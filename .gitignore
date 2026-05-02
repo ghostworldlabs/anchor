@@ -1,0 +1,33 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Logs and Reports
+logs/*.md
+logs/*.log
+health_reports/*.md
+
+# Data and Binaries (Large/Sensitive)
+Summary for PSU/
+archive/
+*.pdf
+*.pptx
+*.docx
+*.xlsx
+*.ico
+*.lnk
+*.bat
+
+# OS/IDEs
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+
+# Dashboard/State (Temporary)
+dashboard_live.html
+.healthcheck_marker
+test_write.txt
