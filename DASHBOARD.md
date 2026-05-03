@@ -21,16 +21,16 @@
 
 ## Today's Priorities (max 5)
 - [ ] **Review David's Hub71 Edits** — Priority: 1 — energy: med — [commercial] — Notes: Carried since 4/26 (6 days). Do this in the 8:00–9:30 AM pre-Wilcox block — only window today
-- [ ] **Calder update call (11 AM)** — Priority: 1 — energy: med — [family] — Notes: Prep done yesterday. Pull Kathy capture notes + Uncle Mike status to top of mind before 10:45 AM
-- [ ] **Resolve 2 PM triple conflict** — Priority: 1 — energy: low — [commercial/academic] — Notes: Skunk vs. Technical (both Zoom) vs. Faculty Meeting 2:30. Decide by noon, send regrets
-- [ ] **Reconcile Clifford Intro 11:30 vs. Calder 11:00–12:00** — Priority: 1 — energy: low — [commercial] — Notes: 30-min overlap. Either reschedule Clifford or step out of Calder call at 11:30
+- [x] **Calder update call (11 AM)** — Priority: 1 — energy: med — [family] — Notes: Prep done yesterday. Pull Kathy capture notes + Uncle Mike status to top of mind before 10:45 AM
+- [x] **Resolve 2 PM triple conflict** — Priority: 1 — energy: low — [commercial/academic] — Notes: Skunk vs. Technical (both Zoom) vs. Faculty Meeting 2:30. Decide by noon, send regrets
+- [x] **Reconcile Clifford Intro 11:30 vs. Calder 11:00–12:00** — Priority: 1 — energy: low — [commercial] — Notes: 30-min overlap. Either reschedule Clifford or step out of Calder call at 11:30
 - [ ] Talk Keith Wilcox (9:30 AM, 217 BB) — Priority: 2 — energy: med — [academic]
-- [ ] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
+- [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
 
 
 ### P1 (carried — Mon/Tue)
 - [ ] Find BYU Med School Person in charge of access — Priority: 1 — energy: med — [commercial] — Notes: Evan, Brandon's dad, said there was a young guy from Harvard system tasked with access ...
-- [ ] Come up with a way of graphically representing the structure of the brain of an agent — Priority: 1 — energy: med — [commercial]
+- [x] Come up with a way of graphically representing the structure of the brain of an agent — Priority: 1 — energy: med — [commercial]
 - [ ] Work with Brian on Global Pharma Deck — Priority: 1 — energy: med — [commercial]
 - [ ] Compare PSU ID Watch Dog and Geico ID Protection — Priority: 1 — energy: low — [personal]
 - [ ] Get login details for Other Retirement Fund Account Nick Accordino — Priority: 1 — energy: low — [personal]

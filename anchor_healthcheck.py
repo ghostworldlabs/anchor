@@ -1,17 +1,17 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Anchor Health Check — runs daily at 5:00 AM via Windows Task Scheduler.
+Anchor Health Check â€” runs daily at 5:00 AM via Windows Task Scheduler.
 
 What it does, every morning:
-  1. File system integrity   — PSU + Axmra dirs reachable, expected files present
-  2. Code compiles           — anchor_gui.py and anchor.py parse cleanly
-  3. Markdown parses         — every task/project/inbox/archive file reads cleanly
-  4. Server boots            — launches anchor_gui.py on test port 8778
-  5. HTTP endpoints respond  — GET /, GET /api/status, validation pings on POSTs
-  6. Synthetic round-trip    — creates a __healthcheck__ task, walks it through
+  1. File system integrity   â€” PSU + Axmra dirs reachable, expected files present
+  2. Code compiles           â€” anchor_gui.py and anchor.py parse cleanly
+  3. Markdown parses         â€” every task/project/inbox/archive file reads cleanly
+  4. Server boots            â€” launches anchor_gui.py on test port 8778
+  5. HTTP endpoints respond  â€” GET /, GET /api/status, validation pings on POSTs
+  6. Synthetic round-trip    â€” creates a __healthcheck__ task, walks it through
                                every state (done, cancel, save, restore, delete)
-  7. Logging works           — verifies today's log was written
-  8. OneDrive sync sanity    — write/read a marker, ensure FS isn't read-only
+  7. Logging works           â€” verifies today's log was written
+  8. Local filesystem write sanity    â€” write/read a marker, ensure FS isn't read-only
 
 Routine maintenance is applied automatically (missing logs/, stale port-holding
 processes, missing top-level files restored from minimal templates). Anything
@@ -40,7 +40,7 @@ import urllib.request
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-# ── Paths ──────────────────────────────────────────────────────────────
+# â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SCRIPT_DIR = Path(__file__).parent.resolve()
 PSU_DIR = SCRIPT_DIR  # this script must live in the PSU root
 REPORTS_DIR = PSU_DIR / "health_reports"
@@ -51,7 +51,7 @@ TODAY = date.today().isoformat()
 
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Discovery ──────────────────────────────────────────────────────────
+# â”€â”€ Discovery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def find_axmra() -> Path | None:
     """Mirror anchor_gui's sibling-discovery so we audit the same files it does."""
     parent = PSU_DIR.parent
@@ -83,7 +83,7 @@ AXMRA_REQUIRED = {  # restored if missing inside .anchor/
 }
 
 
-# ── Report accumulator ─────────────────────────────────────────────────
+# â”€â”€ Report accumulator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 class Report:
     def __init__(self):
         self.checks: list[tuple[str, bool, str]] = []  # (name, ok, detail)
@@ -111,7 +111,7 @@ class Report:
         elapsed = (datetime.now() - self.started).total_seconds()
         status_line = "ISSUES FOUND" if self.has_issues else "OK"
         lines = [
-            f"# Anchor Health Report — {TODAY}",
+            f"# Anchor Health Report â€” {TODAY}",
             "",
             f"Status: {status_line}",
             f"Run time: {elapsed:.1f}s ({self.started.strftime('%H:%M:%S')})",
@@ -119,7 +119,7 @@ class Report:
             "## Checks",
         ]
         for name, ok, detail in self.checks:
-            mark = "✓" if ok else "✗"
+            mark = "âœ“" if ok else "âœ—"
             tail = f"  ({detail})" if detail else ""
             lines.append(f"- {mark} {name}{tail}")
         lines.extend(["", "## Issues"])
@@ -144,7 +144,7 @@ class Report:
         path.write_text("\n".join(lines), encoding="utf-8")
 
 
-# ── Check 1: file system integrity ─────────────────────────────────────
+# â”€â”€ Check 1: file system integrity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_filesystem(report: Report):
     name = "file system integrity"
 
@@ -152,7 +152,7 @@ def check_filesystem(report: Report):
         report.check(name, False, f"PSU directory missing: {PSU_DIR}")
         return
     if AXMRA_DIR is None:
-        report.recommend("Anchor Axmra sibling directory not discovered — single-directory mode")
+        report.recommend("Anchor Axmra sibling directory not discovered â€” single-directory mode")
 
     missing = []
 
@@ -217,7 +217,7 @@ def check_filesystem(report: Report):
         report.check(name, True, scope)
 
 
-# ── Check 2: code compiles ─────────────────────────────────────────────
+# â”€â”€ Check 2: code compiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_code_compiles(report: Report):
     name = "code compiles"
     failed = []
@@ -238,7 +238,7 @@ def check_code_compiles(report: Report):
         report.check(name, True, "anchor_gui.py + anchor.py")
 
 
-# ── Check 3: markdown parses ───────────────────────────────────────────
+# â”€â”€ Check 3: markdown parses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _import_anchor_gui():
     """Load anchor_gui as a module without invoking its main()."""
     spec = importlib.util.spec_from_file_location("anchor_gui_mod", PSU_DIR / "anchor_gui.py")
@@ -301,15 +301,15 @@ def check_markdown_parses(report: Report, mod):
                 items = mod.parse_archived_tasks(path)
                 counts["archived"] += len(items)
         except UnicodeDecodeError as e:
-            errors.append(f"{label}: encoding error — {e}")
+            errors.append(f"{label}: encoding error â€” {e}")
         except Exception as e:
             errors.append(f"{label}: {e}")
 
     # Cross-check: tasks named in DASHBOARD.md should appear somewhere else too
-    # (skip for now — DASHBOARD is allowed to be a curated subset)
+    # (skip for now â€” DASHBOARD is allowed to be a curated subset)
 
     if errors:
-        report.check(name, False, "; ".join(errors[:5]) + (" …" if len(errors) > 5 else ""))
+        report.check(name, False, "; ".join(errors[:5]) + (" â€¦" if len(errors) > 5 else ""))
     else:
         report.check(
             name,
@@ -318,7 +318,7 @@ def check_markdown_parses(report: Report, mod):
         )
 
 
-# ── Check 4: server boot ───────────────────────────────────────────────
+# â”€â”€ Check 4: server boot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _port_in_use(port: int) -> bool:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(0.3)
@@ -347,7 +347,7 @@ def check_server_and_endpoints(report: Report):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             # Suppress browser auto-open by patching env? anchor_gui calls webbrowser.open.
-            # On a headless or scheduled run that may silently fail — that's fine.
+            # On a headless or scheduled run that may silently fail â€” that's fine.
         )
     except Exception as e:
         report.check(name, False, f"could not launch: {e}")
@@ -379,7 +379,7 @@ def check_server_and_endpoints(report: Report):
 
     report.check(name, True, f"{boot_elapsed:.1f}s")
 
-    # ── Endpoint checks ──
+    # â”€â”€ Endpoint checks â”€â”€
     base = f"http://127.0.0.1:{TEST_PORT}"
     endpoint_results = []
 
@@ -401,7 +401,7 @@ def check_server_and_endpoints(report: Report):
     except Exception as e:
         endpoint_results.append(("GET /api/status", False, str(e)))
 
-    # POST validation pings — send a no-op text and expect ok=False, not a 500
+    # POST validation pings â€” send a no-op text and expect ok=False, not a 500
     for endpoint in ("/api/done", "/api/undone", "/api/cancel",
                      "/api/save_for_later", "/api/restore"):
         try:
@@ -432,7 +432,7 @@ def check_server_and_endpoints(report: Report):
     return proc
 
 
-# ── Check 5: synthetic round-trip ──────────────────────────────────────
+# â”€â”€ Check 5: synthetic round-trip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _post(base: str, path: str, payload: dict, timeout: float = 5.0) -> dict:
     req = urllib.request.Request(
         base + path,
@@ -486,7 +486,7 @@ def check_synthetic_roundtrip(report: Report, server_proc):
     except Exception as e:
         steps_ok.append(("exception", False, f"{type(e).__name__}: {e}"))
 
-    # 7. Cleanup — remove the synthetic task from the cancelled archive
+    # 7. Cleanup â€” remove the synthetic task from the cancelled archive
     cleanup_ok, cleanup_detail = _cleanup_synthetic_task(task_text)
     steps_ok.append(("cleanup", cleanup_ok, cleanup_detail))
 
@@ -536,7 +536,7 @@ def _cleanup_synthetic_task(task_text: str) -> tuple[bool, str]:
     return True, f"removed from {len(removed_from)} file(s)" if removed_from else "no traces left"
 
 
-# ── Check 6: logging works ─────────────────────────────────────────────
+# â”€â”€ Check 6: logging works â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_logging(report: Report):
     name = "logging"
     issues = []
@@ -548,21 +548,21 @@ def check_logging(report: Report):
     elif psu_log.stat().st_size < 10:
         issues.append(f"PSU log {TODAY}.md is empty")
 
-    # Yesterday's log SHOULD exist if the system ran yesterday — but only flag if also
+    # Yesterday's log SHOULD exist if the system ran yesterday â€” but only flag if also
     # the day before is missing (to avoid noise on first install or skipped days).
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     day_before = (date.today() - timedelta(days=2)).isoformat()
     psu_yesterday = PSU_DIR / "logs" / f"{yesterday}.md"
     psu_day_before = PSU_DIR / "logs" / f"{day_before}.md"
     if not psu_yesterday.exists() and not psu_day_before.exists():
-        report.recommend(f"No log files for the last 2 days ({yesterday}, {day_before}) — system may not have run")
+        report.recommend(f"No log files for the last 2 days ({yesterday}, {day_before}) â€” system may not have run")
 
     # errors.log should be readable and not catastrophically large
     err_log = PSU_DIR / "logs" / "errors.log"
     if err_log.exists():
         size_mb = err_log.stat().st_size / (1024 * 1024)
         if size_mb > 50:
-            report.recommend(f"errors.log is {size_mb:.1f} MB — consider rotating")
+            report.recommend(f"errors.log is {size_mb:.1f} MB â€” consider rotating")
 
     if issues:
         report.check(name, False, "; ".join(issues))
@@ -570,9 +570,9 @@ def check_logging(report: Report):
         report.check(name, True, f"today's log {psu_log.stat().st_size} bytes")
 
 
-# ── Check 7: OneDrive sync sanity ──────────────────────────────────────
+# â”€â”€ Check 7: Local filesystem write sanity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_onedrive_sync(report: Report):
-    name = "OneDrive sync sanity"
+    name = "Local filesystem write sanity"
     marker = PSU_DIR / ".healthcheck_marker"
     payload = f"{datetime.now().isoformat()} healthcheck"
     try:
@@ -589,7 +589,7 @@ def check_onedrive_sync(report: Report):
         report.check(name, False, f"{type(e).__name__}: {e}")
 
 
-# ── Stale-process cleanup (port 8777) ──────────────────────────────────
+# â”€â”€ Stale-process cleanup (port 8777) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def cleanup_stale_processes(report: Report):
     """If port 8777 is held by a Python process older than 24h, terminate it.
     On Windows, use `tasklist` and `taskkill`. Best-effort: errors are logged but not fatal."""
@@ -637,7 +637,7 @@ def cleanup_stale_processes(report: Report):
             continue
 
 
-# ── Server cleanup ─────────────────────────────────────────────────────
+# â”€â”€ Server cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def shutdown_server(server_proc):
     if server_proc is None:
         return
@@ -664,13 +664,13 @@ def shutdown_server(server_proc):
             server_proc.kill()
 
 
-# ── Main ───────────────────────────────────────────────────────────────
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     report = Report()
     server_proc = None
 
     try:
-        # Routine maintenance pass first — fixes that should happen before tests
+        # Routine maintenance pass first â€” fixes that should happen before tests
         cleanup_stale_processes(report)
 
         check_filesystem(report)
@@ -720,3 +720,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
