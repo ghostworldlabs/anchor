@@ -17,6 +17,7 @@
 https://nam10.safelinks.protection.outlook.com/?url=https%3A%2F%2Fpsu.csod.com%2Fsamldefault.aspx%3Freturnurl%3D%252fDeepLink%252fProcessRedirect.aspx%253fmodule%253dtranscript&data=05%7C02%7Cjcl12%40psu.edu%7C5afdd02d6eb44b2d417408de97802876%7C7cf48d453ddb4389a9c1c115526eb52e%7C0%7C0%7C639114773847988458%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&sdata=AWhT1yOoZGHEcdFPiPd%2BZ0ymOhVwqBIm8C5uRxscoko%3D&reserved=0
 - [x] Send Merrill MIsh's slides — Priority: 1 — energy: med — [academic]
 - [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
+- [ ] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
 
 
 ## Research Projects

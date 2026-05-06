@@ -53,13 +53,13 @@
 - **Deadline:** ongoing
 - **Notes:** Series Bible (Phase 1) complete. Outline order: 1, 3, 2, 6, 4, 5, 7.
 
-## Axmra Capital
+## Nexia Impact / Axmra Capital
 - **Domain:** commercial
 - **Status:** active
 - **Priority:** 1
-- **Next step:** See Axmra directory for details
-- **Deadline:** 
-- **Notes:** Cancer therapy fundraising. Details in Anchor Axmra only.
+- **Next step:** Hub71 review (carried), Clifford intro coordination, KSA/Utah pitch decks (verify still relevant)
+- **Deadline:**
+- **Notes:** Cancer therapy fundraising. Full detail in domains/commercial.md.
 
 ## Bayesian Variable Selection: Categorical Variables
 - **Domain:** academic
@@ -92,7 +92,7 @@
 - **Priority:** 3
 - **Next step:** Talk with Hassan about getting Archty into Axmra at the right time
 - **Deadline:** TBD
-- **Notes:** Details in Anchor Axmra.
+- **Notes:** Full detail in domains/commercial.md.
 
 ## NextGen Nuclear Power
 - **Domain:** commercial
@@ -100,7 +100,7 @@
 - **Priority:** 5
 - **Next step:** Get funding; extend to 3D (one at a time)
 - **Deadline:** when ready
-- **Notes:** Details in Anchor Axmra.
+- **Notes:** Full detail in domains/commercial.md.
 
 ## Anchor Productivity System
 - **Domain:** personal

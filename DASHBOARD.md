@@ -20,12 +20,18 @@
 5. **Weekend: actual rest + Outline v2 read if energy allows.**
 
 ## Today's Priorities (max 5)
-- [ ] **Review David's Hub71 Edits** — Priority: 1 — energy: med — [commercial] — Notes: Carried since 4/26 (6 days). Do this in the 8:00–9:30 AM pre-Wilcox block — only window today
+- [x] **Review David's Hub71 Edits** — Priority: 1 — energy: med — [commercial] — Notes: Carried since 4/26 (6 days). Do this in the 8:00–9:30 AM pre-Wilcox block — only window today
 - [x] **Calder update call (11 AM)** — Priority: 1 — energy: med — [family] — Notes: Prep done yesterday. Pull Kathy capture notes + Uncle Mike status to top of mind before 10:45 AM
 - [x] **Resolve 2 PM triple conflict** — Priority: 1 — energy: low — [commercial/academic] — Notes: Skunk vs. Technical (both Zoom) vs. Faculty Meeting 2:30. Decide by noon, send regrets
 - [x] **Reconcile Clifford Intro 11:30 vs. Calder 11:00–12:00** — Priority: 1 — energy: low — [commercial] — Notes: 30-min overlap. Either reschedule Clifford or step out of Calder call at 11:30
 - [ ] Talk Keith Wilcox (9:30 AM, 217 BB) — Priority: 2 — energy: med — [academic]
 - [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
+- [ ] Get the whitepaper with figures correct. — Priority: 1 — energy: med — [commercial]
+- [ ] Get the finances up to date and get the budget sorted — Priority: 1 — energy: med — [family]
+- [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
+- [ ] Get Milo Trust assigned to my trust — Priority: 1 — energy: med — [family]
+- [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 1 — energy: med — [family]
+- [ ] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
 
 
 ### P1 (carried — Mon/Tue)
@@ -39,7 +45,7 @@
 
 ### P2
 - [ ] Chronicles Book 1 Outline v2 author review (writing re-entry) — Priority: 2 — energy: med — [writing] — Notes: Weekend bonus target
-- [ ] Refresh Axmra commercial dashboard (last touched 4/7 — over three weeks stale) — Priority: 2 — energy: med — [commercial]
+- [x] Refresh Axmra commercial dashboard (last touched 4/7 — over three weeks stale) — Priority: 2 — energy: med — [commercial] — Notes: Done 2026-05-02 — Axmra merged into domains/commercial.md, sibling folder decommissioned
 - [ ] OpX Redo — carried — Priority: 2 — energy: high — [commercial]
 - [ ] Add Children's Books to Wiring Engine — Priority: 2 — energy: med — [writing]
 - [ ] Add Query Shark material to managing publication project — Priority: 2 — energy: med — [writing]
@@ -75,5 +81,4 @@
 | Bayesian ANOVA (JCR) | Academic | 2 | Ongoing review |
 | Conjoint/MoE (JMS) | Academic | 2 | Repositioning |
 | Retail Competition (NF + Hyperbolic) | Academic | 2 | Dual approach |
-| Phenomics/Drug Discovery | Academic | 2 | Collaboration forming |
-| Artificial Magi | Writing | 2 | Awaiting coherence pass |
+| Phenomics/Drug Discovery |

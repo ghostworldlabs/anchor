@@ -29,11 +29,6 @@ PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
 INBOX_MD = ANCHOR_DIR / "INBOX.md"
 DOMAINS_DIR = ANCHOR_DIR / "domains"
 
-# Commercial data lives in a sibling folder (Anchor Axmra)
-# Adjust this path for your machine if needed
-AXMRA_DIR = ANCHOR_DIR.parent / "Anchor Axmra"
-AXMRA_ANCHOR = AXMRA_DIR / ".anchor"
-
 app = Flask(__name__)
 
 # ── Markdown Parsers ───────────────────────────────────────────────────

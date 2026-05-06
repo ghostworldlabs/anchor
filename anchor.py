@@ -19,74 +19,20 @@ from datetime import datetime, date
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
 ANCHOR_DIR = Path(__file__).parent
 
-# Detect whether we're running from PSU or Axmra
-AXMRA_ANCHOR = ANCHOR_DIR / ".anchor"
-IS_AXMRA = AXMRA_ANCHOR.exists()
-
-# --- PSU paths (primary directory with domains/) ---
-# --- Axmra paths (commercial directory with .anchor/) ---
-# We always need BOTH directories for full sync.
-
-def _find_sibling_dir():
-    """Find the sibling Anchor directory (PSU finds Axmra, Axmra finds PSU)."""
-    parent = ANCHOR_DIR.parent
-    if IS_AXMRA:
-        # We're in Axmra — look for PSU sibling
-        for d in parent.iterdir():
-            if d.is_dir() and d != ANCHOR_DIR and (d / "domains").exists() and (d / "DASHBOARD.md").exists():
-                return d
-    else:
-        # We're in PSU — look for Axmra sibling
-        for d in parent.iterdir():
-            if d.is_dir() and d != ANCHOR_DIR and (d / ".anchor").exists():
-                return d
-    return None
-
-SIBLING_DIR = _find_sibling_dir()
-
-# Set up path references for BOTH directories
-if IS_AXMRA:
-    # Running from Axmra
-    AXMRA_DIR = ANCHOR_DIR
-    PSU_DIR = SIBLING_DIR  # may be None
-else:
-    # Running from PSU
-    PSU_DIR = ANCHOR_DIR
-    AXMRA_DIR = SIBLING_DIR  # may be None
-
-# PSU file paths
-PSU_DASHBOARD_MD = PSU_DIR / "DASHBOARD.md" if PSU_DIR else None
-PSU_PROJECTS_MD = PSU_DIR / "PROJECTS.md" if PSU_DIR else None
-PSU_INBOX_MD = PSU_DIR / "INBOX.md" if PSU_DIR else None
-PSU_DOMAINS_DIR = PSU_DIR / "domains" if PSU_DIR else None
-PSU_LOGS_DIR = PSU_DIR / "logs" if PSU_DIR else None
-PSU_HTML_FILE = PSU_DIR / "dashboard.html" if PSU_DIR else None
-PSU_CANCELLED_MD = PSU_DIR / "CANCELLED.md" if PSU_DIR else None
-PSU_SAVED_FOR_LATER_MD = PSU_DIR / "SAVED_FOR_LATER.md" if PSU_DIR else None
-
-# Axmra file paths
-AXMRA_DASHBOARD_MD = AXMRA_DIR / ".anchor" / "DASHBOARD.md" if AXMRA_DIR else None
-AXMRA_PROJECTS_MD = AXMRA_DIR / ".anchor" / "PROJECTS.md" if AXMRA_DIR else None
-AXMRA_INBOX_MD = AXMRA_DIR / ".anchor" / "INBOX.md" if AXMRA_DIR else None
-AXMRA_LOGS_DIR = AXMRA_DIR / ".anchor" / "logs" if AXMRA_DIR else None
-AXMRA_HTML_FILE = AXMRA_DIR / "dashboard.html" if AXMRA_DIR else None
-
-# The HTML file in the current directory (always exists)
+DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
+PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
+INBOX_MD = ANCHOR_DIR / "INBOX.md"
+DOMAINS_DIR = ANCHOR_DIR / "domains"
+LOGS_DIR = ANCHOR_DIR / "logs"
 HTML_FILE = ANCHOR_DIR / "dashboard.html"
+CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
+SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
 
-# Ensure log directories exist
-if PSU_LOGS_DIR:
-    PSU_LOGS_DIR.mkdir(exist_ok=True)
-if AXMRA_LOGS_DIR:
-    AXMRA_LOGS_DIR.mkdir(exist_ok=True)
-
-# Report sibling discovery
-if SIBLING_DIR:
-    print(f"Syncing: {ANCHOR_DIR.name} ↔ {SIBLING_DIR.name}")
-else:
-    print(f"Warning: Sibling directory not found. Running single-directory mode.")
+# Ensure log directory exists
+LOGS_DIR.mkdir(exist_ok=True)
 
 
 # ── Parsing helpers ────────────────────────────────────────────────────
@@ -260,13 +206,13 @@ def generate_state_js(projects, tasks, inbox):
 
 
 def rebuild_dashboard():
-    """Read all markdown files from BOTH directories, regenerate dashboard.html STATE, copy to both dirs."""
+    """Read all markdown files, regenerate dashboard.html STATE."""
     before, after = read_html_template()
     if before is None:
         print("ERROR: dashboard.html not found or STATE block not parseable")
         return False
 
-    # Gather all tasks from BOTH directories
+    # Gather tasks (deduplicated by first 60 chars of lowercased text)
     all_tasks = []
     seen_texts = set()
 
@@ -279,59 +225,34 @@ def rebuild_dashboard():
                     t["domain"] = default_domain
                 all_tasks.append(t)
 
-    # ── PSU tasks ──
-    if PSU_DASHBOARD_MD and PSU_DASHBOARD_MD.exists():
-        _add_tasks(parse_tasks_from_md(PSU_DASHBOARD_MD))
+    if DASHBOARD_MD.exists():
+        _add_tasks(parse_tasks_from_md(DASHBOARD_MD))
 
-    if PSU_DOMAINS_DIR and PSU_DOMAINS_DIR.exists():
-        for domain_file in sorted(PSU_DOMAINS_DIR.glob("*.md")):
+    if DOMAINS_DIR.exists():
+        for domain_file in sorted(DOMAINS_DIR.glob("*.md")):
             _add_tasks(parse_tasks_from_md(domain_file), default_domain=domain_file.stem)
 
-    # ── Axmra tasks (from .anchor/ files) ──
-    if AXMRA_DASHBOARD_MD and AXMRA_DASHBOARD_MD.exists():
-        _add_tasks(parse_tasks_from_md(AXMRA_DASHBOARD_MD), default_domain="commercial")
-
-    if AXMRA_PROJECTS_MD and AXMRA_PROJECTS_MD.exists():
-        _add_tasks(parse_tasks_from_md(AXMRA_PROJECTS_MD), default_domain="commercial")
-
-    # ── Projects from BOTH directories ──
+    # Projects
     projects = []
     seen_proj = set()
-    if PSU_PROJECTS_MD and PSU_PROJECTS_MD.exists():
-        for p in parse_projects_from_md(PSU_PROJECTS_MD):
+    if PROJECTS_MD.exists():
+        for p in parse_projects_from_md(PROJECTS_MD):
             key = p["name"].lower().strip()[:60]
             if key not in seen_proj:
                 seen_proj.add(key)
                 projects.append(p)
 
-    if AXMRA_PROJECTS_MD and AXMRA_PROJECTS_MD.exists():
-        for p in parse_projects_from_md(AXMRA_PROJECTS_MD):
-            key = p["name"].lower().strip()[:60]
-            if key not in seen_proj:
-                seen_proj.add(key)
-                if p["domain"] == "academic":
-                    p["domain"] = "commercial"
-                projects.append(p)
-
-    # ── Inbox from BOTH directories ──
+    # Inbox
     inbox = []
-    if PSU_INBOX_MD and PSU_INBOX_MD.exists():
-        inbox.extend(parse_inbox_from_md(PSU_INBOX_MD))
-    if AXMRA_INBOX_MD and AXMRA_INBOX_MD.exists():
-        inbox.extend(parse_inbox_from_md(AXMRA_INBOX_MD))
+    if INBOX_MD.exists():
+        inbox.extend(parse_inbox_from_md(INBOX_MD))
 
     # Generate new STATE
     state_js = generate_state_js(projects, all_tasks, inbox)
 
-    # Write updated HTML to current directory
+    # Write updated HTML
     new_html = before + state_js + after
     HTML_FILE.write_text(new_html, encoding="utf-8")
-
-    # Copy dashboard.html to sibling directory so both stay in sync
-    if SIBLING_DIR:
-        sibling_html = SIBLING_DIR / "dashboard.html"
-        sibling_html.write_text(new_html, encoding="utf-8")
-        print(f"Dashboard synced to {SIBLING_DIR.name}/dashboard.html")
 
     # Summary
     active = [t for t in all_tasks if not t["done"]]
@@ -350,26 +271,23 @@ def rebuild_dashboard():
 # ── Change operations ──────────────────────────────────────────────────
 
 def log_change(message):
-    """Append a timestamped line to today's log file in BOTH directories."""
+    """Append a timestamped line to today's log file."""
     today = date.today().isoformat()
     now = datetime.now().strftime("%H:%M")
 
-    for logs_dir in [PSU_LOGS_DIR, AXMRA_LOGS_DIR]:
-        if logs_dir is None:
-            continue
-        logs_dir.mkdir(exist_ok=True)
-        log_file = logs_dir / f"{today}.md"
-        if not log_file.exists():
-            day_name = datetime.now().strftime("%A")
-            log_file.write_text(f"# {today} — {day_name}\n\n## Changes\n", encoding="utf-8")
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"- {now} — {message}\n")
+    LOGS_DIR.mkdir(exist_ok=True)
+    log_file = LOGS_DIR / f"{today}.md"
+    if not log_file.exists():
+        day_name = datetime.now().strftime("%A")
+        log_file.write_text(f"# {today} — {day_name}\n\n## Changes\n", encoding="utf-8")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"- {now} — {message}\n")
 
     print(f"Logged: {now} — {message}")
 
 
 def mark_done(task_text):
-    """Mark a task as done across ALL markdown files in BOTH directories."""
+    """Mark a task as done across all markdown files."""
     search = task_text.lower().strip()
     found = False
 
@@ -405,7 +323,7 @@ def mark_done(task_text):
 
 
 def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""):
-    """Add a new task to the appropriate files in BOTH directories."""
+    """Add a new task to DASHBOARD.md and the relevant domain file."""
     due_str = f" — Due: {due}" if due else ""
     notes_str = f" — Notes: {notes}" if notes else ""
     line = f"- [ ] {text} — Priority: {priority} — energy: {energy} — [{domain}]{due_str}{notes_str}"
@@ -426,21 +344,13 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
                 return True
         return False
 
-    # Always add to PSU DASHBOARD.md (central hub)
-    _insert_in_section(PSU_DASHBOARD_MD, ["## Today's Priorities", "## Active Priorities"])
+    # Always add to DASHBOARD.md (central hub)
+    _insert_in_section(DASHBOARD_MD, ["## Today's Priorities", "## Active Priorities"])
 
-    # Add to the right domain file or Axmra dashboard
-    if domain == "commercial":
-        # Commercial tasks go to Axmra .anchor/DASHBOARD.md
-        _insert_in_section(AXMRA_DASHBOARD_MD, ["## Active Priorities", "## Current Focus"])
-        # Also add to PSU domains/commercial.md if it has active tasks section
-        if PSU_DOMAINS_DIR:
-            _insert_in_section(PSU_DOMAINS_DIR / "commercial.md", ["## Active Tasks"])
-    else:
-        # Non-commercial tasks go to PSU domain files
-        if PSU_DOMAINS_DIR:
-            domain_file = PSU_DOMAINS_DIR / f"{domain}.md"
-            _insert_in_section(domain_file, ["## Active Tasks"])
+    # Add to the matching domain file (commercial included — was formerly Axmra)
+    if DOMAINS_DIR.exists():
+        domain_file = DOMAINS_DIR / f"{domain}.md"
+        _insert_in_section(domain_file, ["## Active Tasks"])
 
     log_change(f"Added task: {text} [{domain}] P{priority}")
     rebuild_dashboard()
@@ -448,22 +358,15 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
 
 
 def capture_inbox(text, domain=""):
-    """Add an item to the inbox (PSU inbox by default, Axmra for commercial)."""
+    """Add an item to the inbox."""
     today = date.today().isoformat()
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
 
-    # Write to PSU inbox (always — it's the central hub)
-    if PSU_INBOX_MD and PSU_INBOX_MD.exists():
-        content = PSU_INBOX_MD.read_text(encoding="utf-8")
+    if INBOX_MD.exists():
+        content = INBOX_MD.read_text(encoding="utf-8")
         content = content.rstrip() + "\n" + line + "\n"
-        PSU_INBOX_MD.write_text(content, encoding="utf-8")
-
-    # Also write to Axmra inbox if domain is commercial
-    if domain == "commercial" and AXMRA_INBOX_MD and AXMRA_INBOX_MD.exists():
-        content = AXMRA_INBOX_MD.read_text(encoding="utf-8")
-        content = content.rstrip() + "\n" + line + "\n"
-        AXMRA_INBOX_MD.write_text(content, encoding="utf-8")
+        INBOX_MD.write_text(content, encoding="utf-8")
 
     log_change(f"Captured to inbox: {text}")
     rebuild_dashboard()
@@ -471,7 +374,7 @@ def capture_inbox(text, domain=""):
 
 
 def print_status():
-    """Print a status summary from BOTH directories."""
+    """Print a status summary."""
     tasks = []
     seen = set()
     for md_file in _all_md_files():
@@ -483,16 +386,12 @@ def print_status():
                     tasks.append(t)
 
     projects = []
-    if PSU_PROJECTS_MD and PSU_PROJECTS_MD.exists():
-        projects.extend(parse_projects_from_md(PSU_PROJECTS_MD))
-    if AXMRA_PROJECTS_MD and AXMRA_PROJECTS_MD.exists():
-        projects.extend(parse_projects_from_md(AXMRA_PROJECTS_MD))
+    if PROJECTS_MD.exists():
+        projects.extend(parse_projects_from_md(PROJECTS_MD))
 
     inbox = []
-    if PSU_INBOX_MD and PSU_INBOX_MD.exists():
-        inbox.extend(parse_inbox_from_md(PSU_INBOX_MD))
-    if AXMRA_INBOX_MD and AXMRA_INBOX_MD.exists():
-        inbox.extend(parse_inbox_from_md(AXMRA_INBOX_MD))
+    if INBOX_MD.exists():
+        inbox.extend(parse_inbox_from_md(INBOX_MD))
 
     active = [t for t in tasks if not t["done"]]
     done = [t for t in tasks if t["done"]]
@@ -564,7 +463,7 @@ def cancel_task(task_text):
     """Cancel a task: remove from active lists, add to CANCELLED.md, log it."""
     task = _remove_task_from_files(task_text)
     if task:
-        _append_to_archive(PSU_CANCELLED_MD, task)
+        _append_to_archive(CANCELLED_MD, task)
         log_change(f"Cancelled: {task_text}")
         rebuild_dashboard()
         print(f"✗ Cancelled: {task_text}")
@@ -577,7 +476,7 @@ def save_for_later(task_text):
     """Save a task for later: remove from active lists, add to SAVED_FOR_LATER.md, log it."""
     task = _remove_task_from_files(task_text)
     if task:
-        _append_to_archive(PSU_SAVED_FOR_LATER_MD, task)
+        _append_to_archive(SAVED_FOR_LATER_MD, task)
         log_change(f"Saved for later: {task_text}")
         rebuild_dashboard()
         print(f"⏳ Saved for later: {task_text}")
@@ -588,7 +487,7 @@ def save_for_later(task_text):
 
 def restore_task(task_text, from_archive="saved"):
     """Restore a task from an archive back to the active dashboard."""
-    archive_file = PSU_SAVED_FOR_LATER_MD if from_archive == "saved" else PSU_CANCELLED_MD
+    archive_file = SAVED_FOR_LATER_MD if from_archive == "saved" else CANCELLED_MD
     if not archive_file or not archive_file.exists():
         print(f"Archive file not found")
         return False
@@ -619,21 +518,12 @@ def restore_task(task_text, from_archive="saved"):
 
 
 def _all_md_files():
-    """Return all markdown files that might contain tasks from BOTH directories."""
+    """Return all markdown files that might contain tasks."""
     files = []
-
-    # PSU files
-    if PSU_DASHBOARD_MD:
-        files.append(PSU_DASHBOARD_MD)
-    if PSU_DOMAINS_DIR and PSU_DOMAINS_DIR.exists():
-        files.extend(sorted(PSU_DOMAINS_DIR.glob("*.md")))
-
-    # Axmra .anchor/ files
-    if AXMRA_DASHBOARD_MD:
-        files.append(AXMRA_DASHBOARD_MD)
-    if AXMRA_PROJECTS_MD:
-        files.append(AXMRA_PROJECTS_MD)
-
+    if DASHBOARD_MD.exists():
+        files.append(DASHBOARD_MD)
+    if DOMAINS_DIR.exists():
+        files.extend(sorted(DOMAINS_DIR.glob("*.md")))
     return files
 
 

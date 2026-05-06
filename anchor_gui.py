@@ -21,60 +21,22 @@ from urllib.parse import parse_qs, urlparse
 import html as html_lib
 
 # ── Paths ──────────────────────────────────────────────────────────────
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
 ANCHOR_DIR = Path(__file__).parent
-AXMRA_SUBDIR = ANCHOR_DIR / ".anchor"
-IS_AXMRA = AXMRA_SUBDIR.exists()
 
-def _find_sibling_dir():
-    parent = ANCHOR_DIR.parent
-    if IS_AXMRA:
-        for d in parent.iterdir():
-            if d.is_dir() and d != ANCHOR_DIR and (d / "domains").exists() and (d / "DASHBOARD.md").exists():
-                return d
-    else:
-        for d in parent.iterdir():
-            if d.is_dir() and d != ANCHOR_DIR and (d / ".anchor").exists():
-                return d
-    return None
+DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
+PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
+INBOX_MD = ANCHOR_DIR / "INBOX.md"
+DOMAINS_DIR = ANCHOR_DIR / "domains"
+LOGS_DIR = ANCHOR_DIR / "logs"
+CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
+SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
 
-SIBLING_DIR = _find_sibling_dir()
-
-if IS_AXMRA:
-    AXMRA_DIR = ANCHOR_DIR
-    PSU_DIR = SIBLING_DIR
-else:
-    PSU_DIR = ANCHOR_DIR
-    AXMRA_DIR = SIBLING_DIR
-
-# PSU paths
-PSU_DASHBOARD_MD = PSU_DIR / "DASHBOARD.md" if PSU_DIR else None
-PSU_PROJECTS_MD = PSU_DIR / "PROJECTS.md" if PSU_DIR else None
-PSU_INBOX_MD = PSU_DIR / "INBOX.md" if PSU_DIR else None
-PSU_DOMAINS_DIR = PSU_DIR / "domains" if PSU_DIR else None
-PSU_LOGS_DIR = PSU_DIR / "logs" if PSU_DIR else None
-
-# Axmra paths
-AXMRA_DASHBOARD_MD = AXMRA_DIR / ".anchor" / "DASHBOARD.md" if AXMRA_DIR else None
-AXMRA_PROJECTS_MD = AXMRA_DIR / ".anchor" / "PROJECTS.md" if AXMRA_DIR else None
-AXMRA_INBOX_MD = AXMRA_DIR / ".anchor" / "INBOX.md" if AXMRA_DIR else None
-AXMRA_LOGS_DIR = AXMRA_DIR / ".anchor" / "logs" if AXMRA_DIR else None
-
-# Cancelled / Saved-for-Later files (PSU only — single source of truth for review)
-PSU_CANCELLED_MD = PSU_DIR / "CANCELLED.md" if PSU_DIR else None
-PSU_SAVED_FOR_LATER_MD = PSU_DIR / "SAVED_FOR_LATER.md" if PSU_DIR else None
-
-# Ensure log dirs
-for d in [PSU_LOGS_DIR, AXMRA_LOGS_DIR]:
-    if d:
-        d.mkdir(parents=True, exist_ok=True)
-
-if SIBLING_DIR:
-    print(f"Syncing: {ANCHOR_DIR.name} <-> {SIBLING_DIR.name}")
-else:
-    print(f"Warning: Sibling directory not found. Single-directory mode.")
+# Ensure log dir
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Error Logging ─────────────────────────────────────────────────────
-ERROR_LOG = PSU_DIR / "logs" / "errors.log" if PSU_DIR else ANCHOR_DIR / "logs" / "errors.log"
+ERROR_LOG = LOGS_DIR / "errors.log"
 ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     filename=str(ERROR_LOG),
@@ -216,32 +178,24 @@ def gather_all():
                     t["domain"] = default_domain
                 all_tasks.append(t)
 
-    if PSU_DASHBOARD_MD:
-        _add(parse_tasks_from_md(PSU_DASHBOARD_MD))
-    if PSU_DOMAINS_DIR and PSU_DOMAINS_DIR.exists():
-        for f in sorted(PSU_DOMAINS_DIR.glob("*.md")):
+    if DASHBOARD_MD.exists():
+        _add(parse_tasks_from_md(DASHBOARD_MD))
+    if DOMAINS_DIR.exists():
+        for f in sorted(DOMAINS_DIR.glob("*.md")):
             _add(parse_tasks_from_md(f), default_domain=f.stem)
-    if AXMRA_DASHBOARD_MD:
-        _add(parse_tasks_from_md(AXMRA_DASHBOARD_MD), default_domain="commercial")
-    if AXMRA_PROJECTS_MD:
-        _add(parse_tasks_from_md(AXMRA_PROJECTS_MD), default_domain="commercial")
 
     projects = []
     seen_p = set()
-    for src in [PSU_PROJECTS_MD, AXMRA_PROJECTS_MD]:
-        if src and src.exists():
-            for p in parse_projects_from_md(src):
-                key = p["name"].lower().strip()[:60]
-                if key not in seen_p:
-                    seen_p.add(key)
-                    if src == AXMRA_PROJECTS_MD and p["domain"] == "academic":
-                        p["domain"] = "commercial"
-                    projects.append(p)
+    if PROJECTS_MD.exists():
+        for p in parse_projects_from_md(PROJECTS_MD):
+            key = p["name"].lower().strip()[:60]
+            if key not in seen_p:
+                seen_p.add(key)
+                projects.append(p)
 
     inbox = []
-    for src in [PSU_INBOX_MD, AXMRA_INBOX_MD]:
-        if src and src.exists():
-            inbox.extend(parse_inbox_from_md(src))
+    if INBOX_MD.exists():
+        inbox.extend(parse_inbox_from_md(INBOX_MD))
 
     # Filter out synthetic health-check probes so they never appear in any view
     all_tasks = [t for t in all_tasks if "__healthcheck__" not in t["text"].lower()]
@@ -252,7 +206,7 @@ def gather_all():
 
 # ── Health report banner ──────────────────────────────────────────────
 
-HEALTH_REPORTS_DIR = PSU_DIR / "health_reports" if PSU_DIR else None
+HEALTH_REPORTS_DIR = ANCHOR_DIR / "health_reports"
 
 
 def latest_health_report():
@@ -279,14 +233,10 @@ def latest_health_report():
 
 def _all_md_files():
     files = []
-    if PSU_DASHBOARD_MD:
-        files.append(PSU_DASHBOARD_MD)
-    if PSU_DOMAINS_DIR and PSU_DOMAINS_DIR.exists():
-        files.extend(sorted(PSU_DOMAINS_DIR.glob("*.md")))
-    if AXMRA_DASHBOARD_MD:
-        files.append(AXMRA_DASHBOARD_MD)
-    if AXMRA_PROJECTS_MD:
-        files.append(AXMRA_PROJECTS_MD)
+    if DASHBOARD_MD.exists():
+        files.append(DASHBOARD_MD)
+    if DOMAINS_DIR.exists():
+        files.extend(sorted(DOMAINS_DIR.glob("*.md")))
     return files
 
 
@@ -295,16 +245,13 @@ def _all_md_files():
 def log_change(message):
     today = date.today().isoformat()
     now = datetime.now().strftime("%H:%M")
-    for logs_dir in [PSU_LOGS_DIR, AXMRA_LOGS_DIR]:
-        if not logs_dir:
-            continue
-        logs_dir.mkdir(exist_ok=True)
-        log_file = logs_dir / f"{today}.md"
-        if not log_file.exists():
-            day_name = datetime.now().strftime("%A")
-            log_file.write_text(f"# {today} — {day_name}\n\n## Changes\n", encoding="utf-8")
-        with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"- {now} — {message}\n")
+    LOGS_DIR.mkdir(exist_ok=True)
+    log_file = LOGS_DIR / f"{today}.md"
+    if not log_file.exists():
+        day_name = datetime.now().strftime("%A")
+        log_file.write_text(f"# {today} — {day_name}\n\n## Changes\n", encoding="utf-8")
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"- {now} — {message}\n")
     print(f"  Logged: {now} — {message}")
 
 
@@ -374,11 +321,9 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
                 return True
         return False
 
-    _insert(PSU_DASHBOARD_MD, ["## Today's Priorities", "## Active Priorities"])
-    if domain == "commercial":
-        _insert(AXMRA_DASHBOARD_MD, ["## Active Priorities", "## Current Focus"])
-    elif PSU_DOMAINS_DIR:
-        _insert(PSU_DOMAINS_DIR / f"{domain}.md", ["## Active Tasks"])
+    _insert(DASHBOARD_MD, ["## Today's Priorities", "## Active Priorities"])
+    if DOMAINS_DIR.exists():
+        _insert(DOMAINS_DIR / f"{domain}.md", ["## Active Tasks"])
 
     log_change(f"Added task: {text} [{domain}] P{priority}")
 
@@ -387,11 +332,10 @@ def capture_inbox(text, domain=""):
     today = date.today().isoformat()
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
-    for inbox_path in [PSU_INBOX_MD, AXMRA_INBOX_MD if domain == "commercial" else None]:
-        if inbox_path and inbox_path.exists():
-            content = inbox_path.read_text(encoding="utf-8")
-            content = content.rstrip() + "\n" + line + "\n"
-            inbox_path.write_text(content, encoding="utf-8")
+    if INBOX_MD.exists():
+        content = INBOX_MD.read_text(encoding="utf-8")
+        content = content.rstrip() + "\n" + line + "\n"
+        INBOX_MD.write_text(content, encoding="utf-8")
     log_change(f"Captured: {text}")
 
 
@@ -405,12 +349,8 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
 
         # Infer domain from filename: domains/family.md → "family"
         file_domain = None
-        if PSU_DOMAINS_DIR and md_file.parent == PSU_DOMAINS_DIR:
-            file_domain = md_file.stem  # e.g. "family", "academic", "writing"
-        elif AXMRA_DASHBOARD_MD and md_file == AXMRA_DASHBOARD_MD:
-            file_domain = "commercial"
-        elif AXMRA_PROJECTS_MD and md_file == AXMRA_PROJECTS_MD:
-            file_domain = "commercial"
+        if md_file.parent == DOMAINS_DIR:
+            file_domain = md_file.stem  # e.g. "family", "academic", "writing", "commercial"
 
         text = md_file.read_text(encoding="utf-8")
         new_lines = []
@@ -489,7 +429,7 @@ def edit_project(old_name, new_name=None, new_priority=None, new_domain=None,
     search = old_name.lower().strip()
     found = False
 
-    for proj_file in [PSU_PROJECTS_MD, AXMRA_PROJECTS_MD]:
+    for proj_file in [PROJECTS_MD]:
         if not proj_file or not proj_file.exists():
             continue
         text = proj_file.read_text(encoding="utf-8")
@@ -619,7 +559,7 @@ def cancel_task(task_text):
     """Cancel a task: remove from active lists, add to CANCELLED.md, log it."""
     task = _remove_task_from_files(task_text)
     if task:
-        _append_to_archive(PSU_CANCELLED_MD, task)
+        _append_to_archive(CANCELLED_MD, task)
         log_change(f"Cancelled: {task_text}")
         return True
     return False
@@ -629,7 +569,7 @@ def save_for_later(task_text):
     """Save a task for later: remove from active lists, add to SAVED_FOR_LATER.md, log it."""
     task = _remove_task_from_files(task_text)
     if task:
-        _append_to_archive(PSU_SAVED_FOR_LATER_MD, task)
+        _append_to_archive(SAVED_FOR_LATER_MD, task)
         log_change(f"Saved for later: {task_text}")
         return True
     return False
@@ -637,7 +577,7 @@ def save_for_later(task_text):
 
 def restore_task(task_text, from_archive="saved"):
     """Restore a task from an archive back to the active dashboard."""
-    archive_file = PSU_SAVED_FOR_LATER_MD if from_archive == "saved" else PSU_CANCELLED_MD
+    archive_file = SAVED_FOR_LATER_MD if from_archive == "saved" else CANCELLED_MD
     if not archive_file or not archive_file.exists():
         return False
     text = archive_file.read_text(encoding="utf-8")
@@ -1021,7 +961,7 @@ def generate_html(projects, tasks, inbox):
         completed_items = '<div class="empty-msg">No completed tasks yet. Check off items from the dashboard to see them here.</div>'
 
     # Build cancelled view
-    cancelled_tasks = parse_archived_tasks(PSU_CANCELLED_MD)
+    cancelled_tasks = parse_archived_tasks(CANCELLED_MD)
     cancelled_items = ""
     for ct in reversed(cancelled_tasks):
         b64r = js_safe(ct["text"])
@@ -1038,7 +978,7 @@ def generate_html(projects, tasks, inbox):
         cancelled_items = '<div class="empty-msg">No cancelled tasks.</div>'
 
     # Build saved-for-later view
-    saved_tasks = parse_archived_tasks(PSU_SAVED_FOR_LATER_MD)
+    saved_tasks = parse_archived_tasks(SAVED_FOR_LATER_MD)
     saved_items = ""
     for st in reversed(saved_tasks):
         b64r = js_safe(st["text"])
@@ -2175,6 +2115,7 @@ def _heartbeat_watchdog():
 def main():
     global _server_instance
     port = 8777
+    no_browser = "--no-browser" in sys.argv
     if "--port" in sys.argv:
         idx = sys.argv.index("--port")
         if idx + 1 < len(sys.argv):
@@ -2197,8 +2138,9 @@ def main():
 
     _logger.info(f"Server started on {url}")
 
-    # Open browser after a short delay
-    threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+    if not no_browser:
+        # Open browser after a short delay
+        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
     try:
         server.serve_forever()

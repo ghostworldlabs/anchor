@@ -1,9 +1,9 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Anchor Health Check â€” runs daily at 5:00 AM via Windows Task Scheduler.
 
 What it does, every morning:
-  1. File system integrity   â€” PSU + Axmra dirs reachable, expected files present
+  1. File system integrity   â€” Anchor dir reachable, expected files present
   2. Code compiles           â€” anchor_gui.py and anchor.py parse cleanly
   3. Markdown parses         â€” every task/project/inbox/archive file reads cleanly
   4. Server boots            â€” launches anchor_gui.py on test port 8778
@@ -42,8 +42,8 @@ from pathlib import Path
 
 # â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SCRIPT_DIR = Path(__file__).parent.resolve()
-PSU_DIR = SCRIPT_DIR  # this script must live in the PSU root
-REPORTS_DIR = PSU_DIR / "health_reports"
+ANCHOR_DIR = SCRIPT_DIR  # this script must live in the Anchor root
+REPORTS_DIR = ANCHOR_DIR / "health_reports"
 TEST_PORT = 8778
 SERVER_BOOT_TIMEOUT = 12  # seconds
 SYNTHETIC_TAG = "__healthcheck__"
@@ -51,22 +51,8 @@ TODAY = date.today().isoformat()
 
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# â”€â”€ Discovery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-def find_axmra() -> Path | None:
-    """Mirror anchor_gui's sibling-discovery so we audit the same files it does."""
-    parent = PSU_DIR.parent
-    if not parent.exists():
-        return None
-    for d in parent.iterdir():
-        if d.is_dir() and d != PSU_DIR and (d / ".anchor").exists():
-            return d
-    return None
-
-
-AXMRA_DIR = find_axmra()
-
-# Files that MUST exist in PSU (auto-restored if missing)
-PSU_REQUIRED = {
+# Files that MUST exist (auto-restored if missing)
+REQUIRED_FILES = {
     "DASHBOARD.md": "# Dashboard\n\n## Today's Priorities\n\n## Active Priorities\n",
     "PROJECTS.md": "# Projects\n",
     "INBOX.md": "# Inbox\n\n## Quick Capture\n",
@@ -74,13 +60,7 @@ PSU_REQUIRED = {
     "SAVED_FOR_LATER.md": "# Saved For Later\n\n",
     "WEEKLY_REVIEW.md": "# Weekly Review\n\n",
 }
-PSU_DOMAIN_FILES = ["academic.md", "commercial.md", "family.md", "writing.md"]
-
-AXMRA_REQUIRED = {  # restored if missing inside .anchor/
-    "DASHBOARD.md": "# Anchor Axmra Dashboard\n\n## Active Priorities\n",
-    "PROJECTS.md": "# Projects (Commercial)\n",
-    "INBOX.md": "# Inbox (Commercial)\n",
-}
+DOMAIN_FILES = ["academic.md", "commercial.md", "family.md", "writing.md"]
 
 
 # â”€â”€ Report accumulator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -148,17 +128,15 @@ class Report:
 def check_filesystem(report: Report):
     name = "file system integrity"
 
-    if not PSU_DIR.exists():
-        report.check(name, False, f"PSU directory missing: {PSU_DIR}")
+    if not ANCHOR_DIR.exists():
+        report.check(name, False, f"Anchor directory missing: {ANCHOR_DIR}")
         return
-    if AXMRA_DIR is None:
-        report.recommend("Anchor Axmra sibling directory not discovered â€” single-directory mode")
 
     missing = []
 
-    # PSU required files
-    for filename, template in PSU_REQUIRED.items():
-        p = PSU_DIR / filename
+    # Required files
+    for filename, template in REQUIRED_FILES.items():
+        p = ANCHOR_DIR / filename
         if not p.exists():
             try:
                 p.write_text(template, encoding="utf-8")
@@ -166,55 +144,32 @@ def check_filesystem(report: Report):
             except Exception as e:
                 missing.append(f"{filename} ({e})")
 
-    # PSU domain files
-    domains_dir = PSU_DIR / "domains"
+    # Domain files
+    domains_dir = ANCHOR_DIR / "domains"
     if not domains_dir.exists():
         try:
             domains_dir.mkdir(parents=True, exist_ok=True)
             report.fix("Created missing domains/ directory")
         except Exception as e:
             missing.append(f"domains/ ({e})")
-    for df in PSU_DOMAIN_FILES:
+    for df in DOMAIN_FILES:
         p = domains_dir / df
         if not p.exists():
             missing.append(f"domains/{df}")
 
-    # PSU logs dir
-    logs_dir = PSU_DIR / "logs"
+    # logs dir
+    logs_dir = ANCHOR_DIR / "logs"
     if not logs_dir.exists():
         try:
             logs_dir.mkdir(parents=True, exist_ok=True)
-            report.fix("Created missing logs/ directory in PSU")
+            report.fix("Created missing logs/ directory")
         except Exception as e:
             missing.append(f"logs/ ({e})")
-
-    # Axmra (if present)
-    if AXMRA_DIR is not None:
-        anchor_sub = AXMRA_DIR / ".anchor"
-        if not anchor_sub.exists():
-            missing.append(f"{AXMRA_DIR.name}/.anchor")
-        else:
-            for filename, template in AXMRA_REQUIRED.items():
-                p = anchor_sub / filename
-                if not p.exists():
-                    try:
-                        p.write_text(template, encoding="utf-8")
-                        report.fix(f"Restored missing Axmra .anchor/{filename}")
-                    except Exception as e:
-                        missing.append(f"Axmra .anchor/{filename} ({e})")
-            axmra_logs = anchor_sub / "logs"
-            if not axmra_logs.exists():
-                try:
-                    axmra_logs.mkdir(parents=True, exist_ok=True)
-                    report.fix("Created missing logs/ directory in Axmra")
-                except Exception as e:
-                    missing.append(f"Axmra logs/ ({e})")
 
     if missing:
         report.check(name, False, "missing: " + ", ".join(missing))
     else:
-        scope = "PSU + Axmra" if AXMRA_DIR else "PSU only"
-        report.check(name, True, scope)
+        report.check(name, True, "ok")
 
 
 # â”€â”€ Check 2: code compiles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -222,7 +177,7 @@ def check_code_compiles(report: Report):
     name = "code compiles"
     failed = []
     for fname in ("anchor_gui.py", "anchor.py"):
-        p = PSU_DIR / fname
+        p = ANCHOR_DIR / fname
         if not p.exists():
             failed.append(f"{fname} (missing)")
             continue
@@ -241,7 +196,7 @@ def check_code_compiles(report: Report):
 # â”€â”€ Check 3: markdown parses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _import_anchor_gui():
     """Load anchor_gui as a module without invoking its main()."""
-    spec = importlib.util.spec_from_file_location("anchor_gui_mod", PSU_DIR / "anchor_gui.py")
+    spec = importlib.util.spec_from_file_location("anchor_gui_mod", ANCHOR_DIR / "anchor_gui.py")
     if spec is None or spec.loader is None:
         raise RuntimeError("Could not build module spec for anchor_gui.py")
     mod = importlib.util.module_from_spec(spec)
@@ -262,18 +217,13 @@ def check_markdown_parses(report: Report, mod):
     counts = {"tasks": 0, "projects": 0, "inbox": 0, "archived": 0}
 
     candidates: list[tuple[str, Path, str]] = []  # (label, path, kind)
-    candidates.append(("DASHBOARD.md", PSU_DIR / "DASHBOARD.md", "tasks"))
-    candidates.append(("PROJECTS.md", PSU_DIR / "PROJECTS.md", "projects"))
-    candidates.append(("INBOX.md", PSU_DIR / "INBOX.md", "inbox"))
-    candidates.append(("CANCELLED.md", PSU_DIR / "CANCELLED.md", "archived"))
-    candidates.append(("SAVED_FOR_LATER.md", PSU_DIR / "SAVED_FOR_LATER.md", "archived"))
-    for f in sorted((PSU_DIR / "domains").glob("*.md")):
+    candidates.append(("DASHBOARD.md", ANCHOR_DIR / "DASHBOARD.md", "tasks"))
+    candidates.append(("PROJECTS.md", ANCHOR_DIR / "PROJECTS.md", "projects"))
+    candidates.append(("INBOX.md", ANCHOR_DIR / "INBOX.md", "inbox"))
+    candidates.append(("CANCELLED.md", ANCHOR_DIR / "CANCELLED.md", "archived"))
+    candidates.append(("SAVED_FOR_LATER.md", ANCHOR_DIR / "SAVED_FOR_LATER.md", "archived"))
+    for f in sorted((ANCHOR_DIR / "domains").glob("*.md")):
         candidates.append((f"domains/{f.name}", f, "tasks"))
-    if AXMRA_DIR:
-        anchor_sub = AXMRA_DIR / ".anchor"
-        candidates.append(("Axmra DASHBOARD.md", anchor_sub / "DASHBOARD.md", "tasks"))
-        candidates.append(("Axmra PROJECTS.md", anchor_sub / "PROJECTS.md", "projects"))
-        candidates.append(("Axmra INBOX.md", anchor_sub / "INBOX.md", "inbox"))
 
     for label, path, kind in candidates:
         if not path.exists():
@@ -339,15 +289,13 @@ def check_server_and_endpoints(report: Report):
         report.check(name, False, f"test port {TEST_PORT} already in use; skipping endpoint checks")
         return None
 
-    cmd = [sys.executable, str(PSU_DIR / "anchor_gui.py"), "--port", str(TEST_PORT)]
+    cmd = [sys.executable, str(ANCHOR_DIR / "anchor_gui.py"), "--port", str(TEST_PORT), "--no-browser"]
     try:
         proc = subprocess.Popen(
             cmd,
-            cwd=str(PSU_DIR),
+            cwd=str(ANCHOR_DIR),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            # Suppress browser auto-open by patching env? anchor_gui calls webbrowser.open.
-            # On a headless or scheduled run that may silently fail â€” that's fine.
         )
     except Exception as e:
         report.check(name, False, f"could not launch: {e}")
@@ -501,22 +449,13 @@ def _cleanup_synthetic_task(task_text: str) -> tuple[bool, str]:
     """Remove the synthetic task from CANCELLED.md / SAVED_FOR_LATER.md / any md file."""
     search = task_text.lower()
     files_to_clean: list[Path] = [
-        PSU_DIR / "CANCELLED.md",
-        PSU_DIR / "SAVED_FOR_LATER.md",
-        PSU_DIR / "DASHBOARD.md",
+        ANCHOR_DIR / "CANCELLED.md",
+        ANCHOR_DIR / "SAVED_FOR_LATER.md",
+        ANCHOR_DIR / "DASHBOARD.md",
     ]
-    domains = PSU_DIR / "domains"
+    domains = ANCHOR_DIR / "domains"
     if domains.exists():
         files_to_clean.extend(domains.glob("*.md"))
-    if AXMRA_DIR:
-        anchor_sub = AXMRA_DIR / ".anchor"
-        if anchor_sub.exists():
-            files_to_clean.extend([
-                anchor_sub / "DASHBOARD.md",
-                anchor_sub / "PROJECTS.md",
-                anchor_sub / "CANCELLED.md",
-                anchor_sub / "SAVED_FOR_LATER.md",
-            ])
 
     removed_from = []
     errors = []
@@ -542,23 +481,23 @@ def check_logging(report: Report):
     issues = []
 
     # Today's log should exist and have content (the test server boot+ops should have written)
-    psu_log = PSU_DIR / "logs" / f"{TODAY}.md"
-    if not psu_log.exists():
-        issues.append(f"PSU log {TODAY}.md not written")
-    elif psu_log.stat().st_size < 10:
-        issues.append(f"PSU log {TODAY}.md is empty")
+    log_today = ANCHOR_DIR / "logs" / f"{TODAY}.md"
+    if not log_today.exists():
+        issues.append(f"log {TODAY}.md not written")
+    elif log_today.stat().st_size < 10:
+        issues.append(f"log {TODAY}.md is empty")
 
     # Yesterday's log SHOULD exist if the system ran yesterday â€” but only flag if also
     # the day before is missing (to avoid noise on first install or skipped days).
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     day_before = (date.today() - timedelta(days=2)).isoformat()
-    psu_yesterday = PSU_DIR / "logs" / f"{yesterday}.md"
-    psu_day_before = PSU_DIR / "logs" / f"{day_before}.md"
-    if not psu_yesterday.exists() and not psu_day_before.exists():
+    log_yesterday = ANCHOR_DIR / "logs" / f"{yesterday}.md"
+    log_day_before = ANCHOR_DIR / "logs" / f"{day_before}.md"
+    if not log_yesterday.exists() and not log_day_before.exists():
         report.recommend(f"No log files for the last 2 days ({yesterday}, {day_before}) â€” system may not have run")
 
     # errors.log should be readable and not catastrophically large
-    err_log = PSU_DIR / "logs" / "errors.log"
+    err_log = ANCHOR_DIR / "logs" / "errors.log"
     if err_log.exists():
         size_mb = err_log.stat().st_size / (1024 * 1024)
         if size_mb > 50:
@@ -567,13 +506,13 @@ def check_logging(report: Report):
     if issues:
         report.check(name, False, "; ".join(issues))
     else:
-        report.check(name, True, f"today's log {psu_log.stat().st_size} bytes")
+        report.check(name, True, f"today's log {log_today.stat().st_size} bytes")
 
 
 # â”€â”€ Check 7: Local filesystem write sanity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_onedrive_sync(report: Report):
     name = "Local filesystem write sanity"
-    marker = PSU_DIR / ".healthcheck_marker"
+    marker = ANCHOR_DIR / ".healthcheck_marker"
     payload = f"{datetime.now().isoformat()} healthcheck"
     try:
         marker.write_text(payload, encoding="utf-8")
@@ -589,14 +528,14 @@ def check_onedrive_sync(report: Report):
         report.check(name, False, f"{type(e).__name__}: {e}")
 
 
-# â”€â”€ Stale-process cleanup (port 8777) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# â”€â”€ Stale-process cleanup (ports 8777, 8778) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def cleanup_stale_processes(report: Report):
-    """If port 8777 is held by a Python process older than 24h, terminate it.
+    """If port 8777 or 8778 is held by a Python process older than 24h, terminate it.
     On Windows, use `tasklist` and `taskkill`. Best-effort: errors are logged but not fatal."""
     if sys.platform != "win32":
         return
     try:
-        # netstat to find PID holding port 8777
+        # netstat to find PIDs holding relevant ports
         out = subprocess.check_output(
             ["netstat", "-ano", "-p", "TCP"], stderr=subprocess.DEVNULL, text=True, timeout=10,
         )
@@ -604,8 +543,9 @@ def cleanup_stale_processes(report: Report):
         return
 
     pids = set()
+    targets = {":8777", f":{TEST_PORT}"}
     for line in out.splitlines():
-        if ":8777" in line and "LISTENING" in line:
+        if any(t in line for t in targets) and "LISTENING" in line:
             parts = line.split()
             if parts:
                 try:
@@ -615,10 +555,10 @@ def cleanup_stale_processes(report: Report):
     if not pids:
         return
 
-    # For each PID, check creation time via wmic / Get-Process
+    # For each PID, check creation time via Get-Process
     for pid in pids:
         try:
-            # PowerShell call to check process age (simpler than wmic which is deprecated)
+            # PowerShell call to check process age
             ps_cmd = f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).StartTime.ToString('o')"
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
@@ -629,10 +569,21 @@ def cleanup_stale_processes(report: Report):
                 continue
             start_dt = datetime.fromisoformat(start_str)
             age = datetime.now(start_dt.tzinfo) - start_dt
-            if age > timedelta(hours=24):
+
+            # Be more aggressive with the test port (8778) â€” if it's held by python,
+            # we likely want it dead so we can run the check, even if it's not 24h old.
+            # However, for 8777 (production), we only kill if it's truly stale.
+            is_test_port = False
+            for line in out.splitlines():
+                if f":{TEST_PORT}" in line and str(pid) in line:
+                    is_test_port = True
+                    break
+
+            if age > timedelta(hours=24) or is_test_port:
                 # Kill it
                 subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True, timeout=10)
-                report.fix(f"Terminated stale anchor process PID {pid} (age: {age})")
+                reason = "stale" if age > timedelta(hours=24) else "test port conflict"
+                report.fix(f"Terminated anchor process PID {pid} (reason: {reason}, age: {age})")
         except Exception:
             continue
 
@@ -708,7 +659,7 @@ def main():
         report.write(report_path)
     except Exception as e:
         # Last-ditch fallback: write to a fixed path so we don't lose the result
-        fallback = PSU_DIR / "logs" / "healthcheck-error.log"
+        fallback = ANCHOR_DIR / "logs" / "healthcheck-error.log"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         fallback.write_text(f"Could not write report: {e}\n{traceback.format_exc()}", encoding="utf-8")
 
