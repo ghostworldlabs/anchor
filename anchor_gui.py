@@ -47,9 +47,17 @@ logging.basicConfig(
 # Also log INFO to the error log for server lifecycle events
 _logger = logging.getLogger("anchor")
 _logger.setLevel(logging.INFO)
-_fh = logging.FileHandler(str(ERROR_LOG))
-_fh.setFormatter(logging.Formatter("%(asctime)s — %(levelname)s — %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-_logger.addHandler(_fh)
+# Guard against double-handler attach: if anchor_gui is imported more than once
+# in the same interpreter (e.g. by anchor_healthcheck), only one FileHandler
+# should remain on the logger. Also disable propagation so records don't also
+# get written by the root logger's FileHandler (installed by basicConfig above)
+# — that was producing duplicated lines in errors.log.
+if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == str(ERROR_LOG)
+           for h in _logger.handlers):
+    _fh = logging.FileHandler(str(ERROR_LOG))
+    _fh.setFormatter(logging.Formatter("%(asctime)s — %(levelname)s — %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+    _logger.addHandler(_fh)
+_logger.propagate = False
 
 
 # ── Parsing ────────────────────────────────────────────────────────────
@@ -1025,7 +1033,9 @@ def generate_html(projects, tasks, inbox):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Anchor Dashboard — J.C. Liechty</title>
-<link rel="icon" href="/favicon.ico" type="image/x-icon">
+<link rel="icon" href="/anchor.ico?v=2026-05-11" type="image/x-icon">
+<link rel="icon" href="/anchor.png?v=2026-05-11" type="image/png" sizes="256x256">
+<link rel="apple-touch-icon" href="/anchor-touch.png?v=2026-05-11">
 <style>
 :root {{
     --bg: #0f1117; --surface: #1a1d27; --surface2: #232733; --border: #2e3340;
@@ -1958,7 +1968,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
-            elif self.path == "/favicon.ico":
+            elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
                 ico_path = ANCHOR_DIR / "anchor.ico"
                 if ico_path.exists():
                     self.send_response(200)
@@ -1966,6 +1976,28 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.send_header("Cache-Control", "public, max-age=86400")
                     self.end_headers()
                     self.wfile.write(ico_path.read_bytes())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            elif self.path.startswith("/anchor.png"):
+                png_path = ANCHOR_DIR / "anchor.png"
+                if png_path.exists():
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(png_path.read_bytes())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            elif self.path.startswith("/anchor-touch.png"):
+                png_path = ANCHOR_DIR / "anchor-touch.png"
+                if png_path.exists():
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(png_path.read_bytes())
                 else:
                     self.send_response(404)
                     self.end_headers()

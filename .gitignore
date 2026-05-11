@@ -8,6 +8,7 @@ venv/
 # Logs and Reports
 logs/*.md
 logs/*.log
+logs/*.bak*
 health_reports/*.md
 
 # Data and Binaries (Large/Sensitive)
@@ -20,6 +21,11 @@ archive/
 *.ico
 *.lnk
 *.bat
+
+# Icon assets: keep these tracked despite the *.ico / *.png patterns above
+!anchor.ico
+!anchor.png
+!anchor-touch.png
 
 # OS/IDEs
 .vscode/

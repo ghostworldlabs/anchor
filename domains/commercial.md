@@ -10,6 +10,7 @@
 - [ ] Talk with Hassan about Archty timing — Priority: 3 — energy: low — [commercial] — Notes: Carried from Axmra freeze 2026-04-07
 - [ ] Get the whitepaper with figures correct. — Priority: 1 — energy: med — [commercial]
 - [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
+- [ ] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
 
 
 ## Nexia Impact / Axmra Capital

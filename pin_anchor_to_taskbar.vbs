@@ -7,8 +7,12 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 
 scriptDir = fso.GetParentFolderName(WScript.ScriptFullName)
 desktopPath = WshShell.SpecialFolders("Desktop")
-iconPath = scriptDir & "\AnchorDashboard.ico"
-shortcutPath = desktopPath & "\Anchor Dashboard.lnk"
+iconPath = scriptDir & "\anchor.ico"
+shortcutPath = desktopPath & "\Anchor.lnk"
+
+' Also delete any older shortcut variants from earlier iterations
+oldShortcut1 = desktopPath & "\Anchor Dashboard.lnk"
+If fso.FileExists(oldShortcut1) Then fso.DeleteFile oldShortcut1, True
 
 ' Step 1: Delete old shortcut if it exists
 If fso.FileExists(shortcutPath) Then
@@ -73,7 +77,7 @@ Set shortcut = WshShell.CreateShortcut(shortcutPath)
 shortcut.TargetPath = pythonExe
 shortcut.Arguments = """" & scriptDir & "\launch_anchor.pyw"""
 shortcut.WorkingDirectory = scriptDir
-shortcut.Description = "Launch Anchor Dashboard"
+shortcut.Description = "Launch Anchor"
 shortcut.WindowStyle = 7
 
 If fso.FileExists(iconPath) Then
@@ -86,8 +90,8 @@ shortcut.Save
 WshShell.Run "cmd /c taskkill /IM explorer.exe /F & start explorer.exe", 0, True
 WScript.Sleep 2000
 
-MsgBox "Done! 'Anchor Dashboard' shortcut is on your Desktop with the new anchor icon." & vbCrLf & vbCrLf & _
+MsgBox "Done! 'Anchor' shortcut is on your Desktop with the new icon." & vbCrLf & vbCrLf & _
        "To pin to taskbar:" & vbCrLf & _
-       "1. Double-click 'Anchor Dashboard' on your Desktop" & vbCrLf & _
+       "1. Double-click 'Anchor' on your Desktop" & vbCrLf & _
        "2. Right-click the anchor icon in the taskbar" & vbCrLf & _
        "3. Click 'Pin to taskbar'", vbInformation, "Anchor Setup"

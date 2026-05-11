@@ -31,7 +31,8 @@
 - [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
 - [ ] Get Milo Trust assigned to my trust — Priority: 1 — energy: med — [family]
 - [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 1 — energy: med — [family]
-- [ ] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
+- [x] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
+- [ ] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
 
 
 ### P1 (carried — Mon/Tue)
