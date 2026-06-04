@@ -1426,7 +1426,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
-          <button class="btn btn-sm" onclick="stopServer()" style="font-size:11px;padding:4px 10px;background:var(--danger);margin-left:auto">&#9632; Stop</button>
+          <!-- 2026-05-12: Stop button removed. Server lifecycle is owned by
+               the NSSM "anchor" service on gwl-server. To restart, run
+               `nssm restart anchor` on gwl-server. -->
         </div>
         <div class="date">{today_str}</div>
       </div>
@@ -1902,13 +1904,11 @@ function saveEditProject() {{
     apiCall('/api/edit_project', body);
 }}
 
-function stopServer() {{
-    if (confirm('Stop the Anchor dashboard server?')) {{
-        fetch('/api/shutdown', {{method: 'POST'}}).then(() => {{
-            document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f1117;color:#e2e4e9;font-size:18px">Anchor stopped. You can close this tab.</div>';
-        }}).catch(() => {{}});
-    }}
-}}
+// 2026-05-12: stopServer() removed. The dashboard no longer kills its own
+// server; that responsibility now belongs to the NSSM "anchor" service
+// supervisor on gwl-server. To restart, run `nssm restart anchor`.
+// /api/shutdown is also gone from the Python side, so external POSTs can
+// no longer kill the server either.
 
 function promoteProject(b64) {{ apiCall('/api/promote_project', {{name: dec(b64)}}); }}
 function demoteProject(b64) {{ apiCall('/api/demote_project', {{name: dec(b64)}}); }}
@@ -2116,10 +2116,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
             _last_heartbeat = datetime.now()
             self._send_json({"ok": True})
 
-        elif self.path == "/api/shutdown":
-            self._send_json({"ok": True, "message": "Shutting down..."})
-            log_change("Dashboard server stopped")
-            threading.Timer(0.5, lambda: _server_instance.shutdown()).start()
+        # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
+        # gwl-server owns process lifecycle. To restart: run `nssm restart
+        # anchor` on gwl-server. The dashboard cannot kill the server.
 
         else:
             self._send_json({"ok": False, "error": "Unknown endpoint"}, 404)
