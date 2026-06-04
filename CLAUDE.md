@@ -4,13 +4,24 @@
 >
 > Historical note: this system used to be split across two OneDrive folders (Anchor PSU + Anchor Axmra) that synced to each other via a sibling-discovery mechanism. On 2026-05-02 the active folder moved to `C:\dev\Anchor` and the Axmra sibling was merged in and decommissioned. The frozen Axmra contents are preserved at `_archive/axmra-snapshot-2026-05-02/`. The old `Anchor PSU` OneDrive folder remains as an inert backup.
 
+## Runtime / Host (as of 2026-05-12)
+The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `pythonw anchor_gui.py --no-browser` and binds `http://localhost:8777`.
+
+- **Restart the server:** `nssm restart anchor` (requires an elevated shell)
+- **Stop / start:** `nssm stop anchor` / `nssm start anchor`
+- **Status:** `Get-Service anchor`
+
+Because the service owns the process, the dashboard no longer has a Stop button and the `/api/shutdown` endpoint has been removed — the UI cannot kill its own server.
+
+> ⚠ **Open item — duplicate supervisor:** there is *also* a Task Scheduler task **"Anchor Server"** (at-logon trigger) launching the same script. Running both the NSSM service and the scheduled task spawns redundant server processes competing for port 8777 and leaves orphans. Pick one supervisor (the NSSM service is the documented owner) and disable the other. Until resolved, expect stray `pythonw` processes.
+
 ## Quick Start
 When the user says "Dashboard", "dashboard", "anchor", or "start":
-1. Launch the GUI: Run `python3 anchor_gui.py` (starts a local web server at http://localhost:8777 and opens the browser)
+1. The server is already running (NSSM service). Just open **http://localhost:8777** in the browser — no launch step needed. If it doesn't respond, run `nssm restart anchor` (elevated) or check `Get-Service anchor`.
 2. Give a brief status summary (date, active tasks, upcoming deadlines, inbox count)
 3. The GUI is fully interactive — user can check tasks done, add tasks, capture ideas directly in the browser. All changes save to markdown files automatically and are logged.
 
-**IMPORTANT:** `anchor_gui.py` is the preferred way to use the dashboard. It runs as a local web server and writes directly to the markdown files — no Cowork sandbox limitations.
+**IMPORTANT:** `anchor_gui.py` is the application. It runs as a persistent local web server (under the `anchor` service) and writes directly to the markdown files — no Cowork sandbox limitations. Only run `python3 anchor_gui.py` manually for local debugging when the service is stopped.
 
 ## Fallback (if GUI can't launch)
 If the browser-based GUI can't be launched, fall back to:
@@ -38,9 +49,11 @@ Tasks can be moved through these states:
 Each task can have an optional **Notes** field for storing emails, links, references, or context.
 
 ## Daily Health Check
-A self-test script (`anchor_healthcheck.py`) runs every morning at 5:00 AM via Windows Task Scheduler. It verifies file integrity, parses every markdown file, boots the server on test port 8778, exercises every endpoint, walks a synthetic `__healthcheck__` task through every state, then writes `health_reports/YYYY-MM-DD.md`. If anything failed, the dashboard shows a red banner at the top until the next clean run.
+A self-test script (`anchor_healthcheck.py`) runs every morning at 5:00 AM via the Windows Task Scheduler task **"Anchor Health Check"**. It verifies file integrity, parses every markdown file, boots a throwaway server on test port 8778, exercises every endpoint, walks a synthetic `__healthcheck__` task through every state, then writes `health_reports/YYYY-MM-DD.md`. If anything failed, the dashboard shows a red banner at the top until the next clean run.
 
-- **Install scheduled task:** `powershell -ExecutionPolicy Bypass -File .\register_healthcheck.ps1` (run once)
+If port 8778 is already occupied (e.g. by a stale/orphaned server the non-elevated check can't reap), the self-test automatically falls back to an OS-assigned free port and logs that under "Auto-fixes applied" — it no longer aborts the whole run over a busy test port.
+
+- **Install / re-register scheduled task:** `powershell -ExecutionPolicy Bypass -File .\register_healthcheck.ps1` (run once; safe to re-run)
 - **Run on demand:** double-click `Anchor Healthcheck.bat`, or `python anchor_healthcheck.py`
 - **Disable:** `Unregister-ScheduledTask -TaskName "Anchor Health Check" -Confirm:$false`
 - **Reports:** kept indefinitely in `health_reports/`. See `health_reports/README.md` for the format.
@@ -118,7 +131,6 @@ This is a self-contained Python HTTP server that generates the full dashboard HT
 | POST | `/api/cancel` | Cancel task → CANCELLED.md |
 | POST | `/api/save_for_later` | Save task → SAVED_FOR_LATER.md |
 | POST | `/api/restore` | Restore from archive to active |
-| POST | `/api/shutdown` | Stop the server |
 
 ### anchor.py — CLI Engine
 Mirror of anchor_gui.py's logic but as a command-line tool. Also generates the static `dashboard.html` file. Shares the same markdown format and file paths.
@@ -141,7 +153,7 @@ The dashboard has these views (toggled by `showView()` in JS):
 
 ### Common Pitfalls
 - **Browser caching:** The server sends no-cache headers, but if a user reports stale content, tell them Ctrl+Shift+R
-- **Port conflict:** If port 8777 is already in use (old server still running), the new launch will fail silently. Kill old Python processes first: `taskkill /F /IM pythonw.exe`
+- **Port conflict:** If port 8777 misbehaves, restart the service: `nssm restart anchor` (elevated). Do **not** blanket-kill `taskkill /F /IM pythonw.exe` — that also kills the service's server and any unrelated `pythonw` processes on this host. To target one process, find it with `Get-NetTCPConnection -State Listen -LocalPort 8777` and kill that specific PID.
 - **Local Filesystem:** Project lives in `C:\dev\Anchor`. No OneDrive, no syncing. Version control via local Git.
 - **F-string escaping:** The HTML is generated inside Python f-strings, so all literal `{` and `}` in CSS/JS must be doubled: `{{` and `}}`
 
