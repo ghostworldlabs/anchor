@@ -24,15 +24,19 @@
 - [x] **Calder update call (11 AM)** — Priority: 1 — energy: med — [family] — Notes: Prep done yesterday. Pull Kathy capture notes + Uncle Mike status to top of mind before 10:45 AM
 - [x] **Resolve 2 PM triple conflict** — Priority: 1 — energy: low — [commercial/academic] — Notes: Skunk vs. Technical (both Zoom) vs. Faculty Meeting 2:30. Decide by noon, send regrets
 - [x] **Reconcile Clifford Intro 11:30 vs. Calder 11:00–12:00** — Priority: 1 — energy: low — [commercial] — Notes: 30-min overlap. Either reschedule Clifford or step out of Calder call at 11:30
-- [ ] Talk Keith Wilcox (9:30 AM, 217 BB) — Priority: 2 — energy: med — [academic]
 - [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
-- [ ] Get the whitepaper with figures correct. — Priority: 1 — energy: med — [commercial]
 - [ ] Get the finances up to date and get the budget sorted — Priority: 1 — energy: med — [family]
 - [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
 - [ ] Get Milo Trust assigned to my trust — Priority: 1 — energy: med — [family]
 - [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 1 — energy: med — [family]
 - [x] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
-- [ ] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
+- [x] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
+- [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial]
+- [x] Respond to Cliffort — Priority: 1 — energy: med — [commercial]
+- [x] Review Archty PSU Patent and Respond to Matthew and Marco — Priority: 1 — energy: med — [commercial]
+- [ ] Sort out Archty Tax Bill Deleware — Priority: 2 — energy: med — [academic]
+- [ ] Get TAs lined up for Fall — Priority: 1 — energy: med — [academic]
+- [ ] Add a memorization and math training tool to GWL/Anchor — Priority: 1 — energy: med — [personal]
 
 
 ### P1 (carried — Mon/Tue)
@@ -42,7 +46,7 @@
 - [ ] Compare PSU ID Watch Dog and Geico ID Protection — Priority: 1 — energy: low — [personal]
 - [ ] Get login details for Other Retirement Fund Account Nick Accordino — Priority: 1 — energy: low — [personal]
 - [ ] Get a Fire Proof Safe — Priority: 1 — energy: low — [personal]
-- [ ] Vet Mom's Trust and Review with Brothers — Priority: 1 — energy: med — [family]
+- [x] Vet Mom's Trust and Review with Brothers — Priority: 1 — energy: med — [family]
 
 ### P2
 - [ ] Chronicles Book 1 Outline v2 author review (writing re-entry) — Priority: 2 — energy: med — [writing] — Notes: Weekend bonus target
