@@ -5,7 +5,9 @@
 > Historical note: this system used to be split across two OneDrive folders (Anchor PSU + Anchor Axmra) that synced to each other via a sibling-discovery mechanism. On 2026-05-02 the active folder moved to `C:\dev\Anchor` and the Axmra sibling was merged in and decommissioned. The frozen Axmra contents are preserved at `_archive/axmra-snapshot-2026-05-02/`. The old `Anchor PSU` OneDrive folder remains as an inert backup.
 
 ## Runtime / Host (as of 2026-05-12)
-The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `pythonw anchor_gui.py --no-browser` and binds `http://localhost:8777`.
+The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `python anchor_gui.py --no-browser` and binds `http://localhost:8777`.
+
+**Host:** this is the same physical machine throughout — hostname `PUTER`, also referred to as **`gwl-server`** (its friendly / Tailscale name). Any code comment, doc, or plan that says `gwl-server` means this desktop; they are not two different boxes.
 
 - **Restart the server:** `nssm restart anchor` (requires an elevated shell)
 - **Stop / start:** `nssm stop anchor` / `nssm start anchor`
