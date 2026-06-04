@@ -281,13 +281,33 @@ def _port_in_use(port: int) -> bool:
         s.close()
 
 
+def _find_free_port(preferred: int) -> int:
+    """Return `preferred` if it's free, otherwise an OS-assigned free port."""
+    if not _port_in_use(preferred):
+        return preferred
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
 def check_server_and_endpoints(report: Report):
     """Boot the server on TEST_PORT, exercise endpoints, return the popen handle."""
+    global TEST_PORT
     name = "server boot"
 
+    # The fixed test port can be left occupied by a stale server we can't reap
+    # (e.g. a SYSTEM-owned orphan spawned by the NSSM service — a non-elevated
+    # check can't taskkill it). Don't fail the whole self-test over that: fall
+    # back to an OS-assigned free port so the boot/endpoint/round-trip checks
+    # can still run. check_synthetic_roundtrip reads TEST_PORT too, so updating
+    # the global keeps both in sync.
     if _port_in_use(TEST_PORT):
-        report.check(name, False, f"test port {TEST_PORT} already in use; skipping endpoint checks")
-        return None
+        fallback = _find_free_port(TEST_PORT)
+        report.fix(f"test port {TEST_PORT} busy; ran on free port {fallback} instead")
+        TEST_PORT = fallback
 
     cmd = [sys.executable, str(ANCHOR_DIR / "anchor_gui.py"), "--port", str(TEST_PORT), "--no-browser"]
     try:
