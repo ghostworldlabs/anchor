@@ -10,4 +10,9 @@ gate verdict per wave). Seeded empty at Crucible handoff.
   before invoking Foreman to build.
 
 ## Wave log
-_(empty — Foreman writes here)_
+
+### Wave 1 — Establish the pytest gate + test harness — GO (2026-06-08)
+- EXECUTE: created `pyproject.toml` (`[tool.pytest.ini_options]`, `testpaths=["tests"]`, no runtime deps, pytest under dev extra), `tests/__init__.py`, `tests/conftest.py` (sys.path bootstrap), `tests/test_smoke.py` (5 real tests exercising `anchor.parse_tasks_from_md`). No existing source modified.
+- GATE (orchestrator-run `python -m pytest -v`): **GREEN, 5 passed**, exit 0.
+- REVIEW (2 independent, refute-prompted): both GO. Shared finding MINOR-1.
+- OPEN FINDING (carried to Wave 2): **MINOR-1** — `anchor.py:35` `LOGS_DIR.mkdir(exist_ok=True)` runs at import (idempotent, touches no data files); a test docstring overstates "side-effect free." Resolve when Wave 2 introduces `paths.py`/`ANCHOR_DATA_DIR`.
