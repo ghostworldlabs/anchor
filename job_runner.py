@@ -73,6 +73,12 @@ STATUS_CANCELLED = "cancelled"
 STATUS_INTERRUPTED = "interrupted"
 STATUS_FAILED = "failed"
 
+#: The set of runner statuses that mean the job's process lifecycle is over.
+#: A terminal job cannot accept a continuation turn (its session is gone).
+TERMINAL_STATUSES = frozenset(
+    (STATUS_DONE, STATUS_CANCELLED, STATUS_INTERRUPTED, STATUS_FAILED)
+)
+
 # ── In-memory live job table ────────────────────────────────────────────────
 # Maps job_id -> a _LiveJob holding the Popen, reader thread, and ring buffer.
 # Only live (this-process) jobs appear here; persisted records on disk are the
@@ -392,8 +398,7 @@ def long_poll(job_id: str, since: int = 0,
             return out
         # If the job is finished and there is nothing new, return (empty) so the
         # client learns the terminal status rather than spinning.
-        if out["status"] in (STATUS_DONE, STATUS_CANCELLED,
-                              STATUS_INTERRUPTED, STATUS_FAILED):
+        if out["status"] in TERMINAL_STATUSES:
             return out
         if time.monotonic() >= deadline:
             return out
