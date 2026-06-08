@@ -16,24 +16,35 @@ Launch from Cowork by typing "Dashboard" — Claude will run this for you.
 import json, logging, os, re, sys, threading, traceback, webbrowser
 from datetime import datetime, date
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 import html as html_lib
 
 # ── Paths ──────────────────────────────────────────────────────────────
-# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
-ANCHOR_DIR = Path(__file__).parent
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02).
+# Wave 2: data paths resolve via the shared `paths` helper, honoring the
+# ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
+import paths as _paths
 
-DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
-PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
-INBOX_MD = ANCHOR_DIR / "INBOX.md"
-DOMAINS_DIR = ANCHOR_DIR / "domains"
-LOGS_DIR = ANCHOR_DIR / "logs"
-CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
-SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
+# Process-wide write lock: held around every markdown/JSON mutation so two
+# concurrent mutating requests (ThreadingHTTPServer) cannot lose an update.
+WRITE_LOCK = _paths.WRITE_LOCK
 
-# Ensure log dir
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
+# ANCHOR_DIR is the *code* dir (used for static assets like anchor.ico).
+ANCHOR_DIR = _paths.CODE_DIR
+
+DASHBOARD_MD = _paths.dashboard_md()
+PROJECTS_MD = _paths.projects_md()
+INBOX_MD = _paths.inbox_md()
+DOMAINS_DIR = _paths.domains_dir()
+LOGS_DIR = _paths.logs_dir()
+CANCELLED_MD = _paths.cancelled_md()
+SAVED_FOR_LATER_MD = _paths.saved_for_later_md()
+
+# Ensure data dirs exist (logs/, domains/, health_reports/). This is the GUI's
+# explicit call — directory creation is no longer an import-time side effect of
+# the shared helper.
+_paths.ensure_data_dirs()
 
 # ── Error Logging ─────────────────────────────────────────────────────
 ERROR_LOG = LOGS_DIR / "errors.log"
@@ -249,7 +260,24 @@ def _all_md_files():
 
 
 # ── Change operations ──────────────────────────────────────────────────
+#
+# Every function that MUTATES a markdown or JSON file is wrapped with
+# @_with_write_lock. The lock is a process-wide RLock (re-entrant), so nested
+# mutators (e.g. mark_done -> log_change) acquire it safely. Under
+# ThreadingHTTPServer this serializes concurrent writers so no update is lost.
 
+import functools as _functools
+
+
+def _with_write_lock(fn):
+    @_functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        with WRITE_LOCK:
+            return fn(*args, **kwargs)
+    return _wrapped
+
+
+@_with_write_lock
 def log_change(message):
     today = date.today().isoformat()
     now = datetime.now().strftime("%H:%M")
@@ -263,6 +291,7 @@ def log_change(message):
     print(f"  Logged: {now} — {message}")
 
 
+@_with_write_lock
 def mark_done(task_text):
     search = task_text.lower().strip()
     found = False
@@ -286,6 +315,7 @@ def mark_done(task_text):
     return found
 
 
+@_with_write_lock
 def mark_undone(task_text):
     search = task_text.lower().strip()
     found = False
@@ -309,6 +339,7 @@ def mark_undone(task_text):
     return found
 
 
+@_with_write_lock
 def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""):
     due_str = f" — Due: {due}" if due else ""
     notes_str = f" — Notes: {notes}" if notes else ""
@@ -336,17 +367,22 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
     log_change(f"Added task: {text} [{domain}] P{priority}")
 
 
+@_with_write_lock
 def capture_inbox(text, domain=""):
     today = date.today().isoformat()
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
-    if INBOX_MD.exists():
-        content = INBOX_MD.read_text(encoding="utf-8")
-        content = content.rstrip() + "\n" + line + "\n"
-        INBOX_MD.write_text(content, encoding="utf-8")
+    if not INBOX_MD.exists():
+        # Fresh/empty data dir: create a minimal inbox so the capture is never
+        # silently dropped.
+        INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
+    content = INBOX_MD.read_text(encoding="utf-8")
+    content = content.rstrip() + "\n" + line + "\n"
+    INBOX_MD.write_text(content, encoding="utf-8")
     log_change(f"Captured: {text}")
 
 
+@_with_write_lock
 def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_energy=None, new_due=None, new_notes=None):
     """Edit a task's properties across all markdown files. Only changes specified fields."""
     search = old_text.lower().strip()
@@ -431,6 +467,7 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
     return found
 
 
+@_with_write_lock
 def edit_project(old_name, new_name=None, new_priority=None, new_domain=None,
                  new_status=None, new_effort=None, new_due=None, new_next=None):
     """Edit a project's properties in PROJECTS.md files."""
@@ -563,6 +600,7 @@ def _append_to_archive(filepath, task_dict):
     filepath.write_text(content, encoding="utf-8")
 
 
+@_with_write_lock
 def cancel_task(task_text):
     """Cancel a task: remove from active lists, add to CANCELLED.md, log it."""
     task = _remove_task_from_files(task_text)
@@ -573,6 +611,7 @@ def cancel_task(task_text):
     return False
 
 
+@_with_write_lock
 def save_for_later(task_text):
     """Save a task for later: remove from active lists, add to SAVED_FOR_LATER.md, log it."""
     task = _remove_task_from_files(task_text)
@@ -583,6 +622,7 @@ def save_for_later(task_text):
     return False
 
 
+@_with_write_lock
 def restore_task(task_text, from_archive="saved"):
     """Restore a task from an archive back to the active dashboard."""
     archive_file = SAVED_FOR_LATER_MD if from_archive == "saved" else CANCELLED_MD
@@ -2022,6 +2062,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
         content_len = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_len)) if content_len > 0 else {}
 
+        # Token-auth middleware (Wave 2 / D4). Every mutating /api/* POST
+        # requires a valid shared-secret token when ANCHOR_TOKEN is configured.
+        # If ANCHOR_TOKEN is unset, auth is disabled (local-only back-compat).
+        # The token may be supplied via the X-Anchor-Token header (preferred)
+        # or a "token" field in the JSON body. Read endpoints are not gated.
+        provided = self.headers.get("X-Anchor-Token")
+        if provided is None and isinstance(body, dict):
+            provided = body.get("token")
+        if not _paths.auth_ok(provided):
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
         if self.path == "/api/done":
             text = body.get("text", "")
             ok = mark_done(text)
@@ -2143,6 +2195,19 @@ def _heartbeat_watchdog():
     return
 
 
+def make_server(host="127.0.0.1", port=8777):
+    """Construct + bind the threading HTTP server, recovering from a transient
+    bind failure (e.g. a slow-to-come-up Tailscale interface — D4/Wave 2).
+
+    Uses paths.bind_with_retry so a single bind hiccup retries instead of
+    aborting startup. Structured so a test can monkeypatch socket.bind to fail
+    once then succeed and observe recovery.
+    """
+    return _paths.bind_with_retry(
+        lambda: ThreadingHTTPServer((host, port), AnchorHandler)
+    )
+
+
 def main():
     global _server_instance
     port = 8777
@@ -2152,7 +2217,7 @@ def main():
         if idx + 1 < len(sys.argv):
             port = int(sys.argv[idx + 1])
 
-    server = HTTPServer(("127.0.0.1", port), AnchorHandler)
+    server = make_server("127.0.0.1", port)
     _server_instance = server
     url = f"http://localhost:{port}"
 

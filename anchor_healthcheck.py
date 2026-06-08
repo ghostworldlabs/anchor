@@ -42,14 +42,26 @@ from pathlib import Path
 
 # â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SCRIPT_DIR = Path(__file__).parent.resolve()
-ANCHOR_DIR = SCRIPT_DIR  # this script must live in the Anchor root
-REPORTS_DIR = ANCHOR_DIR / "health_reports"
+ANCHOR_DIR = SCRIPT_DIR  # this script must live in the Anchor root (CODE dir)
+
+# Wave 2: data paths resolve via the shared `paths` helper, honoring the
+# ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
+# Code-file references (anchor_gui.py / anchor.py compile + cwd) stay on
+# ANCHOR_DIR; data-file references use DATA_DIR.
+import paths as _paths
+DATA_DIR = _paths.data_dir()
+REPORTS_DIR = _paths.health_reports_dir()
 TEST_PORT = 8778
 SERVER_BOOT_TIMEOUT = 12  # seconds
 SYNTHETIC_TAG = "__healthcheck__"
 TODAY = date.today().isoformat()
 
-REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+_paths.ensure_data_dirs()
+
+# Sentinel so _post() can distinguish "caller passed token=None on purpose"
+# (deliberately tokenless request) from "caller didn't specify a token"
+# (attach the configured token automatically).
+_UNSET = object()
 
 # Files that MUST exist (auto-restored if missing)
 REQUIRED_FILES = {
@@ -128,15 +140,15 @@ class Report:
 def check_filesystem(report: Report):
     name = "file system integrity"
 
-    if not ANCHOR_DIR.exists():
-        report.check(name, False, f"Anchor directory missing: {ANCHOR_DIR}")
+    if not DATA_DIR.exists():
+        report.check(name, False, f"Anchor data directory missing: {DATA_DIR}")
         return
 
     missing = []
 
     # Required files
     for filename, template in REQUIRED_FILES.items():
-        p = ANCHOR_DIR / filename
+        p = DATA_DIR / filename
         if not p.exists():
             try:
                 p.write_text(template, encoding="utf-8")
@@ -145,7 +157,7 @@ def check_filesystem(report: Report):
                 missing.append(f"{filename} ({e})")
 
     # Domain files
-    domains_dir = ANCHOR_DIR / "domains"
+    domains_dir = DATA_DIR / "domains"
     if not domains_dir.exists():
         try:
             domains_dir.mkdir(parents=True, exist_ok=True)
@@ -158,7 +170,7 @@ def check_filesystem(report: Report):
             missing.append(f"domains/{df}")
 
     # logs dir
-    logs_dir = ANCHOR_DIR / "logs"
+    logs_dir = DATA_DIR / "logs"
     if not logs_dir.exists():
         try:
             logs_dir.mkdir(parents=True, exist_ok=True)
@@ -217,12 +229,12 @@ def check_markdown_parses(report: Report, mod):
     counts = {"tasks": 0, "projects": 0, "inbox": 0, "archived": 0}
 
     candidates: list[tuple[str, Path, str]] = []  # (label, path, kind)
-    candidates.append(("DASHBOARD.md", ANCHOR_DIR / "DASHBOARD.md", "tasks"))
-    candidates.append(("PROJECTS.md", ANCHOR_DIR / "PROJECTS.md", "projects"))
-    candidates.append(("INBOX.md", ANCHOR_DIR / "INBOX.md", "inbox"))
-    candidates.append(("CANCELLED.md", ANCHOR_DIR / "CANCELLED.md", "archived"))
-    candidates.append(("SAVED_FOR_LATER.md", ANCHOR_DIR / "SAVED_FOR_LATER.md", "archived"))
-    for f in sorted((ANCHOR_DIR / "domains").glob("*.md")):
+    candidates.append(("DASHBOARD.md", DATA_DIR / "DASHBOARD.md", "tasks"))
+    candidates.append(("PROJECTS.md", DATA_DIR / "PROJECTS.md", "projects"))
+    candidates.append(("INBOX.md", DATA_DIR / "INBOX.md", "inbox"))
+    candidates.append(("CANCELLED.md", DATA_DIR / "CANCELLED.md", "archived"))
+    candidates.append(("SAVED_FOR_LATER.md", DATA_DIR / "SAVED_FOR_LATER.md", "archived"))
+    for f in sorted((DATA_DIR / "domains").glob("*.md")):
         candidates.append((f"domains/{f.name}", f, "tasks"))
 
     for label, path, kind in candidates:
@@ -369,25 +381,42 @@ def check_server_and_endpoints(report: Report):
     except Exception as e:
         endpoint_results.append(("GET /api/status", False, str(e)))
 
-    # POST validation pings â€” send a no-op text and expect ok=False, not a 500
+    # POST validation pings â€” send a no-op text and expect ok=False, not a 500.
+    # _post() attaches the configured token automatically, so these don't 401
+    # under the production D4 token posture.
     for endpoint in ("/api/done", "/api/undone", "/api/cancel",
                      "/api/save_for_later", "/api/restore"):
         try:
-            req = urllib.request.Request(
-                base + endpoint,
-                data=json.dumps({"text": "__nonexistent_validation_ping__"}).encode(),
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=5) as r:
-                data = json.loads(r.read().decode("utf-8"))
-                # Should respond with ok=False (task not found) and not 500
-                ok = r.status == 200 and "ok" in data
-                endpoint_results.append((f"POST {endpoint}", ok, f"status={r.status}"))
+            data = _post(base, endpoint, {"text": "__nonexistent_validation_ping__"})
+            # Should respond with ok=False (task not found) and not 500
+            ok = "ok" in data
+            endpoint_results.append((f"POST {endpoint}", ok, "status=200"))
         except urllib.error.HTTPError as e:
             endpoint_results.append((f"POST {endpoint}", False, f"HTTP {e.code}"))
         except Exception as e:
             endpoint_results.append((f"POST {endpoint}", False, str(e)))
+
+    # SETUP.md §6 unauth-rejection assertion: when a token IS configured, a
+    # deliberately tokenless mutating POST must be rejected with 401. When no
+    # token is configured, skip gracefully (auth is disabled).
+    if _paths.expected_token() is not None:
+        try:
+            req = urllib.request.Request(
+                base + "/api/done",
+                data=json.dumps({"text": "__unauth_probe__"}).encode(),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=5).read()
+            # Reaching here means it was NOT rejected — a failure.
+            endpoint_results.append(("POST /api/done (tokenless)", False, "expected 401, got 200"))
+        except urllib.error.HTTPError as e:
+            ok = e.code == 401
+            endpoint_results.append(("POST /api/done (tokenless)", ok, f"HTTP {e.code} (expected 401)"))
+            if ok:
+                report.fix("unauth-rejection assertion: tokenless mutating POST correctly returned 401")
+        except Exception as e:
+            endpoint_results.append(("POST /api/done (tokenless)", False, str(e)))
 
     passed = sum(1 for _, ok, _ in endpoint_results if ok)
     total = len(endpoint_results)
@@ -401,11 +430,25 @@ def check_server_and_endpoints(report: Report):
 
 
 # â”€â”€ Check 5: synthetic round-trip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-def _post(base: str, path: str, payload: dict, timeout: float = 5.0) -> dict:
+def _post(base: str, path: str, payload: dict, timeout: float = 5.0,
+          token: "str | None" = _UNSET) -> dict:
+    """POST JSON to the test server.
+
+    When ``token`` is left at its sentinel default, the configured token
+    (``paths.expected_token()``) is attached automatically if one is set — so
+    mutating endpoints don't 401 under the production D4 token posture. Pass
+    ``token=None`` explicitly to send a deliberately tokenless request (used by
+    the unauth-rejection assertion).
+    """
+    headers = {"Content-Type": "application/json"}
+    if token is _UNSET:
+        token = _paths.expected_token()
+    if token is not None:
+        headers["X-Anchor-Token"] = token
     req = urllib.request.Request(
         base + path,
         data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -469,11 +512,11 @@ def _cleanup_synthetic_task(task_text: str) -> tuple[bool, str]:
     """Remove the synthetic task from CANCELLED.md / SAVED_FOR_LATER.md / any md file."""
     search = task_text.lower()
     files_to_clean: list[Path] = [
-        ANCHOR_DIR / "CANCELLED.md",
-        ANCHOR_DIR / "SAVED_FOR_LATER.md",
-        ANCHOR_DIR / "DASHBOARD.md",
+        DATA_DIR / "CANCELLED.md",
+        DATA_DIR / "SAVED_FOR_LATER.md",
+        DATA_DIR / "DASHBOARD.md",
     ]
-    domains = ANCHOR_DIR / "domains"
+    domains = DATA_DIR / "domains"
     if domains.exists():
         files_to_clean.extend(domains.glob("*.md"))
 
@@ -501,7 +544,7 @@ def check_logging(report: Report):
     issues = []
 
     # Today's log should exist and have content (the test server boot+ops should have written)
-    log_today = ANCHOR_DIR / "logs" / f"{TODAY}.md"
+    log_today = DATA_DIR / "logs" / f"{TODAY}.md"
     if not log_today.exists():
         issues.append(f"log {TODAY}.md not written")
     elif log_today.stat().st_size < 10:
@@ -511,13 +554,13 @@ def check_logging(report: Report):
     # the day before is missing (to avoid noise on first install or skipped days).
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     day_before = (date.today() - timedelta(days=2)).isoformat()
-    log_yesterday = ANCHOR_DIR / "logs" / f"{yesterday}.md"
-    log_day_before = ANCHOR_DIR / "logs" / f"{day_before}.md"
+    log_yesterday = DATA_DIR / "logs" / f"{yesterday}.md"
+    log_day_before = DATA_DIR / "logs" / f"{day_before}.md"
     if not log_yesterday.exists() and not log_day_before.exists():
         report.recommend(f"No log files for the last 2 days ({yesterday}, {day_before}) â€” system may not have run")
 
     # errors.log should be readable and not catastrophically large
-    err_log = ANCHOR_DIR / "logs" / "errors.log"
+    err_log = DATA_DIR / "logs" / "errors.log"
     if err_log.exists():
         size_mb = err_log.stat().st_size / (1024 * 1024)
         if size_mb > 50:
@@ -532,7 +575,7 @@ def check_logging(report: Report):
 # â”€â”€ Check 7: Local filesystem write sanity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_onedrive_sync(report: Report):
     name = "Local filesystem write sanity"
-    marker = ANCHOR_DIR / ".healthcheck_marker"
+    marker = DATA_DIR / ".healthcheck_marker"
     payload = f"{datetime.now().isoformat()} healthcheck"
     try:
         marker.write_text(payload, encoding="utf-8")
@@ -612,27 +655,16 @@ def cleanup_stale_processes(report: Report):
 def shutdown_server(server_proc):
     if server_proc is None:
         return
+    # The /api/shutdown endpoint was removed (the NSSM service owns the
+    # process lifecycle now), so go straight to terminate()/kill().
     try:
-        # Try graceful shutdown via API
-        urllib.request.urlopen(
-            urllib.request.Request(
-                f"http://127.0.0.1:{TEST_PORT}/api/shutdown",
-                data=b"{}",
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            ),
-            timeout=3,
-        ).read()
-    except Exception:
-        pass
-    try:
-        server_proc.wait(timeout=4)
-    except subprocess.TimeoutExpired:
         server_proc.terminate()
         try:
-            server_proc.wait(timeout=3)
+            server_proc.wait(timeout=4)
         except subprocess.TimeoutExpired:
             server_proc.kill()
+    except Exception:
+        pass
 
 
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -679,7 +711,7 @@ def main():
         report.write(report_path)
     except Exception as e:
         # Last-ditch fallback: write to a fixed path so we don't lose the result
-        fallback = ANCHOR_DIR / "logs" / "healthcheck-error.log"
+        fallback = DATA_DIR / "logs" / "healthcheck-error.log"
         fallback.parent.mkdir(parents=True, exist_ok=True)
         fallback.write_text(f"Could not write report: {e}\n{traceback.format_exc()}", encoding="utf-8")
 

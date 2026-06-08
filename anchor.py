@@ -19,20 +19,30 @@ from datetime import datetime, date
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────
-# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
-ANCHOR_DIR = Path(__file__).parent
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02).
+# Wave 2: all data paths resolve via the shared `paths` helper, which honors the
+# ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
+import paths as _paths
 
-DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
-PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
-INBOX_MD = ANCHOR_DIR / "INBOX.md"
-DOMAINS_DIR = ANCHOR_DIR / "domains"
-LOGS_DIR = ANCHOR_DIR / "logs"
-HTML_FILE = ANCHOR_DIR / "dashboard.html"
-CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
-SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
+# ANCHOR_DIR is the *code* dir (kept for code-relative references / back-compat).
+ANCHOR_DIR = _paths.CODE_DIR
 
-# Ensure log directory exists
-LOGS_DIR.mkdir(exist_ok=True)
+# Data paths resolved at module load from the current ANCHOR_DATA_DIR. Resolving
+# here (not at every use site) keeps the existing module-level constant API while
+# still honoring the env var; tests that need a tmp data dir set the env var
+# before import, or call the paths.* helpers directly.
+DASHBOARD_MD = _paths.dashboard_md()
+PROJECTS_MD = _paths.projects_md()
+INBOX_MD = _paths.inbox_md()
+DOMAINS_DIR = _paths.domains_dir()
+LOGS_DIR = _paths.logs_dir()
+HTML_FILE = _paths.dashboard_html()
+CANCELLED_MD = _paths.cancelled_md()
+SAVED_FOR_LATER_MD = _paths.saved_for_later_md()
+
+# NOTE: directory creation is intentionally NOT done at import time (carried
+# minor finding). Callers that mutate state call paths.ensure_data_dirs() /
+# create the logs dir lazily inside the write helpers (see log_change()).
 
 
 # ── Parsing helpers ────────────────────────────────────────────────────
@@ -363,10 +373,13 @@ def capture_inbox(text, domain=""):
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
 
-    if INBOX_MD.exists():
-        content = INBOX_MD.read_text(encoding="utf-8")
-        content = content.rstrip() + "\n" + line + "\n"
-        INBOX_MD.write_text(content, encoding="utf-8")
+    if not INBOX_MD.exists():
+        # Fresh/empty data dir: create a minimal inbox so the capture is never
+        # silently dropped.
+        INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
+    content = INBOX_MD.read_text(encoding="utf-8")
+    content = content.rstrip() + "\n" + line + "\n"
+    INBOX_MD.write_text(content, encoding="utf-8")
 
     log_change(f"Captured to inbox: {text}")
     rebuild_dashboard()
