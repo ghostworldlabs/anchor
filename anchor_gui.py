@@ -16,24 +16,35 @@ Launch from Cowork by typing "Dashboard" — Claude will run this for you.
 import json, logging, os, re, sys, threading, traceback, webbrowser
 from datetime import datetime, date
 from pathlib import Path
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 import html as html_lib
 
 # ── Paths ──────────────────────────────────────────────────────────────
-# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
-ANCHOR_DIR = Path(__file__).parent
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02).
+# Wave 2: data paths resolve via the shared `paths` helper, honoring the
+# ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
+import paths as _paths
 
-DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
-PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
-INBOX_MD = ANCHOR_DIR / "INBOX.md"
-DOMAINS_DIR = ANCHOR_DIR / "domains"
-LOGS_DIR = ANCHOR_DIR / "logs"
-CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
-SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
+# Process-wide write lock: held around every markdown/JSON mutation so two
+# concurrent mutating requests (ThreadingHTTPServer) cannot lose an update.
+WRITE_LOCK = _paths.WRITE_LOCK
 
-# Ensure log dir
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
+# ANCHOR_DIR is the *code* dir (used for static assets like anchor.ico).
+ANCHOR_DIR = _paths.CODE_DIR
+
+DASHBOARD_MD = _paths.dashboard_md()
+PROJECTS_MD = _paths.projects_md()
+INBOX_MD = _paths.inbox_md()
+DOMAINS_DIR = _paths.domains_dir()
+LOGS_DIR = _paths.logs_dir()
+CANCELLED_MD = _paths.cancelled_md()
+SAVED_FOR_LATER_MD = _paths.saved_for_later_md()
+
+# Ensure data dirs exist (logs/, domains/, health_reports/). This is the GUI's
+# explicit call — directory creation is no longer an import-time side effect of
+# the shared helper.
+_paths.ensure_data_dirs()
 
 # ── Error Logging ─────────────────────────────────────────────────────
 ERROR_LOG = LOGS_DIR / "errors.log"
@@ -81,8 +92,12 @@ def parse_tasks_from_md(filepath):
             domain = dm.group(1).lower() if dm else "personal"
             due_m = re.search(r'Due:\s*([\d/\-\w]+)', meta, re.I)
             due = due_m.group(1) if due_m else ""
+            # Extract the optional Project: <id> field (Wave 3 task↔project link;
+            # a no-op until Wave 9 — it must simply round-trip unchanged).
+            proj_m = re.search(r'Project:\s*([^\s—]+)', meta, re.I)
+            project = proj_m.group(1).strip() if proj_m else ""
             # Extract notes
-            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|\[)|$)', meta, re.I)
+            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|Project|\[)|$)', meta, re.I)
             if not notes_m:
                 notes_m = re.search(r'Notes:\s*(.+?)$', meta, re.I)
             notes = notes_m.group(1).strip().rstrip(' —') if notes_m else ""
@@ -90,10 +105,34 @@ def parse_tasks_from_md(filepath):
             clean = re.sub(r'\s*—\s*\[.*', '', clean)
             clean = re.sub(r'\s*—\s*energy:.*', '', clean, flags=re.I)
             clean = re.sub(r'\s*—\s*Notes:.*', '', clean, flags=re.I)
+            clean = re.sub(r'\s*—\s*Project:.*', '', clean, flags=re.I)
             clean = clean.strip(' *')
             tasks.append({"text": clean, "done": done, "priority": priority,
-                          "energy": energy, "domain": domain, "due": due, "notes": notes})
+                          "energy": energy, "domain": domain, "due": due,
+                          "notes": notes, "project": project})
     return tasks
+
+
+def serialize_task_line(task):
+    """Serialize a parsed task dict back to its markdown line.
+
+    Round-trips the Wave 3 ``project`` field (``Project: <id>``) unchanged so a
+    task with a project link survives parse→serialize (a no-op until Wave 9).
+    Field order mirrors :func:`add_task` so existing tasks serialize identically.
+    """
+    check = "x" if task.get("done") else " "
+    text = task.get("text", "")
+    priority = task.get("priority", 2)
+    energy = task.get("energy", "med")
+    domain = task.get("domain", "personal")
+    due = task.get("due", "")
+    notes = task.get("notes", "")
+    project = task.get("project", "")
+    due_str = f" — Due: {due}" if due else ""
+    notes_str = f" — Notes: {notes}" if notes else ""
+    project_str = f" — Project: {project}" if project else ""
+    return (f"- [{check}] {text} — Priority: {priority} — energy: {energy} "
+            f"— [{domain}]{due_str}{project_str}{notes_str}")
 
 
 def parse_projects_from_md(filepath):
@@ -248,8 +287,363 @@ def _all_md_files():
     return files
 
 
-# ── Change operations ──────────────────────────────────────────────────
+# ── R&D control surface (Wave 3) ───────────────────────────────────────
+# Thin id-keyed project registry + New Project flow + per-project store +
+# folder-grouped projects view + single-instance project windows.
 
+import rnd_registry as _rnd
+import dir_browser as _dirb
+import effort_history as _eh
+import report_viewer as _rv
+import deliverables as _deliv
+
+
+def _unsafe_path_seg(seg: str) -> bool:
+    """True if a URL segment is unsafe to use as a filesystem path component.
+
+    Rejects path separators (``/`` ``\\``) and parent-dir traversal (``..``)
+    before the value is used to build a filesystem path. Mirrors the
+    path-traversal hardening on the vendored-KaTeX static route.
+    """
+    if seg is None:
+        return False
+    return "/" in seg or "\\" in seg or ".." in seg
+
+
+# Single-instance project windows (Master Plan C2): opening a project that is
+# already open returns the EXISTING instance id rather than spawning a duplicate.
+# Server-side, process-local map {project_id: instance_id}. Guarded by the same
+# process-wide write lock so concurrent opens resolve to one instance.
+_project_instances = {}
+
+
+def open_project_instance(project_id: str) -> dict:
+    """Return the (single) window instance for a project, creating if needed.
+
+    Re-opening an already-open project returns the same ``instance_id`` — no
+    duplicate window (C2). Returns ``{project_id, instance_id, reused}``.
+    """
+    with WRITE_LOCK:
+        existing = _project_instances.get(project_id)
+        if existing is not None:
+            return {"project_id": project_id, "instance_id": existing,
+                    "reused": True}
+        import uuid as _uuid
+        inst = _uuid.uuid4().hex
+        _project_instances[project_id] = inst
+        return {"project_id": project_id, "instance_id": inst, "reused": False}
+
+
+def close_project_instance(project_id: str) -> bool:
+    """Forget a project's open instance (so a later open is fresh)."""
+    with WRITE_LOCK:
+        return _project_instances.pop(project_id, None) is not None
+
+
+def _maybe_git_init(folder: Path) -> bool:
+    """Optionally run ``git init`` in ``folder``. Best-effort, never raises.
+
+    Returns True if git init was attempted and succeeded. Skipped silently if
+    git is unavailable or the folder is already a repo.
+    """
+    try:
+        import subprocess
+        if (folder / ".git").exists():
+            return False
+        subprocess.run(["git", "init"], cwd=str(folder), check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=30)
+        return True
+    except Exception:
+        return False
+
+
+def create_new_folder_project(name: str, parent_path, priority: int = 2,
+                              git_init: bool = False) -> dict:
+    """+ New Project / create-new-folder mode.
+
+    Creates ``<parent>/<name>`` (optional ``git init``), registers a project
+    with a FRESH id, and scaffolds ``.anchor/projects/<id>/{lanes}/``. Returns
+    the registry entry plus ``folder_created`` / ``git_initialized`` flags.
+    """
+    with WRITE_LOCK:
+        parent = Path(parent_path).expanduser()
+        folder = parent / name
+        folder.mkdir(parents=True, exist_ok=True)
+        git_done = _maybe_git_init(folder) if git_init else False
+        entry = _rnd.add_project(name, str(folder), priority=priority,
+                                 scaffold=True)
+        log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
+        return {"entry": entry, "folder_created": True,
+                "git_initialized": git_done}
+
+
+def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
+    """+ New Project / select-existing mode.
+
+    Registers the chosen folder as a project (fresh id, isolated store). Adding
+    another project for a folder that already hosts projects is allowed
+    (1 folder : N projects). A missing path still registers but surfaces a
+    ``path-missing`` state on read (no crash).
+    """
+    with WRITE_LOCK:
+        folder = Path(folder_path).expanduser()
+        exists = folder.exists()
+        entry = _rnd.add_project(name, str(folder), priority=priority,
+                                 scaffold=exists)
+        if not exists:
+            # Don't fabricate a store under a missing path; mark it so the view
+            # shows path-missing rather than crashing.
+            entry = dict(entry)
+            entry["state"] = _rnd.STATE_PATH_MISSING
+        existing = _rnd.group_by_folder().get(str(folder), [])
+        log_change(f"R&D: registered project '{name}' at {folder} (id {entry['id']})")
+        return {"entry": entry, "path_exists": exists,
+                "siblings_in_folder": [e for e in existing
+                                       if e["id"] != entry["id"]]}
+
+
+def render_status_line_html(project_id: str) -> str:
+    """Render the 4-state status line (Research/Planning/Build/Deliverables)."""
+    line = _rnd.status_line(project_id)
+    chips = []
+    for lane in _rnd.STATUS_LANES:
+        state = line.get(lane, _rnd.STATUS_NONE_YET)
+        label = lane.capitalize()
+        chips.append(
+            f'<span class="rnd-lane rnd-lane-{state}">'
+            f'{html_lib.escape(label)}: {html_lib.escape(state)}</span>'
+        )
+    return '<div class="rnd-status-line">' + "".join(chips) + "</div>"
+
+
+def render_project_tile_html(entry: dict) -> str:
+    """Render a single 'Rich' project tile (name + priority + state + status)."""
+    name = html_lib.escape(entry.get("name", ""))
+    pid = html_lib.escape(entry.get("id", ""))
+    pr = entry.get("priority", 2)
+    state = html_lib.escape(entry.get("state", "active"))
+    status = render_status_line_html(entry.get("id", ""))
+    return (
+        f'<div class="rnd-tile" data-project-id="{pid}">'
+        f'<div class="rnd-tile-head">'
+        f'<span class="rnd-name">{name}</span>'
+        f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
+        f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
+        f'</div>'
+        f'{status}'
+        f'<a class="rnd-open" href="/project/{pid}">Open</a>'
+        f'</div>'
+    )
+
+
+def render_projects_view_html(include_archived: bool = True,
+                              include_future: bool = True) -> str:
+    """Render the folder-grouped projects view (collapsible folder → tiles)."""
+    groups = _rnd.group_by_folder(include_archived=include_archived,
+                                  include_future=include_future)
+    if not groups:
+        return ('<div class="rnd-projects"><p class="rnd-empty">'
+                'No R&D projects yet. Use "+ New Project" to add one.</p></div>')
+    blocks = []
+    for folder in sorted(groups):
+        tiles = "".join(render_project_tile_html(e) for e in groups[folder])
+        blocks.append(
+            f'<details class="rnd-folder" open>'
+            f'<summary class="rnd-folder-head">{html_lib.escape(folder)}'
+            f' <span class="rnd-folder-count">'
+            f'({len(groups[folder])})</span></summary>'
+            f'<div class="rnd-folder-tiles">{tiles}</div>'
+            f'</details>'
+        )
+    return '<div class="rnd-projects">' + "".join(blocks) + '</div>'
+
+
+def render_project_window_html(project_id: str) -> str:
+    """Render the basic per-project window for the ``/project/<id>`` route.
+
+    Wave 3 ships a basic view + the 4-state status line (none-yet); the full
+    Kanban is Wave 7. Returns a full HTML page (standalone) for the route.
+    """
+    entry = _rnd.get_project(project_id)
+    if entry is None:
+        return ("<!doctype html><html><head><meta charset='utf-8'>"
+                "<title>Project not found</title></head><body>"
+                "<h1>Project not found</h1>"
+                f"<p>No R&amp;D project with id "
+                f"{html_lib.escape(project_id)}.</p>"
+                "<p><a href='/'>&larr; Back to dashboard</a></p>"
+                "</body></html>")
+    # Surface path-missing on read.
+    eff = _rnd.list_projects()
+    for e in eff:
+        if e["id"] == project_id:
+            entry = e
+            break
+    inst = open_project_instance(project_id)
+    name = html_lib.escape(entry.get("name", ""))
+    folder = html_lib.escape(entry.get("folder_path", ""))
+    state = html_lib.escape(entry.get("state", "active"))
+    pr = entry.get("priority", 2)
+    status = render_status_line_html(project_id)
+    rollup = render_cost_rollup_html(project_id, entry.get("folder_path", ""))
+    tasks_html = render_project_tasks_html(project_id)
+    deliverables_html = render_deliverables_html(
+        project_id, entry.get("folder_path", ""))
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<title>{name} — Anchor R&amp;D</title>"
+        "<style>body{font-family:system-ui,Segoe UI,sans-serif;"
+        "background:#0f1117;color:#e6e8ee;margin:0;padding:24px}"
+        ".rnd-status-line{margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}"
+        ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
+        "font-size:13px}"
+        "a{color:#6c9cfc}</style></head><body>"
+        f"<p><a href='/'>&larr; Back to dashboard</a></p>"
+        f"<h1>{name} <span style='font-size:14px;color:#8a90a2'>"
+        f"(P{pr} · {state})</span></h1>"
+        f"<p style='color:#8a90a2'>Folder: {folder}</p>"
+        f"<p style='color:#8a90a2;font-size:12px'>instance "
+        f"{html_lib.escape(inst['instance_id'])}</p>"
+        "<h2>Lanes</h2>"
+        f"{status}"
+        f"{rollup}"
+        f"{tasks_html}"
+        f"{deliverables_html}"
+        "</body></html>"
+    )
+
+
+def _fmt_cost(rollup: dict) -> str:
+    """Render a one-line cost/time/tokens summary from a rollup dict."""
+    cost = rollup.get("total_cost_usd", 0.0) or 0.0
+    dur_ms = rollup.get("duration_ms", 0) or 0
+    toks = rollup.get("total_tokens", 0) or 0
+    secs = dur_ms / 1000.0
+    return (f"${cost:.4f} · {secs:.1f}s · {toks:,} tok "
+            f"({rollup.get('effort_count', 0)} effort"
+            f"{'s' if rollup.get('effort_count', 0) != 1 else ''})")
+
+
+def render_cost_rollup_html(project_id: str, folder_path: str) -> str:
+    """Render the per-project cost/time/tokens rollup (tile + dashboard, Wave 7).
+
+    Shows the project total plus a per-lane breakdown. Best-effort: a project
+    with no efforts shows zeros and never crashes.
+    """
+    try:
+        roll = _eh.project_rollup(project_id, folder_path)
+    except Exception:
+        return ""
+    total = roll.get("total", {})
+    lanes = roll.get("lanes", {})
+    rows = []
+    for lane in _eh.ROLLUP_LANES:
+        lr = lanes.get(lane, {})
+        if not lr.get("effort_count"):
+            continue
+        rows.append(
+            f"<div class='rnd-lane'>{html_lib.escape(lane)}: "
+            f"{html_lib.escape(_fmt_cost(lr))}</div>"
+        )
+    breakdown = ("<div class='rnd-status-line'>" + "".join(rows) + "</div>"
+                 if rows else "")
+    return (
+        "<h2>Cost rollup</h2>"
+        f"<p style='font-size:15px'><strong>Total:</strong> "
+        f"{html_lib.escape(_fmt_cost(total))}</p>"
+        f"{breakdown}"
+    )
+
+
+# ── Task ↔ project link (Wave 9 — activates the parsed Project: field) ──────
+
+def project_tasks(project_id: str) -> list:
+    """Return every active task whose ``Project: <id>`` field matches.
+
+    ``gather_all()`` already parses each task's ``project`` field (Wave 3) and
+    deduplicates; Wave 9 simply FILTERS on it. This is the data behind the
+    project-tasks view (AC2). Returns the matching task dicts (order preserved).
+    """
+    pid = (project_id or "").strip()
+    if not pid:
+        return []
+    _projects, tasks, _inbox = gather_all()
+    return [t for t in tasks if (t.get("project") or "").strip() == pid]
+
+
+def render_project_tasks_html(project_id: str) -> str:
+    """Render the project-tasks list shown inside the project window (AC2)."""
+    tasks = project_tasks(project_id)
+    if not tasks:
+        return ("<h2>Tasks</h2><p style='color:#8a90a2'>No tasks linked to this "
+                "project yet. Link one with <code>anchor.py link "
+                "\"task\" --project &lt;id&gt;</code>.</p>")
+    rows = []
+    for t in tasks:
+        mark = "✓" if t.get("done") else "○"
+        txt = html_lib.escape(t.get("text", ""))
+        dom = html_lib.escape(t.get("domain", ""))
+        pr = t.get("priority", 2)
+        rows.append(
+            f"<li><span style='color:#6c9cfc'>{mark}</span> {txt} "
+            f"<span style='color:#8a90a2;font-size:12px'>"
+            f"(P{pr} · {dom})</span></li>"
+        )
+    return ("<h2>Tasks</h2><ul style='list-style:none;padding:0'>"
+            + "".join(rows) + "</ul>")
+
+
+def render_deliverables_html(project_id: str, folder_path: str) -> str:
+    """Render the project's deliverable status records (Wave 9 AC1).
+
+    Read-only: shows each deliverable's type + last run status (the dashboard
+    surfacing of the status records ``deliverables.run_deliverable`` persists).
+    """
+    try:
+        records = _deliv.list_status(folder_path, project_id)
+    except Exception:
+        records = []
+    if not records:
+        return ("<h2>Deliverables</h2><p style='color:#8a90a2'>"
+                "No deliverable runs recorded yet.</p>")
+    colors = {_deliv.STATUS_SUCCESS: "#4caf78",
+              _deliv.STATUS_FAILED: "#e06c75",
+              _deliv.STATUS_TIMED_OUT: "#d6a35c"}
+    rows = []
+    for r in records:
+        status = r.get("status", "")
+        color = colors.get(status, "#8a90a2")
+        name = html_lib.escape(r.get("name", "") or r.get("deliverable_id", ""))
+        dtype = html_lib.escape(r.get("type", ""))
+        rows.append(
+            f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
+            f"[{dtype}]</span> — <span style='color:{color}'>"
+            f"{html_lib.escape(status)}</span></li>"
+        )
+    return ("<h2>Deliverables</h2><ul style='list-style:none;padding:0'>"
+            + "".join(rows) + "</ul>")
+
+
+# ── Change operations ──────────────────────────────────────────────────
+#
+# Every function that MUTATES a markdown or JSON file is wrapped with
+# @_with_write_lock. The lock is a process-wide RLock (re-entrant), so nested
+# mutators (e.g. mark_done -> log_change) acquire it safely. Under
+# ThreadingHTTPServer this serializes concurrent writers so no update is lost.
+
+import functools as _functools
+
+
+def _with_write_lock(fn):
+    @_functools.wraps(fn)
+    def _wrapped(*args, **kwargs):
+        with WRITE_LOCK:
+            return fn(*args, **kwargs)
+    return _wrapped
+
+
+@_with_write_lock
 def log_change(message):
     today = date.today().isoformat()
     now = datetime.now().strftime("%H:%M")
@@ -263,6 +657,7 @@ def log_change(message):
     print(f"  Logged: {now} — {message}")
 
 
+@_with_write_lock
 def mark_done(task_text):
     search = task_text.lower().strip()
     found = False
@@ -286,6 +681,7 @@ def mark_done(task_text):
     return found
 
 
+@_with_write_lock
 def mark_undone(task_text):
     search = task_text.lower().strip()
     found = False
@@ -309,6 +705,7 @@ def mark_undone(task_text):
     return found
 
 
+@_with_write_lock
 def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""):
     due_str = f" — Due: {due}" if due else ""
     notes_str = f" — Notes: {notes}" if notes else ""
@@ -336,17 +733,66 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
     log_change(f"Added task: {text} [{domain}] P{priority}")
 
 
+@_with_write_lock
 def capture_inbox(text, domain=""):
     today = date.today().isoformat()
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
-    if INBOX_MD.exists():
-        content = INBOX_MD.read_text(encoding="utf-8")
-        content = content.rstrip() + "\n" + line + "\n"
-        INBOX_MD.write_text(content, encoding="utf-8")
+    if not INBOX_MD.exists():
+        # Fresh/empty data dir: create a minimal inbox so the capture is never
+        # silently dropped.
+        INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
+    content = INBOX_MD.read_text(encoding="utf-8")
+    content = content.rstrip() + "\n" + line + "\n"
+    INBOX_MD.write_text(content, encoding="utf-8")
     log_change(f"Captured: {text}")
 
 
+@_with_write_lock
+def link_task(task_text, project_id):
+    """Link a task to an R&D project — set/maintain its ``Project: <id>`` field.
+
+    Wave 9 activation: edits ONLY the ``Project:`` field on the first matching
+    active task line, preserving every other character verbatim (byte-stable for
+    untouched tasks; clean round-trip for linked ones). An empty ``project_id``
+    unlinks. Mirrors ``anchor.link_task``. Returns True if a task was updated.
+    """
+    search = task_text.lower().strip()
+    new_id = (project_id or "").strip()
+    found = False
+    for md_file in _all_md_files():
+        if not md_file or not md_file.exists():
+            continue
+        text = md_file.read_text(encoding="utf-8")
+        new_lines = []
+        changed = False
+        for line in text.splitlines():
+            if (not found and re.match(r'\s*-\s*\[([ xX])\]', line)
+                    and search in line.lower()):
+                existing = re.search(r'(\s*—\s*Project:\s*)([^\s—]+)', line, re.I)
+                if existing:
+                    if new_id:
+                        new_line = (line[:existing.start(2)] + new_id
+                                    + line[existing.end(2):])
+                    else:
+                        new_line = line[:existing.start(1)] + line[existing.end(2):]
+                else:
+                    new_line = line.rstrip() + f" — Project: {new_id}" if new_id else line
+                if new_line != line:
+                    changed = True
+                new_lines.append(new_line)
+                found = True
+            else:
+                new_lines.append(line)
+        if changed:
+            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    if found:
+        log_change(f"Linked task '{task_text}' to project {new_id}" if new_id
+                   else f"Unlinked task '{task_text}'")
+    return found
+
+
+@_with_write_lock
 def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_energy=None, new_due=None, new_notes=None):
     """Edit a task's properties across all markdown files. Only changes specified fields."""
     search = old_text.lower().strip()
@@ -392,10 +838,14 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
                     due_m = re.search(r'Due:\s*([\d/\-\w]+)', rest, re.I)
                     if due_m: existing_due = due_m.group(1)
                     existing_notes = ""
-                    notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|\[)|$)', rest, re.I)
+                    notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|Project|\[)|$)', rest, re.I)
                     if not notes_m:
                         notes_m = re.search(r'Notes:\s*(.+?)$', rest, re.I)
                     if notes_m: existing_notes = notes_m.group(1).strip().rstrip(' —')
+                    # Preserve the optional Project: <id> link unchanged (Wave 3).
+                    existing_project = ""
+                    proj_m = re.search(r'Project:\s*([^\s—]+)', rest, re.I)
+                    if proj_m: existing_project = proj_m.group(1).strip()
 
                     # Apply only specified changes
                     t_text = new_text if new_text is not None else existing_text
@@ -406,8 +856,9 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
                     t_notes = new_notes if new_notes is not None else existing_notes
                     due_str = f" — Due: {t_due}" if t_due else ""
                     notes_str = f" — Notes: {t_notes}" if t_notes else ""
+                    project_str = f" — Project: {existing_project}" if existing_project else ""
 
-                    new_line = f"{prefix}{check_state}] {t_text} — Priority: {t_priority} — energy: {t_energy} — [{t_domain}]{due_str}{notes_str}"
+                    new_line = f"{prefix}{check_state}] {t_text} — Priority: {t_priority} — energy: {t_energy} — [{t_domain}]{due_str}{project_str}{notes_str}"
                     new_lines.append(new_line)
                     found = True
                     changed = True
@@ -431,6 +882,7 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
     return found
 
 
+@_with_write_lock
 def edit_project(old_name, new_name=None, new_priority=None, new_domain=None,
                  new_status=None, new_effort=None, new_due=None, new_next=None):
     """Edit a project's properties in PROJECTS.md files."""
@@ -563,6 +1015,7 @@ def _append_to_archive(filepath, task_dict):
     filepath.write_text(content, encoding="utf-8")
 
 
+@_with_write_lock
 def cancel_task(task_text):
     """Cancel a task: remove from active lists, add to CANCELLED.md, log it."""
     task = _remove_task_from_files(task_text)
@@ -573,6 +1026,7 @@ def cancel_task(task_text):
     return False
 
 
+@_with_write_lock
 def save_for_later(task_text):
     """Save a task for later: remove from active lists, add to SAVED_FOR_LATER.md, log it."""
     task = _remove_task_from_files(task_text)
@@ -583,6 +1037,7 @@ def save_for_later(task_text):
     return False
 
 
+@_with_write_lock
 def restore_task(task_text, from_archive="saved"):
     """Restore a task from an archive back to the active dashboard."""
     archive_file = SAVED_FOR_LATER_MD if from_archive == "saved" else CANCELLED_MD
@@ -1962,6 +2417,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, data, content_type, cache="no-cache"):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         try:
             if self.path == "/" or self.path == "/dashboard":
@@ -2010,6 +2473,56 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "done": len([t for t in tasks if t["done"]]),
                     "inbox": len(inbox),
                 })
+            elif self.path.startswith(_rv.KATEX_URL_PREFIX):
+                # Read-only vendored KaTeX static assets for the Reader (Wave 7).
+                rel = urlparse(self.path).path[len(_rv.KATEX_URL_PREFIX):]
+                asset = _rv.katex_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith("/report/"):
+                # Read-only report viewer (Wave 7): PDF-by-default else Reader.
+                # /report/<project_id>/<lane>[/<job_id>]
+                parts = [p for p in urlparse(self.path).path[len("/report/"):]
+                         .split("/") if p]
+                if len(parts) < 2:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    pid, lane = parts[0], parts[1]
+                    job_id = parts[2] if len(parts) > 2 else None
+                    # Reject path-separator / traversal in the path-bound
+                    # segments before they hit the filesystem (consistent with
+                    # the hardened KaTeX static route).
+                    if any(_unsafe_path_seg(seg)
+                           for seg in (lane, job_id) if seg is not None):
+                        self.send_response(400)
+                        self.end_headers()
+                        return
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    out = _rv.render_effort(folder, pid, lane, job_id)
+                    body = out["body"]
+                    if isinstance(body, str):
+                        body = body.encode("utf-8")
+                    self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/project/"):
+                # Per-project window (Wave 3 basic view + 4-state status line).
+                pid = urlparse(self.path).path[len("/project/"):].strip("/")
+                self._send_html(render_project_window_html(pid))
+            elif self.path.startswith("/api/rnd/projects"):
+                # Read-only: folder-grouped registry listing.
+                self._send_json({"ok": True,
+                                 "groups": _rnd.group_by_folder()})
+            elif self.path.startswith("/api/rnd/dir_browse"):
+                # Read-only directory browser for the "select existing" UI.
+                q = parse_qs(urlparse(self.path).query)
+                path_arg = q.get("path", [None])[0]
+                self._send_json({"ok": True,
+                                 "result": _dirb.browse(path_arg)})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -2021,6 +2534,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
       try:
         content_len = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_len)) if content_len > 0 else {}
+
+        # Token-auth middleware (Wave 2 / D4). Every mutating /api/* POST
+        # requires a valid shared-secret token when ANCHOR_TOKEN is configured.
+        # If ANCHOR_TOKEN is unset, auth is disabled (local-only back-compat).
+        # The token may be supplied via the X-Anchor-Token header (preferred)
+        # or a "token" field in the JSON body. Read endpoints are not gated.
+        provided = self.headers.get("X-Anchor-Token")
+        if provided is None and isinstance(body, dict):
+            provided = body.get("token")
+        if not _paths.auth_ok(provided):
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
 
         if self.path == "/api/done":
             text = body.get("text", "")
@@ -2116,6 +2641,88 @@ class AnchorHandler(BaseHTTPRequestHandler):
             _last_heartbeat = datetime.now()
             self._send_json({"ok": True})
 
+        # ── R&D control surface (Wave 3) ──────────────────────────────
+        elif self.path == "/api/rnd/new_project":
+            mode = body.get("mode", "existing")
+            name = body.get("name", "")
+            priority = body.get("priority", 2)
+            if mode == "new_folder":
+                res = create_new_folder_project(
+                    name, body.get("parent_path", ""),
+                    priority=priority,
+                    git_init=bool(body.get("git_init", False)),
+                )
+            else:
+                res = select_existing_project(
+                    name, body.get("folder_path", ""), priority=priority,
+                )
+            self._send_json({"ok": True, **res})
+
+        elif self.path == "/api/rnd/open_project":
+            pid = body.get("id", "")
+            self._send_json({"ok": True, **open_project_instance(pid)})
+
+        elif self.path == "/api/rnd/set_priority":
+            pid = body.get("id", "")
+            try:
+                entry = _rnd.set_priority(pid, int(body.get("priority", 2)))
+                self._send_json({"ok": True, "entry": entry})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/archive_project":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.archive_project(pid)})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/future_project":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.mark_future(pid)})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        # ── R&D control surface (Wave 9) ──────────────────────────────
+        elif self.path == "/api/rnd/link_task":
+            # Link/unlink a task ↔ R&D project (activates the Project: field).
+            text = body.get("text", "")
+            pid = body.get("project_id", "")
+            ok = link_task(text, pid)
+            self._send_json({
+                "ok": ok,
+                "message": (f"Linked '{text}' → {pid}" if pid else
+                            f"Unlinked '{text}'") if ok
+                           else f"Task not found: {text}",
+            })
+
+        elif self.path == "/api/rnd/run_deliverable":
+            # Run a deliverable per its type contract; persist + report status.
+            pid = body.get("project_id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                try:
+                    rec = _deliv.run_deliverable(
+                        body.get("type", ""),
+                        target=body.get("target"),
+                        argv=body.get("argv"),
+                        cwd=body.get("cwd") or folder or None,
+                        timeout=float(body.get("timeout",
+                                               _deliv.DEFAULT_TIMEOUT)),
+                        folder_path=folder,
+                        project_id=pid,
+                        name=body.get("name"),
+                    )
+                    self._send_json({"ok": True, "status": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
         # anchor` on gwl-server. The dashboard cannot kill the server.
@@ -2143,6 +2750,19 @@ def _heartbeat_watchdog():
     return
 
 
+def make_server(host="127.0.0.1", port=8777):
+    """Construct + bind the threading HTTP server, recovering from a transient
+    bind failure (e.g. a slow-to-come-up Tailscale interface — D4/Wave 2).
+
+    Uses paths.bind_with_retry so a single bind hiccup retries instead of
+    aborting startup. Structured so a test can monkeypatch socket.bind to fail
+    once then succeed and observe recovery.
+    """
+    return _paths.bind_with_retry(
+        lambda: ThreadingHTTPServer((host, port), AnchorHandler)
+    )
+
+
 def main():
     global _server_instance
     port = 8777
@@ -2152,7 +2772,7 @@ def main():
         if idx + 1 < len(sys.argv):
             port = int(sys.argv[idx + 1])
 
-    server = HTTPServer(("127.0.0.1", port), AnchorHandler)
+    server = make_server("127.0.0.1", port)
     _server_instance = server
     url = f"http://localhost:{port}"
 

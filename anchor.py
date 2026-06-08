@@ -11,6 +11,7 @@ Usage:
     python3 anchor.py restore "task text" --from saved|cancelled  # Restore archived task
     python3 anchor.py add "task" --domain academic --priority 1 --energy high --due 2026-04-10 --notes "some note"
     python3 anchor.py capture "idea"     # Add to inbox
+    python3 anchor.py link "task text" --project <id>   # Link a task to an R&D project
     python3 anchor.py status             # Print current status summary
 """
 
@@ -19,20 +20,30 @@ from datetime import datetime, date
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────
-# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02)
-ANCHOR_DIR = Path(__file__).parent
+# Single-folder layout (was previously dual-folder PSU + Axmra; consolidated 2026-05-02).
+# Wave 2: all data paths resolve via the shared `paths` helper, which honors the
+# ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
+import paths as _paths
 
-DASHBOARD_MD = ANCHOR_DIR / "DASHBOARD.md"
-PROJECTS_MD = ANCHOR_DIR / "PROJECTS.md"
-INBOX_MD = ANCHOR_DIR / "INBOX.md"
-DOMAINS_DIR = ANCHOR_DIR / "domains"
-LOGS_DIR = ANCHOR_DIR / "logs"
-HTML_FILE = ANCHOR_DIR / "dashboard.html"
-CANCELLED_MD = ANCHOR_DIR / "CANCELLED.md"
-SAVED_FOR_LATER_MD = ANCHOR_DIR / "SAVED_FOR_LATER.md"
+# ANCHOR_DIR is the *code* dir (kept for code-relative references / back-compat).
+ANCHOR_DIR = _paths.CODE_DIR
 
-# Ensure log directory exists
-LOGS_DIR.mkdir(exist_ok=True)
+# Data paths resolved at module load from the current ANCHOR_DATA_DIR. Resolving
+# here (not at every use site) keeps the existing module-level constant API while
+# still honoring the env var; tests that need a tmp data dir set the env var
+# before import, or call the paths.* helpers directly.
+DASHBOARD_MD = _paths.dashboard_md()
+PROJECTS_MD = _paths.projects_md()
+INBOX_MD = _paths.inbox_md()
+DOMAINS_DIR = _paths.domains_dir()
+LOGS_DIR = _paths.logs_dir()
+HTML_FILE = _paths.dashboard_html()
+CANCELLED_MD = _paths.cancelled_md()
+SAVED_FOR_LATER_MD = _paths.saved_for_later_md()
+
+# NOTE: directory creation is intentionally NOT done at import time (carried
+# minor finding). Callers that mutate state call paths.ensure_data_dirs() /
+# create the logs dir lazily inside the write helpers (see log_change()).
 
 
 # ── Parsing helpers ────────────────────────────────────────────────────
@@ -61,8 +72,11 @@ def parse_tasks_from_md(filepath):
             # Extract due date
             due_m = re.search(r'Due:\s*([\d/\-\w]+)', meta, re.I)
             due = due_m.group(1) if due_m else ""
+            # Extract the optional Project: <id> link (Wave 3; no-op until Wave 9).
+            proj_m = re.search(r'Project:\s*([^\s—]+)', meta, re.I)
+            project = proj_m.group(1).strip() if proj_m else ""
             # Extract notes
-            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|\[)|$)', meta, re.I)
+            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|Project|\[)|$)', meta, re.I)
             if not notes_m:
                 notes_m = re.search(r'Notes:\s*(.+?)$', meta, re.I)
             notes = notes_m.group(1).strip().rstrip(' —') if notes_m else ""
@@ -71,6 +85,7 @@ def parse_tasks_from_md(filepath):
             clean = re.sub(r'\s*—\s*\[.*', '', clean)
             clean = re.sub(r'\s*—\s*energy:.*', '', clean, flags=re.I)
             clean = re.sub(r'\s*—\s*Notes:.*', '', clean, flags=re.I)
+            clean = re.sub(r'\s*—\s*Project:.*', '', clean, flags=re.I)
             clean = clean.strip(' *')
             tasks.append({
                 "text": clean,
@@ -80,6 +95,7 @@ def parse_tasks_from_md(filepath):
                 "domain": domain,
                 "due": due,
                 "notes": notes,
+                "project": project,
             })
     return tasks
 
@@ -363,10 +379,13 @@ def capture_inbox(text, domain=""):
     domain_tag = f" [{domain}]" if domain else ""
     line = f"- {today}: {text}{domain_tag}"
 
-    if INBOX_MD.exists():
-        content = INBOX_MD.read_text(encoding="utf-8")
-        content = content.rstrip() + "\n" + line + "\n"
-        INBOX_MD.write_text(content, encoding="utf-8")
+    if not INBOX_MD.exists():
+        # Fresh/empty data dir: create a minimal inbox so the capture is never
+        # silently dropped.
+        INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
+    content = INBOX_MD.read_text(encoding="utf-8")
+    content = content.rstrip() + "\n" + line + "\n"
+    INBOX_MD.write_text(content, encoding="utf-8")
 
     log_change(f"Captured to inbox: {text}")
     rebuild_dashboard()
@@ -517,6 +536,70 @@ def restore_task(task_text, from_archive="saved"):
     return False
 
 
+def link_task(task_text, project_id):
+    """Link a task to an R&D project — set/maintain its ``Project: <id>`` field.
+
+    Wave 9 ACTIVATES the ``Project:`` field that Wave 3 parsed as a no-op. This
+    edits ONLY that field, surgically, on the first matching active task line:
+
+    - If the line has no ``Project:`` field, append ``" — Project: <id>"`` to it.
+    - If it already has one, replace just the ``<id>`` in place.
+    - Passing an empty ``project_id`` REMOVES the field (unlink).
+
+    Every other character of the user's markdown line is preserved verbatim, so
+    a task without the field that is not being touched stays byte-stable, and a
+    task with the field round-trips cleanly through parse/serialize + the
+    healthcheck parse path. Returns True if a task was updated.
+    """
+    search = task_text.lower().strip()
+    new_id = (project_id or "").strip()
+    found = False
+
+    for md_file in _all_md_files():
+        if not md_file.exists():
+            continue
+        text = md_file.read_text(encoding="utf-8")
+        new_lines = []
+        changed = False
+        for line in text.splitlines():
+            if (not found and re.match(r'\s*-\s*\[([ xX])\]', line)
+                    and search in line.lower()):
+                existing = re.search(r'(\s*—\s*Project:\s*)([^\s—]+)', line, re.I)
+                if existing:
+                    if new_id:
+                        # Replace just the id; keep surrounding text untouched.
+                        new_line = (line[:existing.start(2)] + new_id
+                                    + line[existing.end(2):])
+                    else:
+                        # Unlink: drop the whole " — Project: <id>" segment.
+                        new_line = line[:existing.start(1)] + line[existing.end(2):]
+                else:
+                    if new_id:
+                        new_line = line.rstrip() + f" — Project: {new_id}"
+                    else:
+                        new_line = line  # nothing to remove
+                if new_line != line:
+                    changed = True
+                new_lines.append(new_line)
+                found = True
+            else:
+                new_lines.append(line)
+        if changed:
+            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    if found:
+        if new_id:
+            log_change(f"Linked task '{task_text}' to project {new_id}")
+            print(f"✓ Linked: {task_text} → project {new_id}")
+        else:
+            log_change(f"Unlinked task '{task_text}' from its project")
+            print(f"✓ Unlinked: {task_text}")
+        rebuild_dashboard()
+    else:
+        print(f"Task not found: {task_text}")
+    return found
+
+
 def _all_md_files():
     """Return all markdown files that might contain tasks."""
     files = []
@@ -601,6 +684,23 @@ def main():
             else:
                 text_parts.append(arg); i += 1
         add_task(" ".join(text_parts), domain, priority, energy, due, notes)
+
+    elif cmd == "link":
+        # anchor.py link "task text" --project <id>   (or --unlink to remove)
+        if len(sys.argv) < 3:
+            print("Usage: anchor.py link \"task text\" --project <id> | --unlink")
+            return
+        text_parts = []
+        project_id = ""
+        i = 2
+        while i < len(sys.argv):
+            if sys.argv[i] == "--project" and i + 1 < len(sys.argv):
+                project_id = sys.argv[i + 1]; i += 2
+            elif sys.argv[i] == "--unlink":
+                project_id = ""; i += 1
+            else:
+                text_parts.append(sys.argv[i]); i += 1
+        link_task(" ".join(text_parts), project_id)
 
     elif cmd == "capture":
         if len(sys.argv) < 3:

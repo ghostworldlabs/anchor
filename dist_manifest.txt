@@ -1,0 +1,53 @@
+# Anchor — shippable-file manifest (Wave 8, deny-by-default)
+#
+# This file is the SINGLE SOURCE OF TRUTH for what ships in the public,
+# data-free distribution (MASTER-PLAN C10). The distro builder (distro.py)
+# is DENY-BY-DEFAULT: a file is staged into the export ONLY if it matches an
+# entry below. Anything not listed here — your task/project markdown, the R&D
+# registry JSON, .anchor/ stores, logs/, health_reports/, foreman build state,
+# planning/, _archive/, _mockups/ — is EXCLUDED automatically.
+#
+# Syntax:
+#   - One path or glob per line, relative to the repo root, POSIX separators.
+#   - Lines starting with '#' and blank lines are ignored.
+#   - Globs use ** for recursive matches (e.g. vendor/**).
+#   - There are NO exclude rules here: deny-by-default means "not listed = not shipped".
+#
+# A NEW unlisted source file will NOT silently ship — add it here deliberately.
+
+# ── Product code (Python stdlib only at runtime) ───────────────────────────
+anchor.py
+anchor_gui.py
+anchor_healthcheck.py
+paths.py
+rnd_registry.py
+dir_browser.py
+job_runner.py
+gate_adapter.py
+lanes.py
+effort_history.py
+report_viewer.py
+distro.py
+
+# ── Vendored, dependency-free assets (KaTeX for the report viewer) ──────────
+vendor/katex/katex.min.js
+vendor/katex/katex.min.css
+vendor/katex/auto-render.min.js
+vendor/katex/PROVENANCE.txt
+vendor/katex/fetch_katex.sh
+vendor/katex/fonts/**
+
+# ── Packaging / dev metadata ───────────────────────────────────────────────
+pyproject.toml
+dist_manifest.txt
+.gitignore
+
+# ── Tests + fixtures (dev-only; pytest is not a shipped runtime dep) ────────
+# Shipped so a collaborator can run the gate. The planted-secret fixture is
+# intentionally EXCLUDED (it carries deliberately-fake personal data).
+tests/conftest.py
+tests/__init__.py
+tests/fake_claude.py
+tests/test_*.py
+tests/fixtures/fake_stream.jsonl
+tests/fixtures/gate_stream.jsonl
