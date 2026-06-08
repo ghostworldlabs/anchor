@@ -69,6 +69,31 @@ def test_parse_tasks_from_md_defaults(tmp_path):
     assert task["domain"] == "personal"   # default domain
 
 
+def test_project_field_only_from_trailing_metadata(tmp_path):
+    """F2 regression guard (anchor.py): a task whose *body text* merely mentions
+    "Project:" must NOT parse a project link, while a real trailing
+    ``— Project: <id>`` metadata field must parse correctly."""
+    md = tmp_path / "proj.md"
+    md.write_text(
+        # Title mentions "Project:" but it is NOT a trailing metadata field.
+        "- [ ] Plan Project: Apollo milestones\n"
+        # Real trailing metadata field.
+        "- [ ] Wire dashboard — Priority: 1 — energy: high — [academic] "
+        "— Project: abc123\n",
+        encoding="utf-8",
+    )
+
+    tasks = anchor.parse_tasks_from_md(md)
+    assert len(tasks) == 2
+
+    # Body mention → no project link.
+    assert not tasks[0]["project"]
+    assert "Plan Project: Apollo milestones" in tasks[0]["text"]
+
+    # Real trailing field → parsed.
+    assert tasks[1]["project"] == "abc123"
+
+
 def test_anchor_module_is_import_safe():
     """Sanity: importing the module did not perform host file writes.
 

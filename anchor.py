@@ -71,8 +71,11 @@ def parse_tasks_from_md(filepath):
             # Extract due date
             due_m = re.search(r'Due:\s*([\d/\-\w]+)', meta, re.I)
             due = due_m.group(1) if due_m else ""
+            # Extract the optional Project: <id> link (Wave 3; no-op until Wave 9).
+            proj_m = re.search(r'Project:\s*([^\s—]+)', meta, re.I)
+            project = proj_m.group(1).strip() if proj_m else ""
             # Extract notes
-            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|\[)|$)', meta, re.I)
+            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|Project|\[)|$)', meta, re.I)
             if not notes_m:
                 notes_m = re.search(r'Notes:\s*(.+?)$', meta, re.I)
             notes = notes_m.group(1).strip().rstrip(' —') if notes_m else ""
@@ -81,6 +84,7 @@ def parse_tasks_from_md(filepath):
             clean = re.sub(r'\s*—\s*\[.*', '', clean)
             clean = re.sub(r'\s*—\s*energy:.*', '', clean, flags=re.I)
             clean = re.sub(r'\s*—\s*Notes:.*', '', clean, flags=re.I)
+            clean = re.sub(r'\s*—\s*Project:.*', '', clean, flags=re.I)
             clean = clean.strip(' *')
             tasks.append({
                 "text": clean,
@@ -90,6 +94,7 @@ def parse_tasks_from_md(filepath):
                 "domain": domain,
                 "due": due,
                 "notes": notes,
+                "project": project,
             })
     return tasks
 

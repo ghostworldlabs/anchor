@@ -37,3 +37,6 @@ Desktop.ini
 dashboard_live.html
 .healthcheck_marker
 test_write.txt
+
+# Foreman orchestration state (transient build artifact, not product)
+foreman-checkpoint.json
