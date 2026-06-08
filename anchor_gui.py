@@ -296,6 +296,9 @@ import dir_browser as _dirb
 import effort_history as _eh
 import report_viewer as _rv
 import deliverables as _deliv
+import lanes as _lanes
+import job_runner as _jr
+import gate_adapter as _gate
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -490,6 +493,7 @@ def render_project_window_html(project_id: str) -> str:
     tasks_html = render_project_tasks_html(project_id)
     deliverables_html = render_deliverables_html(
         project_id, entry.get("folder_path", ""))
+    pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
@@ -498,6 +502,19 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-status-line{margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
         "font-size:13px}"
+        ".rnd-launch{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}"
+        ".rnd-btn{padding:8px 14px;border-radius:6px;border:1px solid #2e3340;"
+        "background:#1b2030;color:#e6e8ee;cursor:pointer;font-size:14px}"
+        ".rnd-btn:hover{background:#232a3d}"
+        ".rnd-console{margin-top:16px}"
+        ".rnd-log{background:#05070c;border:1px solid #2e3340;border-radius:6px;"
+        "padding:10px;height:280px;overflow:auto;font-family:Consolas,monospace;"
+        "font-size:12px;white-space:pre-wrap;color:#cfd3dc}"
+        ".rnd-gate{margin-top:10px;padding:10px;border:1px solid #6c9cfc;"
+        "border-radius:6px;background:#141a2a}"
+        ".rnd-gate button{margin:4px 6px 0 0;padding:6px 12px;border-radius:6px;"
+        "border:1px solid #6c9cfc;background:#1b2030;color:#e6e8ee;cursor:pointer}"
+        ".rnd-status-badge{font-size:12px;color:#8a90a2;margin-left:8px}"
         "a{color:#6c9cfc}</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<h1>{name} <span style='font-size:14px;color:#8a90a2'>"
@@ -507,11 +524,137 @@ def render_project_window_html(project_id: str) -> str:
         f"{html_lib.escape(inst['instance_id'])}</p>"
         "<h2>Lanes</h2>"
         f"{status}"
+        "<div class='rnd-launch'>"
+        "<button class='rnd-btn' onclick=\"launchLane('research')\">Run Research</button>"
+        "<button class='rnd-btn' onclick=\"launchLane('plan')\">Run Plan</button>"
+        "<button class='rnd-btn' onclick=\"launchLane('build')\">Run Build</button>"
+        "</div>"
+        "<div class='rnd-console'>"
+        "<h2 style='display:inline-block'>Console</h2>"
+        "<span class='rnd-status-badge' id='laneStatus'></span>"
+        "<pre class='rnd-log' id='laneLog'></pre>"
+        "<div class='rnd-gate' id='laneGate' style='display:none'></div>"
+        "</div>"
         f"{rollup}"
         f"{tasks_html}"
         f"{deliverables_html}"
+        "<script>\n"
+        f"var PROJECT_ID = {pid_js};\n"
+        + _PROJECT_WINDOW_JS +
+        "</script>"
         "</body></html>"
     )
+
+
+# JS for the project window: launch a lane, then poll /api/rnd/tail and append
+# lines; surface + answer an in-session gate via /api/rnd/answer_gate. Plain
+# string (NOT an f-string), so braces are single. No template interpolation here
+# beyond the PROJECT_ID var injected above.
+_PROJECT_WINDOW_JS = r"""
+var _jobId = null;
+var _since = 0;
+var _pollTimer = null;
+var _gateShown = false;
+
+function _esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+
+function _appendLine(line) {
+  var log = document.getElementById('laneLog');
+  var text;
+  if (typeof line === 'string') { text = line; }
+  else { try { text = JSON.stringify(line); } catch (e) { text = String(line); } }
+  log.textContent += text + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+
+async function launchLane(lane) {
+  document.getElementById('laneLog').textContent = '';
+  document.getElementById('laneGate').style.display = 'none';
+  _gateShown = false;
+  _since = 0;
+  var r, data;
+  try {
+    r = await fetch('/api/rnd/launch_lane', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project_id: PROJECT_ID, lane: lane})
+    });
+    data = await r.json();
+  } catch (e) { _appendLine('[launch error] ' + e.message); return; }
+  if (!data.ok) {
+    _appendLine('[launch refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  _jobId = data.job_id;
+  document.getElementById('laneStatus').textContent =
+    lane + ' · job ' + _jobId + ' · ' + (data.status || 'running');
+  _startPolling();
+}
+
+function _startPolling() {
+  if (_pollTimer) clearTimeout(_pollTimer);
+  _pollOnce();
+}
+
+async function _pollOnce() {
+  if (!_jobId) return;
+  var data;
+  try {
+    var r = await fetch('/api/rnd/tail?job_id=' + encodeURIComponent(_jobId) + '&since=' + _since);
+    data = await r.json();
+  } catch (e) {
+    _pollTimer = setTimeout(_pollOnce, 1500);
+    return;
+  }
+  if (data.lines && data.lines.length) {
+    data.lines.forEach(_appendLine);
+    _since = data.next;
+  }
+  if (data.status) {
+    var badge = document.getElementById('laneStatus');
+    badge.textContent = badge.textContent.replace(/· [^·]*$/, '· ' + data.status);
+  }
+  if (data.pending_prompt) { _renderGate(data.pending_prompt); }
+  else if (_gateShown) { document.getElementById('laneGate').style.display = 'none'; _gateShown = false; }
+  var terminal = ['done', 'cancelled', 'interrupted', 'failed'];
+  if (data.status && terminal.indexOf(data.status) >= 0 && !data.pending_prompt) {
+    return; // job finished; stop polling
+  }
+  _pollTimer = setTimeout(_pollOnce, 1500);
+}
+
+function _renderGate(prompt) {
+  _gateShown = true;
+  var box = document.getElementById('laneGate');
+  var html = '<div style="margin-bottom:6px"><strong>' + _esc(prompt.question || 'Input requested') + '</strong></div>';
+  var opts = prompt.options || [];
+  if (opts.length) {
+    opts.forEach(function (o) {
+      var label = o.label || String(o);
+      html += '<button onclick="answerGate(' + JSON.stringify(label) + ')">' + _esc(label) + '</button>';
+    });
+  } else {
+    html += '<input type="text" id="gateText" placeholder="Your answer" style="padding:6px;width:60%" />'
+         + ' <button onclick="answerGate(document.getElementById(\'gateText\').value)">Send</button>';
+  }
+  box.innerHTML = html;
+  box.style.display = 'block';
+}
+
+async function answerGate(choice) {
+  if (!_jobId) return;
+  try {
+    var r = await fetch('/api/rnd/answer_gate', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({job_id: _jobId, choice: choice})
+    });
+    var data = await r.json();
+    _appendLine('[gate answered: ' + choice + (data.written ? '' : ' (no-op: ' + data.reason + ')') + ']');
+  } catch (e) { _appendLine('[gate error] ' + e.message); }
+  document.getElementById('laneGate').style.display = 'none';
+  _gateShown = false;
+  _startPolling();
+}
+"""
 
 
 def _fmt_cost(rollup: dict) -> str:
@@ -1469,6 +1612,15 @@ def generate_html(projects, tasks, inbox):
     if not inbox:
         inbox_items = '<div class="empty-msg">Inbox empty. Nice work.</div>'
 
+    # R&D control surface: surface the (previously orphaned) folder-grouped
+    # projects view inside the dashboard. Best-effort so a registry hiccup never
+    # blanks the whole dashboard.
+    try:
+        rnd_projects_html = render_projects_view_html()
+    except Exception:
+        rnd_projects_html = ('<div class="rnd-projects"><p class="rnd-empty">'
+                             'R&amp;D projects unavailable.</p></div>')
+
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
     balance_rows = ""
@@ -1857,6 +2009,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <div class="nav-item" data-view="inbox" onclick="showView('inbox')">
         <span class="dot" style="background:var(--warning)"></span> Inbox <span class="count">{len(inbox)}</span>
       </div>
+      <div class="nav-item" data-view="rnd" onclick="showView('rnd')">
+        <span class="dot" style="background:#6c9cfc"></span> R&amp;D
+      </div>
     </div>
     <div class="nav-section">
       <h3>Domains</h3>
@@ -1997,6 +2152,19 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <div class="task-list">{inbox_items}</div>
     </div>
 
+    <!-- R&D control surface view -->
+    <div class="view" id="view-rnd" style="display:none">
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <h2>R&amp;D Projects</h2>
+          <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
+        </div>
+        <div class="date">{today_str}</div>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Per-project R&amp;D control surface. Open a project to launch research / plan / build jobs and watch the live log.</p>
+      {rnd_projects_html}
+    </div>
+
     <!-- Domain views -->
     {domain_views}
   </div>
@@ -2089,6 +2257,43 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('editProjectModal')">Cancel</button>
       <button class="btn" onclick="saveEditProject()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- New R&D Project Modal -->
+<div class="modal-overlay" id="newProjectModal">
+  <div class="modal">
+    <h3>New R&amp;D Project</h3>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <button type="button" class="btn btn-sm" id="npModeNewBtn" onclick="npSetMode('new_folder')">Create new folder</button>
+      <button type="button" class="btn btn-sm btn-outline" id="npModeExistingBtn" onclick="npSetMode('existing')">Select existing</button>
+    </div>
+    <label>Project name</label>
+    <input type="text" id="npName" placeholder="Project name" />
+    <label>Priority</label>
+    <select id="npPriority">
+      <option value="1">P1 — Top Tier</option>
+      <option value="2" selected>P2 — Important</option>
+      <option value="3">P3 — Normal</option>
+    </select>
+    <!-- Create-new-folder mode -->
+    <div id="npNewFolderFields">
+      <label>Parent path</label>
+      <input type="text" id="npParentPath" placeholder="e.g. C:\\dev" />
+      <label style="display:flex;align-items:center;gap:6px;margin-top:6px">
+        <input type="checkbox" id="npGitInit" /> Initialize git repo
+      </label>
+    </div>
+    <!-- Select-existing mode -->
+    <div id="npExistingFields" style="display:none">
+      <label>Folder</label>
+      <input type="text" id="npFolderPath" placeholder="Selected folder path" />
+      <div class="rnd-browse" id="npBrowse" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px;margin-top:6px;font-size:13px"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal('newProjectModal')">Cancel</button>
+      <button class="btn" onclick="createNewProject()">Create</button>
     </div>
   </div>
 </div>
@@ -2359,6 +2564,75 @@ function saveEditProject() {{
     apiCall('/api/edit_project', body);
 }}
 
+// ── R&D: New Project modal ──
+let _npMode = 'new_folder';
+
+function openNewProject() {{
+    _npMode = 'new_folder';
+    npSetMode('new_folder');
+    document.getElementById('npName').value = '';
+    document.getElementById('npParentPath').value = '';
+    document.getElementById('npFolderPath').value = '';
+    document.getElementById('npGitInit').checked = false;
+    document.getElementById('newProjectModal').classList.add('open');
+}}
+
+function npSetMode(mode) {{
+    _npMode = mode;
+    const isNew = mode === 'new_folder';
+    document.getElementById('npNewFolderFields').style.display = isNew ? 'block' : 'none';
+    document.getElementById('npExistingFields').style.display = isNew ? 'none' : 'block';
+    document.getElementById('npModeNewBtn').className = 'btn btn-sm' + (isNew ? '' : ' btn-outline');
+    document.getElementById('npModeExistingBtn').className = 'btn btn-sm' + (isNew ? ' btn-outline' : '');
+    if (!isNew) npBrowse(null);
+}}
+
+async function npBrowse(path) {{
+    const url = '/api/rnd/dir_browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+    let data;
+    try {{ data = await (await fetch(url)).json(); }}
+    catch(e) {{ showToast('Browse failed: ' + e.message); return; }}
+    const res = (data && data.result) || {{}};
+    const box = document.getElementById('npBrowse');
+    let html = '';
+    if (res.path) {{
+        document.getElementById('npFolderPath').value = res.path;
+        html += '<div style="color:var(--text-dim);margin-bottom:4px">' + escHtml(res.path) + '</div>';
+    }}
+    if (res.parent) {{
+        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(res.parent) + ')">&#8593; ..</div>';
+    }}
+    (res.roots || []).forEach(r => {{
+        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(r) + ')">&#128193; ' + escHtml(r) + '</div>';
+    }});
+    (res.dirs || []).forEach(d => {{
+        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(d.path) + ')">&#128193; ' + escHtml(d.name) + '</div>';
+    }});
+    box.innerHTML = html || '<div style="color:var(--text-dim)">(no subfolders)</div>';
+}}
+
+function escHtml(s) {{ const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }}
+function jsStr(s) {{ return JSON.stringify(s == null ? '' : s); }}
+
+async function createNewProject() {{
+    const name = document.getElementById('npName').value.trim();
+    if (!name) {{ showToast('Project name required'); return; }}
+    const priority = parseInt(document.getElementById('npPriority').value);
+    let body;
+    if (_npMode === 'new_folder') {{
+        const parent = document.getElementById('npParentPath').value.trim();
+        if (!parent) {{ showToast('Parent path required'); return; }}
+        body = {{mode: 'new_folder', name, priority, parent_path: parent,
+                 git_init: document.getElementById('npGitInit').checked}};
+    }} else {{
+        const folder = document.getElementById('npFolderPath').value.trim();
+        if (!folder) {{ showToast('Select a folder'); return; }}
+        body = {{mode: 'existing', name, priority, folder_path: folder}};
+    }}
+    closeModal('newProjectModal');
+    apiCall('/api/rnd/new_project', body);
+}}
+
 // 2026-05-12: stopServer() removed. The dashboard no longer kills its own
 // server; that responsibility now belongs to the NSSM "anchor" service
 // supervisor on gwl-server. To restart, run `nssm restart anchor`.
@@ -2523,6 +2797,41 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 path_arg = q.get("path", [None])[0]
                 self._send_json({"ok": True,
                                  "result": _dirb.browse(path_arg)})
+            elif self.path.startswith("/api/rnd/tail"):
+                # Read-only incremental log tail for the project-window console
+                # drawer. Returns {lines,next,status,pending_prompt}. This is a
+                # plain non-blocking ?since= fetch (the JS polls ~1.5s); it never
+                # holds the request, so it can't stall the dashboard.
+                q = parse_qs(urlparse(self.path).query)
+                job_id = (q.get("job_id", [""])[0] or "").strip()
+                try:
+                    since = int(q.get("since", ["0"])[0] or 0)
+                except (TypeError, ValueError):
+                    since = 0
+                if not job_id:
+                    self._send_json({"ok": False, "error": "missing job_id"}, 400)
+                else:
+                    out = _jr.tail(job_id, since)
+                    try:
+                        pending = _gate.load_pending_prompt(job_id)
+                    except Exception:
+                        pending = None
+                    self._send_json({
+                        "ok": True,
+                        "lines": out.get("lines", []),
+                        "next": out.get("next", since),
+                        "total": out.get("total", 0),
+                        "status": out.get("status"),
+                        "pending_prompt": pending,
+                    })
+            elif self.path.startswith("/api/rnd/jobs"):
+                # Read-only: recent job records for a project (lane status).
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip()
+                jobs = [r for r in _jr.list_records()
+                        if not pid or r.get("project_id") == pid]
+                jobs.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
+                self._send_json({"ok": True, "jobs": jobs})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -2722,6 +3031,53 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": True, "status": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        # ── R&D control surface — lane launch + gate answer (UI wiring) ──
+        elif self.path == "/api/rnd/launch_lane":
+            # Launch a trio lane (research|plan|build) for a project. Returns a
+            # clean JSON error (not a 500) for an unknown project / invalid lane
+            # / a concurrency refusal (same-lane-busy or folder-build-lock).
+            pid = body.get("project_id", "")
+            lane = body.get("lane", "")
+            if lane not in _lanes.LANES:
+                self._send_json({"ok": False, "error": f"invalid lane: {lane}",
+                                 "reason": "invalid-lane"}, 400)
+            else:
+                try:
+                    rec = _lanes.launch_lane(pid, lane)
+                    self._send_json({
+                        "ok": True,
+                        "job_id": rec.get("job_id"),
+                        "lane": lane,
+                        "status": rec.get("status"),
+                        "skill": rec.get("skill"),
+                        "gates": rec.get("gates"),
+                    })
+                except KeyError:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown project: {pid}",
+                                     "reason": "unknown-project"}, 404)
+                except _jr.LaneBusyError as busy:
+                    # Concurrency policy refused the launch — surface a clean
+                    # indicator (same-lane-busy / folder-build-lock), not a 500.
+                    self._send_json({
+                        "ok": False,
+                        "error": str(busy),
+                        "reason": busy.reason,
+                        "holder": busy.holder,
+                    }, 409)
+
+        elif self.path == "/api/rnd/answer_gate":
+            # Answer a pending in-session gate by writing a single stdin turn.
+            job_id = body.get("job_id", "")
+            choice = body.get("choice", "")
+            res = _gate.answer(job_id, choice)
+            self._send_json({
+                "ok": bool(res.written),
+                "written": bool(res.written),
+                "reason": res.reason,
+                "job_id": res.job_id,
+            })
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
