@@ -11,6 +11,7 @@ Usage:
     python3 anchor.py restore "task text" --from saved|cancelled  # Restore archived task
     python3 anchor.py add "task" --domain academic --priority 1 --energy high --due 2026-04-10 --notes "some note"
     python3 anchor.py capture "idea"     # Add to inbox
+    python3 anchor.py link "task text" --project <id>   # Link a task to an R&D project
     python3 anchor.py status             # Print current status summary
 """
 
@@ -535,6 +536,70 @@ def restore_task(task_text, from_archive="saved"):
     return False
 
 
+def link_task(task_text, project_id):
+    """Link a task to an R&D project — set/maintain its ``Project: <id>`` field.
+
+    Wave 9 ACTIVATES the ``Project:`` field that Wave 3 parsed as a no-op. This
+    edits ONLY that field, surgically, on the first matching active task line:
+
+    - If the line has no ``Project:`` field, append ``" — Project: <id>"`` to it.
+    - If it already has one, replace just the ``<id>`` in place.
+    - Passing an empty ``project_id`` REMOVES the field (unlink).
+
+    Every other character of the user's markdown line is preserved verbatim, so
+    a task without the field that is not being touched stays byte-stable, and a
+    task with the field round-trips cleanly through parse/serialize + the
+    healthcheck parse path. Returns True if a task was updated.
+    """
+    search = task_text.lower().strip()
+    new_id = (project_id or "").strip()
+    found = False
+
+    for md_file in _all_md_files():
+        if not md_file.exists():
+            continue
+        text = md_file.read_text(encoding="utf-8")
+        new_lines = []
+        changed = False
+        for line in text.splitlines():
+            if (not found and re.match(r'\s*-\s*\[([ xX])\]', line)
+                    and search in line.lower()):
+                existing = re.search(r'(\s*—\s*Project:\s*)([^\s—]+)', line, re.I)
+                if existing:
+                    if new_id:
+                        # Replace just the id; keep surrounding text untouched.
+                        new_line = (line[:existing.start(2)] + new_id
+                                    + line[existing.end(2):])
+                    else:
+                        # Unlink: drop the whole " — Project: <id>" segment.
+                        new_line = line[:existing.start(1)] + line[existing.end(2):]
+                else:
+                    if new_id:
+                        new_line = line.rstrip() + f" — Project: {new_id}"
+                    else:
+                        new_line = line  # nothing to remove
+                if new_line != line:
+                    changed = True
+                new_lines.append(new_line)
+                found = True
+            else:
+                new_lines.append(line)
+        if changed:
+            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+    if found:
+        if new_id:
+            log_change(f"Linked task '{task_text}' to project {new_id}")
+            print(f"✓ Linked: {task_text} → project {new_id}")
+        else:
+            log_change(f"Unlinked task '{task_text}' from its project")
+            print(f"✓ Unlinked: {task_text}")
+        rebuild_dashboard()
+    else:
+        print(f"Task not found: {task_text}")
+    return found
+
+
 def _all_md_files():
     """Return all markdown files that might contain tasks."""
     files = []
@@ -619,6 +684,23 @@ def main():
             else:
                 text_parts.append(arg); i += 1
         add_task(" ".join(text_parts), domain, priority, energy, due, notes)
+
+    elif cmd == "link":
+        # anchor.py link "task text" --project <id>   (or --unlink to remove)
+        if len(sys.argv) < 3:
+            print("Usage: anchor.py link \"task text\" --project <id> | --unlink")
+            return
+        text_parts = []
+        project_id = ""
+        i = 2
+        while i < len(sys.argv):
+            if sys.argv[i] == "--project" and i + 1 < len(sys.argv):
+                project_id = sys.argv[i + 1]; i += 2
+            elif sys.argv[i] == "--unlink":
+                project_id = ""; i += 1
+            else:
+                text_parts.append(sys.argv[i]); i += 1
+        link_task(" ".join(text_parts), project_id)
 
     elif cmd == "capture":
         if len(sys.argv) < 3:

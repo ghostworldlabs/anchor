@@ -32,6 +32,12 @@ ways). argv takes precedence over env.
                                          line carrying cost/usage/duration (for
                                          later waves; Wave 4 ignores it but the
                                          durable-line capture still works).
+  --result-error   / FAKE_CLAUDE_RESULT_ERROR=1
+                                         like --result but the envelope has
+                                         ``is_error: true`` (subtype "error"),
+                                         so a script/skill deliverable's
+                                         result-no-error contract FAILS even on
+                                         exit 0 (Wave 9). Implies --result.
 
 Stdlib only. Self-contained. Lines are flushed immediately so a long-polling
 reader can observe them as they arrive.
@@ -76,6 +82,7 @@ def parse_args(argv):
     p.add_argument("--child-pid-file", default=None)
     p.add_argument("--exit-code", type=int, default=None)
     p.add_argument("--result", action="store_true")
+    p.add_argument("--result-error", action="store_true")
     # Tolerate any extra args the runner appends (e.g. a prompt seed) without
     # failing — a real runner would consume stdin / its own flags.
     args, _unknown = p.parse_known_args(argv)
@@ -91,7 +98,8 @@ def main(argv=None):
     spawn_child = a.spawn_child or _env_flag("FAKE_CLAUDE_SPAWN_CHILD")
     child_pid_file = a.child_pid_file or os.environ.get("FAKE_CLAUDE_CHILD_PID_FILE")
     exit_code = a.exit_code if a.exit_code is not None else _env_int("FAKE_CLAUDE_EXIT_CODE", 0)
-    emit_result = a.result or _env_flag("FAKE_CLAUDE_RESULT")
+    emit_result_error = a.result_error or _env_flag("FAKE_CLAUDE_RESULT_ERROR")
+    emit_result = a.result or emit_result_error or _env_flag("FAKE_CLAUDE_RESULT")
 
     # Emit N deterministic content lines.
     for i in range(lines):
@@ -124,8 +132,8 @@ def main(argv=None):
     if emit_result:
         envelope = {
             "type": "result",
-            "subtype": "success",
-            "is_error": False,
+            "subtype": "error" if emit_result_error else "success",
+            "is_error": bool(emit_result_error),
             "total_cost_usd": 0.0123,
             "duration_ms": 4567,
             "usage": {"input_tokens": 100, "output_tokens": 42},

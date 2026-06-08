@@ -295,6 +295,7 @@ import rnd_registry as _rnd
 import dir_browser as _dirb
 import effort_history as _eh
 import report_viewer as _rv
+import deliverables as _deliv
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -486,6 +487,9 @@ def render_project_window_html(project_id: str) -> str:
     pr = entry.get("priority", 2)
     status = render_status_line_html(project_id)
     rollup = render_cost_rollup_html(project_id, entry.get("folder_path", ""))
+    tasks_html = render_project_tasks_html(project_id)
+    deliverables_html = render_deliverables_html(
+        project_id, entry.get("folder_path", ""))
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
@@ -504,6 +508,8 @@ def render_project_window_html(project_id: str) -> str:
         "<h2>Lanes</h2>"
         f"{status}"
         f"{rollup}"
+        f"{tasks_html}"
+        f"{deliverables_html}"
         "</body></html>"
     )
 
@@ -548,6 +554,75 @@ def render_cost_rollup_html(project_id: str, folder_path: str) -> str:
         f"{html_lib.escape(_fmt_cost(total))}</p>"
         f"{breakdown}"
     )
+
+
+# ── Task ↔ project link (Wave 9 — activates the parsed Project: field) ──────
+
+def project_tasks(project_id: str) -> list:
+    """Return every active task whose ``Project: <id>`` field matches.
+
+    ``gather_all()`` already parses each task's ``project`` field (Wave 3) and
+    deduplicates; Wave 9 simply FILTERS on it. This is the data behind the
+    project-tasks view (AC2). Returns the matching task dicts (order preserved).
+    """
+    pid = (project_id or "").strip()
+    if not pid:
+        return []
+    _projects, tasks, _inbox = gather_all()
+    return [t for t in tasks if (t.get("project") or "").strip() == pid]
+
+
+def render_project_tasks_html(project_id: str) -> str:
+    """Render the project-tasks list shown inside the project window (AC2)."""
+    tasks = project_tasks(project_id)
+    if not tasks:
+        return ("<h2>Tasks</h2><p style='color:#8a90a2'>No tasks linked to this "
+                "project yet. Link one with <code>anchor.py link "
+                "\"task\" --project &lt;id&gt;</code>.</p>")
+    rows = []
+    for t in tasks:
+        mark = "✓" if t.get("done") else "○"
+        txt = html_lib.escape(t.get("text", ""))
+        dom = html_lib.escape(t.get("domain", ""))
+        pr = t.get("priority", 2)
+        rows.append(
+            f"<li><span style='color:#6c9cfc'>{mark}</span> {txt} "
+            f"<span style='color:#8a90a2;font-size:12px'>"
+            f"(P{pr} · {dom})</span></li>"
+        )
+    return ("<h2>Tasks</h2><ul style='list-style:none;padding:0'>"
+            + "".join(rows) + "</ul>")
+
+
+def render_deliverables_html(project_id: str, folder_path: str) -> str:
+    """Render the project's deliverable status records (Wave 9 AC1).
+
+    Read-only: shows each deliverable's type + last run status (the dashboard
+    surfacing of the status records ``deliverables.run_deliverable`` persists).
+    """
+    try:
+        records = _deliv.list_status(folder_path, project_id)
+    except Exception:
+        records = []
+    if not records:
+        return ("<h2>Deliverables</h2><p style='color:#8a90a2'>"
+                "No deliverable runs recorded yet.</p>")
+    colors = {_deliv.STATUS_SUCCESS: "#4caf78",
+              _deliv.STATUS_FAILED: "#e06c75",
+              _deliv.STATUS_TIMED_OUT: "#d6a35c"}
+    rows = []
+    for r in records:
+        status = r.get("status", "")
+        color = colors.get(status, "#8a90a2")
+        name = html_lib.escape(r.get("name", "") or r.get("deliverable_id", ""))
+        dtype = html_lib.escape(r.get("type", ""))
+        rows.append(
+            f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
+            f"[{dtype}]</span> — <span style='color:{color}'>"
+            f"{html_lib.escape(status)}</span></li>"
+        )
+    return ("<h2>Deliverables</h2><ul style='list-style:none;padding:0'>"
+            + "".join(rows) + "</ul>")
 
 
 # ── Change operations ──────────────────────────────────────────────────
@@ -671,6 +746,50 @@ def capture_inbox(text, domain=""):
     content = content.rstrip() + "\n" + line + "\n"
     INBOX_MD.write_text(content, encoding="utf-8")
     log_change(f"Captured: {text}")
+
+
+@_with_write_lock
+def link_task(task_text, project_id):
+    """Link a task to an R&D project — set/maintain its ``Project: <id>`` field.
+
+    Wave 9 activation: edits ONLY the ``Project:`` field on the first matching
+    active task line, preserving every other character verbatim (byte-stable for
+    untouched tasks; clean round-trip for linked ones). An empty ``project_id``
+    unlinks. Mirrors ``anchor.link_task``. Returns True if a task was updated.
+    """
+    search = task_text.lower().strip()
+    new_id = (project_id or "").strip()
+    found = False
+    for md_file in _all_md_files():
+        if not md_file or not md_file.exists():
+            continue
+        text = md_file.read_text(encoding="utf-8")
+        new_lines = []
+        changed = False
+        for line in text.splitlines():
+            if (not found and re.match(r'\s*-\s*\[([ xX])\]', line)
+                    and search in line.lower()):
+                existing = re.search(r'(\s*—\s*Project:\s*)([^\s—]+)', line, re.I)
+                if existing:
+                    if new_id:
+                        new_line = (line[:existing.start(2)] + new_id
+                                    + line[existing.end(2):])
+                    else:
+                        new_line = line[:existing.start(1)] + line[existing.end(2):]
+                else:
+                    new_line = line.rstrip() + f" — Project: {new_id}" if new_id else line
+                if new_line != line:
+                    changed = True
+                new_lines.append(new_line)
+                found = True
+            else:
+                new_lines.append(line)
+        if changed:
+            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    if found:
+        log_change(f"Linked task '{task_text}' to project {new_id}" if new_id
+                   else f"Unlinked task '{task_text}'")
+    return found
 
 
 @_with_write_lock
@@ -2566,6 +2685,43 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "entry": _rnd.mark_future(pid)})
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        # ── R&D control surface (Wave 9) ──────────────────────────────
+        elif self.path == "/api/rnd/link_task":
+            # Link/unlink a task ↔ R&D project (activates the Project: field).
+            text = body.get("text", "")
+            pid = body.get("project_id", "")
+            ok = link_task(text, pid)
+            self._send_json({
+                "ok": ok,
+                "message": (f"Linked '{text}' → {pid}" if pid else
+                            f"Unlinked '{text}'") if ok
+                           else f"Task not found: {text}",
+            })
+
+        elif self.path == "/api/rnd/run_deliverable":
+            # Run a deliverable per its type contract; persist + report status.
+            pid = body.get("project_id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                try:
+                    rec = _deliv.run_deliverable(
+                        body.get("type", ""),
+                        target=body.get("target"),
+                        argv=body.get("argv"),
+                        cwd=body.get("cwd") or folder or None,
+                        timeout=float(body.get("timeout",
+                                               _deliv.DEFAULT_TIMEOUT)),
+                        folder_path=folder,
+                        project_id=pid,
+                        name=body.get("name"),
+                    )
+                    self._send_json({"ok": True, "status": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
