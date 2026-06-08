@@ -95,6 +95,46 @@ _LIVE_LOCK = threading.RLock()
 _JOB_DIRS = {}
 _JOB_DIRS_LOCK = threading.RLock()
 
+# ── Concurrency policy registries (Wave 6) ──────────────────────────────────
+# All concurrency/lock state lives under ``paths.WRITE_LOCK`` (acquired by the
+# helpers below), per the frozen design. These are *in-process* tables — a
+# server owns its subprocess jobs, so a single ThreadingHTTPServer's policy is
+# enforced here; durable records on disk remain the cross-restart source of
+# truth.
+#
+# _ACTIVE_LANE maps (project_id, lane) -> job_id for the currently-running job
+# in that project lane. It enforces WITHIN-a-project same-lane serialization
+# (cross-lane stays concurrent because the key includes the lane).
+_ACTIVE_LANE = {}
+# _FOLDER_BUILD maps folder_path -> job_id for the build currently holding that
+# folder's build lock. It enforces ACROSS-projects-sharing-a-folder build
+# serialization: at most one build per folder at a time. research/plan are NOT
+# folder-locked, so they never appear here and never block.
+_FOLDER_BUILD = {}
+
+#: The lane that mutates the shared working tree and is therefore serialized at
+#: the FOLDER level (the trio forbids parallel coders in one tree).
+BUILD_LANE = "build"
+
+#: Refusal reasons surfaced when a launch is blocked by the concurrency policy.
+REFUSED_SAME_LANE = "same-lane-busy"
+REFUSED_FOLDER_BUILD = "folder-build-lock"
+
+
+class LaneBusyError(RuntimeError):
+    """Raised when a launch is refused by the concurrency policy.
+
+    Carries a machine-readable ``reason`` (one of :data:`REFUSED_SAME_LANE` /
+    :data:`REFUSED_FOLDER_BUILD`) and ``holder`` (the job_id already holding the
+    contended slot) so the caller / UI can render the right indicator (e.g. the
+    folder-build-lock badge).
+    """
+
+    def __init__(self, reason, holder=None, message=None):
+        self.reason = reason
+        self.holder = holder
+        super().__init__(message or f"{reason} (held by {holder})")
+
 
 class _LiveJob:
     """Runtime handle for a job owned by *this* server process."""
@@ -541,6 +581,133 @@ def _tree_kill(pid) -> None:
             pass
 
 
+# ── Concurrency policy: same-lane serialize + folder-build lock (Wave 6) ─────
+
+def _holder_is_active(job_id: str) -> bool:
+    """True if ``job_id`` is still a live (non-terminal) job.
+
+    Used to garbage-collect stale slots: a holder whose record is terminal (or
+    gone) no longer occupies its lane/folder slot, so a fresh launch may proceed.
+    Consults the durable record (the cross-restart source of truth); reconciles
+    a dead 'running' record to interrupted via :func:`liveness_check`.
+    """
+    if not job_id:
+        return False
+    rec = load_record(job_id)
+    if rec is None:
+        return False
+    if rec.get("status") in TERMINAL_STATUSES:
+        return False
+    # Record still says running — verify the process is genuinely alive,
+    # reconciling a dead-but-"running" record to interrupted as a side effect.
+    rec = liveness_check(job_id) or rec
+    return rec.get("status") not in TERMINAL_STATUSES
+
+
+def _gc_lane_slot(project_id: str, lane: str) -> None:
+    """Drop the (project_id, lane) active slot if its holder is no longer live."""
+    key = (project_id, lane)
+    holder = _ACTIVE_LANE.get(key)
+    if holder is not None and not _holder_is_active(holder):
+        _ACTIVE_LANE.pop(key, None)
+
+
+def _gc_folder_build(folder_path: str) -> None:
+    """Drop the folder build lock if its holder is no longer live."""
+    holder = _FOLDER_BUILD.get(folder_path)
+    if holder is not None and not _holder_is_active(holder):
+        _FOLDER_BUILD.pop(folder_path, None)
+
+
+def lane_holder(project_id: str, lane: str):
+    """Return the job_id currently holding (project_id, lane), or ``None``.
+
+    Self-healing: a stale slot whose holder has gone terminal is cleared first.
+    """
+    with _paths.WRITE_LOCK:
+        _gc_lane_slot(project_id, lane)
+        return _ACTIVE_LANE.get((project_id, lane))
+
+
+def folder_build_holder(folder_path: str):
+    """Return the job_id holding ``folder_path``'s build lock, or ``None``.
+
+    This is what the UI's folder-build-lock badge keys off of. Self-healing:
+    a finished build's lock is released here.
+    """
+    folder_path = str(folder_path)
+    with _paths.WRITE_LOCK:
+        _gc_folder_build(folder_path)
+        return _FOLDER_BUILD.get(folder_path)
+
+
+def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
+                   extra_args=None, env=None, job_id: str = None) -> dict:
+    """Launch a job under the Wave-6 concurrency policy.
+
+    Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
+    - WITHIN a project: same-lane jobs are **serialized** (a second same-lane
+      launch while one is live is refused); cross-lane jobs run **concurrently**
+      (the key includes the lane, so different lanes never contend).
+    - ACROSS projects sharing a folder: **build** jobs are serialized at the
+      FOLDER level (at most one build per ``folder_path``); a second build in
+      that folder — even for a different project — is refused with the
+      ``folder-build-lock`` indicator. research/plan are NOT folder-locked.
+
+    The reservation (check-and-set of both the lane slot and, for builds, the
+    folder lock) plus the actual :func:`launch` all happen INSIDE
+    ``paths.WRITE_LOCK``, so the policy is correct under concurrency — two
+    builds for one folder can never both win the lock.
+
+    Raises :class:`LaneBusyError` (with ``reason`` + ``holder``) when refused.
+    On success returns the job record (as :func:`launch`).
+    """
+    folder_path = str(folder_path)
+    with _paths.WRITE_LOCK:
+        # 1) Same-lane within-project serialization.
+        _gc_lane_slot(project_id, lane)
+        same = _ACTIVE_LANE.get((project_id, lane))
+        if same is not None:
+            raise LaneBusyError(REFUSED_SAME_LANE, holder=same)
+
+        # 2) Folder-level build lock (build lane only).
+        if lane == BUILD_LANE:
+            _gc_folder_build(folder_path)
+            held = _FOLDER_BUILD.get(folder_path)
+            if held is not None:
+                raise LaneBusyError(REFUSED_FOLDER_BUILD, holder=held)
+
+        # Both gates clear → launch under the lock, then record the reservation
+        # against the real job_id so subsequent contenders see it.
+        rec = launch(lane, cwd=cwd, extra_args=extra_args, env=env,
+                     job_id=job_id)
+        jid = rec["job_id"]
+        _ACTIVE_LANE[(project_id, lane)] = jid
+        if lane == BUILD_LANE:
+            _FOLDER_BUILD[folder_path] = jid
+        # Stamp the policy context onto the durable record for introspection
+        # (and so the folder-build-lock badge can be reconstructed from disk).
+        _update_record(jid, project_id=project_id, folder_path=folder_path)
+        return rec
+
+
+def release_slots(job_id: str) -> None:
+    """Release any lane/folder slots a (now-finished) job was holding.
+
+    Called when a job reaches a terminal status to promptly free its lane and,
+    if it was a build, its folder lock. Safe to call repeatedly; the lazy GC in
+    the holder accessors also reclaims slots, so this is an optimization for
+    responsiveness, not a correctness requirement.
+    """
+    with _paths.WRITE_LOCK:
+        for key, holder in list(_ACTIVE_LANE.items()):
+            if holder == job_id:
+                _ACTIVE_LANE.pop(key, None)
+        for folder, holder in list(_FOLDER_BUILD.items()):
+            if holder == job_id:
+                _FOLDER_BUILD.pop(folder, None)
+
+
 # ── Test/maintenance helpers ─────────────────────────────────────────────────
 
 def wait(job_id: str, timeout: float = 30.0) -> dict:
@@ -553,6 +720,13 @@ def wait(job_id: str, timeout: float = 30.0) -> dict:
 
 
 def _reset_live_table_for_tests() -> None:
-    """Drop the in-memory live table (used between tests). Does not kill procs."""
+    """Drop the in-memory live + policy tables (used between tests).
+
+    Does not kill procs. Clears the live job table and the Wave-6 concurrency
+    registries (lane slots + folder build locks) so each test starts clean.
+    """
     with _LIVE_LOCK:
         _LIVE.clear()
+    with _paths.WRITE_LOCK:
+        _ACTIVE_LANE.clear()
+        _FOLDER_BUILD.clear()
