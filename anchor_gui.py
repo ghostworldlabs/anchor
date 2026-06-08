@@ -293,6 +293,21 @@ def _all_md_files():
 
 import rnd_registry as _rnd
 import dir_browser as _dirb
+import effort_history as _eh
+import report_viewer as _rv
+
+
+def _unsafe_path_seg(seg: str) -> bool:
+    """True if a URL segment is unsafe to use as a filesystem path component.
+
+    Rejects path separators (``/`` ``\\``) and parent-dir traversal (``..``)
+    before the value is used to build a filesystem path. Mirrors the
+    path-traversal hardening on the vendored-KaTeX static route.
+    """
+    if seg is None:
+        return False
+    return "/" in seg or "\\" in seg or ".." in seg
+
 
 # Single-instance project windows (Master Plan C2): opening a project that is
 # already open returns the EXISTING instance id rather than spawning a duplicate.
@@ -470,6 +485,7 @@ def render_project_window_html(project_id: str) -> str:
     state = html_lib.escape(entry.get("state", "active"))
     pr = entry.get("priority", 2)
     status = render_status_line_html(project_id)
+    rollup = render_cost_rollup_html(project_id, entry.get("folder_path", ""))
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
@@ -487,9 +503,50 @@ def render_project_window_html(project_id: str) -> str:
         f"{html_lib.escape(inst['instance_id'])}</p>"
         "<h2>Lanes</h2>"
         f"{status}"
-        "<p style='color:#8a90a2'>Research / Planning / Build lanes arrive in "
-        "later waves (Kanban: Wave 7).</p>"
+        f"{rollup}"
         "</body></html>"
+    )
+
+
+def _fmt_cost(rollup: dict) -> str:
+    """Render a one-line cost/time/tokens summary from a rollup dict."""
+    cost = rollup.get("total_cost_usd", 0.0) or 0.0
+    dur_ms = rollup.get("duration_ms", 0) or 0
+    toks = rollup.get("total_tokens", 0) or 0
+    secs = dur_ms / 1000.0
+    return (f"${cost:.4f} · {secs:.1f}s · {toks:,} tok "
+            f"({rollup.get('effort_count', 0)} effort"
+            f"{'s' if rollup.get('effort_count', 0) != 1 else ''})")
+
+
+def render_cost_rollup_html(project_id: str, folder_path: str) -> str:
+    """Render the per-project cost/time/tokens rollup (tile + dashboard, Wave 7).
+
+    Shows the project total plus a per-lane breakdown. Best-effort: a project
+    with no efforts shows zeros and never crashes.
+    """
+    try:
+        roll = _eh.project_rollup(project_id, folder_path)
+    except Exception:
+        return ""
+    total = roll.get("total", {})
+    lanes = roll.get("lanes", {})
+    rows = []
+    for lane in _eh.ROLLUP_LANES:
+        lr = lanes.get(lane, {})
+        if not lr.get("effort_count"):
+            continue
+        rows.append(
+            f"<div class='rnd-lane'>{html_lib.escape(lane)}: "
+            f"{html_lib.escape(_fmt_cost(lr))}</div>"
+        )
+    breakdown = ("<div class='rnd-status-line'>" + "".join(rows) + "</div>"
+                 if rows else "")
+    return (
+        "<h2>Cost rollup</h2>"
+        f"<p style='font-size:15px'><strong>Total:</strong> "
+        f"{html_lib.escape(_fmt_cost(total))}</p>"
+        f"{breakdown}"
     )
 
 
@@ -2241,6 +2298,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, data, content_type, cache="no-cache"):
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", cache)
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_GET(self):
         try:
             if self.path == "/" or self.path == "/dashboard":
@@ -2289,6 +2354,42 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "done": len([t for t in tasks if t["done"]]),
                     "inbox": len(inbox),
                 })
+            elif self.path.startswith(_rv.KATEX_URL_PREFIX):
+                # Read-only vendored KaTeX static assets for the Reader (Wave 7).
+                rel = urlparse(self.path).path[len(_rv.KATEX_URL_PREFIX):]
+                asset = _rv.katex_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith("/report/"):
+                # Read-only report viewer (Wave 7): PDF-by-default else Reader.
+                # /report/<project_id>/<lane>[/<job_id>]
+                parts = [p for p in urlparse(self.path).path[len("/report/"):]
+                         .split("/") if p]
+                if len(parts) < 2:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    pid, lane = parts[0], parts[1]
+                    job_id = parts[2] if len(parts) > 2 else None
+                    # Reject path-separator / traversal in the path-bound
+                    # segments before they hit the filesystem (consistent with
+                    # the hardened KaTeX static route).
+                    if any(_unsafe_path_seg(seg)
+                           for seg in (lane, job_id) if seg is not None):
+                        self.send_response(400)
+                        self.end_headers()
+                        return
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    out = _rv.render_effort(folder, pid, lane, job_id)
+                    body = out["body"]
+                    if isinstance(body, str):
+                        body = body.encode("utf-8")
+                    self._send_bytes(body, out["content_type"])
             elif self.path.startswith("/project/"):
                 # Per-project window (Wave 3 basic view + 4-state status line).
                 pid = urlparse(self.path).path[len("/project/"):].strip("/")

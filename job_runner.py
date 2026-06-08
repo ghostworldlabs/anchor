@@ -318,8 +318,15 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
 
 
 def _reader_loop(live: _LiveJob) -> None:
-    """Drain the subprocess stdout into the ring buffer + durable log."""
+    """Drain the subprocess stdout into the ring buffer + durable log.
+
+    While draining, sniff each line for a stream-json ``result`` envelope and
+    capture its cost/usage/duration onto the job record (Wave 7) so the effort
+    history can roll cost up per-lane / per-project. The last ``result`` line
+    wins (a session emits one terminal result envelope).
+    """
     proc = live.proc
+    result_envelope = None
     try:
         with open(live.log_path, "a", encoding="utf-8") as logf:
             for line in proc.stdout:
@@ -328,6 +335,9 @@ def _reader_loop(live: _LiveJob) -> None:
                     live.ring.append(line)
                 logf.write(line + "\n")
                 logf.flush()
+                env = _parse_result_envelope(line)
+                if env is not None:
+                    result_envelope = env
     except (ValueError, OSError):
         # Pipe closed underneath us (e.g. process tree-killed mid-read). Not
         # fatal — finalization below records the terminal status.
@@ -340,20 +350,85 @@ def _reader_loop(live: _LiveJob) -> None:
         code = proc.wait()
         # Finalize the persisted record BEFORE signaling done, so a waiter that
         # unblocks on `done` always observes the terminal status.
-        _finalize(live.job_id, code)
+        _finalize(live.job_id, code, result_envelope)
         live.done.set()
 
 
-def _finalize(job_id: str, exit_code) -> None:
+def _parse_result_envelope(line: str):
+    """Return the cost fields from a stream-json ``result`` line, or ``None``.
+
+    A real ``claude -p`` stream-json session ends with a ``{"type":"result", ...}``
+    envelope carrying ``total_cost_usd``, ``usage``, ``duration_ms``, and
+    ``session_id`` (spike-proven). The mock runner emits the same shape. Only
+    well-formed JSON objects of ``type == "result"`` are recognized; everything
+    else (plain content lines) is ignored cheaply.
+    """
+    s = line.strip()
+    if not s.startswith("{") or '"result"' not in s:
+        return None
+    try:
+        obj = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(obj, dict) or obj.get("type") != "result":
+        return None
+    return obj
+
+
+def _cost_from_envelope(env: dict) -> dict:
+    """Normalize a result envelope into the cost fields stored on a record.
+
+    Returns ``{total_cost_usd, duration_ms, input_tokens, output_tokens,
+    total_tokens, session_id}`` with safe defaults. Token counts come from the
+    envelope's ``usage`` block.
+    """
+    usage = env.get("usage") or {}
+    inp = usage.get("input_tokens") or 0
+    out = usage.get("output_tokens") or 0
+    try:
+        inp = int(inp)
+    except (TypeError, ValueError):
+        inp = 0
+    try:
+        out = int(out)
+    except (TypeError, ValueError):
+        out = 0
+    try:
+        cost = float(env.get("total_cost_usd") or 0.0)
+    except (TypeError, ValueError):
+        cost = 0.0
+    try:
+        dur = int(env.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        dur = 0
+    return {
+        "total_cost_usd": cost,
+        "duration_ms": dur,
+        "input_tokens": inp,
+        "output_tokens": out,
+        "total_tokens": inp + out,
+        "session_id": env.get("session_id"),
+    }
+
+
+def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     """Record the terminal status once the process exits.
 
     Cancellation may have already set the status to ``cancelled``; do not
-    clobber a terminal status that was set deliberately.
+    clobber a terminal status that was set deliberately. If a ``result``
+    envelope was captured from the stream (Wave 7), stamp its cost/usage/
+    duration onto the record regardless of the terminal status (a cancelled
+    job may still have emitted a partial result envelope before the kill).
     """
     with _paths.WRITE_LOCK:
         rec = load_record(job_id)
         if rec is None:
             return
+        if result_envelope is not None:
+            cost = _cost_from_envelope(result_envelope)
+            rec["cost"] = cost
+            if cost.get("session_id") and not rec.get("session_id"):
+                rec["session_id"] = cost["session_id"]
         if rec.get("status") in (STATUS_CANCELLED, STATUS_INTERRUPTED):
             # Terminal status already chosen (cancel / reconciliation). Keep it,
             # just stamp the exit code + finish time.
