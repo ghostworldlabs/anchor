@@ -2158,6 +2158,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         {"".join(top_task_row(t) for t in top_tasks)}
       </div>
 
+      <!-- R&D Projects (home dashboard section) -->
+      <div class="section-header" style="display:flex;align-items:center;gap:8px">
+        <h3>R&amp;D Projects</h3>
+        <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
+      </div>
+      {rnd_projects_html}
+
       <div class="section-header"><h3>Priority 1 Projects</h3></div>
       <div class="card-grid">{"".join(project_card(p) for p in p1_projects)}</div>
 

@@ -130,6 +130,26 @@ def test_dashboard_contains_rnd_tab_view_and_new_project(gui_env):
     assert "{{" not in html and "}}" not in html
 
 
+def test_home_view_has_rnd_projects_section(gui_env):
+    """The HOME dashboard view surfaces an 'R&D Projects' section with the
+    folder-grouped tiles container and a '+ New Project' button wired to the
+    same openNewProject() modal — so it can't silently regress."""
+    gui = gui_env
+    html = gui.generate_html(*gui.gather_all())
+    # The home (default) view container.
+    head, _, _tail = html.partition('id="view-rnd"')
+    assert 'id="view-dashboard"' in head
+    # The home view portion (everything before the R&D tab) carries the section.
+    assert "R&amp;D Projects" in head
+    # The folder-grouped tiles container is rendered in the home view.
+    assert "rnd-projects" in head
+    # A "+ New Project" button wired to the shared modal lives in the home view.
+    assert "openNewProject(" in head
+    assert "New Project" in head
+    # f-string intact: no leaked doubled braces anywhere in the served HTML.
+    assert "{{" not in html and "}}" not in html
+
+
 def test_dashboard_renders_projects_view_now_wired(gui_env):
     """The formerly-orphaned render_projects_view_html is now called in-page."""
     gui = gui_env

@@ -89,19 +89,36 @@ _SEED_RESEARCH = (
     "Run the researchPrime skill for project {name!r} (folder {folder}). "
     "Write all research artifacts under the project-scoped output directory "
     "{output_dir}. This lane runs to completion with no interactive gate; do "
-    "not mutate the working tree."
+    "not mutate the working tree. "
+    "If the folder {folder} already contains a project or codebase, treat this as "
+    "a brownfield investigation: first inventory what already exists (source "
+    "layout, dependencies, build/test setup, docs) and what has already been done "
+    "(prior research, plans, partial builds, TODOs), then produce a research "
+    "report that orients a brand-new owner — what the project is, its current "
+    "state, what's done vs. outstanding, and the key risks/unknowns to resolve "
+    "before further work."
 )
 _SEED_PLAN = (
     "Run the crucible planning skill for project {name!r} (folder {folder}). "
     "Write the plan documents under the project-scoped output directory "
     "{output_dir}. When you reach an AskUserQuestion gate, surface it; an answer "
-    "will arrive in-session. Do not mutate the working tree."
+    "will arrive in-session. Do not mutate the working tree. "
+    "Treat this as a brownfield existing project: before planning, assess the "
+    "current state of the folder {folder} and what has already been done across "
+    "any prior research, planning, and build efforts (including artifacts already "
+    "in {output_dir} and sibling lane directories). Then forge a vetted, "
+    "gold-standard, Foreman-ready plan that takes the project from its current "
+    "state to completion, so the user can hand it off and take over."
 )
 _SEED_BUILD = (
     "Run the foreman build skill for project {name!r} (folder {folder}). "
     "Record build status/checkpoints under the project-scoped output directory "
     "{output_dir}. You MAY mutate the shared working tree at {folder}; only one "
-    "build runs per folder at a time. Answer any AskUserQuestion gate in-session."
+    "build runs per folder at a time. Answer any AskUserQuestion gate in-session. "
+    "This is a brownfield build: continue from the existing plan and current "
+    "project state rather than starting from scratch — read the latest plan in "
+    "{output_dir} (and the project's research/planning lane outputs) and resume "
+    "the remaining work toward completion."
 )
 
 #: The frozen lane registry. Keyed by the trio lane name.

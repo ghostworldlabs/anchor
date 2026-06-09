@@ -86,6 +86,47 @@ def test_ac1_lane_uses_skill_seed_and_project_scoped_output(env, tmp_path):
     job_runner.wait(jid, timeout=30)
 
 
+def test_brownfield_prompt_seeds_render_with_placeholders(env):
+    """Enriched brownfield seeds still substitute name/folder/output_dir and now
+    carry take-over-ready / brownfield language — for all three trio lanes."""
+    lanes = env
+    project = {"name": "Acme", "folder_path": "C:/dev/Acme"}
+    out = "C:/dev/Acme/.anchor/p/plan"
+
+    # All three lanes render without KeyError and substitute every placeholder.
+    for lane in ("research", "plan", "build"):
+        seed = lanes.build_prompt_seed(lane, project, out)
+        assert "Acme" in seed                 # {name!r}
+        assert "C:/dev/Acme" in seed          # {folder}
+        assert out in seed                    # {output_dir}
+        assert "{name" not in seed and "{folder" not in seed
+        assert "{output_dir" not in seed
+
+    research = lanes.build_prompt_seed("research", project, out)
+    plan = lanes.build_prompt_seed("plan", project, out)
+    build = lanes.build_prompt_seed("build", project, out)
+
+    # Research: keeps no-gate/no-mutate posture + adds brownfield inventory/orient.
+    assert "researchPrime" in research
+    assert "no interactive gate" in research
+    assert "do not mutate" in research.lower() or "not mutate" in research.lower()
+    assert "brownfield" in research.lower()
+    assert "inventory" in research.lower()
+
+    # Plan: keeps crucible + no-mutate; adds brownfield assess + Foreman-ready.
+    assert "crucible" in plan
+    assert "not mutate" in plan.lower()
+    assert "brownfield" in plan.lower()
+    assert "foreman-ready" in plan.lower()
+    assert "assess" in plan.lower()
+
+    # Build: keeps foreman + mutate posture; adds continue-from-existing note.
+    assert "foreman" in build
+    assert "mutate the shared working tree" in build.lower()
+    assert "brownfield" in build.lower()
+    assert "scratch" in build.lower()
+
+
 def test_ac1_each_lane_maps_to_its_skill_and_subdir(env, tmp_path):
     lanes = env
     import job_runner
