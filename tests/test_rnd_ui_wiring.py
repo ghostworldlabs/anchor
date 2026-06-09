@@ -396,40 +396,47 @@ def test_dir_browse_missing_path_clean_error(server, tmp_path):
 
 
 def test_new_project_picker_wiring_in_html(gui_env):
-    """The New Project modal carries the clear existing-folder picker: a
-    "Select this folder" button, the per-row "Select" affordance, the location
-    line, the hidden npFolderPath input, and the navigation JS — with the
+    """The New Project modal carries the Explorer-style TREE existing-folder
+    picker: the "Use this folder" confirm button, the tree container, the hidden
+    npFolderPath input, the Selected line, and the lazy-expansion JS — with the
     f-string intact (no leaked braces)."""
     gui = gui_env
     html = gui.generate_html(*gui.gather_all())
-    # Explicit current-folder selection.
-    assert "Select this folder" in html
+    # Explicit confirm of the highlighted folder.
+    assert "Use this folder" in html
     assert "npSelectCurrent(" in html
-    # Per-row direct selection affordance.
-    assert "npSelectPath(" in html
-    # Navigation + state plumbing.
-    assert "npBrowse(" in html
+    # The tree picker container + node/selection machinery.
+    assert 'id="npTree"' in html
+    assert "function npMakeNode(" in html
+    assert "function npTreeSelect(" in html
+    # Lazy expansion fetches dir_browse.
+    assert "function npTreeToggle(" in html
+    assert "/api/rnd/dir_browse" in html
+    # State plumbing.
     assert 'id="npFolderPath"' in html
     assert 'id="npSelected"' in html
     # f-string intact: no leaked doubled braces in the served HTML.
     assert "{{" not in html and "}}" not in html
 
 
-def test_new_project_picker_breadcrumb_and_up_in_html(gui_env):
-    """The picker is Explorer-style: a clickable breadcrumb trail plus an
-    explicit Up control, both wired to navigation. The bigger browse area and
-    crumb containers are present in the rendered HTML."""
+def test_new_project_picker_tree_expand_on_click_in_html(gui_env):
+    """The picker is a real Explorer-style EXPAND-ON-CLICK tree: clicking a node
+    row both selects it (highlight) and lazily loads its child folders from the
+    backend, rendered indented underneath. The tree init + node builder + the
+    click handler that does select-and-toggle are present in the rendered HTML."""
     gui = gui_env
     html = gui.generate_html(*gui.gather_all())
-    # Breadcrumb container + trail + Up control.
-    assert 'id="npCrumbTrail"' in html
-    assert 'id="npUpBtn"' in html
-    assert "npUp(" in html
-    # The breadcrumb renderer that builds clickable ancestor segments.
-    assert "npRenderCrumbs(" in html
-    assert "npPathSegments(" in html
-    # Up uses res.parent (tracked as _npParent).
-    assert "_npParent" in html
+    # The tree is populated from the drive roots on entry.
+    assert "function npTreeInit(" in html
+    # Each node row's click both selects AND toggles expansion.
+    assert "npTreeSelect(row, path)" in html
+    assert "npTreeToggle(node)" in html
+    # Children are fetched lazily per-node via the backend browse helper.
+    assert "function npDirBrowse(" in html
+    assert "rnd-tree-children" in html
+    # The caret + folder-icon node structure is emitted.
+    assert "rt-caret" in html
+    assert "rt-name" in html
     # No brace leak.
     assert "{{" not in html and "}}" not in html
 
@@ -451,6 +458,11 @@ def test_new_project_picker_name_autosuggest_in_html(gui_env):
     assert 'oninput="npNameEdited()"' in html
     # The suggestion writes into the npName field.
     assert "getElementById('npName')" in html
+    # REGRESSION (f-string escaping): the emitted npBasename split regex MUST
+    # keep a literal backslash so Windows path basenames (C:\dev\Anchor ->
+    # 'Anchor') work. A collapsed '\\' -> '/' regex would only split forward
+    # slashes and return the whole path. Require the backslashed char class.
+    assert r"p.split(/[\\/]+/)" in html
     assert "{{" not in html and "}}" not in html
 
 

@@ -2037,52 +2037,29 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     background: rgba(248,113,113,0.12); border: 1px solid var(--danger); color: var(--text);
     word-break: break-all; line-height: 1.4;
 }}
-/* Explorer-style breadcrumb bar */
-.rnd-crumbs {{
-    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-    margin-top: 6px; padding: 6px 8px; border-radius: 6px;
-    background: var(--surface2); border: 1px solid var(--border);
-}}
-.rnd-up-btn {{
-    flex: 0 0 auto; font-size: 11px; padding: 2px 8px; border-radius: 4px;
-    border: 1px solid var(--border); background: none; color: var(--accent);
-    cursor: pointer; white-space: nowrap; transition: all 0.12s;
-}}
-.rnd-up-btn:hover {{ background: rgba(108,156,252,0.18); border-color: var(--accent); }}
-.rnd-up-btn:disabled {{ opacity: 0.4; cursor: default; }}
-.rnd-crumb-trail {{
-    display: flex; align-items: center; flex-wrap: wrap; gap: 2px;
-    font-size: 12px; line-height: 1.6; min-width: 0;
-}}
-.rnd-crumb {{
-    color: var(--accent); cursor: pointer; padding: 1px 4px; border-radius: 4px;
-    white-space: nowrap;
-}}
-.rnd-crumb:hover {{ background: rgba(108,156,252,0.18); text-decoration: underline; }}
-.rnd-crumb-sep {{ color: var(--text-dim); }}
-.rnd-crumb-empty {{ color: var(--text-dim); font-style: italic; }}
-.rnd-browse {{
+/* Explorer-style expandable TREE folder picker */
+.rnd-tree {{
     background: var(--surface2); max-height: 300px; overflow: auto;
     border: 1px solid var(--border); border-radius: 6px; padding: 6px;
     margin-top: 6px; font-size: 13px;
 }}
-.rnd-browse-row {{
-    display: flex; align-items: center; gap: 10px; padding: 8px 8px;
-    border-radius: 5px; cursor: pointer; transition: background 0.12s;
+.rnd-tree-children {{ margin-left: 16px; border-left: 1px solid var(--border); padding-left: 2px; }}
+.rnd-tree-row {{
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+    border-radius: 5px; cursor: pointer; user-select: none; transition: background 0.12s;
 }}
-.rnd-browse-row:hover {{ background: rgba(108,156,252,0.14); }}
-.rnd-browse-row .rb-icon {{ flex: 0 0 auto; font-size: 16px; }}
-.rnd-browse-row .rb-name {{
+.rnd-tree-row:hover {{ background: rgba(108,156,252,0.14); }}
+.rnd-tree-row.selected {{ background: rgba(108,156,252,0.28); }}
+.rnd-tree-row .rt-caret {{
+    flex: 0 0 auto; width: 14px; text-align: center; color: var(--text-dim);
+    font-size: 11px;
+}}
+.rnd-tree-row .rt-icon {{ flex: 0 0 auto; font-size: 15px; }}
+.rnd-tree-row .rt-name {{
     flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }}
-.rnd-browse-row .rb-pick {{
-    flex: 0 0 auto; opacity: 0.55; font-size: 11px; padding: 3px 10px;
-    border-radius: 4px; border: 1px solid var(--border); background: none;
-    color: var(--accent); cursor: pointer; white-space: nowrap; transition: all 0.12s;
-}}
-.rnd-browse-row:hover .rb-pick {{ opacity: 1; }}
-.rnd-browse-row .rb-pick:hover {{ background: rgba(108,156,252,0.18); border-color: var(--accent); }}
-.rnd-browse-up {{ color: var(--text-dim); }}
+.rnd-tree-err {{ color: var(--danger); font-size: 11px; padding: 2px 6px 2px 22px; }}
+.rnd-use-btn {{ background: var(--accent); }}
 
 /* Toast */
 .toast {{
@@ -2448,17 +2425,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <input type="checkbox" id="npGitInit" /> Initialize git repo
       </label>
     </div>
-    <!-- Select-existing mode -->
+    <!-- Select-existing mode (Explorer-style expandable TREE) -->
     <div id="npExistingFields" style="display:none">
       <input type="hidden" id="npFolderPath" />
       <label>Browse to a folder on gwl-server</label>
-      <div class="rnd-crumbs" id="npCrumbs">
-        <button type="button" class="rnd-up-btn" id="npUpBtn" onclick="npUp()" title="Up one level">&#11014; Up</button>
-        <span class="rnd-crumb-trail" id="npCrumbTrail"></span>
-      </div>
       <div class="rnd-picker-err" id="npBrowseErr" style="display:none"></div>
-      <div class="rnd-browse" id="npBrowse"></div>
-      <button type="button" class="btn btn-sm" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Select this folder</button>
+      <div class="rnd-tree" id="npTree" role="tree"></div>
+      <button type="button" class="btn btn-sm rnd-use-btn" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Use this folder</button>
       <div class="rnd-picker-selected empty" id="npSelected">No folder selected yet</div>
     </div>
     <div class="modal-actions">
@@ -2750,8 +2723,6 @@ function openNewProject() {{
     document.getElementById('npGitInit').checked = false;
     _npCurrentPath = null;
     _npAutoName = false;
-    _npCrumbs = [];
-    _npParent = null;
     npUpdateSelectedUI();
     document.getElementById('newProjectModal').classList.add('open');
 }}
@@ -2777,8 +2748,12 @@ function npSuggestName(path) {{
 // Last path segment (drive-letter and trailing-separator aware), e.g.
 // 'C:\\dev\\Anchor' -> 'Anchor', 'C:\\' -> 'C:'.
 function npBasename(path) {{
-    let p = String(path).replace(/[\\/]+$/, '');     // strip trailing slashes
-    const parts = p.split(/[\\/]+/);
+    // NOTE: this is inside a Python f-string, so a literal backslash in the
+    // emitted JS regex needs FOUR here ('\\\\' -> '\\' in JS -> one '\\' match).
+    // Two backslashes would collapse to one in the f-string and the JS regex
+    // would only match forward slashes, breaking Windows path basenames.
+    let p = String(path).replace(/[\\\\/]+$/, '');     // strip trailing slashes
+    const parts = p.split(/[\\\\/]+/);
     let base = parts[parts.length - 1] || '';
     if (/^[A-Za-z]:$/.test(base)) base = base.charAt(0);  // 'C:' -> 'C'
     return base;
@@ -2791,125 +2766,153 @@ function npSetMode(mode) {{
     document.getElementById('npExistingFields').style.display = isNew ? 'none' : 'block';
     document.getElementById('npModeNewBtn').className = 'btn btn-sm' + (isNew ? '' : ' btn-outline');
     document.getElementById('npModeExistingBtn').className = 'btn btn-sm' + (isNew ? ' btn-outline' : '');
-    if (!isNew) npBrowse(null);
+    if (!isNew) npTreeInit();
 }}
 
-let _npCurrentPath = null;   // folder currently shown in the picker (res.path)
-let _npParent = null;        // res.parent for the current view (drives the Up control)
-let _npCrumbs = [];          // breadcrumb segments (name+path) for the current path
+// ── Explorer-style expandable TREE picker ────────────────────────────────────
+// Each tree node is a <div class="rnd-tree-node"> containing one clickable row
+// (caret + folder icon + label) and a hidden children container. Clicking a row
+// BOTH selects the node (highlight + Selected line + name auto-suggest) AND
+// toggles lazy expansion (fetch child dirs from /api/rnd/dir_browse). Clicking
+// an open node again collapses it. Drill arbitrarily deep.
 
-async function npBrowse(path) {{
-    const url = '/api/rnd/dir_browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+let _npCurrentPath = null;   // the currently highlighted/selected folder path
+
+// Populate the top level with the drive roots.
+async function npTreeInit() {{
+    const tree = document.getElementById('npTree');
+    if (!tree) return;
+    tree.innerHTML = '';
+    _npCurrentPath = null;
     let data;
-    try {{ data = await (await fetch(url)).json(); }}
-    catch(e) {{ showToast('Browse failed: ' + e.message); return; }}
+    try {{ data = await npDirBrowse(null); }}
+    catch(e) {{ npTreeErr(tree, 'Browse failed: ' + e.message); return; }}
     const res = (data && data.result) || {{}};
-    const box = document.getElementById('npBrowse');
-    const errEl = document.getElementById('npBrowseErr');
-    const hereBtn = document.getElementById('npSelectHereBtn');
+    (res.roots || []).forEach(r => tree.appendChild(npMakeNode(r, r)));
+}}
 
-    // Track the location we're viewing — does NOT auto-select it.
-    _npCurrentPath = res.path || null;
-    _npParent = res.parent || null;
+// Fetch helper — returns the parsed JSON for a dir_browse call.
+async function npDirBrowse(path) {{
+    const url = '/api/rnd/dir_browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
+    const r = await fetch(url);
+    return await r.json();
+}}
 
-    // Breadcrumb path bar + Up control.
-    npRenderCrumbs(res.path);
+// Build one tree node (row + empty children container). `path` is the absolute
+// folder path; `label` is what to display (drive root or folder basename).
+function npMakeNode(path, label) {{
+    const node = document.createElement('div');
+    node.className = 'rnd-tree-node';
+    node.dataset.path = path;
 
-    // Error line — graceful recovery (parent/roots still offered below).
-    if (res.error) {{
-        errEl.style.display = 'block';
-        errEl.textContent = "Can't open " + (res.path || 'that folder') + ' — ' + res.error;
-    }} else {{
-        errEl.style.display = 'none';
-        errEl.textContent = '';
-    }}
+    const row = document.createElement('div');
+    row.className = 'rnd-tree-row';
+    row.dataset.path = path;
 
-    // "Select this folder" only makes sense when we're inside a real folder.
-    hereBtn.style.display = res.path ? 'inline-block' : 'none';
+    const caret = document.createElement('span');
+    caret.className = 'rt-caret';
+    caret.textContent = '\\u25B8';                // ▸ collapsed
 
-    let html = '';
-    (res.roots || []).forEach(r => {{
-        html += '<div class="rnd-browse-row" onclick="npBrowse(' + jsStr(r) + ')">'
-              + '<span class="rb-icon">&#128190;</span><span class="rb-name">' + escHtml(r) + '</span>'
-              + '<button type="button" class="rb-pick" onclick="event.stopPropagation();npSelectPath(' + jsStr(r) + ')">Select</button></div>';
+    const icon = document.createElement('span');
+    icon.className = 'rt-icon';
+    icon.textContent = '\\uD83D\\uDCC1';          // 📁
+
+    const name = document.createElement('span');
+    name.className = 'rt-name';
+    name.textContent = label;
+
+    row.appendChild(caret);
+    row.appendChild(icon);
+    row.appendChild(name);
+
+    const kids = document.createElement('div');
+    kids.className = 'rnd-tree-children';
+    kids.style.display = 'none';
+
+    node.appendChild(row);
+    node.appendChild(kids);
+
+    node._loaded = false;
+    node._open = false;
+
+    // One click = select + toggle expand/collapse.
+    row.addEventListener('click', function(ev) {{
+        ev.stopPropagation();
+        npTreeSelect(row, path);
+        npTreeToggle(node);
     }});
-    (res.dirs || []).forEach(d => {{
-        html += '<div class="rnd-browse-row" onclick="npBrowse(' + jsStr(d.path) + ')">'
-              + '<span class="rb-icon">&#128193;</span><span class="rb-name">' + escHtml(d.name) + '</span>'
-              + '<button type="button" class="rb-pick" onclick="event.stopPropagation();npSelectPath(' + jsStr(d.path) + ')">Select</button></div>';
-    }});
-    box.innerHTML = html || '<div style="color:var(--text-dim);padding:4px">(no subfolders here)</div>';
-    npUpdateSelectedUI();
+
+    return node;
 }}
 
-// Build the clickable breadcrumb trail (e.g. C: / dev / Anchor) from the current
-// absolute path, plus enable/disable the Up control based on res.parent.
-function npRenderCrumbs(path) {{
-    const trail = document.getElementById('npCrumbTrail');
-    const upBtn = document.getElementById('npUpBtn');
-    upBtn.disabled = !_npParent;
-    _npCrumbs = npPathSegments(path);
-    if (!_npCrumbs.length) {{
-        trail.innerHTML = '<span class="rnd-crumb-empty">Pick a drive below</span>';
-        return;
-    }}
-    let html = '';
-    _npCrumbs.forEach((seg, i) => {{
-        if (i > 0) html += '<span class="rnd-crumb-sep">&#92;</span>';
-        html += '<span class="rnd-crumb" onclick="npBrowse(' + jsStr(seg.path) + ')">'
-              + escHtml(seg.name) + '</span>';
-    }});
-    trail.innerHTML = html;
-}}
-
-// Split an absolute path into ancestor segments (each with name+path). Each segment's
-// path navigates to that ancestor. Handles Windows drive letters and POSIX root.
-function npPathSegments(path) {{
-    if (!path) return [];
-    const p = String(path);
-    const winM = p.match(/^([A-Za-z]):[\\/]?(.*)$/);
-    if (winM) {{
-        const drive = winM[1].toUpperCase();
-        const segs = [{{name: drive + ':', path: drive + ':\\\\'}}];
-        const rest = winM[2].replace(/[\\/]+$/, '');
-        if (rest) {{
-            const parts = rest.split(/[\\/]+/);
-            let acc = drive + ':\\\\';
-            parts.forEach(part => {{
-                if (!part) return;
-                acc = acc.replace(/[\\/]+$/, '') + '\\\\' + part;
-                segs.push({{name: part, path: acc}});
-            }});
-        }}
-        return segs;
-    }}
-    // POSIX-style absolute path.
-    const parts = p.split('/').filter(x => x !== '');
-    const segs = [{{name: '/', path: '/'}}];
-    let acc = '';
-    parts.forEach(part => {{ acc += '/' + part; segs.push({{name: part, path: acc}}); }});
-    return segs;
-}}
-
-// Up one level — navigates to res.parent (the explicit ⬆ Up control).
-function npUp() {{
-    if (_npParent) npBrowse(_npParent);
-}}
-
-// Select the folder currently shown in the picker.
-function npSelectCurrent() {{
-    if (!_npCurrentPath) {{ showToast('Open a folder first, then select it'); return; }}
-    npSelectPath(_npCurrentPath);
-}}
-
-// Select a specific absolute folder path (from a row's "Select" affordance or
-// the "Select this folder" button). Also auto-suggests the project name.
-function npSelectPath(path) {{
-    if (!path) {{ showToast('That folder has no path'); return; }}
+// Highlight a row as the current selection, update the Selected line, and
+// auto-suggest the project name.
+function npTreeSelect(row, path) {{
+    document.querySelectorAll('#npTree .rnd-tree-row.selected')
+        .forEach(r => r.classList.remove('selected'));
+    row.classList.add('selected');
+    _npCurrentPath = path;
     document.getElementById('npFolderPath').value = path;
     npSuggestName(path);
     npUpdateSelectedUI();
-    showToast('Selected: ' + path);
+}}
+
+// Expand (lazy-load children on first open) or collapse a node.
+async function npTreeToggle(node) {{
+    const caret = node.querySelector(':scope > .rnd-tree-row > .rt-caret');
+    const kids = node.querySelector(':scope > .rnd-tree-children');
+    if (node._open) {{
+        node._open = false;
+        caret.textContent = '\\u25B8';            // ▸
+        kids.style.display = 'none';
+        return;
+    }}
+    node._open = true;
+    caret.textContent = '\\u25BE';                // ▾
+    kids.style.display = 'block';
+    if (node._loaded) return;
+    node._loaded = true;
+    let data;
+    try {{ data = await npDirBrowse(node.dataset.path); }}
+    catch(e) {{ npTreeErr(kids, 'Browse failed: ' + e.message); return; }}
+    const res = (data && data.result) || {{}};
+    if (res.error) {{
+        // Inline message; parent stays usable. Allow a later retry.
+        node._loaded = false;
+        npTreeErr(kids, "Can't open this folder — " + res.error);
+        return;
+    }}
+    kids.innerHTML = '';
+    const dirs = res.dirs || [];
+    if (!dirs.length) {{
+        const empty = document.createElement('div');
+        empty.className = 'rnd-tree-err';
+        empty.style.color = 'var(--text-dim)';
+        empty.textContent = '(no subfolders)';
+        kids.appendChild(empty);
+        return;
+    }}
+    dirs.forEach(d => kids.appendChild(npMakeNode(d.path, d.name)));
+}}
+
+// Render a small inline error/notice inside a container.
+function npTreeErr(container, msg) {{
+    const e = document.createElement('div');
+    e.className = 'rnd-tree-err';
+    e.textContent = msg;
+    container.innerHTML = '';
+    container.appendChild(e);
+    container.style.display = 'block';
+}}
+
+// "Use this folder" — confirm the currently highlighted folder (selection
+// already set it; this is the explicit confirm affordance).
+function npSelectCurrent() {{
+    if (!_npCurrentPath) {{ showToast('Click a folder in the tree first'); return; }}
+    document.getElementById('npFolderPath').value = _npCurrentPath;
+    npSuggestName(_npCurrentPath);
+    npUpdateSelectedUI();
+    showToast('Using: ' + _npCurrentPath);
 }}
 
 function npUpdateSelectedUI() {{
