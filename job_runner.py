@@ -65,17 +65,19 @@ BACKEND_CLAUDE = "claude"
 BACKEND_GEMINI = "gemini"
 DEFAULT_BACKEND = BACKEND_CLAUDE
 
-#: Env var overriding the Gemini runner command (best-effort default below is
-#: overridable pending a live spike). When unset, :data:`DEFAULT_GEMINI_CMD` is
-#: used. Verified headless invocation on this host:
-#:   ``gemini -p "<prompt>" --output-format stream-json --approval-mode plan``
-#: ``--approval-mode plan`` is read-only (research is non-mutating). The
-#: prompt/seed is appended by the lane wiring via ``extra_args`` exactly as for
-#: claude; the gemini CLI tolerates/parses the trailing seed. Override the whole
-#: command via this env var once a live spike pins the exact flags.
+#: Env var overriding the Gemini runner command. When unset,
+#: :data:`DEFAULT_GEMINI_CMD` is used. Spike finding (2026-06-09): ``gemini -p``
+#: runs headless and authenticates as the service user, BUT it refuses agentic
+#: work in a project folder unless ``--skip-trust`` is passed — it treats
+#: untrusted dirs as read-only and overrides the approval mode. Since jobs run
+#: INSIDE the project folder, ``--skip-trust`` is required. ``--output-format
+#: stream-json`` is supported. ``--approval-mode plan`` is read-only (research is
+#: non-mutating). The prompt/seed is appended by the lane wiring via
+#: ``extra_args`` exactly as for claude; the gemini CLI tolerates/parses the
+#: trailing seed. Override the whole command via this env var if needed.
 GEMINI_CMD_ENV = "ANCHOR_GEMINI_CMD"
 DEFAULT_GEMINI_CMD = (
-    "gemini -p --output-format stream-json --approval-mode plan"
+    "gemini --skip-trust -p --output-format stream-json --approval-mode plan"
 )
 
 #: Long-poll ceiling (seconds). Production default per the frozen design; the

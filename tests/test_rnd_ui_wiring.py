@@ -410,9 +410,47 @@ def test_new_project_picker_wiring_in_html(gui_env):
     # Navigation + state plumbing.
     assert "npBrowse(" in html
     assert 'id="npFolderPath"' in html
-    assert 'id="npLoc"' in html
     assert 'id="npSelected"' in html
     # f-string intact: no leaked doubled braces in the served HTML.
+    assert "{{" not in html and "}}" not in html
+
+
+def test_new_project_picker_breadcrumb_and_up_in_html(gui_env):
+    """The picker is Explorer-style: a clickable breadcrumb trail plus an
+    explicit Up control, both wired to navigation. The bigger browse area and
+    crumb containers are present in the rendered HTML."""
+    gui = gui_env
+    html = gui.generate_html(*gui.gather_all())
+    # Breadcrumb container + trail + Up control.
+    assert 'id="npCrumbTrail"' in html
+    assert 'id="npUpBtn"' in html
+    assert "npUp(" in html
+    # The breadcrumb renderer that builds clickable ancestor segments.
+    assert "npRenderCrumbs(" in html
+    assert "npPathSegments(" in html
+    # Up uses res.parent (tracked as _npParent).
+    assert "_npParent" in html
+    # No brace leak.
+    assert "{{" not in html and "}}" not in html
+
+
+def test_new_project_picker_name_autosuggest_in_html(gui_env):
+    """Selecting a folder auto-suggests the project name from its basename:
+    npSelectPath calls npSuggestName, which sets npName from the folder
+    basename and tracks an auto-suggested flag cleared on manual edit."""
+    gui = gui_env
+    html = gui.generate_html(*gui.gather_all())
+    # The auto-suggest function exists and is invoked on selection.
+    assert "function npSuggestName(" in html
+    assert "npSuggestName(path)" in html or "npSuggestName(" in html
+    # Basename helper drives the suggested name.
+    assert "function npBasename(" in html
+    # Auto-suggested flag + the manual-edit clear hook wired to the name field.
+    assert "_npAutoName" in html
+    assert "npNameEdited(" in html
+    assert 'oninput="npNameEdited()"' in html
+    # The suggestion writes into the npName field.
+    assert "getElementById('npName')" in html
     assert "{{" not in html and "}}" not in html
 
 

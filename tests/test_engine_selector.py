@@ -202,6 +202,40 @@ def test_runner_cmd_unset_resolves_per_backend(env, monkeypatch):
     assert "-p" in gemini_cmd
     # Read-only approval posture (research is non-mutating).
     assert "--approval-mode" in gemini_cmd
+    # Spike finding (2026-06-09): jobs run inside the project folder, so the
+    # gemini default MUST carry --skip-trust or gemini refuses agentic work.
+    assert "--skip-trust" in gemini_cmd
+
+
+def test_gemini_default_includes_skip_trust(env, monkeypatch):
+    """The built-in gemini default command carries --skip-trust (spike finding):
+    gemini treats untrusted project dirs as read-only and overrides the approval
+    mode unless --skip-trust is passed, and jobs run inside the project folder.
+    claude's default is unaffected."""
+    import job_runner
+    monkeypatch.delenv("ANCHOR_RUNNER_CMD", raising=False)
+    monkeypatch.delenv("ANCHOR_GEMINI_CMD", raising=False)
+    gemini_cmd = job_runner.resolve_runner_cmd(backend="gemini")
+    assert "--skip-trust" in gemini_cmd
+    assert "gemini" in gemini_cmd and "-p" in gemini_cmd
+    # The raw default constant also reflects the flag.
+    assert "--skip-trust" in job_runner.DEFAULT_GEMINI_CMD
+    # Claude default is unchanged — no --skip-trust leaked into it.
+    claude_cmd = job_runner.resolve_runner_cmd(backend="claude")
+    assert "--skip-trust" not in claude_cmd
+    assert claude_cmd[0] == "claude"
+
+
+def test_runner_cmd_override_wins_over_skip_trust_default(env, monkeypatch):
+    """ANCHOR_RUNNER_CMD precedence is intact: when set, it wins for the gemini
+    backend too, so the --skip-trust default is NOT used (the mock runner drives
+    every test)."""
+    import job_runner
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {FAKE}")
+    monkeypatch.delenv("ANCHOR_GEMINI_CMD", raising=False)
+    gemini_cmd = job_runner.resolve_runner_cmd(backend="gemini")
+    assert "--skip-trust" not in gemini_cmd
+    assert FAKE in " ".join(gemini_cmd)
 
 
 def test_gemini_cmd_env_override(env, monkeypatch):

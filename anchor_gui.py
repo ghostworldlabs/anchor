@@ -2037,18 +2037,46 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     background: rgba(248,113,113,0.12); border: 1px solid var(--danger); color: var(--text);
     word-break: break-all; line-height: 1.4;
 }}
-.rnd-browse {{ background: var(--surface2); }}
+/* Explorer-style breadcrumb bar */
+.rnd-crumbs {{
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+    margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+}}
+.rnd-up-btn {{
+    flex: 0 0 auto; font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    border: 1px solid var(--border); background: none; color: var(--accent);
+    cursor: pointer; white-space: nowrap; transition: all 0.12s;
+}}
+.rnd-up-btn:hover {{ background: rgba(108,156,252,0.18); border-color: var(--accent); }}
+.rnd-up-btn:disabled {{ opacity: 0.4; cursor: default; }}
+.rnd-crumb-trail {{
+    display: flex; align-items: center; flex-wrap: wrap; gap: 2px;
+    font-size: 12px; line-height: 1.6; min-width: 0;
+}}
+.rnd-crumb {{
+    color: var(--accent); cursor: pointer; padding: 1px 4px; border-radius: 4px;
+    white-space: nowrap;
+}}
+.rnd-crumb:hover {{ background: rgba(108,156,252,0.18); text-decoration: underline; }}
+.rnd-crumb-sep {{ color: var(--text-dim); }}
+.rnd-crumb-empty {{ color: var(--text-dim); font-style: italic; }}
+.rnd-browse {{
+    background: var(--surface2); max-height: 300px; overflow: auto;
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px;
+    margin-top: 6px; font-size: 13px;
+}}
 .rnd-browse-row {{
-    display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+    display: flex; align-items: center; gap: 10px; padding: 8px 8px;
     border-radius: 5px; cursor: pointer; transition: background 0.12s;
 }}
 .rnd-browse-row:hover {{ background: rgba(108,156,252,0.14); }}
-.rnd-browse-row .rb-icon {{ flex: 0 0 auto; }}
+.rnd-browse-row .rb-icon {{ flex: 0 0 auto; font-size: 16px; }}
 .rnd-browse-row .rb-name {{
     flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }}
 .rnd-browse-row .rb-pick {{
-    flex: 0 0 auto; opacity: 0; font-size: 10px; padding: 2px 8px;
+    flex: 0 0 auto; opacity: 0.55; font-size: 11px; padding: 3px 10px;
     border-radius: 4px; border: 1px solid var(--border); background: none;
     color: var(--accent); cursor: pointer; white-space: nowrap; transition: all 0.12s;
 }}
@@ -2405,7 +2433,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <button type="button" class="btn btn-sm btn-outline" id="npModeExistingBtn" onclick="npSetMode('existing')">Select existing</button>
     </div>
     <label>Project name</label>
-    <input type="text" id="npName" placeholder="Project name" />
+    <input type="text" id="npName" placeholder="Project name" oninput="npNameEdited()" />
     <label>Priority</label>
     <select id="npPriority">
       <option value="1">P1 — Top Tier</option>
@@ -2423,10 +2451,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     <!-- Select-existing mode -->
     <div id="npExistingFields" style="display:none">
       <input type="hidden" id="npFolderPath" />
-      <label>Browse to a folder</label>
-      <div class="rnd-picker-loc" id="npLoc">Current folder: <b>—</b></div>
+      <label>Browse to a folder on gwl-server</label>
+      <div class="rnd-crumbs" id="npCrumbs">
+        <button type="button" class="rnd-up-btn" id="npUpBtn" onclick="npUp()" title="Up one level">&#11014; Up</button>
+        <span class="rnd-crumb-trail" id="npCrumbTrail"></span>
+      </div>
       <div class="rnd-picker-err" id="npBrowseErr" style="display:none"></div>
-      <div class="rnd-browse" id="npBrowse" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px;margin-top:6px;font-size:13px"></div>
+      <div class="rnd-browse" id="npBrowse"></div>
       <button type="button" class="btn btn-sm" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Select this folder</button>
       <div class="rnd-picker-selected empty" id="npSelected">No folder selected yet</div>
     </div>
@@ -2705,6 +2736,10 @@ function saveEditProject() {{
 
 // ── R&D: New Project modal ──
 let _npMode = 'new_folder';
+// Tracks whether npName currently holds an auto-suggested basename (vs a value
+// the user typed). When true, selecting a folder may overwrite it; the moment
+// the user edits the field (npNameEdited), we stop auto-overwriting.
+let _npAutoName = false;
 
 function openNewProject() {{
     _npMode = 'new_folder';
@@ -2714,8 +2749,39 @@ function openNewProject() {{
     document.getElementById('npFolderPath').value = '';
     document.getElementById('npGitInit').checked = false;
     _npCurrentPath = null;
+    _npAutoName = false;
+    _npCrumbs = [];
+    _npParent = null;
     npUpdateSelectedUI();
     document.getElementById('newProjectModal').classList.add('open');
+}}
+
+// Called on every keystroke in the name field: a manual edit clears the
+// auto-suggest flag so later folder selections never clobber the user's text.
+function npNameEdited() {{ _npAutoName = false; }}
+
+// Auto-suggest the project name from a selected folder's basename, but ONLY if
+// the field is empty or still holds a prior auto-suggestion (never overwrite a
+// value the user typed). Keeps the field fully editable.
+function npSuggestName(path) {{
+    if (!path) return;
+    const nameEl = document.getElementById('npName');
+    const cur = (nameEl.value || '').trim();
+    if (cur !== '' && !_npAutoName) return;   // user typed their own — leave it
+    const base = npBasename(path);
+    if (!base) return;
+    nameEl.value = base;
+    _npAutoName = true;
+}}
+
+// Last path segment (drive-letter and trailing-separator aware), e.g.
+// 'C:\\dev\\Anchor' -> 'Anchor', 'C:\\' -> 'C:'.
+function npBasename(path) {{
+    let p = String(path).replace(/[\\/]+$/, '');     // strip trailing slashes
+    const parts = p.split(/[\\/]+/);
+    let base = parts[parts.length - 1] || '';
+    if (/^[A-Za-z]:$/.test(base)) base = base.charAt(0);  // 'C:' -> 'C'
+    return base;
 }}
 
 function npSetMode(mode) {{
@@ -2729,6 +2795,8 @@ function npSetMode(mode) {{
 }}
 
 let _npCurrentPath = null;   // folder currently shown in the picker (res.path)
+let _npParent = null;        // res.parent for the current view (drives the Up control)
+let _npCrumbs = [];          // breadcrumb segments (name+path) for the current path
 
 async function npBrowse(path) {{
     const url = '/api/rnd/dir_browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
@@ -2737,19 +2805,15 @@ async function npBrowse(path) {{
     catch(e) {{ showToast('Browse failed: ' + e.message); return; }}
     const res = (data && data.result) || {{}};
     const box = document.getElementById('npBrowse');
-    const locEl = document.getElementById('npLoc');
     const errEl = document.getElementById('npBrowseErr');
     const hereBtn = document.getElementById('npSelectHereBtn');
 
     // Track the location we're viewing — does NOT auto-select it.
     _npCurrentPath = res.path || null;
+    _npParent = res.parent || null;
 
-    // Location line.
-    if (res.path) {{
-        locEl.innerHTML = 'Current folder: <b>' + escHtml(res.path) + '</b>';
-    }} else {{
-        locEl.innerHTML = 'Current folder: <b>(pick a drive below)</b>';
-    }}
+    // Breadcrumb path bar + Up control.
+    npRenderCrumbs(res.path);
 
     // Error line — graceful recovery (parent/roots still offered below).
     if (res.error) {{
@@ -2764,10 +2828,6 @@ async function npBrowse(path) {{
     hereBtn.style.display = res.path ? 'inline-block' : 'none';
 
     let html = '';
-    if (res.parent) {{
-        html += '<div class="rnd-browse-row rnd-browse-up" onclick="npBrowse(' + jsStr(res.parent) + ')">'
-              + '<span class="rb-icon">&#8593;</span><span class="rb-name">.. (up one level)</span></div>';
-    }}
     (res.roots || []).forEach(r => {{
         html += '<div class="rnd-browse-row" onclick="npBrowse(' + jsStr(r) + ')">'
               + '<span class="rb-icon">&#128190;</span><span class="rb-name">' + escHtml(r) + '</span>'
@@ -2782,16 +2842,72 @@ async function npBrowse(path) {{
     npUpdateSelectedUI();
 }}
 
+// Build the clickable breadcrumb trail (e.g. C: / dev / Anchor) from the current
+// absolute path, plus enable/disable the Up control based on res.parent.
+function npRenderCrumbs(path) {{
+    const trail = document.getElementById('npCrumbTrail');
+    const upBtn = document.getElementById('npUpBtn');
+    upBtn.disabled = !_npParent;
+    _npCrumbs = npPathSegments(path);
+    if (!_npCrumbs.length) {{
+        trail.innerHTML = '<span class="rnd-crumb-empty">Pick a drive below</span>';
+        return;
+    }}
+    let html = '';
+    _npCrumbs.forEach((seg, i) => {{
+        if (i > 0) html += '<span class="rnd-crumb-sep">&#92;</span>';
+        html += '<span class="rnd-crumb" onclick="npBrowse(' + jsStr(seg.path) + ')">'
+              + escHtml(seg.name) + '</span>';
+    }});
+    trail.innerHTML = html;
+}}
+
+// Split an absolute path into ancestor segments (each with name+path). Each segment's
+// path navigates to that ancestor. Handles Windows drive letters and POSIX root.
+function npPathSegments(path) {{
+    if (!path) return [];
+    const p = String(path);
+    const winM = p.match(/^([A-Za-z]):[\\/]?(.*)$/);
+    if (winM) {{
+        const drive = winM[1].toUpperCase();
+        const segs = [{{name: drive + ':', path: drive + ':\\\\'}}];
+        const rest = winM[2].replace(/[\\/]+$/, '');
+        if (rest) {{
+            const parts = rest.split(/[\\/]+/);
+            let acc = drive + ':\\\\';
+            parts.forEach(part => {{
+                if (!part) return;
+                acc = acc.replace(/[\\/]+$/, '') + '\\\\' + part;
+                segs.push({{name: part, path: acc}});
+            }});
+        }}
+        return segs;
+    }}
+    // POSIX-style absolute path.
+    const parts = p.split('/').filter(x => x !== '');
+    const segs = [{{name: '/', path: '/'}}];
+    let acc = '';
+    parts.forEach(part => {{ acc += '/' + part; segs.push({{name: part, path: acc}}); }});
+    return segs;
+}}
+
+// Up one level — navigates to res.parent (the explicit ⬆ Up control).
+function npUp() {{
+    if (_npParent) npBrowse(_npParent);
+}}
+
 // Select the folder currently shown in the picker.
 function npSelectCurrent() {{
     if (!_npCurrentPath) {{ showToast('Open a folder first, then select it'); return; }}
     npSelectPath(_npCurrentPath);
 }}
 
-// Select a specific absolute folder path (from a row's "Select" affordance).
+// Select a specific absolute folder path (from a row's "Select" affordance or
+// the "Select this folder" button). Also auto-suggests the project name.
 function npSelectPath(path) {{
     if (!path) {{ showToast('That folder has no path'); return; }}
     document.getElementById('npFolderPath').value = path;
+    npSuggestName(path);
     npUpdateSelectedUI();
     showToast('Selected: ' + path);
 }}
