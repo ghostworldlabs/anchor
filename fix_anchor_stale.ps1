@@ -1,132 +1,131 @@
 #requires -Version 5.1
-<#
-  fix_anchor_stale.ps1 — one-shot, self-verifying repair for the Anchor
-  "stale server on port 8777" problem. RUN ELEVATED (Terminal as Admin).
-
-  ROOT CAUSE (found by adversarial diagnosis):
-    There are TWO NSSM services that each run an Anchor server in C:\dev\Anchor:
-      * `anchor`         — the legitimate supervisor (C:\Tools\nssm\nssm.exe)
-      * `Anchor-Server`  — a ROGUE DUPLICATE service (WinGet nssm), created
-                           2026-05-16, running OLD code.
-    The old code bound the port with SO_REUSEADDR, so BOTH servers could listen
-    on 8777 at once and requests randomly hit the old or new one. `nssm restart
-    anchor` can never fix this — it only restarts one of the two supervisors,
-    and the rogue one respawns its old-code child within ~2s.
-
-    NOTE: those NSSM/LocalSystem children expose an EMPTY command line even to
-    an elevated query, so we reap by PORT/PID, never by command-line match.
-
-  WHAT THIS DOES (idempotent, safe to re-run):
-    1. Verify `Anchor-Server` really is the rogue Anchor duplicate, then STOP +
-       REMOVE it (so it stops respawning). Leaves `anchor` and `ledger` alone.
-    2. Stop `anchor`, reap every PID still listening on 8777 (only python/pythonw
-       anchor servers — reports anything else instead of killing).
-    3. Start `anchor` so its NEW-code child binds 8777 as the sole owner.
-    4. PROVE the new code is live: GET /api/rnd/tail must be 400 (not 404) and
-       GET / must contain the R&D UI. Prints RESULT: NEW UI LIVE / STILL STALE.
-
-  Leaves untouched: `anchor` (legit), `ledger` (legit, ledger_gui.py on 8778),
-  the claude-code-bridge and aurora python processes.
-#>
+# fix_anchor_stale.ps1 - one-shot, self-verifying repair for the Anchor
+# "stale server on port 8777" problem. RUN ELEVATED (Terminal as Admin).
+#
+# ROOT CAUSE: two NSSM services each run an Anchor server in C:\dev\Anchor:
+#   'anchor'        - the legitimate supervisor (C:\Tools\nssm\nssm.exe)
+#   'Anchor-Server' - a ROGUE DUPLICATE service (WinGet nssm) from 2026-05-16,
+#                     running OLD code. The old code bound with SO_REUSEADDR so
+#                     BOTH servers could listen on 8777 at once; requests hit
+#                     old or new at random. 'nssm restart anchor' restarts only
+#                     one supervisor, so the rogue keeps respawning old code.
+#   NSSM/LocalSystem children hide their command line, so we reap by PORT/PID.
+#
+# This script: removes the rogue service, frees 8777 by PID, restarts 'anchor',
+# and verifies the new code is live. Leaves 'anchor', 'ledger', bridge, aurora
+# untouched. Idempotent / safe to re-run.
 
 $ErrorActionPreference = 'Continue'
 $Port = 8777
 $Base = "http://127.0.0.1:$Port"
 $AnchorDir = 'C:\dev\Anchor'
 
-function Step($m){ Write-Host "`n==> $m" -ForegroundColor Cyan }
-function Ok($m){ Write-Host "    [ok]   $m" -ForegroundColor Green }
-function Warn($m){ Write-Host "    [warn] $m" -ForegroundColor Yellow }
-function Fail($m){ Write-Host "    [FAIL] $m" -ForegroundColor Red }
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) { Write-Host "[FAIL] Not elevated. Re-run from Terminal (Admin)." -ForegroundColor Red; exit 2 }
 
-# --- elevation check -------------------------------------------------------
-$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-         ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin){ Fail "Not elevated. Re-run from Terminal (Admin)."; exit 2 }
-
-# --- resolve an nssm.exe (any one can control a service by name) ------------
 $Nssm = (Get-Command nssm -ErrorAction SilentlyContinue).Source
-if (-not $Nssm){
-  foreach($c in @("C:\Tools\nssm\nssm.exe",
-                  "$env:LOCALAPPDATA\Microsoft\WinGet\Links\nssm.exe",
-                  "C:\Windows\System32\nssm.exe")){ if(Test-Path $c){ $Nssm=$c; break } }
+if (-not $Nssm) {
+  foreach ($c in @("C:\Tools\nssm\nssm.exe", "$env:LOCALAPPDATA\Microsoft\WinGet\Links\nssm.exe", "C:\Windows\System32\nssm.exe")) {
+    if (Test-Path $c) { $Nssm = $c; break }
+  }
 }
-if (-not $Nssm){ Fail "nssm.exe not found."; exit 2 }
-Ok "Using nssm: $Nssm"
+if (-not $Nssm) { Write-Host "[FAIL] nssm.exe not found." -ForegroundColor Red; exit 2 }
+Write-Host "[ok] Using nssm: $Nssm" -ForegroundColor Green
 
-function PortOwners {
-  @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
-      Select-Object -ExpandProperty OwningProcess -Unique)
+function Get-PortOwners {
+  return @(Get-NetTCPConnection -LocalPort 8777 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
 }
 
-# === 1. Remove the rogue Anchor-Server service =============================
-Step "1/4  Checking for the rogue 'Anchor-Server' service"
+# 1. Remove the rogue Anchor-Server service
+Write-Host "`n==> 1/4 Checking for the rogue 'Anchor-Server' service" -ForegroundColor Cyan
 $rogue = Get-Service -Name 'Anchor-Server' -ErrorAction SilentlyContinue
-if ($rogue){
+if ($rogue) {
   $rp = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Anchor-Server\Parameters' -ErrorAction SilentlyContinue
-  Write-Host "    Anchor-Server params: App=$($rp.Application) Dir=$($rp.AppDirectory) Params=$($rp.AppParameters)"
-  $isAnchor = ($rp.AppParameters -match 'anchor_gui\.py') -and ($rp.AppDirectory -ieq $AnchorDir)
-  if ($isAnchor){
-    & $Nssm stop   Anchor-Server 2>&1 | ForEach-Object { "    $_" }
+  Write-Host ("    Anchor-Server: App={0} Dir={1} Params={2}" -f $rp.Application, $rp.AppDirectory, $rp.AppParameters)
+  $isAnchor = ($rp.AppParameters -like '*anchor_gui.py*') -and ($rp.AppDirectory -ieq $AnchorDir)
+  if ($isAnchor) {
+    & $Nssm stop Anchor-Server 2>&1 | ForEach-Object { "    $_" }
     & $Nssm remove Anchor-Server confirm 2>&1 | ForEach-Object { "    $_" }
     Start-Sleep -Milliseconds 800
-    if (Get-Service -Name 'Anchor-Server' -ErrorAction SilentlyContinue){
-      Warn "Anchor-Server still present; trying sc.exe delete"; & sc.exe delete Anchor-Server | Out-Null
-    }
-    Ok "Rogue 'Anchor-Server' removed."
+    if (Get-Service -Name 'Anchor-Server' -ErrorAction SilentlyContinue) { & sc.exe delete Anchor-Server | Out-Null }
+    Write-Host "[ok] Rogue 'Anchor-Server' removed." -ForegroundColor Green
   } else {
-    Warn "A service named 'Anchor-Server' exists but its params are NOT anchor_gui.py in $AnchorDir."
-    Warn "Refusing to remove it. Inspect manually before continuing."
+    Write-Host "[warn] 'Anchor-Server' params are NOT anchor_gui.py in $AnchorDir; refusing to remove. Inspect manually." -ForegroundColor Yellow
   }
-} else { Ok "No 'Anchor-Server' service present (already removed)." }
+} else {
+  Write-Host "[ok] No 'Anchor-Server' service present (already removed)." -ForegroundColor Green
+}
 
-# === 2. Stop legit service + reap any 8777 squatters (by PORT/PID) =========
-Step "2/4  Stopping 'anchor' and freeing port $Port"
+# 2. Stop legit service and reap any 8777 squatters by PORT/PID
+Write-Host "`n==> 2/4 Stopping 'anchor' and freeing port $Port" -ForegroundColor Cyan
 & $Nssm stop anchor 2>&1 | ForEach-Object { "    $_" }
 Start-Sleep -Milliseconds 800
-foreach($procId in PortOwners){
+foreach ($procId in (Get-PortOwners)) {
   $p = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
-  if ($p -and $p.Name -in @('python.exe','pythonw.exe')){
+  if ($p -and ($p.Name -eq 'python.exe' -or $p.Name -eq 'pythonw.exe')) {
     Write-Host "    killing 8777 owner PID $procId ($($p.Name))" -ForegroundColor Magenta
     Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
-  } elseif ($p){
-    Warn "Port $Port held by NON-python PID $procId ($($p.Name)) — NOT killing. Free it manually."
+  } elseif ($p) {
+    Write-Host "[warn] Port $Port held by NON-python PID $procId ($($p.Name)); NOT killing. Free it manually." -ForegroundColor Yellow
   }
 }
 $deadline = (Get-Date).AddSeconds(10)
-while ((PortOwners).Count -gt 0 -and (Get-Date) -lt $deadline){ Start-Sleep -Milliseconds 400 }
-if ((PortOwners).Count -gt 0){ Fail "Port $Port still held by PID(s): $((PortOwners) -join ', '). RESULT: STILL STALE"; exit 1 }
-Ok "Port $Port is free."
+while ((Get-PortOwners).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 400 }
+if ((Get-PortOwners).Count -gt 0) {
+  Write-Host ("[FAIL] Port {0} still held by PID(s): {1}" -f $Port, ((Get-PortOwners) -join ', ')) -ForegroundColor Red
+  Write-Host "RESULT: STILL STALE" -ForegroundColor Red; exit 1
+}
+Write-Host "[ok] Port $Port is free." -ForegroundColor Green
 
-# === 3. Start the legit service ===========================================
-Step "3/4  Starting 'anchor'"
+# 3. Start the legit service
+Write-Host "`n==> 3/4 Starting 'anchor'" -ForegroundColor Cyan
 & $Nssm start anchor 2>&1 | ForEach-Object { "    $_" }
 $deadline = (Get-Date).AddSeconds(20)
-while ((PortOwners).Count -eq 0 -and (Get-Date) -lt $deadline){ Start-Sleep -Milliseconds 500 }
-if ((PortOwners).Count -eq 0){ Fail "Service did not bind $Port within 20s. RESULT: STILL STALE"; exit 1 }
-Ok "anchor is listening on $Port (PID $((PortOwners) -join ','))."
+while ((Get-PortOwners).Count -eq 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+if ((Get-PortOwners).Count -eq 0) {
+  Write-Host "[FAIL] Service did not bind $Port within 20s." -ForegroundColor Red
+  Write-Host "RESULT: STILL STALE" -ForegroundColor Red; exit 1
+}
+Write-Host ("[ok] anchor is listening on {0} (PID {1})." -f $Port, ((Get-PortOwners) -join ',')) -ForegroundColor Green
 
-# === 4. Verify the NEW code is serving ====================================
-Step "4/4  Verifying new code is live"
-function TailCode {
-  try { return [int](Invoke-WebRequest "$Base/api/rnd/tail" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop).StatusCode }
-  catch [System.Net.WebException] { if($_.Exception.Response){ return [int]$_.Exception.Response.StatusCode } return -1 }
-  catch { return -1 }
+# 4. Verify the new code is serving
+Write-Host "`n==> 4/4 Verifying new code is live" -ForegroundColor Cyan
+function Get-TailCode {
+  try {
+    $r = Invoke-WebRequest "$Base/api/rnd/tail" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+    return [int]$r.StatusCode
+  } catch [System.Net.WebException] {
+    if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
+    return -1
+  } catch { return -1 }
 }
 $code = -1
-for($i=0; $i -lt 12; $i++){ $code = TailCode; if($code -eq 400 -or $code -eq 404){ break }; Start-Sleep -Milliseconds 600 }
+for ($i = 0; $i -lt 12; $i++) {
+  $code = Get-TailCode
+  if ($code -eq 400 -or $code -eq 404) { break }
+  Start-Sleep -Milliseconds 600
+}
 $tailOk = ($code -eq 400)
-if ($code -eq 400){ Ok "/api/rnd/tail -> 400 (new route present)." }
-elseif ($code -eq 404){ Fail "/api/rnd/tail -> 404 (OLD code still serving)." }
-else { Fail "/api/rnd/tail unreachable (code $code)." }
+if ($code -eq 400) { Write-Host "[ok] /api/rnd/tail returned 400 (new route present)." -ForegroundColor Green }
+elseif ($code -eq 404) { Write-Host "[FAIL] /api/rnd/tail returned 404 (OLD code still serving)." -ForegroundColor Red }
+else { Write-Host "[FAIL] /api/rnd/tail unreachable (code $code)." -ForegroundColor Red }
 
 $uiOk = $false
 try {
   $h = (Invoke-WebRequest "$Base/" -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop).Content
-  $uiOk = ($h -match "showView\('rnd'\)") -and ($h -match 'New Project')
-  if ($uiOk){ Ok "Dashboard HTML has the R&D tab + New Project." } else { Fail "Dashboard HTML missing R&D markers." }
-} catch { Fail "GET / failed: $($_.Exception.Message)" }
+  $marker1 = "showView('rnd')"
+  $uiOk = $h.Contains($marker1) -and $h.Contains('New Project')
+  if ($uiOk) { Write-Host "[ok] Dashboard has the RnD tab and New Project button." -ForegroundColor Green }
+  else { Write-Host "[FAIL] Dashboard HTML missing the RnD markers." -ForegroundColor Red }
+} catch {
+  Write-Host "[FAIL] GET / failed: $($_.Exception.Message)" -ForegroundColor Red
+}
 
 Write-Host ""
-if ($tailOk -and $uiOk){ Write-Host "RESULT: NEW UI LIVE  (hard-refresh the browser: Ctrl+Shift+R)" -ForegroundColor Green; exit 0 }
-else { Write-Host "RESULT: STILL STALE" -ForegroundColor Red; exit 1 }
+if ($tailOk -and $uiOk) {
+  Write-Host "RESULT: NEW UI LIVE  (now hard-refresh the browser: Ctrl+Shift+R)" -ForegroundColor Green
+  exit 0
+} else {
+  Write-Host "RESULT: STILL STALE" -ForegroundColor Red
+  exit 1
+}
