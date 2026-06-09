@@ -71,6 +71,86 @@ if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", Non
 _logger.propagate = False
 
 
+# ── Build identity (cache-bust) ────────────────────────────────────────
+# Computed ONCE at process startup. Used by the self-healing client JS to
+# detect a redeploy and force a cache-busting reload (and to kill any leftover
+# service worker / Cache Storage left behind by an old Anchor build).
+def _compute_build_id():
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(ANCHOR_DIR),
+            capture_output=True, text=True, timeout=5,
+        )
+        rev = (out.stdout or "").strip()
+        if out.returncode == 0 and rev:
+            return rev
+    except Exception:
+        pass
+    # Fallback: mtime of this source file (changes on every redeploy).
+    try:
+        return str(int(os.path.getmtime(__file__)))
+    except Exception:
+        return "0"
+
+
+BUILD_ID = _compute_build_id()
+
+
+# Self-healing cache-bust client JS. Kept as a plain (non-f) string so it can
+# be embedded verbatim in BOTH the f-string dashboard page (generate_html) and
+# the concatenated project-window page without brace-doubling concerns. The
+# build id is substituted via a simple placeholder, not f-string formatting.
+_CACHE_BUST_JS_TEMPLATE = """
+(function () {
+  try {
+    window.__ANCHOR_BUILD__ = "__ANCHOR_BUILD_ID__";
+    // Kill any leftover service worker registered by an OLD Anchor build.
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker.getRegistrations().then(function (rs) {
+        rs.forEach(function (r) { try { r.unregister(); } catch (e) {} });
+      }).catch(function () {});
+    }
+    // Best-effort: clear any stale Cache Storage entries.
+    if (window.caches && caches.keys) {
+      caches.keys().then(function (ks) {
+        ks.forEach(function (k) { try { caches.delete(k); } catch (e) {} });
+      }).catch(function () {});
+    }
+    function checkVersion() {
+      fetch('/api/version', { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          var v = d && d.version;
+          if (!v || v === window.__ANCHOR_BUILD__) return;
+          // Loop guard: never reload more than once per server version.
+          var key = 'anchor_reloaded_for';
+          try {
+            if (sessionStorage.getItem(key) === String(v)) return;
+            sessionStorage.setItem(key, String(v));
+          } catch (e) {}
+          location.replace(location.pathname + '?v=' + encodeURIComponent(v));
+        })
+        .catch(function () {});
+    }
+    checkVersion();
+    setInterval(checkVersion, 30000);
+  } catch (e) {}
+})();
+"""
+
+
+def cache_bust_script():
+    """Return the inline cache-bust JS for the current BUILD_ID.
+
+    No f-string formatting is used (the JS contains literal braces), so this is
+    safe to drop into an f-string page as ``{cache_bust_script()}`` only after
+    the result is a plain string — callers embed the returned string verbatim.
+    """
+    return _CACHE_BUST_JS_TEMPLATE.replace("__ANCHOR_BUILD_ID__", BUILD_ID)
+
+
 # ── Parsing ────────────────────────────────────────────────────────────
 
 def parse_tasks_from_md(filepath):
@@ -542,6 +622,7 @@ def render_project_window_html(project_id: str) -> str:
         f"var PROJECT_ID = {pid_js};\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
+        "<script>" + cache_bust_script() + "</script>"
         "</body></html>"
     )
 
@@ -2662,6 +2743,7 @@ function addTaskDomain(domain) {{
     apiCall('/api/add', {{text, domain, priority, energy: 'med', due, notes}});
 }}
 </script>
+<script>{cache_bust_script()}</script>
 </body>
 </html>'''
 
@@ -2701,10 +2783,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path == "/" or self.path == "/dashboard":
+            _path_only = urlparse(self.path).path
+            if _path_only == "/" or _path_only == "/dashboard":
+                # Serve the dashboard for "/" REGARDLESS of query string so the
+                # cache-busting reload ("/?v=<build_id>") lands on the dashboard
+                # instead of 404ing.
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
+            elif _path_only == "/api/version":
+                # Must always be fetched fresh (no-store) so the self-healing
+                # client can detect a redeploy.
+                body = json.dumps({"version": BUILD_ID}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
                 ico_path = ANCHOR_DIR / "anchor.ico"
                 if ico_path.exists():
