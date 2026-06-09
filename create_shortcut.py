@@ -56,18 +56,17 @@ def make_ico():
 # ── Create .bat launcher ───────────────────────────────────────────────
 
 def make_bat():
-    """Create a .bat file that starts the server and opens the browser."""
-    server_path = ANCHOR_DIR / "anchor_server.py"
-    bat_content = f'''@echo off
-title Anchor Dashboard
-echo.
-echo   Anchor Dashboard
-echo   ─────────────────
-echo   Starting server...
-echo.
-cd /d "{ANCHOR_DIR}"
-python "{server_path}"
-pause
+    """Create a .bat file that ONLY opens the dashboard in the browser.
+
+    The Anchor server runs persistently under the NSSM service ``anchor``; the
+    launcher must never start its own server (a duplicate would squat port 8777
+    and serve stale content).
+    """
+    bat_content = '''@echo off
+rem Open the Anchor dashboard. The server runs under the NSSM service "anchor";
+rem this launcher must NOT start a server. If it does not load, run (elevated):
+rem   nssm restart anchor
+start "" "http://localhost:8777"
 '''
     BAT_PATH.write_text(bat_content, encoding="utf-8")
     print(f"  Created launcher: {BAT_PATH}")
@@ -141,6 +140,6 @@ if __name__ == "__main__":
   OPTION 3 — Desktop shortcut:
     Already created on your Desktop (if on Windows).
 
-  The server runs at http://localhost:5000
-  Press Ctrl+C in the terminal window to stop it.
+  The launcher only OPENS http://localhost:8777 in your browser.
+  The server itself runs persistently under the NSSM service "anchor".
 """)

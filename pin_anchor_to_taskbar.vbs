@@ -41,43 +41,18 @@ If fso.FileExists(legacyCache) Then
     On Error GoTo 0
 End If
 
-' Step 3: Find pythonw.exe
-pythonExe = ""
-Dim tryPaths(5)
-tryPaths(0) = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Python\Python313\pythonw.exe"
-tryPaths(1) = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Python\Python312\pythonw.exe"
-tryPaths(2) = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Python\Python311\pythonw.exe"
-tryPaths(3) = WshShell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Programs\Python\Python310\pythonw.exe"
-tryPaths(4) = "C:\Python312\pythonw.exe"
-tryPaths(5) = "C:\Python311\pythonw.exe"
+' Step 3: Create fresh shortcut with the new icon.
+' The shortcut points at AnchorDashboard.vbs, which ONLY opens the dashboard
+' URL in the default browser. The Anchor server runs persistently under the
+' NSSM service "anchor"; the icon must NEVER start its own server (that would
+' spawn a duplicate squatting port 8777 and serving stale content).
+launcher = scriptDir & "\AnchorDashboard.vbs"
 
-For Each p In tryPaths
-    If fso.FileExists(p) Then
-        pythonExe = p
-        Exit For
-    End If
-Next
-
-If pythonExe = "" Then
-    Set exec = WshShell.Exec("cmd /c where pythonw.exe 2>nul")
-    result = ""
-    If Not exec.StdOut.AtEndOfStream Then
-        result = Trim(exec.StdOut.ReadLine())
-    End If
-    If result <> "" Then pythonExe = result
-End If
-
-If pythonExe = "" Then
-    MsgBox "Could not find pythonw.exe. Please install Python 3 first.", vbCritical, "Anchor Setup"
-    WScript.Quit
-End If
-
-' Step 4: Create fresh shortcut with the new icon
 Set shortcut = WshShell.CreateShortcut(shortcutPath)
-shortcut.TargetPath = pythonExe
-shortcut.Arguments = """" & scriptDir & "\launch_anchor.pyw"""
+shortcut.TargetPath = "wscript.exe"
+shortcut.Arguments = """" & launcher & """"
 shortcut.WorkingDirectory = scriptDir
-shortcut.Description = "Launch Anchor"
+shortcut.Description = "Open Anchor Dashboard"
 shortcut.WindowStyle = 7
 
 If fso.FileExists(iconPath) Then

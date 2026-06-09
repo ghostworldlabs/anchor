@@ -13,7 +13,7 @@ Usage:
 Launch from Cowork by typing "Dashboard" — Claude will run this for you.
 """
 
-import json, logging, os, re, sys, threading, traceback, webbrowser
+import json, logging, os, re, socket, sys, threading, traceback, webbrowser
 from datetime import datetime, date
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -3106,16 +3106,58 @@ def _heartbeat_watchdog():
     return
 
 
-def make_server(host="127.0.0.1", port=8777):
-    """Construct + bind the threading HTTP server, recovering from a transient
-    bind failure (e.g. a slow-to-come-up Tailscale interface — D4/Wave 2).
+class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer that claims EXCLUSIVE ownership of its port.
 
-    Uses paths.bind_with_retry so a single bind hiccup retries instead of
-    aborting startup. Structured so a test can monkeypatch socket.bind to fail
-    once then succeed and observe recovery.
+    On Windows, ``socket.SO_EXCLUSIVEADDRUSE`` guarantees only ONE process can
+    own the listening port — so a duplicate/orphan Anchor process can never
+    silently squat 8777 and serve stale code. We deliberately turn OFF
+    ``allow_reuse_address`` (HTTPServer enables SO_REUSEADDR by default, which
+    is what permits port sharing) and set SO_EXCLUSIVEADDRUSE before binding.
+
+    Used ONLY for the real fixed-port path (see ``make_server``). The ephemeral
+    ``port=0`` path used by the tests/health check keeps the default behavior.
     """
+
+    # HTTPServer sets this to 1 (SO_REUSEADDR). Force it off for exclusivity.
+    allow_reuse_address = False
+
+    def server_bind(self):
+        try:
+            self.socket.setsockopt(
+                socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1
+            )
+        except (AttributeError, OSError):
+            # SO_EXCLUSIVEADDRUSE is Windows-only; on any platform/socket that
+            # rejects it, fall back to the default bind (use_exclusive_bind
+            # already gates us to Windows, so this is just belt-and-suspenders).
+            pass
+        super().server_bind()
+
+
+def make_server(host="127.0.0.1", port=8777):
+    """Construct + bind the threading HTTP server.
+
+    Two distinct bind-failure modes are reconciled here (D4/Wave 2 + Wave 3
+    single-instance guard):
+
+    - **Transient** failures (e.g. EADDRNOTAVAIL — a slow-to-come-up Tailscale
+      interface not yet assignable) are retried by ``paths.bind_with_retry``.
+    - **Address already owned by another Anchor** (EADDRINUSE) is NOT retried —
+      ``bind_with_retry`` re-raises it immediately so the caller can exit
+      cleanly instead of spinning into a bad state.
+
+    For the real fixed port (non-zero, on Windows) we bind with
+    SO_EXCLUSIVEADDRUSE so the OS guarantees a single owner. The ``port=0``
+    ephemeral path (tests / health check) keeps the default ThreadingHTTPServer
+    behavior so OS-assigned ports are unaffected.
+    """
+    if _paths.use_exclusive_bind(host, port):
+        server_cls = _ExclusiveThreadingHTTPServer
+    else:
+        server_cls = ThreadingHTTPServer
     return _paths.bind_with_retry(
-        lambda: ThreadingHTTPServer((host, port), AnchorHandler)
+        lambda: server_cls((host, port), AnchorHandler)
     )
 
 
@@ -3128,7 +3170,24 @@ def main():
         if idx + 1 < len(sys.argv):
             port = int(sys.argv[idx + 1])
 
-    server = make_server("127.0.0.1", port)
+    try:
+        server = make_server("127.0.0.1", port)
+    except OSError as exc:
+        # Single-instance guard: another healthy Anchor already owns this port.
+        # Do NOT retry-forever or fight for the port — exit cleanly so the
+        # existing server keeps serving and we never become a stale duplicate.
+        if _paths.classify_bind_error(exc) == "exit":
+            msg = (
+                f"Anchor already running on {port} — this instance is exiting "
+                f"to avoid a duplicate."
+            )
+            print(msg)
+            try:
+                _logger.warning(msg)
+            except Exception:
+                pass
+            sys.exit(0)
+        raise
     _server_instance = server
     url = f"http://localhost:{port}"
 

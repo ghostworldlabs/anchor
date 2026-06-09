@@ -229,6 +229,16 @@ def bind_with_retry(make_server, attempts: int = 5, delay: float = 0.25):
     interface not yet up), retry up to ``attempts`` times with ``delay``
     seconds between tries. Re-raises the last error if all attempts fail.
 
+    A bind that fails because the address is already **owned by another
+    instance** (EADDRINUSE / WSAEADDRINUSE) is NOT a transient hiccup — retrying
+    can never succeed while the other process holds the port — so it is
+    re-raised immediately instead of consuming the retry budget. Every other
+    OSError (notably EADDRNOTAVAIL / WSAEADDRNOTAVAIL — the address not yet
+    assignable on a slow-to-come-up Tailscale interface — and generic, errno-less
+    OSErrors) is treated as transient and retried. This keeps the original
+    Wave-2 retry contract (a plain ``OSError("...")`` with no errno still
+    retries) intact.
+
     Structured so a test can monkeypatch ``socket.bind`` to fail once then
     succeed and observe recovery.
     """
@@ -240,6 +250,91 @@ def bind_with_retry(make_server, attempts: int = 5, delay: float = 0.25):
             return make_server()
         except OSError as exc:  # bind failures surface as OSError
             last_exc = exc
+            # "Address already owned by another Anchor" → no point retrying.
+            if classify_bind_error(exc) == "exit":
+                raise
             if i < attempts - 1:
                 time.sleep(delay)
     raise last_exc
+
+
+# ── Single-instance guard (Wave 3) ─────────────────────────────────────────
+#
+# The Anchor server runs on a FIXED port (8777) under the NSSM service. If a
+# duplicate/orphan process is already squatting that port, a second process
+# binding with SO_REUSEADDR could quietly steal/share it and serve stale code.
+# The guard makes that impossible: the real fixed-port bind requests EXCLUSIVE
+# ownership (Windows SO_EXCLUSIVEADDRUSE), and a bind that loses to an existing
+# owner is classified as "another instance already running → exit cleanly"
+# rather than retried forever.
+#
+# Both helpers below are pure / side-effect-free so they unit-test in isolation
+# without ever touching the real port or the live service.
+
+# errno values for "address already in use" across platforms. WSAEADDRINUSE is
+# the Windows Sockets code (10048); EADDRINUSE is the POSIX code (98 on Linux,
+# 48 on macOS — provided by the stdlib ``errno`` module per-platform).
+_ADDR_IN_USE_ERRNOS = set()
+
+
+def _addr_in_use_errnos():
+    """The set of errno values that mean 'address already in use'."""
+    global _ADDR_IN_USE_ERRNOS
+    if _ADDR_IN_USE_ERRNOS:
+        return _ADDR_IN_USE_ERRNOS
+    import errno as _errno
+    vals = set()
+    for name in ("EADDRINUSE", "WSAEADDRINUSE"):
+        v = getattr(_errno, name, None)
+        if v is not None:
+            vals.add(v)
+    # WSAEADDRINUSE numeric fallback (older Pythons may omit the alias on
+    # non-Windows; the number is stable on Windows).
+    vals.add(10048)
+    _ADDR_IN_USE_ERRNOS = vals
+    return vals
+
+
+def classify_bind_error(exc) -> str:
+    """Classify a bind-time :class:`OSError`.
+
+    Returns:
+      - ``"exit"``  — the address is already in use by **another instance**
+        (EADDRINUSE / WSAEADDRINUSE). Retrying cannot help; the caller should
+        log and exit cleanly so it does not become a duplicate.
+      - ``"retry"`` — any other failure (e.g. EADDRNOTAVAIL: the address is not
+        yet assignable on a slow-to-come-up interface), including generic
+        errno-less OSErrors. These are treated as transient.
+
+    Pure: inspects only the exception's ``errno`` / ``winerror``. Never raises.
+    """
+    in_use = _addr_in_use_errnos()
+    for attr in ("errno", "winerror"):
+        code = getattr(exc, attr, None)
+        if code is not None and code in in_use:
+            return "exit"
+    return "retry"
+
+
+def use_exclusive_bind(host, port) -> bool:
+    """Predicate: should this bind request EXCLUSIVE port ownership?
+
+    True only for the **real fixed-port** server path on Windows:
+      - we are on Windows (SO_EXCLUSIVEADDRUSE only exists there), AND
+      - ``port`` is a concrete non-zero port (the tests and the health check
+        bind ``port=0`` for an OS-assigned ephemeral port; exclusive mode must
+        NOT be applied there, or it would change ephemeral-bind semantics).
+
+    Kept pure so it is unit-testable without opening a socket.
+    """
+    import sys as _sys
+    import socket as _socket
+
+    if _sys.platform != "win32":
+        return False
+    if not hasattr(_socket, "SO_EXCLUSIVEADDRUSE"):
+        return False
+    try:
+        return int(port) != 0
+    except (TypeError, ValueError):
+        return False
