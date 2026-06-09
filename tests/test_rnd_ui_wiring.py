@@ -346,6 +346,91 @@ def test_answer_gate_single_write(server):
     job_runner.wait(jid, timeout=30)
 
 
+# ── D: existing-folder picker (dir_browse endpoint + modal wiring) ───────────
+
+def test_dir_browse_no_path_returns_roots(server):
+    """GET /api/rnd/dir_browse with no path lists drive roots to start from."""
+    gui, base = server
+    code, body = _get(base + "/api/rnd/dir_browse")
+    assert code == 200
+    assert body["ok"] is True
+    res = body["result"]
+    assert isinstance(res["roots"], list) and res["roots"]
+    # No path → nothing resolved yet, no error.
+    assert res["path"] is None
+    assert res["error"] is None
+
+
+def test_dir_browse_lists_subdir_and_parent(server, tmp_path):
+    """GET /api/rnd/dir_browse?path=<tmp dir with a subdir> returns that subdir
+    in ``dirs`` and the correct ``parent`` — i.e. it powers navigation."""
+    gui, base = server
+    sub = tmp_path / "child"
+    sub.mkdir()
+    # A file in the same dir must NOT show up (directories only).
+    (tmp_path / "afile.txt").write_text("x", encoding="utf-8")
+    from urllib.parse import quote
+    code, body = _get(base + "/api/rnd/dir_browse?path=" + quote(str(tmp_path)))
+    assert code == 200
+    res = body["result"]
+    assert res["error"] is None
+    names = {d["name"] for d in res["dirs"]}
+    assert "child" in names
+    assert "afile.txt" not in names
+    # The subdir row carries its absolute path (used by npBrowse / npSelectPath).
+    child_row = next(d for d in res["dirs"] if d["name"] == "child")
+    assert child_row["path"] == str(sub)
+    # Parent points one level up so the "Up" row can navigate back.
+    assert res["parent"] == str(tmp_path.parent)
+
+
+def test_dir_browse_missing_path_clean_error(server, tmp_path):
+    """A missing path surfaces a structured ``path-missing`` error, not a 500."""
+    gui, base = server
+    from urllib.parse import quote
+    missing = tmp_path / "nope-not-here"
+    code, body = _get(base + "/api/rnd/dir_browse?path=" + quote(str(missing)))
+    assert code == 200
+    res = body["result"]
+    assert res["error"] == "path-missing"
+
+
+def test_new_project_picker_wiring_in_html(gui_env):
+    """The New Project modal carries the clear existing-folder picker: a
+    "Select this folder" button, the per-row "Select" affordance, the location
+    line, the hidden npFolderPath input, and the navigation JS — with the
+    f-string intact (no leaked braces)."""
+    gui = gui_env
+    html = gui.generate_html(*gui.gather_all())
+    # Explicit current-folder selection.
+    assert "Select this folder" in html
+    assert "npSelectCurrent(" in html
+    # Per-row direct selection affordance.
+    assert "npSelectPath(" in html
+    # Navigation + state plumbing.
+    assert "npBrowse(" in html
+    assert 'id="npFolderPath"' in html
+    assert 'id="npLoc"' in html
+    assert 'id="npSelected"' in html
+    # f-string intact: no leaked doubled braces in the served HTML.
+    assert "{{" not in html and "}}" not in html
+
+
+def test_select_existing_missing_path_no_crash_endpoint(server, tmp_path):
+    """select_existing_project still registers a chosen folder, and a missing
+    path yields a path-missing state (regression guard for the picker backend)."""
+    gui, base = server
+    real = tmp_path / "realproj"
+    real.mkdir()
+    res = gui.select_existing_project("Picked", str(real))
+    assert res["path_exists"] is True
+    assert res["entry"]["id"]
+    # Missing path → path-missing state, no crash.
+    ghost = gui.select_existing_project("Ghost", str(tmp_path / "missing"))
+    assert ghost["path_exists"] is False
+    assert ghost["entry"]["state"] == "path-missing"
+
+
 # ── C: project window carries the launch controls + log drawer hooks ─────────
 
 def test_project_window_has_lane_controls_and_log_drawer(gui_env):

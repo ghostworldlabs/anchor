@@ -2009,6 +2009,44 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .modal input:focus, .modal select:focus {{ border-color: var(--accent); }}
 .modal-actions {{ display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }}
 
+/* R&D existing-folder picker */
+.rnd-picker-loc {{
+    font-size: 12px; color: var(--text-dim); margin-bottom: 6px;
+    word-break: break-all; line-height: 1.4;
+}}
+.rnd-picker-loc b {{ color: var(--text); }}
+.rnd-picker-selected {{
+    font-size: 12px; margin: 6px 0 0; padding: 6px 10px; border-radius: 6px;
+    background: rgba(108,156,252,0.12); border: 1px solid var(--accent);
+    color: var(--text); word-break: break-all; line-height: 1.4;
+}}
+.rnd-picker-selected.empty {{
+    background: var(--surface2); border-color: var(--border); color: var(--text-dim);
+}}
+.rnd-picker-err {{
+    font-size: 12px; margin: 6px 0; padding: 6px 10px; border-radius: 6px;
+    background: rgba(248,113,113,0.12); border: 1px solid var(--danger); color: var(--text);
+    word-break: break-all; line-height: 1.4;
+}}
+.rnd-browse {{ background: var(--surface2); }}
+.rnd-browse-row {{
+    display: flex; align-items: center; gap: 8px; padding: 5px 6px;
+    border-radius: 5px; cursor: pointer; transition: background 0.12s;
+}}
+.rnd-browse-row:hover {{ background: rgba(108,156,252,0.14); }}
+.rnd-browse-row .rb-icon {{ flex: 0 0 auto; }}
+.rnd-browse-row .rb-name {{
+    flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}}
+.rnd-browse-row .rb-pick {{
+    flex: 0 0 auto; opacity: 0; font-size: 10px; padding: 2px 8px;
+    border-radius: 4px; border: 1px solid var(--border); background: none;
+    color: var(--accent); cursor: pointer; white-space: nowrap; transition: all 0.12s;
+}}
+.rnd-browse-row:hover .rb-pick {{ opacity: 1; }}
+.rnd-browse-row .rb-pick:hover {{ background: rgba(108,156,252,0.18); border-color: var(--accent); }}
+.rnd-browse-up {{ color: var(--text-dim); }}
+
 /* Toast */
 .toast {{
     position: fixed; bottom: 24px; right: 24px; background: var(--success);
@@ -2375,9 +2413,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     </div>
     <!-- Select-existing mode -->
     <div id="npExistingFields" style="display:none">
-      <label>Folder</label>
-      <input type="text" id="npFolderPath" placeholder="Selected folder path" />
+      <input type="hidden" id="npFolderPath" />
+      <label>Browse to a folder</label>
+      <div class="rnd-picker-loc" id="npLoc">Current folder: <b>—</b></div>
+      <div class="rnd-picker-err" id="npBrowseErr" style="display:none"></div>
       <div class="rnd-browse" id="npBrowse" style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px;padding:6px;margin-top:6px;font-size:13px"></div>
+      <button type="button" class="btn btn-sm" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Select this folder</button>
+      <div class="rnd-picker-selected empty" id="npSelected">No folder selected yet</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal('newProjectModal')">Cancel</button>
@@ -2662,6 +2704,8 @@ function openNewProject() {{
     document.getElementById('npParentPath').value = '';
     document.getElementById('npFolderPath').value = '';
     document.getElementById('npGitInit').checked = false;
+    _npCurrentPath = null;
+    npUpdateSelectedUI();
     document.getElementById('newProjectModal').classList.add('open');
 }}
 
@@ -2675,6 +2719,8 @@ function npSetMode(mode) {{
     if (!isNew) npBrowse(null);
 }}
 
+let _npCurrentPath = null;   // folder currently shown in the picker (res.path)
+
 async function npBrowse(path) {{
     const url = '/api/rnd/dir_browse' + (path ? ('?path=' + encodeURIComponent(path)) : '');
     let data;
@@ -2682,21 +2728,76 @@ async function npBrowse(path) {{
     catch(e) {{ showToast('Browse failed: ' + e.message); return; }}
     const res = (data && data.result) || {{}};
     const box = document.getElementById('npBrowse');
-    let html = '';
+    const locEl = document.getElementById('npLoc');
+    const errEl = document.getElementById('npBrowseErr');
+    const hereBtn = document.getElementById('npSelectHereBtn');
+
+    // Track the location we're viewing — does NOT auto-select it.
+    _npCurrentPath = res.path || null;
+
+    // Location line.
     if (res.path) {{
-        document.getElementById('npFolderPath').value = res.path;
-        html += '<div style="color:var(--text-dim);margin-bottom:4px">' + escHtml(res.path) + '</div>';
+        locEl.innerHTML = 'Current folder: <b>' + escHtml(res.path) + '</b>';
+    }} else {{
+        locEl.innerHTML = 'Current folder: <b>(pick a drive below)</b>';
     }}
+
+    // Error line — graceful recovery (parent/roots still offered below).
+    if (res.error) {{
+        errEl.style.display = 'block';
+        errEl.textContent = "Can't open " + (res.path || 'that folder') + ' — ' + res.error;
+    }} else {{
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+    }}
+
+    // "Select this folder" only makes sense when we're inside a real folder.
+    hereBtn.style.display = res.path ? 'inline-block' : 'none';
+
+    let html = '';
     if (res.parent) {{
-        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(res.parent) + ')">&#8593; ..</div>';
+        html += '<div class="rnd-browse-row rnd-browse-up" onclick="npBrowse(' + jsStr(res.parent) + ')">'
+              + '<span class="rb-icon">&#8593;</span><span class="rb-name">.. (up one level)</span></div>';
     }}
     (res.roots || []).forEach(r => {{
-        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(r) + ')">&#128193; ' + escHtml(r) + '</div>';
+        html += '<div class="rnd-browse-row" onclick="npBrowse(' + jsStr(r) + ')">'
+              + '<span class="rb-icon">&#128190;</span><span class="rb-name">' + escHtml(r) + '</span>'
+              + '<button type="button" class="rb-pick" onclick="event.stopPropagation();npSelectPath(' + jsStr(r) + ')">Select</button></div>';
     }});
     (res.dirs || []).forEach(d => {{
-        html += '<div class="rnd-browse-row" style="cursor:pointer;padding:2px 4px" onclick="npBrowse(' + jsStr(d.path) + ')">&#128193; ' + escHtml(d.name) + '</div>';
+        html += '<div class="rnd-browse-row" onclick="npBrowse(' + jsStr(d.path) + ')">'
+              + '<span class="rb-icon">&#128193;</span><span class="rb-name">' + escHtml(d.name) + '</span>'
+              + '<button type="button" class="rb-pick" onclick="event.stopPropagation();npSelectPath(' + jsStr(d.path) + ')">Select</button></div>';
     }});
-    box.innerHTML = html || '<div style="color:var(--text-dim)">(no subfolders)</div>';
+    box.innerHTML = html || '<div style="color:var(--text-dim);padding:4px">(no subfolders here)</div>';
+    npUpdateSelectedUI();
+}}
+
+// Select the folder currently shown in the picker.
+function npSelectCurrent() {{
+    if (!_npCurrentPath) {{ showToast('Open a folder first, then select it'); return; }}
+    npSelectPath(_npCurrentPath);
+}}
+
+// Select a specific absolute folder path (from a row's "Select" affordance).
+function npSelectPath(path) {{
+    if (!path) {{ showToast('That folder has no path'); return; }}
+    document.getElementById('npFolderPath').value = path;
+    npUpdateSelectedUI();
+    showToast('Selected: ' + path);
+}}
+
+function npUpdateSelectedUI() {{
+    const sel = (document.getElementById('npFolderPath').value || '').trim();
+    const el = document.getElementById('npSelected');
+    if (!el) return;
+    if (sel) {{
+        el.classList.remove('empty');
+        el.innerHTML = 'Selected: <b>' + escHtml(sel) + '</b>';
+    }} else {{
+        el.classList.add('empty');
+        el.textContent = 'No folder selected yet';
+    }}
 }}
 
 function escHtml(s) {{ const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }}
@@ -2714,7 +2815,7 @@ async function createNewProject() {{
                  git_init: document.getElementById('npGitInit').checked}};
     }} else {{
         const folder = document.getElementById('npFolderPath').value.trim();
-        if (!folder) {{ showToast('Select a folder'); return; }}
+        if (!folder) {{ showToast('No folder selected — browse to a folder and click “Select this folder”'); return; }}
         body = {{mode: 'existing', name, priority, folder_path: folder}};
     }}
     closeModal('newProjectModal');
