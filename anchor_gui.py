@@ -605,7 +605,12 @@ def render_project_window_html(project_id: str) -> str:
         "<h2>Lanes</h2>"
         f"{status}"
         "<div class='rnd-launch'>"
-        "<button class='rnd-btn' onclick=\"launchLane('research')\">Run Research</button>"
+        # Research offers an engine choice: Claude (default) or Gemini. Gemini is
+        # research-only (researchPrime is portable); Plan/Build are Claude-only.
+        "<button class='rnd-btn' onclick=\"launchLane('research','claude')\">"
+        "Run Research (Claude)</button>"
+        "<button class='rnd-btn' onclick=\"launchLane('research','gemini')\">"
+        "Run Research (Gemini)</button>"
         "<button class='rnd-btn' onclick=\"launchLane('plan')\">Run Plan</button>"
         "<button class='rnd-btn' onclick=\"launchLane('build')\">Run Build</button>"
         "</div>"
@@ -648,7 +653,10 @@ function _appendLine(line) {
   log.scrollTop = log.scrollHeight;
 }
 
-async function launchLane(lane) {
+async function launchLane(lane, backend) {
+  // backend defaults to 'claude'. Only the research lane offers 'gemini';
+  // plan/build are Claude-only (enforced server-side too).
+  backend = backend || 'claude';
   document.getElementById('laneLog').textContent = '';
   document.getElementById('laneGate').style.display = 'none';
   _gateShown = false;
@@ -657,7 +665,7 @@ async function launchLane(lane) {
   try {
     r = await fetch('/api/rnd/launch_lane', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({project_id: PROJECT_ID, lane: lane})
+      body: JSON.stringify({project_id: PROJECT_ID, lane: lane, backend: backend})
     });
     data = await r.json();
   } catch (e) { _appendLine('[launch error] ' + e.message); return; }
@@ -666,8 +674,9 @@ async function launchLane(lane) {
     return;
   }
   _jobId = data.job_id;
+  var eng = data.backend || backend;
   document.getElementById('laneStatus').textContent =
-    lane + ' · job ' + _jobId + ' · ' + (data.status || 'running');
+    lane + ' · ' + eng + ' · job ' + _jobId + ' · ' + (data.status || 'running');
   _startPolling();
 }
 
@@ -3243,20 +3252,36 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # / a concurrency refusal (same-lane-busy or folder-build-lock).
             pid = body.get("project_id", "")
             lane = body.get("lane", "")
+            backend = body.get("backend") or _lanes.DEFAULT_BACKEND
             if lane not in _lanes.LANES:
                 self._send_json({"ok": False, "error": f"invalid lane: {lane}",
                                  "reason": "invalid-lane"}, 400)
+            elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+                self._send_json({"ok": False,
+                                 "error": f"invalid engine: {backend}",
+                                 "reason": "invalid-engine"}, 400)
             else:
                 try:
-                    rec = _lanes.launch_lane(pid, lane)
+                    rec = _lanes.launch_lane(pid, lane, backend=backend)
                     self._send_json({
                         "ok": True,
                         "job_id": rec.get("job_id"),
                         "lane": lane,
+                        "backend": rec.get("backend"),
                         "status": rec.get("status"),
                         "skill": rec.get("skill"),
                         "gates": rec.get("gates"),
                     })
+                except _lanes.EngineNotAllowedError as eng:
+                    # Engine policy refused (e.g. gemini on plan/build) — clean
+                    # JSON error, NOT a 500.
+                    self._send_json({
+                        "ok": False,
+                        "error": str(eng),
+                        "reason": "engine-not-allowed",
+                        "lane": eng.lane,
+                        "backend": eng.backend,
+                    }, 400)
                 except KeyError:
                     self._send_json({"ok": False,
                                      "error": f"unknown project: {pid}",

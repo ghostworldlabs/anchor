@@ -53,6 +53,37 @@ SKILL_RESEARCH = "researchPrime"
 SKILL_PLAN = "crucible"
 SKILL_BUILD = "foreman"
 
+#: Engine backends. Claude is the default and available on ALL lanes. Gemini is
+#: a portable read-only engine available ONLY for the research lane —
+#: researchPrime is portable, but Crucible (plan) and Foreman (build) are Claude
+#: Code engines Gemini can't run.
+BACKEND_CLAUDE = _jr.BACKEND_CLAUDE
+BACKEND_GEMINI = _jr.BACKEND_GEMINI
+DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
+
+#: The set of (lane, backend) pairs that are allowed. Everything else with a
+#: non-claude backend is refused. Claude works on all lanes; gemini only on
+#: research.
+GEMINI_LANES = frozenset((LANE_RESEARCH,))
+
+
+class EngineNotAllowedError(ValueError):
+    """Raised when an engine backend is not permitted for the requested lane.
+
+    Gemini is offered ONLY for the research lane; plan/build run on Claude
+    (Crucible/Foreman are Claude Code engines Gemini can't run). Carries the
+    offending ``lane`` and ``backend`` for a clean structured refusal.
+    """
+
+    def __init__(self, lane, backend, message=None):
+        self.lane = lane
+        self.backend = backend
+        super().__init__(
+            message
+            or "Gemini is only available for the Research lane; "
+               "Plan/Build run on Claude."
+        )
+
 
 class LaneDef:
     """A lane's frozen wiring: skill + output subdir + gate flag + seed template.
@@ -196,7 +227,8 @@ def build_extra_args(lane: str, output_dir, prompt_seed: str) -> list:
 # ── Launch a lane ───────────────────────────────────────────────────────────
 
 def _write_launch_record(output_dir: Path, project_id: str, lane: str,
-                         job_id: str, skill: str, prompt_seed: str) -> Path:
+                         job_id: str, skill: str, prompt_seed: str,
+                         backend: str = DEFAULT_BACKEND) -> Path:
     """Persist a small launch pointer-record into the project-scoped output dir.
 
     This is what makes "the effort is recorded under .anchor/projects/<id>/<lane>/"
@@ -213,6 +245,7 @@ def _write_launch_record(output_dir: Path, project_id: str, lane: str,
             "project_id": project_id,
             "lane": lane,
             "skill": skill,
+            "backend": backend,
             "prompt_seed": prompt_seed,
             "output_dir": str(output_dir),
             "launched_at": time.time(),
@@ -223,21 +256,37 @@ def _write_launch_record(output_dir: Path, project_id: str, lane: str,
         return p
 
 
+def check_engine_allowed(lane: str, backend: str) -> None:
+    """Enforce the engine policy: Gemini is research-only; Claude runs anywhere.
+
+    Raises :class:`EngineNotAllowedError` if ``backend == "gemini"`` and ``lane``
+    is not the research lane. Claude (the default) is always allowed.
+    """
+    if backend == BACKEND_GEMINI and lane not in GEMINI_LANES:
+        raise EngineNotAllowedError(lane, backend)
+
+
 def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
-                extra_args=None) -> dict:
+                extra_args=None, backend=DEFAULT_BACKEND) -> dict:
     """Launch a trio lane for a registered project under the frozen policy.
 
     Steps:
     1. Resolve the project from ``rnd_registry`` (raises ``KeyError`` if unknown).
-    2. Compute the project-scoped output path
+    2. Enforce the engine policy: Claude (default) runs on all lanes; Gemini is
+       allowed ONLY on the research lane (``EngineNotAllowedError`` otherwise).
+    3. Compute the project-scoped output path
        ``<folder>/.anchor/projects/<id>/<lane-subdir>/`` and scaffold it.
-    3. Build the prompt seed + runner extra-args (skill id + output path +
+    4. Build the prompt seed + runner extra-args (skill id + output path +
        seed) — i.e. pass the project-scoped output path INTO the engine.
-    4. Launch via ``job_runner.launch_guarded``, which enforces:
-       within-project same-lane serialized + cross-lane concurrent, and the
-       folder-level build lock for the build lane.
-    5. Record a launch pointer-record inside the project-scoped output dir so the
+    5. Launch via ``job_runner.launch_guarded`` (threading ``backend`` through to
+       the runner), which enforces: within-project same-lane serialized +
+       cross-lane concurrent, and the folder-level build lock for the build lane.
+    6. Record a launch pointer-record inside the project-scoped output dir so the
        effort is demonstrably under the project namespace (never the folder root).
+
+    ``backend`` ∈ {"claude","gemini"} (default "claude") selects the engine. The
+    chosen engine is recorded on both the job record and the launch
+    pointer-record so the UI/history can show which engine ran an effort.
 
     Gating: research has no gate (runs to completion); plan/build gate
     in-session — handled by ``gate_adapter`` once the stream surfaces the
@@ -245,10 +294,15 @@ def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
     lane as gating, which the seed reflects).
 
     Returns the augmented job record (includes ``skill``, ``output_dir``,
-    ``project_id``, ``folder_path``, ``gates``). Raises
-    ``job_runner.LaneBusyError`` if the concurrency policy refuses the launch.
+    ``project_id``, ``folder_path``, ``gates``, ``backend``). Raises
+    ``EngineNotAllowedError`` if the engine policy refuses the launch, or
+    ``job_runner.LaneBusyError`` if the concurrency policy refuses it.
     """
+    backend = backend or DEFAULT_BACKEND
     ld = get_lane(lane)
+    # Engine policy: Gemini only on research; Claude anywhere. Checked before any
+    # subprocess is spawned so a refused launch leaves no side effects.
+    check_engine_allowed(lane, backend)
     project = _rnd.get_project(project_id)
     if project is None:
         raise KeyError(project_id)
@@ -267,13 +321,14 @@ def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
     rec = _jr.launch_guarded(
         lane, project_id=project_id, folder_path=folder_path,
         cwd=folder_path or None, extra_args=launch_args, env=env,
-        job_id=job_id,
+        job_id=job_id, backend=backend,
     )
     jid = rec["job_id"]
 
-    # Record the effort under the project namespace (on-disk proof for AC1).
+    # Record the effort under the project namespace (on-disk proof for AC1),
+    # stamping the chosen engine so history shows which engine ran the effort.
     _write_launch_record(output_dir, project_id, lane, jid, ld.skill,
-                         prompt_seed)
+                         prompt_seed, backend)
 
     # Augment + persist the record with lane wiring metadata for the UI / Wave 7.
     rec = _jr._update_record(
@@ -282,5 +337,6 @@ def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
         output_dir=str(output_dir),
         gates=ld.gates,
         mutates_tree=ld.mutates_tree,
+        backend=backend,
     )
     return rec

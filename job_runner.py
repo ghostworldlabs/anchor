@@ -56,6 +56,28 @@ DEFAULT_RUNNER_CMD = (
     "claude -p --input-format stream-json --output-format stream-json"
 )
 
+#: Engine backends. Claude is the default and runs on all lanes; Gemini is a
+#: portable read-only engine offered ONLY for the research lane (policy enforced
+#: in ``lanes.launch_lane``). The runner command for each is resolved by
+#: :func:`resolve_runner_cmd`. ``ANCHOR_RUNNER_CMD`` (the test indirection point)
+#: ALWAYS wins, regardless of backend, so the mock runner drives every test.
+BACKEND_CLAUDE = "claude"
+BACKEND_GEMINI = "gemini"
+DEFAULT_BACKEND = BACKEND_CLAUDE
+
+#: Env var overriding the Gemini runner command (best-effort default below is
+#: overridable pending a live spike). When unset, :data:`DEFAULT_GEMINI_CMD` is
+#: used. Verified headless invocation on this host:
+#:   ``gemini -p "<prompt>" --output-format stream-json --approval-mode plan``
+#: ``--approval-mode plan`` is read-only (research is non-mutating). The
+#: prompt/seed is appended by the lane wiring via ``extra_args`` exactly as for
+#: claude; the gemini CLI tolerates/parses the trailing seed. Override the whole
+#: command via this env var once a live spike pins the exact flags.
+GEMINI_CMD_ENV = "ANCHOR_GEMINI_CMD"
+DEFAULT_GEMINI_CMD = (
+    "gemini -p --output-format stream-json --approval-mode plan"
+)
+
 #: Long-poll ceiling (seconds). Production default per the frozen design; the
 #: HTTP layer passes this. Injectable so tests run fast (never actually 25s).
 DEFAULT_LONGPOLL_CEILING = 25.0
@@ -228,17 +250,30 @@ def _update_record(job_id: str, **fields) -> dict:
 
 # ── Runner command resolution ────────────────────────────────────────────────
 
-def resolve_runner_cmd(extra_args=None) -> list:
-    """Resolve the runner command as an argv list.
+def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND) -> list:
+    """Resolve the runner command as an argv list, honoring the engine backend.
 
-    Reads ``ANCHOR_RUNNER_CMD`` (falls back to the production ``claude`` default
-    when unset). ``extra_args`` (a list) is appended — used by later waves to
-    pass the per-lane skill/prompt seed. Parsed with :func:`shlex.split` using
-    POSIX rules so a path like ``python C:/.../fake_claude.py`` survives intact
-    on Windows (backslashes are avoided by passing forward-slash paths).
+    Resolution order (CRITICAL — the test indirection must always win):
+    1. ``ANCHOR_RUNNER_CMD`` set → use it **for any backend** (this is how the
+       whole test suite drives the mock ``tests/fake_claude.py`` regardless of
+       which engine a launch selected). Never broken by adding gemini.
+    2. else backend == ``"gemini"`` → ``ANCHOR_GEMINI_CMD`` env, or the built-in
+       :data:`DEFAULT_GEMINI_CMD` (best-effort, overridable pending a live spike).
+    3. else (claude) → ``DEFAULT_RUNNER_CMD`` (the existing claude default —
+       unchanged).
+
+    ``extra_args`` (a list) is appended — the per-lane skill/prompt seed. Parsed
+    with :func:`shlex.split` using POSIX rules so a path like
+    ``python C:/.../fake_claude.py`` survives intact on Windows (backslashes are
+    avoided by passing forward-slash paths).
     """
-    raw = os.environ.get(RUNNER_CMD_ENV)
-    if not (raw and raw.strip()):
+    override = os.environ.get(RUNNER_CMD_ENV)
+    if override and override.strip():
+        raw = override
+    elif backend == BACKEND_GEMINI:
+        gem = os.environ.get(GEMINI_CMD_ENV)
+        raw = gem if (gem and gem.strip()) else DEFAULT_GEMINI_CMD
+    else:
         raw = DEFAULT_RUNNER_CMD
     argv = shlex.split(raw, posix=True)
     if extra_args:
@@ -249,14 +284,18 @@ def resolve_runner_cmd(extra_args=None) -> list:
 # ── Launch ───────────────────────────────────────────────────────────────────
 
 def launch(lane: str, cwd=None, extra_args=None, env=None,
-           job_id: str = None) -> dict:
+           job_id: str = None, backend=DEFAULT_BACKEND) -> dict:
     """Launch a server-owned job. Returns the job record.
 
-    The record holds at least ``{job_id, lane, pid, status, log_path}``. stdout
-    is streamed by a daemon reader thread into a durable log file *and* an
+    The record holds at least ``{job_id, lane, pid, status, log_path, backend}``.
+    stdout is streamed by a daemon reader thread into a durable log file *and* an
     in-memory ring buffer. ``cwd`` is the project working directory; ``env`` is
-    merged onto the current environment.
+    merged onto the current environment. ``backend`` ∈ {"claude","gemini"}
+    selects the engine command (resolved by :func:`resolve_runner_cmd`); it is
+    recorded on the job so the UI/history can show which engine ran the effort.
+    ``ANCHOR_RUNNER_CMD``, when set, still overrides the command for any backend.
     """
+    backend = backend or DEFAULT_BACKEND
     job_id = job_id or uuid.uuid4().hex
     # Pin this job's storage dir for its lifetime (resolved now, once).
     pinned = jobs_dir()
@@ -267,7 +306,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # Truncate/create the durable log up front so tail() always has a target.
     lp.write_text("", encoding="utf-8")
 
-    argv = resolve_runner_cmd(extra_args)
+    argv = resolve_runner_cmd(extra_args, backend=backend)
 
     full_env = dict(os.environ)
     if env:
@@ -306,6 +345,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "started_at": time.time(),
         "exit_code": None,
         "session_id": None,
+        "backend": backend,
     }
     _write_record(rec)
 
@@ -717,7 +757,8 @@ def folder_build_holder(folder_path: str):
 
 
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
-                   extra_args=None, env=None, job_id: str = None) -> dict:
+                   extra_args=None, env=None, job_id: str = None,
+                   backend=DEFAULT_BACKEND) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -755,7 +796,7 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
         # Both gates clear → launch under the lock, then record the reservation
         # against the real job_id so subsequent contenders see it.
         rec = launch(lane, cwd=cwd, extra_args=extra_args, env=env,
-                     job_id=job_id)
+                     job_id=job_id, backend=backend)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:

@@ -439,8 +439,9 @@ def test_project_window_has_lane_controls_and_log_drawer(gui_env):
     with tempfile.TemporaryDirectory() as td:
         proj = _mkproject(gui, Path(td) / "win", "WindowProj")
         html = gui.render_project_window_html(proj["id"])
-    # Lane-launch controls.
-    assert "launchLane('research')" in html
+    # Lane-launch controls. Research now carries an engine choice (Claude default
+    # + Gemini); plan/build stay Claude-only (no engine arg).
+    assert "launchLane('research','claude')" in html
     assert "launchLane('plan')" in html
     assert "launchLane('build')" in html
     # Log drawer + gate hooks (the page emits single-quoted attributes).
