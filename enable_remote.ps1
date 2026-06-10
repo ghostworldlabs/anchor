@@ -51,10 +51,14 @@ $nssm = if (Test-Path 'C:\Tools\nssm\nssm.exe') { 'C:\Tools\nssm\nssm.exe' }
 Write-Host "Using nssm: $nssm" -ForegroundColor DarkGray
 
 # --- read the current AppEnvironmentExtra into an ordered map (preserve it) ---
+# Read from the REGISTRY (clean REG_MULTI_SZ String[]), NOT `nssm get` - the
+# latter returns UTF-16 that mis-decodes into char-spaced garbage ("P A T H"),
+# which would corrupt the merge. nssm is still used to WRITE (it encodes fine).
 function Get-ExtraEnv {
-    $raw = & $nssm get $Svc AppEnvironmentExtra 2>$null
+    $key = "HKLM:\SYSTEM\CurrentControlSet\Services\$Svc\Parameters"
+    $val = (Get-ItemProperty -Path $key -Name AppEnvironmentExtra -ErrorAction SilentlyContinue).AppEnvironmentExtra
     $map = [ordered]@{}
-    foreach ($line in @($raw)) {
+    foreach ($line in @($val)) {
         $line = "$line".Trim()
         if (-not $line) { continue }
         $i = $line.IndexOf('=')
@@ -125,7 +129,17 @@ Write-Host "`n=== AFTER ===" -ForegroundColor Cyan
 $after = Get-CimInstance Win32_Service -Filter "Name='$Svc'"
 Write-Host ("State    : {0}" -f $after.State)
 Write-Host ("Bind     : {0}" -f $bindMsg)
+# Read the env back from the registry (clean) to PROVE it persisted.
+$post = Get-ExtraEnv
+if (-not $Off) {
+    if ($post['ANCHOR_TOKEN']) { Write-Host "ANCHOR_TOKEN: persisted OK" -ForegroundColor Green }
+    else { Write-Host "ANCHOR_TOKEN: NOT persisted - the env write failed!" -ForegroundColor Red }
+    Write-Host ("ANCHOR_BIND : {0}" -f $post['ANCHOR_BIND'])
+}
 $listen = Get-NetTCPConnection -State Listen -LocalPort 8777 -ErrorAction SilentlyContinue
+if ($listen -and -not $Off -and (@($listen).LocalAddress -contains '127.0.0.1') -and -not (@($listen).LocalAddress -contains $Bind) -and ($Bind -ne '0.0.0.0')) {
+    Write-Host "WARNING: still listening on 127.0.0.1 only - remote bind did NOT take effect." -ForegroundColor Red
+}
 if ($listen) {
     $listen | Select-Object LocalAddress, LocalPort, OwningProcess | Format-Table -AutoSize
 } else {
