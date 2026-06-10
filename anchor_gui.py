@@ -644,6 +644,28 @@ var _gateShown = false;
 
 function _esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
 
+// ── Access token (D4) ──────────────────────────────────────────────────────
+// The shared-secret token is kept ONLY in this browser's localStorage and sent
+// as X-Anchor-Token on mutating POSTs. It is NEVER embedded in the served HTML
+// (GET is unauthenticated, so embedding would leak it to anyone who can reach
+// the page). When ANCHOR_TOKEN is unset on the server, auth is disabled and the
+// header is simply ignored, so local use needs no token.
+function _anchorToken() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
+function setAnchorToken() {
+  var cur = _anchorToken();
+  var t = window.prompt('Anchor access token (blank to clear):', cur);
+  if (t === null) return false;            // user cancelled
+  try { if (t) { localStorage.setItem('anchor_token', t); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
+  return true;
+}
+function _postJson(url, payload) {
+  var headers = {'Content-Type': 'application/json'};
+  var tok = _anchorToken();
+  if (tok) headers['X-Anchor-Token'] = tok;
+  return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
+}
+function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
+
 function _appendLine(line) {
   var log = document.getElementById('laneLog');
   var text;
@@ -662,12 +684,14 @@ async function launchLane(lane, backend) {
   _gateShown = false;
   _since = 0;
   var r, data;
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
   try {
-    r = await fetch('/api/rnd/launch_lane', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({project_id: PROJECT_ID, lane: lane, backend: backend})
-    });
+    r = await _postJson('/api/rnd/launch_lane', payload);
     data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/launch_lane', payload);
+      data = await r.json();
+    }
   } catch (e) { _appendLine('[launch error] ' + e.message); return; }
   if (!data.ok) {
     _appendLine('[launch refused] ' + (data.error || data.reason || 'unknown'));
@@ -733,11 +757,13 @@ function _renderGate(prompt) {
 async function answerGate(choice) {
   if (!_jobId) return;
   try {
-    var r = await fetch('/api/rnd/answer_gate', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({job_id: _jobId, choice: choice})
-    });
+    var payload = {job_id: _jobId, choice: choice};
+    var r = await _postJson('/api/rnd/answer_gate', payload);
     var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/answer_gate', payload);
+      data = await r.json();
+    }
     _appendLine('[gate answered: ' + choice + (data.written ? '' : ' (no-op: ' + data.reason + ')') + ']');
   } catch (e) { _appendLine('[gate error] ' + e.message); }
   document.getElementById('laneGate').style.display = 'none';
@@ -2447,13 +2473,29 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 // Heartbeat disabled — the server runs until explicitly stopped so the
 // dashboard is instantly available when you return to the tab later.
 
+// ── Access token (D4) ──
+// Kept ONLY in this browser's localStorage; sent as X-Anchor-Token on mutating
+// POSTs; NEVER embedded in the served HTML (GET is unauthenticated). When the
+// server has no ANCHOR_TOKEN set, auth is off and the header is ignored.
+function _anchorToken() {{ try {{ return localStorage.getItem('anchor_token') || ''; }} catch (e) {{ return ''; }} }}
+function setAnchorToken() {{
+    const cur = _anchorToken();
+    const t = window.prompt('Anchor access token (blank to clear):', cur);
+    if (t === null) return false;
+    try {{ if (t) {{ localStorage.setItem('anchor_token', t); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
+    return true;
+}}
+
 async function apiCall(endpoint, body) {{
     // Retry once on network failure — the server may have briefly paused
     // (e.g. GC, slow I/O) and the browser throttled our heartbeat.
     async function _doFetch() {{
+        const headers = {{'Content-Type': 'application/json'}};
+        const tok = _anchorToken();
+        if (tok) headers['X-Anchor-Token'] = tok;
         const r = await fetch(endpoint, {{
             method: 'POST',
-            headers: {{'Content-Type': 'application/json'}},
+            headers: headers,
             body: JSON.stringify(body)
         }});
         return await r.json();
@@ -2463,6 +2505,10 @@ async function apiCall(endpoint, body) {{
         try {{ data = await _doFetch(); }}
         catch(e1) {{
             await new Promise(res => setTimeout(res, 400));
+            data = await _doFetch();
+        }}
+        // Auth required but missing/stale → let the user supply it, then retry once.
+        if (data && data.error === 'unauthorized' && setAnchorToken()) {{
             data = await _doFetch();
         }}
         if (data.ok) {{

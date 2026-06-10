@@ -50,6 +50,62 @@ def _post(url, payload, token=None):
         return e.code, e.read()
 
 
+def test_ui_sends_token_and_never_embeds_it(monkeypatch):
+    """The dashboard + project-window JS must send X-Anchor-Token on mutating
+    POSTs (read from localStorage, settable via setAnchorToken), and the real
+    token value must NEVER be embedded in the served HTML — GET is
+    unauthenticated, so embedding would leak the secret to anyone who can reach
+    the page. This is the client half of D4 (the server half is below)."""
+    monkeypatch.setenv("ANCHOR_TOKEN", "supersecret-xyz")
+    importlib.reload(paths)
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    dash = gui.generate_html([], [], [])
+    pj = gui._PROJECT_WINDOW_JS
+    for blob, name in ((dash, "dashboard"), (pj, "project-window")):
+        assert "X-Anchor-Token" in blob, name + " must send the token header"
+        assert "setAnchorToken" in blob, name + " must offer token entry"
+        assert "localStorage" in blob, name + " must read the token client-side"
+    # SECURITY: the configured token value is never written into the page.
+    assert "supersecret-xyz" not in dash
+    assert "supersecret-xyz" not in pj
+
+
+def test_rnd_mutating_posts_are_gated(monkeypatch, tmp_path):
+    """The R&D mutating endpoints (launch_lane / answer_gate) must reject a
+    no-token POST with 401 BEFORE any lane logic runs — so no claude/gemini
+    subprocess is ever spawned by an unauthenticated caller."""
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-rnd")
+    importlib.reload(paths)
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        for ep, payload in (
+            ("/api/rnd/launch_lane", {"project_id": "x", "lane": "research"}),
+            ("/api/rnd/answer_gate", {"job_id": "x", "choice": "y"}),
+        ):
+            code, _ = _post(base + ep, payload)
+            assert code == 401, ep + " must require the token"
+        # With the right token, launch_lane reaches the handler and cleanly
+        # refuses an unknown project (404) — proving auth passed without
+        # launching a real lane.
+        code, _ = _post(base + "/api/rnd/launch_lane",
+                        {"project_id": "no-such", "lane": "research"},
+                        token="tok-rnd")
+        assert code in (404, 400), "authed launch of unknown project should be a clean refusal"
+    finally:
+        server.shutdown()
+        server.server_close()
+        t.join(timeout=5)
+
+
 def test_integration_mutating_post_requires_token(monkeypatch, tmp_path):
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
