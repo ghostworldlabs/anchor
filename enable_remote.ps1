@@ -16,7 +16,6 @@
 # is set (enforced in anchor_gui.resolve_bind_host). Mutating endpoints require the
 # token; GET endpoints stay open (read-only) to any device that can reach the port.
 
-#requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [string]$Token = "",
@@ -24,6 +23,26 @@ param(
     [switch]$Off
 )
 $ErrorActionPreference = 'Stop'
+
+# --- self-elevate: works from ANY PowerShell (any folder, elevated or not) ---
+# If not already Administrator, relaunch this exact script elevated (UAC prompt),
+# forwarding the same args, in a window that STAYS OPEN (-NoExit) so the printed
+# token remains visible. $PSCommandPath = this script's full path, so CWD is
+# irrelevant. The non-elevated instance then exits.
+$admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+         ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $admin) {
+    Write-Host "Not elevated - relaunching as Administrator (accept the UAC prompt)..." -ForegroundColor Yellow
+    $fwd = @('-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    if ($Token) { $fwd += @('-Token', $Token) }
+    if ($Bind)  { $fwd += @('-Bind',  $Bind) }
+    if ($Off)   { $fwd += '-Off' }
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList $fwd
+    return
+}
+# Elevated from here on. Run from the script's own folder (defensive).
+Set-Location -LiteralPath $PSScriptRoot
+
 $Svc = 'anchor'
 
 # --- locate the nssm that manages the service (install used C:\Tools\nssm) ---

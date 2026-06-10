@@ -84,9 +84,24 @@ def test_ui_sends_token_and_never_embeds_it(monkeypatch):
         assert "X-Anchor-Token" in blob, name + " must send the token header"
         assert "setAnchorToken" in blob, name + " must offer token entry"
         assert "localStorage" in blob, name + " must read the token client-side"
+        # First-load auto-prompt: gated on ANCHOR_AUTH_REQUIRED + fires on load.
+        assert "ANCHOR_AUTH_REQUIRED" in blob, name + " must gate the prompt on auth state"
+        assert "DOMContentLoaded" in blob, name + " must prompt on first load"
+    # When auth is ON, the dashboard embeds the bool TRUE so the page prompts.
+    assert "ANCHOR_AUTH_REQUIRED = true" in dash
     # SECURITY: the configured token value is never written into the page.
     assert "supersecret-xyz" not in dash
     assert "supersecret-xyz" not in pj
+
+
+def test_auth_flag_false_when_token_unset(monkeypatch):
+    """Local (no ANCHOR_TOKEN) → the page must NOT prompt for a token."""
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    importlib.reload(paths)
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    dash = gui.generate_html([], [], [])
+    assert "ANCHOR_AUTH_REQUIRED = false" in dash
 
 
 def test_rnd_mutating_posts_are_gated(monkeypatch, tmp_path):

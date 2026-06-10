@@ -625,6 +625,7 @@ def render_project_window_html(project_id: str) -> str:
         f"{deliverables_html}"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
+        f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
         "<script>" + cache_bust_script() + "</script>"
@@ -653,11 +654,15 @@ function _esc(s) { var d = document.createElement('div'); d.textContent = (s == 
 function _anchorToken() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
 function setAnchorToken() {
   var cur = _anchorToken();
-  var t = window.prompt('Anchor access token (blank to clear):', cur);
+  var t = window.prompt('Paste your Anchor access token:', cur);
   if (t === null) return false;            // user cancelled
-  try { if (t) { localStorage.setItem('anchor_token', t); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
+  try { if (t) { localStorage.setItem('anchor_token', t.trim()); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
   return true;
 }
+// On first load, if the server requires auth and no token is stored yet, ask once.
+window.addEventListener('DOMContentLoaded', function () {
+  if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
+});
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
   var tok = _anchorToken();
@@ -1334,6 +1339,10 @@ def generate_html(projects, tasks, inbox):
     today_str = datetime.now().strftime("%A, %B %d, %Y")
     active = [t for t in tasks if not t["done"]]
     done_tasks = [t for t in tasks if t["done"]]
+    # Whether the server requires a token (remote/exposed). Embedded as a bool so
+    # the page can prompt for the token ONCE on first load — never the token value
+    # itself (GET is unauthenticated; embedding the secret would leak it).
+    auth_required_js = "true" if _paths.expected_token() else "false"
 
     # ── Health banner ──
     # If the most recent health report flagged issues, show a banner at the top.
@@ -2477,14 +2486,20 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 // Kept ONLY in this browser's localStorage; sent as X-Anchor-Token on mutating
 // POSTs; NEVER embedded in the served HTML (GET is unauthenticated). When the
 // server has no ANCHOR_TOKEN set, auth is off and the header is ignored.
+window.ANCHOR_AUTH_REQUIRED = {auth_required_js};
 function _anchorToken() {{ try {{ return localStorage.getItem('anchor_token') || ''; }} catch (e) {{ return ''; }} }}
 function setAnchorToken() {{
     const cur = _anchorToken();
-    const t = window.prompt('Anchor access token (blank to clear):', cur);
+    const t = window.prompt('Paste your Anchor access token:', cur);
     if (t === null) return false;
-    try {{ if (t) {{ localStorage.setItem('anchor_token', t); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
+    try {{ if (t) {{ localStorage.setItem('anchor_token', t.trim()); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
     return true;
 }}
+// On first load, if the server requires auth and we have no token yet, ask once.
+// Once stored, this never fires again (token persists in localStorage).
+window.addEventListener('DOMContentLoaded', function () {{
+    if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) {{ setAnchorToken(); }}
+}});
 
 async function apiCall(endpoint, body) {{
     // Retry once on network failure — the server may have briefly paused
