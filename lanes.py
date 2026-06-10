@@ -204,24 +204,20 @@ def build_prompt_seed(lane: str, project: dict, output_dir) -> str:
     )
 
 
-# ── Runner extra-args (skill + output path passed to the engine) ────────────
+# ── Lane → runner gating shape ──────────────────────────────────────────────
 
-def build_extra_args(lane: str, output_dir, prompt_seed: str) -> list:
-    """Assemble the argv tail handed to the uniform runner.
+def lane_gated_flag(lane: str):
+    """Map a lane to the ``gated`` value the runner expects.
 
-    Carries the lane's **skill identifier**, the **project-scoped output path**,
-    and the **prompt seed** — the three things a lane contributes on top of the
-    uniform ``claude -p`` primitive. (The mock runner tolerates these via
-    ``parse_known_args``; a real ``claude`` invocation consumes the skill flag +
-    the stream-json prompt. The testable invariant is that the correct skill id
-    and per-project output path are present.)
+    The runner uses ``gated`` to pick the stdin mode + (for claude) the
+    permission mode: falsy for the non-gated RESEARCH lane (prompt on argv,
+    ``stdin=DEVNULL``); the lane NAME (``"plan"`` / ``"build"``) for a gated lane
+    so the runner can pick ``acceptEdits`` (plan: writes docs, non-mutating) vs.
+    ``bypassPermissions`` (build: mutates the tree + may run Bash) and open a
+    kept-open stdin PIPE for the in-session gate answer.
     """
     ld = get_lane(lane)
-    return [
-        "--skill", ld.skill,
-        "--output-dir", str(output_dir),
-        "--prompt-seed", prompt_seed,
-    ]
+    return ld.lane if ld.gates else False
 
 
 # ── Launch a lane ───────────────────────────────────────────────────────────
@@ -314,14 +310,20 @@ def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
     output_dir.mkdir(parents=True, exist_ok=True)
 
     prompt_seed = build_prompt_seed(lane, project, output_dir)
-    launch_args = build_extra_args(lane, output_dir, prompt_seed)
-    if extra_args:
-        launch_args = launch_args + list(extra_args)
-
+    gated = lane_gated_flag(lane)
+    # The prompt seed (natural-language "Run the X skill ...") is now delivered
+    # as the ACTUAL prompt — on argv for research, on a stream-json stdin turn
+    # for the gated lanes — NOT stuffed into the dead --skill/--output-dir/
+    # --prompt-seed flags (those are not real CLI flags; that was the bug). The
+    # project-scoped output dir is passed via the real --add-dir (claude) /
+    # --include-directories (gemini) flag so artifacts land in the project
+    # namespace. ``extra_args`` stays a passthrough for test flags (--lines etc.)
+    # that the mock runner consumes; in production it is normally empty.
     rec = _jr.launch_guarded(
         lane, project_id=project_id, folder_path=folder_path,
-        cwd=folder_path or None, extra_args=launch_args, env=env,
-        job_id=job_id, backend=backend,
+        cwd=folder_path or None, extra_args=extra_args, env=env,
+        job_id=job_id, backend=backend, prompt=prompt_seed,
+        output_dir=output_dir, gated=gated,
     )
     jid = rec["job_id"]
 

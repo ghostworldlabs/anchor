@@ -38,6 +38,15 @@ ways). argv takes precedence over env.
                                          so a script/skill deliverable's
                                          result-no-error contract FAILS even on
                                          exit 0 (Wave 9). Implies --result.
+  --gate           / FAKE_CLAUDE_GATE=1  emit ONE real stream-json
+                                         ``AskUserQuestion`` tool_use frame
+                                         (assistant message) AFTER the N content
+                                         lines, so the gated-lane production wiring
+                                         (reader_loop → gate_adapter) can be
+                                         exercised end-to-end without a live CLI.
+                                         The frame shape matches what real
+                                         ``claude -p --output-format stream-json``
+                                         emits for an AskUserQuestion gate.
 
 Stdlib only. Self-contained. Lines are flushed immediately so a long-polling
 reader can observe them as they arrive.
@@ -83,6 +92,7 @@ def parse_args(argv):
     p.add_argument("--exit-code", type=int, default=None)
     p.add_argument("--result", action="store_true")
     p.add_argument("--result-error", action="store_true")
+    p.add_argument("--gate", action="store_true")
     # Tolerate any extra args the runner appends (e.g. a prompt seed) without
     # failing — a real runner would consume stdin / its own flags.
     args, _unknown = p.parse_known_args(argv)
@@ -100,10 +110,46 @@ def main(argv=None):
     exit_code = a.exit_code if a.exit_code is not None else _env_int("FAKE_CLAUDE_EXIT_CODE", 0)
     emit_result_error = a.result_error or _env_flag("FAKE_CLAUDE_RESULT_ERROR")
     emit_result = a.result or emit_result_error or _env_flag("FAKE_CLAUDE_RESULT")
+    emit_gate = a.gate or _env_flag("FAKE_CLAUDE_GATE")
 
     # Emit N deterministic content lines.
     for i in range(lines):
         sys.stdout.write(f"fake-line {i}\n")
+        sys.stdout.flush()
+
+    # Optionally emit ONE real AskUserQuestion gate frame (assistant tool_use)
+    # so the gated-lane production wiring can be exercised without a live CLI.
+    # Shape matches real claude -p --output-format stream-json.
+    if emit_gate:
+        gate = {
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_fake_gate_0001",
+                        "name": "AskUserQuestion",
+                        "input": {
+                            "questions": [
+                                {
+                                    "question": "Which output format?",
+                                    "header": "Format",
+                                    "multiSelect": False,
+                                    "options": [
+                                        {"label": "JSON files",
+                                         "description": "Structured JSON"},
+                                        {"label": "Markdown",
+                                         "description": "Human-readable"},
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+        }
+        sys.stdout.write(json.dumps(gate) + "\n")
         sys.stdout.flush()
 
     # Optionally spawn a long-sleeping grandchild so tree-kill can be proven.

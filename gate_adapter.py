@@ -22,11 +22,19 @@ Frozen requirements satisfied here:
   enforced with the write-lock + a ``gate_consumed`` marker on the record.
 
 The actual stdin write goes to the job's process stdin (owned by
-``job_runner``). To keep ``job_runner``'s Wave-4 launch contract untouched (its
-``Popen`` is created with ``stdin=DEVNULL``), the destination is resolved
-through a small **stdin-sink registry**: production code registers the live
-process's ``stdin`` (a writable file object); tests register a fake sink. Live
-``claude`` is NEVER invoked here.
+``job_runner``). For NON-gated lanes ``job_runner.launch`` keeps the Wave-4
+contract (``stdin=DEVNULL``); for GATED lanes (plan/build) it now opens a
+kept-open ``stdin=PIPE`` and registers that live pipe here via
+:func:`register_stdin_sink`, so ``answer()`` writes the continuation turn into
+the SAME session. The destination is resolved through a small **stdin-sink
+registry**: production registers the live process's ``stdin`` (a writable file
+object); tests register a fake sink. Live ``claude`` is NEVER invoked here.
+
+The continuation turn is a stream-json-framed user TEXT turn (``role:user``,
+``content:"<choice>"``) — NOT a tool_result. SETUP §4 residual risk: an
+AskUserQuestion gate auto-dismisses headless and CANNOT be answered via a
+tool_result; the model re-asks in plain text and this plain-text user turn
+continues the session. This path is inherently FRAGILE / best-effort.
 
 Stdlib only. No third-party imports.
 """

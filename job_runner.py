@@ -50,11 +50,15 @@ import paths as _paths
 #: ``claude`` is never invoked.
 RUNNER_CMD_ENV = "ANCHOR_RUNNER_CMD"
 
-#: Production default runner (D1). NOT used in the gate — tests override via
-#: ANCHOR_RUNNER_CMD. The per-lane skill/prompt seed is layered on in Wave 6.
-DEFAULT_RUNNER_CMD = (
-    "claude -p --input-format stream-json --output-format stream-json"
-)
+#: Production default runner (D1) — the *base* claude command shape. NOT used in
+#: the gate (tests override via ANCHOR_RUNNER_CMD). This base is what
+#: ``resolve_runner_cmd`` returns when no per-launch prompt is supplied (e.g. the
+#: engine-selector tests that only inspect the command shape). For a real launch
+#: the per-lane argv is built by ``build_backend_argv`` below, which appends the
+#: prompt + output-dir + permission flags appropriate to the lane (research is
+#: non-gated and takes the prompt on argv; plan/build are gated and take the
+#: prompt as a stream-json user message on stdin).
+DEFAULT_RUNNER_CMD = "claude -p --output-format stream-json"
 
 #: Engine backends. Claude is the default and runs on all lanes; Gemini is a
 #: portable read-only engine offered ONLY for the research lane (policy enforced
@@ -75,9 +79,19 @@ DEFAULT_BACKEND = BACKEND_CLAUDE
 #: non-mutating). The prompt/seed is appended by the lane wiring via
 #: ``extra_args`` exactly as for claude; the gemini CLI tolerates/parses the
 #: trailing seed. Override the whole command via this env var if needed.
+#: Spike finding (2026-06-09, verified live): the previous default passed
+#: ``--approval-mode plan``, which is READ-ONLY — a research lane MUST write its
+#: report into the output dir, so ``plan`` blocks it. The minimal write-capable
+#: mode is ``auto_edit`` (auto-approves file edits; gemini is research-only here
+#: and never needs to run shell commands, so ``yolo`` would be over-broad). Also
+#: note the real gemini flag is ``-p/--prompt`` whose VALUE is the prompt (NOT a
+#: bare ``-p`` consuming the prompt from stdin) and ``--include-directories``
+#: (NOT ``--output-dir``) grants access to the output dir — both are appended by
+#: ``build_backend_argv`` for a real launch. This base constant is the command
+#: SHAPE returned when no per-launch prompt is supplied.
 GEMINI_CMD_ENV = "ANCHOR_GEMINI_CMD"
 DEFAULT_GEMINI_CMD = (
-    "gemini --skip-trust -p --output-format stream-json --approval-mode plan"
+    "gemini --skip-trust -p --output-format stream-json --approval-mode auto_edit"
 )
 
 #: Long-poll ceiling (seconds). Production default per the frozen design; the
@@ -163,9 +177,10 @@ class LaneBusyError(RuntimeError):
 class _LiveJob:
     """Runtime handle for a job owned by *this* server process."""
 
-    __slots__ = ("job_id", "proc", "ring", "reader", "log_path", "lock", "done")
+    __slots__ = ("job_id", "proc", "ring", "reader", "log_path", "lock", "done",
+                 "gated")
 
-    def __init__(self, job_id, proc, log_path):
+    def __init__(self, job_id, proc, log_path, gated=False):
         self.job_id = job_id
         self.proc = proc
         self.ring = deque(maxlen=RING_CAPACITY)
@@ -173,6 +188,10 @@ class _LiveJob:
         self.log_path = log_path
         self.lock = threading.Lock()
         self.done = threading.Event()
+        # Truthy ("plan"/"build") for a gated lane: the reader loop feeds each
+        # stdout line to the gate adapter so an AskUserQuestion frame surfaces as
+        # awaiting-input state in production (NOT just in hand-injected tests).
+        self.gated = gated
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────
@@ -252,32 +271,138 @@ def _update_record(job_id: str, **fields) -> dict:
 
 # ── Runner command resolution ────────────────────────────────────────────────
 
-def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND) -> list:
+def _shlex_split(raw: str) -> list:
+    """Split a command string into argv, surviving Windows backslash paths.
+
+    Carried-bug fix: ``shlex.split(posix=True)`` eats backslashes, corrupting an
+    explicitly-set ``ANCHOR_RUNNER_CMD`` like ``python C:\\dev\\...\\fake.py`` on
+    Windows. Use ``posix=False`` on Windows so backslashes survive; POSIX rules
+    elsewhere. (The prod defaults use forward-slash-free bare binaries, so this
+    only matters for an explicit override.)
+    """
+    return shlex.split(raw, posix=(os.name != "nt"))
+
+
+def _build_claude_argv(prompt, output_dir, gated) -> list:
+    """Build a VALID ``claude`` argv for a real (override-unset) launch.
+
+    Verified-real claude flags only (claude --help): ``-p`` (print/headless),
+    ``--output-format stream-json``, ``--add-dir <dir>`` (grant tool access to
+    the output dir so the skill can WRITE its report there), and
+    ``--permission-mode <mode>``.
+
+    - RESEARCH (non-gated): the natural-language seed IS the prompt and is passed
+      as a trailing argv value. ``acceptEdits`` is the MINIMAL mode that lets the
+      skill write files into the output dir (``plan`` is read-only and would
+      block the report; ``bypassPermissions`` is broader than research needs).
+    - PLAN/BUILD (gated): ``--input-format stream-json`` is added, which makes
+      claude consume the prompt as a stream-json user message from STDIN (NOT
+      argv) — so the prompt is delivered by :func:`launch` on the stdin pipe, not
+      here. build mutates the tree and may run Bash → ``bypassPermissions``; plan
+      is non-mutating but writes docs → ``acceptEdits``.
+
+    There is intentionally NO ``--skill`` / ``--output-dir`` / ``--prompt-seed``
+    (none are real flags — that was the bug). Skills are auto-discovered and
+    invoked via the natural-language seed.
+    """
+    # Live-smoke finding (2026-06-10): real ``claude -p --output-format
+    # stream-json`` REQUIRES ``--verbose`` ("--output-format=stream-json requires
+    # --verbose") — without it claude refuses to start. (Not in the mock path.)
+    argv = ["claude", "-p", "--verbose", "--output-format", "stream-json"]
+    if output_dir:
+        argv += ["--add-dir", str(output_dir)]
+    if gated:
+        # Gated lanes consume the initial prompt from stdin as a stream-json user
+        # message (delivered by launch()); build may mutate the tree + run Bash.
+        argv += ["--input-format", "stream-json"]
+        argv += ["--permission-mode", "bypassPermissions" if gated == "build"
+                 else "acceptEdits"]
+        # Prompt is NOT placed on argv for gated lanes — it arrives on stdin.
+    else:
+        # Research: minimal write-capable mode; the seed is the prompt on argv.
+        argv += ["--permission-mode", "acceptEdits"]
+        if prompt:
+            argv.append(prompt)
+    return argv
+
+
+def _build_gemini_argv(prompt, output_dir, gated) -> list:
+    """Build a VALID ``gemini`` argv for a real (override-unset) launch.
+
+    Verified-real gemini flags only (gemini --help): ``--skip-trust`` (REQUIRED —
+    untrusted folders are forced read-only otherwise, and jobs run inside the
+    project folder), ``-p/--prompt <value>`` (the prompt is the VALUE),
+    ``--output-format stream-json``, ``--approval-mode {…}`` (``auto_edit`` lets
+    the skill write its report; ``plan`` is read-only and would block it), and
+    ``--include-directories <dir>`` (NOT ``--output-dir``) to grant access to the
+    output dir.
+
+    Gemini is research-only (non-gated) per policy, so there is no gated branch.
+    """
+    argv = ["gemini", "--skip-trust", "-p"]
+    if prompt:
+        argv.append(prompt)
+    argv += ["--output-format", "stream-json", "--approval-mode", "auto_edit"]
+    if output_dir:
+        argv += ["--include-directories", str(output_dir)]
+    return argv
+
+
+def build_backend_argv(backend, prompt, output_dir, gated) -> list:
+    """Build the VALID production argv for a backend + lane shape.
+
+    Used only on the override-UNSET (real-CLI) path. Dispatches to the
+    per-backend builder. ``gated`` is falsy for research, ``"plan"``/``"build"``
+    (truthy) for the gated lanes (claude only — gemini is research-only).
+    """
+    if backend == BACKEND_GEMINI:
+        return _build_gemini_argv(prompt, output_dir, gated)
+    return _build_claude_argv(prompt, output_dir, gated)
+
+
+def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND,
+                       prompt=None, output_dir=None, gated=False) -> list:
     """Resolve the runner command as an argv list, honoring the engine backend.
 
     Resolution order (CRITICAL — the test indirection must always win):
     1. ``ANCHOR_RUNNER_CMD`` set → use it **for any backend** (this is how the
        whole test suite drives the mock ``tests/fake_claude.py`` regardless of
-       which engine a launch selected). Never broken by adding gemini.
-    2. else backend == ``"gemini"`` → ``ANCHOR_GEMINI_CMD`` env, or the built-in
-       :data:`DEFAULT_GEMINI_CMD` (best-effort, overridable pending a live spike).
-    3. else (claude) → ``DEFAULT_RUNNER_CMD`` (the existing claude default —
-       unchanged).
+       which engine a launch selected). The base mock command is used as-is; if a
+       ``prompt`` is supplied it is appended as a trailing arg the mock tolerates
+       via ``parse_known_args`` (so tests still drive the mock and the prompt
+       never leaks into a real CLI). ``extra_args`` (test flags like ``--lines``)
+       are appended last. Never broken by the per-backend builders.
+    2. else (override unset → a REAL launch): build a VALID per-backend, per-lane
+       argv via :func:`build_backend_argv` — but only when a ``prompt`` is
+       supplied (a real lane launch always supplies one). When no ``prompt`` is
+       supplied (e.g. an engine-selector test inspecting only the command SHAPE),
+       fall back to the per-backend default command constant so its shape is
+       observable. ``extra_args`` are appended in both sub-cases.
 
-    ``extra_args`` (a list) is appended — the per-lane skill/prompt seed. Parsed
-    with :func:`shlex.split` using POSIX rules so a path like
-    ``python C:/.../fake_claude.py`` survives intact on Windows (backslashes are
-    avoided by passing forward-slash paths).
+    Rationale for the shape: the dead flags ``--skill``/``--output-dir``/
+    ``--prompt-seed`` are GONE (they are not real CLI flags — that was the bug).
+    A research lane delivers its natural-language seed as the prompt; a gated
+    lane delivers it on stdin (see :func:`build_backend_argv`).
     """
     override = os.environ.get(RUNNER_CMD_ENV)
     if override and override.strip():
-        raw = override
-    elif backend == BACKEND_GEMINI:
-        gem = os.environ.get(GEMINI_CMD_ENV)
-        raw = gem if (gem and gem.strip()) else DEFAULT_GEMINI_CMD
+        # Test indirection: the mock runner drives every test. Use the override
+        # base verbatim; append the prompt (mock ignores it) so the gated/stdin
+        # path is exercised without a real CLI, then the test's extra_args.
+        argv = _shlex_split(override)
+        if prompt is not None:
+            argv = argv + [prompt]
+    elif prompt is not None:
+        # Real launch: construct a valid per-backend argv from scratch.
+        argv = build_backend_argv(backend, prompt, output_dir, gated)
     else:
-        raw = DEFAULT_RUNNER_CMD
-    argv = shlex.split(raw, posix=True)
+        # Shape-only resolution (no prompt): return the per-backend default base.
+        if backend == BACKEND_GEMINI:
+            gem = os.environ.get(GEMINI_CMD_ENV)
+            raw = gem if (gem and gem.strip()) else DEFAULT_GEMINI_CMD
+        else:
+            raw = DEFAULT_RUNNER_CMD
+        argv = _shlex_split(raw)
     if extra_args:
         argv = argv + list(extra_args)
     return argv
@@ -285,8 +410,24 @@ def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND) -> list:
 
 # ── Launch ───────────────────────────────────────────────────────────────────
 
+def _stream_json_user_turn(text: str) -> str:
+    """Render an initial prompt as a stream-json user message (for stdin).
+
+    A gated lane (claude ``--input-format stream-json``) consumes its INITIAL
+    prompt as a stream-json user message on stdin (the prompt is NOT on argv).
+    This is the same envelope shape ``gate_adapter._format_turn`` writes for a
+    continuation answer, so the session reads them uniformly.
+    """
+    envelope = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+    }
+    return json.dumps(envelope, ensure_ascii=False) + "\n"
+
+
 def launch(lane: str, cwd=None, extra_args=None, env=None,
-           job_id: str = None, backend=DEFAULT_BACKEND) -> dict:
+           job_id: str = None, backend=DEFAULT_BACKEND,
+           prompt=None, output_dir=None, gated=False) -> dict:
     """Launch a server-owned job. Returns the job record.
 
     The record holds at least ``{job_id, lane, pid, status, log_path, backend}``.
@@ -296,6 +437,26 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     selects the engine command (resolved by :func:`resolve_runner_cmd`); it is
     recorded on the job so the UI/history can show which engine ran the effort.
     ``ANCHOR_RUNNER_CMD``, when set, still overrides the command for any backend.
+
+    ``prompt`` (the natural-language lane seed), ``output_dir`` (project-scoped),
+    and ``gated`` (falsy for research; ``"plan"``/``"build"`` for the gated lanes)
+    are threaded into :func:`resolve_runner_cmd` so a real launch builds a VALID
+    per-backend argv.
+
+    Stdin handling (D / SETUP §5):
+    - NON-GATED (research) **or** no prompt: ``stdin=DEVNULL`` (unchanged Wave-4
+      contract — the prompt, if any, is on argv).
+    - GATED (plan/build, claude only): ``stdin=PIPE`` kept OPEN for the job's
+      lifetime, and the INITIAL prompt is written as a stream-json user message
+      (claude's ``--input-format stream-json`` consumes the prompt from stdin,
+      not argv). The live process stdin is registered with the gate adapter so an
+      answer can be written into the SAME pipe. NOTE: in the test path
+      (``ANCHOR_RUNNER_CMD`` set → the mock), the mock reads no stdin, so we still
+      open the pipe but the mock simply ignores it; gate tests register their own
+      fake sink. This plain-text-after-auto-dismiss gate path is inherently
+      FRAGILE (SETUP §4 residual risk): AskUserQuestion can't be answered via a
+      tool_result, so the model re-asks in plain text and we answer with a
+      stream-json user TEXT turn — best-effort continuation, not guaranteed.
     """
     backend = backend or DEFAULT_BACKEND
     job_id = job_id or uuid.uuid4().hex
@@ -308,7 +469,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # Truncate/create the durable log up front so tail() always has a target.
     lp.write_text("", encoding="utf-8")
 
-    argv = resolve_runner_cmd(extra_args, backend=backend)
+    argv = resolve_runner_cmd(extra_args, backend=backend, prompt=prompt,
+                              output_dir=output_dir, gated=gated)
 
     full_env = dict(os.environ)
     if env:
@@ -321,10 +483,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 
+    # Gated lanes need a kept-open stdin PIPE so the initial prompt + the gate
+    # answer can be written into the live session. Non-gated lanes keep the
+    # original DEVNULL contract.
+    use_stdin_pipe = bool(gated)
     proc = subprocess.Popen(
         argv,
         cwd=str(cwd) if cwd else None,
-        stdin=subprocess.DEVNULL,
+        stdin=(subprocess.PIPE if use_stdin_pipe else subprocess.DEVNULL),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         env=full_env,
@@ -333,9 +499,24 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         creationflags=creationflags,
     )
 
-    live = _LiveJob(job_id, proc, lp)
+    live = _LiveJob(job_id, proc, lp, gated=gated)
     with _LIVE_LOCK:
         _LIVE[job_id] = live
+
+    # For a gated lane, deliver the initial prompt as a stream-json user turn on
+    # stdin and register the (kept-open) pipe with the gate adapter so a later
+    # answer writes into the SAME session. Deferred import avoids a cycle.
+    if use_stdin_pipe and proc.stdin is not None:
+        try:
+            if prompt:
+                proc.stdin.write(_stream_json_user_turn(prompt))
+                proc.stdin.flush()
+            import gate_adapter as _ga
+            _ga.register_stdin_sink(job_id, proc.stdin)
+        except (OSError, ValueError, ImportError):
+            # A dead/closed pipe (e.g. the mock exited instantly) is non-fatal —
+            # the reader thread + finalize still record the terminal status.
+            pass
 
     rec = {
         "job_id": job_id,
@@ -366,9 +547,29 @@ def _reader_loop(live: _LiveJob) -> None:
     capture its cost/usage/duration onto the job record (Wave 7) so the effort
     history can roll cost up per-lane / per-project. The last ``result`` line
     wins (a session emits one terminal result envelope).
+
+    BLOCKER FIX (gated lanes): for a GATED lane (``live.gated`` truthy) we also
+    feed each line to ``gate_adapter.parse_event``; the FIRST ``AskUserQuestion``
+    frame is persisted via ``gate_adapter.mark_awaiting_input`` so the job's gate
+    ``state`` flips to ``awaiting-input`` and ``pending_prompt`` is stored. This
+    is the ONLY production path that surfaces a gate from the live stream — before
+    this, the reader merely logged the frame as a plain line and the prompt box
+    (which renders solely on a non-null ``load_pending_prompt``) never appeared,
+    so gated lanes were end-to-end dead. We gate this on ``live.gated`` so a
+    research lane (non-gated) never acquires spurious gate state. The deferred
+    import avoids a module import cycle (gate_adapter imports job_runner). We only
+    mark the FIRST gate (``gate_marked``) — re-asks land in the log; the existing
+    answer/continuation path advances ``state`` off awaiting-input.
     """
     proc = live.proc
     result_envelope = None
+    gate_marked = False
+    _ga = None
+    if live.gated:
+        try:
+            import gate_adapter as _ga
+        except ImportError:
+            _ga = None
     try:
         with open(live.log_path, "a", encoding="utf-8") as logf:
             for line in proc.stdout:
@@ -380,6 +581,19 @@ def _reader_loop(live: _LiveJob) -> None:
                 env = _parse_result_envelope(line)
                 if env is not None:
                     result_envelope = env
+                # Gated lanes: surface the first AskUserQuestion gate from the
+                # live stream into awaiting-input state (production wiring).
+                if _ga is not None and not gate_marked:
+                    try:
+                        prompts = _ga.parse_event(line)
+                    except Exception:
+                        prompts = []
+                    if prompts:
+                        try:
+                            _ga.mark_awaiting_input(live.job_id, prompts[0])
+                            gate_marked = True
+                        except Exception:
+                            pass
     except (ValueError, OSError):
         # Pipe closed underneath us (e.g. process tree-killed mid-read). Not
         # fatal — finalization below records the terminal status.
@@ -760,7 +974,8 @@ def folder_build_holder(folder_path: str):
 
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                    extra_args=None, env=None, job_id: str = None,
-                   backend=DEFAULT_BACKEND) -> dict:
+                   backend=DEFAULT_BACKEND, prompt=None, output_dir=None,
+                   gated=False) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -776,6 +991,10 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     folder lock) plus the actual :func:`launch` all happen INSIDE
     ``paths.WRITE_LOCK``, so the policy is correct under concurrency — two
     builds for one folder can never both win the lock.
+
+    ``prompt`` / ``output_dir`` / ``gated`` are threaded straight through to
+    :func:`launch` so the real per-backend argv (and the gated stdin pipe) are
+    built there. They are inert under the concurrency policy itself.
 
     Raises :class:`LaneBusyError` (with ``reason`` + ``holder``) when refused.
     On success returns the job record (as :func:`launch`).
@@ -798,7 +1017,8 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
         # Both gates clear → launch under the lock, then record the reservation
         # against the real job_id so subsequent contenders see it.
         rec = launch(lane, cwd=cwd, extra_args=extra_args, env=env,
-                     job_id=job_id, backend=backend)
+                     job_id=job_id, backend=backend, prompt=prompt,
+                     output_dir=output_dir, gated=gated)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:
