@@ -3555,6 +3555,29 @@ def make_server(host="127.0.0.1", port=8777):
     )
 
 
+_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def resolve_bind_host():
+    """Resolve the server bind host from ``ANCHOR_BIND`` (default loopback).
+
+    Set ``ANCHOR_BIND`` to the Tailscale IP (e.g. ``100.69.215.4``) to expose the
+    dashboard over the tailnet. SAFETY (D4): refuse a non-loopback bind unless
+    ``ANCHOR_TOKEN`` is configured — otherwise every mutating ``/api/*`` endpoint
+    (including the ``bypassPermissions`` build lane) would be reachable
+    unauthenticated. Returns the host string; raises ``RuntimeError`` for the
+    unsafe combination so ``main`` can refuse to start.
+    """
+    host = (os.environ.get("ANCHOR_BIND") or "127.0.0.1").strip() or "127.0.0.1"
+    if host not in _LOOPBACK_HOSTS and _paths.expected_token() is None:
+        raise RuntimeError(
+            f"Refusing to bind {host} without ANCHOR_TOKEN set — that would "
+            f"expose mutating endpoints (incl. the build lane) unauthenticated. "
+            f"Set ANCHOR_TOKEN, or use ANCHOR_BIND=127.0.0.1 for local-only."
+        )
+    return host
+
+
 def main():
     global _server_instance
     port = 8777
@@ -3565,7 +3588,17 @@ def main():
             port = int(sys.argv[idx + 1])
 
     try:
-        server = make_server("127.0.0.1", port)
+        bind_host = resolve_bind_host()
+    except RuntimeError as exc:
+        print(str(exc))
+        try:
+            _logger.error(str(exc))
+        except Exception:
+            pass
+        sys.exit(1)
+
+    try:
+        server = make_server(bind_host, port)
     except OSError as exc:
         # Single-instance guard: another healthy Anchor already owns this port.
         # Do NOT retry-forever or fight for the port — exit cleanly so the
@@ -3583,7 +3616,9 @@ def main():
             sys.exit(0)
         raise
     _server_instance = server
-    url = f"http://localhost:{port}"
+    # Browser/log URL: localhost for a loopback bind, else the bound interface.
+    url = (f"http://localhost:{port}" if bind_host in _LOOPBACK_HOSTS
+           else f"http://{bind_host}:{port}")
 
     # Start heartbeat watchdog thread
     watchdog = threading.Thread(target=_heartbeat_watchdog, daemon=True)

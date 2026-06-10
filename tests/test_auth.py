@@ -50,6 +50,24 @@ def _post(url, payload, token=None):
         return e.code, e.read()
 
 
+def test_resolve_bind_host_refuses_nonloopback_without_token(monkeypatch):
+    """Exposing the server beyond loopback REQUIRES a token — else every mutating
+    endpoint (incl. the bypassPermissions build lane) would be open."""
+    import anchor_gui as g
+    # Default loopback, no token needed.
+    monkeypatch.delenv("ANCHOR_BIND", raising=False)
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    assert g.resolve_bind_host() == "127.0.0.1"
+    # Non-loopback WITHOUT a token -> refuse to start.
+    monkeypatch.setenv("ANCHOR_BIND", "100.69.215.4")
+    import pytest
+    with pytest.raises(RuntimeError):
+        g.resolve_bind_host()
+    # Non-loopback WITH a token -> allowed.
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok")
+    assert g.resolve_bind_host() == "100.69.215.4"
+
+
 def test_ui_sends_token_and_never_embeds_it(monkeypatch):
     """The dashboard + project-window JS must send X-Anchor-Token on mutating
     POSTs (read from localStorage, settable via setAnchorToken), and the real
