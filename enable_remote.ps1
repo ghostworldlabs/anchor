@@ -147,13 +147,25 @@ if ($listen) {
 }
 
 if ($tokenToShow) {
+    # Resolve the tailnet URL for other devices.
+    $tsip = ''
+    try { $tsip = (tailscale ip -4 2>$null | Select-Object -First 1).Trim() } catch {}
+    if (-not $tsip) { $tsip = '100.69.215.4' }
+
     Write-Host "`n================  ACCESS TOKEN (store securely)  ================" -ForegroundColor Green
     Write-Host "  $tokenToShow"
     Write-Host "=================================================================" -ForegroundColor Green
-    Write-Host "Open the dashboard at  http://${Bind}:8777  (localhost will NOT" -ForegroundColor Cyan
-    Write-Host "respond - the server is bound to the Tailscale interface). In the" -ForegroundColor Cyan
-    Write-Host "browser console (or on the first 401) run setAnchorToken() and paste" -ForegroundColor Cyan
-    Write-Host "the token above so mutating actions are authorized." -ForegroundColor Cyan
+    Write-Host "`nOpen the dashboard at:" -ForegroundColor Cyan
+    if ($Bind -eq '0.0.0.0') {
+        Write-Host "  - This machine:            http://localhost:8777" -ForegroundColor Cyan
+        Write-Host ("  - Other devices (Tailscale): http://{0}:8777" -f $tsip) -ForegroundColor Cyan
+    } else {
+        Write-Host ("  - http://{0}:8777   (use this on THIS machine too;" -f $Bind) -ForegroundColor Cyan
+        Write-Host "    localhost will NOT respond - bound to one interface)" -ForegroundColor Cyan
+    }
+    Write-Host "On first load the page prompts automatically - paste the token" -ForegroundColor Cyan
+    Write-Host "above (only the token). It is saved in that browser; you won't be" -ForegroundColor Cyan
+    Write-Host "asked again. The SAME token works on every device/browser." -ForegroundColor Cyan
 } else {
     Write-Host "`nRemote DISABLED. Dashboard is local-only again at http://localhost:8777" -ForegroundColor Cyan
 }
