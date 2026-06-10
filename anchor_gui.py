@@ -501,33 +501,69 @@ def render_status_line_html(project_id: str) -> str:
 
 
 def render_project_tile_html(entry: dict) -> str:
-    """Render a single 'Rich' project tile (name + priority + state + status)."""
+    """Render a 'Rich' project tile: name, priority, state, effort rollup, notes,
+    and lifecycle actions (open-in-its-own-window, change priority, edit notes,
+    archive / retire — or reactivate for an inactive project)."""
+    pid_raw = entry.get("id", "")
+    pid = html_lib.escape(pid_raw)
     name = html_lib.escape(entry.get("name", ""))
-    pid = html_lib.escape(entry.get("id", ""))
     pr = entry.get("priority", 2)
     state = html_lib.escape(entry.get("state", "active"))
-    status = render_status_line_html(entry.get("id", ""))
+    notes = entry.get("notes", "") or ""
+    notes_attr = html_lib.escape(notes, quote=True)
+    folder = entry.get("folder_path", "")
+    status = render_status_line_html(pid_raw)
+    # Effort rollup ("amount of effort") — count + cost/time/tokens.
+    try:
+        total = _eh.project_rollup(pid_raw, folder).get("total", {})
+        n_eff = int(total.get("effort_count", 0) or 0)
+    except Exception:
+        total, n_eff = {}, 0
+    if n_eff:
+        effort_line = (f'<div class="rnd-effort">{n_eff} effort'
+                       f'{"s" if n_eff != 1 else ""} · '
+                       f'{html_lib.escape(_fmt_cost(total))}</div>')
+    else:
+        effort_line = '<div class="rnd-effort rnd-dim">no efforts yet</div>'
+    notes_block = (f'<div class="rnd-notes" title="{notes_attr}">&#128221; '
+                   f'{html_lib.escape(notes)}</div>') if notes.strip() else ''
+    is_active = state in ("active", "path-missing")
+    p1on = " rnd-pr-on" if pr == 1 else ""
+    p2on = " rnd-pr-on" if pr == 2 else ""
+    if is_active:
+        lifecycle = (
+            f'<button class="rnd-mini{p1on}" onclick="rndSetPriority(\'{pid}\',1)" title="Priority 1">P1</button>'
+            f'<button class="rnd-mini{p2on}" onclick="rndSetPriority(\'{pid}\',2)" title="Priority 2">P2</button>'
+            f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
+            f'<button class="rnd-mini" onclick="rndArchive(\'{pid}\')" title="Archive (shelve, reviewable)">Archive</button>'
+            f'<button class="rnd-mini rnd-danger" onclick="rndRetire(\'{pid}\')" title="Retire / cancel">Retire</button>'
+        )
+    else:
+        lifecycle = (
+            f'<button class="rnd-mini rnd-accent" onclick="rndReactivate(\'{pid}\')" title="Make active again">Reactivate</button>'
+            f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
+        )
     return (
-        f'<div class="rnd-tile" data-project-id="{pid}">'
+        f'<div class="rnd-tile" data-project-id="{pid}" data-notes="{notes_attr}">'
         f'<div class="rnd-tile-head">'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
         f'</div>'
         f'{status}'
-        f'<a class="rnd-open" href="/project/{pid}">Open</a>'
+        f'{effort_line}'
+        f'{notes_block}'
+        f'<div class="rnd-actions">'
+        f'<button class="rnd-mini rnd-open-btn" onclick="openProjectWindow(\'{pid}\')" '
+        f'title="Open in its own window (multiple projects at once)">Open &#8599;</button>'
+        f'{lifecycle}'
+        f'</div>'
         f'</div>'
     )
 
 
-def render_projects_view_html(include_archived: bool = True,
-                              include_future: bool = True) -> str:
-    """Render the folder-grouped projects view (collapsible folder → tiles)."""
-    groups = _rnd.group_by_folder(include_archived=include_archived,
-                                  include_future=include_future)
-    if not groups:
-        return ('<div class="rnd-projects"><p class="rnd-empty">'
-                'No R&D projects yet. Use "+ New Project" to add one.</p></div>')
+def _render_folder_groups(groups: dict) -> str:
+    """Render folder-grouped tiles (shared by the active + archive views)."""
     blocks = []
     for folder in sorted(groups):
         tiles = "".join(render_project_tile_html(e) for e in groups[folder])
@@ -540,6 +576,36 @@ def render_projects_view_html(include_archived: bool = True,
             f'</details>'
         )
     return '<div class="rnd-projects">' + "".join(blocks) + '</div>'
+
+
+def render_projects_view_html(include_archived: bool = False,
+                              include_future: bool = False,
+                              include_retired: bool = False) -> str:
+    """Render the ACTIVE folder-grouped projects view (collapsible folder → tiles).
+
+    Defaults to active-only; inactive projects (archived/future/retired) live on
+    the separate Archive view (:func:`render_archive_view_html`).
+    """
+    groups = _rnd.group_by_folder(include_archived=include_archived,
+                                  include_future=include_future,
+                                  include_retired=include_retired)
+    if not groups:
+        return ('<div class="rnd-projects"><p class="rnd-empty">'
+                'No active R&D projects. Use "+ New Project" to add one.</p></div>')
+    return _render_folder_groups(groups)
+
+
+def render_archive_view_html() -> str:
+    """Render the Archive/Inactive view: archived + future + retired projects,
+    each reactivatable (the tile shows a Reactivate button for inactive states)."""
+    inactive = _rnd.list_inactive_projects()
+    if not inactive:
+        return ('<div class="rnd-projects"><p class="rnd-empty">'
+                'No archived, future, or retired projects.</p></div>')
+    groups = {}
+    for e in inactive:
+        groups.setdefault(e.get("folder_path", ""), []).append(e)
+    return _render_folder_groups(groups)
 
 
 def render_project_window_html(project_id: str) -> str:
@@ -1745,6 +1811,11 @@ def generate_html(projects, tasks, inbox):
     except Exception:
         rnd_projects_html = ('<div class="rnd-projects"><p class="rnd-empty">'
                              'R&amp;D projects unavailable.</p></div>')
+    try:
+        rnd_archive_html = render_archive_view_html()
+    except Exception:
+        rnd_archive_html = ('<div class="rnd-projects"><p class="rnd-empty">'
+                            'Archive unavailable.</p></div>')
 
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
@@ -2162,6 +2233,32 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     .stats-row {{ flex-wrap: wrap; }}
     .stat-card {{ min-width: calc(50% - 6px); }}
 }}
+
+/* ── R&D project tiles (rich) ── */
+.rnd-projects {{ display: flex; flex-direction: column; gap: 14px; }}
+.rnd-folder {{ border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }}
+.rnd-folder-head {{ cursor: pointer; padding: 10px 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,.02); }}
+.rnd-folder-count {{ color: var(--text-dim); }}
+.rnd-folder-tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 12px; }}
+.rnd-tile {{ border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface2, #232733); display: flex; flex-direction: column; gap: 7px; }}
+.rnd-tile:hover {{ border-color: var(--accent); }}
+.rnd-tile-head {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+.rnd-name {{ font-weight: 600; font-size: 14px; }}
+.rnd-badge {{ font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }}
+.rnd-badge.rnd-p1 {{ background: rgba(248,113,113,.18); color: var(--danger); border-color: rgba(248,113,113,.3); }}
+.rnd-badge.rnd-p2 {{ background: rgba(251,191,36,.15); color: var(--warning); border-color: rgba(251,191,36,.3); }}
+.rnd-badge[class*="rnd-state-archived"], .rnd-badge[class*="rnd-state-future"], .rnd-badge[class*="rnd-state-retired"] {{ background: rgba(255,255,255,.04); }}
+.rnd-effort {{ font-size: 11px; color: var(--accent); }}
+.rnd-effort.rnd-dim {{ color: var(--text-dim); }}
+.rnd-notes {{ font-size: 11.5px; color: var(--text-dim); background: rgba(255,255,255,.03); border-radius: 6px; padding: 5px 8px; white-space: pre-wrap; }}
+.rnd-actions {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }}
+.rnd-mini {{ font-size: 11px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }}
+.rnd-mini:hover {{ border-color: var(--accent); }}
+.rnd-mini.rnd-pr-on {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
+.rnd-mini.rnd-open-btn {{ background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }}
+.rnd-mini.rnd-accent {{ border-color: var(--accent); color: var(--accent); }}
+.rnd-mini.rnd-danger:hover {{ border-color: var(--danger); color: var(--danger); }}
+.rnd-empty {{ color: var(--text-dim); font-size: 13px; }}
 </style>
 </head>
 <body>
@@ -2179,6 +2276,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       </div>
       <div class="nav-item" data-view="rnd" onclick="showView('rnd')">
         <span class="dot" style="background:#6c9cfc"></span> R&amp;D
+      </div>
+      <div class="nav-item" data-view="rnd-archive" onclick="showView('rnd-archive')">
+        <span class="dot" style="background:var(--text-dim)"></span> R&amp;D Archive
       </div>
     </div>
     <div class="nav-section">
@@ -2336,8 +2436,20 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
         <div class="date">{today_str}</div>
       </div>
-      <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Per-project R&amp;D control surface. Open a project to launch research / plan / build jobs and watch the live log.</p>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Per-project R&amp;D control surface. <b>Open</b> a project to launch research / plan / build jobs in its own window (run several at once). Use the tile buttons to change priority, add notes, or archive / retire a project. <a href="#" onclick="showView('rnd-archive');return false" style="color:var(--accent)">View Archive &#8594;</a></p>
       {rnd_projects_html}
+    </div>
+
+    <div class="view" id="view-rnd-archive" style="display:none">
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <h2>R&amp;D Archive</h2>
+          <button class="btn btn-sm" onclick="showView('rnd')" style="font-size:11px;padding:4px 10px">&#8592; Active projects</button>
+        </div>
+        <div class="date">{today_str}</div>
+      </div>
+      <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Archived, future, and retired projects (kept, reviewable). Use <b>Reactivate</b> to bring one back to the active list.</p>
+      {rnd_archive_html}
     </div>
 
     <!-- Domain views -->
@@ -3019,6 +3131,26 @@ async function createNewProject() {{
 
 function promoteProject(b64) {{ apiCall('/api/promote_project', {{name: dec(b64)}}); }}
 function demoteProject(b64) {{ apiCall('/api/demote_project', {{name: dec(b64)}}); }}
+
+// ── R&D project lifecycle (rich tiles) ──
+// Open a project in ITS OWN window, named per-project: if that window is already
+// open, this focuses it instead of opening a duplicate (multiple projects at a
+// time, but one window each).
+function openProjectWindow(pid) {{
+    var w = window.open('/project/' + encodeURIComponent(pid), 'anchorproj_' + pid);
+    if (w) {{ try {{ w.focus(); }} catch (e) {{}} }}
+}}
+function rndSetPriority(pid, pr) {{ apiCall('/api/rnd/set_priority', {{id: pid, priority: pr}}); }}
+function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the Archive view (kept, reviewable).')) apiCall('/api/rnd/archive_project', {{id: pid}}); }}
+function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
+function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
+function rndNotes(pid) {{
+    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
+    var cur = el ? (el.getAttribute('data-notes') || '') : '';
+    var n = window.prompt('Project notes:', cur);
+    if (n === null) return;
+    apiCall('/api/rnd/set_notes', {{id: pid, notes: n}});
+}}
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
 
@@ -3385,6 +3517,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
             try:
                 self._send_json({"ok": True,
                                  "entry": _rnd.mark_future(pid)})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/retire_project":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.retire_project(pid)})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/reactivate_project":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.reactivate_project(pid)})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/set_notes":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.set_notes(pid, body.get("notes", ""))})
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
 

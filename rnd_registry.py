@@ -39,9 +39,12 @@ LANE_DIRS = ("research", "planning", "build", "deliverables", "jobs")
 STATE_ACTIVE = "active"
 STATE_ARCHIVED = "archived"
 STATE_FUTURE = "future"
+STATE_RETIRED = "retired"          # cancelled / done-with (kept, reviewable)
 STATE_PATH_MISSING = "path-missing"
 
-VALID_STORED_STATES = {STATE_ACTIVE, STATE_ARCHIVED, STATE_FUTURE}
+VALID_STORED_STATES = {STATE_ACTIVE, STATE_ARCHIVED, STATE_FUTURE, STATE_RETIRED}
+#: States that are NOT active (shown on the Archive/Inactive view, not the main one).
+INACTIVE_STATES = {STATE_ARCHIVED, STATE_FUTURE, STATE_RETIRED}
 
 # The four R&D lanes shown on the project status line (UX design: 4-state
 # status line for Research / Planning / Build / Deliverables).
@@ -110,6 +113,7 @@ def _normalize(entry: dict) -> dict:
         "folder_path": folder_path,
         "priority": priority,
         "state": state,
+        "notes": (entry.get("notes") or ""),
     }
 
 
@@ -204,7 +208,8 @@ def _write_tracking_policy(anchor_dir: Path) -> None:
 # ── CRUD ────────────────────────────────────────────────────────────────
 
 def add_project(name: str, folder_path, priority: int = 2,
-                state: str = STATE_ACTIVE, scaffold: bool = True) -> dict:
+                state: str = STATE_ACTIVE, scaffold: bool = True,
+                notes: str = "") -> dict:
     """Register a new project with a FRESH id. Returns the stored entry.
 
     ``folder_path`` is non-unique — adding another project for an
@@ -223,6 +228,7 @@ def add_project(name: str, folder_path, priority: int = 2,
             "folder_path": str(folder_path),
             "priority": priority,
             "state": state,
+            "notes": notes,
         })
         reg[pid] = entry
         _save_registry(reg)
@@ -241,7 +247,7 @@ def update_project(project_id: str, **fields) -> dict:
 
     Raises ``KeyError`` if the id is unknown.
     """
-    allowed = {"name", "folder_path", "priority", "state"}
+    allowed = {"name", "folder_path", "priority", "state", "notes"}
     with _paths.WRITE_LOCK:
         reg = load_registry()
         if project_id not in reg:
@@ -272,9 +278,19 @@ def mark_future(project_id: str) -> dict:
     return update_project(project_id, state=STATE_FUTURE)
 
 
+def retire_project(project_id: str) -> dict:
+    """Retire/cancel a project — RETAINED in the registry, not deleted (C7)."""
+    return update_project(project_id, state=STATE_RETIRED)
+
+
 def reactivate_project(project_id: str) -> dict:
-    """Move an archived/future project back to active."""
+    """Move an archived/future/retired project back to active."""
     return update_project(project_id, state=STATE_ACTIVE)
+
+
+def set_notes(project_id: str, notes: str) -> dict:
+    """Set the free-text notes for a project (like a task's Notes field)."""
+    return update_project(project_id, notes=("" if notes is None else str(notes)))
 
 
 def remove_project(project_id: str) -> bool:
@@ -300,7 +316,7 @@ def _effective_state(entry: dict) -> str:
     folder is also missing; only otherwise-live entries flip to path-missing.
     """
     fp = entry.get("folder_path", "")
-    if entry.get("state") in (STATE_ARCHIVED, STATE_FUTURE):
+    if entry.get("state") in INACTIVE_STATES:
         return entry["state"]
     if fp and not Path(fp).exists():
         return STATE_PATH_MISSING
@@ -308,11 +324,13 @@ def _effective_state(entry: dict) -> str:
 
 
 def list_projects(include_archived: bool = True, include_future: bool = True,
+                  include_retired: bool = True,
                   with_effective_state: bool = True) -> list:
     """Return entries as a list. ``state`` reflects path-missing when applicable.
 
-    Archived/future entries are included by default (retained, reviewable);
-    callers may filter them out for the default active view.
+    Archived/future/retired entries are included by default (retained,
+    reviewable); the active dashboard passes all three flags False to show only
+    live projects, while the Archive view shows only the inactive ones.
     """
     reg = load_registry()
     out = []
@@ -325,13 +343,29 @@ def list_projects(include_archived: bool = True, include_future: bool = True,
             continue
         if not include_future and stored == STATE_FUTURE:
             continue
+        if not include_retired and stored == STATE_RETIRED:
+            continue
         out.append(e)
     out.sort(key=lambda x: (x.get("priority", 2), x.get("name", "").lower()))
     return out
 
 
+def list_inactive_projects() -> list:
+    """Return ONLY archived/future/retired projects (for the Archive view)."""
+    reg = load_registry()
+    out = []
+    for e in reg.values():
+        if reg[e["id"]]["state"] in INACTIVE_STATES:
+            e = dict(e)
+            e["state"] = _effective_state(e)
+            out.append(e)
+    out.sort(key=lambda x: (x.get("state", ""), x.get("name", "").lower()))
+    return out
+
+
 def group_by_folder(include_archived: bool = True,
-                    include_future: bool = True) -> dict:
+                    include_future: bool = True,
+                    include_retired: bool = True) -> dict:
     """Group projects by ``folder_path`` → list of entries (ordered).
 
     The projects view renders this: a collapsible folder header → its tiles.
@@ -339,7 +373,8 @@ def group_by_folder(include_archived: bool = True,
     """
     groups = {}
     for e in list_projects(include_archived=include_archived,
-                           include_future=include_future):
+                           include_future=include_future,
+                           include_retired=include_retired):
         groups.setdefault(e["folder_path"], []).append(e)
     return groups
 

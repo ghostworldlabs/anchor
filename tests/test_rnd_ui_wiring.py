@@ -502,3 +502,72 @@ def test_project_window_has_lane_controls_and_log_drawer(gui_env):
     assert "/api/rnd/answer_gate" in html
     # The PROJECT_ID was injected for the JS.
     assert "PROJECT_ID" in html
+
+
+# ── R&D project lifecycle: notes / priority / archive / retire / reactivate ──
+
+def test_registry_notes_and_state_transitions(gui_env):
+    import rnd_registry as r
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        e = r.add_project("LifeProj", td, notes="initial note")
+        pid = e["id"]
+        assert e["notes"] == "initial note"
+        assert r.set_notes(pid, "updated")["notes"] == "updated"
+        # retire -> inactive: excluded from the active list, present in inactive
+        r.retire_project(pid)
+        assert r.get_project(pid)["state"] == r.STATE_RETIRED
+        active = [x["id"] for x in r.list_projects(
+            include_archived=False, include_future=False, include_retired=False)]
+        assert pid not in active
+        assert pid in [x["id"] for x in r.list_inactive_projects()]
+        # reactivate -> active again
+        r.reactivate_project(pid)
+        assert r.get_project(pid)["state"] == r.STATE_ACTIVE
+        assert pid in [x["id"] for x in r.list_projects(
+            include_archived=False, include_future=False, include_retired=False)]
+
+
+def test_lifecycle_endpoints_round_trip_and_views(server):
+    """HTTP round-trip: set notes/priority, retire -> the project leaves the
+    ACTIVE views and appears in the ARCHIVE view with a Reactivate control;
+    reactivate brings it back; unknown id -> clean 404."""
+    gui, base = server
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        proj = _mkproject(gui, Path(td) / "Life", name="LifeHTTP")
+        pid = proj["id"]
+        code, data = _post(base + "/api/rnd/set_notes", {"id": pid, "notes": "via http"})
+        assert code == 200 and data["ok"] and data["entry"]["notes"] == "via http"
+        code, data = _post(base + "/api/rnd/set_priority", {"id": pid, "priority": 1})
+        assert data["entry"]["priority"] == 1
+        code, data = _post(base + "/api/rnd/retire_project", {"id": pid})
+        assert code == 200 and data["entry"]["state"] == "retired"
+        # Active views (home + view-rnd) EXCLUDE it; the archive view INCLUDES it.
+        html = gui.generate_html(*gui.gather_all())
+        head, _, archive = html.partition('id="view-rnd-archive"')
+        assert "LifeHTTP" not in head, "retired project must leave the active views"
+        assert "LifeHTTP" in archive, "retired project must appear in the archive view"
+        assert "rndReactivate" in archive
+        code, data = _post(base + "/api/rnd/reactivate_project", {"id": pid})
+        assert code == 200 and data["entry"]["state"] == "active"
+        code, data = _post(base + "/api/rnd/retire_project", {"id": "nope"})
+        assert code == 404
+
+
+def test_tile_has_lifecycle_controls_and_multiwindow_open(gui_env):
+    """The rich tile + lifecycle JS are actually surfaced in the page (the exact
+    'built but not wired into the UI' regression that bit the first R&D build)."""
+    gui = gui_env
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        _mkproject(gui, Path(td) / "Tile", name="TileProj")
+        html = gui.generate_html(*gui.gather_all())
+    for needle in ("function openProjectWindow", "openProjectWindow(",
+                   "rndSetPriority", "rndArchive", "rndRetire", "rndNotes",
+                   "function rndNotes", 'id="view-rnd-archive"',
+                   "showView('rnd-archive')", ".rnd-tile", "rnd-effort"):
+        assert needle in html, "page missing: " + needle
+    # window.open with a per-project NAME => focus-existing, one window per project
+    assert "'anchorproj_'" in html
+    assert "{{" not in html and "}}" not in html
