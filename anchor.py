@@ -610,6 +610,33 @@ def _all_md_files():
     return files
 
 
+# ── R&D Grass Catchers content feeds (Wave 5 mirror) ───────────────────────
+
+def add_idea(folder_path, project_id, text, notes=""):
+    """CLI mirror of ``effort_history.add_idea`` — manual Grass Catchers idea.
+
+    Records a real Anchor-created idea card on the project's grass lane.
+    Delegates to the single source of truth in ``effort_history`` so the GUI and
+    CLI never diverge. Returns the stored pointer-record.
+    """
+    import effort_history as _eh
+    return _eh.add_idea(folder_path, project_id, text, notes=notes)
+
+
+def promote_inbox(folder_path, project_id, inbox_item_text):
+    """CLI mirror of ``effort_history.promote_inbox`` — promote an INBOX item.
+
+    Reads the existing ``INBOX.md`` with this module's ``parse_inbox_from_md``
+    (no new format) and copies the matching item into the project's Grass
+    Catchers lane (copy-by-default — the inbox item is NOT removed). Returns the
+    stored grass pointer-record. Raises ``ValueError`` if no item matches.
+    """
+    import effort_history as _eh
+    inbox_items = parse_inbox_from_md(INBOX_MD)
+    return _eh.promote_inbox(folder_path, project_id, inbox_item_text,
+                             inbox_items=inbox_items)
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():

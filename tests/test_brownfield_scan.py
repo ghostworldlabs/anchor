@@ -124,6 +124,16 @@ def test_full_scan_result_and_counts(tmp_path):
     ("whitepaper.pdf", "docs"),
     ("README.md", None),
     ("src/main.py", None),
+    # ── Wave 5: Grass Catchers idea-docs ──
+    # A bare PLAN.md stub (e.g. planning/gemini-adapter/PLAN.md) -> grass.
+    ("planning/gemini-adapter/PLAN.md", "grass"),
+    ("PLAN.md", "grass"),
+    # SAVED_FOR_LATER + scoping/ideas notes -> grass.
+    ("SAVED_FOR_LATER.md", "grass"),
+    ("notes/scoping.md", "grass"),
+    # A REAL named trio plan-doc is NEVER grass — it stays planning.
+    ("planning/MASTER-PLAN.md", "planning"),
+    ("planning/x/IMPLEMENTATION-PLAN.md", "planning"),
 ])
 def test_single_file_classification(tmp_path, classify_case):
     rel, expect = classify_case
@@ -178,3 +188,51 @@ def test_scan_to_dict_is_json_serializable(tmp_path):
     d = res.to_dict()
     s = json.dumps(d)  # must not raise
     assert "by_lane" in json.loads(s)
+
+
+# ── Wave 5: Grass Catchers idea-doc classification ──────────────────────────
+
+def test_idea_docs_classify_into_grass_lane(tmp_path):
+    """SAVED_FOR_LATER + an un-run PLAN.md stub => grass; a real MASTER-PLAN.md
+    stays planning (never demoted to grass)."""
+    root = tmp_path / "grassy"
+    root.mkdir()
+    # Idea-docs that belong in Grass Catchers.
+    (root / "SAVED_FOR_LATER.md").write_text("# Saved\n- idea one\n",
+                                             encoding="utf-8")
+    stub = root / "planning" / "gemini-adapter"
+    stub.mkdir(parents=True)
+    (stub / "PLAN.md").write_text("# Gemini adapter PLAN\nstub\n",
+                                  encoding="utf-8")
+    # A REAL named trio plan-doc must stay planning, NOT grass.
+    (root / "planning" / "MASTER-PLAN.md").write_text("# Master Plan\nreal\n",
+                                                      encoding="utf-8")
+
+    res = bscan.scan(str(root))
+
+    grass_rels = {a["rel"] for a in res.by_lane["grass"]}
+    assert "SAVED_FOR_LATER.md" in grass_rels
+    assert "planning/gemini-adapter/PLAN.md" in grass_rels
+
+    plan_rels = {a["rel"] for a in res.by_lane["planning"]}
+    assert "planning/MASTER-PLAN.md" in plan_rels
+    # The real trio plan-doc is NOT in grass.
+    assert "planning/MASTER-PLAN.md" not in grass_rels
+    # Idea-docs are NOT masqueraded as planning.
+    assert "SAVED_FOR_LATER.md" not in plan_rels
+    assert "planning/gemini-adapter/PLAN.md" not in plan_rels
+
+    # Counts include the grass lane in the total.
+    assert res.counts["grass"] == 2
+    assert res.counts["planning"] == 1
+
+
+def test_grass_doc_kind_is_idea_doc(tmp_path):
+    root = tmp_path / "g2"
+    root.mkdir()
+    (root / "PLAN.md").write_text("# stub\n", encoding="utf-8")
+    res = bscan.scan(str(root))
+    grass = res.by_lane["grass"]
+    assert len(grass) == 1
+    assert grass[0]["kind"] == "idea-doc"
+    assert grass[0]["lane"] == "grass"

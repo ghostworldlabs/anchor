@@ -53,7 +53,9 @@ LANE_BUILD = "build"
 LANE_PLANNING = "planning"
 LANE_RESEARCH = "research"
 LANE_DELIVERABLES = "deliverables"
-LANES = (LANE_RESEARCH, LANE_PLANNING, LANE_BUILD, LANE_DELIVERABLES)
+#: Grass Catchers lane — discovered idea-docs (future-work, not active trio runs).
+LANE_GRASS = "grass"
+LANES = (LANE_RESEARCH, LANE_PLANNING, LANE_BUILD, LANE_DELIVERABLES, LANE_GRASS)
 
 # Build-provenance filenames (exact, case-insensitive).
 _BUILD_FILES = frozenset({"foreman-checkpoint.json", "foreman.config.json"})
@@ -66,6 +68,23 @@ _PLANNING_FRAGMENTS = ("master-plan", "implementation-plan", "execution-log",
 _RESEARCH_DIRS = frozenset({"research"})
 # Research artifact basenames (case-insensitive).
 _RESEARCH_FILES = frozenset({"report.md", "report.pdf"})
+
+# ── Grass Catchers idea-doc signals (Wave 5) ────────────────────────────────
+# Idea-docs are FUTURE-WORK candidates, NOT active trio runs. They are adopted
+# as DISCOVERED grass efforts (imported grass cards). The rules are deliberately
+# conservative so the real trio plan-docs (master-plan / implementation-plan /
+# execution-log / decision-log) are NEVER reclassified as grass — those stay in
+# the planning lane (rule #2 below runs FIRST and wins).
+#
+# Grass signals (a *.md only, and only when NOT a named trio plan-doc):
+#   - a SAVED_FOR_LATER doc (the repo's saved-for-later list),
+#   - a bare ``PLAN.md`` stub (stem == "plan") — an un-run plan stub like
+#     ``planning/gemini-adapter/PLAN.md`` (NOT ``FUNDING-PLAN.md`` etc., whose
+#     stem is not exactly "plan" — those remain low-confidence docs),
+#   - a SCOPING / IDEAS notes doc.
+_GRASS_STEM_EXACT = frozenset({"plan"})
+#: Name fragments (case-insensitive substring of the stem) that mark an idea-doc.
+_GRASS_FRAGMENTS = ("saved_for_later", "saved-for-later", "scoping", "ideas")
 
 
 class ScanResult:
@@ -158,6 +177,18 @@ def _is_planning_doc(stem_lower: str) -> bool:
     return any(frag in stem_lower for frag in _PLANNING_FRAGMENTS)
 
 
+def _is_grass_doc(stem_lower: str) -> bool:
+    """True iff a markdown stem is an idea-doc (Grass Catchers) signal.
+
+    NEVER call this for a named trio plan-doc — the caller checks
+    :func:`_is_planning_doc` FIRST so the real master-plan / implementation-plan
+    / execution-log / decision-log are never reclassified as grass.
+    """
+    if stem_lower in _GRASS_STEM_EXACT:
+        return True
+    return any(frag in stem_lower for frag in _GRASS_FRAGMENTS)
+
+
 def _classify(path: Path, rel_posix: str, rel_parts):
     """Classify ONE file by trio provenance. Returns ``(lane_or_docs, kind)``
     or ``None`` to skip the file entirely.
@@ -178,9 +209,18 @@ def _classify(path: Path, rel_posix: str, rel_parts):
                 if "checkpoint" in name_lower else "foreman-config")
 
     # 2. Planning provenance — trio planning docs (named), under planning/ or
-    #    at the root. EXECUTION-LOG.md etc.
+    #    at the root. EXECUTION-LOG.md etc. This runs BEFORE the grass rule so a
+    #    real master-plan / implementation-plan is NEVER demoted to grass.
     if suffix == ".md" and _is_planning_doc(stem_lower):
         return (LANE_PLANNING, "plan-doc")
+
+    # 2b. Grass Catchers idea-docs (Wave 5): SAVED_FOR_LATER, a bare PLAN.md
+    #     stub (e.g. planning/gemini-adapter/PLAN.md), scoping/ideas notes. These
+    #     are ADOPTABLE as discovered grass efforts (imported grass cards) — they
+    #     are future-work, not active trio runs. (Named trio docs already
+    #     returned above, so they can never reach here.)
+    if suffix == ".md" and _is_grass_doc(stem_lower):
+        return (LANE_GRASS, "idea-doc")
 
     # 3. Research provenance — report.md / report.pdf under a research store.
     if name_lower in _RESEARCH_FILES:

@@ -56,3 +56,13 @@
 - RE-GATE (orchestrator-run): **335 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 5 — Grass Catchers content sources — GO (2026-06-11)
+
+- EXECUTE: `add_idea` + `POST /api/rnd/add_idea` (real source=run grass card, honesty contract kept); `promote_inbox` + `POST /api/rnd/promote_inbox` (reuses existing inbox parser, copy-by-default/non-destructive); brownfield `_classify` grass rules (SAVED_FOR_LATER, bare PLAN.md stubs → grass) ordered AFTER the named-trio planning check so real trio docs are never demoted; grass column affordances wired; CLI mirror in anchor.py. New tests/test_grass_catchers.py + extended test_brownfield_scan.py.
+- GATE (orchestrator-run): 351 passed, 1 skipped.
+- REVIEW (2 independent): Reviewer A full PASS (classification conservatism, honesty contract, auth, distro-scan integrity — tok-123 is a pre-existing allowlisted placeholder, no scan weakened). Reviewer B single-reviewer MAJOR-1: reconcile/sibling-adoption folded only cost-rollup lanes, so a retired id's grass ideas would be hard-deleted without folding — data-loss path contradicting the locked "fold history then delete" decision.
+- FIX (1 iter): added `FOLD_LANES` (rollup lanes + grass); `adopt_sibling_sessions` + `reconcile_folder` now fold ALL content lanes incl. grass before hard-delete; COST rollup (`ROLLUP_LANES`) deliberately unchanged (grass has no cost); +1 test proving grass ideas survive reconcile and add no cost.
+- RE-GATE (orchestrator-run): **352 passed, 1 skipped**. Converged.
+
+---

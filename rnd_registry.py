@@ -621,7 +621,10 @@ def reconcile_folder(active_id: str, apply: bool = False) -> dict:
             sid = sib["id"]
             per_lane = {}
             total = 0
-            for lane in _eh.ROLLUP_LANES:
+            # Fold ALL content lanes (incl. grass ideas), not just the cost
+            # rollup lanes — otherwise grass ideas under a folded sibling are
+            # destroyed by the subsequent hard-delete instead of migrated.
+            for lane in _eh.FOLD_LANES:
                 try:
                     n = len(_eh.list_efforts(folder, sid, lane))
                 except Exception:

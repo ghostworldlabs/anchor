@@ -67,6 +67,15 @@ LANE_SUBDIR = {
     "grass": "grass",
 }
 
+#: Every CONTENT lane that holds effort records (cost-bearing rollup lanes PLUS
+#: the cost-free ``grass`` ideas lane). This is the set used when MOVING/FOLDING
+#: a project's full effort history (sibling adoption + the destructive
+#: ``rnd_registry.reconcile_folder`` fold-then-delete), so grass ideas are never
+#: silently lost when a folded sibling id is hard-deleted. NOTE: grass is
+#: deliberately EXCLUDED from :data:`ROLLUP_LANES` (the COST rollup) because
+#: grass ideas carry no cost — only the fold/adopt iteration uses this set.
+FOLD_LANES = ("research", "planning", "build", "deliverables", "grass")
+
 #: Subdirectory under a lane dir holding the per-effort pointer-records.
 EFFORTS_DIRNAME = "efforts"
 #: The append-only ordered index of effort job_ids for a lane.
@@ -204,6 +213,101 @@ def latest_effort(folder_path, project_id: str, lane: str):
     """Return the most-recent effort pointer-record (index 0), or ``None``."""
     efforts = list_efforts(folder_path, project_id, lane)
     return efforts[0] if efforts else None
+
+
+# ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
+
+#: job_id prefix for an Anchor-CREATED grass idea (manual add / inbox promote).
+#: Distinct from the discovered prefix so an idea card is honestly an Anchor
+#: artifact, NOT a brownfield-discovered one.
+IDEA_PREFIX = "idea-"
+
+
+def _new_idea_job_id() -> str:
+    """A fresh, unique job_id for a manual/promoted grass idea."""
+    return f"{IDEA_PREFIX}{hashlib.sha1(f'{time.time_ns()}'.encode()).hexdigest()[:16]}"
+
+
+def add_idea(folder_path, project_id: str, text: str, notes: str = "") -> dict:
+    """Record a manual Grass Catchers idea as a grass-lane effort card (Wave 5).
+
+    A real Anchor-CREATED idea (``source=SOURCE_RUN``, ``kind="idea"``) — NOT a
+    brownfield-discovered artifact. It carries the user's ``text`` as its title
+    and an optional ``notes`` blob; it has NO cost / tokens / session_id (it is
+    not a trio run). Appends a new grass effort, newest-first; nothing is
+    overwritten. Returns the stored pointer-record. All writes under WRITE_LOCK
+    (via :func:`record_effort`).
+    """
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("idea text required")
+    jid = _new_idea_job_id()
+    extra = {
+        "source": SOURCE_RUN,
+        "kind": "idea",
+        "title": text,
+        "notes": (notes or "").strip(),
+        "status": "idea",
+    }
+    return record_effort(folder_path, project_id, "grass", jid, extra=extra)
+
+
+def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
+                  inbox_items=None) -> dict:
+    """Promote an EXISTING INBOX.md item into a project's Grass Catchers (Wave 5).
+
+    Reads the existing inbox (the caller supplies ``inbox_items`` parsed by the
+    GUI/CLI's existing ``parse_inbox_from_md`` — no new inbox format is invented)
+    and creates a grass card from the matching item. Matching is by exact text,
+    then case-insensitive, then substring (first match wins).
+
+    COPY-BY-DEFAULT (non-destructive): the inbox item is NOT removed from
+    INBOX.md — the idea is COPIED into the project's grass lane so the inbox
+    remains the user's untouched capture log. (The frozen plan does not direct a
+    move/remove; copy is the safe default, leaving INBOX.md as the source of
+    truth.) Returns the stored grass pointer-record.
+
+    Raises ``ValueError`` if the item is not found in the supplied inbox.
+    """
+    want = (inbox_item_text or "").strip()
+    if not want:
+        raise ValueError("inbox item text required")
+    items = inbox_items or []
+    match = None
+    for it in items:
+        if (it.get("text") or "").strip() == want:
+            match = it
+            break
+    if match is None:
+        low = want.lower()
+        for it in items:
+            if (it.get("text") or "").strip().lower() == low:
+                match = it
+                break
+    if match is None:
+        low = want.lower()
+        for it in items:
+            if low in (it.get("text") or "").strip().lower():
+                match = it
+                break
+    if match is None:
+        raise ValueError(f"inbox item not found: {inbox_item_text}")
+
+    jid = _new_idea_job_id()
+    note_bits = []
+    if match.get("date"):
+        note_bits.append(f"from INBOX {match['date']}")
+    if match.get("domain"):
+        note_bits.append(f"[{match['domain']}]")
+    extra = {
+        "source": SOURCE_RUN,
+        "kind": "idea",
+        "title": (match.get("text") or "").strip(),
+        "notes": " ".join(note_bits),
+        "status": "idea",
+        "promoted_from": "inbox",
+    }
+    return record_effort(folder_path, project_id, "grass", jid, extra=extra)
 
 
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────
@@ -446,8 +550,11 @@ def adopt_sibling_sessions(folder_path, target_id: str,
     """Fold sibling project-ids' real efforts into ``target_id`` as imported.
 
     For each sibling id (default: every OTHER on-disk store under this folder),
-    every effort in every rollup lane is upserted into ``target_id``'s matching
-    lane store via :func:`_import_record_into`. The target therefore SEES trio
+    every effort in every CONTENT lane (:data:`FOLD_LANES` — the rollup lanes
+    PLUS the cost-free ``grass`` ideas lane) is upserted into ``target_id``'s
+    matching lane store via :func:`_import_record_into`. Folding the grass lane
+    too means manually-added / adopted grass IDEAS are migrated before any
+    hard-delete and are never silently lost. The target therefore SEES trio
     work that was originally recorded under a different project-id for the SAME
     folder — fixing the bug where research run under one id is invisible to a
     sibling id for the same folder.
@@ -464,12 +571,12 @@ def adopt_sibling_sessions(folder_path, target_id: str,
     else:
         source_ids = [s for s in source_ids if s and s != target_id]
     imported = 0
-    by_lane = {lane: 0 for lane in ROLLUP_LANES}
+    by_lane = {lane: 0 for lane in FOLD_LANES}
     used_sources = []
     with _paths.WRITE_LOCK:
         for sid in source_ids:
             touched = False
-            for store_lane in ROLLUP_LANES:
+            for store_lane in FOLD_LANES:
                 for rec in list_efforts(folder_path, sid, store_lane):
                     _import_record_into(folder_path, target_id, store_lane, rec)
                     imported += 1

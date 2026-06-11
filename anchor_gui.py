@@ -798,6 +798,12 @@ def _gather_project_efforts(folder_path, project_id):
             seed = eff.get("prompt_seed") or ""
             hint = seed.strip().splitlines()[0] if seed.strip() else ""
             sub = " · ".join(p for p in (skill, hint) if p)
+            # A manual/promoted Grass Catchers idea (Wave 5) carries its text as
+            # the title; surface it so the card body shows the idea, not a blank.
+            if not discovered and eff.get("kind") == "idea":
+                idea_text = (eff.get("title") or "").strip()
+                if idea_text:
+                    sub = idea_text
             cost = (eff.get("cost") or {})
             cost_usd = float(cost.get("total_cost_usd", 0.0) or 0.0)
             views.append({
@@ -992,9 +998,14 @@ def _render_kanban_html(folder_path, project_id):
             add = (f"<span class='addnew rnd-dim' title='Deliverables are run "
                    f"from the project config'>{html_lib.escape(add_label)}</span>")
         elif trio_lane == "grass":
-            add = (f"<span class='addnew rnd-dim' title='Grass Catchers content "
-                   f"feeds arrive in a later build'>{html_lib.escape(add_label)}"
-                   f"</span>")
+            # Grass Catchers content feeds (Wave 5): manual add + promote from
+            # INBOX. Both POST behind the auth gate via the project-window JS.
+            add = (
+                f"<span class='addnew' onclick=\"addIdea()\">"
+                f"{html_lib.escape(add_label)}</span> "
+                f"<span class='addnew' onclick=\"promoteInbox()\">"
+                f"+ From inbox</span>"
+            )
         elif trio_lane == "research":
             add = (
                 "<span class='addnew' onclick=\"launchLane('research','claude')\">"
@@ -1482,6 +1493,49 @@ async function launchLane(lane, backend) {
   s.tabName = lane + (data.backend ? (' · ' + data.backend) : '');
   attachSession(data.job_id);
   _startPolling();
+}
+
+// ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
+// Manual add: prompt for idea text, POST /api/rnd/add_idea, then refresh so the
+// new grass card renders. Token-aware via _postJson (retries once on 401).
+async function addIdea() {
+  var text = window.prompt('New idea for Grass Catchers:', '');
+  if (text === null) return;            // cancelled
+  text = (text || '').trim();
+  if (!text) return;
+  var payload = {project_id: PROJECT_ID, text: text};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/add_idea', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/add_idea', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[add idea error] ' + e.message); return; }
+  if (!data.ok) { alert('[add idea refused] ' + (data.error || 'unknown')); return; }
+  location.reload();
+}
+
+// Promote from INBOX: prompt for the inbox item text, POST /api/rnd/promote_inbox
+// (copy-by-default — the inbox item is not removed), then refresh.
+async function promoteInbox() {
+  var text = window.prompt('Promote which INBOX item into Grass Catchers? (type the item text)', '');
+  if (text === null) return;
+  text = (text || '').trim();
+  if (!text) return;
+  var payload = {project_id: PROJECT_ID, text: text};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/promote_inbox', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/promote_inbox', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[promote inbox error] ' + e.message); return; }
+  if (!data.ok) { alert('[promote inbox refused] ' + (data.error || 'unknown')); return; }
+  location.reload();
 }
 
 function _startPolling() {
@@ -4645,6 +4699,45 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "job_id": job_id,
                     "status": (out or {}).get("status"),
                 })
+
+        # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
+        elif self.path == "/api/rnd/add_idea":
+            # Manually add an idea to a project's Grass Catchers lane (a real
+            # Anchor-created idea card, NOT a discovered artifact). Auth is
+            # already enforced by the middleware above. Clean 404 for an unknown
+            # project; 400 for empty text.
+            pid = body.get("project_id", "") or body.get("id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                try:
+                    rec = _eh.add_idea(folder, pid,
+                                       body.get("text", ""),
+                                       notes=body.get("notes", ""))
+                    self._send_json({"ok": True, "effort": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/promote_inbox":
+            # Promote an EXISTING INBOX.md item into a project's Grass Catchers
+            # (copy-by-default: the inbox item is NOT removed). Reuses the
+            # existing inbox parser — no new format. Auth enforced above.
+            pid = body.get("project_id", "") or body.get("id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                inbox_items = parse_inbox_from_md(INBOX_MD)
+                try:
+                    rec = _eh.promote_inbox(folder, pid,
+                                            body.get("text", ""),
+                                            inbox_items=inbox_items)
+                    self._send_json({"ok": True, "effort": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart

@@ -257,6 +257,73 @@ def test_reconcile_apply_folds_then_hard_deletes(mods, tmp_path):
     assert anchor_ids == [aid]
 
 
+def test_reconcile_apply_folds_grass_ideas_not_lost(mods, tmp_path):
+    """Wave 5 fix: the destructive fold-then-hard-delete must FOLD grass-lane
+    ideas too — otherwise a sibling's manually-added / adopted grass ideas are
+    silently destroyed when the sibling id is hard-deleted.
+
+    G/W/T: a retired same-folder sibling holds a grass idea (and a real research
+    effort). When reconcile_folder(active, apply=True), Then the grass idea is
+    PRESENT under the active id (folded) AND the sibling id is gone. The cost
+    rollup for the active id must NOT have gained any cost from the grass idea
+    (grass is excluded from the cost rollup by design)."""
+    rnd, eh = mods
+    folder = tmp_path / "Anchor"
+    folder.mkdir()
+
+    active = rnd.add_project("Anchor", str(folder), priority=1)
+    aid = active["id"]
+
+    # Retired same-folder sibling: a manually-added grass IDEA + a real (cost-
+    # bearing) research effort, so we can prove grass folds AND cost stays honest.
+    sib = rnd.add_project("Anchor", str(folder), priority=1)
+    sid = sib["id"]
+    rnd.retire_project(sid)
+    idea = eh.add_idea(str(folder), sid, "explore tritium recovery",
+                       notes="from brainstorm")
+    idea_jid = idea["job_id"]
+    _seed_real_effort(eh, str(folder), sid, "research", "r-real",
+                      title="sibling research", cost=0.05)
+
+    # Sanity: active sees no grass yet.
+    assert eh.list_efforts(str(folder), aid, "grass") == []
+
+    # Preview must already account for the grass lane in the fold plan.
+    plan = rnd.reconcile_folder(aid, apply=False)
+    by_id = {f["id"]: f for f in plan["fold"]}
+    assert by_id[sid]["efforts"].get("grass") == 1
+
+    res = rnd.reconcile_folder(aid, apply=True)
+    assert res["ok"] is True and res["applied"] is True
+
+    # The grass idea is now PRESENT under the active id (folded, never lost).
+    grass = eh.list_efforts(str(folder), aid, "grass")
+    assert len(grass) == 1
+    assert grass[0]["title"] == "explore tritium recovery"
+    # Imported grass keeps its provenance honest (folded → source=discovered).
+    assert eh.is_discovered(grass[0])
+    assert grass[0].get("imported_from") == sid
+    # The grass fold is reflected in the apply report's by-lane counts.
+    assert res["imported_by_lane"].get("grass") == 1
+
+    # The sibling id is hard-deleted; exactly one Anchor id remains.
+    reg = rnd.load_registry()
+    assert sid not in reg
+    anchor_ids = [e["id"] for e in reg.values()
+                  if e["folder_path"] == str(folder)]
+    assert anchor_ids == [aid]
+
+    # COST HONESTY: the cost rollup never includes the grass lane, and the
+    # folded grass idea fabricates NO cost. (Folded efforts become
+    # source=discovered, so they're excluded from the real-cost rollup — see the
+    # honesty contract; the rollup therefore stays $0.00 and grass contributes
+    # nothing.)
+    rollup = eh.project_rollup(aid, folder_path=str(folder))
+    assert "grass" not in rollup["lanes"]            # rollup never includes grass
+    assert set(rollup["lanes"]) == set(eh.ROLLUP_LANES)
+    assert rollup["total"]["total_cost_usd"] == pytest.approx(0.0)
+
+
 def test_reconcile_never_touches_different_folder_id(mods, tmp_path):
     rnd, eh = mods
     folder = tmp_path / "Anchor"
