@@ -109,3 +109,12 @@ All 8 waves GREEN on the orchestrator-run gate `python -m pytest -v` (**391 pass
 **Not done by this build (data debris, flagged):** `domains/test.md` is untracked junk with a cp1252 byte that breaks the LIVE healthcheck/server markdown-parse path — should be deleted by the user.
 
 **Deploy note:** changes live on branch `foreman/rnd-surface-v2`; the live server (NSSM `anchor`) still runs the old code until merged to master + `nssm restart anchor` (elevated).
+
+---
+
+## Follow-up — real xterm.js swap (user decision) — GO (2026-06-11)
+
+- User chose real xterm.js over the lightweight anchor-term console. EXECUTE: vendored real `@xterm/xterm 6.0.0` (offline copy, MIT LICENSE + PROVENANCE) into `vendor/xterm/`; rewrote `vendor/anchor-term/anchor-term.js` as an ADAPTER over `new window.Terminal(...)` preserving the SAME `window.AnchorTerm.mount` API, gates, discover→adopt panel, and beforeunload reap; added traversal-safe `/vendor/xterm/` static route + includes (xterm before anchor-term). Backend `rnd_terminal.py` + SSE/term endpoints **byte-unchanged** (verified via empty git diff).
+- GATE (orchestrator-run): **394 passed, 1 skipped** (+3 asset/route tests).
+- REVIEW (1 focused, adversarial): full PASS on API parity, backend-unchanged, route safety, real-asset reality, adapter correctness, brace discipline, no stale refs. (Its lone "git hygiene" flag was a protocol misread — commit happens on GO, post-review.)
+- Note: full visual/behavioral terminal validation is in-browser (out of gate scope) — verify after deploy.

@@ -496,12 +496,19 @@ def test_project_window_has_lane_controls_and_log_drawer(gui_env):
     assert "openTerminal('research','claude')" in html
     assert "openTerminal('plan')" in html
     assert "openTerminal('build')" in html
-    # Terminal substrate hooks: the window mounts the vendored terminal console
-    # (AnchorTerm) and starts a session via /api/rnd/start_terminal; the SSE
-    # stream URL itself lives in the vendored anchor-term.js static asset.
+    # Terminal substrate hooks: the window mounts the REAL xterm.js terminal via
+    # the anchor-term adapter (which still exposes window.AnchorTerm.mount) and
+    # starts a session via /api/rnd/start_terminal; the SSE stream URL itself
+    # lives in the vendored anchor-term.js static asset.
     assert "AnchorTerm" in html
+    assert "window.AnchorTerm.mount" in html
     assert "/api/rnd/start_terminal" in html
+    # The genuine xterm.js library + stylesheet are vendored and included, and
+    # xterm.js loads BEFORE the anchor-term adapter that drives its Terminal.
+    assert "/vendor/xterm/xterm.js" in html
+    assert "/vendor/xterm/xterm.css" in html
     assert "anchor-term.js" in html
+    assert html.index("/vendor/xterm/xterm.js") < html.index("anchor-term.js")
     # Log drawer + gate hooks (the legacy raw-log mirror is KEPT for reattach).
     assert "id='laneLog'" in html
     assert "id='laneGate'" in html

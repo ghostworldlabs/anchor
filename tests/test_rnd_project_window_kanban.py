@@ -149,6 +149,12 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     assert "openTerminal('plan')" in html
     assert "openTerminal('build')" in html
     assert "New research run" in html
+    # Real xterm.js terminal: the vendored library + stylesheet are included and
+    # the window still mounts through the unchanged window.AnchorTerm.mount API.
+    assert "/vendor/xterm/xterm.js" in html
+    assert "/vendor/xterm/xterm.css" in html
+    assert "anchor-term.js" in html
+    assert "window.AnchorTerm.mount" in html
     # Multi-session console (session tabs + attached log + Ask + Stop).
     assert "id='ctabs'" in html
     assert "id='laneLog'" in html
@@ -164,6 +170,60 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     assert "RichProj" in html
     # f-string / brace hygiene of the served page.
     assert "{{" not in html and "}}" not in html
+
+
+def test_vendored_xterm_assets_present_and_real(gui_env):
+    """The genuine xterm.js library + stylesheet are vendored locally (offline)
+    and look like the real upstream bundle (no network, no fake)."""
+    import anchor_gui as gui
+    assert gui.XTERM_DIR.is_file() is False  # it's a directory
+    assert (gui.XTERM_DIR / "xterm.js").is_file()
+    assert (gui.XTERM_DIR / "xterm.css").is_file()
+    assert (gui.XTERM_DIR / "PROVENANCE.txt").is_file()
+    js = (gui.XTERM_DIR / "xterm.js").read_text(encoding="utf-8")
+    # Real xterm.js is a sizeable UMD bundle that exports the Terminal class.
+    assert len(js) > 100_000
+    assert "Terminal" in js
+
+
+def test_xterm_asset_serves_local_file_and_blocks_traversal(gui_env):
+    """xterm_asset() serves the vendored bytes and refuses traversal — mirrors
+    the hardened katex/anchor-term static-asset routes."""
+    import anchor_gui as gui
+    js = gui.xterm_asset("xterm.js")
+    assert js is not None
+    data, ctype = js
+    assert ctype.startswith("text/javascript")
+    assert b"Terminal" in data
+    css = gui.xterm_asset("xterm.css")
+    assert css is not None and css[1].startswith("text/css")
+    # Path traversal / escapes must be refused (ZERO bytes read on escape).
+    assert gui.xterm_asset("../../paths.py") is None
+    assert gui.xterm_asset("../anchor-term/anchor-term.js") is None
+    assert gui.xterm_asset("does-not-exist.js") is None
+
+
+def test_xterm_static_route_served_over_http_and_traversal_safe(server):
+    """GET /vendor/xterm/xterm.js serves the real bytes; a traversal attempt and
+    a missing file 404 (the route mirrors the KaTeX/anchor-term static routes)."""
+    gui, base = server
+    status, body = _get_text(base + "/vendor/xterm/xterm.js")
+    assert status == 200
+    assert "Terminal" in body and len(body) > 100_000
+    # CSS too.
+    status_css, body_css = _get_text(base + "/vendor/xterm/xterm.css")
+    assert status_css == 200 and ".xterm" in body_css
+    # Traversal / missing -> 404 (never serve outside the vendored dir). The
+    # traversal uses percent-encoded dot-segments so it reaches the server
+    # un-normalized (a raw "../" is collapsed client-side by urllib).
+    for bad in ("/vendor/xterm/%2e%2e/%2e%2e/paths.py", "/vendor/xterm/nope.js"):
+        try:
+            _get_text(base + bad)
+            served = True
+        except urllib.error.HTTPError as e:
+            served = False
+            assert e.code == 404
+        assert not served, f"{bad} should not be served"
 
 
 def test_window_done_effort_links_report_viewer(gui_env, tmp_path):

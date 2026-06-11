@@ -1,11 +1,11 @@
-/* Anchor R&D interactive terminal — lightweight, dependency-free console.
+/* Anchor R&D interactive terminal — CHROME for the REAL xterm.js console.
  *
- * This is the vendored static asset for the v2 terminal substrate (Wave 7). It
- * is deliberately a small, self-contained terminal-style console (monospace,
- * dark, scrollback, a command input line) that renders the SSE output stream and
- * POSTs user input — NOT a full ConPTY/xterm.js terminal (Anchor forbids native
- * deps; see MASTER-PLAN §E). It is named ``anchor-term`` so a real xterm.js can
- * be swapped in behind the same mount/API later without touching callers.
+ * The terminal canvas itself is now a genuine xterm.js Terminal (its own
+ * stylesheet is vendored at /vendor/xterm/xterm.css). This stylesheet styles the
+ * Anchor REPL chrome layered AROUND that canvas: the title bar, the command
+ * input line, the inline gate / AskUserQuestion prompts, and the
+ * exit -> discover -> confirm-adopt panel. xterm.js is vendored as a plain
+ * static asset (like KaTeX), behind the same window.AnchorTerm.mount API.
  */
 .aterm {
   background: #0a0c11;
@@ -37,23 +37,31 @@
   70% { box-shadow: 0 0 0 6px rgba(108,156,252,0); }
   100% { box-shadow: 0 0 0 0 rgba(108,156,252,0); }
 }
+/* Host for the real xterm.js Terminal canvas. xterm sizes itself to this box. */
 .aterm-screen {
-  flex: 1;
   min-height: 160px;
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 10px 12px;
+  height: 320px;
+  max-height: 60vh;
+  overflow: hidden;
+  padding: 8px 10px;
+  background: #0a0c11;
+}
+.aterm-screen .xterm { height: 100%; }
+.aterm-screen .xterm-viewport { background: #0a0c11 !important; }
+/* Degraded fallback (only if window.Terminal is unavailable). */
+.aterm-fallback {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, Menlo, monospace;
   font-size: 12.5px;
   line-height: 1.45;
   color: #cdd2dc;
   white-space: pre-wrap;
   word-break: break-word;
 }
-.aterm-line.user { color: #6c9cfc; }
-.aterm-line.assistant { color: #cdd2dc; }
-.aterm-line.system { color: #8b8f9a; font-style: italic; }
-.aterm-line.error { color: #f87171; }
-/* Inline gate / AskUserQuestion prompt surfaced in-stream. */
+/* Gate + adopt chrome live below the canvas. */
+.aterm-chrome { padding: 0 12px; }
+.aterm-chrome:empty { padding: 0; }
+/* Inline gate / AskUserQuestion prompt surfaced as chrome below the terminal. */
 .aterm-gate {
   margin: 8px 0;
   padding: 8px 10px;

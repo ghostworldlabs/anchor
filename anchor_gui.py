@@ -431,6 +431,35 @@ def anchor_term_asset(rel_path: str):
     return target.read_bytes(), ctype
 
 
+# ── Vendored xterm.js static asset (real terminal emulator) ──────────────────
+# The interactive terminal canvas is a genuine xterm.js Terminal. xterm.js is
+# pure browser JS (no native/compiled component), vendored offline as a plain
+# static asset exactly like KaTeX. The anchor-term chrome (input line, gates,
+# adopt panel) is layered on top via the anchor-term asset above.
+XTERM_DIR = ANCHOR_DIR / "vendor" / "xterm"
+XTERM_URL_PREFIX = "/vendor/xterm"
+
+
+def xterm_asset(rel_path: str):
+    """Resolve a ``/vendor/xterm/<rel>`` request to (bytes, content_type).
+
+    Path-traversal safe (same containment pattern as :func:`anchor_term_asset`
+    and ``report_viewer.katex_asset``): the resolved file MUST stay within
+    :data:`XTERM_DIR`. Returns ``None`` for a missing file or an escape attempt.
+    """
+    rel = rel_path.lstrip("/")
+    target = (XTERM_DIR / rel).resolve()
+    try:
+        target.relative_to(XTERM_DIR.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    ctype = _ANCHOR_TERM_CONTENT_TYPES.get(target.suffix.lower(),
+                                           "application/octet-stream")
+    return target.read_bytes(), ctype
+
+
 # Single-instance project windows (Master Plan C2): opening a project that is
 # already open returns the EXISTING instance id rather than spawning a duplicate.
 # Server-side, process-local map {project_id: instance_id}. Guarded by the same
@@ -1209,7 +1238,10 @@ def render_project_window_html(project_id: str) -> str:
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
-        # Vendored interactive-terminal console asset (Wave 7), served like KaTeX.
+        # Vendored REAL xterm.js terminal (canvas) + anchor-term chrome, both
+        # served like KaTeX. xterm.css styles the terminal grid; anchor-term.css
+        # styles the REPL chrome (input line, gates, adopt panel) around it.
+        f"<link rel='stylesheet' href='{XTERM_URL_PREFIX}/xterm.css'>"
         f"<link rel='stylesheet' href='{ANCHOR_TERM_URL_PREFIX}/anchor-term.css'>"
         "<style>"
         ":root{--bg:#0f1117;--surface:#1a1d27;--surface2:#232733;"
@@ -1399,7 +1431,12 @@ def render_project_window_html(project_id: str) -> str:
         f"{deliverables_html}"
         f"<p style='color:#8a90a2;font-size:12px'>instance "
         f"{html_lib.escape(inst['instance_id'])}</p>"
-        # Vendored terminal-console component (Wave 7): provides window.AnchorTerm.
+        # Vendored REAL xterm.js (defines window.Terminal) — MUST load before the
+        # anchor-term adapter, which instantiates an xterm.js Terminal and layers
+        # the REPL chrome on top while preserving window.AnchorTerm.mount.
+        f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
+        # anchor-term adapter (Wave 7+): drives the xterm.js Terminal and provides
+        # window.AnchorTerm.mount (SSE stream + input line + inline gate + adopt).
         f"<script src='{ANCHOR_TERM_URL_PREFIX}/anchor-term.js'></script>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
@@ -4480,6 +4517,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # Read-only vendored KaTeX static assets for the Reader (Wave 7).
                 rel = urlparse(self.path).path[len(_rv.KATEX_URL_PREFIX):]
                 asset = _rv.katex_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith(XTERM_URL_PREFIX):
+                # Read-only vendored REAL xterm.js static asset (terminal canvas),
+                # served like KaTeX (traversal-safe). Loaded before anchor-term.js.
+                rel = urlparse(self.path).path[len(XTERM_URL_PREFIX):]
+                asset = xterm_asset(rel)
                 if asset is None:
                     self.send_response(404)
                     self.end_headers()
