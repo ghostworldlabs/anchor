@@ -217,3 +217,155 @@ def test_status_persisted_for_dashboard(deliv, tmp_path):
     assert listed[0]["status"] == deliv.STATUS_SUCCESS
     loaded = deliv.load_status(str(folder), pid, rec["deliverable_id"])
     assert loaded is not None and loaded["type"] == deliv.TYPE_DOC
+
+
+# ── Wave 2: deliverable DECLARE (Anchor.md marker) + PIN ─────────────────────
+
+@pytest.fixture
+def deliv2(tmp_path, monkeypatch):
+    """Fixture that also reloads rnd_registry + effort_history (declare/pin
+    record into the deliverables-lane effort store)."""
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
+    import paths
+    importlib.reload(paths)
+    import rnd_registry
+    importlib.reload(rnd_registry)
+    import effort_history
+    importlib.reload(effort_history)
+    import job_runner
+    importlib.reload(job_runner)
+    import report_viewer
+    importlib.reload(report_viewer)
+    import deliverables
+    importlib.reload(deliverables)
+    return deliverables, rnd_registry, effort_history
+
+
+def test_pin_deliverable_surfaces_as_deliverables_effort(deliv2, tmp_path):
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    (folder / "anchor_gui.py").write_text("print('app')\n", encoding="utf-8")
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+
+    rec = deliv.pin_deliverable(str(folder), pid, "anchor_gui.py",
+                                name="anchor_gui.py")
+    assert rec["source"] == deliv.SOURCE_PINNED
+    assert rec["artifact_path"] == "anchor_gui.py"
+    assert rec["deliverable_type"] == deliv.TYPE_SCRIPT  # .py → script
+
+    # It appears as a DELIVERABLES-lane effort even though it is NOT under
+    # deliverables/.
+    efforts = eh.list_efforts(str(folder), pid, "deliverables")
+    assert any(e.get("artifact_path") == "anchor_gui.py" for e in efforts)
+    pinned = deliv.list_pinned_deliverables(str(folder), pid)
+    assert len(pinned) == 1
+    assert pinned[0]["title"] == "anchor_gui.py"
+
+
+def test_pin_deliverable_is_idempotent(deliv2, tmp_path):
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+    deliv.pin_deliverable(str(folder), pid, "anchor_gui.py")
+    deliv.pin_deliverable(str(folder), pid, "anchor_gui.py")
+    assert len(eh.list_efforts(str(folder), pid, "deliverables")) == 1
+
+
+def test_pin_absolute_path_under_folder_is_relativized(deliv2, tmp_path):
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+    abs_path = str(folder / "anchor_gui.py")
+    rec = deliv.pin_deliverable(str(folder), pid, abs_path)
+    assert rec["artifact_path"] == "anchor_gui.py"
+
+
+def test_declare_deliverables_from_anchor_md(deliv2, tmp_path):
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+    # An Anchor.md marker with a Deliverables declaration block.
+    (folder / "Anchor.md").write_text(
+        "# Anchor.md\n"
+        "\n"
+        "## Deliverables (declared)\n"
+        "\n"
+        "- `anchor_gui.py` — program — The running web app\n"
+        "- `DASHBOARD.md` — doc — Daily dashboard\n"
+        "\n"
+        "## Anchor\n"
+        "\n"
+        "- `should-not-be-parsed.py` — script — past the block\n",
+        encoding="utf-8",
+    )
+
+    items = deliv.parse_anchor_md_deliverables(str(folder))
+    assert [it["path"] for it in items] == ["anchor_gui.py", "DASHBOARD.md"]
+    assert items[0]["type"] == deliv.TYPE_PROGRAM
+    assert items[1]["type"] == deliv.TYPE_DOC
+    assert items[0]["description"] == "The running web app"
+
+    res = deliv.declare_deliverables_from_marker(str(folder), pid)
+    assert res["declared"] == 2
+
+    pinned = deliv.list_pinned_deliverables(str(folder), pid)
+    paths_ = {p["artifact_path"] for p in pinned}
+    assert paths_ == {"anchor_gui.py", "DASHBOARD.md"}
+    assert all(p["source"] == deliv.SOURCE_DECLARED for p in pinned)
+
+
+def test_declare_no_marker_is_empty(deliv2, tmp_path):
+    deliv, rnd, _ = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+    assert deliv.parse_anchor_md_deliverables(str(folder)) == []
+    res = deliv.declare_deliverables_from_marker(str(folder), pid)
+    assert res["declared"] == 0
+
+
+def test_declare_is_idempotent(deliv2, tmp_path):
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+    (folder / "Anchor.md").write_text(
+        "## Deliverables\n\n- `anchor_gui.py` — program\n", encoding="utf-8")
+    deliv.declare_deliverables_from_marker(str(folder), pid)
+    deliv.declare_deliverables_from_marker(str(folder), pid)
+    assert len(deliv.list_pinned_deliverables(str(folder), pid)) == 1
+
+
+def test_pin_relative_traversal_escape_is_rejected(deliv2, tmp_path):
+    """A RELATIVE ``..``-escaping path (e.g. ../../../../etc/passwd) must be
+    REJECTED — it never gets stored as a deliverable's artifact_path. An
+    in-folder relative path still works (containment, not blanket-deny)."""
+    deliv, rnd, eh = deliv2
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = rnd.add_project("Anchor", str(folder))["id"]
+
+    # Escaping relative path → rejected with a clear ValueError, nothing stored.
+    with pytest.raises(ValueError):
+        deliv.pin_deliverable(str(folder), pid, "../../../../etc/passwd")
+    # An absolute path outside the folder is likewise rejected.
+    outside = (tmp_path / "outside" / "loot.txt")
+    with pytest.raises(ValueError):
+        deliv.pin_deliverable(str(folder), pid, str(outside))
+    # No bad effort leaked into the deliverables lane.
+    assert eh.list_efforts(str(folder), pid, "deliverables") == []
+
+    # An IN-FOLDER relative path still pins fine (containment, not deny-all).
+    (folder / "anchor_gui.py").write_text("print('app')\n", encoding="utf-8")
+    rec = deliv.pin_deliverable(str(folder), pid, "anchor_gui.py")
+    assert rec["artifact_path"] == "anchor_gui.py"
+    # And a nested in-folder relative path normalizes to POSIX-relative.
+    sub = folder / "sub"
+    sub.mkdir()
+    (sub / "tool.py").write_text("x=1\n", encoding="utf-8")
+    rec2 = deliv.pin_deliverable(str(folder), pid, "sub/tool.py")
+    assert rec2["artifact_path"] == "sub/tool.py"

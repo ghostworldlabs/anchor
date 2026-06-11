@@ -162,3 +162,32 @@ def test_discovered_job_id_is_stable(mods):
     assert a == b
     assert a != c
     assert a.startswith("disc-")
+
+
+def test_sibling_store_adoption_pulls_other_id_same_folder(mods, tmp_path):
+    """Wave 2 sibling adoption: a real effort recorded under a SIBLING project-id
+    for the same folder is pulled into the target id as an imported effort."""
+    eh, rnd = mods
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    target = rnd.add_project("Anchor", str(folder))["id"]
+    sib = rnd.add_project("Anchor", str(folder))["id"]
+
+    # A real research run lives ONLY under the sibling's store.
+    eh.record_effort(folder, sib, "research", "sib1", skill="researchPrime",
+                     extra={"title": "sibling report"})
+    eh.finalize_effort(folder, sib, "research", "sib1",
+                       {"status": "done", "cost": {"total_cost_usd": 0.05}},
+                       auto_commit=False)
+    assert eh.list_efforts(folder, target, "research") == []
+
+    rep = eh.adopt_sibling_sessions(folder, target)
+    assert rep["imported"] == 1
+    got = eh.list_efforts(folder, target, "research")
+    assert len(got) == 1
+    assert got[0]["title"] == "sibling report"
+    # Folded-in history is imported (not double-counted as a real run-cost).
+    assert eh.is_discovered(got[0])
+    # Honest rollup: the target's real effort_count stays 0 (imported only).
+    assert eh.lane_rollup(folder, target, "research")["effort_count"] == 0
+    assert eh.lane_rollup(folder, target, "research")["discovered_count"] == 1

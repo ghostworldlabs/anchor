@@ -26,3 +26,13 @@
 - Acceptance proven: active-project planning fixture (7 discovered files / 2 dirs) → exactly 2 sessions, newest-first, no dup/dropped members.
 
 ---
+
+## Wave 2 — Folder-history unification + reconcile + deliverable pinning — GO (2026-06-11)
+
+- EXECUTE: sibling-store adoption (`effort_history.sibling_store_ids`/`adopt_sibling_sessions`), `rnd_registry.reconcile_folder(active_id, apply=False|True)` (preview-then-fold-then-hard-delete, all under WRITE_LOCK, never touches active or different-folder ids), new `deliverables.py` (Anchor.md marker parse + pin), `POST /api/rnd/pin_deliverable`. Ids read from registry by folder at runtime (not hard-coded). New `tests/test_reconcile.py` + extended `tests/test_deliverables.py`/`test_brownfield_adopt.py`.
+- GATE (orchestrator-run): 312 passed, 1 skipped. Live registry untouched (hermetic tests).
+- REVIEW (2 independent): Reviewer A raised a path-traversal BLOCKER in `deliverables._relpath` (relative `..` stored unvalidated); Reviewer B independently judged path handling safe → not a ≥2-agree blocker, and serve-time guard (`test_artifact_route_safety`) already limits exploitability. Fixed anyway (defense-in-depth, data-sensitive wave). Idempotency test-gap (A major / B minor) also closed.
+- FIX (1 iter): `_relpath` now resolves against the folder and raises ValueError on any escape (reusing the report_viewer/`/artifact` containment pattern); endpoint returns 400 not 500; +2 tests (traversal-reject, fallback-jid idempotent). One resolved ambiguity: malicious-Anchor.md hardening left out — Anchor.md is a trusted repo-committed file; ValueError still can't crash the endpoint. Sound default, no user HALT.
+- RE-GATE (orchestrator-run): **314 passed, 1 skipped**. Converged.
+
+---

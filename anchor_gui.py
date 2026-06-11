@@ -527,9 +527,15 @@ def discover_and_adopt(project_id: str) -> dict:
     # Reconcile is implicit in adopt (prunes stale discovered), but run an
     # explicit pass too so a deleted artifact whose lane vanished is pruned.
     _eh.reconcile_discovered(folder, project_id)
+    # Folder-history unification (Wave 2, scope #1): also adopt trio sessions
+    # found in OTHER project-ids' stores for the SAME folder, so a run recorded
+    # under a sibling id is not invisible to this project. Non-destructive — the
+    # sibling stores/ids are left intact (the explicit, reviewable
+    # ``reconcile_folder`` is what folds + hard-deletes them).
+    sibling = _eh.adopt_sibling_sessions(folder, project_id)
     marker = _marker.write_anchor_md(folder)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
-            "marker": marker}
+            "sibling_adopt": sibling, "marker": marker}
 
 
 def render_status_line_html(project_id: str) -> str:
@@ -4270,6 +4276,40 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": True, "status": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/pin_deliverable":
+            # Pin a path (e.g. anchor_gui.py) as a deliverable so it surfaces as
+            # a deliverables-lane effort even though it is not under a
+            # deliverables/ directory. With "declare":true, instead pin every
+            # deliverable declared in the folder's Anchor.md marker block.
+            pid = body.get("project_id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                if body.get("declare"):
+                    res = _deliv.declare_deliverables_from_marker(folder, pid)
+                    self._send_json({"ok": True, **res})
+                else:
+                    path = body.get("path", "") or body.get("target", "")
+                    if not path:
+                        self._send_json({"ok": False,
+                                         "error": "path required"}, 400)
+                    else:
+                        try:
+                            rec = _deliv.pin_deliverable(
+                                folder, pid, path,
+                                name=body.get("name"),
+                                dtype=body.get("type"),
+                                description=body.get("description", ""),
+                            )
+                        except ValueError as e:
+                            # A path that escapes the project folder is rejected
+                            # cleanly (400), never a 500-crash.
+                            self._send_json({"ok": False, "error": str(e)}, 400)
+                        else:
+                            self._send_json({"ok": True, "effort": rec})
 
         # ── R&D control surface — lane launch + gate answer (UI wiring) ──
         elif self.path == "/api/rnd/launch_lane":

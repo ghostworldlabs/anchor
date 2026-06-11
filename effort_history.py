@@ -369,6 +369,116 @@ def reconcile_discovered(folder_path, project_id: str) -> dict:
     return {"pruned": len(pruned), "pruned_ids": pruned}
 
 
+# ── Sibling-store adoption (Wave 2: folder-history unification) ──────────────
+
+def _projects_root(folder_path) -> Path:
+    """``<folder>/.anchor/projects/`` — the parent of every per-project store."""
+    return Path(folder_path) / ".anchor" / "projects"
+
+
+def sibling_store_ids(folder_path, exclude_id: str = None) -> list:
+    """Project-ids that have an on-disk store under THIS folder's ``.anchor``.
+
+    Reads ``<folder>/.anchor/projects/*`` directory names — these are the
+    project-ids whose effort stores physically live alongside ``exclude_id`` for
+    the SAME folder. ``exclude_id`` (typically the target/active id) is omitted.
+
+    This is how sibling adoption finds same-folder stores: trio runs recorded
+    under one project-id's store are invisible to a sibling id for the same
+    folder until they are adopted across. Best-effort: a missing/unreadable
+    ``.anchor`` yields ``[]``. Returns sorted ids for determinism.
+    """
+    root = _projects_root(folder_path)
+    out = []
+    try:
+        if not root.is_dir():
+            return []
+        for child in root.iterdir():
+            try:
+                if child.is_dir() and child.name and child.name != exclude_id:
+                    out.append(child.name)
+            except OSError:
+                continue
+    except OSError:
+        return []
+    return sorted(out)
+
+
+def _import_record_into(folder_path, target_id: str, lane: str,
+                        rec: dict) -> dict:
+    """Upsert ONE sibling effort-record into ``target_id``'s lane store.
+
+    The record is imported as a DISCOVERED (imported) effort so it never
+    fabricates cost into the target's real-effort rollup (honesty contract).
+    Its identity (``job_id``) is preserved so re-importing is idempotent — the
+    same sibling effort never duplicates under the target. Real run-cost is kept
+    as readable metadata but the record is flagged discovered for rollups.
+    Returns the stored record.
+    """
+    jid = (rec.get("job_id") or "").strip()
+    if not jid:
+        # Stable fallback id from the record's identity so re-import is idempotent.
+        h = hashlib.sha1(
+            "\x00".join(str(rec.get(k, "")) for k in
+                        ("artifact_path", "created_at", "skill", "kind",
+                         "title")).encode("utf-8")).hexdigest()
+        jid = f"{DISCOVERED_PREFIX}sib-{h[:16]}"
+    extra = {k: v for k, v in rec.items()
+             if k not in ("job_id", "project_id", "lane")}
+    # Mark as imported (folded-in) history; preserve the original provenance and
+    # owning id so the move is auditable and rollups stay honest.
+    extra.setdefault("imported_from", rec.get("project_id", ""))
+    extra["source"] = SOURCE_DISCOVERED
+    stored = record_effort(folder_path, target_id, lane, jid, extra=extra)
+    ca = rec.get("created_at")
+    if ca:
+        try:
+            stored = _set_created_at(folder_path, target_id, lane, jid,
+                                     float(ca))
+        except (TypeError, ValueError):
+            pass
+    return stored
+
+
+def adopt_sibling_sessions(folder_path, target_id: str,
+                           source_ids=None) -> dict:
+    """Fold sibling project-ids' real efforts into ``target_id`` as imported.
+
+    For each sibling id (default: every OTHER on-disk store under this folder),
+    every effort in every rollup lane is upserted into ``target_id``'s matching
+    lane store via :func:`_import_record_into`. The target therefore SEES trio
+    work that was originally recorded under a different project-id for the SAME
+    folder — fixing the bug where research run under one id is invisible to a
+    sibling id for the same folder.
+
+    Idempotent: importing the same sibling effort twice does not duplicate it
+    (job_id-keyed upsert). The sibling stores are NOT modified or deleted here —
+    that hard-delete is the explicit, reviewable :func:`rnd_registry.reconcile_folder`
+    step. Returns ``{"imported": n, "from": [...], "by_lane": {...}}``.
+
+    All writes run under ``paths.WRITE_LOCK``.
+    """
+    if source_ids is None:
+        source_ids = sibling_store_ids(folder_path, exclude_id=target_id)
+    else:
+        source_ids = [s for s in source_ids if s and s != target_id]
+    imported = 0
+    by_lane = {lane: 0 for lane in ROLLUP_LANES}
+    used_sources = []
+    with _paths.WRITE_LOCK:
+        for sid in source_ids:
+            touched = False
+            for store_lane in ROLLUP_LANES:
+                for rec in list_efforts(folder_path, sid, store_lane):
+                    _import_record_into(folder_path, target_id, store_lane, rec)
+                    imported += 1
+                    by_lane[store_lane] += 1
+                    touched = True
+            if touched:
+                used_sources.append(sid)
+    return {"imported": imported, "from": used_sources, "by_lane": by_lane}
+
+
 # ── Attaching cost from a completed job's result envelope ───────────────────
 
 def attach_cost(folder_path, project_id: str, lane: str, job_id: str,

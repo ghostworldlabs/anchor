@@ -422,6 +422,134 @@ def status_line(project_id: str) -> dict:
     return out
 
 
+# ── Folder-history unification: reconcile (Wave 2) ───────────────────────
+
+def _same_folder_ids(active_id: str):
+    """Return ``(active_entry, [sibling_entries])`` for the active id's folder.
+
+    Siblings are OTHER registered projects whose ``folder_path`` matches the
+    active project's folder EXACTLY (normalized via ``Path``). A project on a
+    DIFFERENT folder (e.g. the unrelated "BF Test" temp-folder id) is never a
+    sibling here, so ``reconcile_folder`` can never fold/delete it.
+    """
+    reg = load_registry()
+    active = reg.get(active_id)
+    if active is None:
+        return None, []
+    target = active.get("folder_path", "")
+    try:
+        target_norm = str(Path(target)) if target else ""
+    except (TypeError, ValueError):
+        target_norm = str(target)
+    siblings = []
+    for e in reg.values():
+        if e["id"] == active_id:
+            continue
+        fp = e.get("folder_path", "")
+        try:
+            fp_norm = str(Path(fp)) if fp else ""
+        except (TypeError, ValueError):
+            fp_norm = str(fp)
+        if fp_norm and fp_norm == target_norm:
+            siblings.append(e)
+    siblings.sort(key=lambda x: (x.get("priority", 2), x.get("name", "").lower()))
+    return active, siblings
+
+
+def reconcile_folder(active_id: str, apply: bool = False) -> dict:
+    """Fold same-folder sibling ids into ``active_id``, then hard-delete them.
+
+    This is the EXPLICIT, REVIEWABLE folder-history unification (MASTER-PLAN
+    §D). It is **NOT** run silently on every rescan — a caller invokes it on
+    purpose, first as a preview, then (separately) to apply.
+
+    Two-step contract:
+
+    - **Preview** (``apply=False``, the default): returns a PLAN of exactly what
+      it WOULD do — which sibling ids (for the SAME folder only) would be folded
+      into ``active_id``, how many real sessions/efforts each holds, and which
+      ids would then be hard-deleted — WITHOUT mutating anything. So it can
+      never silently destroy history.
+    - **Apply** (``apply=True``): folds each sibling's REAL effort history into
+      ``active_id`` (via ``effort_history.adopt_sibling_sessions``), then
+      HARD-DELETES the folded sibling ids from the registry
+      (``remove_project``). A sibling that holds nothing is still deleted (it is
+      an empty same-folder duplicate). Ids on a DIFFERENT folder are never
+      touched.
+
+    Returns a report dict::
+
+        {"ok": bool, "active_id": ..., "folder_path": ...,
+         "applied": bool,
+         "fold": [{"id","name","priority","efforts": {lane: n, ...},
+                   "total_efforts": n}],
+         "to_delete": [ids],
+         "imported": n,            # apply only
+         "deleted": [ids]}         # apply only
+
+    Every registry mutation runs under ``paths.WRITE_LOCK`` (matching the
+    module's existing pattern). Best-effort/honesty: an unknown ``active_id``
+    yields ``{"ok": False, "reason": "unknown-active"}``.
+    """
+    import effort_history as _eh  # lazy: effort_history imports this module
+
+    with _paths.WRITE_LOCK:
+        active, siblings = _same_folder_ids(active_id)
+        if active is None:
+            return {"ok": False, "reason": "unknown-active",
+                    "active_id": active_id}
+        folder = active.get("folder_path", "")
+
+        fold_plan = []
+        for sib in siblings:
+            sid = sib["id"]
+            per_lane = {}
+            total = 0
+            for lane in _eh.ROLLUP_LANES:
+                try:
+                    n = len(_eh.list_efforts(folder, sid, lane))
+                except Exception:
+                    n = 0
+                if n:
+                    per_lane[lane] = n
+                    total += n
+            fold_plan.append({
+                "id": sid,
+                "name": sib.get("name", ""),
+                "priority": sib.get("priority", 2),
+                "state": sib.get("state", ""),
+                "efforts": per_lane,
+                "total_efforts": total,
+            })
+        to_delete = [p["id"] for p in fold_plan]
+
+        report = {
+            "ok": True,
+            "active_id": active_id,
+            "folder_path": folder,
+            "applied": False,
+            "fold": fold_plan,
+            "to_delete": to_delete,
+        }
+        if not apply:
+            return report
+
+        # APPLY: fold each sibling's real sessions into the active id, then
+        # hard-delete the sibling from the registry.
+        source_ids = to_delete
+        adopt = _eh.adopt_sibling_sessions(folder, active_id,
+                                           source_ids=source_ids)
+        deleted = []
+        for sid in source_ids:
+            if remove_project(sid):
+                deleted.append(sid)
+        report["applied"] = True
+        report["imported"] = adopt.get("imported", 0)
+        report["imported_by_lane"] = adopt.get("by_lane", {})
+        report["deleted"] = deleted
+        return report
+
+
 # ── Legacy id assignment (idempotent) ───────────────────────────────────
 
 def assign_legacy_ids(legacy_entries) -> list:

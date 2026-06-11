@@ -35,6 +35,7 @@ Stdlib only. No third-party imports. (``report_viewer`` / ``rnd_registry`` /
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -46,6 +47,7 @@ import paths as _paths
 import rnd_registry as _rnd
 import job_runner as _jr
 import report_viewer as _rv
+import effort_history as _eh
 
 # ── Deliverable types ───────────────────────────────────────────────────────
 
@@ -329,3 +331,188 @@ def run_deliverable(dtype: str, target=None, argv=None, cwd=None, env=None,
     if folder_path is not None and project_id is not None:
         _write_status(folder_path, project_id, record)
     return record
+
+
+# ── Deliverable declare (Anchor.md marker) + pin (Wave 2) ───────────────────
+#
+# Today a deliverable is only DISCOVERED when it sits under a ``deliverables/``
+# directory. The real deliverable (e.g. the running ``anchor_gui.py`` web app)
+# lives at the repo root, so it is never found. Two new paths fix that:
+#   - DECLARE: an ``Anchor.md`` marker block lists deliverables explicitly.
+#   - PIN: a manual pin records ANY path as a deliverable.
+# Both surface the deliverable as a DELIVERABLES-lane effort (so it shows up in
+# the project window's Deliverables lane), tagged ``source="declared"`` /
+# ``source="pinned"`` so it is honestly distinguished from an Anchor-run effort.
+
+#: The Anchor.md heading whose list items declare deliverables. The block is a
+#: markdown list; each item is ``- `<rel-path>` — <type> — <description>`` where
+#: type and description are optional. Type defaults to inference from the suffix.
+_DELIV_HEADING_RE = re.compile(
+    r"^#{1,6}\s+Deliverables\b.*$", re.IGNORECASE)
+_HEADING_RE = re.compile(r"^#{1,6}\s+")
+#: A declared/pinned deliverable list item: a backticked path, optional
+#: ``— type`` and ``— description`` (em-dash or hyphen separated).
+_DELIV_ITEM_RE = re.compile(
+    r"^\s*[-*]\s+`(?P<path>[^`]+)`"
+    r"(?:\s*[—-]\s*(?P<type>[A-Za-z]+))?"
+    r"(?:\s*[—-]\s*(?P<desc>.+))?\s*$")
+
+#: Marker placed on a deliverables-lane effort that was declared/pinned (vs.
+#: brownfield-discovered under ``deliverables/`` or Anchor-run).
+SOURCE_DECLARED = "declared"
+SOURCE_PINNED = "pinned"
+
+
+def infer_type(path) -> str:
+    """Infer a deliverable type from a path suffix (best-effort).
+
+    ``.md``/``.markdown``/``.txt``/``.pdf`` → ``doc``; ``.py``/``.sh``/``.ps1``/
+    ``.js`` → ``script``; anything else → ``program``. The caller may always
+    override; this is only the default when none is declared.
+    """
+    suf = Path(str(path)).suffix.lower()
+    if suf in (".md", ".markdown", ".txt", ".pdf", ".rst"):
+        return TYPE_DOC
+    if suf in (".py", ".sh", ".ps1", ".bat", ".js", ".rb", ".pl"):
+        return TYPE_SCRIPT
+    return TYPE_PROGRAM
+
+
+def parse_anchor_md_deliverables(folder_path) -> list:
+    """Parse the ``## Deliverables`` declaration block from ``Anchor.md``.
+
+    Returns a list of ``{"path","type","description"}`` dicts (folder-relative
+    paths). The block is the markdown list under the first heading whose text
+    starts with "Deliverables"; parsing stops at the next heading. Best-effort:
+    a missing/unreadable ``Anchor.md`` or absent block yields ``[]`` (never
+    raises). ``type`` is inferred from the suffix when not declared.
+    """
+    md = Path(folder_path) / "Anchor.md"
+    try:
+        if not md.is_file():
+            return []
+        text = md.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out = []
+    in_block = False
+    for line in text.splitlines():
+        if _DELIV_HEADING_RE.match(line):
+            in_block = True
+            continue
+        if in_block and _HEADING_RE.match(line):
+            break  # next heading ends the block
+        if not in_block:
+            continue
+        m = _DELIV_ITEM_RE.match(line)
+        if not m:
+            continue
+        rel = (m.group("path") or "").strip()
+        if not rel:
+            continue
+        dtype = (m.group("type") or "").strip().lower()
+        if dtype not in VALID_TYPES:
+            dtype = infer_type(rel)
+        out.append({
+            "path": rel,
+            "type": dtype,
+            "description": (m.group("desc") or "").strip(),
+        })
+    return out
+
+
+def pin_deliverable(folder_path, project_id: str, path: str,
+                    name: str = None, dtype: str = None,
+                    description: str = "", source: str = SOURCE_PINNED) -> dict:
+    """Pin ``path`` as a deliverable → a DELIVERABLES-lane effort record.
+
+    Records a pointer-record in the project's ``deliverables`` lane (via
+    ``effort_history``) so the pinned file (e.g. ``anchor_gui.py``) surfaces as
+    a deliverables-lane session/effort even though it is NOT under a
+    ``deliverables/`` directory. The job_id is content-addressed from the path
+    so pinning the same file twice is idempotent (no duplicate effort).
+
+    ``path`` is stored folder-relative when it lives under the folder. ``dtype``
+    defaults to ``infer_type(path)``. Returns the stored effort record.
+
+    All writes run under ``paths.WRITE_LOCK`` (via ``effort_history``).
+    """
+    rel = _relpath(folder_path, path)
+    dtype = (dtype or "").strip().lower() or infer_type(rel)
+    if dtype not in VALID_TYPES:
+        dtype = infer_type(rel)
+    jid = _eh.discovered_job_id("deliverables", f"pin::{rel}")
+    extra = {
+        "source": source,
+        "kind": f"deliverable-{dtype}",
+        "deliverable_type": dtype,
+        "title": name or Path(rel).name,
+        "artifact_path": rel,
+        "description": description or "",
+        "status": "pinned",
+    }
+    return _eh.record_effort(folder_path, project_id, "deliverables", jid,
+                             extra=extra)
+
+
+def _relpath(folder_path, path: str) -> str:
+    """Folder-relative POSIX path for a deliverable, traversal-safe.
+
+    Reuses the same containment discipline as the ``/artifact`` file route
+    (``report_viewer.resolve_project_artifact`` / ``katex_asset``): resolve the
+    candidate against the folder and require it to stay *inside* the folder.
+
+    - An in-folder RELATIVE path → returned folder-relative (POSIX), unchanged
+      semantics.
+    - An ABSOLUTE path UNDER the folder → relativized (existing behavior, kept).
+    - A path (relative OR absolute) that ESCAPES the folder — ``..`` traversal,
+      an absolute path outside the folder, or a symlink-escape — is REJECTED
+      with a ``ValueError`` so :func:`pin_deliverable` never stores an
+      out-of-folder artifact path. (Mirrors the route's "reject" branch, which
+      reads zero bytes.)
+    """
+    p = Path(str(path))
+    try:
+        folder = Path(folder_path).resolve()
+        target = (folder / p).resolve()
+    except OSError as e:
+        raise ValueError(f"unresolvable deliverable path: {path!r}") from e
+    # Containment: target must stay within the folder (same as the /artifact
+    # route's ``target.relative_to(folder.resolve())`` check).
+    try:
+        return target.relative_to(folder).as_posix()
+    except ValueError:
+        raise ValueError(
+            f"deliverable path escapes project folder: {path!r}") from None
+
+
+def declare_deliverables_from_marker(folder_path, project_id: str) -> dict:
+    """Pin every deliverable declared in ``Anchor.md`` (declare path).
+
+    Parses the marker block (:func:`parse_anchor_md_deliverables`) and pins each
+    entry as a ``source="declared"`` deliverables-lane effort. Idempotent
+    (job_id-keyed). Returns ``{"declared": n, "items": [...]}``.
+    """
+    items = parse_anchor_md_deliverables(folder_path)
+    pinned = []
+    with _paths.WRITE_LOCK:
+        for it in items:
+            rec = pin_deliverable(folder_path, project_id, it["path"],
+                                  dtype=it.get("type"),
+                                  description=it.get("description", ""),
+                                  source=SOURCE_DECLARED)
+            pinned.append(rec)
+    return {"declared": len(pinned), "items": pinned}
+
+
+def list_pinned_deliverables(folder_path, project_id: str) -> list:
+    """Return the declared/pinned deliverable efforts for a project.
+
+    These are the deliverables-lane effort records whose ``source`` is
+    ``declared`` or ``pinned`` (newest-first, as ``effort_history`` returns).
+    """
+    out = []
+    for rec in _eh.list_efforts(folder_path, project_id, "deliverables"):
+        if rec.get("source") in (SOURCE_DECLARED, SOURCE_PINNED):
+            out.append(rec)
+    return out
