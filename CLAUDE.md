@@ -133,6 +133,9 @@ This is a self-contained Python HTTP server that generates the full dashboard HT
 | POST | `/api/cancel` | Cancel task → CANCELLED.md |
 | POST | `/api/save_for_later` | Save task → SAVED_FOR_LATER.md |
 | POST | `/api/restore` | Restore from archive to active |
+| POST | `/api/rnd/cancel_job` | Stop one R&D lane job (tree-kill via `job_runner.cancel`); 404 on unknown id. Used by the project-window console "Stop job" button, scoped to the ATTACHED session |
+
+> **R&D project window (`GET /project/<id>`):** `render_project_window_html` serves the rich "Dashboard A" — a 4-column Kanban (Research|Planning|Build|Deliverables) of versioned effort cards (state pills: done/running/needs-input/failed), a multi-session console drawer (session tabs; clicking a live effort card or a tab attaches the console to that job's `/api/rnd/tail` stream; the Ask box + reply + "Stop job" act on the ATTACHED job only — no cross-wire), a lifecycle header (priority/notes/archive/retire/reactivate, all token-aware via `_postJson`), and the linked-tasks strip. Done efforts link to the report viewer (`/report/<pid>/<lane>/<job_id>`). The window JS lives in the `_PROJECT_WINDOW_JS` RAW (single-brace) string — NOT an f-string.
 
 ### anchor.py — CLI Engine
 Mirror of anchor_gui.py's logic but as a command-line tool. Also generates the static `dashboard.html` file. Shares the same markdown format and file paths.

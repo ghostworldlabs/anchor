@@ -13,7 +13,7 @@ Usage:
 Launch from Cowork by typing "Dashboard" — Claude will run this for you.
 """
 
-import json, logging, os, re, socket, sys, threading, traceback, webbrowser
+import json, logging, os, re, socket, sys, threading, time, traceback, webbrowser
 from datetime import datetime, date
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -608,11 +608,201 @@ def render_archive_view_html() -> str:
     return _render_folder_groups(groups)
 
 
-def render_project_window_html(project_id: str) -> str:
-    """Render the basic per-project window for the ``/project/<id>`` route.
+# Kanban column wiring: which trio/store lanes map to each board column, the
+# column's display label + glyph, and the "+ New run" affordance.
+_KANBAN_COLUMNS = (
+    ("research", "research", "Research", "\U0001F52C", "+ New research run"),
+    ("plan", "planning", "Planning", "\U0001F4D0", "+ New plan run"),
+    ("build", "build", "Build", "\U0001F528", "+ New build run"),
+    ("deliverables", "deliverables", "Deliverables", "\U0001F4E6", "+ Add deliverable"),
+)
 
-    Wave 3 ships a basic view + the 4-state status line (none-yet); the full
-    Kanban is Wave 7. Returns a full HTML page (standalone) for the route.
+
+def _fmt_age(created_at) -> str:
+    """Compact relative age ("now", "5m", "2h", "3d", "1w") from an epoch ts."""
+    try:
+        ts = float(created_at or 0)
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    delta = max(0.0, time.time() - ts)
+    if delta < 60:
+        return "now"
+    if delta < 3600:
+        return f"{int(delta // 60)}m"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h"
+    if delta < 604800:
+        return f"{int(delta // 86400)}d"
+    return f"{int(delta // 604800)}w"
+
+
+# Map a job record's status/state to the board state-pill class + label.
+def _effort_pill(status, gate_state):
+    """Return ``(pill_class, pill_label, is_live, needs_input)`` for an effort."""
+    if gate_state == "awaiting-input":
+        return ("input", "needs input", True, True)
+    if status == _jr.STATUS_RUNNING:
+        return ("run", "running", True, False)
+    if status == _jr.STATUS_DONE:
+        return ("done", "done", False, False)
+    if status in (_jr.STATUS_FAILED, _jr.STATUS_INTERRUPTED, _jr.STATUS_CANCELLED):
+        label = "failed" if status == _jr.STATUS_FAILED else status
+        return ("fail", label, False, False)
+    return ("", status or "queued", False, False)
+
+
+def _gather_project_efforts(folder_path, project_id):
+    """Join each lane's effort pointer-records with their live job records.
+
+    Returns ``{column_lane: [effort_view, ...]}`` newest-first, where an
+    ``effort_view`` carries everything the board needs (already HTML-escaped
+    where it lands in attributes/text) plus the live status/gate.
+    """
+    # Index job records by job_id for the live-status join (newest job wins on
+    # duplicate ids, which never happens, but be defensive).
+    jobs_by_id = {}
+    for jr in _jr.list_records():
+        jid = jr.get("job_id")
+        if jid:
+            jobs_by_id[jid] = jr
+    out = {}
+    for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
+        try:
+            efforts = _eh.list_efforts(folder_path, project_id, trio_lane)
+        except Exception:
+            efforts = []
+        views = []
+        n = len(efforts)
+        for idx, eff in enumerate(efforts):
+            jid = eff.get("job_id", "")
+            job = jobs_by_id.get(jid, {})
+            status = job.get("status") or eff.get("status") or ""
+            gate_state = job.get("state")
+            pill_cls, pill_lbl, is_live, needs_input = _effort_pill(
+                status, gate_state)
+            # Version label: newest = v<n>, descending by recency.
+            ver = f"v{n - idx}" if n else "v1"
+            skill = eff.get("skill") or job.get("skill") or ""
+            seed = eff.get("prompt_seed") or ""
+            hint = seed.strip().splitlines()[0] if seed.strip() else ""
+            sub = " · ".join(p for p in (skill, hint) if p)
+            cost = (eff.get("cost") or {})
+            cost_usd = float(cost.get("total_cost_usd", 0.0) or 0.0)
+            views.append({
+                "job_id": jid,
+                "trio_lane": trio_lane,
+                "ver": ver,
+                "status": status,
+                "pill_cls": pill_cls,
+                "pill_lbl": pill_lbl,
+                "is_live": is_live,
+                "needs_input": needs_input,
+                "is_done": status == _jr.STATUS_DONE,
+                "age": _fmt_age(eff.get("created_at")),
+                "skill": skill,
+                "sub": sub,
+                "cost_usd": cost_usd,
+            })
+        out[trio_lane] = views
+    return out
+
+
+def _render_effort_card(ev, store_lane, project_id):
+    """Render ONE effort card. Done efforts link to the report viewer; live ones
+    carry the data hooks the console uses to attach. Every dynamic field is
+    HTML-escaped (XSS-safe)."""
+    jid = ev["job_id"]
+    jid_esc = html_lib.escape(jid, quote=True)
+    ver = html_lib.escape(ev["ver"])
+    age = html_lib.escape(ev["age"])
+    sub = html_lib.escape(ev["sub"]) if ev["sub"] else ""
+    pill = ""
+    if ev["pill_cls"]:
+        dot = ""
+        if ev["pill_cls"] == "run":
+            dot = "<span class='dotpulse'></span>"
+        elif ev["pill_cls"] == "input":
+            dot = "<span class='dotwarn'></span>"
+        pill = (f"<span class='statepill {ev['pill_cls']}'>{dot}"
+                f"{html_lib.escape(ev['pill_lbl'])}</span>")
+    cost_bit = ""
+    if ev["cost_usd"] > 0:
+        cost_bit = (f"<span class='ecost'>${ev['cost_usd']:.4f}</span>")
+    # Classes + data hooks. A live/needs-input card is clickable to attach the
+    # console; a done card links to its report.
+    cls = "effort"
+    data = (f" data-job-id=\"{jid_esc}\" data-lane=\"{html_lib.escape(store_lane, quote=True)}\""
+            f" data-trio-lane=\"{html_lib.escape(ev['trio_lane'], quote=True)}\""
+            f" data-ver=\"{ver}\" data-live=\"{'1' if ev['is_live'] else '0'}\"")
+    inner = (
+        f"<div class='er'><span class='ver'>{ver}</span>{pill}"
+        f"<span class='age'>{age}</span></div>"
+        + (f"<div class='sub'>{sub}{cost_bit}</div>" if (sub or cost_bit) else "")
+    )
+    if ev["is_done"] and jid:
+        # Link a done effort to the report viewer route.
+        href = (f"/report/{html_lib.escape(project_id, quote=True)}/"
+                f"{html_lib.escape(ev['trio_lane'], quote=True)}/{jid_esc}")
+        return (f"<div class='{cls}'{data} onclick=\"openReport('{href}')\">"
+                f"{inner}</div>")
+    if ev["is_live"] and jid:
+        return (f"<div class='{cls}' id='effort_{jid_esc}'{data} "
+                f"onclick=\"attachSession('{jid_esc}')\">{inner}</div>")
+    return f"<div class='{cls}'{data}>{inner}</div>"
+
+
+def _render_kanban_html(folder_path, project_id):
+    """Render the 4-column Kanban board (Research|Planning|Build|Deliverables)."""
+    efforts_by_lane = _gather_project_efforts(folder_path, project_id)
+    cols = []
+    for trio_lane, store_lane, label, glyph, add_label in _KANBAN_COLUMNS:
+        views = efforts_by_lane.get(trio_lane, [])
+        any_live = any(v["is_live"] and not v["needs_input"] for v in views)
+        any_input = any(v["needs_input"] for v in views)
+        badge = ""
+        if any_input:
+            badge = "<span class='attn'>⚠ input</span>"
+        elif any_live:
+            badge = "<span class='live'><span class='dotpulse'></span>live</span>"
+        cards = "".join(
+            _render_effort_card(v, store_lane, project_id) for v in views)
+        # The "+ New run" affordance launches that lane. Research offers an
+        # engine choice (Claude default + Gemini); plan/build are Claude-only;
+        # deliverables are config-driven (no launch).
+        if trio_lane == "deliverables":
+            add = (f"<span class='addnew rnd-dim' title='Deliverables are run "
+                   f"from the project config'>{html_lib.escape(add_label)}</span>")
+        elif trio_lane == "research":
+            add = (
+                "<span class='addnew' onclick=\"launchLane('research','claude')\">"
+                "+ New research run (Claude)</span> "
+                "<span class='addnew' onclick=\"launchLane('research','gemini')\">"
+                "Gemini</span>"
+            )
+        else:
+            add = (f"<span class='addnew' onclick=\"launchLane('{trio_lane}')\">"
+                   f"{html_lib.escape(add_label)}</span>")
+        cols.append(
+            f"<div class='col' data-col-lane='{html_lib.escape(trio_lane, quote=True)}'>"
+            f"<h4><span>{glyph}</span> {html_lib.escape(label)} "
+            f"<span class='badge' id='badge_{html_lib.escape(trio_lane, quote=True)}'>{badge}</span></h4>"
+            f"<div class='col-cards' id='cards_{html_lib.escape(trio_lane, quote=True)}'>{cards}</div>"
+            f"{add}</div>"
+        )
+    return "<div class='kan'>" + "".join(cols) + "</div>"
+
+
+def render_project_window_html(project_id: str) -> str:
+    """Render the rich per-project window ("Dashboard A") for ``/project/<id>``.
+
+    A 4-column Kanban (Research|Planning|Build|Deliverables) of versioned effort
+    cards, a multi-session console drawer that attaches to whichever live job you
+    click (its log tail + an Ask box for gates + a Stop button — acting on the
+    ATTACHED job only), the lifecycle header (priority/notes/archive/retire or
+    reactivate), the cost rollup + linked-tasks strip. Returns a standalone HTML
+    page. All engine/user content is HTML-escaped (XSS-safe).
     """
     entry = _rnd.get_project(project_id)
     if entry is None:
@@ -630,65 +820,200 @@ def render_project_window_html(project_id: str) -> str:
             entry = e
             break
     inst = open_project_instance(project_id)
+    folder_raw = entry.get("folder_path", "")
     name = html_lib.escape(entry.get("name", ""))
-    folder = html_lib.escape(entry.get("folder_path", ""))
-    state = html_lib.escape(entry.get("state", "active"))
+    folder = html_lib.escape(folder_raw)
+    state_raw = entry.get("state", "active")
+    state = html_lib.escape(state_raw)
     pr = entry.get("priority", 2)
+    pid_attr = html_lib.escape(project_id, quote=True)
+    notes_raw = entry.get("notes", "") or ""
+    notes_attr = html_lib.escape(notes_raw, quote=True)
+    notes_esc = html_lib.escape(notes_raw)
+    is_active = state_raw in ("active", "path-missing")
+    p1on = " rnd-pr-on" if pr == 1 else ""
+    p2on = " rnd-pr-on" if pr == 2 else ""
+    # Lifecycle header actions (all send the auth token via _postJson in the JS).
+    if is_active:
+        lifecycle = (
+            f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
+            f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
+            f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
+            f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
+            f"<button class='rnd-mini rnd-danger' onclick=\"rndRetire('{pid_attr}')\">Retire</button>"
+        )
+    else:
+        lifecycle = (
+            f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
+            f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
+        )
+    kanban = _render_kanban_html(folder_raw, project_id)
     status = render_status_line_html(project_id)
-    rollup = render_cost_rollup_html(project_id, entry.get("folder_path", ""))
+    rollup = render_cost_rollup_html(project_id, folder_raw)
     tasks_html = render_project_tasks_html(project_id)
-    deliverables_html = render_deliverables_html(
-        project_id, entry.get("folder_path", ""))
+    deliverables_html = render_deliverables_html(project_id, folder_raw)
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
-        "<style>body{font-family:system-ui,Segoe UI,sans-serif;"
-        "background:#0f1117;color:#e6e8ee;margin:0;padding:24px}"
-        ".rnd-status-line{margin:16px 0;display:flex;gap:8px;flex-wrap:wrap}"
+        "<style>"
+        ":root{--bg:#0f1117;--surface:#1a1d27;--surface2:#232733;"
+        "--border:#2e3340;--text:#e2e4e9;--text-dim:#8b8f9a;--accent:#6c9cfc;"
+        "--danger:#f87171;--warning:#fbbf24;--success:#4ade80;color-scheme:dark}"
+        "*{box-sizing:border-box}"
+        "body{font-family:system-ui,Segoe UI,sans-serif;background:var(--bg);"
+        "color:var(--text);margin:0;padding:24px;line-height:1.5}"
+        "a{color:var(--accent)}"
+        ".dash{background:var(--surface);border:1px solid var(--border);"
+        "border-radius:12px;overflow:hidden;margin-top:12px}"
+        ".dhead{display:flex;align-items:center;gap:12px;padding:14px 18px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex-wrap:wrap}"
+        ".dhead .name{font-size:18px;font-weight:700}"
+        ".dhead .path{font-size:12px;color:var(--text-dim);"
+        "font-family:ui-monospace,Consolas,monospace}"
+        ".dhead .right{margin-left:auto;display:flex;gap:6px;align-items:center;"
+        "flex-wrap:wrap}"
+        ".pri{font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px}"
+        ".pri.p1{background:rgba(248,113,113,.18);color:var(--danger)}"
+        ".pri.p2{background:rgba(251,191,36,.15);color:var(--warning)}"
+        ".chip{font-size:10px;padding:1px 8px;border-radius:20px;"
+        "border:1px solid var(--border);color:var(--text-dim)}"
+        ".chip.active{color:var(--success);border-color:rgba(74,222,128,.3)}"
+        ".rnd-mini{font-size:11px;padding:3px 9px;border-radius:6px;"
+        "border:1px solid var(--border);background:var(--surface2);"
+        "color:var(--text);cursor:pointer}"
+        ".rnd-mini:hover{border-color:var(--accent)}"
+        ".rnd-mini.rnd-pr-on{border-color:var(--accent);color:var(--accent)}"
+        ".rnd-mini.rnd-danger:hover{border-color:var(--danger);color:var(--danger)}"
+        ".rnd-mini.rnd-accent{border-color:var(--accent);color:var(--accent)}"
+        ".kan{display:grid;grid-template-columns:repeat(4,1fr);gap:0}"
+        ".kan .col{border-right:1px solid var(--border);min-height:180px;"
+        "padding:12px}"
+        ".kan .col:last-child{border-right:none}"
+        ".kan .col h4{font-size:11px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);display:flex;align-items:center;gap:7px;"
+        "margin:0 0 10px}"
+        ".kan .col h4 .badge{margin-left:auto}"
+        ".attn{font-size:10px;font-weight:700;color:var(--warning);"
+        "background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.4);"
+        "border-radius:20px;padding:1px 7px;display:inline-flex;align-items:center;"
+        "gap:4px}"
+        ".live{font-size:10px;font-weight:700;color:var(--accent);"
+        "background:rgba(108,156,252,.13);border:1px solid rgba(108,156,252,.4);"
+        "border-radius:20px;padding:1px 7px;display:inline-flex;align-items:center;"
+        "gap:4px}"
+        ".effort{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:8px;padding:8px 10px;margin-bottom:7px;font-size:12px;"
+        "cursor:pointer;transition:.12s}"
+        ".effort:hover{border-color:var(--accent)}"
+        ".effort.attached{border-color:var(--accent);"
+        "box-shadow:0 0 0 1px var(--accent) inset}"
+        ".effort .er{display:flex;align-items:center;gap:7px}"
+        ".effort .ver{font-weight:600}"
+        ".effort .age{margin-left:auto;color:var(--text-dim);font-size:11px}"
+        ".effort .sub{font-size:11px;color:var(--text-dim);margin-top:3px}"
+        ".effort .ecost{margin-left:6px;color:var(--success)}"
+        ".statepill{font-size:10px;padding:1px 7px;border-radius:20px;"
+        "border:1px solid var(--border)}"
+        ".statepill.done{color:var(--success);border-color:rgba(74,222,128,.35);"
+        "background:rgba(74,222,128,.1)}"
+        ".statepill.run{color:var(--accent);border-color:rgba(108,156,252,.4);"
+        "background:rgba(108,156,252,.12)}"
+        ".statepill.input{color:var(--warning);border-color:rgba(251,191,36,.4);"
+        "background:rgba(251,191,36,.12)}"
+        ".statepill.fail{color:var(--danger);border-color:rgba(248,113,113,.4);"
+        "background:rgba(248,113,113,.12)}"
+        ".addnew{font-size:12px;color:var(--accent);cursor:pointer;"
+        "display:inline-block;margin-top:4px}"
+        ".addnew.rnd-dim{color:var(--text-dim);cursor:default}"
+        ".dotpulse{width:7px;height:7px;border-radius:50%;background:var(--accent);"
+        "animation:pulse 1.5s infinite;display:inline-block}"
+        ".dotwarn{width:7px;height:7px;border-radius:50%;background:var(--warning);"
+        "animation:pulse 1.5s infinite;display:inline-block}"
+        "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
+        "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
+        "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
+        ".console{border-top:1px solid var(--border);background:#0c0e14}"
+        ".console .ctabs{display:flex;align-items:center;gap:6px;padding:8px 14px;"
+        "border-bottom:1px solid var(--border);flex-wrap:wrap}"
+        ".console .ctabs .lbl{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:1px;color:var(--text-dim);margin-right:4px}"
+        ".ctab{font-size:11.5px;padding:4px 11px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text-dim);cursor:pointer;display:inline-flex;"
+        "align-items:center;gap:6px}"
+        ".ctab.sel{color:var(--text);border-color:var(--accent);"
+        "background:rgba(108,156,252,.1)}"
+        ".ctab.warn.sel{border-color:var(--warning);"
+        "background:rgba(251,191,36,.1);color:var(--warning)}"
+        ".console .cbody{padding:12px 16px}"
+        ".console .src{font-size:11px;color:var(--text-dim);margin-bottom:8px}"
+        ".console .log{font-family:ui-monospace,Consolas,monospace;font-size:12px;"
+        "color:#cdd2dc;white-space:pre-wrap;max-height:200px;overflow:auto}"
+        ".console .ask{margin-top:10px;background:var(--surface2);"
+        "border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:10px}"
+        ".console .ask .qtext{font-size:12.5px;margin-bottom:8px}"
+        ".console .ask .opts{display:flex;gap:8px;flex-wrap:wrap}"
+        ".inputrow{display:flex;gap:8px;margin-top:9px}"
+        ".inputrow input{flex:1;background:var(--bg);border:1px solid var(--border);"
+        "border-radius:7px;padding:8px 11px;color:var(--text);font-size:13px}"
+        ".btn{font-size:12px;padding:5px 12px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface2);"
+        "color:var(--text);cursor:pointer}"
+        ".btn:hover{border-color:var(--accent)}"
+        ".btn.accent{background:var(--accent);color:#0b1020;"
+        "border-color:var(--accent);font-weight:600}"
+        ".taskstrip{border-top:1px solid var(--border);padding:11px 16px}"
+        ".rnd-status-line{margin:0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
         "font-size:13px}"
-        ".rnd-launch{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}"
-        ".rnd-btn{padding:8px 14px;border-radius:6px;border:1px solid #2e3340;"
-        "background:#1b2030;color:#e6e8ee;cursor:pointer;font-size:14px}"
-        ".rnd-btn:hover{background:#232a3d}"
-        ".rnd-console{margin-top:16px}"
-        ".rnd-log{background:#05070c;border:1px solid #2e3340;border-radius:6px;"
-        "padding:10px;height:280px;overflow:auto;font-family:Consolas,monospace;"
-        "font-size:12px;white-space:pre-wrap;color:#cfd3dc}"
-        ".rnd-gate{margin-top:10px;padding:10px;border:1px solid #6c9cfc;"
-        "border-radius:6px;background:#141a2a}"
-        ".rnd-gate button{margin:4px 6px 0 0;padding:6px 12px;border-radius:6px;"
-        "border:1px solid #6c9cfc;background:#1b2030;color:#e6e8ee;cursor:pointer}"
-        ".rnd-status-badge{font-size:12px;color:#8a90a2;margin-left:8px}"
-        "a{color:#6c9cfc}</style></head><body>"
+        ".rnd-dim{color:var(--text-dim)}"
+        "h2{font-size:14px;margin:18px 0 6px}"
+        "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
-        f"<h1>{name} <span style='font-size:14px;color:#8a90a2'>"
-        f"(P{pr} · {state})</span></h1>"
-        f"<p style='color:#8a90a2'>Folder: {folder}</p>"
-        f"<p style='color:#8a90a2;font-size:12px'>instance "
-        f"{html_lib.escape(inst['instance_id'])}</p>"
-        "<h2>Lanes</h2>"
-        f"{status}"
-        "<div class='rnd-launch'>"
-        # Research offers an engine choice: Claude (default) or Gemini. Gemini is
-        # research-only (researchPrime is portable); Plan/Build are Claude-only.
-        "<button class='rnd-btn' onclick=\"launchLane('research','claude')\">"
-        "Run Research (Claude)</button>"
-        "<button class='rnd-btn' onclick=\"launchLane('research','gemini')\">"
-        "Run Research (Gemini)</button>"
-        "<button class='rnd-btn' onclick=\"launchLane('plan')\">Run Plan</button>"
-        "<button class='rnd-btn' onclick=\"launchLane('build')\">Run Build</button>"
+        f"<div class='dash' data-notes='{notes_attr}'>"
+        # ── Lifecycle header ──
+        "<div class='dhead'>"
+        f"<span class='name'>{name}</span>"
+        f"<span class='path'>{folder}</span>"
+        "<div class='right'>"
+        f"<span class='pri p{pr}'>P{pr}</span>"
+        f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
+        f"{lifecycle}"
+        "</div></div>"
+        # ── Project notes (like a task's Notes; click 'Notes' above to edit) ──
+        + (f"<div style='padding:8px 18px;border-bottom:1px solid var(--border);"
+           f"font-size:12.5px;color:var(--text-dim);white-space:pre-wrap'>"
+           f"&#128221; {notes_esc}</div>" if notes_raw.strip() else "")
+        +
+        # ── 4-state status line (consistent with the dashboard tiles) ──
+        f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
+        # ── Kanban board ──
+        f"{kanban}"
+        # ── Console drawer (session tabs + attached log + ask + stop) ──
+        "<div class='console' id='console'>"
+        "<div class='ctabs'><span class='lbl'>Sessions</span>"
+        "<span id='ctabs'></span>"
+        "<span id='ctabsHint' style='margin-left:auto;font-size:11px;"
+        "color:var(--text-dim)'>launch or click a live effort to attach ↑</span>"
         "</div>"
-        "<div class='rnd-console'>"
-        "<h2 style='display:inline-block'>Console</h2>"
-        "<span class='rnd-status-badge' id='laneStatus'></span>"
-        "<pre class='rnd-log' id='laneLog'></pre>"
-        "<div class='rnd-gate' id='laneGate' style='display:none'></div>"
+        "<div class='cbody'>"
+        "<div class='src' id='consoleSrc'>No session attached.</div>"
+        "<div class='log' id='laneLog'></div>"
+        "<div id='laneGate' class='ask' style='display:none'></div>"
+        "<div class='inputrow' id='inputRow' style='display:none'>"
+        "<input id='replyText' placeholder='…or type a reply to this session'>"
+        "<button class='btn accent' onclick='sendReply()'>Send</button>"
+        "<button class='btn' onclick='stopAttached()'>Stop job</button>"
+        "</div></div></div>"
+        # ── Linked tasks strip ──
+        f"<div class='taskstrip'>{tasks_html}</div>"
         "</div>"
         f"{rollup}"
-        f"{tasks_html}"
         f"{deliverables_html}"
+        f"<p style='color:#8a90a2;font-size:12px'>instance "
+        f"{html_lib.escape(inst['instance_id'])}</p>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
@@ -699,15 +1024,17 @@ def render_project_window_html(project_id: str) -> str:
     )
 
 
-# JS for the project window: launch a lane, then poll /api/rnd/tail and append
-# lines; surface + answer an in-session gate via /api/rnd/answer_gate. Plain
-# string (NOT an f-string), so braces are single. No template interpolation here
-# beyond the PROJECT_ID var injected above.
+# JS for the rich project window. Drives the multi-session console: a SESSIONS
+# map keyed by job_id (each with its own log tail, cursor, status, gate), an
+# ATTACHED job_id the console mirrors, session tabs, and per-session attach /
+# answer-gate / stop. answerGate + stopAttached ALWAYS act on the ATTACHED job
+# only (no cross-wire). Plain string (NOT an f-string), so braces are single. No
+# template interpolation here beyond the PROJECT_ID var injected above.
 _PROJECT_WINDOW_JS = r"""
-var _jobId = null;
-var _since = 0;
+// SESSIONS: job_id -> {jobId, lane, since, lines:[], status, pending, tabName}
+var SESSIONS = {};
+var _attached = null;          // job_id the console is currently mirroring
 var _pollTimer = null;
-var _gateShown = false;
 
 function _esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
 
@@ -728,6 +1055,8 @@ function setAnchorToken() {
 // On first load, if the server requires auth and no token is stored yet, ask once.
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
+  adoptLiveEfforts();
+  _startPolling();
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -737,23 +1066,99 @@ function _postJson(url, payload) {
 }
 function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
 
-function _appendLine(line) {
+// On load, adopt any live/needs-input effort cards rendered server-side as
+// sessions (so a background job that was already running shows up + can be
+// attached without a fresh launch).
+function adoptLiveEfforts() {
+  var cards = document.querySelectorAll('.effort[data-live="1"]');
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i];
+    var jid = c.getAttribute('data-job-id');
+    if (jid && !SESSIONS[jid]) {
+      _ensureSession(jid, c.getAttribute('data-trio-lane') || '',
+                     c.getAttribute('data-ver') || '');
+    }
+  }
+  if (!_attached) {
+    var first = Object.keys(SESSIONS)[0];
+    if (first) attachSession(first);
+  }
+  renderTabs();
+}
+
+function _ensureSession(jobId, lane, ver) {
+  if (!SESSIONS[jobId]) {
+    SESSIONS[jobId] = {jobId: jobId, lane: lane || '', ver: ver || '',
+                       since: 0, lines: [], status: 'running', pending: null,
+                       tabName: ((lane || 'job') + (ver ? (' ' + ver) : ''))};
+  }
+  return SESSIONS[jobId];
+}
+
+function renderTabs() {
+  var host = document.getElementById('ctabs');
+  if (!host) return;
+  host.innerHTML = '';
+  var ids = Object.keys(SESSIONS);
+  for (var i = 0; i < ids.length; i++) {
+    var s = SESSIONS[ids[i]];
+    var span = document.createElement('span');
+    var warn = (s.pending ? ' warn' : '');
+    var sel = (s.jobId === _attached ? ' sel' : '');
+    span.className = 'ctab' + warn + sel;
+    var dot = s.pending ? "<span class='dotwarn'></span>"
+                        : (_isLiveStatus(s.status) ? "<span class='dotpulse'></span>" : '');
+    span.innerHTML = dot + _esc(s.tabName) + (s.pending ? ' · needs input' : '');
+    (function (jid) { span.onclick = function () { attachSession(jid); }; })(s.jobId);
+    host.appendChild(span);
+  }
+  var hint = document.getElementById('ctabsHint');
+  if (hint) hint.style.display = ids.length ? 'none' : '';
+}
+
+function _isLiveStatus(st) {
+  return st === 'running' || st === 'awaiting-input' || !st;
+}
+
+function attachSession(jobId) {
+  if (!SESSIONS[jobId]) _ensureSession(jobId, '', '');
+  _attached = jobId;
+  // Highlight the attached effort card.
+  var cards = document.querySelectorAll('.effort');
+  for (var i = 0; i < cards.length; i++) cards[i].classList.remove('attached');
+  var card = document.getElementById('effort_' + jobId);
+  if (card) card.classList.add('attached');
+  _renderAttached();
+  renderTabs();
+}
+
+function _renderAttached() {
   var log = document.getElementById('laneLog');
-  var text;
-  if (typeof line === 'string') { text = line; }
-  else { try { text = JSON.stringify(line); } catch (e) { text = String(line); } }
-  log.textContent += text + '\n';
-  log.scrollTop = log.scrollHeight;
+  var src = document.getElementById('consoleSrc');
+  var gate = document.getElementById('laneGate');
+  var inputRow = document.getElementById('inputRow');
+  if (!_attached || !SESSIONS[_attached]) {
+    if (src) src.textContent = 'No session attached.';
+    if (log) log.textContent = '';
+    if (gate) gate.style.display = 'none';
+    if (inputRow) inputRow.style.display = 'none';
+    return;
+  }
+  var s = SESSIONS[_attached];
+  if (src) {
+    src.innerHTML = 'Attached to: <b style="color:var(--text)">' +
+      _esc(s.tabName) + '</b> · ' + _esc(s.status || '') + ' · job ' + _esc(s.jobId);
+  }
+  if (log) { log.textContent = s.lines.join('\n'); log.scrollTop = log.scrollHeight; }
+  if (inputRow) inputRow.style.display = 'flex';
+  if (s.pending) { _renderGate(s.pending); }
+  else if (gate) { gate.style.display = 'none'; gate.innerHTML = ''; }
 }
 
 async function launchLane(lane, backend) {
   // backend defaults to 'claude'. Only the research lane offers 'gemini';
   // plan/build are Claude-only (enforced server-side too).
   backend = backend || 'claude';
-  document.getElementById('laneLog').textContent = '';
-  document.getElementById('laneGate').style.display = 'none';
-  _gateShown = false;
-  _since = 0;
   var r, data;
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
   try {
@@ -763,15 +1168,15 @@ async function launchLane(lane, backend) {
       r = await _postJson('/api/rnd/launch_lane', payload);
       data = await r.json();
     }
-  } catch (e) { _appendLine('[launch error] ' + e.message); return; }
+  } catch (e) { alert('[launch error] ' + e.message); return; }
   if (!data.ok) {
-    _appendLine('[launch refused] ' + (data.error || data.reason || 'unknown'));
+    alert('[launch refused] ' + (data.error || data.reason || 'unknown'));
     return;
   }
-  _jobId = data.job_id;
-  var eng = data.backend || backend;
-  document.getElementById('laneStatus').textContent =
-    lane + ' · ' + eng + ' · job ' + _jobId + ' · ' + (data.status || 'running');
+  var s = _ensureSession(data.job_id, lane, '');
+  s.status = data.status || 'running';
+  s.tabName = lane + (data.backend ? (' · ' + data.backend) : '');
+  attachSession(data.job_id);
   _startPolling();
 }
 
@@ -780,66 +1185,183 @@ function _startPolling() {
   _pollOnce();
 }
 
+// Poll EVERY known session each tick so background sessions keep their gate +
+// status fresh (a lane badge can flip to ⚠ input even when not attached). Only
+// the ATTACHED session re-renders the console body.
 async function _pollOnce() {
-  if (!_jobId) return;
-  var data;
-  try {
-    var r = await fetch('/api/rnd/tail?job_id=' + encodeURIComponent(_jobId) + '&since=' + _since);
-    data = await r.json();
-  } catch (e) {
-    _pollTimer = setTimeout(_pollOnce, 1500);
-    return;
+  var ids = Object.keys(SESSIONS);
+  var anyLive = false;
+  for (var i = 0; i < ids.length; i++) {
+    var s = SESSIONS[ids[i]];
+    var terminal = ['done', 'cancelled', 'interrupted', 'failed'];
+    if (s.status && terminal.indexOf(s.status) >= 0 && !s.pending) continue;
+    anyLive = true;
+    try {
+      var r = await fetch('/api/rnd/tail?job_id=' + encodeURIComponent(s.jobId) + '&since=' + s.since);
+      var data = await r.json();
+      if (data.lines && data.lines.length) {
+        for (var k = 0; k < data.lines.length; k++) {
+          var ln = data.lines[k];
+          s.lines.push(typeof ln === 'string' ? ln : JSON.stringify(ln));
+        }
+        s.since = data.next;
+      }
+      if (data.status) s.status = data.status;
+      s.pending = data.pending_prompt || null;
+    } catch (e) { /* keep polling */ }
   }
-  if (data.lines && data.lines.length) {
-    data.lines.forEach(_appendLine);
-    _since = data.next;
-  }
-  if (data.status) {
-    var badge = document.getElementById('laneStatus');
-    badge.textContent = badge.textContent.replace(/· [^·]*$/, '· ' + data.status);
-  }
-  if (data.pending_prompt) { _renderGate(data.pending_prompt); }
-  else if (_gateShown) { document.getElementById('laneGate').style.display = 'none'; _gateShown = false; }
-  var terminal = ['done', 'cancelled', 'interrupted', 'failed'];
-  if (data.status && terminal.indexOf(data.status) >= 0 && !data.pending_prompt) {
-    return; // job finished; stop polling
-  }
+  // Refresh lane badges from the freshest session state, then the tabs + body.
+  _refreshBadges();
+  renderTabs();
+  if (_attached) _renderAttached();
   _pollTimer = setTimeout(_pollOnce, 1500);
 }
 
-function _renderGate(prompt) {
-  _gateShown = true;
-  var box = document.getElementById('laneGate');
-  var html = '<div style="margin-bottom:6px"><strong>' + _esc(prompt.question || 'Input requested') + '</strong></div>';
-  var opts = prompt.options || [];
-  if (opts.length) {
-    opts.forEach(function (o) {
-      var label = o.label || String(o);
-      html += '<button onclick="answerGate(' + JSON.stringify(label) + ')">' + _esc(label) + '</button>';
-    });
-  } else {
-    html += '<input type="text" id="gateText" placeholder="Your answer" style="padding:6px;width:60%" />'
-         + ' <button onclick="answerGate(document.getElementById(\'gateText\').value)">Send</button>';
+// Flip each lane header badge to ⚠ input / live based on its sessions.
+function _refreshBadges() {
+  var byLane = {};
+  var ids = Object.keys(SESSIONS);
+  for (var i = 0; i < ids.length; i++) {
+    var s = SESSIONS[ids[i]];
+    if (!s.lane) continue;
+    var b = byLane[s.lane] || (byLane[s.lane] = {live: false, input: false});
+    if (s.pending) b.input = true;
+    else if (_isLiveStatus(s.status) && (s.status === 'running' || s.status === 'awaiting-input')) b.live = true;
   }
-  box.innerHTML = html;
+  for (var lane in byLane) {
+    var el = document.getElementById('badge_' + lane);
+    if (!el) continue;
+    if (byLane[lane].input) el.innerHTML = "<span class='attn'>⚠ input</span>";
+    else if (byLane[lane].live) el.innerHTML = "<span class='live'><span class='dotpulse'></span>live</span>";
+  }
+}
+
+function _renderGate(prompt) {
+  var box = document.getElementById('laneGate');
+  if (!box) return;
+  // Build the gate DOM without inline onclick handlers. The option label is
+  // carried only as the button's text node + a data-gate-opt attribute; a single
+  // delegated listener (wired once below) reads getAttribute('data-gate-opt') and
+  // calls answerGate(label). This avoids the HTML-attribute breakout that an
+  // an inline onclick built from JSON.stringify(label) caused (the double quotes
+  // from JSON.stringify terminated the double-quoted onclick attribute), which made
+  // every gate option button non-functional.
+  box.innerHTML = '';
+  var q = document.createElement('div');
+  q.className = 'qtext';
+  var strong = document.createElement('strong');
+  strong.textContent = (prompt.question != null ? prompt.question : 'Input requested');
+  q.appendChild(strong);
+  box.appendChild(q);
+  var optsWrap = document.createElement('div');
+  optsWrap.className = 'opts';
+  var opts = prompt.options || [];
+  opts.forEach(function (o) {
+    var label = (o && o.label != null) ? o.label : String(o);
+    var btn = document.createElement('button');
+    btn.className = 'btn accent';
+    btn.setAttribute('data-gate-opt', label);  // attribute value is set via the DOM API, never string-concatenated into HTML
+    btn.textContent = label;
+    optsWrap.appendChild(btn);
+  });
+  box.appendChild(optsWrap);
+  // Wire the delegated click handler exactly once for this box.
+  if (!box._gateDelegated) {
+    box._gateDelegated = true;
+    box.addEventListener('click', function (e) {
+      var t = e.target;
+      while (t && t !== box && !(t.getAttribute && t.hasAttribute && t.hasAttribute('data-gate-opt'))) {
+        t = t.parentNode;
+      }
+      if (t && t.getAttribute && t.hasAttribute('data-gate-opt')) {
+        answerGate(t.getAttribute('data-gate-opt'));
+      }
+    });
+  }
   box.style.display = 'block';
 }
 
+// answerGate ALWAYS targets the ATTACHED session (no cross-wire). The reply box
+// + the gate option buttons both route here.
 async function answerGate(choice) {
-  if (!_jobId) return;
+  if (!_attached) return;
+  var jid = _attached;
   try {
-    var payload = {job_id: _jobId, choice: choice};
+    var payload = {job_id: jid, choice: choice};
     var r = await _postJson('/api/rnd/answer_gate', payload);
     var data = await r.json();
     if (_isUnauthorized(r, data) && setAnchorToken()) {
       r = await _postJson('/api/rnd/answer_gate', payload);
       data = await r.json();
     }
-    _appendLine('[gate answered: ' + choice + (data.written ? '' : ' (no-op: ' + data.reason + ')') + ']');
-  } catch (e) { _appendLine('[gate error] ' + e.message); }
-  document.getElementById('laneGate').style.display = 'none';
-  _gateShown = false;
+    if (SESSIONS[jid]) {
+      SESSIONS[jid].lines.push('[gate answered: ' + choice +
+        (data.written ? '' : ' (no-op: ' + data.reason + ')') + ']');
+      SESSIONS[jid].pending = null;
+    }
+  } catch (e) { if (SESSIONS[jid]) SESSIONS[jid].lines.push('[gate error] ' + e.message); }
+  var box = document.getElementById('laneGate');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  if (_attached === jid) _renderAttached();
+  renderTabs();
   _startPolling();
+}
+
+function sendReply() {
+  var inp = document.getElementById('replyText');
+  if (!inp || !inp.value.trim()) return;
+  var v = inp.value;
+  inp.value = '';
+  answerGate(v);
+}
+
+// stopAttached ALWAYS cancels the ATTACHED job only (no cross-wire).
+async function stopAttached() {
+  if (!_attached) return;
+  var jid = _attached;
+  try {
+    var r = await _postJson('/api/rnd/cancel_job', {job_id: jid});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/cancel_job', {job_id: jid});
+      data = await r.json();
+    }
+    if (SESSIONS[jid]) {
+      SESSIONS[jid].status = (data && data.status) || 'cancelled';
+      SESSIONS[jid].pending = null;
+      SESSIONS[jid].lines.push('[stopped: ' + ((data && data.status) || 'cancelled') + ']');
+    }
+  } catch (e) { if (SESSIONS[jid]) SESSIONS[jid].lines.push('[stop error] ' + e.message); }
+  if (_attached === jid) _renderAttached();
+  renderTabs();
+}
+
+function openReport(href) { window.open(href, '_blank'); }
+
+// ── Lifecycle header actions (token-aware via _postJson) ────────────────────
+function _lifecycle(url, payload, reload) {
+  return _postJson(url, payload).then(function (r) {
+    return r.json().then(function (data) {
+      if (_isUnauthorized(r, data) && setAnchorToken()) {
+        return _postJson(url, payload).then(function (r2) { return r2.json(); });
+      }
+      return data;
+    });
+  }).then(function (data) {
+    if (reload !== false) location.reload();
+    return data;
+  }).catch(function (e) { alert('Action failed: ' + e.message); });
+}
+function rndSetPriority(pid, pr) { _lifecycle('/api/rnd/set_priority', {id: pid, priority: pr}); }
+function rndArchive(pid) { if (confirm('Archive this project?')) _lifecycle('/api/rnd/archive_project', {id: pid}); }
+function rndRetire(pid) { if (confirm('Retire/cancel this project?')) _lifecycle('/api/rnd/retire_project', {id: pid}); }
+function rndReactivate(pid) { _lifecycle('/api/rnd/reactivate_project', {id: pid}); }
+function rndNotes(pid) {
+  var d = document.querySelector('.dash');
+  var cur = d ? (d.getAttribute('data-notes') || '') : '';
+  var n = window.prompt('Notes for this project:', cur);
+  if (n === null) return;
+  _lifecycle('/api/rnd/set_notes', {id: pid, notes: n});
 }
 """
 
@@ -3643,6 +4165,25 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 "reason": res.reason,
                 "job_id": res.job_id,
             })
+
+        elif self.path == "/api/rnd/cancel_job":
+            # Stop a running job (tree-kill via job_runner.cancel). Acts on the
+            # job_id supplied by the ATTACHED console session only — the caller
+            # passes the exact job_id, so two concurrent sessions never cross-
+            # wire. A clean 404 for an unknown id; auth is already enforced by the
+            # middleware above (this is a mutating POST).
+            job_id = (body.get("job_id", "") or "").strip()
+            rec = _jr.load_record(job_id) if job_id else None
+            if rec is None:
+                self._send_json({"ok": False, "error": f"unknown job: {job_id}",
+                                 "reason": "unknown-job"}, 404)
+            else:
+                out = _jr.cancel(job_id)
+                self._send_json({
+                    "ok": True,
+                    "job_id": job_id,
+                    "status": (out or {}).get("status"),
+                })
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
