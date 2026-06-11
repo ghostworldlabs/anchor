@@ -46,3 +46,13 @@
 - RE-GATE (orchestrator-run): **327 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 4 — Project window restructure — GO (2026-06-11)
+
+- EXECUTE: Kanban now renders SESSIONS (Wave-1 list_sessions) as most-recent card + "previous sessions (N)" expander per lane (one trio run = one card, multi-file collapses behind "files (N)"); 5th "Grass Catchers" column added (structure only; grass added to LANE_DIRS + effort_history LANE_SUBDIR); dead "no tasks linked yet" replaced by a working linked-tasks strip (Link/Unlink via existing link_task). Extended tests/test_project_window.py.
+- GATE (orchestrator-run): 334 passed, 1 skipped; imports clean.
+- REVIEW (2 independent): Reviewer B GREEN/zero-blockers (verified ordering, integration w/ W2-3, crash-resilience, XSS escaping, scope-tight). Reviewer A single-reviewer BLOCKER on rndUnlinkTask — mechanism muddled but underlying defect real (inline onclick string arg breaks for task text with apostrophes/quotes). Fixed.
+- FIX (1 iter): task identity now rides via HTML-escaped data-attributes (`data-task`/`data-project`) + `rndUnlinkTask(this)`/`rndLinkTask(this)` reading `el.dataset` — no inline JS string arg carries task text; backend by-text match now round-trips for special chars; +1 test (`Fix it's "weird" bug`).
+- RE-GATE (orchestrator-run): **335 passed, 1 skipped**. Converged.
+
+---

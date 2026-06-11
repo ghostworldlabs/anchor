@@ -64,6 +64,7 @@ LANE_SUBDIR = {
     "planning": "planning",
     "build": "build",
     "deliverables": "deliverables",
+    "grass": "grass",
 }
 
 #: Subdirectory under a lane dir holding the per-effort pointer-records.

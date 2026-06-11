@@ -374,6 +374,7 @@ def _all_md_files():
 import rnd_registry as _rnd
 import dir_browser as _dirb
 import effort_history as _eh
+import sessions as _sessions
 import report_viewer as _rv
 import deliverables as _deliv
 import lanes as _lanes
@@ -709,6 +710,7 @@ _KANBAN_COLUMNS = (
     ("plan", "planning", "Planning", "\U0001F4D0", "+ New plan run"),
     ("build", "build", "Build", "\U0001F528", "+ New build run"),
     ("deliverables", "deliverables", "Deliverables", "\U0001F4E6", "+ Add deliverable"),
+    ("grass", "grass", "Grass Catchers", "\U0001F33F", "+ Add idea"),
 )
 
 
@@ -900,12 +902,80 @@ def _render_effort_card(ev, store_lane, project_id):
     return f"<div class='{cls}'{data}>{inner}</div>"
 
 
+def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
+    """Group each lane's effort views into SESSIONS (v2 Wave 4, MASTER-PLAN §A).
+
+    Wraps :func:`sessions.list_sessions` (Wave 1) — one trio run = one session —
+    and joins each session to the per-effort views produced by
+    :func:`_gather_project_efforts`. Returns ``{trio_lane: [session_view, ...]}``
+    newest-first, where a ``session_view`` is::
+
+        {"session_id", "members": [effort_view, ...]}
+
+    ``members`` are the session's effort views, newest-first (the representative
+    card = ``members[0]``). Member views not found (defensive) are skipped.
+    """
+    if efforts_by_lane is None:
+        efforts_by_lane = _gather_project_efforts(folder_path, project_id)
+    out = {}
+    for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
+        views = efforts_by_lane.get(trio_lane, [])
+        # Index this lane's effort views by job_id for the session→view join.
+        by_jid = {}
+        for v in views:
+            jid = v.get("job_id") or ""
+            by_jid.setdefault(jid, v)
+        try:
+            sess_list = _sessions.list_sessions(folder_path, project_id, trio_lane)
+        except Exception:
+            sess_list = []
+        session_views = []
+        claimed = set()
+        for s in sess_list:
+            members = []
+            for m in s.get("member_files", []):
+                jid = (m.get("job_id") or "").strip()
+                v = by_jid.get(jid)
+                if v is not None:
+                    members.append(v)
+                    claimed.add(jid)
+            if not members:
+                continue
+            # Keep members newest-first (the effort views already arrive
+            # newest-first from list_efforts; preserve that ordering).
+            session_views.append({
+                "session_id": s.get("session_id", ""),
+                "members": members,
+            })
+        # Defensive: surface any effort view not claimed by a session as its own
+        # single-member session so nothing silently disappears from the board.
+        for v in views:
+            jid = v.get("job_id") or ""
+            if jid not in claimed:
+                claimed.add(jid)
+                session_views.append({
+                    "session_id": f"loose::{jid}",
+                    "members": [v],
+                })
+        out[trio_lane] = session_views
+    return out
+
+
 def _render_kanban_html(folder_path, project_id):
-    """Render the 4-column Kanban board (Research|Planning|Build|Deliverables)."""
+    """Render the 5-column Kanban board (Research|Planning|Build|Deliverables|
+    Grass Catchers).
+
+    Each lane renders SESSIONS, not per-file cards (v2 Wave 4): the MOST-RECENT
+    session is the visible card; the remaining sessions sit behind a "previous
+    sessions (N)" ``<details>`` expander. One trio run = one card.
+    """
     efforts_by_lane = _gather_project_efforts(folder_path, project_id)
+    sessions_by_lane = _gather_project_sessions(
+        folder_path, project_id, efforts_by_lane)
     cols = []
     for trio_lane, store_lane, label, glyph, add_label in _KANBAN_COLUMNS:
         views = efforts_by_lane.get(trio_lane, [])
+        session_views = sessions_by_lane.get(trio_lane, [])
         any_live = any(v["is_live"] and not v["needs_input"] for v in views)
         any_input = any(v["needs_input"] for v in views)
         badge = ""
@@ -913,14 +983,18 @@ def _render_kanban_html(folder_path, project_id):
             badge = "<span class='attn'>⚠ input</span>"
         elif any_live:
             badge = "<span class='live'><span class='dotpulse'></span>live</span>"
-        cards = "".join(
-            _render_effort_card(v, store_lane, project_id) for v in views)
+        cards = _render_lane_sessions(session_views, store_lane, project_id)
         # The "+ New run" affordance launches that lane. Research offers an
         # engine choice (Claude default + Gemini); plan/build are Claude-only;
-        # deliverables are config-driven (no launch).
+        # deliverables are config-driven (no launch); grass catchers get a
+        # placeholder add affordance (content feeds wired in Wave 5).
         if trio_lane == "deliverables":
             add = (f"<span class='addnew rnd-dim' title='Deliverables are run "
                    f"from the project config'>{html_lib.escape(add_label)}</span>")
+        elif trio_lane == "grass":
+            add = (f"<span class='addnew rnd-dim' title='Grass Catchers content "
+                   f"feeds arrive in a later build'>{html_lib.escape(add_label)}"
+                   f"</span>")
         elif trio_lane == "research":
             add = (
                 "<span class='addnew' onclick=\"launchLane('research','claude')\">"
@@ -939,6 +1013,49 @@ def _render_kanban_html(folder_path, project_id):
             f"{add}</div>"
         )
     return "<div class='kan'>" + "".join(cols) + "</div>"
+
+
+def _render_lane_sessions(session_views, store_lane, project_id):
+    """Render a lane's sessions: most-recent visible + a "previous sessions"
+    expander holding the rest (v2 Wave 4).
+
+    Each session renders as ONE card (its representative = ``members[0]``); the
+    remaining members of a multi-file session sit behind a small per-card
+    "files (N)" expander so a 7-file Crucible run is one card, not seven. The
+    representative keeps the existing click target (report viewer / attach /
+    artifact) — summaries arrive in a later wave.
+    """
+    if not session_views:
+        return ""
+    def _render_session_card(sv):
+        members = sv.get("members", [])
+        if not members:
+            return ""
+        head = _render_effort_card(members[0], store_lane, project_id)
+        rest = members[1:]
+        if not rest:
+            return head
+        inner = "".join(
+            _render_effort_card(m, store_lane, project_id) for m in rest)
+        return (
+            f"<div class='session'>{head}"
+            f"<details class='session-files'>"
+            f"<summary>files ({len(rest) + 1})</summary>"
+            f"<div class='session-files-body'>{inner}</div>"
+            f"</details></div>"
+        )
+    recent = _render_session_card(session_views[0])
+    older = session_views[1:]
+    if not older:
+        return recent
+    older_cards = "".join(_render_session_card(sv) for sv in older)
+    return (
+        f"{recent}"
+        f"<details class='prev-sessions'>"
+        f"<summary>previous sessions ({len(older)})</summary>"
+        f"<div class='prev-sessions-body'>{older_cards}</div>"
+        f"</details>"
+    )
 
 
 def render_project_window_html(project_id: str) -> str:
@@ -1050,7 +1167,7 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-mini.rnd-pr-on{border-color:var(--accent);color:var(--accent)}"
         ".rnd-mini.rnd-danger:hover{border-color:var(--danger);color:var(--danger)}"
         ".rnd-mini.rnd-accent{border-color:var(--accent);color:var(--accent)}"
-        ".kan{display:grid;grid-template-columns:repeat(4,1fr);gap:0}"
+        ".kan{display:grid;grid-template-columns:repeat(5,1fr);gap:0}"
         ".kan .col{border-right:1px solid var(--border);min-height:180px;"
         "padding:12px}"
         ".kan .col:last-child{border-right:none}"
@@ -1078,6 +1195,16 @@ def render_project_window_html(project_id: str) -> str:
         ".effort .sub{font-size:11px;color:var(--text-dim);margin-top:3px}"
         ".effort .ecost{margin-left:6px;color:var(--success)}"
         ".effort.discovered{border-style:dashed;opacity:.92}"
+        ".session-files{margin:-3px 0 7px}"
+        ".session-files>summary{font-size:10.5px;color:var(--text-dim);"
+        "cursor:pointer;list-style:none;padding-left:2px}"
+        ".session-files>summary:hover{color:var(--accent)}"
+        ".session-files-body{padding-left:8px;border-left:1px solid var(--border)}"
+        ".prev-sessions{margin-top:2px}"
+        ".prev-sessions>summary{font-size:11px;color:var(--text-dim);"
+        "cursor:pointer;list-style:none;padding:3px 2px}"
+        ".prev-sessions>summary:hover{color:var(--accent)}"
+        ".prev-sessions-body{margin-top:6px}"
         ".imported{font-size:10px;color:var(--text-dim);"
         "display:inline-flex;align-items:center;gap:5px;letter-spacing:.5px}"
         ".dotdisc{width:6px;height:6px;border-radius:50%;"
@@ -1548,6 +1675,27 @@ function rndBlurb(pid) {
   if (n === null) return;
   _lifecycle('/api/rnd/set_blurb', {id: pid, blurb: n});
 }
+
+// ── Task linking (surfaces the existing link_task endpoint) ─────────────────
+function rndLinkTask(el) {
+  // Project id rides via the element's data-project attribute (the browser
+  // entity-decodes it for us), avoiding the inline-string-literal trap.
+  var pid = el.dataset.project || '';
+  var t = window.prompt('Link a task to this project (type the task text):', '');
+  if (t === null) return;
+  t = t.trim();
+  if (!t) return;
+  _lifecycle('/api/rnd/link_task', {text: t, project_id: pid});
+}
+function rndUnlinkTask(el) {
+  // Read the raw task text from the DOM dataset (entity-decoded by the
+  // browser) so it matches the markdown task text verbatim — works even when
+  // the text contains apostrophes, quotes, &, <, or >.
+  var text = el.dataset.task || '';
+  if (!confirm('Unlink this task from the project?')) return;
+  // An empty project_id unlinks the matching task (backend contract).
+  _lifecycle('/api/rnd/link_task', {text: text, project_id: ''});
+}
 """
 
 
@@ -1613,24 +1761,50 @@ def project_tasks(project_id: str) -> list:
 
 
 def render_project_tasks_html(project_id: str) -> str:
-    """Render the project-tasks list shown inside the project window (AC2)."""
+    """Render the linked-tasks strip inside the project window (v2 Wave 4 / §G).
+
+    Surfaces the existing ``link_task`` capability: lists every active task whose
+    ``Project: <id>`` matches, each with an Unlink affordance, plus a "Link task"
+    button that calls the existing ``/api/rnd/link_task`` endpoint. Replaces the
+    old dead-end "no tasks linked yet" message with a working strip.
+    """
+    pid_attr = html_lib.escape(project_id, quote=True)
+    link_btn = (f"<button class='rnd-mini' data-project=\"{pid_attr}\" "
+                f"onclick=\"rndLinkTask(this)\" "
+                f"title='Link an existing task to this project'>+ Link task"
+                f"</button>")
+    header = (f"<h2 style='display:flex;align-items:center;gap:10px'>Tasks "
+              f"{link_btn}</h2>")
     tasks = project_tasks(project_id)
     if not tasks:
-        return ("<h2>Tasks</h2><p style='color:#8a90a2'>No tasks linked to this "
-                "project yet. Link one with <code>anchor.py link "
-                "\"task\" --project &lt;id&gt;</code>.</p>")
+        return (header + "<p class='rnd-empty-tasks' style='color:#8a90a2'>"
+                "No tasks linked to this project yet. Use "
+                "<strong>+ Link task</strong> above (or "
+                "<code>anchor.py link \"task\" --project &lt;id&gt;</code>).</p>")
     rows = []
     for t in tasks:
         mark = "✓" if t.get("done") else "○"
-        txt = html_lib.escape(t.get("text", ""))
+        txt_raw = t.get("text", "")
+        txt = html_lib.escape(txt_raw)
+        txt_attr = html_lib.escape(txt_raw, quote=True)
         dom = html_lib.escape(t.get("domain", ""))
         pr = t.get("priority", 2)
+        # Task identity rides via data- attributes (entity-decoded by the
+        # browser), NOT as an inline JS string arg — so text with apostrophes,
+        # quotes, &, <, > round-trips verbatim to /api/rnd/link_task.
+        unlink = (f"<button class='rnd-mini rnd-unlink' "
+                  f"data-task=\"{txt_attr}\" data-project=\"{pid_attr}\" "
+                  f"onclick=\"rndUnlinkTask(this)\" "
+                  f"title='Unlink this task'>Unlink</button>")
         rows.append(
-            f"<li><span style='color:#6c9cfc'>{mark}</span> {txt} "
+            f"<li class='linked-task' style='display:flex;align-items:center;"
+            f"gap:8px;margin-bottom:5px'>"
+            f"<span style='color:#6c9cfc'>{mark}</span> {txt} "
             f"<span style='color:#8a90a2;font-size:12px'>"
-            f"(P{pr} · {dom})</span></li>"
+            f"(P{pr} · {dom})</span>"
+            f"<span style='margin-left:auto'>{unlink}</span></li>"
         )
-    return ("<h2>Tasks</h2><ul style='list-style:none;padding:0'>"
+    return (header + "<ul style='list-style:none;padding:0'>"
             + "".join(rows) + "</ul>")
 
 

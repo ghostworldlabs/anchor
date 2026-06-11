@@ -30,8 +30,9 @@ import paths as _paths
 # Registry JSON filename, stored at the data-dir root.
 REGISTRY_NAME = "rnd_registry.json"
 
-# Lane subdirectories scaffolded under each project's namespace.
-LANE_DIRS = ("research", "planning", "build", "deliverables", "jobs")
+# Lane subdirectories scaffolded under each project's namespace. ``grass`` is
+# the Grass Catchers lane (v2 Wave 4 structure; content feeds land in Wave 5).
+LANE_DIRS = ("research", "planning", "build", "deliverables", "grass", "jobs")
 
 # Canonical lifecycle states. ``active`` is the default; ``archived`` and
 # ``future`` are retained (not deleted); ``path-missing`` is computed on read
