@@ -53,6 +53,8 @@ Each task can have an optional **Notes** field for storing emails, links, refere
 ## Daily Health Check
 A self-test script (`anchor_healthcheck.py`) runs every morning at 5:00 AM via the Windows Task Scheduler task **"Anchor Health Check"**. It verifies file integrity, parses every markdown file, boots a throwaway server on test port 8778, exercises every endpoint, walks a synthetic `__healthcheck__` task through every state, then writes `health_reports/YYYY-MM-DD.md`. If anything failed, the dashboard shows a red banner at the top until the next clean run.
 
+It also exercises the **v2 R&D surface** (`check_rnd_v2_surface`): it registers a synthetic project in a throwaway temp folder and walks `add_idea` / `promote_inbox` (grass) → `pin_deliverable` → reconcile preview → `status_line` shape → a discovered planning session → `GET /summary` + `regenerate_summary` → a terminal session start → `term_input` → `term_discover` → `term_adopt`. **Every model call is stubbed via `ANCHOR_RUNNER_CMD` → `tests/fake_claude.py` — never live `claude`.** The synthetic project and its temp folder are torn down afterward, the `ANCHOR_RUNNER_CMD` env is restored, and the existing `__healthcheck__` filtering is unaffected, so no real data is polluted.
+
 If port 8778 is already occupied (e.g. by a stale/orphaned server the non-elevated check can't reap), the self-test automatically falls back to an OS-assigned free port and logs that under "Auto-fixes applied" — it no longer aborts the whole run over a busy test port.
 
 - **Install / re-register scheduled task:** `powershell -ExecutionPolicy Bypass -File .\register_healthcheck.ps1` (run once; safe to re-run)
@@ -65,8 +67,20 @@ The synthetic `__healthcheck__` task is filtered out of every dashboard view by 
 ## File Structure
 ```
 anchor_gui.py           ← Standalone GUI (local web server + browser dashboard)
-anchor.py               ← CLI engine (reads/writes markdown, generates HTML)
-anchor_healthcheck.py   ← Daily self-test (runs at 5:00 AM via Task Scheduler)
+anchor.py               ← CLI engine (reads/writes markdown, generates HTML; `rnd` v2 mirror)
+anchor_healthcheck.py   ← Daily self-test (runs at 5:00 AM via Task Scheduler; also walks the v2 R&D surface, stubbed)
+# R&D control surface v2 (design + plan frozen in planning/rnd-v2/):
+rnd_registry.py         ← Id-keyed R&D project registry (status_line, blurb, reconcile_folder)
+effort_history.py       ← Append-only per-lane effort pointer-records (add_idea, promote_inbox, adopt_sibling_sessions)
+sessions.py             ← Session model — one trio run = one session (list_sessions, merge/split)
+summarizer.py           ← Validated, cached session summaries (generate-twice + grounding filter)
+rnd_terminal.py         ← Interactive terminal substrate (persistent stream-json REPL over SSE; not ConPTY)
+deliverables.py         ← Deliverable declare/pin + per-type run contract
+brownfield_scan.py      ← Discovery of on-disk trio artifacts + idea-docs (grass)
+lanes.py / job_runner.py / gate_adapter.py ← Lane→skill mapping, durable job runner, gate stdin wiring
+report_viewer.py        ← Markdown→HTML report/summary rendering (vendored KaTeX)
+paths.py                ← Shared path/data-dir constants, WRITE_LOCK, auth + bind helpers (imported everywhere)
+vendor/anchor-term/     ← Vendored lightweight terminal console (anchor-term.js/.css; swappable for xterm.js behind window.AnchorTerm.mount)
 register_healthcheck.ps1 ← One-time setup for the scheduled task
 Anchor Healthcheck.bat  ← Manual trigger for the health check (with console output)
 launch_anchor.pyw       ← Silent launcher (no terminal window, used by shortcuts)
@@ -133,12 +147,60 @@ This is a self-contained Python HTTP server that generates the full dashboard HT
 | POST | `/api/cancel` | Cancel task → CANCELLED.md |
 | POST | `/api/save_for_later` | Save task → SAVED_FOR_LATER.md |
 | POST | `/api/restore` | Restore from archive to active |
+| GET | `/project/<id>` | R&D project window (rich Kanban "Dashboard A") |
+| GET | `/summary/<pid>/<lane>/<session_id>` | Cached, validated session summary page (run-once on first view; rendered via `report_viewer`) |
+| GET | `/report/<pid>/<lane>/<job_id>` | Read-only report viewer for one effort (PDF-by-default else Reader) |
+| GET | `/artifact/<pid>?path=<rel>` | Serve a discovered (brownfield) artifact, traversal-safe |
+| GET | `/api/rnd/projects` | List R&D projects (grouped by folder) |
+| GET | `/api/rnd/term_stream?session=<id>` | SSE stream of a terminal session's output (bounded by `max_ticks`, heartbeated, ends on terminal status) |
+| GET | `/api/rnd/tail?job_id=<id>&since=<n>` | Cursor-stable incremental job log read (long-poll-safe) |
+| POST | `/api/rnd/new_project` / `open_project` / `rescan` | Register / open / re-discover a project |
+| POST | `/api/rnd/set_priority` / `archive_project` / `future_project` / `retire_project` / `reactivate_project` | Project lifecycle (retained, never deleted) |
+| POST | `/api/rnd/set_notes` | Set a project's free-text notes |
+| POST | `/api/rnd/set_blurb` | Set the project blurb ("what this project is"); seeded once from `CLAUDE.md`/`README`/`Anchor.md` |
+| POST | `/api/rnd/link_task` | Link/unlink a task to an R&D project (`Project: <id>` field) |
+| POST | `/api/rnd/launch_lane` | One-shot lane job launch (research→researchPrime, plan→Crucible, build→Foreman) |
+| POST | `/api/rnd/answer_gate` | Answer an in-flight AskUserQuestion gate (plan/build) |
+| POST | `/api/rnd/start_terminal` | Start a PERSISTENT interactive terminal session for a lane (stream-json REPL; stdin kept open). Returns the `job_id` = session id |
+| POST | `/api/rnd/term_input` | Write ONE user turn onto a live terminal session's stdin (reuses the gate-adapter stdin sink) |
+| POST | `/api/rnd/term_discover` | On exit, return the adoption PROPOSAL (files this session produced) |
+| POST | `/api/rnd/term_adopt` | Confirm-adopt a terminal session's produced files as ONE session in the lane |
+| POST | `/api/rnd/regenerate_summary` | Force re-run + re-cache a session's validated summary (through the runner seam) |
+| POST | `/api/rnd/add_idea` | Add a manual idea to a project's Grass Catchers lane |
+| POST | `/api/rnd/promote_inbox` | Promote an `INBOX.md` item into a project's Grass Catchers (copy-by-default; inbox untouched) |
+| POST | `/api/rnd/pin_deliverable` | Pin any path (e.g. `anchor_gui.py`) as a deliverable; `{declare:true}` instead pins everything in the folder's `Anchor.md` marker block |
+| POST | `/api/rnd/run_deliverable` | Run a declared/pinned deliverable per its type contract (doc/script/skill/program) |
 | POST | `/api/rnd/cancel_job` | Stop one R&D lane job (tree-kill via `job_runner.cancel`); 404 on unknown id. Used by the project-window console "Stop job" button, scoped to the ATTACHED session |
 
-> **R&D project window (`GET /project/<id>`):** `render_project_window_html` serves the rich "Dashboard A" — a 4-column Kanban (Research|Planning|Build|Deliverables) of versioned effort cards (state pills: done/running/needs-input/failed), a multi-session console drawer (session tabs; clicking a live effort card or a tab attaches the console to that job's `/api/rnd/tail` stream; the Ask box + reply + "Stop job" act on the ATTACHED job only — no cross-wire), a lifecycle header (priority/notes/archive/retire/reactivate, all token-aware via `_postJson`), and the linked-tasks strip. Done efforts link to the report viewer (`/report/<pid>/<lane>/<job_id>`). The window JS lives in the `_PROJECT_WINDOW_JS` RAW (single-brace) string — NOT an f-string.
+> **R&D project window (`GET /project/<id>`):** `render_project_window_html` serves the rich "Dashboard A" — a 5-column Kanban (Research|Planning|Build|Deliverables|Grass Catchers) showing the **most-recent session per lane** as the visible card with a **"previous sessions" expander** holding the rest, a multi-session console / interactive terminal drawer, a lifecycle header (priority/notes/blurb/archive/retire/reactivate, all token-aware via `_postJson`), and the linked-tasks strip. Done sessions link to the cached summary (`/summary/<pid>/<lane>/<session_id>`); individual effort docs link to the report viewer (`/report/<pid>/<lane>/<job_id>`). The window JS lives in the `_PROJECT_WINDOW_JS` RAW (single-brace) string — NOT an f-string.
+
+### R&D Control Surface v2 (frozen design + plan in `planning/rnd-v2/`)
+
+The v2 surface makes Anchor a **truthful, useful memory** of each project's trio work. The frozen design lives in `planning/rnd-v2/MASTER-PLAN.md`; the wave-by-wave build plan in `planning/rnd-v2/IMPLEMENTATION-PLAN.md`. Key concepts and their modules:
+
+- **Session model (`sessions.py`).** One trio run = one **session**, not N per-file cards. `list_sessions(folder, pid, lane)` wraps `effort_history` and groups efforts into sessions newest-first: RUN efforts group by `job_id`; DISCOVERED (brownfield) efforts group by common parent directory (`planning/brownfield-discovery/` is one session, `planning/rnd-v1/` another); a `skill`+timestamp-cluster fallback handles flat folders. A `merge_sessions`/`split_session` escape hatch (persisted in a `sessions-overrides.json` sidecar) fixes mis-grouped discovered files. Each session carries `provenance` = `run` | `imported`.
+- **Cached, validated summaries (`summarizer.py`).** Clicking a session opens a rendered markdown **summary** (goal · key decisions · files-with-links · findings · errors), not the raw log. Pipeline: extraction-seed from the member docs → **generate twice** through the runner → a **deterministic grounding hint-filter** drops claims whose key terms don't appear in the member docs → cache `summary.json` + `summary.md` under `<lane>/summaries/<session_id>/`. **Run-once**: a second view serves the cache; **Regenerate** (`/api/rnd/regenerate_summary`) re-runs and overwrites. All model calls go through the `ANCHOR_RUNNER_CMD` seam, so they are exercised via `tests/fake_claude.py` — **never live `claude` in any test/healthcheck path.**
+- **First-class imported history (`rnd_registry.status_line`).** Returns per-lane **counts + provenance** (`{planning: {count, imported, running}}`), NOT the old `import`/`none-yet` masquerade — a lane with sessions never reads "import". "imported" is a per-card chip, not the lane's whole state. A user-editable **project blurb** (`set_blurb`, seeded once from `CLAUDE.md`/`README`/`Anchor.md` via `seed_blurb`) describes what the project is.
+- **Folder reconcile (`rnd_registry.reconcile_folder` + `effort_history.adopt_sibling_sessions`).** Because one folder may have N registered ids (live + retired test ids), an **explicit, reviewable** reconcile folds same-folder siblings' real sessions into the active id, then **hard-deletes** the siblings. Two-step: `apply=False` returns a dry-run PLAN (what would fold/delete) without mutating; `apply=True` folds-then-deletes. It folds ALL content lanes (`effort_history.FOLD_LANES` = research/planning/build/deliverables/**grass**) so grass ideas are migrated, not destroyed. Ids on a DIFFERENT folder are never touched.
+- **Grass Catchers lane (`grass`).** A 5th lane (`rnd_registry.LANE_DIRS`/`STATUS_LANES`-adjacent) for future ideas, fed three ways: manual add (`effort_history.add_idea`), promote-from-`INBOX.md` (`effort_history.promote_inbox`, copy-by-default — the inbox stays the untouched source of truth), and discovery classification of idea-docs in `brownfield_scan.py`.
+- **Deliverable declare/pin (`deliverables.py`).** A real deliverable (e.g. the running `anchor_gui.py`, which is NOT under a `deliverables/` dir) is representable: **pin** any in-folder path as a deliverables-lane effort (`pin_deliverable`, idempotent/content-addressed, traversal-safe), or **declare** them via an `Anchor.md` `## Deliverables` marker block (`declare_deliverables_from_marker`). Running a deliverable enforces a per-type success contract (doc=exists+nonempty; script/skill=exit 0 + result-no-error; program=exit 0 within timeout) with stdin-closed + tree-kill-on-timeout discipline.
+- **Interactive terminal substrate (`rnd_terminal.py`).** "New research/plan/build" opens an interactive terminal that already knows the lane's trio skill. The substrate is a **persistent `stream-json` REPL** (one long-lived `claude`/`gemini` job per session, user turns POSTed onto its stdin, assistant output streamed back over **SSE**) — deliberately **NOT a native ConPTY terminal**, which would need a compiled dependency and violate the stdlib-only / no-native-asset rule. The console is the **vendored anchor-term** static asset (xterm.js was deliberately NOT used, for the same stdlib-only/no-native-asset reason; the terminal *feel* is achieved over the REPL). It generalizes — never forks — the gate-adapter stdin mechanism. On process exit it **auto-discovers** files produced under the session output dir (`discover_produced`) and asks the user to **confirm adoption** as a session (`adopt_produced`, recorded as one RUN session keyed by the terminal job_id, reusing the Wave-1 grouping + Wave-2 adopt paths).
 
 ### anchor.py — CLI Engine
 Mirror of anchor_gui.py's logic but as a command-line tool. Also generates the static `dashboard.html` file. Shares the same markdown format and file paths.
+
+**R&D v2 CLI mirror** (`anchor.py rnd <subcommand>`) — each subcommand resolves a project by id and **delegates to the shared v2 module** (no forked logic):
+
+- `rnd sessions <pid> --lane <lane>` — list a lane's sessions (`sessions.list_sessions`)
+- `rnd status <pid>` — per-lane counts+provenance (`rnd_registry.status_line`)
+- `rnd reconcile <pid> [--apply]` — folder reconcile; default is a dry-run preview (`rnd_registry.reconcile_folder`)
+- `rnd add-idea <pid> "text" [--notes "..."]` — manual Grass Catchers idea (`effort_history.add_idea`)
+- `rnd promote-inbox <pid> "inbox item"` — promote an INBOX item to grass (`effort_history.promote_inbox`)
+- `rnd pin-deliverable <pid> <path> [--name N] [--type T] [--desc "..."]` — pin a deliverable (`deliverables.pin_deliverable`)
+- `rnd set-blurb <pid> "blurb"` — set the project blurb (`rnd_registry.set_blurb`)
+- `rnd regenerate-summary <pid> --lane <lane> --session <id>` — force re-cache a session summary (`summarizer.summarize_session(force=True)`, through the runner seam)
+
+There is intentionally **no CLI form** for the live interactive terminal (start/input/SSE), the SSE stream, or the merge/split escape hatch — those are inherently interactive/UI-driven and exposing them as one-shot CLI calls would not be meaningful.
 
 ### How to Add a New Feature
 1. Add the backend function in **anchor_gui.py** (in the "Change Operations" section)

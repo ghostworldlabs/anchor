@@ -13,6 +13,16 @@ Usage:
     python3 anchor.py capture "idea"     # Add to inbox
     python3 anchor.py link "task text" --project <id>   # Link a task to an R&D project
     python3 anchor.py status             # Print current status summary
+
+R&D control-surface mirror (v2 — delegates to the shared modules):
+    python3 anchor.py rnd sessions <project_id> --lane planning
+    python3 anchor.py rnd status <project_id>
+    python3 anchor.py rnd reconcile <project_id> [--apply]   # default = dry-run preview
+    python3 anchor.py rnd add-idea <project_id> "idea text" [--notes "..."]
+    python3 anchor.py rnd promote-inbox <project_id> "inbox item text"
+    python3 anchor.py rnd pin-deliverable <project_id> <path> [--name N] [--type doc|script|skill|program] [--desc "..."]
+    python3 anchor.py rnd set-blurb <project_id> "what this project is"
+    python3 anchor.py rnd regenerate-summary <project_id> --lane planning --session <session_id>
 """
 
 import json, os, re, sys
@@ -637,6 +647,95 @@ def promote_inbox(folder_path, project_id, inbox_item_text):
                              inbox_items=inbox_items)
 
 
+# ── R&D v2 surface mirror (Wave 8) ─────────────────────────────────────────
+# These delegate (never duplicate logic) to the shared v2 modules so the CLI
+# and the GUI/API stay byte-for-byte consistent. Each resolves a project by id
+# via ``rnd_registry`` and forwards to ``sessions`` / ``rnd_registry`` /
+# ``effort_history`` / ``deliverables`` / ``summarizer``.
+
+def _rnd_resolve(project_id):
+    """Return ``(project_entry, folder_path)`` for an R&D project id.
+
+    Raises ``KeyError`` (with a clean message) for an unknown id so callers can
+    print a friendly error rather than a traceback.
+    """
+    import rnd_registry as _rnd
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        raise KeyError(project_id)
+    return proj, proj.get("folder_path", "")
+
+
+def rnd_list_sessions(project_id, lane):
+    """CLI mirror of ``sessions.list_sessions`` — one trio run = one session.
+
+    Returns the lane's sessions newest-first (delegates to ``sessions``).
+    """
+    import sessions as _sessions
+    _proj, folder = _rnd_resolve(project_id)
+    return _sessions.list_sessions(folder, project_id, lane)
+
+
+def rnd_status_line(project_id):
+    """CLI mirror of ``rnd_registry.status_line`` — per-lane counts + provenance."""
+    import rnd_registry as _rnd
+    # Validate the id (status_line is best-effort and returns zeros for unknown).
+    _rnd_resolve(project_id)
+    return _rnd.status_line(project_id)
+
+
+def rnd_reconcile(project_id, apply=False):
+    """CLI mirror of ``rnd_registry.reconcile_folder`` — preview (dry-run) / apply.
+
+    With ``apply=False`` (default) returns the PLAN of what folding+deleting would
+    do WITHOUT mutating anything; with ``apply=True`` folds same-folder siblings'
+    real sessions into the active id, then hard-deletes them.
+    """
+    import rnd_registry as _rnd
+    return _rnd.reconcile_folder(project_id, apply=apply)
+
+
+def rnd_set_blurb(project_id, blurb):
+    """CLI mirror of ``rnd_registry.set_blurb`` — the project's 'what this is' line."""
+    import rnd_registry as _rnd
+    _rnd_resolve(project_id)
+    return _rnd.set_blurb(project_id, blurb)
+
+
+def rnd_pin_deliverable(project_id, path, name=None, dtype=None, description=""):
+    """CLI mirror of ``deliverables.pin_deliverable`` — pin any path as a deliverable.
+
+    Surfaces a file (e.g. ``anchor_gui.py`` at repo root) as a deliverables-lane
+    effort even though it is not under a ``deliverables/`` directory.
+    """
+    import deliverables as _deliv
+    _proj, folder = _rnd_resolve(project_id)
+    return _deliv.pin_deliverable(folder, project_id, path, name=name,
+                                  dtype=dtype, description=description)
+
+
+def rnd_regenerate_summary(project_id, lane, session_id):
+    """CLI mirror of ``summarizer.summarize_session(force=True)`` — re-cache a summary.
+
+    Re-runs the validated summarizer (through the runner seam — ``ANCHOR_RUNNER_CMD``)
+    for one session and overwrites its cached ``summary.json`` / ``summary.md``.
+    Raises ``KeyError`` for an unknown project and ``ValueError`` for an unknown
+    session so the CLI can report a clean error.
+    """
+    import sessions as _sessions
+    import summarizer as _summarizer
+    _proj, folder = _rnd_resolve(project_id)
+    session = None
+    for s in _sessions.list_sessions(folder, project_id, lane):
+        if s.get("session_id") == session_id:
+            session = s
+            break
+    if session is None:
+        raise ValueError(f"unknown session: {session_id}")
+    return _summarizer.summarize_session(folder, project_id, lane, session,
+                                         force=True)
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -743,9 +842,167 @@ def main():
                 text_parts.append(sys.argv[i]); i += 1
         capture_inbox(" ".join(text_parts), domain)
 
+    elif cmd == "rnd":
+        _rnd_cli(sys.argv[2:])
+
     else:
         print(f"Unknown command: {cmd}")
         print(__doc__)
+
+
+# ── R&D CLI dispatcher (Wave 8) ────────────────────────────────────────────
+
+def _rnd_cli(args):
+    """Dispatch ``anchor.py rnd <subcommand> ...`` to the v2 mirror functions.
+
+    Follows anchor.py's existing manual-arg-parsing convention (no argparse).
+    Each subcommand resolves a project by id and delegates to the shared module;
+    no R&D logic is reimplemented here.
+    """
+    if not args:
+        print("Usage: anchor.py rnd <sessions|status|reconcile|add-idea|"
+              "promote-inbox|pin-deliverable|set-blurb|regenerate-summary> ...")
+        return
+    sub = args[0].lower()
+    rest = args[1:]
+
+    def _opt(name, default=None):
+        if name in rest:
+            i = rest.index(name)
+            if i + 1 < len(rest):
+                return rest[i + 1]
+        return default
+
+    def _flag(name):
+        return name in rest
+
+    def _positionals():
+        """Positional args = everything not consumed by a --flag or its value."""
+        out = []
+        skip = False
+        for i, a in enumerate(rest):
+            if skip:
+                skip = False
+                continue
+            if a.startswith("--"):
+                # flags that take a value consume the next token
+                if a in ("--lane", "--session", "--notes", "--name",
+                         "--type", "--desc"):
+                    skip = True
+                continue
+            out.append(a)
+        return out
+
+    try:
+        if sub == "sessions":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd sessions <project_id> --lane <lane>")
+                return
+            lane = _opt("--lane", "planning")
+            sessions = rnd_list_sessions(pos[0], lane)
+            print(f"{len(sessions)} session(s) in lane '{lane}':")
+            for s in sessions:
+                prov = s.get("provenance", "")
+                n = len(s.get("member_files", []))
+                print(f"  - [{prov}] {s.get('title','(untitled)')} "
+                      f"— {n} file(s) - id={s.get('session_id','')}")
+
+        elif sub == "status":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd status <project_id>")
+                return
+            sl = rnd_status_line(pos[0])
+            print(f"Status line for {pos[0]}:")
+            for lane, counts in sl.items():
+                print(f"  {lane:<13} count={counts.get('count',0)} "
+                      f"imported={counts.get('imported',0)} "
+                      f"running={counts.get('running',0)}")
+
+        elif sub == "reconcile":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd reconcile <project_id> [--apply]")
+                return
+            apply = _flag("--apply")
+            report = rnd_reconcile(pos[0], apply=apply)
+            if not report.get("ok"):
+                print(f"Reconcile failed: {report.get('reason')}")
+                return
+            mode = "APPLIED" if report.get("applied") else "PREVIEW (dry-run)"
+            print(f"Reconcile {mode} for {report.get('active_id')} "
+                  f"(folder: {report.get('folder_path')})")
+            for f in report.get("fold", []):
+                print(f"  fold {f['id']} ({f.get('name','')}): "
+                      f"{f.get('total_efforts',0)} effort(s) {f.get('efforts',{})}")
+            print(f"  to_delete: {report.get('to_delete', [])}")
+            if report.get("applied"):
+                print(f"  imported: {report.get('imported',0)}  "
+                      f"deleted: {report.get('deleted', [])}")
+
+        elif sub == "add-idea":
+            pos = _positionals()
+            if len(pos) < 2:
+                print('Usage: anchor.py rnd add-idea <project_id> "idea text" '
+                      '[--notes "..."]')
+                return
+            _proj, folder = _rnd_resolve(pos[0])
+            rec = add_idea(folder, pos[0], " ".join(pos[1:]),
+                           notes=_opt("--notes", ""))
+            print(f"OK: Idea added to grass lane: {rec.get('title','')} "
+                  f"(job_id={rec.get('job_id','')})")
+
+        elif sub == "promote-inbox":
+            pos = _positionals()
+            if len(pos) < 2:
+                print('Usage: anchor.py rnd promote-inbox <project_id> '
+                      '"inbox item text"')
+                return
+            _proj, folder = _rnd_resolve(pos[0])
+            rec = promote_inbox(folder, pos[0], " ".join(pos[1:]))
+            print(f"OK: Promoted INBOX item to grass lane: {rec.get('title','')}")
+
+        elif sub == "pin-deliverable":
+            pos = _positionals()
+            if len(pos) < 2:
+                print("Usage: anchor.py rnd pin-deliverable <project_id> <path> "
+                      "[--name N] [--type doc|script|skill|program] [--desc ...]")
+                return
+            rec = rnd_pin_deliverable(pos[0], pos[1], name=_opt("--name"),
+                                      dtype=_opt("--type"),
+                                      description=_opt("--desc", ""))
+            print(f"OK: Pinned deliverable: {rec.get('title','')} "
+                  f"[{rec.get('deliverable_type','')}] -> {rec.get('artifact_path','')}")
+
+        elif sub == "set-blurb":
+            pos = _positionals()
+            if len(pos) < 2:
+                print('Usage: anchor.py rnd set-blurb <project_id> "blurb text"')
+                return
+            entry = rnd_set_blurb(pos[0], " ".join(pos[1:]))
+            print(f"OK: Blurb set: {entry.get('blurb','')}")
+
+        elif sub == "regenerate-summary":
+            pos = _positionals()
+            lane = _opt("--lane")
+            session_id = _opt("--session")
+            if not pos or not lane or not session_id:
+                print("Usage: anchor.py rnd regenerate-summary <project_id> "
+                      "--lane <lane> --session <session_id>")
+                return
+            summary = rnd_regenerate_summary(pos[0], lane, session_id)
+            claims = summary.get("claims", [])
+            print(f"OK: Summary regenerated for session {session_id}: "
+                  f"{len(claims)} grounded claim(s)")
+
+        else:
+            print(f"Unknown rnd subcommand: {sub}")
+            print(__doc__)
+    except KeyError as ke:
+        print(f"Unknown project: {ke.args[0] if ke.args else ke}")
+    except ValueError as ve:
+        print(f"Error: {ve}")
 
 
 if __name__ == "__main__":

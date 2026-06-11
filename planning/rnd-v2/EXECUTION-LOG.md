@@ -87,3 +87,25 @@
 - RE-GATE (orchestrator-run): **379 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 8 — CLI mirror + healthcheck + docs — GO (2026-06-11)
+
+- EXECUTE: `anchor.py rnd <subcommand>` mirror (sessions/status/reconcile[--apply dry-run default]/add-idea/promote-inbox/pin-deliverable/set-blurb/regenerate-summary, all delegating to shared modules, ASCII output for cp1252); `anchor_healthcheck.py` `check_rnd_v2_surface` walks the full v2 surface on the throwaway port, fully stubbed via fake_claude with finally-teardown (no real-data pollution, no live claude); CLAUDE.md documents the v2 surface + endpoint table. New tests/test_cli_rnd.py + tests/test_healthcheck_rnd_v2.py.
+- GATE (orchestrator-run): 391 passed, 1 skipped.
+- REVIEW (2 independent): both full PASS, zero blockers — CLI delegates (no forked logic), reconcile dry-run non-mutating, healthcheck teardown-in-finally + stubbed, docs accurate, lane constants consistent (FOLD_LANES vs LANE_DIRS vs STATUS_LANES), no scope creep. Only 2 MINOR doc gaps (paths.py, vendor/ missing from File Structure).
+- FIX (orchestrator, trivial): added paths.py + vendor/anchor-term/ to the CLAUDE.md File Structure block.
+- RE-GATE (orchestrator-run): **391 passed, 1 skipped**. Converged.
+
+---
+
+## PROJECT DONE — 2026-06-11
+
+All 8 waves GREEN on the orchestrator-run gate `python -m pytest -v` (**391 passed, 1 skipped**; baseline was 284). Terminal wave (Wave 8) complete → Foreman emits final-state verdict and stops.
+
+**Built:** session model (1 trio run = 1 card) · folder reconcile + sibling adoption + deliverable pin · first-class imported history (counts+provenance, blurb) · window restructure (most-recent+expander, grass column, task-linking) · Grass Catchers feeds (manual/INBOX/discovery) · validated cached summaries (run-once, grounding hint-filter, concurrency-safe) · interactive terminal (stream-json REPL over SSE, vendored anchor-term, exit→discover→adopt) · CLI mirror + healthcheck + docs.
+
+**Open product decision surfaced to user:** terminal UI uses a vendored lightweight `anchor-term` console rather than real xterm.js (the plan permitted the lightweight console only if xterm.js was unavailable offline; it was available). Swappable behind `window.AnchorTerm.mount`. Awaiting user call.
+
+**Not done by this build (data debris, flagged):** `domains/test.md` is untracked junk with a cp1252 byte that breaks the LIVE healthcheck/server markdown-parse path — should be deleted by the user.
+
+**Deploy note:** changes live on branch `foreman/rnd-surface-v2`; the live server (NSSM `anchor`) still runs the old code until merged to master + `nssm restart anchor` (elevated).

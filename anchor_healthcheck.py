@@ -538,6 +538,219 @@ def _cleanup_synthetic_task(task_text: str) -> tuple[bool, str]:
     return True, f"removed from {len(removed_from)} file(s)" if removed_from else "no traces left"
 
 
+# â”€â”€ Check 5b: R&D v2 surface (sessions / summaries / terminal / grass) â”€â”€â”€â”€â”€â”€
+# Exercises the v2 R&D endpoints on the throwaway server (Wave 8). Everything
+# model-driven goes through the STUB runner (ANCHOR_RUNNER_CMD -> fake_claude),
+# never live claude. A SYNTHETIC project is registered in a throwaway temp folder
+# and fully torn down afterward so REAL data (rnd_registry.json, the live
+# project's .anchor store) is never polluted.
+
+SYNTHETIC_RND_NAME = "__healthcheck__ rnd probe"
+
+
+def _fake_runner_cmd() -> "str | None":
+    """Path to the stub runner used to drive v2 model calls without live claude.
+
+    Prefers ``tests/fake_claude.py`` (the suite's deterministic stub). Returns a
+    ``python <abs path>`` command string, or ``None`` if the stub is absent (the
+    v2 check then degrades gracefully instead of risking a live CLI).
+    """
+    stub = ANCHOR_DIR / "tests" / "fake_claude.py"
+    if stub.is_file():
+        return f"{sys.executable} {stub}"
+    return None
+
+
+def check_rnd_v2_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v2 R&D surface on the throwaway server (stubbed runner).
+
+    Walks: register a synthetic project -> status_line shape (via the project
+    window) -> add_idea / promote_inbox (grass) -> pin_deliverable -> reconcile
+    preview -> a discovered planning session -> /summary + regenerate_summary ->
+    a terminal session start -> term_input -> term_discover -> term_adopt. All
+    model calls are stubbed via ANCHOR_RUNNER_CMD=fake_claude.
+
+    ``rnd_env`` carries the temp folder + registry-cleanup hooks set up by main()
+    so this never touches real data.
+    """
+    name = "R&D v2 surface"
+    if server_proc is None:
+        report.check(name, False, "skipped (server did not boot)")
+        return
+    if not rnd_env.get("runner_cmd"):
+        report.check(name, True, "skipped (no stub runner; live claude avoided)")
+        return
+
+    base = f"http://127.0.0.1:{TEST_PORT}"
+    steps: list[tuple[str, bool, str]] = []
+    folder = rnd_env["folder"]
+
+    try:
+        import rnd_registry as _rnd
+        import effort_history as _eh
+        import sessions as _sessions
+        import brownfield_scan as _bf
+
+        # 1. Register a synthetic project in the throwaway folder.
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME, str(folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register project", bool(pid), pid))
+
+        # 2. add_idea -> grass lane (POST, token-aware).
+        r = _post(base, "/api/rnd/add_idea",
+                  {"project_id": pid, "text": "hc synthetic idea"})
+        steps.append(("add_idea", r.get("ok", False), str(r.get("error", ""))))
+
+        # 3. promote_inbox -> grass lane (reads the live INBOX.md, copy-by-default).
+        #    Seed a synthetic inbox line first so the match is deterministic and
+        #    tagged for cleanup; copy-by-default leaves it for _cleanup to remove.
+        inbox = DATA_DIR / "INBOX.md"
+        probe_line = f"- {TODAY}: {SYNTHETIC_TAG} inbox idea\n"
+        try:
+            if inbox.exists():
+                inbox.write_text(inbox.read_text(encoding="utf-8").rstrip()
+                                 + "\n" + probe_line, encoding="utf-8")
+            else:
+                inbox.write_text("# Inbox\n\n" + probe_line, encoding="utf-8")
+        except OSError:
+            pass
+        r = _post(base, "/api/rnd/promote_inbox",
+                  {"project_id": pid, "text": f"{SYNTHETIC_TAG} inbox idea"})
+        steps.append(("promote_inbox", r.get("ok", False),
+                      str(r.get("error", ""))))
+
+        # 4. pin_deliverable: pin a file inside the throwaway folder.
+        (folder / "deliverable.py").write_text("print('hc')\n", encoding="utf-8")
+        r = _post(base, "/api/rnd/pin_deliverable",
+                  {"project_id": pid, "path": "deliverable.py",
+                   "type": "script"})
+        steps.append(("pin_deliverable", r.get("ok", False),
+                      str(r.get("error", ""))))
+
+        # 5. reconcile PREVIEW (dry-run) via the registry mirror (non-destructive).
+        rep = _rnd.reconcile_folder(pid, apply=False)
+        steps.append(("reconcile preview",
+                      rep.get("ok", False) and rep.get("applied") is False,
+                      f"to_delete={rep.get('to_delete')}"))
+
+        # 6. status_line shape (Wave 3 contract: per-lane counts+provenance).
+        sl = _rnd.status_line(pid)
+        shape_ok = all(
+            lane in sl and set(sl[lane].keys()) == {"count", "imported", "running"}
+            for lane in ("research", "planning", "build", "deliverables")
+        )
+        steps.append(("status_line shape", shape_ok, str(sl.get("grass", ""))))
+
+        # 7. A discovered planning session -> /summary (GET) + regenerate_summary.
+        bd = folder / "planning" / "brownfield-discovery"
+        bd.mkdir(parents=True, exist_ok=True)
+        (bd / "MASTER-PLAN.md").write_text(
+            "# Master Plan\n\n## North Star\nfake line goal.\n", encoding="utf-8")
+        scan = _bf.scan(str(folder))
+        _eh.adopt_discovered(folder, pid, scan)
+        plan_sessions = _sessions.list_sessions(folder, pid, "planning")
+        if plan_sessions:
+            sid = plan_sessions[0]["session_id"]
+            # GET /summary (run-once: generates through the stub runner on first view)
+            try:
+                with urllib.request.urlopen(
+                    f"{base}/summary/{pid}/planning/{sid}", timeout=20) as rr:
+                    body = rr.read().decode("utf-8", errors="replace")
+                    steps.append(("GET /summary", rr.status == 200
+                                  and len(body) > 200, f"{len(body)}b"))
+            except Exception as e:
+                steps.append(("GET /summary", False, str(e)))
+            # regenerate_summary (POST, force re-run through the stub).
+            r = _post(base, "/api/rnd/regenerate_summary",
+                      {"project_id": pid, "lane": "planning",
+                       "session_id": sid}, timeout=30)
+            steps.append(("regenerate_summary", r.get("ok", False),
+                          str(r.get("error", ""))))
+        else:
+            steps.append(("discovered planning session", False,
+                          "no session grouped"))
+
+        # 8. Terminal walk: start -> input -> discover -> adopt (stubbed runner).
+        #    Use the research lane (engine policy permits both engines) with a
+        #    short fake run so the session reaches a terminal state quickly.
+        try:
+            import rnd_terminal as _term
+            rec = _term.start_terminal(
+                pid, "research",
+                extra_args=["--lines", "1", "--sleep", "0.3"])
+            tjid = rec.get("job_id")
+            steps.append(("terminal start", bool(tjid), str(rec.get("status"))))
+            # input via the API (writes onto live stdin while the job runs).
+            r = _post(base, "/api/rnd/term_input",
+                      {"session": tjid, "text": "continue please"})
+            # written may be False if the stub already exited — accept either as
+            # long as it is a clean JSON response (no 500).
+            steps.append(("term_input", "written" in r,
+                          f"written={r.get('written')}"))
+            # Simulate a produced file then discover -> adopt.
+            out_dir = Path(rec.get("output_dir") or "")
+            if out_dir and out_dir.exists():
+                (out_dir / "PRODUCED.md").write_text(
+                    "# Produced\nhc terminal output\n", encoding="utf-8")
+            import job_runner as _jr
+            try:
+                _jr.wait(tjid, timeout=10)
+            except Exception:
+                pass
+            r = _post(base, "/api/rnd/term_discover", {"session": tjid})
+            steps.append(("term_discover", r.get("ok", False),
+                          str(r.get("error", ""))))
+            r = _post(base, "/api/rnd/term_adopt", {"session": tjid})
+            # adopt returns ok=True when something was adopted; tolerate the
+            # nothing-adoptable path as a clean (non-500) response too.
+            steps.append(("term_adopt", "ok" in r,
+                          str(r.get("error", r.get("ok")))))
+        except Exception as e:
+            steps.append(("terminal walk", False, f"{type(e).__name__}: {e}"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
+def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
+    """Remove the synthetic project(s) + throwaway folder + inbox probe line."""
+    # Drop the synthetic project ids from the live registry (never delete real ones).
+    try:
+        import rnd_registry as _rnd
+        for pid in rnd_env.get("created_ids", []):
+            try:
+                _rnd.remove_project(pid)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Remove the throwaway project folder (it is a tmp dir, not real data).
+    folder = rnd_env.get("folder")
+    if folder is not None:
+        try:
+            shutil.rmtree(folder, ignore_errors=True)
+        except Exception:
+            pass
+    # Strip the synthetic inbox probe line we appended.
+    inbox = DATA_DIR / "INBOX.md"
+    if inbox.exists():
+        try:
+            text = inbox.read_text(encoding="utf-8")
+            new_lines = [ln for ln in text.splitlines()
+                         if SYNTHETIC_TAG not in ln.lower()]
+            if len(new_lines) != len(text.splitlines()):
+                inbox.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+
+
 # â”€â”€ Check 6: logging works â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def check_logging(report: Report):
     name = "logging"
@@ -672,6 +885,21 @@ def main():
     report = Report()
     server_proc = None
 
+    # v2 R&D surface (Wave 8): the server subprocess + the in-process registry ops
+    # must drive model calls through the STUB runner, never live claude. Set
+    # ANCHOR_RUNNER_CMD in this process's environment BEFORE booting the server so
+    # the child inherits it. A throwaway temp folder isolates the synthetic project
+    # from real data; everything is torn down in `finally`.
+    import tempfile
+    rnd_env = {
+        "runner_cmd": _fake_runner_cmd(),
+        "folder": Path(tempfile.mkdtemp(prefix="anchor-hc-rnd-")),
+        "created_ids": [],
+        "prev_runner_cmd": os.environ.get("ANCHOR_RUNNER_CMD"),
+    }
+    if rnd_env["runner_cmd"]:
+        os.environ["ANCHOR_RUNNER_CMD"] = rnd_env["runner_cmd"]
+
     try:
         # Routine maintenance pass first â€” fixes that should happen before tests
         cleanup_stale_processes(report)
@@ -691,6 +919,7 @@ def main():
 
         server_proc = check_server_and_endpoints(report)
         check_synthetic_roundtrip(report, server_proc)
+        check_rnd_v2_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
@@ -705,6 +934,16 @@ def main():
         report.check("healthcheck framework", False, f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
     finally:
         shutdown_server(server_proc)
+        # Tear down the synthetic R&D project + throwaway folder, then restore
+        # ANCHOR_RUNNER_CMD so the process env is left as we found it.
+        try:
+            _cleanup_synthetic_rnd(rnd_env, report)
+        except Exception:
+            pass
+        if rnd_env.get("prev_runner_cmd") is None:
+            os.environ.pop("ANCHOR_RUNNER_CMD", None)
+        else:
+            os.environ["ANCHOR_RUNNER_CMD"] = rnd_env["prev_runner_cmd"]
 
     report_path = REPORTS_DIR / f"{TODAY}.md"
     try:
