@@ -1,0 +1,33 @@
+Anchor R&D interactive terminal — vendored static asset (Wave 7)
+================================================================
+
+WHAT THIS IS
+  anchor-term.js + anchor-term.css are a LIGHTWEIGHT, dependency-free,
+  terminal-style console component authored for Anchor. They render the
+  server-sent-events (SSE) output stream of a persistent stream-json REPL
+  session, provide a command input line that POSTs user turns, surface in-session
+  gates (AskUserQuestion) inline, and offer the exit -> discover -> confirm-adopt
+  flow.
+
+WHY NOT xterm.js
+  The frozen design (planning/rnd-v2/MASTER-PLAN.md §E + Constraints) permits
+  vendoring xterm.js as a static asset IF obtainable offline, OR a lightweight
+  dependency-free terminal-style console as an explicitly-allowed alternative.
+  A copy of xterm.js DOES exist on this machine under unrelated node_modules
+  trees, but it was deliberately NOT vendored here:
+    - xterm.js is a raw terminal EMULATOR; it provides no command-input line, no
+      inline gate prompts, and no adopt flow — all of which a REPL chrome must add
+      on top anyway. The net code saved would be small while adding a large,
+      version-coupled bundle.
+    - Anchor's rule is stdlib-only at runtime with no native/compiled assets;
+      keeping the client asset small + self-contained matches that spirit and
+      avoids pinning a third-party version.
+  The component is NAMED "anchor-term" and exposes a single factory
+  (window.AnchorTerm.mount) so a real xterm.js adapter can be swapped in behind
+  the same API later without touching callers.
+
+SERVED AT
+  /vendor/anchor-term/anchor-term.js
+  /vendor/anchor-term/anchor-term.css
+  (read-only static route in anchor_gui.py, traversal-safe, mirroring the
+   vendored-KaTeX pattern.)

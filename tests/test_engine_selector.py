@@ -294,14 +294,17 @@ def test_project_window_offers_gemini_for_research_only(gui_env, tmp_path):
     gui = gui_env
     proj = _mkproject(tmp_path / "win", "WindowProj")
     html = gui.render_project_window_html(proj["id"])
-    # Research offers an engine choice (Claude + Gemini buttons).
-    assert "launchLane('research','claude')" in html
-    assert "launchLane('research','gemini')" in html
+    # Research offers an engine choice (Claude + Gemini buttons). Wave 7: the
+    # "+ New run" affordances open the interactive TERMINAL (openTerminal),
+    # replacing the old raw-log launch console (launchLane); the engine policy
+    # surfaced by the affordance text is unchanged.
+    assert "openTerminal('research','claude')" in html
+    assert "openTerminal('research','gemini')" in html
     # Plan/Build stay Claude-only — no engine choice.
-    assert "launchLane('plan')" in html
-    assert "launchLane('build')" in html
-    assert "launchLane('plan','gemini')" not in html
-    assert "launchLane('build','gemini')" not in html
+    assert "openTerminal('plan')" in html
+    assert "openTerminal('build')" in html
+    assert "openTerminal('plan','gemini')" not in html
+    assert "openTerminal('build','gemini')" not in html
     # A Gemini option is offered somewhere in the window.
     assert "gemini" in html.lower()
     # f-string intact: no leaked doubled braces.

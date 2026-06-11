@@ -489,15 +489,22 @@ def test_project_window_has_lane_controls_and_log_drawer(gui_env):
     with tempfile.TemporaryDirectory() as td:
         proj = _mkproject(gui, Path(td) / "win", "WindowProj")
         html = gui.render_project_window_html(proj["id"])
-    # Lane-launch controls. Research now carries an engine choice (Claude default
-    # + Gemini); plan/build stay Claude-only (no engine arg).
-    assert "launchLane('research','claude')" in html
-    assert "launchLane('plan')" in html
-    assert "launchLane('build')" in html
-    # Log drawer + gate hooks (the page emits single-quoted attributes).
+    # Lane-launch controls. Wave 7: the "+ New run" affordances open the
+    # interactive TERMINAL (openTerminal) instead of the old raw-log launch
+    # console. Research carries an engine choice (Claude default + Gemini);
+    # plan/build stay Claude-only (no engine arg).
+    assert "openTerminal('research','claude')" in html
+    assert "openTerminal('plan')" in html
+    assert "openTerminal('build')" in html
+    # Terminal substrate hooks: the window mounts the vendored terminal console
+    # (AnchorTerm) and starts a session via /api/rnd/start_terminal; the SSE
+    # stream URL itself lives in the vendored anchor-term.js static asset.
+    assert "AnchorTerm" in html
+    assert "/api/rnd/start_terminal" in html
+    assert "anchor-term.js" in html
+    # Log drawer + gate hooks (the legacy raw-log mirror is KEPT for reattach).
     assert "id='laneLog'" in html
     assert "id='laneGate'" in html
-    assert "/api/rnd/launch_lane" in html
     assert "/api/rnd/tail" in html
     assert "/api/rnd/answer_gate" in html
     # The PROJECT_ID was injected for the JS.

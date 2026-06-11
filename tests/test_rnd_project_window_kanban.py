@@ -143,10 +143,11 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     assert ">v1<" in html
     # Effort cards.
     assert "class='effort'" in html
-    # Per-lane "New run" affordances.
-    assert "launchLane('research','claude')" in html
-    assert "launchLane('plan')" in html
-    assert "launchLane('build')" in html
+    # Per-lane "New run" affordances. Wave 7: these open the interactive TERMINAL
+    # (openTerminal) that replaced the raw-log launch console.
+    assert "openTerminal('research','claude')" in html
+    assert "openTerminal('plan')" in html
+    assert "openTerminal('build')" in html
     assert "New research run" in html
     # Multi-session console (session tabs + attached log + Ask + Stop).
     assert "id='ctabs'" in html

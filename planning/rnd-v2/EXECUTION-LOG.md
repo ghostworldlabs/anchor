@@ -76,3 +76,14 @@
 - RE-GATE (orchestrator-run): **361 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 7 — Interactive terminal (stream-json REPL) — GO (2026-06-11)
+
+- EXECUTE: new `rnd_terminal.py` (persistent per-lane stream-json process via job_runner.launch_guarded, auto-seeded with lane skill; send_turn→stdin reusing gate_adapter sink; read_since; discover_produced; adopt_produced→one run session); SSE `GET /api/rnd/term_stream` (stdlib, bounded/heartbeat); `POST /api/rnd/term_input|start_terminal|term_discover|term_adopt` (auth-gated); vendored lightweight `vendor/anchor-term/` console; openTerminal replaces the raw-log launch console. New tests/test_terminal_repl.py.
+- DECISION (deviation flagged): plan said vendor real xterm.js if available offline; agent vendored a lightweight `anchor-term` console instead (rationale in PROVENANCE.txt; swappable behind `window.AnchorTerm.mount`). Surfacing to user as a post-build product decision — does not block.
+- GATE (orchestrator-run): 369 passed, 1 skipped; no live claude.
+- REVIEW (2 independent): diverged — Reviewer A zero-blockers/all-justified; Reviewer B 2 BLOCKERs + 5 MAJORs. §5: neither B blocker corroborated by A → not auto-blockers, but several were real robustness gaps for a process-spawning feature → fixed.
+- FIX (1 iter): abandoned-terminal reaping (beforeunload→cancel_job tree-kill + `cancel_terminal` helper); SSE broad-exception → terminal error frame (no client hang); snapshot-before-launch (race); send_turn validation (reject empty/oversized/dead-stdin); filename HTML-escape at propose time (rel_raw kept for resolution); +10 tests (adopt idempotency, send_turn edges, SSE-exception-graceful, cancel path).
+- RE-GATE (orchestrator-run): **379 passed, 1 skipped**. Converged.
+
+---

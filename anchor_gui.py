@@ -383,6 +383,7 @@ import job_runner as _jr
 import gate_adapter as _gate
 import brownfield_scan as _bscan
 import anchor_marker as _marker
+import rnd_terminal as _term
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -395,6 +396,39 @@ def _unsafe_path_seg(seg: str) -> bool:
     if seg is None:
         return False
     return "/" in seg or "\\" in seg or ".." in seg
+
+
+# ── Vendored terminal-console static asset (Wave 7) ──────────────────────────
+# The lightweight, dependency-free terminal console (anchor-term) is vendored
+# exactly like KaTeX: a read-only static dir served traversal-safe under a URL
+# prefix. It backs the interactive terminal that replaces the raw-log console.
+ANCHOR_TERM_DIR = ANCHOR_DIR / "vendor" / "anchor-term"
+ANCHOR_TERM_URL_PREFIX = "/vendor/anchor-term"
+_ANCHOR_TERM_CONTENT_TYPES = {
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+}
+
+
+def anchor_term_asset(rel_path: str):
+    """Resolve a ``/vendor/anchor-term/<rel>`` request to (bytes, content_type).
+
+    Path-traversal safe (mirrors ``report_viewer.katex_asset``): the resolved
+    file MUST stay within :data:`ANCHOR_TERM_DIR`. Returns ``None`` for a missing
+    file or an escape attempt.
+    """
+    rel = rel_path.lstrip("/")
+    target = (ANCHOR_TERM_DIR / rel).resolve()
+    try:
+        target.relative_to(ANCHOR_TERM_DIR.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    ctype = _ANCHOR_TERM_CONTENT_TYPES.get(target.suffix.lower(),
+                                           "application/octet-stream")
+    return target.read_bytes(), ctype
 
 
 # Single-instance project windows (Master Plan C2): opening a project that is
@@ -1009,13 +1043,13 @@ def _render_kanban_html(folder_path, project_id):
             )
         elif trio_lane == "research":
             add = (
-                "<span class='addnew' onclick=\"launchLane('research','claude')\">"
+                "<span class='addnew' onclick=\"openTerminal('research','claude')\">"
                 "+ New research run (Claude)</span> "
-                "<span class='addnew' onclick=\"launchLane('research','gemini')\">"
+                "<span class='addnew' onclick=\"openTerminal('research','gemini')\">"
                 "Gemini</span>"
             )
         else:
-            add = (f"<span class='addnew' onclick=\"launchLane('{trio_lane}')\">"
+            add = (f"<span class='addnew' onclick=\"openTerminal('{trio_lane}')\">"
                    f"{html_lib.escape(add_label)}</span>")
         cols.append(
             f"<div class='col' data-col-lane='{html_lib.escape(trio_lane, quote=True)}'>"
@@ -1175,6 +1209,8 @@ def render_project_window_html(project_id: str) -> str:
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
+        # Vendored interactive-terminal console asset (Wave 7), served like KaTeX.
+        f"<link rel='stylesheet' href='{ANCHOR_TERM_URL_PREFIX}/anchor-term.css'>"
         "<style>"
         ":root{--bg:#0f1117;--surface:#1a1d27;--surface2:#232733;"
         "--border:#2e3340;--text:#e2e4e9;--text-dim:#8b8f9a;--accent:#6c9cfc;"
@@ -1343,6 +1379,12 @@ def render_project_window_html(project_id: str) -> str:
         "</div>"
         "<div class='cbody'>"
         "<div class='src' id='consoleSrc'>No session attached.</div>"
+        # Interactive terminal host (Wave 7): openTerminal() mounts the vendored
+        # anchor-term console here over the SSE stream. This replaces the raw-log
+        # launch console as the primary surface for NEW research/plan/build runs.
+        "<div id='termHost'></div>"
+        # Legacy raw-log mirror (kept as a fallback for reattaching to a
+        # background job via the /api/rnd/tail poll — does not break Wave 4/6).
         "<div class='log' id='laneLog'></div>"
         "<div id='laneGate' class='ask' style='display:none'></div>"
         "<div class='inputrow' id='inputRow' style='display:none'>"
@@ -1357,6 +1399,8 @@ def render_project_window_html(project_id: str) -> str:
         f"{deliverables_html}"
         f"<p style='color:#8a90a2;font-size:12px'>instance "
         f"{html_lib.escape(inst['instance_id'])}</p>"
+        # Vendored terminal-console component (Wave 7): provides window.AnchorTerm.
+        f"<script src='{ANCHOR_TERM_URL_PREFIX}/anchor-term.js'></script>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
@@ -1496,6 +1540,60 @@ function _renderAttached() {
   if (inputRow) inputRow.style.display = 'flex';
   if (s.pending) { _renderGate(s.pending); }
   else if (gate) { gate.style.display = 'none'; gate.innerHTML = ''; }
+}
+
+// ── Interactive terminal (Wave 7) ───────────────────────────────────────────
+// openTerminal starts a PERSISTENT stream-json REPL session for the lane and
+// mounts the vendored anchor-term console (SSE stream + input line + inline gate
+// + exit→discover→confirm-adopt). This is the affordance the "+ New
+// research/plan/build run" links call, replacing the raw-log launch console.
+var _activeTerm = null;
+async function openTerminal(lane, backend) {
+  backend = backend || 'claude';
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/start_terminal', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/start_terminal', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[terminal error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[terminal refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  var host = document.getElementById('termHost');
+  var src = document.getElementById('consoleSrc');
+  if (src) src.textContent = 'Interactive ' + lane + ' terminal · ' + backend +
+    ' · session ' + data.session;
+  // Hide the legacy raw-log mirror while the terminal is the active surface.
+  var legacy = document.getElementById('laneLog');
+  if (legacy) legacy.style.display = 'none';
+  if (_activeTerm && _activeTerm.dispose) _activeTerm.dispose();
+  if (!window.AnchorTerm) { alert('terminal component failed to load'); return; }
+  _activeTerm = window.AnchorTerm.mount({
+    host: host,
+    session: data.session,
+    lane: lane,
+    title: lane + ' · ' + backend,
+    // Token-aware POST helper the component uses for input/discover/adopt.
+    postJson: function (url, p) {
+      return _postJson(url, p).then(function (resp) {
+        return resp.json().then(function (d) {
+          if (_isUnauthorized(resp, d) && setAnchorToken()) {
+            return _postJson(url, p).then(function (r2) { return r2.json(); });
+          }
+          return d;
+        });
+      });
+    },
+    onAdopted: function () {
+      // The produced docs are now a session in the lane — refresh to show it.
+      setTimeout(function () { location.reload(); }, 800);
+    }
+  });
 }
 
 async function launchLane(lane, backend) {
@@ -4195,6 +4293,127 @@ class AnchorHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    # ── SSE for the interactive terminal (Wave 7) ────────────────────────────
+    def _sse_event(self, event, data_obj):
+        """Write ONE well-formed SSE event frame and flush it.
+
+        Frame shape (per the SSE spec): an ``event:`` line, one ``data:`` line
+        carrying a JSON payload, then a BLANK line terminating the event. Flushed
+        immediately so a streaming client observes events as they arrive.
+        """
+        payload = json.dumps(data_obj, ensure_ascii=False)
+        frame = f"event: {event}\ndata: {payload}\n\n"
+        self.wfile.write(frame.encode("utf-8"))
+        self.wfile.flush()
+
+    def _serve_term_sse(self):
+        """Stream a terminal session's output as Server-Sent Events.
+
+        Stdlib-only streaming: a chunked ``text/event-stream`` response that
+        loops, polling :func:`rnd_terminal.read_since` for new output, flushing an
+        ``output`` event for new lines, a ``status`` event on change, and a
+        ``gate`` event when an in-session prompt surfaces. It emits a
+        ``heartbeat`` every few idle ticks and ENDS with a ``done`` event when the
+        session is terminal OR a bounded tick budget elapses — so a test can read
+        N events and the stream closes (no indefinite hang). The bound + poll
+        interval are query-overridable for fast hermetic tests.
+        """
+        q = parse_qs(urlparse(self.path).query)
+        session = (q.get("session", [""])[0] or "").strip()
+        try:
+            since = int(q.get("since", ["0"])[0] or 0)
+        except (TypeError, ValueError):
+            since = 0
+        if not session:
+            self._send_json({"ok": False, "error": "missing session"}, 400)
+            return
+        # Bounded loop knobs (defaults are production-sane; tests shrink them so
+        # the stream ends quickly). poll_interval in seconds; max_ticks bounds the
+        # total loop iterations; heartbeat_every emits a keep-alive on idle ticks.
+        try:
+            poll_interval = float(q.get("poll", ["0.25"])[0] or 0.25)
+        except (TypeError, ValueError):
+            poll_interval = 0.25
+        try:
+            max_ticks = int(q.get("max_ticks", ["240"])[0] or 240)
+        except (TypeError, ValueError):
+            max_ticks = 240
+        try:
+            heartbeat_every = int(q.get("hb", ["8"])[0] or 8)
+        except (TypeError, ValueError):
+            heartbeat_every = 8
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Connection", "close")
+        # No Content-Length → chunked/streamed body via the connection close.
+        self.end_headers()
+
+        cursor = since
+        last_status = None
+        idle = 0
+        try:
+            for _tick in range(max(1, max_ticks)):
+                # Guard the per-tick read + event emission so ANY exception from
+                # read_since (not just pipe/OS errors) ends the stream CLEANLY
+                # with a terminal done/error event instead of letting the handler
+                # thread crash mid-stream and leaving the client hung (never
+                # getting a 'done'). Pipe/connection errors mean the client is
+                # already gone, so for those we just stop without trying to write.
+                try:
+                    out = _term.read_since(session, cursor)
+                    lines = out.get("lines") or []
+                    if lines:
+                        self._sse_event("output", {"lines": lines,
+                                                   "next": out.get("next", cursor)})
+                        cursor = out.get("next", cursor)
+                        idle = 0
+                    else:
+                        idle += 1
+                    status = out.get("status")
+                    if status and status != last_status:
+                        self._sse_event("status", {"status": status})
+                        last_status = status
+                    pending = out.get("pending_prompt")
+                    if pending:
+                        self._sse_event("gate", {"prompt": pending})
+                    if status in _term.TERMINAL_STATUSES:
+                        # Drain any final lines, then end the stream cleanly.
+                        final = _term.read_since(session, cursor)
+                        fl = final.get("lines") or []
+                        if fl:
+                            self._sse_event("output", {"lines": fl,
+                                                       "next": final.get("next", cursor)})
+                            cursor = final.get("next", cursor)
+                        self._sse_event("done", {"status": status, "next": cursor})
+                        return
+                    if heartbeat_every and idle and idle % heartbeat_every == 0:
+                        self._sse_event("heartbeat", {"next": cursor})
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    # Client closed the connection — stop cleanly (re-raise to the
+                    # outer guard, which simply returns).
+                    raise
+                except Exception:
+                    # ANY other failure (a generic read_since error, a bad record,
+                    # etc.): emit a final error-flavored done so the client always
+                    # gets a terminal frame, then end the stream. Best-effort — if
+                    # even this write fails the outer guard swallows it.
+                    try:
+                        self._sse_event("done", {"status": "error",
+                                                 "next": cursor, "error": True})
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    return
+                time.sleep(max(0.0, poll_interval))
+            # Tick budget exhausted while still live — end with a heartbeat-flavored
+            # done so the client can re-open (bounded, never an infinite hold).
+            self._sse_event("done", {"status": last_status or "running",
+                                     "next": cursor, "bounded": True})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            # Client closed the connection — stop cleanly.
+            return
+
     def do_GET(self):
         try:
             _path_only = urlparse(self.path).path
@@ -4267,6 +4486,29 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 else:
                     data, ctype = asset
                     self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith(ANCHOR_TERM_URL_PREFIX):
+                # Read-only vendored terminal-console static asset (Wave 7),
+                # served like KaTeX (traversal-safe). Backs the interactive
+                # terminal that replaced the raw-log launch console.
+                rel = urlparse(self.path).path[len(ANCHOR_TERM_URL_PREFIX):]
+                asset = anchor_term_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=3600")
+            elif self.path.startswith("/api/rnd/term_stream"):
+                # SSE (Server-Sent Events) stream of a terminal session's output
+                # (Wave 7). Implemented on stdlib http.server as a chunked
+                # text/event-stream response loop: it flushes "output"/"status"/
+                # "gate" events as new lines arrive, emits periodic "heartbeat"
+                # events, and TERMINATES cleanly with a "done" event when the
+                # session reaches a terminal status OR a bounded number of ticks
+                # elapses. The bound (max_ticks) makes it TESTABLE without
+                # hanging: a client reads a finite set of events and the stream
+                # ends. The ThreadingHTTPServer handles concurrent streams.
+                self._serve_term_sse()
             elif self.path.startswith("/report/"):
                 # Read-only report viewer (Wave 7): PDF-by-default else Reader.
                 # /report/<project_id>/<lane>[/<job_id>]
@@ -4750,6 +4992,101 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 "reason": res.reason,
                 "job_id": res.job_id,
             })
+
+        # ── R&D interactive terminal (Wave 7) ─────────────────────────
+        elif self.path == "/api/rnd/start_terminal":
+            # Start a persistent interactive terminal session for a lane. The
+            # returned job_id is the terminal session id the SSE stream + input
+            # endpoints key off of. Clean JSON errors (not 500s) for unknown
+            # project / invalid lane / engine or concurrency refusals.
+            pid = body.get("project_id", "")
+            lane = body.get("lane", "")
+            backend = body.get("backend") or _lanes.DEFAULT_BACKEND
+            if lane not in _lanes.LANES:
+                self._send_json({"ok": False, "error": f"invalid lane: {lane}",
+                                 "reason": "invalid-lane"}, 400)
+            elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+                self._send_json({"ok": False,
+                                 "error": f"invalid engine: {backend}",
+                                 "reason": "invalid-engine"}, 400)
+            else:
+                try:
+                    rec = _term.start_terminal(pid, lane, backend=backend)
+                    self._send_json({
+                        "ok": True,
+                        "session": rec.get("job_id"),
+                        "job_id": rec.get("job_id"),
+                        "lane": lane,
+                        "backend": rec.get("backend"),
+                        "status": rec.get("status"),
+                        "skill": rec.get("skill"),
+                        "gates": rec.get("gates"),
+                    })
+                except _lanes.EngineNotAllowedError as eng:
+                    self._send_json({"ok": False, "error": str(eng),
+                                     "reason": "engine-not-allowed",
+                                     "lane": eng.lane, "backend": eng.backend},
+                                    400)
+                except KeyError:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown project: {pid}",
+                                     "reason": "unknown-project"}, 404)
+                except _jr.LaneBusyError as busy:
+                    self._send_json({"ok": False, "error": str(busy),
+                                     "reason": busy.reason,
+                                     "holder": busy.holder}, 409)
+
+        elif self.path == "/api/rnd/term_input":
+            # Write ONE user turn onto a live terminal session's stdin (reuses the
+            # gate-adapter stdin sink — never forks it). Auth is enforced by the
+            # middleware above. Clean JSON for an unknown/terminal session.
+            session = (body.get("session", "") or body.get("job_id", "")).strip()
+            text = body.get("text", "")
+            if not session:
+                self._send_json({"ok": False, "error": "missing session"}, 400)
+            elif text is None or not str(text).strip():
+                # Reject an empty/whitespace-only turn cleanly (nothing written).
+                self._send_json({"ok": False, "written": False,
+                                 "session": session, "error": "empty turn",
+                                 "reason": "empty"}, 400)
+            elif len(str(text)) > _term.MAX_TURN_CHARS:
+                # Reject an oversized turn cleanly (nothing written).
+                self._send_json({"ok": False, "written": False,
+                                 "session": session, "error": "turn too large",
+                                 "reason": "too-large"}, 413)
+            else:
+                ok = _term.send_turn(session, text)
+                self._send_json({"ok": bool(ok), "written": bool(ok),
+                                 "session": session,
+                                 "reason": None if ok else "not-writable"})
+
+        elif self.path == "/api/rnd/term_discover":
+            # On session exit, return the adoption PROPOSAL (files this session
+            # produced under its output dir) for the UI to confirm. Read-style but
+            # POSTed so the token-aware client path is uniform.
+            session = (body.get("session", "") or body.get("job_id", "")).strip()
+            proposal = _term.discover_produced(session) if session else None
+            if proposal is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                self._send_json({"ok": True, "proposal": proposal})
+
+        elif self.path == "/api/rnd/term_adopt":
+            # Confirm-adopt a terminal session's produced files as ONE session in
+            # the lane (Wave 1 grouping + Wave 2 adopt paths). Auth enforced above.
+            session = (body.get("session", "") or body.get("job_id", "")).strip()
+            if not session:
+                self._send_json({"ok": False, "error": "missing session"}, 400)
+            else:
+                sess = _term.adopt_produced(session)
+                if sess is None:
+                    self._send_json({"ok": False,
+                                     "error": "nothing to adopt",
+                                     "reason": "nothing-adoptable"}, 404)
+                else:
+                    self._send_json({"ok": True, "session": sess})
 
         elif self.path == "/api/rnd/cancel_job":
             # Stop a running job (tree-kill via job_runner.cancel). Acts on the
