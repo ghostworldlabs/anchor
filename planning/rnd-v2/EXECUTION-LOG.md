@@ -66,3 +66,13 @@
 - RE-GATE (orchestrator-run): **352 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 6 — Validated, cached summaries — GO (2026-06-11)
+
+- EXECUTE: new `summarizer.py` (extraction-seed → generate twice via job_runner/ANCHOR_RUNNER_CMD seam → grounded-claim validation → cache summary.json+summary.md, run-once); `GET /summary/<pid>/<lane>/<session_id>` (reuses report_viewer markdown→HTML, member links to /report or /artifact); `POST /api/rnd/regenerate_summary` (auth-gated, force). New tests/test_summarizer.py + tests/stub_summarizer.py (no live claude — counter file proves run count).
+- GATE (orchestrator-run): 356 passed, 1 skipped; no live claude in code paths.
+- REVIEW (2 independent): **≥2-AGREE BLOCKER** — concurrency race (cache-check→generate unlocked → double model run on ThreadingHTTPServer; A=MAJOR, B=BLOCKER). Plus single-reviewer: cache-poisoning on model failure (B), weak 50%-token grounding (A), and several missing edge-case tests.
+- FIX (1 iter): per-session lock + double-checked cache read → run-once under concurrency (proven by a 2-thread test = exactly GENERATE_RUNS); failed/empty runner job no longer caches (retryable error state + honest /summary message); model-succeeded-but-all-ungrounded caches with an explicit "no grounded claims" note (never a silent blank); grounding strengthened (ratio 0.5→0.7, ≥2 grounded terms) + documented as a hint filter, not a guarantee; explicit `.anchor/.gitignore` allow for summary.json/summary.md; +5 tests (concurrency, failure-no-poison, all-ungrounded, zero-member, grounding units).
+- RE-GATE (orchestrator-run): **361 passed, 1 skipped**. Converged.
+
+---

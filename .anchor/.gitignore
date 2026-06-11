@@ -17,3 +17,9 @@ projects/*/**/raw/
 !projects/*/**/index.json
 !projects/*/**/*.pointer.json
 !projects/*/**/*-overrides.json
+
+# Re-include the validated, cached session summaries (Wave 6, C9). These small
+# JSON + rendered-markdown files are the durable, shareable summary cache and
+# must be tracked even though raw run logs above stay ignored.
+!projects/*/**/summary.json
+!projects/*/**/summary.md

@@ -376,6 +376,7 @@ import dir_browser as _dirb
 import effort_history as _eh
 import sessions as _sessions
 import report_viewer as _rv
+import summarizer as _summarizer
 import deliverables as _deliv
 import lanes as _lanes
 import job_runner as _jr
@@ -1034,7 +1035,9 @@ def _render_lane_sessions(session_views, store_lane, project_id):
     remaining members of a multi-file session sit behind a small per-card
     "files (N)" expander so a 7-file Crucible run is one card, not seven. The
     representative keeps the existing click target (report viewer / attach /
-    artifact) — summaries arrive in a later wave.
+    artifact); DONE / imported sessions ALSO get a "summary" affordance opening
+    the cached validated summary page (Wave 6). Live / running cards keep
+    attaching to the console (no Wave 4/7 regression).
     """
     if not session_views:
         return ""
@@ -1042,14 +1045,39 @@ def _render_lane_sessions(session_views, store_lane, project_id):
         members = sv.get("members", [])
         if not members:
             return ""
-        head = _render_effort_card(members[0], store_lane, project_id)
+        rep = members[0]
+        head = _render_effort_card(rep, store_lane, project_id)
+        # Wave 6 summary affordance: only for DONE or imported (non-live)
+        # sessions, and not for the defensive "loose::" single-effort wrappers
+        # (those have no grouped session record to summarize). Live/running
+        # representatives keep their console-attach click untouched.
+        sid = sv.get("session_id", "") or ""
+        rep_summarizable = (
+            (rep.get("is_done") or rep.get("discovered"))
+            and not rep.get("is_live")
+            and sid and not sid.startswith("loose::")
+        )
+        summary_link = ""
+        if rep_summarizable:
+            trio_lane = rep.get("trio_lane", store_lane)
+            href = (f"/summary/{url_quote(project_id, safe='')}/"
+                    f"{url_quote(trio_lane, safe='')}/"
+                    f"{url_quote(sid, safe='')}")
+            summary_link = (
+                f"<div class='session-summary-link'>"
+                f"<a href=\"#\" onclick=\""
+                f"openSummary('{html_lib.escape(href, quote=True)}');"
+                f"return false;\">summary</a></div>"
+            )
         rest = members[1:]
         if not rest:
+            if summary_link:
+                return f"<div class='session'>{head}{summary_link}</div>"
             return head
         inner = "".join(
             _render_effort_card(m, store_lane, project_id) for m in rest)
         return (
-            f"<div class='session'>{head}"
+            f"<div class='session'>{head}{summary_link}"
             f"<details class='session-files'>"
             f"<summary>files ({len(rest) + 1})</summary>"
             f"<div class='session-files-body'>{inner}</div>"
@@ -1695,6 +1723,10 @@ async function stopAttached() {
 }
 
 function openReport(href) { window.open(href, '_blank'); }
+
+// Open a session's cached, validated summary page (Wave 6). DONE / imported
+// session cards link here; live/running cards keep attaching to the console.
+function openSummary(href) { window.open(href, '_blank'); }
 
 // ── Lifecycle header actions (token-aware via _postJson) ────────────────────
 function _lifecycle(url, payload, reload) {
@@ -4261,6 +4293,44 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/summary/"):
+                # Read-only cached session SUMMARY page (Wave 6): the validated,
+                # cached markdown summary (goal · key decisions · files-with-
+                # links) rendered via report_viewer (vendored KaTeX). Generated
+                # once on first view (run-once), then served from cache.
+                # /summary/<project_id>/<lane>/<session_id>
+                parts = [p for p in urlparse(self.path).path[len("/summary/"):]
+                         .split("/") if p]
+                if len(parts) < 3:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    pid, lane = parts[0], parts[1]
+                    # The session_id may itself contain '/'-free '::' segments;
+                    # rejoin any remaining components defensively.
+                    session_id = "/".join(parts[2:])
+                    if _unsafe_path_seg(lane):
+                        self.send_response(400)
+                        self.end_headers()
+                        return
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    # Look up the live session record so an uncached summary can
+                    # be generated on first view (run-once).
+                    session = None
+                    try:
+                        for s in _sessions.list_sessions(folder, pid, lane):
+                            if s.get("session_id") == session_id:
+                                session = s
+                                break
+                    except Exception:
+                        session = None
+                    out = _summarizer.render_summary_page(
+                        folder, pid, lane, session_id, session=session)
+                    body = out["body"]
+                    if isinstance(body, str):
+                        body = body.encode("utf-8")
+                    self._send_bytes(body, out["content_type"])
             elif self.path.startswith("/artifact/"):
                 # Read-only serving of a DISCOVERED (brownfield) artifact from a
                 # project's folder (Wave 4). Traversal-safe via the proven
@@ -4699,6 +4769,41 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "job_id": job_id,
                     "status": (out or {}).get("status"),
                 })
+
+        # ── R&D validated, cached session summary (Wave 6) ────────────
+        elif self.path == "/api/rnd/regenerate_summary":
+            # Force re-run + re-cache a session's validated summary. Auth is
+            # already enforced by the middleware above (mutating POST). The
+            # session's members are summarized again through the runner seam and
+            # summary.json + summary.md are overwritten. Clean 404 for an unknown
+            # project or session.
+            pid = body.get("project_id", "") or body.get("id", "")
+            lane = body.get("lane", "")
+            session_id = body.get("session_id", "")
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            elif not lane or not session_id:
+                self._send_json({"ok": False,
+                                 "error": "lane and session_id required"}, 400)
+            else:
+                folder = proj.get("folder_path", "")
+                session = None
+                try:
+                    for s in _sessions.list_sessions(folder, pid, lane):
+                        if s.get("session_id") == session_id:
+                            session = s
+                            break
+                except Exception:
+                    session = None
+                if session is None:
+                    self._send_json({"ok": False,
+                                     "error": f"Unknown session: {session_id}"},
+                                    404)
+                else:
+                    summary = _summarizer.summarize_session(
+                        folder, pid, lane, session, force=True)
+                    self._send_json({"ok": True, "summary": summary})
 
         # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
         elif self.path == "/api/rnd/add_idea":
