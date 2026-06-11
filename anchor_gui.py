@@ -17,7 +17,7 @@ import json, logging, os, re, socket, sys, threading, time, traceback, webbrowse
 from datetime import datetime, date
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote as url_quote, urlparse
 import html as html_lib
 
 # ── Paths ──────────────────────────────────────────────────────────────
@@ -379,6 +379,8 @@ import deliverables as _deliv
 import lanes as _lanes
 import job_runner as _jr
 import gate_adapter as _gate
+import brownfield_scan as _bscan
+import anchor_marker as _marker
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -457,6 +459,10 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=True)
         log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
+        try:
+            discover_and_adopt(entry["id"])
+        except Exception:
+            pass
         return {"entry": entry, "folder_created": True,
                 "git_initialized": git_done}
 
@@ -481,9 +487,49 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
             entry["state"] = _rnd.STATE_PATH_MISSING
         existing = _rnd.group_by_folder().get(str(folder), [])
         log_change(f"R&D: registered project '{name}' at {folder} (id {entry['id']})")
+        # Brownfield: instantly discover + adopt any pre-existing trio artifacts
+        # so the tile/Kanban/home panel populate from disk on register.
+        if exists:
+            try:
+                discover_and_adopt(entry["id"])
+            except Exception:
+                pass
         return {"entry": entry, "path_exists": exists,
                 "siblings_in_folder": [e for e in existing
                                        if e["id"] != entry["id"]]}
+
+
+def discover_and_adopt(project_id: str) -> dict:
+    """One brownfield pipeline: scan -> adopt -> reconcile -> write marker.
+
+    Called from register (``add_project`` wiring), open (``GET /project/<id>``),
+    and the manual Rescan (``POST /api/rnd/rescan``). Idempotent, bounded, and
+    robust to a missing/huge/UNC/mistyped folder (returns a no-op report, never
+    hangs/raises). Discovered records are reconciled (pruned when their artifact
+    is gone); real efforts are never touched. The marker (``Anchor.md`` +
+    sidecar) is rewritten ONLY when its structure changed (no-churn).
+
+    Returns ``{"ok": bool, "scanned": <counts>, "adopt": <report>,
+    "marker": <report>}``.
+    """
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        return {"ok": False, "reason": "unknown-project"}
+    folder = (proj or {}).get("folder_path", "")
+    try:
+        if not folder or not Path(folder).is_dir():
+            return {"ok": False, "reason": "path-missing"}
+    except OSError:
+        return {"ok": False, "reason": "path-missing"}
+
+    scan = _bscan.scan(folder)
+    adopt = _eh.adopt_discovered(folder, project_id, scan)
+    # Reconcile is implicit in adopt (prunes stale discovered), but run an
+    # explicit pass too so a deleted artifact whose lane vanished is pruned.
+    _eh.reconcile_discovered(folder, project_id)
+    marker = _marker.write_anchor_md(folder)
+    return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
+            "marker": marker}
 
 
 def render_status_line_html(project_id: str) -> str:
@@ -517,12 +563,18 @@ def render_project_tile_html(entry: dict) -> str:
     try:
         total = _eh.project_rollup(pid_raw, folder).get("total", {})
         n_eff = int(total.get("effort_count", 0) or 0)
+        n_imp = int(total.get("discovered_count", 0) or 0)
     except Exception:
-        total, n_eff = {}, 0
+        total, n_eff, n_imp = {}, 0, 0
+    imported_bit = (f' · <span class="rnd-imported">{n_imp} imported</span>'
+                    if n_imp else "")
     if n_eff:
         effort_line = (f'<div class="rnd-effort">{n_eff} effort'
-                       f'{"s" if n_eff != 1 else ""} · '
+                       f'{"s" if n_eff != 1 else ""}{imported_bit} · '
                        f'{html_lib.escape(_fmt_cost(total))}</div>')
+    elif n_imp:
+        # Brownfield project with only imported artifacts (no Anchor runs yet).
+        effort_line = (f'<div class="rnd-effort">0 efforts{imported_bit}</div>')
     else:
         effort_line = '<div class="rnd-effort rnd-dim">no efforts yet</div>'
     notes_block = (f'<div class="rnd-notes" title="{notes_attr}">&#128221; '
@@ -530,10 +582,13 @@ def render_project_tile_html(entry: dict) -> str:
     is_active = state in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
+    rescan_btn = (f'<button class="rnd-mini" onclick="rndRescan(\'{pid}\')" '
+                  f'title="Re-scan the folder for trio artifacts">Rescan</button>')
     if is_active:
         lifecycle = (
             f'<button class="rnd-mini{p1on}" onclick="rndSetPriority(\'{pid}\',1)" title="Priority 1">P1</button>'
             f'<button class="rnd-mini{p2on}" onclick="rndSetPriority(\'{pid}\',2)" title="Priority 2">P2</button>'
+            f'{rescan_btn}'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
             f'<button class="rnd-mini" onclick="rndArchive(\'{pid}\')" title="Archive (shelve, reviewable)">Archive</button>'
             f'<button class="rnd-mini rnd-danger" onclick="rndRetire(\'{pid}\')" title="Retire / cancel">Retire</button>'
@@ -541,6 +596,7 @@ def render_project_tile_html(entry: dict) -> str:
     else:
         lifecycle = (
             f'<button class="rnd-mini rnd-accent" onclick="rndReactivate(\'{pid}\')" title="Make active again">Reactivate</button>'
+            f'{rescan_btn}'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
         )
     return (
@@ -674,16 +730,30 @@ def _gather_project_efforts(folder_path, project_id):
         except Exception:
             efforts = []
         views = []
-        n = len(efforts)
+        # Version numbering (vN) is computed over NON-DISCOVERED (real) efforts
+        # ONLY (honesty contract): a discovered card gets NO vN. So the newest
+        # REAL effort is v<real_count>, descending; discovered cards are skipped
+        # in the version counter and instead carry an "imported" marker.
+        real_total = sum(1 for e in efforts if not _eh.is_discovered(e))
+        real_seen = 0
         for idx, eff in enumerate(efforts):
             jid = eff.get("job_id", "")
             job = jobs_by_id.get(jid, {})
+            discovered = _eh.is_discovered(eff)
             status = job.get("status") or eff.get("status") or ""
             gate_state = job.get("state")
             pill_cls, pill_lbl, is_live, needs_input = _effort_pill(
                 status, gate_state)
-            # Version label: newest = v<n>, descending by recency.
-            ver = f"v{n - idx}" if n else "v1"
+            if discovered:
+                # No vN; an "imported" marker instead. Discovered records are
+                # never live and never link to a report viewer route.
+                ver = ""
+                is_live = needs_input = False
+                pill_cls, pill_lbl = "", ""
+            else:
+                # Newest real effort = v<real_total>, descending by recency.
+                real_seen += 1
+                ver = f"v{real_total - real_seen + 1}" if real_total else "v1"
             skill = eff.get("skill") or job.get("skill") or ""
             seed = eff.get("prompt_seed") or ""
             hint = seed.strip().splitlines()[0] if seed.strip() else ""
@@ -699,11 +769,15 @@ def _gather_project_efforts(folder_path, project_id):
                 "pill_lbl": pill_lbl,
                 "is_live": is_live,
                 "needs_input": needs_input,
-                "is_done": status == _jr.STATUS_DONE,
+                "is_done": (not discovered) and status == _jr.STATUS_DONE,
                 "age": _fmt_age(eff.get("created_at")),
                 "skill": skill,
                 "sub": sub,
-                "cost_usd": cost_usd,
+                "cost_usd": 0.0 if discovered else cost_usd,
+                "discovered": discovered,
+                "artifact_path": eff.get("artifact_path", "") if discovered else "",
+                "title": eff.get("title", "") if discovered else "",
+                "kind": eff.get("kind", "") if discovered else "",
             })
         out[trio_lane] = views
     return out
@@ -718,6 +792,41 @@ def _render_effort_card(ev, store_lane, project_id):
     ver = html_lib.escape(ev["ver"])
     age = html_lib.escape(ev["age"])
     sub = html_lib.escape(ev["sub"]) if ev["sub"] else ""
+
+    # ── Discovered (brownfield-imported) card: subtle, honest, no vN ──────────
+    # It carries data-discovered="1" + a small dot + an "imported" marker, and
+    # links to the REAL on-disk file via /artifact/<pid>?path=<rel>. It is NEVER
+    # masqueraded as an Anchor-run session (no vN, no cost, no live hooks).
+    if ev.get("discovered"):
+        rel = ev.get("artifact_path", "")
+        title = ev.get("title", "") or rel
+        kind = ev.get("kind", "")
+        title_esc = html_lib.escape(title)
+        kind_esc = html_lib.escape(kind)
+        data = (
+            f" data-job-id=\"{jid_esc}\""
+            f" data-lane=\"{html_lib.escape(store_lane, quote=True)}\""
+            f" data-trio-lane=\"{html_lib.escape(ev['trio_lane'], quote=True)}\""
+            f" data-discovered=\"1\" data-live=\"0\""
+            f" data-artifact-path=\"{html_lib.escape(rel, quote=True)}\""
+        )
+        marker = ("<span class='imported'><span class='dotdisc'></span>"
+                  "imported</span>")
+        inner = (
+            f"<div class='er'>{marker}"
+            f"<span class='age'>{age}</span></div>"
+            f"<div class='sub'>{title_esc}"
+            + (f" <span class='dkind'>{kind_esc}</span>" if kind_esc else "")
+            + "</div>"
+        )
+        if rel:
+            href = (f"/artifact/{html_lib.escape(project_id, quote=True)}"
+                    f"?path={url_quote(rel, safe='')}")
+            return (f"<div class='effort discovered'{data} "
+                    f"onclick=\"openReport('{html_lib.escape(href, quote=True)}')\">"
+                    f"{inner}</div>")
+        return f"<div class='effort discovered'{data}>{inner}</div>"
+
     pill = ""
     if ev["pill_cls"]:
         dot = ""
@@ -834,10 +943,13 @@ def render_project_window_html(project_id: str) -> str:
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
+    rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
+                  f"title='Re-scan the folder for trio artifacts'>Rescan</button>")
     if is_active:
         lifecycle = (
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
             f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
+            f"{rescan_btn}"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
             f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
             f"<button class='rnd-mini rnd-danger' onclick=\"rndRetire('{pid_attr}')\">Retire</button>"
@@ -845,6 +957,7 @@ def render_project_window_html(project_id: str) -> str:
     else:
         lifecycle = (
             f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
+            f"{rescan_btn}"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
         )
     kanban = _render_kanban_html(folder_raw, project_id)
@@ -914,6 +1027,13 @@ def render_project_window_html(project_id: str) -> str:
         ".effort .age{margin-left:auto;color:var(--text-dim);font-size:11px}"
         ".effort .sub{font-size:11px;color:var(--text-dim);margin-top:3px}"
         ".effort .ecost{margin-left:6px;color:var(--success)}"
+        ".effort.discovered{border-style:dashed;opacity:.92}"
+        ".imported{font-size:10px;color:var(--text-dim);"
+        "display:inline-flex;align-items:center;gap:5px;letter-spacing:.5px}"
+        ".dotdisc{width:6px;height:6px;border-radius:50%;"
+        "background:var(--text-dim);display:inline-block}"
+        ".effort .dkind{color:var(--text-dim);font-size:10px;"
+        "border:1px solid var(--border);border-radius:10px;padding:0 6px}"
         ".statepill{font-size:10px;padding:1px 7px;border-radius:20px;"
         "border:1px solid var(--border)}"
         ".statepill.done{color:var(--success);border-color:rgba(74,222,128,.35);"
@@ -1356,6 +1476,7 @@ function rndSetPriority(pid, pr) { _lifecycle('/api/rnd/set_priority', {id: pid,
 function rndArchive(pid) { if (confirm('Archive this project?')) _lifecycle('/api/rnd/archive_project', {id: pid}); }
 function rndRetire(pid) { if (confirm('Retire/cancel this project?')) _lifecycle('/api/rnd/retire_project', {id: pid}); }
 function rndReactivate(pid) { _lifecycle('/api/rnd/reactivate_project', {id: pid}); }
+function rndRescan(pid) { _lifecycle('/api/rnd/rescan', {id: pid}); }
 function rndNotes(pid) {
   var d = document.querySelector('.dash');
   var cur = d ? (d.getAttribute('data-notes') || '') : '';
@@ -1400,10 +1521,13 @@ def render_cost_rollup_html(project_id: str, folder_path: str) -> str:
         )
     breakdown = ("<div class='rnd-status-line'>" + "".join(rows) + "</div>"
                  if rows else "")
+    n_imp = int(total.get("discovered_count", 0) or 0)
+    imported_bit = (f" · <span class='rnd-imported'>{n_imp} imported</span>"
+                    if n_imp else "")
     return (
         "<h2>Cost rollup</h2>"
         f"<p style='font-size:15px'><strong>Total:</strong> "
-        f"{html_lib.escape(_fmt_cost(total))}</p>"
+        f"{html_lib.escape(_fmt_cost(total))}{imported_bit}</p>"
         f"{breakdown}"
     )
 
@@ -2771,6 +2895,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-badge.rnd-p2 {{ background: rgba(251,191,36,.15); color: var(--warning); border-color: rgba(251,191,36,.3); }}
 .rnd-badge[class*="rnd-state-archived"], .rnd-badge[class*="rnd-state-future"], .rnd-badge[class*="rnd-state-retired"] {{ background: rgba(255,255,255,.04); }}
 .rnd-effort {{ font-size: 11px; color: var(--accent); }}
+.rnd-imported {{ color: var(--text-dim); font-style: italic; }}
 .rnd-effort.rnd-dim {{ color: var(--text-dim); }}
 .rnd-notes {{ font-size: 11.5px; color: var(--text-dim); background: rgba(255,255,255,.03); border-radius: 6px; padding: 5px 8px; white-space: pre-wrap; }}
 .rnd-actions {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }}
@@ -3666,6 +3791,7 @@ function rndSetPriority(pid, pr) {{ apiCall('/api/rnd/set_priority', {{id: pid, 
 function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the Archive view (kept, reviewable).')) apiCall('/api/rnd/archive_project', {{id: pid}}); }}
 function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
 function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
+function rndRescan(pid) {{ apiCall('/api/rnd/rescan', {{id: pid}}); }}
 function rndNotes(pid) {{
     var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
     var cur = el ? (el.getAttribute('data-notes') || '') : '';
@@ -3830,9 +3956,42 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/artifact/"):
+                # Read-only serving of a DISCOVERED (brownfield) artifact from a
+                # project's folder (Wave 4). Traversal-safe via the proven
+                # report_viewer.katex_asset containment pattern:
+                #   target=(folder/rel).resolve(); target.relative_to(folder)
+                # Rejects absolute rel, ../.. escape, .git/.anchor, symlink
+                # escape -> 400/404, ZERO bytes read.
+                pid = urlparse(self.path).path[len("/artifact/"):].strip("/")
+                q = parse_qs(urlparse(self.path).query)
+                rel = q.get("path", [None])[0]
+                if not pid or not rel:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                proj = _rnd.get_project(pid)
+                folder = (proj or {}).get("folder_path", "")
+                if not folder:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                asset = _rv.resolve_project_artifact(folder, rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype)
             elif self.path.startswith("/project/"):
                 # Per-project window (Wave 3 basic view + 4-state status line).
+                # Opening a brownfield project DISCOVERS + ADOPTS its on-disk
+                # trio artifacts so the Kanban/tile/home panel populate (Wave 6).
                 pid = urlparse(self.path).path[len("/project/"):].strip("/")
+                try:
+                    discover_and_adopt(pid)
+                except Exception:
+                    pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
@@ -4017,6 +4176,15 @@ class AnchorHandler(BaseHTTPRequestHandler):
         elif self.path == "/api/rnd/open_project":
             pid = body.get("id", "")
             self._send_json({"ok": True, **open_project_instance(pid)})
+
+        elif self.path == "/api/rnd/rescan":
+            # Re-discover + re-adopt a brownfield project's on-disk artifacts:
+            # scan -> adopt -> reconcile (prune deletions) -> rewrite marker.
+            # Idempotent (no dupes). Clean JSON; never a 500 for a bad folder.
+            pid = body.get("id", "") or body.get("project_id", "")
+            res = discover_and_adopt(pid)
+            code = 200 if res.get("ok") else 404
+            self._send_json(res, code)
 
         elif self.path == "/api/rnd/set_priority":
             pid = body.get("id", "")

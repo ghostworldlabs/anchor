@@ -27,6 +27,8 @@ gate_adapter.py
 lanes.py
 effort_history.py
 report_viewer.py
+brownfield_scan.py
+anchor_marker.py
 distro.py
 
 # ── Vendored, dependency-free assets (KaTeX for the report viewer) ──────────

@@ -379,13 +379,47 @@ def group_by_folder(include_archived: bool = True,
     return groups
 
 
-def status_line(project_id: str) -> dict:
-    """Return the 4-state status line for a project.
+#: Lane status values beyond ``none-yet``.
+STATUS_IMPORTED = "imported"   # only discovered (brownfield) artifacts present
+STATUS_HAS_RUNS = "has-runs"   # >=1 real Anchor-run effort
+STATUS_RUNNING = "running"     # a live job in this lane
 
-    Wave 3: every lane is ``none-yet`` (efforts arrive in later waves). Reading
-    the project's lane dirs is best-effort and never crashes.
+
+def status_line(project_id: str) -> dict:
+    """Return the 4-state status line for a project (Research/Plan/Build/Deliv).
+
+    Reflects ADOPTED (discovered) + REAL efforts per lane, computed from the
+    per-project effort store (best-effort — never crashes if a lane is unread):
+      - ``has-runs`` if the lane has >=1 real (Anchor-run) effort,
+      - else ``imported`` if it has >=1 discovered (brownfield) effort,
+      - else ``none-yet``.
+
+    Imported is kept distinct from has-runs so the UI never masquerades a
+    discovered artifact as an Anchor-run effort.
     """
-    return {lane: STATUS_NONE_YET for lane in STATUS_LANES}
+    proj = get_project(project_id)
+    folder = (proj or {}).get("folder_path", "")
+    out = {}
+    # Local import to avoid a hard import cycle (effort_history imports this
+    # module). Resolved lazily, per call.
+    try:
+        import effort_history as _eh
+    except Exception:
+        return {lane: STATUS_NONE_YET for lane in STATUS_LANES}
+    for lane in STATUS_LANES:
+        state = STATUS_NONE_YET
+        try:
+            efforts = _eh.list_efforts(folder, project_id, lane)
+        except Exception:
+            efforts = []
+        has_real = any(not _eh.is_discovered(e) for e in efforts)
+        has_disc = any(_eh.is_discovered(e) for e in efforts)
+        if has_real:
+            state = STATUS_HAS_RUNS
+        elif has_disc:
+            state = STATUS_IMPORTED
+        out[lane] = state
+    return out
 
 
 # ── Legacy id assignment (idempotent) ───────────────────────────────────

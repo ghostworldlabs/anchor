@@ -33,6 +33,7 @@ All writes run under ``paths.WRITE_LOCK``. Stdlib only (``git`` invoked as a
 subprocess is allowed; it is a system tool, not a Python dependency).
 """
 
+import hashlib
 import json
 import subprocess
 import time
@@ -40,6 +41,18 @@ from pathlib import Path
 
 import paths as _paths
 import rnd_registry as _rnd
+
+#: Marker on a pointer-record that was DISCOVERED from a pre-existing on-disk
+#: artifact (brownfield), as opposed to an Anchor-RUN effort. Discovered records
+#: carry real metadata only (rel path, mtime->created_at, title, kind) and NEVER
+#: fabricated cost/tokens/session_id. They are derived (reconcilable): a rescan
+#: PRUNES a discovered record whose artifact no longer exists on disk.
+SOURCE_DISCOVERED = "discovered"
+SOURCE_RUN = "run"
+
+#: job_id prefix for discovered records (a stable, content-addressed hash of the
+#: artifact's lane + relative path, so rescans are idempotent — no duplicates).
+DISCOVERED_PREFIX = "disc-"
 
 # Map the trio lane names → the per-project store subdir they write into. This
 # mirrors ``lanes.LaneDef.output_subdir`` but is kept here so effort_history has
@@ -192,6 +205,170 @@ def latest_effort(folder_path, project_id: str, lane: str):
     return efforts[0] if efforts else None
 
 
+# ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────
+
+def discovered_job_id(lane: str, rel: str) -> str:
+    """Stable, content-addressed job_id for a discovered artifact.
+
+    Derived purely from the (store) lane + the artifact's folder-relative path,
+    so adopting the same artifact twice yields the SAME job_id (idempotent
+    rescans — no duplicates). Never random.
+    """
+    h = hashlib.sha1(f"{_resolve_subdir(lane)}::{rel}".encode("utf-8")).hexdigest()
+    return f"{DISCOVERED_PREFIX}{h[:16]}"
+
+
+def is_discovered(rec: dict) -> bool:
+    """True iff a pointer-record was discovered (brownfield), not Anchor-run."""
+    return bool(rec) and rec.get("source") == SOURCE_DISCOVERED
+
+
+def _delete_effort_record(folder_path, project_id: str, lane: str,
+                          job_id: str) -> bool:
+    """Remove ONE pointer-record + drop its id from the index (under lock).
+
+    Only ever called for DISCOVERED records during reconciliation — real efforts
+    are never pruned. Returns True if a record was removed.
+    """
+    with _paths.WRITE_LOCK:
+        ppath = _pointer_path(folder_path, project_id, lane, job_id)
+        removed = False
+        try:
+            if ppath.exists():
+                ppath.unlink()
+                removed = True
+        except OSError:
+            pass
+        order = _load_index(folder_path, project_id, lane)
+        if job_id in order:
+            order = [j for j in order if j != job_id]
+            _save_index(folder_path, project_id, lane, order)
+            removed = True
+        return removed
+
+
+def adopt_discovered(folder_path, project_id: str, scan_result) -> dict:
+    """Create/update DISCOVERED pointer-records for a folder's scanned artifacts.
+
+    For every adoptable artifact in ``scan_result.by_lane`` (research / planning /
+    build / deliverables) this upserts a pointer-record with:
+      - a STABLE path-hash ``job_id`` (idempotent: rescans never duplicate),
+      - ``source="discovered"``,
+      - ``created_at`` = the artifact's mtime,
+      - real ``title`` / ``kind`` / ``artifact_path`` (folder-relative),
+      - NO cost / tokens / session_id (honesty contract).
+
+    Then RECONCILES: any *previously discovered* record in those lanes whose
+    artifact is no longer present in this scan is PRUNED (discovered records are
+    derived). Real (run) efforts are NEVER touched. Returns a small report.
+
+    All writes run under ``paths.WRITE_LOCK``.
+    """
+    adopted = []
+    pruned = []
+    with _paths.WRITE_LOCK:
+        by_lane = getattr(scan_result, "by_lane", None) or {}
+        for store_lane, artifacts in by_lane.items():
+            # Desired discovered job_ids for this lane after this scan.
+            desired = {}
+            for art in artifacts:
+                rel = art.get("rel", "")
+                if not rel:
+                    continue
+                jid = discovered_job_id(store_lane, rel)
+                desired[jid] = art
+            # Upsert each desired discovered record.
+            for jid, art in desired.items():
+                extra = {
+                    "source": SOURCE_DISCOVERED,
+                    "kind": art.get("kind", ""),
+                    "title": art.get("title", ""),
+                    "artifact_path": art.get("rel", ""),
+                    "status": "imported",
+                }
+                # created_at from the artifact mtime (real metadata only).
+                rec = record_effort(folder_path, project_id, store_lane, jid,
+                                    extra=extra)
+                # Force created_at to the artifact mtime (record_effort defaults
+                # to now() only when absent; ensure it reflects on-disk reality).
+                mtime = art.get("mtime")
+                if mtime:
+                    rec = _set_created_at(folder_path, project_id, store_lane,
+                                          jid, float(mtime))
+                adopted.append(rec)
+            # Reconcile: prune discovered records in this lane not in `desired`.
+            for existing in list_efforts(folder_path, project_id, store_lane):
+                if not is_discovered(existing):
+                    continue  # never touch real efforts
+                ejid = existing.get("job_id", "")
+                if ejid and ejid not in desired:
+                    if _delete_effort_record(folder_path, project_id,
+                                             store_lane, ejid):
+                        pruned.append(ejid)
+        # Reconcile lanes that had discovered records but appear with ZERO
+        # artifacts in this scan (handled by the loop above only if the lane key
+        # is present in by_lane; ensure all standard lanes are reconciled).
+        scanned_lanes = set(by_lane.keys())
+        for store_lane in ROLLUP_LANES:
+            if store_lane in scanned_lanes:
+                continue
+            for existing in list_efforts(folder_path, project_id, store_lane):
+                if is_discovered(existing):
+                    ejid = existing.get("job_id", "")
+                    if ejid and _delete_effort_record(folder_path, project_id,
+                                                      store_lane, ejid):
+                        pruned.append(ejid)
+    return {"adopted": len(adopted), "pruned": len(pruned),
+            "pruned_ids": pruned}
+
+
+def _set_created_at(folder_path, project_id: str, lane: str, job_id: str,
+                    ts: float) -> dict:
+    """Stamp ``created_at`` on an existing pointer-record (under lock)."""
+    with _paths.WRITE_LOCK:
+        ppath = _pointer_path(folder_path, project_id, lane, job_id)
+        if not ppath.exists():
+            return {}
+        try:
+            rec = json.loads(ppath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        rec["created_at"] = ts
+        ppath.write_text(json.dumps(rec, indent=2, ensure_ascii=False),
+                         encoding="utf-8")
+        return rec
+
+
+def reconcile_discovered(folder_path, project_id: str) -> dict:
+    """Prune DISCOVERED records whose on-disk artifact no longer exists.
+
+    Independent of a fresh scan: checks each discovered record's
+    ``artifact_path`` against the folder and removes the record if the file is
+    gone. Real efforts are never touched. Returns ``{"pruned": n,
+    "pruned_ids": [...]}``.
+    """
+    pruned = []
+    folder = Path(folder_path)
+    with _paths.WRITE_LOCK:
+        for store_lane in ROLLUP_LANES:
+            for existing in list_efforts(folder_path, project_id, store_lane):
+                if not is_discovered(existing):
+                    continue
+                rel = existing.get("artifact_path", "")
+                exists = False
+                if rel:
+                    try:
+                        exists = (folder / rel).exists()
+                    except OSError:
+                        exists = False
+                if not exists:
+                    ejid = existing.get("job_id", "")
+                    if ejid and _delete_effort_record(folder_path, project_id,
+                                                      store_lane, ejid):
+                        pruned.append(ejid)
+    return {"pruned": len(pruned), "pruned_ids": pruned}
+
+
 # ── Attaching cost from a completed job's result envelope ───────────────────
 
 def attach_cost(folder_path, project_id: str, lane: str, job_id: str,
@@ -265,6 +442,11 @@ def _empty_rollup() -> dict:
         "output_tokens": 0,
         "total_tokens": 0,
         "effort_count": 0,
+        # Discovered (brownfield-imported) efforts are counted SEPARATELY and
+        # NEVER contribute to effort_count / cost (honesty contract). They carry
+        # no real cost, so discovered_cost is always 0.
+        "discovered_count": 0,
+        "discovered_cost": 0.0,
     }
 
 
@@ -286,9 +468,18 @@ def effort_cost(effort: dict) -> dict:
 
 
 def lane_rollup(folder_path, project_id: str, lane: str) -> dict:
-    """Aggregate cost across ALL efforts in a lane (per-lane rollup)."""
+    """Aggregate cost across the REAL efforts in a lane (per-lane rollup).
+
+    Honesty contract: DISCOVERED (brownfield-imported) efforts are EXCLUDED from
+    ``effort_count`` and cost; they are tallied separately in
+    ``discovered_count`` (and ``discovered_cost`` is always 0). ``list_efforts``
+    still returns them for rendering — only this rollup excludes them.
+    """
     acc = _empty_rollup()
     for effort in list_efforts(folder_path, project_id, lane):
+        if is_discovered(effort):
+            acc["discovered_count"] += 1
+            continue
         cost = effort.get("cost") or {}
         _add_cost(acc, cost)
         acc["effort_count"] += 1
@@ -320,6 +511,7 @@ def project_rollup(project_id: str, folder_path=None) -> dict:
         total["output_tokens"] += lr["output_tokens"]
         total["total_tokens"] += lr["total_tokens"]
         total["effort_count"] += lr["effort_count"]
+        total["discovered_count"] += lr["discovered_count"]
     return {"total": total, "lanes": lanes_out}
 
 

@@ -268,6 +268,85 @@ _KATEX_CONTENT_TYPES = {
 }
 
 
+# ── Discovered-artifact serving (brownfield, traversal-safe) ────────────────
+
+# Subdirs inside a project folder that must NEVER be served, even if a rel path
+# resolves to stay within the folder (defense in depth beyond containment).
+_ARTIFACT_FORBIDDEN_TOP = frozenset({".git", ".anchor"})
+
+# Content types for served discovered artifacts (best-effort; default text).
+_ARTIFACT_CONTENT_TYPES = {
+    ".md": "text/markdown; charset=utf-8",
+    ".txt": "text/plain; charset=utf-8",
+    ".pdf": "application/pdf",
+    ".json": "application/json; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".csv": "text/csv; charset=utf-8",
+}
+
+
+def resolve_project_artifact(folder_path, rel_path: str):
+    """Resolve a discovered artifact under a project folder, traversal-safe.
+
+    Mirrors the proven :func:`katex_asset` containment pattern:
+      ``target = (folder / rel).resolve()`` then
+      ``target.relative_to(folder.resolve())`` or reject.
+
+    Rejects:
+      - a missing/blank folder or rel,
+      - an ABSOLUTE ``rel`` (e.g. ``/etc/passwd`` / ``C:\\Windows\\...``),
+      - any ``rel`` that resolves OUTSIDE the folder (``../..`` / symlink-escape),
+      - any path whose first folder-relative component is ``.git`` / ``.anchor``.
+
+    Returns ``(bytes, content_type)`` on success, else ``None`` — and on
+    rejection reads ZERO bytes. Stdlib only.
+    """
+    if not folder_path or not rel_path:
+        return None
+    rel_raw = str(rel_path)
+    # Reject an absolute rel before any join (POSIX or Windows-drive form).
+    try:
+        if Path(rel_raw).is_absolute():
+            return None
+    except (TypeError, ValueError):
+        return None
+    # A leading slash/backslash also denotes absolute on the URL side.
+    if rel_raw.startswith("/") or rel_raw.startswith("\\"):
+        return None
+
+    try:
+        folder = Path(folder_path).resolve()
+    except OSError:
+        return None
+    try:
+        target = (folder / rel_raw).resolve()
+    except OSError:
+        return None
+
+    # Containment: target must stay within the folder.
+    try:
+        rel_inside = target.relative_to(folder)
+    except ValueError:
+        return None
+
+    # Reject .git / .anchor at the top of the resolved relative path.
+    parts = rel_inside.parts
+    if parts and parts[0] in _ARTIFACT_FORBIDDEN_TOP:
+        return None
+    # Also reject any component that is one of the forbidden dirs (symlink-in).
+    if any(p in _ARTIFACT_FORBIDDEN_TOP for p in parts):
+        return None
+
+    if not target.is_file():
+        return None
+    ctype = _ARTIFACT_CONTENT_TYPES.get(target.suffix.lower(),
+                                        "application/octet-stream")
+    try:
+        return target.read_bytes(), ctype
+    except OSError:
+        return None
+
+
 def katex_asset(rel_path: str):
     """Resolve a request under ``/vendor/katex/<rel>`` to (bytes, content_type).
 
