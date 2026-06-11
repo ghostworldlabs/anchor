@@ -58,7 +58,9 @@ def test_project_window_html_renders(gui, tmp_path):
     pid = gui.select_existing_project("ShinyProj", str(folder))["entry"]["id"]
     html = gui.render_project_window_html(pid)
     assert "ShinyProj" in html
-    assert "none-yet" in html
+    # Wave 3 contract: empty lanes read "Lane: 0", NOT the old "none-yet" state.
+    assert "none-yet" not in html
+    assert "Research: 0" in html
 
 
 def test_project_window_unknown_id_no_crash(gui):

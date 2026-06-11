@@ -114,6 +114,7 @@ def _normalize(entry: dict) -> dict:
         "priority": priority,
         "state": state,
         "notes": (entry.get("notes") or ""),
+        "blurb": (entry.get("blurb") or ""),
     }
 
 
@@ -209,7 +210,7 @@ def _write_tracking_policy(anchor_dir: Path) -> None:
 
 def add_project(name: str, folder_path, priority: int = 2,
                 state: str = STATE_ACTIVE, scaffold: bool = True,
-                notes: str = "") -> dict:
+                notes: str = "", blurb: str = "") -> dict:
     """Register a new project with a FRESH id. Returns the stored entry.
 
     ``folder_path`` is non-unique — adding another project for an
@@ -229,6 +230,7 @@ def add_project(name: str, folder_path, priority: int = 2,
             "priority": priority,
             "state": state,
             "notes": notes,
+            "blurb": blurb,
         })
         reg[pid] = entry
         _save_registry(reg)
@@ -247,7 +249,7 @@ def update_project(project_id: str, **fields) -> dict:
 
     Raises ``KeyError`` if the id is unknown.
     """
-    allowed = {"name", "folder_path", "priority", "state", "notes"}
+    allowed = {"name", "folder_path", "priority", "state", "notes", "blurb"}
     with _paths.WRITE_LOCK:
         reg = load_registry()
         if project_id not in reg:
@@ -291,6 +293,83 @@ def reactivate_project(project_id: str) -> dict:
 def set_notes(project_id: str, notes: str) -> dict:
     """Set the free-text notes for a project (like a task's Notes field)."""
     return update_project(project_id, notes=("" if notes is None else str(notes)))
+
+
+# ── Project blurb ("what this project is") — Wave 3 ──────────────────────
+
+#: Source files probed (in order) to SEED a project blurb, best-effort.
+BLURB_SEED_FILES = ("CLAUDE.md", "README.md", "README", "Anchor.md")
+#: Max chars read from a seed file (bounded read — never slurp a huge file).
+_BLURB_SEED_MAX_READ = 8192
+#: Max chars kept for the seeded blurb itself.
+_BLURB_MAX_LEN = 400
+
+
+def set_blurb(project_id: str, blurb: str) -> dict:
+    """Set the user-editable project blurb (what the project is). Returns entry."""
+    return update_project(project_id, blurb=("" if blurb is None else str(blurb)))
+
+
+def _extract_blurb(text: str) -> str:
+    """Best-effort: first meaningful heading-or-paragraph from a seed doc.
+
+    Skips a leading ``# Title`` heading and blockquote/badge lines, returns the
+    first non-empty prose paragraph (or, failing that, the title text), bounded
+    to ``_BLURB_MAX_LEN`` chars. Never raises.
+    """
+    title = ""
+    para = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            if para:
+                break  # end of the first paragraph
+            continue
+        if line.startswith("#"):
+            if not title:
+                title = line.lstrip("#").strip()
+            continue
+        if line.startswith(">") or line.startswith("|") or line.startswith("---"):
+            continue
+        para.append(line)
+    blurb = " ".join(para).strip() or title
+    if len(blurb) > _BLURB_MAX_LEN:
+        blurb = blurb[:_BLURB_MAX_LEN].rstrip() + "…"
+    return blurb
+
+
+def seed_blurb(project_id: str, *, force: bool = False) -> dict:
+    """Seed a project's blurb ONCE from its folder docs, if currently empty.
+
+    Reads (bounded, best-effort) the first of ``BLURB_SEED_FILES`` that exists in
+    the project's ``folder_path`` and extracts the first heading-or-paragraph as
+    the blurb. A no-op if the blurb is already set (unless ``force``) or nothing
+    usable is found. Never crashes on a missing/unreadable folder.
+
+    Returns the (possibly updated) entry, or ``None`` if the id is unknown.
+    """
+    proj = get_project(project_id)
+    if proj is None:
+        return None
+    if (proj.get("blurb") or "").strip() and not force:
+        return proj
+    folder = proj.get("folder_path", "")
+    if not folder:
+        return proj
+    text = ""
+    for name in BLURB_SEED_FILES:
+        try:
+            p = Path(folder) / name
+            if p.is_file():
+                text = p.read_text(encoding="utf-8", errors="replace")[
+                    :_BLURB_SEED_MAX_READ]
+                break
+        except (OSError, ValueError):
+            continue
+    blurb = _extract_blurb(text)
+    if not blurb:
+        return proj
+    return update_project(project_id, blurb=blurb)
 
 
 def remove_project(project_id: str) -> bool:
@@ -379,46 +458,82 @@ def group_by_folder(include_archived: bool = True,
     return groups
 
 
-#: Lane status values beyond ``none-yet``.
-STATUS_IMPORTED = "imported"   # only discovered (brownfield) artifacts present
-STATUS_HAS_RUNS = "has-runs"   # >=1 real Anchor-run effort
+#: Legacy lane-state strings (kept as named constants for back-compat; the
+#: Wave 3 ``status_line`` no longer returns these — see ``lane_counts`` below).
+STATUS_IMPORTED = "imported"   # a session whose members are discovered (brownfield)
+STATUS_HAS_RUNS = "has-runs"   # >=1 real (Anchor-run) session
 STATUS_RUNNING = "running"     # a live job in this lane
+
+#: The per-lane count keys returned by ``status_line`` (Wave 3 contract).
+LANE_COUNT_KEYS = ("count", "imported", "running")
+
+
+def _empty_lane_counts() -> dict:
+    """A zeroed per-lane counts dict (the default when a lane is empty/unread)."""
+    return {k: 0 for k in LANE_COUNT_KEYS}
 
 
 def status_line(project_id: str) -> dict:
-    """Return the 4-state status line for a project (Research/Plan/Build/Deliv).
+    """Return per-lane SESSION COUNTS + PROVENANCE for a project (Wave 3 contract).
 
-    Reflects ADOPTED (discovered) + REAL efforts per lane, computed from the
-    per-project effort store (best-effort — never crashes if a lane is unread):
-      - ``has-runs`` if the lane has >=1 real (Anchor-run) effort,
-      - else ``imported`` if it has >=1 discovered (brownfield) effort,
-      - else ``none-yet``.
+    The unit is now a **session** (one trio run = one session, MASTER-PLAN §A),
+    NOT a raw effort: 7 discovered planning files that group into 2 planning
+    sessions count as ``planning.count == 2``. This REPLACES the old
+    ``has-runs``/``imported``/``none-yet`` masquerade — imported provenance is now
+    a count, not the lane's whole state, so a lane with sessions never renders as
+    ``import`` or ``none-yet``.
 
-    Imported is kept distinct from has-runs so the UI never masquerades a
-    discovered artifact as an Anchor-run effort.
+    Shape (one entry per ``STATUS_LANES`` lane)::
+
+        {"research":     {"count": 1, "imported": 1, "running": 0},
+         "planning":     {"count": 2, "imported": 2, "running": 0},
+         "build":        {"count": 1, "imported": 0, "running": 1},
+         "deliverables": {"count": 0, "imported": 0, "running": 0}}
+
+    - ``count``    = number of sessions in the lane.
+    - ``imported`` = how many of those are brownfield-imported (provenance
+      ``imported``); the rest are real Anchor runs.
+    - ``running``  = how many sessions have a live (``running``) job.
+
+    Best-effort: never crashes if a lane is unread or a dependency import fails;
+    a failing lane yields a zeroed counts dict.
     """
     proj = get_project(project_id)
     folder = (proj or {}).get("folder_path", "")
-    out = {}
-    # Local import to avoid a hard import cycle (effort_history imports this
-    # module). Resolved lazily, per call.
+    out = {lane: _empty_lane_counts() for lane in STATUS_LANES}
+
+    # Local imports to avoid hard import cycles (effort_history/sessions import
+    # this module). Resolved lazily, per call.
     try:
-        import effort_history as _eh
+        import sessions as _sessions
     except Exception:
-        return {lane: STATUS_NONE_YET for lane in STATUS_LANES}
+        return out
+    try:
+        import job_runner as _jr
+        running_job_ids = {
+            r.get("job_id")
+            for r in _jr.list_records()
+            if r.get("status") == _jr.STATUS_RUNNING and r.get("job_id")
+        }
+    except Exception:
+        running_job_ids = set()
+
     for lane in STATUS_LANES:
-        state = STATUS_NONE_YET
         try:
-            efforts = _eh.list_efforts(folder, project_id, lane)
+            sess = _sessions.list_sessions(folder, project_id, lane)
         except Exception:
-            efforts = []
-        has_real = any(not _eh.is_discovered(e) for e in efforts)
-        has_disc = any(_eh.is_discovered(e) for e in efforts)
-        if has_real:
-            state = STATUS_HAS_RUNS
-        elif has_disc:
-            state = STATUS_IMPORTED
-        out[lane] = state
+            sess = []
+        counts = _empty_lane_counts()
+        for s in sess:
+            counts["count"] += 1
+            if s.get("provenance") == _sessions.PROV_IMPORTED:
+                counts["imported"] += 1
+            members = s.get("member_files") or []
+            if running_job_ids and any(
+                (m.get("job_id") or "") in running_job_ids for m in members
+            ):
+                counts["running"] += 1
+        out[lane] = counts
     return out
 
 

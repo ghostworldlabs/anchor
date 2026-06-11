@@ -180,20 +180,24 @@ def test_status_line_reflects_adopted_and_real(gui_env, tmp_path):
     proj = rnd.add_project("Brown", str(folder))
     pid = proj["id"]
 
-    # Before adoption: all none-yet.
+    # Wave 3 contract: per-lane SESSION counts + provenance, not a state string.
+    # Before adoption: every lane is a zeroed counts dict.
     line0 = rnd.status_line(pid)
-    assert all(v == rnd.STATUS_NONE_YET for v in line0.values())
+    for lane in rnd.STATUS_LANES:
+        assert line0[lane] == {"count": 0, "imported": 0, "running": 0}
 
-    # Adopt the brownfield planning doc.
+    # Adopt the brownfield planning doc → one IMPORTED planning session.
     eh.adopt_discovered(folder, pid, bscan.scan(str(folder)))
     line1 = rnd.status_line(pid)
-    assert line1["planning"] != rnd.STATUS_NONE_YET
-    assert line1["planning"] == rnd.STATUS_IMPORTED
+    assert line1["planning"]["count"] >= 1
+    assert line1["planning"]["imported"] == line1["planning"]["count"]
+    assert line1["planning"]["count"] > 0  # never reads "none-yet"
 
-    # A real run in research flips it to has-runs.
+    # A real run in research → one NON-imported (run) research session.
     eh.record_effort(folder, pid, "research", "r1", skill="researchPrime")
     line2 = rnd.status_line(pid)
-    assert line2["research"] == rnd.STATUS_HAS_RUNS
+    assert line2["research"]["count"] == 1
+    assert line2["research"]["imported"] == 0
 
 
 def test_home_dashboard_panel_shows_imported(server, tmp_path):

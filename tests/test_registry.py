@@ -145,6 +145,42 @@ def test_legacy_id_assignment_idempotent(reg, tmp_path):
     assert len(reg.load_registry()) == 2
 
 
+def test_status_line_shape_per_lane_counts(reg, tmp_path):
+    """Wave 3 contract: status_line returns {lane: {count, imported, running}}."""
+    import effort_history as eh
+    importlib.reload(eh)
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    pid = reg.add_project("P", str(folder))["id"]
+
+    # Empty project: every lane is a zeroed counts dict (never "none-yet").
+    line = reg.status_line(pid)
+    for lane in reg.STATUS_LANES:
+        assert line[lane] == {"count": 0, "imported": 0, "running": 0}
+
+    # One real run + two discovered planning files in two dirs (=2 sessions).
+    eh.record_effort(folder, pid, "research", "r1", skill="researchPrime")
+    eh.record_effort(folder, pid, "planning", "d1", skill="crucible",
+                     extra={"source": "discovered",
+                            "artifact_path": "planning/a/x.md"})
+    eh.record_effort(folder, pid, "planning", "d2", skill="crucible",
+                     extra={"source": "discovered",
+                            "artifact_path": "planning/b/y.md"})
+    line = reg.status_line(pid)
+    assert line["research"] == {"count": 1, "imported": 0, "running": 0}
+    assert line["planning"]["count"] == 2
+    assert line["planning"]["imported"] == 2
+
+
+def test_blurb_field_round_trips(reg, tmp_path):
+    pid = reg.add_project("P", str(tmp_path / "P"), blurb="seed blurb")["id"]
+    assert reg.get_project(pid)["blurb"] == "seed blurb"
+    reg.set_blurb(pid, "edited")
+    assert reg.get_project(pid)["blurb"] == "edited"
+    # Persisted to disk.
+    assert reg.load_registry()[pid]["blurb"] == "edited"
+
+
 def test_concurrent_writes_no_lost_update(reg, tmp_path):
     n = 25
     errors = []

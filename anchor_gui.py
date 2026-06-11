@@ -539,15 +539,31 @@ def discover_and_adopt(project_id: str) -> dict:
 
 
 def render_status_line_html(project_id: str) -> str:
-    """Render the 4-state status line (Research/Planning/Build/Deliverables)."""
+    """Render the per-lane SESSION summary line (Research/Planning/Build/Deliv).
+
+    Wave 3 contract: ``rnd_registry.status_line`` returns per-lane counts +
+    provenance, so the line reads e.g.
+    ``Research: 1 · Planning: 2 (1 imported) · Build: 1 · Deliverables: 1`` —
+    a lane with sessions NEVER renders as ``import`` or ``none-yet``. A lane with
+    zero sessions shows a dimmed ``0``; an imported count adds a small
+    ``(N imported)`` provenance chip; a live job adds ``• N running``.
+    """
     line = _rnd.status_line(project_id)
     chips = []
     for lane in _rnd.STATUS_LANES:
-        state = line.get(lane, _rnd.STATUS_NONE_YET)
+        counts = line.get(lane) or {}
+        n = int(counts.get("count", 0) or 0)
+        n_imp = int(counts.get("imported", 0) or 0)
+        n_run = int(counts.get("running", 0) or 0)
         label = lane.capitalize()
+        prov = (f' <span class="rnd-imported">({n_imp} imported)</span>'
+                if n_imp else '')
+        run = (f' <span class="rnd-running">&bull; {n_run} running</span>'
+               if n_run else '')
+        dim = ' rnd-lane-empty' if n == 0 else ''
         chips.append(
-            f'<span class="rnd-lane rnd-lane-{state}">'
-            f'{html_lib.escape(label)}: {html_lib.escape(state)}</span>'
+            f'<span class="rnd-lane{dim}">'
+            f'{html_lib.escape(label)}: {n}{prov}{run}</span>'
         )
     return '<div class="rnd-status-line">' + "".join(chips) + "</div>"
 
@@ -564,6 +580,19 @@ def render_project_tile_html(entry: dict) -> str:
     notes = entry.get("notes", "") or ""
     notes_attr = html_lib.escape(notes, quote=True)
     folder = entry.get("folder_path", "")
+    # Project blurb ("what this project is"): seed once from CLAUDE.md/README/
+    # Anchor.md when empty, then render. Best-effort — never block the tile.
+    blurb = entry.get("blurb", "") or ""
+    if not blurb.strip():
+        try:
+            seeded = _rnd.seed_blurb(pid_raw)
+            if seeded:
+                blurb = seeded.get("blurb", "") or ""
+        except Exception:
+            pass
+    blurb_attr = html_lib.escape(blurb, quote=True)
+    blurb_block = (f'<div class="rnd-blurb" data-blurb="{blurb_attr}">'
+                   f'{html_lib.escape(blurb)}</div>') if blurb.strip() else ''
     status = render_status_line_html(pid_raw)
     # Effort rollup ("amount of effort") — count + cost/time/tokens.
     try:
@@ -595,6 +624,7 @@ def render_project_tile_html(entry: dict) -> str:
             f'<button class="rnd-mini{p1on}" onclick="rndSetPriority(\'{pid}\',1)" title="Priority 1">P1</button>'
             f'<button class="rnd-mini{p2on}" onclick="rndSetPriority(\'{pid}\',2)" title="Priority 2">P2</button>'
             f'{rescan_btn}'
+            f'<button class="rnd-mini" onclick="rndBlurb(\'{pid}\')" title="Edit blurb (what this project is)">Blurb</button>'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
             f'<button class="rnd-mini" onclick="rndArchive(\'{pid}\')" title="Archive (shelve, reviewable)">Archive</button>'
             f'<button class="rnd-mini rnd-danger" onclick="rndRetire(\'{pid}\')" title="Retire / cancel">Retire</button>'
@@ -603,6 +633,7 @@ def render_project_tile_html(entry: dict) -> str:
         lifecycle = (
             f'<button class="rnd-mini rnd-accent" onclick="rndReactivate(\'{pid}\')" title="Make active again">Reactivate</button>'
             f'{rescan_btn}'
+            f'<button class="rnd-mini" onclick="rndBlurb(\'{pid}\')" title="Edit blurb (what this project is)">Blurb</button>'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
         )
     return (
@@ -612,6 +643,7 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
         f'</div>'
+        f'{blurb_block}'
         f'{status}'
         f'{effort_line}'
         f'{notes_block}'
@@ -945,6 +977,16 @@ def render_project_window_html(project_id: str) -> str:
     notes_raw = entry.get("notes", "") or ""
     notes_attr = html_lib.escape(notes_raw, quote=True)
     notes_esc = html_lib.escape(notes_raw)
+    blurb_raw = entry.get("blurb", "") or ""
+    if not blurb_raw.strip():
+        try:
+            seeded = _rnd.seed_blurb(project_id)
+            if seeded:
+                blurb_raw = seeded.get("blurb", "") or ""
+        except Exception:
+            pass
+    blurb_attr = html_lib.escape(blurb_raw, quote=True)
+    blurb_esc = html_lib.escape(blurb_raw)
     is_active = state_raw in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -956,6 +998,7 @@ def render_project_window_html(project_id: str) -> str:
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
             f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
             f"{rescan_btn}"
+            f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
             f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
             f"<button class='rnd-mini rnd-danger' onclick=\"rndRetire('{pid_attr}')\">Retire</button>"
@@ -964,6 +1007,7 @@ def render_project_window_html(project_id: str) -> str:
         lifecycle = (
             f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
             f"{rescan_btn}"
+            f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
         )
     kanban = _render_kanban_html(folder_raw, project_id)
@@ -1094,11 +1138,14 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-status-line{margin:0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
         "font-size:13px}"
+        ".rnd-lane-empty{color:var(--text-dim)}"
+        ".rnd-imported{color:var(--text-dim);font-style:italic;font-size:11px}"
+        ".rnd-running{color:var(--success);font-size:11px}"
         ".rnd-dim{color:var(--text-dim)}"
         "h2{font-size:14px;margin:18px 0 6px}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
-        f"<div class='dash' data-notes='{notes_attr}'>"
+        f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
         # ── Lifecycle header ──
         "<div class='dhead'>"
         f"<span class='name'>{name}</span>"
@@ -1108,6 +1155,10 @@ def render_project_window_html(project_id: str) -> str:
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
         f"{lifecycle}"
         "</div></div>"
+        # ── Project blurb ("what this project is"; click 'Blurb' above to edit) ──
+        + (f"<div class='rnd-blurb' data-blurb='{blurb_attr}' "
+           f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
+           f"font-size:13px'>{blurb_esc}</div>" if blurb_raw.strip() else "")
         # ── Project notes (like a task's Notes; click 'Notes' above to edit) ──
         + (f"<div style='padding:8px 18px;border-bottom:1px solid var(--border);"
            f"font-size:12.5px;color:var(--text-dim);white-space:pre-wrap'>"
@@ -1489,6 +1540,13 @@ function rndNotes(pid) {
   var n = window.prompt('Notes for this project:', cur);
   if (n === null) return;
   _lifecycle('/api/rnd/set_notes', {id: pid, notes: n});
+}
+function rndBlurb(pid) {
+  var d = document.querySelector('.dash');
+  var cur = d ? (d.getAttribute('data-blurb') || '') : '';
+  var n = window.prompt('What this project is (blurb):', cur);
+  if (n === null) return;
+  _lifecycle('/api/rnd/set_blurb', {id: pid, blurb: n});
 }
 """
 
@@ -2901,8 +2959,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-badge.rnd-p2 {{ background: rgba(251,191,36,.15); color: var(--warning); border-color: rgba(251,191,36,.3); }}
 .rnd-badge[class*="rnd-state-archived"], .rnd-badge[class*="rnd-state-future"], .rnd-badge[class*="rnd-state-retired"] {{ background: rgba(255,255,255,.04); }}
 .rnd-effort {{ font-size: 11px; color: var(--accent); }}
-.rnd-imported {{ color: var(--text-dim); font-style: italic; }}
+.rnd-imported {{ color: var(--text-dim); font-style: italic; font-size: 11px; }}
+.rnd-running {{ color: var(--success); font-size: 11px; }}
 .rnd-effort.rnd-dim {{ color: var(--text-dim); }}
+.rnd-status-line {{ margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }}
+.rnd-lane {{ padding: 4px 10px; border-radius: 6px; background: #1b2030; font-size: 13px; }}
+.rnd-lane.rnd-lane-empty {{ color: var(--text-dim); }}
+.rnd-blurb {{ font-size: 12px; color: var(--text); opacity: .85; }}
 .rnd-notes {{ font-size: 11.5px; color: var(--text-dim); background: rgba(255,255,255,.03); border-radius: 6px; padding: 5px 8px; white-space: pre-wrap; }}
 .rnd-actions {{ display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }}
 .rnd-mini {{ font-size: 11px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; }}
@@ -3805,6 +3868,14 @@ function rndNotes(pid) {{
     if (n === null) return;
     apiCall('/api/rnd/set_notes', {{id: pid, notes: n}});
 }}
+function rndBlurb(pid) {{
+    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
+    var bEl = el ? el.querySelector('.rnd-blurb') : null;
+    var cur = bEl ? (bEl.getAttribute('data-blurb') || '') : '';
+    var n = window.prompt('What this project is (blurb):', cur);
+    if (n === null) return;
+    apiCall('/api/rnd/set_blurb', {{id: pid, blurb: n}});
+}}
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
 
@@ -4237,6 +4308,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
             try:
                 self._send_json({"ok": True,
                                  "entry": _rnd.set_notes(pid, body.get("notes", ""))})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/set_blurb":
+            pid = body.get("id", "")
+            try:
+                self._send_json({"ok": True,
+                                 "entry": _rnd.set_blurb(pid, body.get("blurb", ""))})
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
 

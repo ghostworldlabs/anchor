@@ -115,7 +115,10 @@ def test_status_line_none_yet(gui, tmp_path):
     html = gui.render_status_line_html(e["entry"]["id"])
     for lane in ("Research", "Planning", "Build", "Deliverables"):
         assert lane in html
-    assert "none-yet" in html
+    # Wave 3 contract: empty lanes read "Lane: 0", NOT the old "none-yet" state.
+    assert "none-yet" not in html
+    assert "Research: 0" in html
+    assert "Planning: 0" in html
 
 
 def test_project_field_round_trips_unchanged(gui):

@@ -36,3 +36,13 @@
 - RE-GATE (orchestrator-run): **314 passed, 1 skipped**. Converged.
 
 ---
+
+## Wave 3 — First-class imported history (status-line, tiles, blurb) — GO (2026-06-11)
+
+- EXECUTE: `status_line` reshaped to per-lane `{count, imported, running}` built from `sessions.list_sessions` (session = unit, so 7 discovered planning files = 2); all callers + 3 dependent tests updated; tile/window render a real per-lane summary line + per-lane "imported" chip (no more "import"/"none-yet" masquerade); per-project `blurb` field + `POST /api/rnd/set_blurb` + `seed_blurb` (CLAUDE.md→README→Anchor.md, bounded, escaped). New `tests/test_tile_render.py`.
+- GATE (orchestrator-run): 326 passed, 1 skipped; `import anchor_gui` clean (f-string discipline held).
+- REVIEW (2 independent): no BLOCKERs; both confirm HTML escaping correct, counts session-based, graceful degradation, acceptance renders exactly per spec. Single-reviewer MAJORs (B): CSS inconsistency across the two style blocks; benign idempotent blurb-seed race. "running always 0 for discovered" rejected (correct behavior).
+- FIX (1 iter): aligned `.rnd-status-line`/`.rnd-lane`/`.rnd-imported` across both style blocks (brace conventions preserved); added XSS-escaping regression test. Seed-race left as-is (idempotent, exception-guarded).
+- RE-GATE (orchestrator-run): **327 passed, 1 skipped**. Converged.
+
+---
