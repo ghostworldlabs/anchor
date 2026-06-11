@@ -1,10 +1,17 @@
 {
-  "project": "anchor-rnd-control-surface",
+  "project": "anchor-rnd-surface-v2",
   "docs": {
-    "description": "planning/rnd-v1/MASTER-PLAN.md",
-    "plan": "planning/rnd-v1/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/rnd-v1/EXECUTION-LOG.md"
+    "description": "planning/rnd-v2/MASTER-PLAN.md",
+    "plan": "planning/rnd-v2/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/rnd-v2/EXECUTION-LOG.md"
   },
   "test_command": "python -m pytest -v",
-  "notes": "Pre-Foreman human gate in planning/rnd-v1/SETUP.md must be completed before building. Runner/job waves verify against tests/fake_claude.py via ANCHOR_RUNNER_CMD; never live claude in the gate."
+  "notes": "Build cwd = repo root C:\\dev\\Anchor. Runner/terminal/summarizer waves (6,7) verify against tests/fake_claude.py via ANCHOR_RUNNER_CMD; never live claude/gemini in the gate. Stdlib-only runtime; xterm.js vendored as a static asset (no native deps). Supersedes planning/rnd-v1 (already built).",
+  "prior_config_rnd_v1": {
+    "docs": {
+      "description": "planning/rnd-v1/MASTER-PLAN.md",
+      "plan": "planning/rnd-v1/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v1/EXECUTION-LOG.md"
+    }
+  }
 }

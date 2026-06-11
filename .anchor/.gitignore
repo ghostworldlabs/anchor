@@ -1,0 +1,19 @@
+# Anchor R&D per-project store — tracking policy (reconciles C9 + C10).
+#
+# C9 (durable/git-trackable): the lightweight JSON *pointer-records* that index
+#   each project's efforts ARE meant to be committed so history survives.
+# C10 (no personal-data leak / shareable distro): raw run logs, large engine
+#   outputs, and anything that may carry absolute paths / tokens / personal
+#   data are git-IGNORED here and excluded by the distribution scan (Wave 8).
+#
+# Default: ignore the heavy/volatile artifacts; allow-list the pointer records.
+
+projects/*/jobs/
+projects/*/**/*.log
+projects/*/**/*.pdf
+projects/*/**/raw/
+
+# Re-include the small pointer-record JSON index files (git-trackable).
+!projects/*/**/index.json
+!projects/*/**/*.pointer.json
+!projects/*/**/*-overrides.json
