@@ -1264,6 +1264,34 @@ def _fmt_age(created_at) -> str:
     return f"{int(delta // 604800)}w"
 
 
+# v4 Wave 4 — Paradigm-2 lane-tile status light.
+#
+# Map a session's representative effort view → the LOCKED status-light bucket
+# (session_registry status constants → colors, MASTER-PLAN §E):
+#   running                       → green  (live PTY / job producing output)
+#   needs-attention / done        → amber  (come look — waiting on you or finished)
+#   failed / cancelled / interrupted → red
+#   idle / unknown / discovered   → grey
+# This mirrors the JS ``_statusColor`` (which maps the registry status strings):
+# a single source of truth for the four colors, applied here at the lane-tile
+# render and there at the live session-bar / panel render.
+def _session_light_class(ev):
+    """Return the lane-tile status-light color class ('green'|'amber'|'red'|
+    'grey') for a session's representative effort view ``ev``."""
+    if not ev:
+        return "grey"
+    if ev.get("needs_input"):
+        return "amber"          # needs-attention (awaiting input)
+    if ev.get("is_live"):
+        return "green"          # running
+    status = (ev.get("status") or "").strip()
+    if ev.get("is_done") or status == _jr.STATUS_DONE:
+        return "amber"          # done → amber (finished; awaiting your review)
+    if status in (_jr.STATUS_FAILED, _jr.STATUS_INTERRUPTED, _jr.STATUS_CANCELLED):
+        return "red"
+    return "grey"               # idle / discovered / unknown
+
+
 # Map a job record's status/state to the board state-pill class + label.
 def _effort_pill(status, gate_state):
     """Return ``(pill_class, pill_label, is_live, needs_input)`` for an effort."""
@@ -1519,7 +1547,8 @@ def _render_kanban_html(folder_path, project_id):
             badge = "<span class='attn'>⚠ input</span>"
         elif any_live:
             badge = "<span class='live'><span class='dotpulse'></span>live</span>"
-        cards = _render_lane_sessions(session_views, store_lane, project_id)
+        cards = _render_lane_sessions(
+            session_views, store_lane, project_id, trio_lane)
         # The "+ New run" affordance launches that lane. Research offers an
         # engine choice (Claude default + Gemini); plan/build are Claude-only;
         # deliverables are config-driven (no launch); grass catchers get a
@@ -1565,9 +1594,15 @@ def _safe_dom_id(seg: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
 
 
-def _render_lane_sessions(session_views, store_lane, project_id):
+def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
     """Render a lane's sessions: most-recent visible + a "previous sessions"
     expander holding the rest (v2 Wave 4).
+
+    v4 Wave 4 (Paradigm 2): the MOST-RECENT session card is the lane TILE — it
+    carries a status-light element (``.lt green/amber/red/grey`` from
+    :func:`_session_light_class`) and a click-to-expand hook
+    (``onclick="openPanel('<sid>')"``) that opens a full-width inline panel in
+    the panel stack below the board (NOT a floating window, NOT page nav).
 
     Each session renders as ONE card (its representative = ``members[0]``); the
     remaining members of a multi-file session sit behind a small per-card
@@ -1633,7 +1668,29 @@ def _render_lane_sessions(session_views, store_lane, project_id):
             f"<div class='session-files-body'>{inner}</div>"
             f"</details></div>"
         )
-    recent = _render_session_card(session_views[0])
+    def _lane_tile(sv):
+        """Wrap the recent session card as the Paradigm-2 lane TILE: a status
+        light (locked color bucket) + a click-to-expand hook that opens the
+        inline panel for this session (no floating window, no page nav)."""
+        inner = _render_session_card(sv)
+        if not inner:
+            return ""
+        members = sv.get("members", [])
+        rep = members[0] if members else None
+        light = _session_light_class(rep)
+        sid = sv.get("session_id", "") or ""
+        sid_attr = html_lib.escape(sid, quote=True)
+        lane_attr = html_lib.escape(trio_lane, quote=True)
+        return (
+            f"<div class='lane-tile' data-session=\"{sid_attr}\" "
+            f"data-lane=\"{lane_attr}\" data-light=\"{light}\" "
+            f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
+            f"<span class='lt {light}' aria-hidden='true'></span>"
+            f"<div class='lane-tile-body'>{inner}</div>"
+            f"</div>"
+        )
+
+    recent = _lane_tile(session_views[0])
     older = session_views[1:]
     if not older:
         return recent
@@ -1922,33 +1979,43 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px dashed var(--border);background:transparent;"
         "color:var(--accent);cursor:pointer}"
         ".newsess:hover{border-color:var(--accent)}"
-        # The window LAYER is a positioned canvas the brick-stacked windows live in.
-        ".winlayer{position:relative;min-height:40px;padding:0 16px 16px}"
-        ".termwin{position:absolute;width:520px;height:340px;background:#0c0e14;"
-        "border:1px solid var(--border);border-radius:10px;overflow:hidden;"
-        "box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;flex-direction:column;"
-        "min-width:260px;min-height:120px}"
-        ".termwin.minimized{height:34px!important;min-height:0;resize:none}"
-        ".termwin.minimized .termbody,.termwin.minimized .winresize{display:none}"
-        ".termwin .wintitle{display:flex;align-items:center;gap:8px;"
-        "padding:6px 10px;background:var(--surface2);"
-        "border-bottom:1px solid var(--border);cursor:move;user-select:none;"
-        "font-size:12px}"
-        ".termwin .wintitle .wt-label{font-weight:600;white-space:nowrap;"
+        # ── v4 Wave 4: Paradigm-2 lane TILE status light (.lt) ──
+        # The most-recent session card in each lane is the lane tile; it carries a
+        # status light whose color comes from the LOCKED bucket (_session_light_class
+        # ↔ the JS _statusColor): running=green, needs-you/done=amber, failed=red,
+        # idle/discovered=grey. (Single-brace plain literals — NOT an f-string.)
+        ".lane-tile{position:relative;cursor:pointer}"
+        ".lane-tile-body{padding-left:14px}"
+        ".lt{position:absolute;left:2px;top:13px;width:9px;height:9px;"
+        "border-radius:50%;display:inline-block;background:var(--text-dim)}"
+        ".lt.green{background:#22c55e}"
+        ".lt.amber{background:#fbbf24}"
+        ".lt.red{background:#f87171}"
+        ".lt.grey{background:#8b8f9a;opacity:.6}"
+        # ── v4 Wave 4: inline expanding PANEL STACK (replaces the floating windows) ──
+        # Clicking a lane tile expands a full-width panel appended BELOW the board.
+        # Panels stack down the page; minimize collapses back to the tile (the
+        # session keeps running); the X kills behind a confirm. Wave 5 fills the
+        # panel body (split summary + xterm terminal); this wave ships the shell.
+        ".panel-stack{display:flex;flex-direction:column}"
+        ".panel{border-top:1px solid var(--border);background:var(--surface)}"
+        ".panel.minimized .pin{display:none}"
+        ".panel .pbar{display:flex;align-items:center;gap:9px;padding:9px 16px;"
+        "background:var(--surface2);border-bottom:1px solid var(--border)}"
+        ".panel .pbar .ic{font-size:14px}"
+        ".panel .pbar .ti{font-size:13px;font-weight:700;white-space:nowrap;"
         "overflow:hidden;text-overflow:ellipsis}"
-        ".termwin .wintitle .wt-meta{color:var(--text-dim);font-size:11px}"
-        ".termwin .wintitle .wt-sp{margin-left:auto}"
-        ".winbtn{width:20px;height:20px;line-height:18px;text-align:center;"
+        ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
+        ".panel .pbar .sp{flex:1}"
+        ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px}"
+        ".panel .panel-body{min-height:60px}"
+        ".panelbtn{width:22px;height:20px;line-height:18px;text-align:center;"
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
-        ".winbtn:hover{color:var(--text);border-color:var(--accent)}"
-        ".winbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
-        ".termwin .termbody{flex:1;overflow:hidden;padding:4px}"
-        ".termwin .winresize{position:absolute;right:0;bottom:0;width:16px;"
-        "height:16px;cursor:nwse-resize}"
-        ".termwin .winresize::after{content:'';position:absolute;right:3px;"
-        "bottom:3px;width:7px;height:7px;border-right:2px solid var(--text-dim);"
-        "border-bottom:2px solid var(--text-dim)}"
+        ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
+        ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        ".panel .term-host{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;min-height:120px;overflow:hidden}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -1974,9 +2041,10 @@ def render_project_window_html(project_id: str) -> str:
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
         # ── Kanban board ──
         f"{kanban}"
-        # ── Wave 4: session button bar + stacking window manager (ConPTY) ──
+        # ── v4 Wave 4: live-terminal bar + Paradigm-2 inline panel STACK ──
         # The bar is repopulated on load from /api/rnd/term_sessions; each button
-        # is status-colored and opens/attaches that session's terminal window.
+        # is status-colored and opens/attaches that session's INLINE panel (no
+        # floating window). Clicking a lane tile (above) likewise calls openPanel.
         "<div class='sessbar' id='sessionBar'>"
         "<span class='lbl'>Live terminals</span>"
         "<span id='sessionBtns'></span>"
@@ -1985,7 +2053,9 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='newsess' onclick=\"newTermSession('build')\">+ build</button>"
         "<span class='hint' id='sessionBarHint'>no live terminal sessions</span>"
         "</div>"
-        "<div class='winlayer' id='windowLayer'></div>"
+        # The PANEL STACK: opened sessions expand inline here, stacking down the
+        # page (replaces the v3 floating window layer).
+        "<div class='panel-stack' id='panelStack'></div>"
         # ── Console drawer (session tabs + attached log + ask + stop) ──
         "<div class='console' id='console'>"
         "<div class='ctabs'><span class='lbl'>Sessions</span>"
@@ -2701,16 +2771,21 @@ function rndUnlinkTask(el) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Wave 4 — stacking window-manager UI for ConPTY terminal sessions.
+// v4 Wave 4 — Paradigm-2 INLINE ACCORDION PANEL MANAGER (replaces the v3 floating
+// window manager).
 //
-// A top bar of terse, STATUS-COLORED buttons (one per live managed session,
-// labeled "<lane> <index>"); clicking opens/attaches that session's terminal in
-// a draggable / resizable / minimizable WINDOW that stacks like a brick. Minimize
-// keeps the session/process RUNNING (it only hides the window). The X control is
-// KILL — gated behind a confirm() — which POSTs /api/rnd/term_kill, removes the
-// window, and refreshes the bar. xterm.js is mounted in each window over the
-// Wave-3 transport (WS first, SSE-out + POST-in fallback). All POSTs are
-// token-aware via _postJson; the WS/SSE URLs carry ?token= from localStorage.
+// Each lane's most-recent session is a TILE carrying a status light. Clicking a
+// tile (laneTileClick → openPanel) EXPANDS a full-width inline panel appended to
+// the #panelStack BELOW the board — panels stack down the page, they never float
+// or overlap. A second click / the panel's "– min" button collapses it back to
+// the tile (minimizePanel) WITHOUT killing the session. The panel's "×" button is
+// KILL, gated behind a confirm() (killPanel → POST /api/rnd/term_kill).
+// repopulate() reads /api/rnd/term_sessions and repaints the live-terminals bar.
+//
+// The terminal transport is UNCHANGED from v3 (WS term_ws first; SSE-out
+// term_stream2 + POST-in term_input2 fallback; term_resize); only the HOST DOM
+// changed from a floating window to a panel body. Wave 5 mounts xterm into the
+// panel body host; this wave ships the panel SHELL with a placeholder body.
 //
 // This is a NEW surface; it does NOT touch the v2 console drawer (openTerminal /
 // launchLane) above.
@@ -2718,12 +2793,12 @@ function rndUnlinkTask(el) {
 
 // MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
 var MANAGED = {};
-// WINDOWS: session_id -> {el, term, transport, body} for an OPEN window.
-var WINDOWS = {};
+// PANELS: session_id -> {el, body, term, transport} for an OPEN inline panel.
+var PANELS = {};
 var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" labels
-var _winZ = 30;           // z-index cursor so a focused window comes forward
 
-// Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E):
+// Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E; this is
+// the SAME mapping the server's _session_light_class applies to the lane tiles):
 //   running              -> green  (working; ignore)
 //   needs-attention/done -> amber  (come look)
 //   failed               -> red
@@ -2735,8 +2810,10 @@ function _statusColor(status) {
   return 'grey';
 }
 
-// Fetch the project's live managed sessions from the registry and paint the bar.
-async function loadSessions() {
+// repopulate(): fetch the project's live managed sessions from the registry and
+// repaint the live-terminals bar (the window-manager repopulate hook). Kept under
+// the historical name loadSessions too (callers + DOMContentLoaded use it).
+async function repopulate() {
   var url = '/api/rnd/term_sessions?project_id=' + encodeURIComponent(PROJECT_ID);
   var data;
   try {
@@ -2764,12 +2841,14 @@ async function loadSessions() {
     };
     seen[s.session_id] = true;
   }
-  // Drop sessions the registry no longer reports (and close any stale window).
+  // Drop sessions the registry no longer reports (and close any stale panel).
   for (var sid in MANAGED) {
-    if (!seen[sid]) { _closeWindow(sid); delete MANAGED[sid]; }
+    if (!seen[sid]) { _closePanel(sid); delete MANAGED[sid]; }
   }
   renderSessionBar();
 }
+// Back-compat alias: the historical name used by callers + DOMContentLoaded.
+var loadSessions = repopulate;
 
 function renderSessionBar() {
   var host = document.getElementById('sessionBtns');
@@ -2779,7 +2858,7 @@ function renderSessionBar() {
   for (var i = 0; i < ids.length; i++) {
     var s = MANAGED[ids[i]];
     var btn = document.createElement('button');
-    btn.className = 'sessbtn' + (WINDOWS[s.session_id] ? ' open' : '');
+    btn.className = 'sessbtn' + (PANELS[s.session_id] ? ' open' : '');
     btn.setAttribute('data-session', s.session_id);
     btn.setAttribute('data-status', s.status);
     var dot = document.createElement('span');
@@ -2789,7 +2868,7 @@ function renderSessionBar() {
     txt.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
     btn.appendChild(txt);
     (function (sid) {
-      btn.onclick = function () { openSessionWindow(sid); };
+      btn.onclick = function () { openPanel(sid); };
     })(s.session_id);
     host.appendChild(btn);
   }
@@ -2797,8 +2876,25 @@ function renderSessionBar() {
   if (hint) hint.style.display = ids.length ? 'none' : '';
 }
 
+// laneTileClick: a lane tile's body was clicked. Ignore clicks that land on an
+// inner interactive control (a report/attach effort card, the inline summary
+// toggle, or a <summary>/<details> disclosure) so those keep their own behavior;
+// otherwise expand this session's inline panel.
+function laneTileClick(ev, sessionId) {
+  var t = ev && ev.target;
+  while (t && t.classList && !t.classList.contains('lane-tile')) {
+    if (t.classList.contains('summary-toggle') ||
+        t.classList.contains('effort') ||
+        t.tagName === 'SUMMARY' || t.tagName === 'A') {
+      return;   // inner control handles its own click
+    }
+    t = t.parentNode;
+  }
+  openPanel(sessionId);
+}
+
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
-// then refresh the bar and open its window. backend defaults to claude.
+// then refresh the bar and open its inline panel. backend defaults to claude.
 async function newTermSession(lane, backend, opts) {
   backend = backend || 'claude';
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
@@ -2850,92 +2946,107 @@ async function newTermSession(lane, backend, opts) {
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
   renderSessionBar();
-  openSessionWindow(sid);
+  openPanel(sid);
   // Re-sync indices/labels from the registry shortly after.
-  setTimeout(loadSessions, 600);
+  setTimeout(repopulate, 600);
 }
 
-// Open (or focus) a stacking terminal window for a managed session.
-function openSessionWindow(sessionId) {
+// openPanel(sessionId): expand (or scroll to) the session's INLINE panel in the
+// #panelStack below the board. A second openPanel on an OPEN, non-minimized panel
+// toggles it back to minimized (collapse-to-tile); an already-minimized panel
+// re-expands. The session keeps running throughout — this only shows/hides the
+// panel body. The panel header carries "– min" (minimizePanel) + "× kill"
+// (killPanel, confirm-gated).
+function openPanel(sessionId) {
   var s = MANAGED[sessionId];
   if (!s) return;
-  if (WINDOWS[sessionId]) { _focusWindow(sessionId); return; }
-  var layer = document.getElementById('windowLayer');
-  if (!layer) return;
+  var existing = PANELS[sessionId];
+  if (existing && existing.el) {
+    // Second click toggles minimize/expand (no kill, no re-mount).
+    if (existing.el.classList.contains('minimized')) {
+      existing.el.classList.remove('minimized');
+      existing.el.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } else {
+      minimizePanel(sessionId);
+    }
+    renderSessionBar();
+    return;
+  }
+  var stack = document.getElementById('panelStack');
+  if (!stack) return;
 
-  var win = document.createElement('div');
-  win.className = 'termwin';
-  win.setAttribute('data-session', sessionId);
-  // Brick-stack: offset each new window so they stack like bricks (2–3 visible).
-  var n = Object.keys(WINDOWS).length;
-  win.style.left = (16 + (n % 3) * 36) + 'px';
-  win.style.top = (16 + n * 30) + 'px';
-  win.style.zIndex = (++_winZ);
+  var panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.setAttribute('data-session', sessionId);
 
   var bar = document.createElement('div');
-  bar.className = 'wintitle';
-  var label = document.createElement('span');
-  label.className = 'wt-label';
-  label.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+  bar.className = 'pbar';
+  var dot = document.createElement('span');
+  dot.className = 'lt ' + _statusColor(s.status);
+  var title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
   var meta = document.createElement('span');
-  meta.className = 'wt-meta';
+  meta.className = 'mt';
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
   var sp = document.createElement('span');
-  sp.className = 'wt-sp';
+  sp.className = 'sp';
   var minBtn = document.createElement('button');
-  minBtn.className = 'winbtn min';
+  minBtn.className = 'panelbtn min';
   minBtn.title = 'Minimize (keeps the session running)';
   minBtn.textContent = '–';
-  minBtn.onclick = function (e) { e.stopPropagation(); _toggleMinimize(sessionId); };
+  minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
   var killBtn = document.createElement('button');
-  killBtn.className = 'winbtn kill';
+  killBtn.className = 'panelbtn kill';
   killBtn.title = 'Kill this session';
   killBtn.textContent = '×';
-  killBtn.onclick = function (e) { e.stopPropagation(); killSession(sessionId); };
-  bar.appendChild(label); bar.appendChild(meta);
+  killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
+  bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
   bar.appendChild(sp); bar.appendChild(minBtn); bar.appendChild(killBtn);
 
-  var body = document.createElement('div');
-  body.className = 'termbody';
+  // Panel inner body. Wave 5 fills this with the split summary + xterm terminal;
+  // for now it carries a ready terminal-host placeholder element.
+  var pin = document.createElement('div');
+  pin.className = 'pin';
+  var host = document.createElement('div');
+  host.className = 'panel-body term-host';
+  host.setAttribute('data-session', sessionId);
+  pin.appendChild(host);
 
-  var grip = document.createElement('div');
-  grip.className = 'winresize';
+  panel.appendChild(bar);
+  panel.appendChild(pin);
+  stack.appendChild(panel);
 
-  win.appendChild(bar); win.appendChild(body); win.appendChild(grip);
-  layer.appendChild(win);
-
-  WINDOWS[sessionId] = {el: win, body: body, term: null, transport: null};
-  win.addEventListener('mousedown', function () { _focusWindow(sessionId); });
-  _wireDrag(win, bar);
-  _wireResize(win, grip);
-  _mountTerminal(sessionId, body);
+  PANELS[sessionId] = {el: panel, body: host, term: null, transport: null};
+  _mountTerminal(sessionId, host);
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
 }
 
-function _focusWindow(sessionId) {
-  var w = WINDOWS[sessionId];
-  if (w && w.el) w.el.style.zIndex = (++_winZ);
+// minimizePanel: collapse the panel back to a header-only strip. The session and
+// its terminal transport keep RUNNING — this only hides the panel body.
+function minimizePanel(sessionId) {
+  var p = PANELS[sessionId];
+  if (!p || !p.el) return;
+  p.el.classList.add('minimized');
+  renderSessionBar();
 }
 
-function _toggleMinimize(sessionId) {
-  var w = WINDOWS[sessionId];
-  if (!w || !w.el) return;
-  // Minimize ONLY hides/collapses the window — it NEVER kills the session.
-  w.el.classList.toggle('minimized');
+// _closePanel: tear down the panel DOM + transport WITHOUT killing the session
+// (used when the registry no longer reports the session, e.g. after a kill).
+function _closePanel(sessionId) {
+  var p = PANELS[sessionId];
+  if (!p) return;
+  try { if (p.transport && p.transport.close) p.transport.close(); } catch (e) {}
+  try { if (p.term && p.term.dispose) p.term.dispose(); } catch (e) {}
+  if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
+  delete PANELS[sessionId];
 }
 
-function _closeWindow(sessionId) {
-  var w = WINDOWS[sessionId];
-  if (!w) return;
-  try { if (w.transport && w.transport.close) w.transport.close(); } catch (e) {}
-  try { if (w.term && w.term.dispose) w.term.dispose(); } catch (e) {}
-  if (w.el && w.el.parentNode) w.el.parentNode.removeChild(w.el);
-  delete WINDOWS[sessionId];
-}
-
-// X = KILL with a confirm gate. Only on YES do we POST term_kill, then close the
-// window + refresh the bar. (Minimize, by contrast, never kills.)
-async function killSession(sessionId) {
+// killPanel: the panel "×" = KILL, gated behind a confirm(). Only on YES do we
+// POST /api/rnd/term_kill, then tear down the panel + refresh the bar. (Minimize,
+// by contrast, never kills — the session keeps running.)
+async function killPanel(sessionId) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
   if (!confirm('Kill the "' + name + '" terminal session? This stops its process.')) return;
@@ -2947,17 +3058,17 @@ async function killSession(sessionId) {
       data = await r.json();
     }
   } catch (e) { alert('[kill error] ' + e.message); }
-  _closeWindow(sessionId);
+  _closePanel(sessionId);
   delete MANAGED[sessionId];
   renderSessionBar();
-  setTimeout(loadSessions, 400);
+  setTimeout(repopulate, 400);
 }
 
-// Mount xterm.js in the window body over the Wave-3 transport. Prefer the
-// hand-rolled WebSocket (term_ws); fall back to SSE-out (term_stream2) + POST-in
-// (term_input2). Bytes from read_since are decoded str sent as UTF-8 text.
+// Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
+// Prefer the hand-rolled WebSocket (term_ws); fall back to SSE-out (term_stream2)
+// + POST-in (term_input2). Bytes from read_since are decoded str sent as UTF-8.
 function _mountTerminal(sessionId, body) {
-  var w = WINDOWS[sessionId];
+  var w = PANELS[sessionId];
   if (!w) return;
   if (!window.Terminal) {
     body.textContent = 'terminal component failed to load';
@@ -3009,46 +3120,8 @@ function _mountTerminal(sessionId, body) {
     ws.onerror = function () { try { ws.close(); } catch (e) {} startSSE(); };
   } catch (e) { startSSE(); }
 }
-
-// Titlebar drag — move the window within the layer (brick repositioning).
-function _wireDrag(win, handle) {
-  handle.addEventListener('mousedown', function (e) {
-    if (e.target.classList && e.target.classList.contains('winbtn')) return;
-    e.preventDefault();
-    var sx = e.clientX, sy = e.clientY;
-    var ox = win.offsetLeft, oy = win.offsetTop;
-    function mv(ev) {
-      win.style.left = Math.max(0, ox + (ev.clientX - sx)) + 'px';
-      win.style.top = Math.max(0, oy + (ev.clientY - sy)) + 'px';
-    }
-    function up() {
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    }
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
-  });
-}
-
-// Resize handle — grow/shrink the window from its bottom-right corner.
-function _wireResize(win, grip) {
-  grip.addEventListener('mousedown', function (e) {
-    e.preventDefault();
-    e.stopPropagation();
-    var sx = e.clientX, sy = e.clientY;
-    var ow = win.offsetWidth, oh = win.offsetHeight;
-    function mv(ev) {
-      win.style.width = Math.max(260, ow + (ev.clientX - sx)) + 'px';
-      win.style.height = Math.max(120, oh + (ev.clientY - sy)) + 'px';
-    }
-    function up() {
-      document.removeEventListener('mousemove', mv);
-      document.removeEventListener('mouseup', up);
-    }
-    document.addEventListener('mousemove', mv);
-    document.addEventListener('mouseup', up);
-  });
-}
+// (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
+// stack in the document flow — Wave 5 adds the terminal-pane vertical resize.)
 """
 
 

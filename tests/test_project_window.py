@@ -244,41 +244,54 @@ def test_linked_tasks_strip_reflects_a_linked_task(gui, tmp_path):
     assert "rndUnlinkTask(" in html
 
 
-# ── Wave 4 (v3) — stacking window-manager UI markup ──────────────────────────
+# ── Wave 4 (v4) — Paradigm-2 inline expanding-panel manager markup ───────────
+# (Replaces the v3 floating stacking-window manager. Same INTENT — status
+# colors, minimize-keeps-running, kill-behind-confirm, repopulate-from-registry,
+# seeded launch — re-encoded for the inline panel-stack host DOM.)
 
 def test_window_manager_markup_present(gui, tmp_path):
-    """The project window carries the Wave-4 session button bar + the stacking
-    window-manager container, the four status-color classes, the minimize
-    control, and the kill-confirm wiring (a confirm() + a term_kill reference)."""
+    """The project window carries the Wave-4 live-terminals bar + the inline
+    PANEL-STACK container, the four status-color classes, the accordion panel
+    manager contract (open/minimize/kill/repopulate), and the kill-confirm wiring
+    (a confirm() + a term_kill reference). NO floating-window markup remains."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("WMProj", str(folder))["entry"]["id"]
     html = gui.render_project_window_html(pid)
-    # Stable container ids.
+    # Stable container ids: the live-terminals bar + the inline panel stack.
     assert "id='sessionBar'" in html
-    assert "id='windowLayer'" in html
-    # All four LOCKED status-color CSS classes.
+    assert "id='panelStack'" in html
+    assert "class='panel-stack'" in html
+    # All four LOCKED status-color CSS classes (the session-bar dot variants).
     for cls in ("sess-dot--green", "sess-dot--amber",
                 "sess-dot--red", "sess-dot--grey"):
         assert cls in html, "missing status class: " + cls
-    # Minimize control + window window-class.
-    assert "termwin" in html
-    assert "minimized" in html
-    assert "_toggleMinimize" in html
+    # Accordion panel manager contract: open / minimize / kill / repopulate.
+    assert "function openPanel" in html
+    assert "function minimizePanel" in html
+    assert "function killPanel" in html
+    assert "async function repopulate" in html
+    # Minimize keeps the session running (no kill on collapse).
+    assert "minimizePanel" in html
     # Kill = X gated behind a confirm() that POSTs term_kill.
-    assert "function killSession" in html
+    assert "function killPanel" in html
     assert "confirm(" in html
     assert "/api/rnd/term_kill" in html
-    # Repopulate-from-registry hook.
-    assert "function loadSessions" in html
+    # Repopulate-from-registry hook (historical loadSessions alias preserved).
+    assert "function loadSessions" not in html  # replaced by repopulate()
+    assert "loadSessions = repopulate" in html
     assert "/api/rnd/term_sessions" in html
     # The per-lane "new session" affordance calls term_start.
     assert "newTermSession(" in html
     assert "/api/rnd/term_start" in html
+    # NO v3 floating-window markup/code remains in the cockpit.
+    assert "termwin" not in html
+    assert "windowLayer" not in html
+    assert "openSessionWindow" not in html
 
 
 def test_window_manager_wires_wave3_transport_endpoints(gui, tmp_path):
-    """Each terminal window mounts xterm.js over the Wave-3 transport: WS first
+    """Each terminal panel mounts xterm.js over the Wave-3 transport: WS first
     (term_ws), SSE-out + POST-in fallback (term_stream2 / term_input2), plus
     term_resize. xterm.js (window.Terminal) is vendored + loaded."""
     folder = tmp_path / "P"
