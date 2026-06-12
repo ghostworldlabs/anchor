@@ -489,13 +489,14 @@ def test_project_window_has_lane_controls_and_log_drawer(gui_env):
     with tempfile.TemporaryDirectory() as td:
         proj = _mkproject(gui, Path(td) / "win", "WindowProj")
         html = gui.render_project_window_html(proj["id"])
-    # Lane-launch controls. Wave 7: the "+ New run" affordances open the
-    # interactive TERMINAL (openTerminal) instead of the old raw-log launch
-    # console. Research carries an engine choice (Claude default + Gemini);
-    # plan/build stay Claude-only (no engine arg).
-    assert "openTerminal('research','claude')" in html
-    assert "openTerminal('plan')" in html
-    assert "openTerminal('build')" in html
+    # Lane-launch controls. v4 Wave 1: the "+ New run" affordances launch the
+    # SEEDED ConPTY path (newTermSession → term_start), NOT the v2 unseeded REPL
+    # (openTerminal / start_terminal) that caused the repeating-prompt bug.
+    # Research carries an engine choice (Claude default + Gemini); plan/build
+    # stay Claude-only (no engine arg).
+    assert "newTermSession('research','claude')" in html
+    assert "newTermSession('plan')" in html
+    assert "newTermSession('build')" in html
     # Terminal substrate hooks: the window mounts the REAL xterm.js terminal via
     # the anchor-term adapter (which still exposes window.AnchorTerm.mount) and
     # starts a session via /api/rnd/start_terminal; the SSE stream URL itself

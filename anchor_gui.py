@@ -1537,14 +1537,18 @@ def _render_kanban_html(folder_path, project_id):
                 f"+ From inbox</span>"
             )
         elif trio_lane == "research":
+            # v3 Wave 1 fix: the lane launch uses the SEEDED ConPTY path
+            # (newTermSession → term_start → terminal_session.start_session),
+            # NOT the v2 unseeded stream-json REPL (openTerminal/start_terminal).
             add = (
-                "<span class='addnew' onclick=\"openTerminal('research','claude')\">"
+                "<span class='addnew' onclick=\"newTermSession('research','claude')\">"
                 "+ New research run (Claude)</span> "
-                "<span class='addnew' onclick=\"openTerminal('research','gemini')\">"
+                "<span class='addnew' onclick=\"newTermSession('research','gemini')\">"
                 "Gemini</span>"
             )
         else:
-            add = (f"<span class='addnew' onclick=\"openTerminal('{trio_lane}')\">"
+            # v3 Wave 1 fix: seeded ConPTY launch (see research-lane note above).
+            add = (f"<span class='addnew' onclick=\"newTermSession('{trio_lane}')\">"
                    f"{html_lib.escape(add_label)}</span>")
         cols.append(
             f"<div class='col' data-col-lane='{html_lib.escape(trio_lane, quote=True)}'>"

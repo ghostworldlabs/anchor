@@ -254,6 +254,10 @@ def test_register_failure_rolls_back_pty_and_worktree(env, monkeypatch):
 def test_attach_reports_dropped_and_truncated(env, monkeypatch):
     """When the bounded buffer drops older scrollback, attach reports it."""
     ts = env["ts"]
+    # This test reasons about the bounded buffer's drop/truncate accounting from
+    # USER writes alone, so disable the v4 lane skill-seed (empty override = bare
+    # shell) to keep the start buffer empty.
+    monkeypatch.setenv("ANCHOR_TERMINAL_SEED", "")
     # Shrink the buffer so a modest write overflows it.
     monkeypatch.setattr(env["pty"], "MAX_BUFFER_CHARS", 16)
     rec = ts.start_session(env["pid"], "plan", backend="claude")

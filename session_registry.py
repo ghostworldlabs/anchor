@@ -10,7 +10,12 @@ reflect true live state.
 A session record models::
 
     {session_id, project_id, lane, backend ("claude"|"gemini"),
-     worktree_path, branch, status, created_at, label}
+     worktree_path, branch, status, created_at, label,
+     seeded, seed_text}
+
+``seeded`` / ``seed_text`` (v4 Wave 1) record whether the session's one-time
+lane skill-seed turn was already written, so the seed is **never re-sent** on a
+subsequent attach/input/read.
 
 Persistence MIRRORS ``rnd_registry.py``:
 
@@ -157,6 +162,11 @@ def _normalize(record: dict) -> dict:
         "status": status,
         "created_at": created_at,
         "label": record.get("label", ""),
+        # v4 Wave 1: one-time lane skill-seed bookkeeping. ``seeded`` is the guard
+        # that keeps the seed turn from ever being re-sent; ``seed_text`` is the
+        # exact text written (for inspection / tests). Default False / "".
+        "seeded": bool(record.get("seeded", False)),
+        "seed_text": record.get("seed_text", "") or "",
     }
 
 
@@ -242,11 +252,11 @@ def update_session(session_id: str, **fields) -> dict:
     """Update allowed fields of a session record. Returns the updated record.
 
     Allowed: ``project_id, lane, backend, worktree_path, branch, status,
-    label``. ``session_id`` and ``created_at`` are immutable. Raises
-    ``KeyError`` if the id is unknown.
+    label, seeded, seed_text``. ``session_id`` and ``created_at`` are immutable.
+    Raises ``KeyError`` if the id is unknown.
     """
     allowed = {"project_id", "lane", "backend", "worktree_path", "branch",
-               "status", "label"}
+               "status", "label", "seeded", "seed_text"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:

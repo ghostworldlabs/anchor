@@ -29,6 +29,7 @@ error dict, never a crash). Stdlib only; the native PTY dep is isolated in
 ``pty_manager`` and selected by ``ANCHOR_PTY_BACKEND`` (``stub`` in all tests).
 """
 
+import os
 import uuid
 
 import pty_manager as _pty
@@ -44,6 +45,73 @@ except Exception:  # pragma: no cover - lanes is always importable, defensive
 
 #: Backends this service accepts (mirrors session_registry.VALID_BACKENDS).
 VALID_BACKENDS = {_reg.BACKEND_CLAUDE, _reg.BACKEND_GEMINI}
+
+
+# ── Per-lane skill-seed map (v4 Wave 1) ──────────────────────────────────────
+#
+# Kill the repeating-prompt bug at the root: a brand-new cockpit terminal session
+# auto-loads its lane's trio skill exactly ONCE, greets ONCE, then behaves like a
+# normal interactive terminal. The seed is a SINGLE opening stdin turn written
+# right after the PTY launches; ``seeded`` is recorded on the session record so it
+# is NEVER re-sent on a later attach/input/read.
+#
+# Lane → skill (both the trio-lane key ``plan`` and the on-disk dir name
+# ``planning`` map to Crucible so either naming convention is tolerated):
+#   research          → researchPrime
+#   plan / planning   → Crucible
+#   build             → Foreman
+LANE_SKILL = {
+    "research": "researchPrime",
+    "plan": "Crucible",
+    "planning": "Crucible",
+    "build": "Foreman",
+}
+
+#: A single global override env var (when set, used verbatim for EVERY lane —
+#: tests assert deterministically against it). Per-lane overrides take the form
+#: ``ANCHOR_SEED_PROMPT_<LANE-UPPER>`` and win over the global one for that lane.
+SEED_ENV_GLOBAL = "ANCHOR_TERMINAL_SEED"
+SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
+
+
+def _default_seed_text(skill):
+    """The one-time opening instruction: load the skill, confirm, greet once.
+
+    A single instruction string that tells the model to load the lane's skill,
+    confirm it is ready, greet EXACTLY once with ``✓ <Skill> loaded — what would
+    you like to do?`` and then wait for the user — nothing more. Ends with a
+    newline so it is delivered as one submitted turn.
+    """
+    return (
+        "Load the {skill} skill now. Once it is loaded and ready, greet me "
+        "EXACTLY once with this single line and nothing else: "
+        "\"✓ {skill} loaded — what would you like to do?\" "
+        "Then stop and wait for my next message. Do not repeat this greeting."
+        "\n"
+    ).format(skill=skill)
+
+
+def seed_for_lane(lane):
+    """Return the one-time seed text for ``lane`` (env-overridable), or ``None``.
+
+    Resolution order (so tests can pin a deterministic value):
+      1. ``ANCHOR_SEED_PROMPT_<LANE-UPPER>`` — per-lane override;
+      2. ``ANCHOR_TERMINAL_SEED`` — single global override (all lanes);
+      3. the built-in :func:`_default_seed_text` for the lane's mapped skill.
+
+    A lane with no mapped skill and no override returns ``None`` (no seed sent) —
+    e.g. the ``grass`` future-ideas lane is a bare shell.
+    """
+    per_lane = os.environ.get(SEED_ENV_LANE_PREFIX + str(lane).upper())
+    if per_lane is not None:
+        return per_lane
+    glob = os.environ.get(SEED_ENV_GLOBAL)
+    if glob is not None:
+        return glob
+    skill = LANE_SKILL.get(lane)
+    if not skill:
+        return None
+    return _default_seed_text(skill)
 
 
 def _valid_lanes():
@@ -100,9 +168,11 @@ def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
-    git worktree for it, launches a **bare interactive** ``backend`` PTY in that
-    worktree (NO auto-seeded skill/prompt — a clean shell), and registers the
-    session as ``RUNNING``. The pty id IS the registry ``session_id``.
+    git worktree for it, launches an interactive ``backend`` PTY in that worktree,
+    registers the session as ``RUNNING``, and — for a lane with a mapped trio
+    skill — writes **exactly one** opening stdin turn that loads the lane's skill
+    and greets once (the v4 Wave-1 seed; recorded as ``seeded=True`` so it is
+    never re-sent). The pty id IS the registry ``session_id``.
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -180,6 +250,26 @@ def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
         raise TerminalSessionError(
             "failed to register session (%s); rolled back PTY + worktree"
             % (exc,)) from exc
+
+    # 5) Seed the lane's skill EXACTLY ONCE. This is the only place the seed is
+    #    ever written — it happens right after a successful launch+register and
+    #    is recorded as ``seeded=True`` on the record, so no later attach/input/
+    #    read can re-send it. A lane with no mapped skill (e.g. ``grass``) gets a
+    #    bare shell (seed_text == None → nothing written). A write/persist failure
+    #    is non-fatal: the session is already live and usable; we simply leave it
+    #    un-seeded rather than tearing down a working terminal.
+    seed_text = seed_for_lane(lane)
+    if seed_text:
+        try:
+            _pty.write(sid, seed_text)
+        except Exception:
+            seed_text = None  # seed not delivered → don't claim it was
+        if seed_text:
+            try:
+                record = _reg.update_session(
+                    sid, seeded=True, seed_text=seed_text)
+            except Exception:
+                pass
     return record
 
 
