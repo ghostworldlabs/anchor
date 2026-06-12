@@ -180,3 +180,48 @@ xterm.js text; binary control-seq framing is a possible Wave-4 refinement.
 **Verdict: GO.**
 
 ---
+
+## Wave 4 — Stacking window-manager UI — GO (2026-06-11)
+
+**EXECUTE.** Front-end in `anchor_gui.py` (`render_project_window_html` CSS/HTML +
+`_PROJECT_WINDOW_JS` RAW string): a status-colored **session button bar**
+(`#sessionBar`, one `.sessbtn` per live registry session, `.sess-dot--green/
+--amber/--red/--grey` driven by `_statusColor()` — exactly running=green,
+needs-attention/done=amber, failed=red, idle=grey), a **stacking window manager**
+(`#windowLayer`/`.termwin`: brick-offset stacking, draggable titlebar, resize
+handle, minimize that only collapses — never kills, X = `killSession` with an
+"Are you sure?" `confirm(...)` gating `POST term_kill`). Each window mounts xterm.js
+over `term_ws?session=&token=` (SSE `term_stream2` fallback), input→`term_input2`,
+resize→`term_resize`, all token-aware (`?token=` from localStorage; token never
+baked into served HTML). New read-only `GET /api/rnd/term_sessions?project_id=`
+returns a safe projection (NO `worktree_path`/`branch`/`project_id`) for the
+repopulate-on-load hook (`loadSessions` on DOMContentLoaded). The v2 console
+drawer is left intact.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **455 passed, 1 skipped**.
+Independently verified: `render_project_window_html(<real pid>)` (48 KB) and
+`generate_html` (202 KB) both have **0 leaked `{{`/`}}`**; all Wave-4 ids/classes/
+endpoint refs present; `git worktree list` = main only.
+
+**REVIEW (2 independent adversarial reviewers).** Reviewer A (UI/plan-fidelity):
+**GO**, no findings — status mapping un-inverted, kill-confirm un-bypassable,
+minimize keeps the session running, transport/token wiring safe, repopulate works,
+no scope creep, v2 drawer intact. Reviewer B (endpoint security/XSS/braces):
+**GO-WITH-NITS** — verified 0 brace leaks on served output, `term_sessions` strips
+`worktree_path` (live-probed), no reachable unescaped `innerHTML` sink (bar/titlebar
+use `textContent`/`_esc`), token never in HTML, all mutators POST-authed.
+
+**FIX (bounded, 1 iter).** (1) Added an XSS-regression test: a stub session with
+label `<img src=x onerror=alert(1)>` is served inert (application/json) and never
+embedded as a raw HTML sink in the server-rendered window (guards a future
+`innerHTML` regression). (2) Added `X-Content-Type-Options: nosniff` to all JSON
+responses (`_send_json`). Re-gate: **455 passed, 1 skipped**.
+
+**Seam for Wave 5/6.** `MANAGED` map + `_statusColor()` reusable for the Wave-5
+thin-row status dots; `newTermSession(lane, backend)` is the launch path Wave 6
+enriches with launch-from-summary seeding; the window-manager surface is
+independent of the v2 console drawer so Wave-6 inline summaries coexist.
+
+**Verdict: GO.**
+
+---

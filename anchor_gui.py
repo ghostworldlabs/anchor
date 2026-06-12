@@ -1620,6 +1620,57 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-running{color:var(--success);font-size:11px}"
         ".rnd-dim{color:var(--text-dim)}"
         "h2{font-size:14px;margin:18px 0 6px}"
+        # ── Wave 4: stacking window-manager UI (session bar + windows) ──
+        # NOTE: this is a PLAIN (non-f) string literal — single braces are FINE.
+        ".sessbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
+        "padding:10px 16px;border-top:1px solid var(--border);"
+        "background:var(--surface2)}"
+        ".sessbar .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-right:2px}"
+        ".sessbar .hint{font-size:11px;color:var(--text-dim);margin-left:auto}"
+        ".sessbtn{font-size:11.5px;padding:4px 11px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text);cursor:pointer;display:inline-flex;align-items:center;"
+        "gap:6px}"
+        ".sessbtn:hover{border-color:var(--accent)}"
+        ".sessbtn.open{border-color:var(--accent);background:rgba(108,156,252,.1)}"
+        ".sess-dot{width:8px;height:8px;border-radius:50%;display:inline-block;"
+        "background:var(--text-dim)}"
+        ".sess-dot--green{background:#4ade80}"
+        ".sess-dot--amber{background:#fbbf24}"
+        ".sess-dot--red{background:#f87171}"
+        ".sess-dot--grey{background:#8b8f9a}"
+        ".newsess{font-size:11px;padding:3px 10px;border-radius:7px;"
+        "border:1px dashed var(--border);background:transparent;"
+        "color:var(--accent);cursor:pointer}"
+        ".newsess:hover{border-color:var(--accent)}"
+        # The window LAYER is a positioned canvas the brick-stacked windows live in.
+        ".winlayer{position:relative;min-height:40px;padding:0 16px 16px}"
+        ".termwin{position:absolute;width:520px;height:340px;background:#0c0e14;"
+        "border:1px solid var(--border);border-radius:10px;overflow:hidden;"
+        "box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;flex-direction:column;"
+        "min-width:260px;min-height:120px}"
+        ".termwin.minimized{height:34px!important;min-height:0;resize:none}"
+        ".termwin.minimized .termbody,.termwin.minimized .winresize{display:none}"
+        ".termwin .wintitle{display:flex;align-items:center;gap:8px;"
+        "padding:6px 10px;background:var(--surface2);"
+        "border-bottom:1px solid var(--border);cursor:move;user-select:none;"
+        "font-size:12px}"
+        ".termwin .wintitle .wt-label{font-weight:600;white-space:nowrap;"
+        "overflow:hidden;text-overflow:ellipsis}"
+        ".termwin .wintitle .wt-meta{color:var(--text-dim);font-size:11px}"
+        ".termwin .wintitle .wt-sp{margin-left:auto}"
+        ".winbtn{width:20px;height:20px;line-height:18px;text-align:center;"
+        "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
+        ".winbtn:hover{color:var(--text);border-color:var(--accent)}"
+        ".winbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        ".termwin .termbody{flex:1;overflow:hidden;padding:4px}"
+        ".termwin .winresize{position:absolute;right:0;bottom:0;width:16px;"
+        "height:16px;cursor:nwse-resize}"
+        ".termwin .winresize::after{content:'';position:absolute;right:3px;"
+        "bottom:3px;width:7px;height:7px;border-right:2px solid var(--text-dim);"
+        "border-bottom:2px solid var(--text-dim)}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -1645,6 +1696,18 @@ def render_project_window_html(project_id: str) -> str:
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
         # ── Kanban board ──
         f"{kanban}"
+        # ── Wave 4: session button bar + stacking window manager (ConPTY) ──
+        # The bar is repopulated on load from /api/rnd/term_sessions; each button
+        # is status-colored and opens/attaches that session's terminal window.
+        "<div class='sessbar' id='sessionBar'>"
+        "<span class='lbl'>Live terminals</span>"
+        "<span id='sessionBtns'></span>"
+        "<button class='newsess' onclick=\"newTermSession('research')\">+ research</button>"
+        "<button class='newsess' onclick=\"newTermSession('plan')\">+ plan</button>"
+        "<button class='newsess' onclick=\"newTermSession('build')\">+ build</button>"
+        "<span class='hint' id='sessionBarHint'>no live terminal sessions</span>"
+        "</div>"
+        "<div class='winlayer' id='windowLayer'></div>"
         # ── Console drawer (session tabs + attached log + ask + stop) ──
         "<div class='console' id='console'>"
         "<div class='ctabs'><span class='lbl'>Sessions</span>"
@@ -1724,6 +1787,9 @@ window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   adoptLiveEfforts();
   _startPolling();
+  // Wave 4: repopulate the ConPTY session button bar from the registry so
+  // reopening the dashboard reflects live managed sessions.
+  loadSessions();
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -2159,6 +2225,329 @@ function rndUnlinkTask(el) {
   if (!confirm('Unlink this task from the project?')) return;
   // An empty project_id unlinks the matching task (backend contract).
   _lifecycle('/api/rnd/link_task', {text: text, project_id: ''});
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Wave 4 — stacking window-manager UI for ConPTY terminal sessions.
+//
+// A top bar of terse, STATUS-COLORED buttons (one per live managed session,
+// labeled "<lane> <index>"); clicking opens/attaches that session's terminal in
+// a draggable / resizable / minimizable WINDOW that stacks like a brick. Minimize
+// keeps the session/process RUNNING (it only hides the window). The X control is
+// KILL — gated behind a confirm() — which POSTs /api/rnd/term_kill, removes the
+// window, and refreshes the bar. xterm.js is mounted in each window over the
+// Wave-3 transport (WS first, SSE-out + POST-in fallback). All POSTs are
+// token-aware via _postJson; the WS/SSE URLs carry ?token= from localStorage.
+//
+// This is a NEW surface; it does NOT touch the v2 console drawer (openTerminal /
+// launchLane) above.
+// ════════════════════════════════════════════════════════════════════════════
+
+// MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
+var MANAGED = {};
+// WINDOWS: session_id -> {el, term, transport, body} for an OPEN window.
+var WINDOWS = {};
+var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" labels
+var _winZ = 30;           // z-index cursor so a focused window comes forward
+
+// Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E):
+//   running              -> green  (working; ignore)
+//   needs-attention/done -> amber  (come look)
+//   failed               -> red
+//   idle / unknown       -> grey
+function _statusColor(status) {
+  if (status === 'running') return 'green';
+  if (status === 'needs-attention' || status === 'done') return 'amber';
+  if (status === 'failed') return 'red';
+  return 'grey';
+}
+
+// Fetch the project's live managed sessions from the registry and paint the bar.
+async function loadSessions() {
+  var url = '/api/rnd/term_sessions?project_id=' + encodeURIComponent(PROJECT_ID);
+  var data;
+  try {
+    var r = await fetch(url);
+    data = await r.json();
+  } catch (e) { return; }
+  if (!data || !data.ok) return;
+  var sessions = data.sessions || [];
+  // Rebuild the MANAGED map, preserving a stable per-lane index per session.
+  var seen = {};
+  _laneCounters = {};
+  sessions.sort(function (a, b) {
+    return (a.created_at || 0) - (b.created_at || 0);
+  });
+  for (var i = 0; i < sessions.length; i++) {
+    var s = sessions[i];
+    if (!s.session_id) continue;
+    var lane = s.lane || 'session';
+    _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
+    var prev = MANAGED[s.session_id] || {};
+    MANAGED[s.session_id] = {
+      session_id: s.session_id, lane: lane, backend: s.backend || '',
+      status: s.status || 'idle', label: s.label || '',
+      idx: prev.idx || _laneCounters[lane]
+    };
+    seen[s.session_id] = true;
+  }
+  // Drop sessions the registry no longer reports (and close any stale window).
+  for (var sid in MANAGED) {
+    if (!seen[sid]) { _closeWindow(sid); delete MANAGED[sid]; }
+  }
+  renderSessionBar();
+}
+
+function renderSessionBar() {
+  var host = document.getElementById('sessionBtns');
+  if (!host) return;
+  host.innerHTML = '';
+  var ids = Object.keys(MANAGED);
+  for (var i = 0; i < ids.length; i++) {
+    var s = MANAGED[ids[i]];
+    var btn = document.createElement('button');
+    btn.className = 'sessbtn' + (WINDOWS[s.session_id] ? ' open' : '');
+    btn.setAttribute('data-session', s.session_id);
+    btn.setAttribute('data-status', s.status);
+    var dot = document.createElement('span');
+    dot.className = 'sess-dot sess-dot--' + _statusColor(s.status);
+    btn.appendChild(dot);
+    var txt = document.createElement('span');
+    txt.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+    btn.appendChild(txt);
+    (function (sid) {
+      btn.onclick = function () { openSessionWindow(sid); };
+    })(s.session_id);
+    host.appendChild(btn);
+  }
+  var hint = document.getElementById('sessionBarHint');
+  if (hint) hint.style.display = ids.length ? 'none' : '';
+}
+
+// Start a brand-new managed terminal session for a lane (Wave-3 term_start),
+// then refresh the bar and open its window. backend defaults to claude.
+async function newTermSession(lane, backend) {
+  backend = backend || 'claude';
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_start', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_start', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[terminal start error] ' + e.message); return; }
+  if (!data.ok || !data.session) {
+    alert('[terminal refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || backend,
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openSessionWindow(sid);
+  // Re-sync indices/labels from the registry shortly after.
+  setTimeout(loadSessions, 600);
+}
+
+// Open (or focus) a stacking terminal window for a managed session.
+function openSessionWindow(sessionId) {
+  var s = MANAGED[sessionId];
+  if (!s) return;
+  if (WINDOWS[sessionId]) { _focusWindow(sessionId); return; }
+  var layer = document.getElementById('windowLayer');
+  if (!layer) return;
+
+  var win = document.createElement('div');
+  win.className = 'termwin';
+  win.setAttribute('data-session', sessionId);
+  // Brick-stack: offset each new window so they stack like bricks (2–3 visible).
+  var n = Object.keys(WINDOWS).length;
+  win.style.left = (16 + (n % 3) * 36) + 'px';
+  win.style.top = (16 + n * 30) + 'px';
+  win.style.zIndex = (++_winZ);
+
+  var bar = document.createElement('div');
+  bar.className = 'wintitle';
+  var label = document.createElement('span');
+  label.className = 'wt-label';
+  label.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+  var meta = document.createElement('span');
+  meta.className = 'wt-meta';
+  meta.textContent = s.backend ? ('· ' + s.backend) : '';
+  var sp = document.createElement('span');
+  sp.className = 'wt-sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'winbtn min';
+  minBtn.title = 'Minimize (keeps the session running)';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); _toggleMinimize(sessionId); };
+  var killBtn = document.createElement('button');
+  killBtn.className = 'winbtn kill';
+  killBtn.title = 'Kill this session';
+  killBtn.textContent = '×';
+  killBtn.onclick = function (e) { e.stopPropagation(); killSession(sessionId); };
+  bar.appendChild(label); bar.appendChild(meta);
+  bar.appendChild(sp); bar.appendChild(minBtn); bar.appendChild(killBtn);
+
+  var body = document.createElement('div');
+  body.className = 'termbody';
+
+  var grip = document.createElement('div');
+  grip.className = 'winresize';
+
+  win.appendChild(bar); win.appendChild(body); win.appendChild(grip);
+  layer.appendChild(win);
+
+  WINDOWS[sessionId] = {el: win, body: body, term: null, transport: null};
+  win.addEventListener('mousedown', function () { _focusWindow(sessionId); });
+  _wireDrag(win, bar);
+  _wireResize(win, grip);
+  _mountTerminal(sessionId, body);
+  renderSessionBar();
+}
+
+function _focusWindow(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (w && w.el) w.el.style.zIndex = (++_winZ);
+}
+
+function _toggleMinimize(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (!w || !w.el) return;
+  // Minimize ONLY hides/collapses the window — it NEVER kills the session.
+  w.el.classList.toggle('minimized');
+}
+
+function _closeWindow(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (!w) return;
+  try { if (w.transport && w.transport.close) w.transport.close(); } catch (e) {}
+  try { if (w.term && w.term.dispose) w.term.dispose(); } catch (e) {}
+  if (w.el && w.el.parentNode) w.el.parentNode.removeChild(w.el);
+  delete WINDOWS[sessionId];
+}
+
+// X = KILL with a confirm gate. Only on YES do we POST term_kill, then close the
+// window + refresh the bar. (Minimize, by contrast, never kills.)
+async function killSession(sessionId) {
+  var s = MANAGED[sessionId];
+  var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
+  if (!confirm('Kill the "' + name + '" terminal session? This stops its process.')) return;
+  try {
+    var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_kill', {session: sessionId});
+      data = await r.json();
+    }
+  } catch (e) { alert('[kill error] ' + e.message); }
+  _closeWindow(sessionId);
+  delete MANAGED[sessionId];
+  renderSessionBar();
+  setTimeout(loadSessions, 400);
+}
+
+// Mount xterm.js in the window body over the Wave-3 transport. Prefer the
+// hand-rolled WebSocket (term_ws); fall back to SSE-out (term_stream2) + POST-in
+// (term_input2). Bytes from read_since are decoded str sent as UTF-8 text.
+function _mountTerminal(sessionId, body) {
+  var w = WINDOWS[sessionId];
+  if (!w) return;
+  if (!window.Terminal) {
+    body.textContent = 'terminal component failed to load';
+    return;
+  }
+  var _termTheme = {background: '#0c0e14'};
+  var term = new window.Terminal({convertEol: true, fontSize: 12, theme: _termTheme});
+  term.open(body);
+  w.term = term;
+  var tok = _anchorToken();
+  var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
+
+  // Outbound user keystrokes → term_input2 (works for BOTH transports; the WS
+  // also accepts frames, but routing input through the POST keeps one path).
+  term.onData(function (d) {
+    _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
+  });
+  // Resize → term_resize (best-effort, token-aware).
+  term.onResize(function (sz) {
+    _postJson('/api/rnd/term_resize',
+              {session: sessionId, cols: sz.cols, rows: sz.rows});
+  });
+
+  // Transport: try WebSocket first; on error fall back to the SSE stream.
+  var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+  var wsUrl = wsProto + '//' + location.host +
+              '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
+  var sseStarted = false;
+  function startSSE() {
+    if (sseStarted) return;
+    sseStarted = true;
+    var sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
+    var es = new EventSource(sseUrl);
+    w.transport = es;
+    es.addEventListener('output', function (ev) {
+      try { var p = JSON.parse(ev.data); if (p.text) term.write(p.text); } catch (e) {}
+    });
+    es.addEventListener('done', function () { try { es.close(); } catch (e) {} });
+    es.onerror = function () { /* bounded server stream; let it close */ };
+  }
+  try {
+    var ws = new WebSocket(wsUrl);
+    w.transport = ws;
+    ws.onmessage = function (ev) { term.write(ev.data); };
+    ws.onclose = function () {
+      // If the WS never carried data (e.g. upgrade unsupported), use SSE.
+      if (!sseStarted) startSSE();
+    };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} startSSE(); };
+  } catch (e) { startSSE(); }
+}
+
+// Titlebar drag — move the window within the layer (brick repositioning).
+function _wireDrag(win, handle) {
+  handle.addEventListener('mousedown', function (e) {
+    if (e.target.classList && e.target.classList.contains('winbtn')) return;
+    e.preventDefault();
+    var sx = e.clientX, sy = e.clientY;
+    var ox = win.offsetLeft, oy = win.offsetTop;
+    function mv(ev) {
+      win.style.left = Math.max(0, ox + (ev.clientX - sx)) + 'px';
+      win.style.top = Math.max(0, oy + (ev.clientY - sy)) + 'px';
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+// Resize handle — grow/shrink the window from its bottom-right corner.
+function _wireResize(win, grip) {
+  grip.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var sx = e.clientX, sy = e.clientY;
+    var ow = win.offsetWidth, oh = win.offsetHeight;
+    function mv(ev) {
+      win.style.width = Math.max(260, ow + (ev.clientX - sx)) + 'px';
+      win.style.height = Math.max(120, oh + (ev.clientY - sy)) + 'px';
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
 }
 """
 
@@ -4550,6 +4939,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -5167,6 +5557,32 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
+            elif self.path.startswith("/api/rnd/term_sessions"):
+                # Read-only (Wave 4): live managed terminal sessions for a
+                # project — the repopulate-from-registry hook the window-manager
+                # button bar paints from on load. Returns a SAFE projection of
+                # each registry record (NO absolute worktree_path — the UI has
+                # no need for it). Consistent with /api/rnd/projects (GET, no
+                # mutation, no auth gate).
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip()
+                try:
+                    recs = _termsess.list_sessions(project_id=pid or None)
+                except Exception:
+                    recs = []
+                safe = []
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    safe.append({
+                        "session_id": r.get("session_id"),
+                        "lane": r.get("lane", ""),
+                        "backend": r.get("backend", ""),
+                        "status": r.get("status", ""),
+                        "label": r.get("label", ""),
+                        "created_at": r.get("created_at"),
+                    })
+                self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
