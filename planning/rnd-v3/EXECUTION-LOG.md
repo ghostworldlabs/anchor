@@ -371,3 +371,49 @@ session" seeds prior-stage outputs via `seed_session`.
 **Verdict: GO** (after the BLOCKER fix).
 
 ---
+
+## Wave 8 — Runnable Anchor deliverable (ephemeral preview) — GO (2026-06-12)
+
+**EXECUTE.** `anchor_gui.py` is pinned as the Anchor deliverable
+(`ensure_anchor_deliverable` → `deliverables.pin_deliverable`, idempotent, now
+pin-if-absent). New `preview_server.py`: `start_preview` picks an OS-assigned free
+port (hard-guarded `!= 8777`, belt-and-suspenders), launches `python anchor_gui.py
+--port <port> --no-browser` with an ISOLATED env (temp `ANCHOR_DATA_DIR`, loopback
+bind, token stripped) from the live checkout, health-checks `http://127.0.0.1:<port>/`
+(bounded), returns the URL; `stop_preview` tree-kills (`taskkill /T /F`) + scrubs the
+temp dir; `list_previews`/`reap_orphans` reconcile dead previews on restart;
+persisted to `.anchor/previews.json`. Auth-gated `POST /api/rnd/preview_start`/
+`preview_stop`; read-only `GET /api/rnd/previews` (safe projection, no abs paths).
+Deliverables-lane UI gets Run (opens the preview URL in a new tab) + Stop.
+
+**GATE (orchestrator-run).** First full-suite run was **RED** — the sub-agent's
+subset missed it: the new test embedded a `token="tok-prev"` literal that the
+distro no-secrets scan flags as `auth-token-value` (5 `test_distro_scan` failures).
+Orchestrator fixed it (swap to the allowlisted placeholder `tok-123`, as the Wave-3
+tests do). Re-gate: **502 passed, 1 skipped**. Live `:8777` service verified
+**Running and untouched** (PID unchanged); **0 orphan preview processes** after the
+run.
+
+**REVIEW (2 independent adversarial reviewers).** Reviewer A (safety): **GO** —
+no path can bind/disturb 8777 (OS-ephemeral bind + double `!=8777` re-assert +
+hardcoded `--port` argv), data isolated to a temp dir, real tree-kill reap,
+auth-before-spawn, bounded health-check, graceful TOCTOU handling. Reviewer B
+(wiring): **GO-WITH-NITS** — idempotent pinning, deliverable shown, Run/Stop
+token-aware + XSS-safe, 0 brace leaks, persisted structure-only registry.
+
+**FIX (bounded, 1 iter).** (1) `ensure_anchor_deliverable` now pins ONLY IF ABSENT
+(no per-render write churn under `WRITE_LOCK`). (2) `GET /api/rnd/previews` projects
+to a safe subset omitting absolute `data_dir`/`folder_path` (consistent with
+`term_sessions`), with a test. (3) Documented the live-checkout-by-design decision
+(data+port isolation is the safety contract; the deliverable IS the in-repo
+`anchor_gui.py`). Re-gate: **502 passed, 1 skipped**; live service still untouched,
+0 orphans.
+
+**Seam for Wave 10.** `preview_server.py` is pure stdlib (no distro-scan exception
+needed). Healthcheck v3 walk can use `pick_free_port` (never-8777) + `reap_orphans`
+with an injected dead-pid record to avoid spawning at the 5 AM check. CLI mirror
+candidates: `rnd preview-start/-stop/-list`.
+
+**Verdict: GO.**
+
+---

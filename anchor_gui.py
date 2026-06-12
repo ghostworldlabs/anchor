@@ -435,6 +435,7 @@ import anchor_marker as _marker
 import rnd_terminal as _term
 import terminal_session as _termsess
 import handoff as _handoff
+import preview_server as _preview
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -1679,6 +1680,14 @@ def render_project_window_html(project_id: str) -> str:
     status = render_status_line_html(project_id)
     rollup = render_cost_rollup_html(project_id, folder_raw)
     tasks_html = render_project_tasks_html(project_id)
+    # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
+    # pin it as the runnable deliverable so the Deliverables lane shows it with a
+    # Run action. Idempotent (content-addressed); best-effort.
+    try:
+        if (Path(folder_raw) / _preview.DEFAULT_TARGET).is_file():
+            ensure_anchor_deliverable(folder_raw, project_id)
+    except Exception:
+        pass
     deliverables_html = render_deliverables_html(project_id, folder_raw)
     pid_js = json.dumps(project_id)
     return (
@@ -2395,6 +2404,63 @@ async function stopAttached() {
   renderTabs();
 }
 
+// ── Runnable Anchor deliverable — ephemeral preview (v3 Wave 8) ─────────────
+// Run starts a preview server on a free port (≠8777) in an isolated temp data
+// dir, then opens the returned URL in a NEW TAB. Stop reaps it. Token-aware.
+async function runDeliverable(deliverable, btn) {
+  var li = btn.closest('.deliv-pinned');
+  var msg = li ? li.querySelector('.deliv-msg') : null;
+  if (msg) msg.textContent = 'starting…';
+  btn.disabled = true;
+  var payload = {project_id: PROJECT_ID, deliverable: deliverable};
+  try {
+    var r = await _postJson('/api/rnd/preview_start', payload);
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/preview_start', payload);
+      data = await r.json();
+    }
+    if (data && data.ok && data.url) {
+      if (li) li.setAttribute('data-preview-id', data.preview_id || '');
+      if (msg) msg.textContent = 'running on port ' + (data.port || '?');
+      var stopBtn = li ? li.querySelector('.deliv-stop') : null;
+      if (stopBtn) stopBtn.style.display = '';
+      btn.style.display = 'none';
+      window.open(data.url, '_blank');
+    } else {
+      if (msg) msg.textContent = 'failed: ' + ((data && data.error) || 'unknown');
+      btn.disabled = false;
+    }
+  } catch (e) {
+    if (msg) msg.textContent = 'error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+async function stopDeliverable(btn) {
+  var li = btn.closest('.deliv-pinned');
+  var pid = li ? li.getAttribute('data-preview-id') : '';
+  var msg = li ? li.querySelector('.deliv-msg') : null;
+  if (!pid) { if (msg) msg.textContent = 'no running preview'; return; }
+  btn.disabled = true;
+  try {
+    var r = await _postJson('/api/rnd/preview_stop', {preview_id: pid});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/preview_stop', {preview_id: pid});
+      data = await r.json();
+    }
+    if (msg) msg.textContent = 'stopped';
+    btn.style.display = 'none';
+    if (li) li.removeAttribute('data-preview-id');
+    var runBtn = li ? li.querySelector('.deliv-run') : null;
+    if (runBtn) { runBtn.style.display = ''; runBtn.disabled = false; }
+  } catch (e) {
+    if (msg) msg.textContent = 'stop error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
 function openReport(href) { window.open(href, '_blank'); }
 
 // Open a session's cached, validated summary page (Wave 6 back-compat: direct
@@ -3055,35 +3121,107 @@ def render_project_tasks_html(project_id: str) -> str:
             + "".join(rows) + "</ul>")
 
 
-def render_deliverables_html(project_id: str, folder_path: str) -> str:
-    """Render the project's deliverable status records (Wave 9 AC1).
+def ensure_anchor_deliverable(folder_path: str, project_id: str):
+    """Pin ``anchor_gui.py`` as the project's runnable Anchor deliverable (Wave 8).
 
-    Read-only: shows each deliverable's type + last run status (the dashboard
-    surfacing of the status records ``deliverables.run_deliverable`` persists).
+    Idempotent: ``deliverables.pin_deliverable`` is content-addressed by path, so
+    pinning the same file twice produces no duplicate. ``anchor_gui.py`` is a
+    long-running SERVER (not a run-to-completion program), so its run is the
+    ephemeral preview (``preview_server``), not the program contract — it is
+    pinned with type ``program`` only so it surfaces in the Deliverables lane.
+    Best-effort: a pin failure never breaks the window render.
+
+    Pin-if-absent: this runs on EVERY ``GET /project/<id>`` render, and
+    ``pin_deliverable`` → ``record_effort`` unconditionally rewrites the pointer
+    JSON under ``WRITE_LOCK``. To avoid needless disk-write/lock churn on this
+    hot path, skip the pin entirely when ``anchor_gui.py`` is already pinned for
+    this project; the first render still pins. The pinned content/id is
+    unchanged (content-addressed by path).
     """
+    try:
+        target = _preview.DEFAULT_TARGET
+        for rec in _deliv.list_pinned_deliverables(folder_path, project_id):
+            if (rec.get("artifact_path") or "") == target:
+                return rec  # already pinned — no write, no lock contention
+        return _deliv.pin_deliverable(
+            folder_path, project_id, target,
+            name=target, dtype=_deliv.TYPE_PROGRAM,
+            description="Anchor dashboard web app (run as an ephemeral preview)")
+    except Exception:
+        return None
+
+
+def render_deliverables_html(project_id: str, folder_path: str) -> str:
+    """Render the project's deliverables: pinned deliverables (with Run/Stop) +
+    deliverable run-status records (Wave 9 AC1 + v3 Wave 8 ephemeral preview).
+
+    The pinned ``anchor_gui.py`` deliverable gets a **Run** action that starts an
+    ephemeral preview on a free port (≠8777) and opens it in a new tab, plus a
+    **Stop** that reaps it — token-aware via the project-window JS.
+    """
+    pinned = []
+    try:
+        pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
+    except Exception:
+        pinned = []
     try:
         records = _deliv.list_status(folder_path, project_id)
     except Exception:
         records = []
-    if not records:
-        return ("<h2>Deliverables</h2><p style='color:#8a90a2'>"
-                "No deliverable runs recorded yet.</p>")
-    colors = {_deliv.STATUS_SUCCESS: "#4caf78",
-              _deliv.STATUS_FAILED: "#e06c75",
-              _deliv.STATUS_TIMED_OUT: "#d6a35c"}
-    rows = []
-    for r in records:
-        status = r.get("status", "")
-        color = colors.get(status, "#8a90a2")
-        name = html_lib.escape(r.get("name", "") or r.get("deliverable_id", ""))
-        dtype = html_lib.escape(r.get("type", ""))
-        rows.append(
-            f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
-            f"[{dtype}]</span> — <span style='color:{color}'>"
-            f"{html_lib.escape(status)}</span></li>"
-        )
-    return ("<h2>Deliverables</h2><ul style='list-style:none;padding:0'>"
-            + "".join(rows) + "</ul>")
+
+    out = ["<h2>Deliverables</h2>"]
+
+    # Pinned deliverables with Run/Stop (the runnable Anchor deliverable).
+    if pinned:
+        items = []
+        for r in pinned:
+            name = html_lib.escape(
+                r.get("title") or r.get("artifact_path") or "")
+            rel = r.get("artifact_path", "") or ""
+            dtype = html_lib.escape(r.get("deliverable_type", "") or "")
+            rel_attr = html_lib.escape(rel, quote=True)
+            items.append(
+                f"<li class='deliv-pinned' data-deliv=\"{rel_attr}\">"
+                f"<span class='deliv-name'>{name}</span> "
+                f"<span style='color:#8a90a2;font-size:12px'>[{dtype}]</span> "
+                f"<button class='deliv-run' "
+                f"onclick=\"runDeliverable('{rel_attr}', this)\">Run</button> "
+                f"<button class='deliv-stop' "
+                f"onclick=\"stopDeliverable(this)\" style='display:none'>"
+                f"Stop</button> "
+                f"<span class='deliv-msg' style='color:#8a90a2;"
+                f"font-size:12px'></span></li>"
+            )
+        out.append("<h3 style='margin:8px 0 4px;font-size:14px;color:#aeb4c2'>"
+                   "Pinned</h3>")
+        out.append("<ul style='list-style:none;padding:0'>"
+                   + "".join(items) + "</ul>")
+
+    # Run-status records (read-only history).
+    if records:
+        colors = {_deliv.STATUS_SUCCESS: "#4caf78",
+                  _deliv.STATUS_FAILED: "#e06c75",
+                  _deliv.STATUS_TIMED_OUT: "#d6a35c"}
+        rows = []
+        for r in records:
+            status = r.get("status", "")
+            color = colors.get(status, "#8a90a2")
+            name = html_lib.escape(
+                r.get("name", "") or r.get("deliverable_id", ""))
+            dtype = html_lib.escape(r.get("type", ""))
+            rows.append(
+                f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
+                f"[{dtype}]</span> — <span style='color:{color}'>"
+                f"{html_lib.escape(status)}</span></li>"
+            )
+        out.append("<h3 style='margin:8px 0 4px;font-size:14px;color:#aeb4c2'>"
+                   "Run history</h3>")
+        out.append("<ul style='list-style:none;padding:0'>"
+                   + "".join(rows) + "</ul>")
+
+    if not pinned and not records:
+        out.append("<p style='color:#8a90a2'>No deliverables yet.</p>")
+    return "".join(out)
 
 
 # ── Change operations ──────────────────────────────────────────────────
@@ -6142,6 +6280,32 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         if not pid or r.get("project_id") == pid]
                 jobs.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
                 self._send_json({"ok": True, "jobs": jobs})
+            elif self.path.startswith("/api/rnd/previews"):
+                # Read-only: list ephemeral deliverable previews for a project
+                # (reconciles dead previews → stopped so the UI repopulates
+                # truthfully on reconnect). Wave 8. Returns a SAFE projection of
+                # each registry record — NO absolute filesystem paths
+                # (data_dir / folder_path); the UI only needs the id/url/port/
+                # status. Consistent with the term_sessions projection (which
+                # strips worktree_path). The persisted record (.anchor/
+                # previews.json) keeps the full fields for reaping.
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip() or None
+                safe = []
+                for r in _preview.list_previews(pid):
+                    if not isinstance(r, dict):
+                        continue
+                    safe.append({
+                        "preview_id": r.get("preview_id"),
+                        "project_id": r.get("project_id"),
+                        "target": r.get("target", ""),
+                        "port": r.get("port"),
+                        "url": r.get("url", ""),
+                        "status": r.get("status", ""),
+                        "started_at": r.get("started_at"),
+                        "stopped_at": r.get("stopped_at"),
+                    })
+                self._send_json({"ok": True, "previews": safe})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -6593,6 +6757,45 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "job_id": job_id,
                     "status": (out or {}).get("status"),
                 })
+
+        # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
+        elif self.path == "/api/rnd/preview_start":
+            # Spin up an EPHEMERAL preview of the project's deliverable web app
+            # (e.g. anchor_gui.py) on an OS-assigned free port (NEVER 8777) in an
+            # isolated TEMP ANCHOR_DATA_DIR — so it can never bind or disturb the
+            # live :8777 service. Auth is enforced by the middleware above.
+            pid = (body.get("project_id", "") or "").strip()
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                target = (body.get("deliverable") or body.get("target")
+                          or _preview.DEFAULT_TARGET)
+                res = _preview.start_preview(folder, pid, target=target)
+                if res.get("ok"):
+                    self._send_json({"ok": True, "url": res.get("url"),
+                                     "preview_id": res.get("preview_id"),
+                                     "port": res.get("port"),
+                                     "pid": res.get("pid")})
+                else:
+                    # Clean 400 (e.g. target missing / never came up), not a 500.
+                    self._send_json({"ok": False,
+                                     "error": res.get("reason", "preview failed"),
+                                     "port": res.get("port")}, 400)
+
+        elif self.path == "/api/rnd/preview_stop":
+            # Tree-kill + reap a running preview. Idempotent; 404 for unknown id.
+            preview_id = (body.get("preview_id", "") or "").strip()
+            res = _preview.stop_preview(preview_id)
+            if res.get("ok"):
+                self._send_json({"ok": True,
+                                 "preview_id": res.get("preview_id"),
+                                 "status": res.get("status")})
+            else:
+                self._send_json({"ok": False,
+                                 "error": res.get("reason", "unknown preview"),
+                                 "reason": "unknown-preview"}, 404)
 
         # ── ConPTY terminal session lifecycle (Wave 3) ────────────────
         # These are the NEW ConPTY surface — distinct from the v2 REPL
