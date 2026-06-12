@@ -39,12 +39,21 @@ def env(tmp_path, monkeypatch):
     importlib.reload(report_viewer)
     import summarizer
     importlib.reload(summarizer)
+    import session_registry
+    importlib.reload(session_registry)
+    import preview_server
+    importlib.reload(preview_server)
+    import anchor_marker
+    importlib.reload(anchor_marker)
+    import handoff
+    importlib.reload(handoff)
     import anchor
     importlib.reload(anchor)
     yield {
         "tmp": tmp_path, "paths": paths, "rnd": rnd_registry,
         "eh": effort_history, "sessions": sessions, "deliverables": deliverables,
         "summarizer": summarizer, "anchor": anchor, "jr": job_runner,
+        "sreg": session_registry, "preview": preview_server, "handoff": handoff,
     }
     for rec in job_runner.list_records():
         if rec.get("status") == job_runner.STATUS_RUNNING:
@@ -229,6 +238,88 @@ def test_cli_regenerate_summary_stubbed(env, capsys):
     anchor._rnd_cli(["regenerate-summary", pid, "--lane", "planning",
                      "--session", sid])
     assert "Summary regenerated" in capsys.readouterr().out
+
+
+# ── Wave 10: v3 inspection mirror — term-sessions / previews / handoff ────
+
+def test_cli_term_sessions(env, capsys):
+    anchor = env["anchor"]
+    proj, _folder = _mkproject(env)
+    pid = proj["id"]
+    # Register a managed terminal session directly in the registry.
+    rec = env["sreg"].register_session(pid, "build",
+                                       status=env["sreg"].STATUS_RUNNING,
+                                       label="cli probe")
+    recs = anchor.rnd_term_sessions(pid)
+    assert any(r["session_id"] == rec["session_id"] for r in recs)
+
+    anchor._rnd_cli(["term-sessions", pid])
+    out = capsys.readouterr().out
+    assert "managed terminal session(s)" in out
+    assert "build" in out and "cli probe" in out
+
+
+def test_cli_previews(env, capsys):
+    anchor = env["anchor"]
+    proj, _folder = _mkproject(env)
+    pid = proj["id"]
+    # Inject a (stopped) preview record — list_previews reconciles, never spawns.
+    env["preview"]._put_record({
+        "preview_id": "cli-prev-1", "project_id": pid, "target": "anchor_gui.py",
+        "port": 54321, "url": "http://127.0.0.1:54321/", "status": "stopped",
+        "pid": 0, "started_at": 1.0,
+    })
+    recs = anchor.rnd_previews(pid)
+    assert any(r["preview_id"] == "cli-prev-1" for r in recs)
+    # Never the live port.
+    assert all(r.get("port") != env["preview"].LIVE_PORT for r in recs)
+
+    anchor._rnd_cli(["previews", pid])
+    out = capsys.readouterr().out
+    assert "deliverable preview(s)" in out
+    assert "anchor_gui.py" in out
+
+
+def test_cli_handoff(env, capsys):
+    anchor = env["anchor"]
+    proj, folder = _mkproject(env)
+    pid = proj["id"]
+    # Build a discovered planning session with a MASTER+IMPL plan pair.
+    bd = folder / "planning" / "rnd-vX"
+    bd.mkdir(parents=True, exist_ok=True)
+    (bd / "MASTER-PLAN.md").write_text(
+        "# Master Plan\n\n## North Star\ncli handoff goal.\n", encoding="utf-8")
+    (bd / "IMPLEMENTATION-PLAN.md").write_text(
+        "# Implementation Plan\n\n## Wave 1\nx.\n", encoding="utf-8")
+    import brownfield_scan
+    importlib.reload(brownfield_scan)
+    scan = brownfield_scan.scan(str(folder))
+    env["eh"].adopt_discovered(folder, pid, scan)
+
+    out = anchor.rnd_handoff(pid, lane="build")
+    assert out["proposal"]["has_plan_set"] is True
+    assert "handoffs" in out
+
+    # Record one so the inspection mirror surfaces it.
+    plan_set = env["handoff"].discover_recent_plan_set(str(folder), pid)
+    env["handoff"].record_handoff(str(folder), pid, "build-sess-1", plan_set)
+    out2 = anchor.rnd_handoff(pid, lane="build")
+    assert any(h["build_session_id"] == "build-sess-1"
+               for h in out2["handoffs"])
+
+    anchor._rnd_cli(["handoff", pid, "--lane", "build"])
+    printed = capsys.readouterr().out
+    assert "Most-recent plan set" in printed
+    assert "recorded handoff(s)" in printed
+
+
+def test_cli_handoff_no_plan_set(env, capsys):
+    anchor = env["anchor"]
+    proj, _folder = _mkproject(env)
+    pid = proj["id"]
+    anchor._rnd_cli(["handoff", pid])
+    out = capsys.readouterr().out
+    assert "No plan set available" in out
 
 
 # ── error handling: unknown project / session are clean (no traceback) ────

@@ -55,6 +55,8 @@ A self-test script (`anchor_healthcheck.py`) runs every morning at 5:00 AM via t
 
 It also exercises the **v2 R&D surface** (`check_rnd_v2_surface`): it registers a synthetic project in a throwaway temp folder and walks `add_idea` / `promote_inbox` (grass) → `pin_deliverable` → reconcile preview → `status_line` shape → a discovered planning session → `GET /summary` + `regenerate_summary` → a terminal session start → `term_input` → `term_discover` → `term_adopt`. **Every model call is stubbed via `ANCHOR_RUNNER_CMD` → `tests/fake_claude.py` — never live `claude`.** The synthetic project and its temp folder are torn down afterward, the `ANCHOR_RUNNER_CMD` env is restored, and the existing `__healthcheck__` filtering is unaffected, so no real data is polluted.
 
+It additionally walks the **v3 "Mission Control" surface** (`check_rnd_v3_surface`), **fully stubbed** — `ANCHOR_PTY_BACKEND=stub` (no real ConPTY/pywinpty) + `ANCHOR_RUNNER_CMD` → `fake_claude.py` + a temp `ANCHOR_WORKTREE_BASE` (never the build repo) + a throwaway temp git project. It exercises: (1) the **session registry** — register a synthetic session → `reconcile` re-statuses a dead "running" one → remove; (2) the **stub-PTY lifecycle** — `pty_manager` `start`→`write`→`read_since` (echo round-trip)→`kill` (reaped), AND `terminal_session.start_session`→`attach` (replay)→`input`→`kill` against the temp git repo; (3) the **proactive project summary** — `summarizer.summarize_project` through the stub runner → cached; (4) the **deliverable preview guard** — it does **NOT spawn a real server** at the 5 AM check; it walks `preview_server.pick_free_port` (asserting `≠ 8777`) + `reap_orphans` with an **injected dead-pid record** to prove the never-8777 guard and the reconcile path without spawning; and (5) **handoffs** — `discover_recent_plan_set` + `record_handoff`, asserting the record **survives a rescan**. The `ANCHOR_PTY_BACKEND` / `ANCHOR_WORKTREE_BASE` env and all temp dirs are restored/torn down afterward; nothing touches the live `:8777` service or real data.
+
 If port 8778 is already occupied (e.g. by a stale/orphaned server the non-elevated check can't reap), the self-test automatically falls back to an OS-assigned free port and logs that under "Auto-fixes applied" — it no longer aborts the whole run over a busy test port.
 
 - **Install / re-register scheduled task:** `powershell -ExecutionPolicy Bypass -File .\register_healthcheck.ps1` (run once; safe to re-run)
@@ -67,20 +69,30 @@ The synthetic `__healthcheck__` task is filtered out of every dashboard view by 
 ## File Structure
 ```
 anchor_gui.py           ← Standalone GUI (local web server + browser dashboard)
-anchor.py               ← CLI engine (reads/writes markdown, generates HTML; `rnd` v2 mirror)
-anchor_healthcheck.py   ← Daily self-test (runs at 5:00 AM via Task Scheduler; also walks the v2 R&D surface, stubbed)
+anchor.py               ← CLI engine (reads/writes markdown, generates HTML; `rnd` v2 + v3 inspection mirror)
+anchor_healthcheck.py   ← Daily self-test (runs at 5:00 AM via Task Scheduler; walks the v2 AND v3 R&D surfaces, stubbed)
 # R&D control surface v2 (design + plan frozen in planning/rnd-v2/):
 rnd_registry.py         ← Id-keyed R&D project registry (status_line, blurb, reconcile_folder)
 effort_history.py       ← Append-only per-lane effort pointer-records (add_idea, promote_inbox, adopt_sibling_sessions)
 sessions.py             ← Session model — one trio run = one session (list_sessions, merge/split)
-summarizer.py           ← Validated, cached session summaries (generate-twice + grounding filter)
-rnd_terminal.py         ← Interactive terminal substrate (persistent stream-json REPL over SSE; not ConPTY)
+summarizer.py           ← Validated, cached SESSION + PROJECT summaries (generate-twice + grounding filter; v3 added the project-summary path)
+rnd_terminal.py         ← v2 interactive terminal substrate (persistent stream-json REPL over SSE; not ConPTY)
 deliverables.py         ← Deliverable declare/pin + per-type run contract
 brownfield_scan.py      ← Discovery of on-disk trio artifacts + idea-docs (grass)
 lanes.py / job_runner.py / gate_adapter.py ← Lane→skill mapping, durable job runner, gate stdin wiring
 report_viewer.py        ← Markdown→HTML report/summary rendering (vendored KaTeX)
 paths.py                ← Shared path/data-dir constants, WRITE_LOCK, auth + bind helpers (imported everywhere)
-vendor/anchor-term/     ← Vendored lightweight terminal console (anchor-term.js/.css; swappable for xterm.js behind window.AnchorTerm.mount)
+distro.py               ← Deny-by-default distribution builder + no-PII/secrets scan + stdlib-only import scan (declares the lone pywinpty exception)
+# R&D control surface v3 "Mission Control" (design + plan frozen in planning/rnd-v3/):
+pty_manager.py          ← ConPTY PTY substrate; backend seam (real pywinpty | stub via ANCHOR_PTY_BACKEND). The ONLY module that imports `winpty`, LAZILY, terminal-only
+session_registry.py     ← Durable managed-terminal-session registry under .anchor/ (register/list/update/remove/reconcile; status→color mapping)
+worktrees.py            ← Per-session git worktree+branch isolation under a git-ignored managed base (create/remove/reap_orphans)
+terminal_session.py     ← Ties pty_manager + registry + worktrees into a live session (start_session/attach/input/resize/kill)
+handoff.py              ← Stage handoffs: discover_recent_plan_set → prime_worktree (HANDOFF.md) → record_handoff (rescan-durable in discovery.json); list_handoffs
+preview_server.py       ← Ephemeral deliverable-run preview on an OS-assigned port (HARD-guarded ≠ 8777); start/stop/list/reap_orphans
+vendor/anchor-term/     ← Vendored lightweight terminal console (anchor-term.js/.css; the v2 REPL fallback)
+vendor/xterm/           ← Vendored xterm.js console (v3 ConPTY terminal windows)
+vendor/brand/           ← Ghost World Labs brand mark (gwl-m-icon.svg; favicon + home-page lockup)
 register_healthcheck.ps1 ← One-time setup for the scheduled task
 Anchor Healthcheck.bat  ← Manual trigger for the health check (with console output)
 launch_anchor.pyw       ← Silent launcher (no terminal window, used by shortcuts)
@@ -171,6 +183,21 @@ This is a self-contained Python HTTP server that generates the full dashboard HT
 | POST | `/api/rnd/pin_deliverable` | Pin any path (e.g. `anchor_gui.py`) as a deliverable; `{declare:true}` instead pins everything in the folder's `Anchor.md` marker block |
 | POST | `/api/rnd/run_deliverable` | Run a declared/pinned deliverable per its type contract (doc/script/skill/program) |
 | POST | `/api/rnd/cancel_job` | Stop one R&D lane job (tree-kill via `job_runner.cancel`); 404 on unknown id. Used by the project-window console "Stop job" button, scoped to the ATTACHED session |
+| **v3 — ConPTY terminals (all token-authed; GET transports gate via `?token=`)** | | |
+| GET | `/api/rnd/term_sessions?project_id=<id>` | Read-only: SAFE projection of the project's managed terminal sessions (NO `worktree_path`/`branch`); the window-manager button-bar repopulate hook |
+| GET | `/api/rnd/term_ws?session=<id>&token=<t>` | Stdlib hand-rolled **WebSocket** (RFC-6455) carrying PTY bytes both ways; 401 before the 101 upgrade if unauthed |
+| GET | `/api/rnd/term_stream2?session=<id>&token=<t>` | **SSE-out** fallback transport for a session's PTY output (bounded/heartbeated) |
+| POST | `/api/rnd/term_start` | Start a worktree-isolated, registered, **bare interactive** ConPTY session for a lane; on a BUILD launch it discovers→primes→records the most-recent plan-set handoff. Returns the session record |
+| POST | `/api/rnd/term_input2` | Write one user turn onto a live session's PTY stdin (SSE/POST fallback path) |
+| POST | `/api/rnd/term_resize` | Resize a session's PTY (cols×rows) |
+| POST | `/api/rnd/term_kill` | Kill a session (reap PTY + remove worktree + mark registry terminal); the window-manager "X" gates this behind an "Are you sure?" confirm |
+| **v3 — proactive summary / handoff / preview** | | |
+| GET | `/api/rnd/session_summary?pid=&lane=&session=` | Read-only cached SESSION summary for the in-place accordion (cache → `ready`; uncached → background gen + `generating`; never a synchronous model run) |
+| GET | `/api/rnd/handoff_proposal?project_id=&lane=&seed_session=` | Read-only: the most-recent plan set a build launch would execute on (`{has_plan_set, plan_set, message}`) |
+| GET | `/api/rnd/previews?project_id=<id>` | Read-only: SAFE projection of the project's ephemeral deliverable previews (NO absolute paths; reconciles dead → stopped) |
+| POST | `/api/rnd/preview_start` | Start an ephemeral `anchor_gui.py` preview on an OS-assigned port (HARD-guarded ≠ 8777), isolated temp `ANCHOR_DATA_DIR` + loopback bind; returns its URL |
+| POST | `/api/rnd/preview_stop` | Stop + tree-kill + scrub a preview |
+| GET | `/vendor/brand/<file>` | Traversal-safe static route serving the Ghost World Labs brand mark (also the dashboard favicon) |
 
 > **R&D project window (`GET /project/<id>`):** `render_project_window_html` serves the rich "Dashboard A" — a 5-column Kanban (Research|Planning|Build|Deliverables|Grass Catchers) showing the **most-recent session per lane** as the visible card with a **"previous sessions" expander** holding the rest, a multi-session console / interactive terminal drawer, a lifecycle header (priority/notes/blurb/archive/retire/reactivate, all token-aware via `_postJson`), and the linked-tasks strip. Done sessions link to the cached summary (`/summary/<pid>/<lane>/<session_id>`); individual effort docs link to the report viewer (`/report/<pid>/<lane>/<job_id>`). The window JS lives in the `_PROJECT_WINDOW_JS` RAW (single-brace) string — NOT an f-string.
 
@@ -186,6 +213,19 @@ The v2 surface makes Anchor a **truthful, useful memory** of each project's trio
 - **Deliverable declare/pin (`deliverables.py`).** A real deliverable (e.g. the running `anchor_gui.py`, which is NOT under a `deliverables/` dir) is representable: **pin** any in-folder path as a deliverables-lane effort (`pin_deliverable`, idempotent/content-addressed, traversal-safe), or **declare** them via an `Anchor.md` `## Deliverables` marker block (`declare_deliverables_from_marker`). Running a deliverable enforces a per-type success contract (doc=exists+nonempty; script/skill=exit 0 + result-no-error; program=exit 0 within timeout) with stdin-closed + tree-kill-on-timeout discipline.
 - **Interactive terminal substrate (`rnd_terminal.py`).** "New research/plan/build" opens an interactive terminal that already knows the lane's trio skill. The substrate is a **persistent `stream-json` REPL** (one long-lived `claude`/`gemini` job per session, user turns POSTed onto its stdin, assistant output streamed back over **SSE**) — deliberately **NOT a native ConPTY terminal**, which would need a compiled dependency and violate the stdlib-only / no-native-asset rule. The console is the **vendored anchor-term** static asset (xterm.js was deliberately NOT used, for the same stdlib-only/no-native-asset reason; the terminal *feel* is achieved over the REPL). It generalizes — never forks — the gate-adapter stdin mechanism. On process exit it **auto-discovers** files produced under the session output dir (`discover_produced`) and asks the user to **confirm adoption** as a session (`adopt_produced`, recorded as one RUN session keyed by the terminal job_id, reusing the Wave-1 grouping + Wave-2 adopt paths).
 
+### R&D Control Surface v3 — "Mission Control" (frozen design + plan in `planning/rnd-v3/`)
+
+v3 turns the per-project window into a **Mission Control** for the trio: real ConPTY terminals, per-session git-worktree isolation, a stacking window manager, thin project rows with accurate cached summaries, in-place expandable session summaries, stage handoffs, a runnable deliverable preview, and Ghost World Labs branding. The frozen design lives in `planning/rnd-v3/MASTER-PLAN.md`; the 10-wave build plan in `planning/rnd-v3/IMPLEMENTATION-PLAN.md`; per-wave EXECUTE/REVIEW/FIX/JUDGE history in `planning/rnd-v3/EXECUTION-LOG.md`. Key concepts and their modules:
+
+- **ConPTY terminal subsystem + the declared `pywinpty` exception (`pty_manager.py`).** Real interactive terminals run over a Windows **ConPTY** PTY. `pty_manager` has a **backend seam** (`ANCHOR_PTY_BACKEND`): a real `pywinpty` backend and a deterministic in-memory **`stub`** backend (selected in ALL tests/healthcheck). Core: `start(cmd,cwd,env)→session_id`, `write`, `read_since` (cursor-stable, bounded buffer), `resize`, `kill` (tree-kill reap), `live_sessions`. **`pywinpty` (`import winpty`) is the ONE permitted native dependency in the whole product** — imported **LAZILY** inside `PywinptyBackend.start`, ONLY in `pty_manager.py`; `import pty_manager` works with the native dep absent, surfacing `PtyUnavailable` ("real terminal unavailable") while the rest of Anchor is unaffected. It is a `pip install .[terminal]` **optional extra** (`pyproject.toml`), never in the stdlib-only core import path. `distro.py`'s import scan DECLARES this single exception and refuses any other native/third-party import in product code (see below).
+- **Durable session registry + git-worktree isolation (`session_registry.py` + `worktrees.py`).** A managed session is `{session_id, project_id, lane, backend, worktree_path, branch, status, created_at, label}`, persisted under `.anchor/sessions.json` (atomic, survives restart). Status constants map to the locked colors (running=**green**, needs-attention/done=**amber**, failed=**red**, idle=**grey**). `reconcile(live_session_ids,…)` re-statuses sessions whose process is gone and surfaces orphan worktrees. Each session gets its OWN `git worktree` + branch under a **git-ignored managed base** (`<data_dir>/.anchor/worktrees/<sid>`, overridable via `ANCHOR_WORKTREE_BASE`) so a planning session can't dirty a running build's tree; `remove_worktree`/`reap_orphans` clean up safely (path-containment guarded, never the main tree).
+- **Live terminal sessions (`terminal_session.py`).** Ties the PTY + registry + worktrees together: `start_session(project_id, lane, backend)` mints one id, creates the worktree, launches a **bare interactive** PTY in it (NO auto-seeded skill), registers it RUNNING (rolling back PTY+worktree on any failure). `attach` replays the full retained screen buffer (honest `dropped`/`truncated`); `input`/`resize`/`read_since`; `kill` reaps the PTY, marks the record terminal, removes the worktree. Browser transport (in `anchor_gui.py`): a stdlib hand-rolled **WebSocket** (`/api/rnd/term_ws`, RFC-6455 codec) plus an **SSE-out + POST-in** fallback (`term_stream2`/`term_input2`); ALL terminal endpoints are token-authed (WS rejected 401 before the 101 upgrade).
+- **Stacking window manager + thin rows + in-place summaries (`anchor_gui.py`).** The project window shows a top bar of terse **status-colored session buttons**; clicking opens/attaches an xterm.js terminal **window**; windows **stack like bricks**, are draggable/resizable/minimizable (minimize keeps the session running; **X = kill behind an "Are you sure?" confirm**). The main dashboard renders **thin full-width project rows** (status dot · name · cached summary · per-lane mini-counts · kebab lifecycle menu). Clicking a session tile **expands an inline accordion** (no `/summary` page navigation) showing when-run / what-was-asked / North-Star / **doc links** (open rendered markdown in a new tab via `report_viewer`) / **effort** (tokens + wall-clock from `job_runner` cost records; imported/discovered → "no run metrics", never fabricated), plus a **"Launch new session"** button.
+- **Proactive cached PROJECT + session summaries (`summarizer.py`).** v3 adds a **project-summary** path (`summarize_project`/`load_cached_project`) mirroring the session pipeline: seed from CLAUDE.md/README/Anchor.md + newest plan docs + pinned deliverables → generate-twice through the runner seam → grounding filter → cache `.anchor/projects/<id>/project-summary.json(.md)` (generate-once; `force=True` regenerates; a failed run never poisons the cache). The dashboard render path only READS the cache; generation runs proactively on `rescan` in a background thread. The render path NEVER runs the model.
+- **Stage handoffs (`handoff.py`).** Launching a build session discovers the **most-recent plan set** (`discover_recent_plan_set` — newest planning session with a MASTER+IMPL pair; honors a `seed_session` override; falls back to `discovery.json`), offers "execute on this plan set?", and on confirm `prime_worktree` writes a passive `HANDOFF.md` referencing the plan doc paths (already in the checkout — **no contents copied, no skill auto-run**). `record_handoff` appends a structure-only record to `discovery.json`'s `handoffs` list — **rescan-durable** (`anchor_marker.write_anchor_md` merges, preserving `handoffs`). `list_handoffs` is the read-only accessor.
+- **Runnable deliverable preview (`preview_server.py`).** `anchor_gui.py` is pinned as the Anchor deliverable; a **Run** action spins up a preview `python anchor_gui.py --port <port> --no-browser` on an **OS-assigned ephemeral port HARD-guarded `!= 8777`** (`pick_free_port`), with an ISOLATED temp `ANCHOR_DATA_DIR` + loopback bind + stripped token (so it NEVER binds 8777 / touches the live service / real data), health-checks it, returns the URL, and `stop_preview` tree-kills + scrubs. `list_previews`/`reap_orphans` reconcile dead previews on restart (persisted to `.anchor/previews.json`).
+- **Ghost World Labs branding.** The home page is branded as a **Ghost World Labs** tool **powered by NextGen Nuclear ☢**, using the vendored brand mark `vendor/brand/gwl-m-icon.svg` (ghost + ☢ on dark slate, served via a **traversal-safe** `/vendor/brand/` route and set as the dashboard **favicon**) with a sidebar header lockup + footer credit in the brand palette (`#0f172a`/`#22c55e`/`#f8fafc`).
+
 ### anchor.py — CLI Engine
 Mirror of anchor_gui.py's logic but as a command-line tool. Also generates the static `dashboard.html` file. Shares the same markdown format and file paths.
 
@@ -200,7 +240,13 @@ Mirror of anchor_gui.py's logic but as a command-line tool. Also generates the s
 - `rnd set-blurb <pid> "blurb"` — set the project blurb (`rnd_registry.set_blurb`)
 - `rnd regenerate-summary <pid> --lane <lane> --session <id>` — force re-cache a session summary (`summarizer.summarize_session(force=True)`, through the runner seam)
 
-There is intentionally **no CLI form** for the live interactive terminal (start/input/SSE), the SSE stream, or the merge/split escape hatch — those are inherently interactive/UI-driven and exposing them as one-shot CLI calls would not be meaningful.
+**R&D v3 "Mission Control" inspection mirror** (read-only — DATA/INSPECTION only, no live-terminal/preview control):
+
+- `rnd term-sessions <pid>` — list the project's managed ConPTY terminal sessions (`session_registry.list_sessions`)
+- `rnd previews <pid>` — list the project's ephemeral deliverable-run previews (`preview_server.list_previews`; reconciles dead → stopped, never spawns)
+- `rnd handoff <pid> [--lane build] [--seed-session <id>]` — show the most-recent plan set a build session would execute on (`handoff.propose_handoff`) + the recorded handoffs (`handoff.list_handoffs`)
+
+There is intentionally **no CLI form** for the live interactive terminal (start/input/SSE/WS), the v2 SSE stream, preview **START/STOP**, or the merge/split escape hatch — those are inherently interactive / mutating live operations driven by the dashboard, and exposing them as one-shot CLI calls would not be meaningful. The v3 CLI mirrors only the data/inspection seams.
 
 ### How to Add a New Feature
 1. Add the backend function in **anchor_gui.py** (in the "Change Operations" section)
@@ -229,5 +275,5 @@ The dashboard has these views (toggled by `showView()` in JS):
 - **Single folder.** Everything lives in `C:\dev\Anchor`. No siblings, no syncing.
 - **commercial.md is now full detail** — proprietary commercial info (Nexia/Axmra fundraising, drug detail, key relationships) lives directly in `domains/commercial.md`. The old "summary-only" rule no longer applies.
 - **Markdown files are the source of truth.** No database, no lock files. Everything is plain text.
-- **No external dependencies.** Python stdlib only. Must run on any machine with Python 3.8+.
+- **No external dependencies (one declared exception).** Python stdlib only, EXCEPT the v3 terminal subsystem's optional `pywinpty` (`import winpty`, LAZY, in `pty_manager.py` ONLY; `pip install .[terminal]`). It degrades gracefully if absent. `distro.py`'s import scan enforces this — it refuses any other native/third-party import in product code. Must run on any machine with Python 3.8+ (terminals require Windows + the optional extra).
 - **All files must remain accessible** from Cowork, Claude Code, or any CLI tool. No binary formats, no compiled assets.

@@ -719,6 +719,235 @@ def check_rnd_v2_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def _git_init_repo(path: Path) -> bool:
+    """Best-effort ``git init`` + one commit so worktrees can be added. Returns
+    success. Used ONLY for the throwaway v3 terminal repo (never the build repo)."""
+    try:
+        env = dict(os.environ)
+        env.setdefault("GIT_AUTHOR_NAME", "anchor-hc")
+        env.setdefault("GIT_AUTHOR_EMAIL", "anchor@localhost")
+        env.setdefault("GIT_COMMITTER_NAME", "anchor-hc")
+        env.setdefault("GIT_COMMITTER_EMAIL", "anchor@localhost")
+        for args in (
+            ["git", "init"],
+            ["git", "config", "user.email", "anchor@localhost"],
+            ["git", "config", "user.name", "anchor-hc"],
+            ["git", "add", "-A"],
+            ["git", "commit", "-m", "hc seed", "--no-gpg-sign"],
+        ):
+            subprocess.run(args, cwd=str(path), env=env, capture_output=True,
+                           text=True, timeout=30)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def check_rnd_v3_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v3 "Mission Control" R&D surface — FULLY STUBBED.
+
+    Walks the new v3 modules in a throwaway temp project/folder, never touching
+    real data, never a live claude / real PTY / real preview spawn / real
+    worktree off the build repo:
+
+      1. session registry: register a synthetic session → reconcile re-statuses a
+         dead "running" one → remove.
+      2. stub-PTY lifecycle: ``pty_manager`` stub ``start→write→read_since`` (echo
+         round-trip) → ``kill`` (reaped); AND a ``terminal_session.start_session``
+         → ``attach`` (replay) → ``input`` → ``kill`` against a TEMP git repo with
+         the stub backend + a TEMP worktree base (``ANCHOR_WORKTREE_BASE``).
+      3. proactive summary: ``summarizer.summarize_project`` through the stub
+         runner → cached.
+      4. deliverable-run preview: NO real server spawn — walk
+         ``preview_server.pick_free_port`` (assert ``!= 8777``) + ``reap_orphans``
+         with an INJECTED dead-pid record (proves the never-8777 guard + the
+         reconcile path without spawning anything).
+      5. handoff: ``discover_recent_plan_set`` / ``record_handoff`` on the
+         synthetic project, and the record SURVIVES a rescan.
+
+    Everything is torn down by ``_cleanup_synthetic_rnd`` + the env restore in
+    ``main()``. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (fake_claude)
+    keep every model/PTY interaction off the real engine.
+    """
+    name = "R&D v3 surface"
+    if not rnd_env.get("runner_cmd"):
+        report.check(name, True, "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    # Force the STUB PTY backend + a hermetic worktree base for the whole walk;
+    # both are restored in `finally`.
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v3-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    try:
+        import rnd_registry as _rnd
+        import session_registry as _sreg
+        import pty_manager as _pty
+        import terminal_session as _ts
+        import preview_server as _preview
+        import summarizer as _summarizer
+        import handoff as _handoff
+        import sessions as _sessions
+        import effort_history as _eh
+        import brownfield_scan as _bf
+
+        # ── 0. A throwaway git project (so worktrees can attach to a real repo) ─
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v3-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "README.md").write_text("# hc v3 probe\n", encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v3", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v3 project", bool(pid), pid))
+
+        # ── 1. Session registry: register → reconcile(dead) → remove ───────────
+        rec = _sreg.register_session(pid, "build", status=_sreg.STATUS_RUNNING,
+                                     label="hc synthetic")
+        sid = rec["session_id"]
+        # No live ids → the "running" session is stale; reconcile re-statuses it.
+        rc = _sreg.reconcile(live_session_ids=[], apply=True)
+        after = _sreg.get_session(sid)
+        steps.append(("registry register+reconcile",
+                      sid in rc.get("stale", [])
+                      and after and after.get("status") != _sreg.STATUS_RUNNING,
+                      f"status={after.get('status') if after else None}"))
+        removed = _sreg.remove_session(sid)
+        steps.append(("registry remove",
+                      removed and _sreg.get_session(sid) is None, ""))
+
+        # ── 2a. Stub-PTY round-trip via pty_manager directly ───────────────────
+        psid = _pty.start(["claude"], cwd=str(proj_folder))
+        _pty.write(psid, "ECHO-ROUNDTRIP")
+        out = _pty.read_since(psid, 0)
+        echoed = "ECHO-ROUNDTRIP" in out.get("text", "")
+        steps.append(("pty stub echo round-trip", echoed,
+                      f"status={out.get('status')}"))
+        _pty.kill(psid)
+        reaped = psid not in _pty.live_sessions()
+        steps.append(("pty stub kill reaped", reaped, ""))
+
+        # ── 2b. terminal_session start→attach(replay)→input→kill (stub+temp repo)
+        if git_ok:
+            try:
+                trec = _ts.start_session(pid, "build", label="hc v3 term")
+                tsid = trec["session_id"]
+                _ts.input(tsid, "hello-term")
+                att = _ts.attach(tsid)
+                steps.append(("terminal_session start+attach",
+                              att.get("ok") and "hello-term" in att.get("buffer", ""),
+                              f"status={att.get('status')}"))
+                ko = _ts.kill(tsid, project_id=pid)
+                steps.append(("terminal_session kill+worktree",
+                              ko.get("ok", False),
+                              f"wt={ko.get('worktree', {}).get('ok')}"))
+            except Exception as e:
+                steps.append(("terminal_session walk", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("terminal_session walk", True,
+                          "skipped (git unavailable; pty round-trip already proven)"))
+
+        # ── 3. Proactive PROJECT summary through the stub runner → cached ──────
+        (proj_folder / "CLAUDE.md").write_text(
+            "# HC v3 Project\n\nNorth Star: prove the stubbed v3 summary path.\n",
+            encoding="utf-8")
+        try:
+            psum = _summarizer.summarize_project(str(proj_folder), pid, force=True)
+            cached = _summarizer.load_cached_project(str(proj_folder), pid)
+            steps.append(("project summary (stubbed)",
+                          isinstance(psum, dict) and cached is not None,
+                          str(psum.get("error", "ok"))))
+        except Exception as e:
+            steps.append(("project summary (stubbed)", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── 4. Preview: pick_free_port (!=8777) + reap_orphans w/ injected dead pid
+        try:
+            port = _preview.pick_free_port()
+            steps.append(("preview pick_free_port != 8777",
+                          isinstance(port, int) and port != _preview.LIVE_PORT,
+                          f"port={port}"))
+            # Inject a dead-pid 'running' preview record (no spawn at the 5AM check)
+            dead_pid = 2 ** 31 - 1  # an implausible/never-alive pid
+            inj = {
+                "preview_id": "hc-v3-preview",
+                "project_id": pid,
+                "target": "anchor_gui.py",
+                "port": port,
+                "url": f"http://127.0.0.1:{port}/",
+                "status": _preview.STATUS_RUNNING,
+                "pid": dead_pid,
+                "data_dir": "",
+                "started_at": time.time(),
+            }
+            _preview._put_record(inj)
+            rep = _preview.reap_orphans()
+            recd = _preview.load_previews().get("hc-v3-preview", {})
+            steps.append(("preview reap_orphans (dead pid → stopped)",
+                          "hc-v3-preview" in rep.get("reaped", [])
+                          and recd.get("status") == _preview.STATUS_STOPPED,
+                          f"reaped={rep.get('reaped')}"))
+            # Clean the injected record out of the registry.
+            with _paths.WRITE_LOCK:
+                regp = _preview.load_previews()
+                regp.pop("hc-v3-preview", None)
+                _preview._save_previews(regp)
+        except Exception as e:
+            steps.append(("preview walk", False, f"{type(e).__name__}: {e}"))
+
+        # ── 5. Handoff: discover_recent_plan_set + record (survives a rescan) ──
+        try:
+            bd = proj_folder / "planning" / "hc-v3-plan"
+            bd.mkdir(parents=True, exist_ok=True)
+            (bd / "MASTER-PLAN.md").write_text(
+                "# Master Plan\n\n## North Star\nhc v3 north star.\n",
+                encoding="utf-8")
+            (bd / "IMPLEMENTATION-PLAN.md").write_text(
+                "# Implementation Plan\n\n## Wave 1\nhc.\n", encoding="utf-8")
+            scan = _bf.scan(str(proj_folder))
+            _eh.adopt_discovered(proj_folder, pid, scan)
+            plan_set = _handoff.discover_recent_plan_set(str(proj_folder), pid)
+            steps.append(("handoff discover_recent_plan_set",
+                          bool(plan_set), str(bool(plan_set))))
+            rh = _handoff.record_handoff(str(proj_folder), pid,
+                                         "hc-build-session", plan_set or {})
+            steps.append(("handoff record", rh.get("ok", False),
+                          str(rh.get("reason", ""))))
+            # The record must SURVIVE a rescan (the Wave-7 durability contract).
+            _bf.scan(str(proj_folder))  # re-scan; merge must preserve handoffs
+            survived = any(h.get("build_session_id") == "hc-build-session"
+                           for h in _handoff.list_handoffs(str(proj_folder), pid))
+            steps.append(("handoff survives rescan", survived, ""))
+        except Exception as e:
+            steps.append(("handoff walk", False, f"{type(e).__name__}: {e}"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Restore the PTY backend + worktree-base env we forced for this walk.
+        if prev_pty is None:
+            os.environ.pop("ANCHOR_PTY_BACKEND", None)
+        else:
+            os.environ["ANCHOR_PTY_BACKEND"] = prev_pty
+        if prev_wtbase is None:
+            os.environ.pop("ANCHOR_WORKTREE_BASE", None)
+        else:
+            os.environ["ANCHOR_WORKTREE_BASE"] = prev_wtbase
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
     """Remove the synthetic project(s) + throwaway folder + inbox probe line."""
     # Drop the synthetic project ids from the live registry (never delete real ones).
@@ -731,11 +960,50 @@ def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
                 pass
     except Exception:
         pass
+    # Best-effort: remove ANY session_registry rows + preview records keyed to a
+    # synthetic project id. The v3 walk (`check_rnd_v3_surface`) registers a
+    # synthetic session and may inject a preview record between register/remove
+    # calls that are NOT individually guarded; if any step in between raises, the
+    # row would otherwise leak into REAL `.anchor/sessions.json` /
+    # `previews.json` during a 5AM run. Delegate to the registries' own
+    # list/remove APIs so teardown leaves real data clean regardless of where
+    # the walk failed. Tolerant by design — never raises.
+    for pid in rnd_env.get("created_ids", []):
+        try:
+            import session_registry as _sreg
+            for rec in _sreg.list_sessions(project_id=pid):
+                try:
+                    _sreg.remove_session(rec.get("session_id"))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
+            import preview_server as _preview
+            for rec in _preview.list_previews(project_id=pid):
+                key = rec.get("preview_id")
+                if not key:
+                    continue
+                try:
+                    with _paths.WRITE_LOCK:
+                        regp = _preview.load_previews()
+                        if regp.pop(key, None) is not None:
+                            _preview._save_previews(regp)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     # Remove the throwaway project folder (it is a tmp dir, not real data).
     folder = rnd_env.get("folder")
     if folder is not None:
         try:
             shutil.rmtree(folder, ignore_errors=True)
+        except Exception:
+            pass
+    # Remove the v3 walk's throwaway dirs (temp git repo + worktree base).
+    for d in rnd_env.get("v3_temp_dirs", []):
+        try:
+            shutil.rmtree(d, ignore_errors=True)
         except Exception:
             pass
     # Strip the synthetic inbox probe line we appended.
@@ -920,6 +1188,7 @@ def main():
         server_proc = check_server_and_endpoints(report)
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)
+        check_rnd_v3_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

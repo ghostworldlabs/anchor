@@ -458,3 +458,82 @@ Wave 1's `pywinpty` terminal exception).
 **Verdict: GO.**
 
 ---
+
+## Wave 10 — CLI mirror + healthcheck + distro-scan/docs — GO (2026-06-12)
+
+**EXECUTE (closing wave).** `anchor.py` gains read-only v3 inspection mirrors `rnd
+term-sessions` / `rnd previews` / `rnd handoff` (delegating to `session_registry` /
+`preview_server` / `handoff`; intentionally NO CLI for live terminal/preview
+start/stop/SSE per the plan). `anchor_healthcheck.py` gains `check_rnd_v3_surface`,
+fully STUBBED (`ANCHOR_PTY_BACKEND=stub` + `ANCHOR_RUNNER_CMD`→fake_claude + temp
+`ANCHOR_WORKTREE_BASE` + throwaway temp git project): walks session-registry
+register→reconcile→remove, stub-PTY echo round-trip + `terminal_session`
+start→attach(replay)→kill, `summarizer.summarize_project` (stubbed)→cached, preview
+`pick_free_port`(≠8777)+`reap_orphans`(injected dead pid, NO spawn), and
+handoff discover→record (survives rescan). `distro.py` gains an AST import-scan with
+a single declared, file-scoped exception (`winpty` allowed ONLY in `pty_manager.py`;
+any other non-stdlib/native import in a first-party module is refused) — additive to
+the existing PII/secret scan; `dist_manifest.txt` ships the v2+v3 product modules.
+`CLAUDE.md` documents the full v3 surface + the pywinpty exception.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **529 passed, 1 skipped**.
+`distro.build_distro()` stages 98 files, scan CLEAN (pty_manager + preview_server
+ship; `.anchor`/data excluded). `python anchor_healthcheck.py` → **Status OK**, "R&D
+v2 surface (12 steps)" + "R&D v3 surface (13 steps)" both pass live-stubbed; live
+`:8777` service untouched.
+
+**REVIEW (2 independent adversarial reviewers).** Reviewer A: **GO** — proved by
+experiment that the pywinpty exception is correctly scoped (winpty only in
+`pty_manager.py`; `import winpty` elsewhere AND any other native import flagged + build
+fails; secrets/PII scan still fires; no native dep can slip past), CLI mirrors are
+read-only delegations. Reviewer B: **GO-WITH-NITS** — verified the healthcheck v3 walk
+is genuinely hermetic (no live claude/PTY/preview-spawn/real-worktree; env saved +
+restored; non-vacuous), CLAUDE.md accurate, and every Project-DONE surface present in
+code; flagged one MINOR (real-data orphan-row risk on a mid-walk failure).
+
+**FIX (bounded, 1 iter).** Reviewer B MINOR: `_cleanup_synthetic_rnd` now sweeps any
+synthetic `session_registry` rows + `preview_server` records keyed to the synthetic
+pid (delegating to their own APIs, best-effort, on the failure path too), so a
+mid-walk failure in a real 5 AM run cannot orphan a row in real `.anchor` data.
+Regression test added (monkeypatch a step to raise → teardown leaves real data clean;
+verified it fails without the fix). Re-gate: **529 passed, 1 skipped**.
+
+**Verdict: GO.**
+
+---
+
+## PROJECT DONE — Anchor R&D Surface v3 "Mission Control" (2026-06-12)
+
+All ten waves GREEN on `python -m pytest -v` (**529 passed, 1 skipped** — the lone
+skip is an unrelated host-conditional symlink test, not a v3 skip). The
+Project-DONE criteria (IMPLEMENTATION-PLAN lines 236-246) are met and present in code:
+
+- **Wave 1** ConPTY substrate — empirically proven: a real `pywinpty` `claude` TUI
+  runs under the simulated non-interactive `anchor`-service context (the user-gated
+  HARD GATE; HALT condition never triggered). `pywinpty` is the lone native-dep
+  exception, lazy-imported + isolated to `pty_manager.py`, degrades gracefully.
+- **Waves 2-3** durable session registry + git-worktree isolation + a stdlib
+  hand-rolled WebSocket (+SSE/POST fallback) ConPTY terminal service, all terminal
+  endpoints token-authed, reattach replays the buffer, sessions survive disconnect.
+- **Wave 4** stacking, draggable/resizable/minimizable, status-colored terminal
+  windows; X=kill-with-confirm; repopulate-from-registry.
+- **Wave 5** thin full-width project rows with accurate proactive cached summaries.
+- **Wave 6** in-place expandable session summaries (when · what · North-Star · doc
+  links · effort; imported→no run metrics) — no `/summary` navigation.
+- **Wave 7** clean stage handoffs (most-recent plan set → primed worktree + durable
+  record).
+- **Wave 8** the runnable Anchor deliverable: an ephemeral preview on a free port
+  (never 8777), isolated, reaped — the live service untouched.
+- **Wave 9** Ghost World Labs branding, powered by NextGen Nuclear ☢, GWL favicon,
+  traversal-safe brand route.
+- **Wave 10** CLI inspection mirror + stubbed healthcheck v3 walk + distro pywinpty
+  exception + CLAUDE.md.
+
+Every wave passed an orchestrator-run ground-truth gate (never a sub-agent's pasted
+output) + two independent adversarial reviewers; the adversarial loop caught and
+fixed real defects pre-merge (the Wave-7 handoff-durability BLOCKER; the Wave-8
+distro secret-literal regression the sub-agent subset missed). Built on branch
+`foreman/rnd-surface-v3`. **NOT merged to master; the live `anchor` service NOT
+restarted** — deploy (merge + elevated `nssm restart anchor`) is the user's call.
+
+---

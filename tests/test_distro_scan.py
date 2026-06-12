@@ -402,3 +402,98 @@ def test_concrete_token_value_is_flagged():
     text = _assign("ANCHOR_TOKEN", _FAKE_TOKEN)
     hits = list(distro._scan_text("x.py", text))
     assert any(cat == "auth-token-value" for (_, cat, _) in hits)
+
+
+# ── Wave 10: the declared pywinpty exception + stdlib-only import enforcement ─
+
+def test_pywinpty_exception_is_declared_and_scoped():
+    """The ONE native-dep exception is declared + scoped to pty_manager.py."""
+    allow = distro._THIRD_PARTY_IMPORT_ALLOWLIST
+    assert "winpty" in allow, "pywinpty (winpty) must be the declared exception"
+    assert "pty_manager.py" in allow["winpty"]["files"]
+    # Scoped: allowed in pty_manager.py, refused everywhere else.
+    assert distro._import_allowed("winpty", "pty_manager.py")
+    assert not distro._import_allowed("winpty", "anchor_gui.py")
+    assert not distro._import_allowed("winpty", "preview_server.py")
+
+
+def test_lazy_import_winpty_in_pty_manager_does_not_fail_scan():
+    """`import winpty` in pty_manager.py must NOT trip the import scan, and the
+    REAL pty_manager.py (which lazily imports winpty) scans clean."""
+    src = "def start(self):\n    import winpty  # lazy native import\n"
+    hits = distro.scan_third_party_imports(
+        [("pty_manager.py", _WRITE(src))], root=REPO_ROOT)
+    assert hits == [], hits
+    # The real shipped pty_manager.py is in the selection and scans clean.
+    selected = set(distro.select_shippable())
+    assert "pty_manager.py" in selected
+    pairs = [("pty_manager.py", REPO_ROOT / "pty_manager.py")]
+    assert distro.scan_third_party_imports(pairs) == []
+
+
+def test_undeclared_native_import_elsewhere_is_flagged(tmp_path):
+    """An undeclared third-party/native import in another first-party file FAILS,
+    and `import winpty` OUTSIDE pty_manager.py is also refused."""
+    # numpy in a non-allowlisted module → flagged.
+    numpy_src = tmp_path / "some_module.py"
+    numpy_src.write_text("import numpy\n", encoding="utf-8")
+    hits = distro.scan_third_party_imports(
+        [("some_module.py", numpy_src)], root=REPO_ROOT)
+    assert any(cat == "third-party-import" and "numpy" in snip
+               for (_, cat, snip) in hits), hits
+
+    # winpty imported in a DIFFERENT file than pty_manager.py → still refused.
+    winpty_src = tmp_path / "bar.py"
+    winpty_src.write_text("import winpty\n", encoding="utf-8")
+    hits2 = distro.scan_third_party_imports(
+        [("bar.py", winpty_src)], root=REPO_ROOT)
+    assert any(cat == "third-party-import" and "winpty" in snip
+               for (_, cat, snip) in hits2), hits2
+
+
+def test_undeclared_native_import_fails_the_build(tmp_path):
+    """A planted `import requests` in a staged product file FAILS the build."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    shutil.copy2(REPO_ROOT / "paths.py", root / "paths.py")
+    leaky = root / "leaky_mod.py"
+    leaky.write_text("import requests\nx = 1\n", encoding="utf-8")
+    manifest = tmp_path / "manifest.txt"
+    manifest.write_text("paths.py\nleaky_mod.py\n", encoding="utf-8")
+    out = tmp_path / "export"
+    with pytest.raises(distro.PersonalDataError) as ei:
+        distro.build_distro(root=root, output_dir=out, manifest_path=manifest,
+                            emit_readme_file=False)
+    cats = {cat for (_, cat, _) in ei.value.hits}
+    assert "third-party-import" in cats, ei.value.hits
+    assert "leaky_mod.py" in str(ei.value)
+    assert not out.exists()  # torn down on failure
+
+
+def test_v3_modules_ship():
+    """All new v3 "Mission Control" modules are in the shippable set."""
+    selected = set(distro.select_shippable())
+    for must in ("pty_manager.py", "session_registry.py", "worktrees.py",
+                 "terminal_session.py", "handoff.py", "preview_server.py"):
+        assert must in selected, f"{must} should ship"
+
+
+def test_tests_and_vendor_exempt_from_import_rule():
+    """tests/ (pytest is a declared dev dep) and vendor/ are exempt from the
+    stdlib-only import rule."""
+    # A test file importing pytest is NOT flagged.
+    pytest_src = "import pytest\n"
+    assert distro.scan_third_party_imports(
+        [("tests/test_x.py", _WRITE(pytest_src))], root=REPO_ROOT) == []
+    # A vendor file with a third-party-looking import is NOT flagged.
+    assert distro.scan_third_party_imports(
+        [("vendor/x/y.py", _WRITE("import numpy\n"))], root=REPO_ROOT) == []
+
+
+# Helper: materialize source text to a temp file path for the import scan, which
+# reads from disk. (Kept tiny + local so the scan-clean test file stays clean.)
+def _WRITE(text):
+    import tempfile
+    p = Path(tempfile.mkstemp(suffix=".py")[1])
+    p.write_text(text, encoding="utf-8")
+    return p

@@ -415,3 +415,19 @@ def record_handoff(folder_path, project_id, build_session_id, plan_set):
         except OSError as exc:
             return {"ok": False, "reason": f"write-failed: {exc}"}
     return {"ok": True, "entry": entry, "count": len(handoffs)}
+
+
+def list_handoffs(folder_path, project_id):
+    """Return the recorded handoffs for a project (newest-first). Never raises.
+
+    Read-only accessor over ``discovery.json``'s ``handoffs`` list (the records
+    written by :func:`record_handoff`). Used by the read-only CLI/inspection
+    surfaces. Returns ``[]`` when there are none.
+    """
+    disc = _load_discovery(folder_path, project_id)
+    handoffs = disc.get("handoffs")
+    if not isinstance(handoffs, list):
+        return []
+    out = [h for h in handoffs if isinstance(h, dict)]
+    out.sort(key=lambda h: (h.get("when") is None, -(h.get("when") or 0.0)))
+    return out
