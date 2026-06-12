@@ -1704,6 +1704,59 @@ def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
     )
 
 
+def _fmt_rollup_line(roll: dict) -> str:
+    """Render a ``project_effort_rollup`` dict as ``Σ <tok> tok · $<c> · <t> · N sessions``.
+
+    Used by the project-window header (v4 Wave 5). Run-session-only totals (the
+    rollup already excludes imported/discovered). Stdlib only; never raises.
+    """
+    toks = int(roll.get("tokens", 0) or 0)
+    cost = float(roll.get("cost_usd", 0.0) or 0.0)
+    ms = int(roll.get("wall_clock_ms", 0) or 0)
+    n = int(roll.get("sessions", 0) or 0)
+    secs = ms / 1000.0
+    if secs >= 3600:
+        tstr = f"{secs / 3600.0:.1f}h"
+    elif secs >= 60:
+        tstr = f"{secs / 60.0:.0f}m"
+    else:
+        tstr = f"{secs:.0f}s"
+    if toks >= 1000:
+        tokstr = f"{toks / 1000.0:.0f}k tok"
+    else:
+        tokstr = f"{toks} tok"
+    return (f"Σ {tokstr} · ${cost:.2f} · {tstr} "
+            f"· {n} session{'' if n == 1 else 's'}")
+
+
+def render_header_rollup_html(project_id: str) -> str:
+    """The per-project cost/tokens/time rollup for the project-window header.
+
+    Server-side render of ``effort_history.project_effort_rollup(pid,'lifetime')``
+    beside the project path (v4 Wave 5, MASTER-PLAN cockpit header). A small
+    lifetime/30-day toggle re-fetches the read-only ``/api/rnd/project_rollup``
+    endpoint and swaps the text in place (the actual swap is the JS
+    ``rndRollupWindow``). Both windows' text are rendered so a no-JS view still
+    shows lifetime totals. Stdlib only; never raises (omits on failure).
+    """
+    try:
+        life = _eh.project_effort_rollup(project_id, window=_eh.WINDOW_LIFETIME)
+    except Exception:
+        return ""
+    pid_attr = html_lib.escape(project_id, quote=True)
+    life_txt = html_lib.escape(_fmt_rollup_line(life))
+    return (
+        f"<span class='roll' id='hdrRollup' data-window='lifetime' "
+        f"data-pid=\"{pid_attr}\">{life_txt}</span>"
+        f"<span class='rolltog' role='group' aria-label='rollup window'>"
+        f"<b class='on' data-window='lifetime' "
+        f"onclick=\"rndRollupWindow('lifetime',this)\">lifetime</b>"
+        f"<b data-window='30d' "
+        f"onclick=\"rndRollupWindow('30d',this)\">30d</b>"
+        f"</span>"
+    )
+
+
 def render_project_window_html(project_id: str) -> str:
     """Render the rich per-project window ("Dashboard A") for ``/project/<id>``.
 
@@ -1776,6 +1829,7 @@ def render_project_window_html(project_id: str) -> str:
     kanban = _render_kanban_html(folder_raw, project_id)
     status = render_status_line_html(project_id)
     rollup = render_cost_rollup_html(project_id, folder_raw)
+    header_rollup = render_header_rollup_html(project_id)
     tasks_html = render_project_tasks_html(project_id)
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
     # pin it as the runnable deliverable so the Deliverables lane shows it with a
@@ -1811,6 +1865,16 @@ def render_project_window_html(project_id: str) -> str:
         ".dhead .name{font-size:18px;font-weight:700}"
         ".dhead .path{font-size:12px;color:var(--text-dim);"
         "font-family:ui-monospace,Consolas,monospace}"
+        # v4 Wave 5: header rollup (Σ tokens · $ · time · N sessions) + window toggle.
+        ".dhead .roll{font-size:11px;color:var(--text-dim);"
+        "font-family:ui-monospace,Consolas,monospace;border-left:1px solid "
+        "var(--border);padding-left:10px;margin-left:2px}"
+        ".dhead .rolltog{display:inline-flex;border:1px solid var(--border);"
+        "border-radius:6px;overflow:hidden;margin-left:2px}"
+        ".dhead .rolltog b{font-size:10px;padding:2px 8px;background:var(--surface);"
+        "color:var(--text-dim);cursor:pointer;font-weight:500}"
+        ".dhead .rolltog b.on{background:rgba(108,156,252,.15);color:var(--accent);"
+        "font-weight:700}"
         ".dhead .right{margin-left:auto;display:flex;gap:6px;align-items:center;"
         "flex-wrap:wrap}"
         ".pri{font-size:10px;font-weight:700;padding:1px 7px;border-radius:4px}"
@@ -2007,6 +2071,7 @@ def render_project_window_html(project_id: str) -> str:
         "overflow:hidden;text-overflow:ellipsis}"
         ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
         ".panel .pbar .sp{flex:1}"
+        # Panel body STACKS: split summary on top, full-width terminal below.
         ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px}"
         ".panel .panel-body{min-height:60px}"
         ".panelbtn{width:22px;height:20px;line-height:18px;text-align:center;"
@@ -2014,8 +2079,47 @@ def render_project_window_html(project_id: str) -> str:
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
-        ".panel .term-host{background:#05070c;border:1px solid var(--border);"
-        "border-radius:8px;min-height:120px;overflow:hidden}"
+        # ── v4 Wave 5: split summary — materials LEFT, role links RIGHT, both
+        # columns filling EQUAL vertical height (mockup Paradigm-2 internals).
+        # The left effort line sinks to the bottom (.smat .effbar{margin-top:auto});
+        # the right's second link group pins to the bottom (.slinks .slh.two).
+        ".panel .summary{font-size:12px}"
+        ".panel .summary.split{display:grid;grid-template-columns:1.5fr 1fr;"
+        "gap:20px;align-items:stretch}"
+        ".panel .summary .smat{min-width:0;display:flex;flex-direction:column}"
+        ".panel .summary .smat .sgoal{font-size:13px;color:var(--text);"
+        "margin-bottom:10px}"
+        ".panel .summary .smat .row{display:flex;gap:10px;font-size:12px;"
+        "margin-bottom:7px}"
+        ".panel .summary .smat .row .k{color:var(--text-dim);min-width:92px;"
+        "flex-shrink:0}"
+        ".panel .summary .smat .effbar{font-size:11px;color:var(--text-dim);"
+        "margin-top:auto}"
+        ".panel .summary .slinks{border-left:1px solid var(--border);"
+        "padding-left:18px;display:flex;flex-direction:column}"
+        ".panel .summary .slinks .slh{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:1px;color:var(--text-dim);margin:0 0 8px}"
+        ".panel .summary .slinks .slh.two{margin-top:auto}"
+        ".panel .summary .slinks .doc{display:flex;width:100%;margin-bottom:6px;"
+        "align-items:center;gap:6px;font-size:11.5px;padding:4px 10px;"
+        "border-radius:7px;border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text);text-decoration:none}"
+        ".panel .summary .slinks .doc:hover{border-color:var(--accent)}"
+        ".panel .summary .slinks .doc .role{margin-left:auto;font-size:9.5px;"
+        "color:var(--text-dim)}"
+        ".panel .summary .summ-loading{color:var(--text-dim);font-style:italic}"
+        # ── v4 Wave 5: full-width terminal pane BELOW the summary, VERTICALLY
+        # RESIZABLE (drag the bottom edge; the JS fits + term_resize on resize).
+        ".panel .tpane{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden;resize:vertical;min-height:150px;"
+        "height:240px;display:flex;flex-direction:column}"
+        ".panel .tpane .tbar{display:flex;align-items:center;gap:8px;"
+        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
+        ".panel .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
+        ".panel .tpane .tbar .rzhint{font-size:10px;color:var(--text-dim);"
+        "margin-left:auto}"
+        ".panel .tpane .term-host{background:#05070c;flex:1;overflow:auto;"
+        "min-height:90px}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -2023,6 +2127,9 @@ def render_project_window_html(project_id: str) -> str:
         "<div class='dhead'>"
         f"<span class='name'>{name}</span>"
         f"<span class='path'>{folder}</span>"
+        # v4 Wave 5: the per-project cost/tokens/time rollup beside the path,
+        # with a lifetime/30-day toggle (run-session-only totals).
+        f"{header_rollup}"
         "<div class='right'>"
         f"<span class='pri p{pr}'>P{pr}</span>"
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
@@ -2749,6 +2856,33 @@ function rndBlurb(pid) {
   _lifecycle('/api/rnd/set_blurb', {id: pid, blurb: n});
 }
 
+// ── Header cost/tokens/time rollup: lifetime / 30-day toggle (v4 Wave 5) ─────
+// The header renders the lifetime rollup server-side; this toggle re-fetches the
+// read-only /api/rnd/project_rollup for the chosen window and swaps the text in
+// place (no page reload). Lifetime is the default; the toggle is purely additive.
+function rndRollupWindow(window_, btn) {
+  var el = document.getElementById('hdrRollup');
+  if (!el) return;
+  var pid = el.getAttribute('data-pid') || PROJECT_ID;
+  // Flip the on-state on the two toggle buttons.
+  if (btn && btn.parentNode) {
+    var bs = btn.parentNode.querySelectorAll('b');
+    for (var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+    btn.classList.add('on');
+  }
+  var url = '/api/rnd/project_rollup?pid=' + encodeURIComponent(pid)
+    + '&window=' + encodeURIComponent(window_) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d && d.ok && d.text) {
+        el.textContent = d.text;
+        el.setAttribute('data-window', window_);
+      }
+    })
+    .catch(function () {});
+}
+
 // ── Task linking (surfaces the existing link_task endpoint) ─────────────────
 function rndLinkTask(el) {
   // Project id rides via the element's data-project attribute (the browser
@@ -3004,24 +3138,207 @@ function openPanel(sessionId) {
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
   bar.appendChild(sp); bar.appendChild(minBtn); bar.appendChild(killBtn);
 
-  // Panel inner body. Wave 5 fills this with the split summary + xterm terminal;
-  // for now it carries a ready terminal-host placeholder element.
+  // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
+  // (materials left + role-tagged doc links right, EQUAL height), then a
+  // full-width, vertically-resizable terminal pane BELOW.
   var pin = document.createElement('div');
   pin.className = 'pin';
+
+  // (1) Split summary block — filled async from /api/rnd/session_summary +
+  //     /api/rnd/session_doc_roles. Absent → just a thin loading note.
+  var summ = document.createElement('div');
+  summ.className = 'summary split';
+  summ.setAttribute('data-session', sessionId);
+  summ.innerHTML = '<div class="summ-loading">loading session summary…</div>';
+  pin.appendChild(summ);
+
+  // (2) The terminal pane (resizable wrapper) with a bar + the xterm host.
+  var tpane = document.createElement('div');
+  tpane.className = 'tpane';
+  // Persisted per-session height (in-memory): restore if the user resized it.
+  if (_panelHeights[sessionId]) tpane.style.height = _panelHeights[sessionId];
+  var tbar = document.createElement('div');
+  tbar.className = 'tbar';
+  var lab = document.createElement('span');
+  lab.className = 'lab';
+  lab.textContent = (s.backend || 'terminal') + ' · ' + s.session_id;
+  var rz = document.createElement('span');
+  rz.className = 'rzhint';
+  rz.textContent = '⇕ drag bottom edge to resize';
+  tbar.appendChild(lab);
+  tbar.appendChild(rz);
   var host = document.createElement('div');
   host.className = 'panel-body term-host';
   host.setAttribute('data-session', sessionId);
-  pin.appendChild(host);
+  tpane.appendChild(tbar);
+  tpane.appendChild(host);
+  pin.appendChild(tpane);
 
   panel.appendChild(bar);
   panel.appendChild(pin);
   stack.appendChild(panel);
 
-  PANELS[sessionId] = {el: panel, body: host, term: null, transport: null};
+  PANELS[sessionId] = {el: panel, body: host, term: null, transport: null,
+                       tpane: tpane, fit: null, ro: null};
   _mountTerminal(sessionId, host);
+  _loadPanelSummary(sessionId, summ);
+  _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
 }
+
+// Per-session terminal-pane height (in-memory persistence across minimize /
+// re-open within this page load). Keyed by session_id → CSS height string.
+var _panelHeights = {};
+
+// _loadPanelSummary(sessionId, host): fill the split summary — materials LEFT
+// (.smat: goal / North-Star / what-was-asked / effort) from the cached session
+// summary, role-tagged doc links RIGHT (.slinks) from session_doc_roles. Both
+// fetches are read-only; absent fields / roles are simply not rendered. The
+// terminal mounts regardless (the summary is advisory chrome).
+function _loadPanelSummary(sessionId, host) {
+  var s = MANAGED[sessionId];
+  if (!s || !host) return;
+  var lane = s.lane || '';
+  // session_id here is the MANAGED (live-terminal) id; its lane is the trio lane
+  // (research/plan/build). The summary/doc-roles endpoints key on (pid, lane,
+  // session). A live terminal session may have no cached trio-session summary
+  // yet — that's fine; we render whatever resolves and omit the rest.
+  var sUrl = '/api/rnd/session_summary?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sessionId);
+  var rUrl = '/api/rnd/session_doc_roles?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sessionId)
+    + _tokenQ();
+  var summary = null, roles = {};
+  function _paint() {
+    host.innerHTML = _renderSplitSummary(summary, roles, lane);
+  }
+  fetch(sUrl, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d && d.status === 'ready' && d.summary) summary = d.summary;
+    })
+    .catch(function () {})
+    .then(function () { return fetch(rUrl, _jsonHdrs()); })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (d && d.ok && d.roles) roles = d.roles; })
+    .catch(function () {})
+    .then(_paint);
+}
+
+// _renderSplitSummary(summary, roles, lane): the EQUAL-HEIGHT two-column split.
+// LEFT (.smat) = materials; the effort line uses margin-top:auto so it sinks to
+// the bottom. RIGHT (.slinks) = role-tagged doc links; a second link group (when
+// present) uses .slh.two (margin-top:auto) so it pins to the bottom — making both
+// columns fill the same height per the mockup.
+function _renderSplitSummary(summary, roles, lane) {
+  var L = [];   // left materials
+  if (summary) {
+    if (summary.title) L.push('<div class="sgoal">' + _esc(summary.title) + '</div>');
+    if (summary.north_star) L.push('<div class="row"><span class="k">North Star</span><span>' + _esc(summary.north_star) + '</span></div>');
+    if (summary.what_was_asked) L.push('<div class="row"><span class="k">Asked</span><span>' + _esc(summary.what_was_asked) + '</span></div>');
+    if (summary.when_run) L.push('<div class="row"><span class="k">When run</span><span>' + _esc(summary.when_run) + '</span></div>');
+    var eff = '';
+    if (summary.hasOwnProperty('effort')) {
+      if (summary.effort === null) eff = 'imported — no run metrics';
+      else if (summary.effort) {
+        var secs = ((summary.effort.wall_clock_ms || 0) / 1000).toFixed(1);
+        eff = _esc(summary.effort.tokens || 0) + ' tokens · ' + secs + 's wall-clock · '
+          + _esc(summary.effort.runs || 0) + ' run(s)';
+      }
+    }
+    if (eff) L.push('<div class="effbar">' + eff + '</div>');
+  }
+  if (!L.length) L.push('<div class="summ-loading">No cached summary for this session yet.</div>');
+
+  // RIGHT: role-tagged links. Roles split into a primary group + a secondary
+  // (.two) group so both columns fill equal height (locked CSS).
+  var primary = [], secondary = [];
+  var groups = _DOC_ROLE_GROUPS[lane] || {};
+  for (var role in roles) {
+    if (!roles.hasOwnProperty(role)) continue;
+    var lk = roles[role];
+    var html = '<a class="doc" href="' + _esc(lk.href) + '" target="_blank" '
+      + 'rel="noopener">' + _esc(lk.label || role)
+      + '<span class="role">' + _esc(role) + '</span></a>';
+    if ((groups.two || []).indexOf(role) >= 0) secondary.push(html);
+    else primary.push(html);
+  }
+  var R = [];
+  if (primary.length) {
+    R.push('<div class="slh">' + _esc(groups.primary_label || 'Documents') + '</div>');
+    R = R.concat(primary);
+  }
+  if (secondary.length) {
+    R.push('<div class="slh two">' + _esc(groups.two_label || 'More') + '</div>');
+    R = R.concat(secondary);
+  }
+  var right = R.length ? ('<div class="slinks">' + R.join('') + '</div>') : '';
+  return '<div class="smat">' + L.join('') + '</div>' + right;
+}
+
+// Per-lane role grouping for the split's two link groups (primary + .two). The
+// secondary group pins to the bottom (.slh.two) so both columns share height.
+var _DOC_ROLE_GROUPS = {
+  research: {primary_label: 'Research outputs', two_label: 'Provenance',
+            two: ['provenance']},
+  planning: {primary_label: 'Plan documents', two_label: 'Objective',
+            two: ['northstar']},
+  plan: {primary_label: 'Plan documents', two_label: 'Objective',
+        two: ['northstar']},
+  build: {primary_label: 'Build outputs', two_label: 'Plan it executes',
+         two: ['northstar', 'plan']}
+};
+
+// _wirePanelResize(sessionId, tpane): the tpane has CSS `resize:vertical`, so the
+// browser draws the drag handle. We watch its size with a ResizeObserver and on
+// each change (a) persist the height for this session and (b) re-fit the xterm +
+// term_resize so cols/rows track the new pane size. Falls back to no-op if
+// ResizeObserver is unavailable (the CSS resize still works visually).
+function _wirePanelResize(sessionId, tpane) {
+  var p = PANELS[sessionId];
+  if (!p || !tpane || typeof ResizeObserver === 'undefined') return;
+  var ro = new ResizeObserver(function () {
+    _panelHeights[sessionId] = tpane.style.height || (tpane.offsetHeight + 'px');
+    _fitPanelTerminal(sessionId);
+  });
+  ro.observe(tpane);
+  p.ro = ro;
+}
+
+// _fitPanelTerminal(sessionId): re-fit the xterm to its host then push the new
+// cols/rows to the PTY via term_resize (the existing transport endpoint). Uses
+// the xterm fit addon when present; otherwise relies on the onResize hook the
+// mounted terminal already wires to term_resize.
+function _fitPanelTerminal(sessionId) {
+  var p = PANELS[sessionId];
+  if (!p || !p.term) return;
+  try {
+    if (p.fit && p.fit.fit) {
+      p.fit.fit();              // triggers term.onResize → term_resize
+    } else if (p.term.resize && p.term.cols) {
+      // No fit addon: keep current cols, recompute rows from host height.
+      var host = p.body;
+      var rows = Math.max(4, Math.floor((host.clientHeight || 90) / 17));
+      p.term.resize(p.term.cols, rows);   // triggers onResize → term_resize
+    }
+  } catch (e) {}
+}
+
+// _tokenQ(): the ?token= suffix for read-only GET endpoints that gate via the
+// query param (same semantics as the WS/SSE transport token).
+function _tokenQ() {
+  var tok = _anchorToken();
+  return tok ? ('&token=' + encodeURIComponent(tok)) : '';
+}
+
+// Shared Accept-JSON headers object (one definition avoids a literal double
+// close-brace in nested fetch-option object literals — the served-HTML
+// brace-hygiene contract for this RAW single-brace string).
+var _ACCEPT_JSON = {Accept: 'application/json'};
+function _jsonHdrs() { return {headers: _ACCEPT_JSON}; }
 
 // minimizePanel: collapse the panel back to a header-only strip. The session and
 // its terminal transport keep RUNNING — this only hides the panel body.
@@ -3037,6 +3354,7 @@ function minimizePanel(sessionId) {
 function _closePanel(sessionId) {
   var p = PANELS[sessionId];
   if (!p) return;
+  try { if (p.ro && p.ro.disconnect) p.ro.disconnect(); } catch (e) {}
   try { if (p.transport && p.transport.close) p.transport.close(); } catch (e) {}
   try { if (p.term && p.term.dispose) p.term.dispose(); } catch (e) {}
   if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
@@ -6339,6 +6657,63 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             _trigger_session_summary(
                                 folder, pid, lane, session)
                             self._send_json({"ok": True, "status": "generating"})
+            elif self.path.startswith("/api/rnd/session_doc_roles"):
+                # Read-only (v4 Wave 5): the per-lane ROLE→doc map for one
+                # session (summarizer.session_doc_roles, Wave 3). The cockpit's
+                # split-summary RIGHT column (.slinks) renders these role-tagged
+                # links. Each href reuses the EXISTING /report and /artifact
+                # routes; absent roles are simply omitted (never fabricated).
+                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0] or "").strip()
+                lane = (q.get("lane", [""])[0] or "").strip()
+                session_id = (q.get("session", [""])[0] or "").strip()
+                if not pid or not lane or not session_id:
+                    self._send_json({"ok": False,
+                                     "error": "pid, lane, session required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                else:
+                    try:
+                        roles = _summarizer.session_doc_roles(
+                            pid, lane, session_id)
+                    except Exception:
+                        roles = {}
+                    self._send_json({"ok": True, "roles": roles})
+            elif self.path.startswith("/api/rnd/project_rollup"):
+                # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
+                # (effort_history.project_effort_rollup, Wave 3) for the header's
+                # lifetime/30-day toggle. RUN-session totals only (imported /
+                # discovered contribute 0 — never fabricated). Returns both the
+                # raw fields and a pre-formatted ``text`` for the header swap.
+                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0]
+                       or q.get("project_id", [""])[0] or "").strip()
+                window = (q.get("window", ["lifetime"])[0] or "lifetime").strip()
+                if window not in (_eh.WINDOW_LIFETIME, _eh.WINDOW_30D):
+                    window = _eh.WINDOW_LIFETIME
+                if not pid:
+                    self._send_json({"ok": False, "error": "pid required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    try:
+                        roll = _eh.project_effort_rollup(pid, window=window)
+                    except Exception:
+                        roll = {"tokens": 0, "cost_usd": 0.0,
+                                "wall_clock_ms": 0, "sessions": 0}
+                    self._send_json({"ok": True, "window": window,
+                                     "rollup": roll,
+                                     "text": _fmt_rollup_line(roll)})
             elif self.path.startswith("/artifact/"):
                 # Read-only serving of a DISCOVERED (brownfield) artifact from a
                 # project's folder (Wave 4). Traversal-safe via the proven
