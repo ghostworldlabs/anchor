@@ -29,6 +29,13 @@ are interactive and have NO CLI form):
     python3 anchor.py rnd term-sessions <project_id>          # managed ConPTY terminal sessions
     python3 anchor.py rnd previews <project_id>               # ephemeral deliverable-run previews
     python3 anchor.py rnd handoff <project_id> [--lane build] [--seed-session <session_id>]
+
+R&D v4 "Project Cockpit" inspection mirror (read-only DATA seams; live
+terminal start/switch + deliverable launch are interactive and have NO CLI form):
+    python3 anchor.py rnd rollup <project_id> [--window lifetime|30d]   # cost/tokens/time rollup
+    python3 anchor.py rnd doc-roles <project_id> --lane <lane> --session <id>  # per-lane role->doc map
+    python3 anchor.py rnd deliverable-type <project_id> <deliverable_id>  # type detection (skill/tool also verify)
+    python3 anchor.py rnd engine <project_id>                 # the project's last-used engine
 """
 
 import json, os, re, sys
@@ -804,6 +811,80 @@ def rnd_handoff(project_id, lane="build", seed_session=None):
     return {"proposal": proposal, "handoffs": recorded}
 
 
+# ── R&D v4 "Project Cockpit" data mirror (Wave 9) ──────────────────────────
+# Read-only DATA seams the cockpit renders. These DELEGATE to the shared v4
+# modules (no forked logic). There is intentionally NO CLI for the live
+# interactive terminal (start/input/engine-switch) or for deliverable LAUNCH —
+# those are interactive / mutating live operations driven by the dashboard.
+
+def rnd_rollup(project_id, window="lifetime"):
+    """CLI mirror of ``effort_history.project_effort_rollup`` — cost/tokens/time.
+
+    Sums ``job_runner`` cost records for the project's RUN-provenance sessions
+    only (imported/discovered contribute 0). ``window`` is ``lifetime`` (all
+    records) or ``30d`` (records within the last 30 days). Returns
+    ``{tokens, cost_usd, wall_clock_ms, sessions}``.
+    """
+    import effort_history as _eh
+    _proj, folder = _rnd_resolve(project_id)
+    return _eh.project_effort_rollup(project_id, window=window,
+                                     folder_path=folder)
+
+
+def rnd_doc_roles(project_id, lane, session_id):
+    """CLI mirror of ``summarizer.session_doc_roles`` — per-lane role->doc map.
+
+    Resolves the session's member docs to the LANE'S locked role set and returns
+    ``{role: {label, href}}`` (each href via the existing ``/report`` /
+    ``/artifact`` routes). Roles whose document is absent are omitted.
+    """
+    import summarizer as _summarizer
+    _proj, folder = _rnd_resolve(project_id)
+    return _summarizer.session_doc_roles(project_id, lane, session_id,
+                                         folder_path=folder)
+
+
+def rnd_deliverable_type(project_id, deliverable_id):
+    """Type detection (+ skill/tool verify) for a pinned deliverable (Wave 9).
+
+    Delegates to ``deliverables``: resolves the pinned deliverable by its
+    content-addressed id, reports its declared type (else ``infer_type`` from the
+    path), and — for a ``skill``/``tool`` — adds the no-spawn verify status
+    (``available`` | ``loaded`` | ``missing``) via ``verify_skill_or_tool``. No
+    process is ever spawned (inspection only). Raises ``ValueError`` for an
+    unknown deliverable so the CLI prints a clean error.
+    """
+    import deliverables as _deliv
+    _proj, folder = _rnd_resolve(project_id)
+    rec = _deliv.get_pinned_deliverable(folder, project_id, deliverable_id)
+    if rec is None:
+        raise ValueError(f"unknown deliverable: {deliverable_id}")
+    dtype = (rec.get("deliverable_type") or "").strip().lower()
+    if dtype not in _deliv.VALID_TYPES:
+        dtype = _deliv.infer_type(rec.get("artifact_path") or "")
+    out = {
+        "deliverable_id": deliverable_id,
+        "type": dtype,
+        "artifact_path": rec.get("artifact_path", ""),
+        "title": rec.get("title", ""),
+    }
+    if dtype in _deliv.VERIFY_TYPES:
+        out["verify"] = _deliv.verify_skill_or_tool(dtype, rec)
+    return out
+
+
+def rnd_engine(project_id):
+    """CLI mirror of ``terminal_session.last_engine_for_project`` — last engine.
+
+    Returns the project's last-used engine (``claude`` | ``gemini``; defaults to
+    ``claude`` when unset). Read-only — switching engines is a live terminal
+    operation with no CLI form.
+    """
+    import terminal_session as _ts
+    _rnd_resolve(project_id)
+    return _ts.last_engine_for_project(project_id)
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -930,7 +1011,8 @@ def _rnd_cli(args):
     if not args:
         print("Usage: anchor.py rnd <sessions|status|reconcile|add-idea|"
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
-              "term-sessions|previews|handoff> ...")
+              "term-sessions|previews|handoff|rollup|doc-roles|"
+              "deliverable-type|engine> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -956,7 +1038,7 @@ def _rnd_cli(args):
             if a.startswith("--"):
                 # flags that take a value consume the next token
                 if a in ("--lane", "--session", "--notes", "--name",
-                         "--type", "--desc", "--seed-session"):
+                         "--type", "--desc", "--seed-session", "--window"):
                     skip = True
                 continue
             out.append(a)
@@ -1115,6 +1197,60 @@ def _rnd_cli(args):
                 print(f"  - build={h.get('build_session_id','')} "
                       f"plan={h.get('plan_session_id','')} "
                       f"dir={h.get('plan_dir','')}")
+
+        elif sub == "rollup":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd rollup <project_id> "
+                      "[--window lifetime|30d]")
+                return
+            window = _opt("--window", "lifetime")
+            roll = rnd_rollup(pos[0], window=window)
+            secs = (roll.get("wall_clock_ms", 0) or 0) / 1000.0
+            print(f"Effort rollup for {pos[0]} (window: {window}):")
+            print(f"  tokens:     {roll.get('tokens', 0)}")
+            print(f"  cost_usd:   ${roll.get('cost_usd', 0.0)}")
+            print(f"  wall-clock: {secs:.1f}s")
+            print(f"  sessions:   {roll.get('sessions', 0)} (run-only)")
+
+        elif sub == "doc-roles":
+            pos = _positionals()
+            lane = _opt("--lane")
+            session_id = _opt("--session")
+            if not pos or not lane or not session_id:
+                print("Usage: anchor.py rnd doc-roles <project_id> "
+                      "--lane <lane> --session <session_id>")
+                return
+            roles = rnd_doc_roles(pos[0], lane, session_id)
+            print(f"{len(roles)} doc role(s) for session {session_id} "
+                  f"(lane '{lane}'):")
+            for role, meta in roles.items():
+                print(f"  {role:<12} {meta.get('label','')} "
+                      f"-> {meta.get('href','')}")
+
+        elif sub == "deliverable-type":
+            pos = _positionals()
+            if len(pos) < 2:
+                print("Usage: anchor.py rnd deliverable-type <project_id> "
+                      "<deliverable_id>")
+                return
+            info = rnd_deliverable_type(pos[0], pos[1])
+            print(f"Deliverable {info['deliverable_id']}:")
+            print(f"  type:     {info.get('type','')}")
+            print(f"  path:     {info.get('artifact_path','')}")
+            print(f"  title:    {info.get('title','')}")
+            ver = info.get("verify")
+            if ver:
+                print(f"  verify:   {ver.get('status','')} "
+                      f"({ver.get('detail','')})")
+
+        elif sub == "engine":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd engine <project_id>")
+                return
+            eng = rnd_engine(pos[0])
+            print(f"Last-used engine for {pos[0]}: {eng}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

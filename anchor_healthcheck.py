@@ -948,6 +948,272 @@ def check_rnd_v3_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v4_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v4 "Project Cockpit" R&D surface — FULLY STUBBED.
+
+    Walks the new v4 data/control seams in a throwaway temp project + temp git
+    repo, never touching real data, never a live claude / real PTY / real preview
+    spawn / real worktree off the build repo:
+
+      (a) seed-once: ``terminal_session.start_session`` (stub PTY) writes the lane
+          skill seed EXACTLY once → ``record.seeded`` is True; a repeated
+          ``read_since`` never re-emits the seed.
+      (b) engine switch: ``terminal_session.switch_engine`` swaps the backend in
+          the SAME worktree with no orphan PTY; ``last_engine_for_project``
+          reflects the new engine.
+      (c) doc-roles: ``summarizer.session_doc_roles`` returns a dict for a
+          discovered planning session.
+      (d) rollup: ``effort_history.project_effort_rollup`` returns the
+          ``{tokens,cost_usd,wall_clock_ms,sessions}`` shape for BOTH lifetime
+          and 30d windows.
+      (e) grass promote: ``effort_history.promote_grass_to_lane`` starts a seeded
+          stub session in the target lane and the idea REMAINS in grass (copy).
+      (f) type-aware deliverable launch — a skill VERIFY (no spawn, against a TEMP
+          ``ANCHOR_SKILLS_DIR`` — never the live one) AND a service launch on a
+          GUARANTEED-FREE injected port asserted ``!= 8777`` via a STUBBED
+          ``preview_server`` (no real long-lived server is bound).
+
+    Everything is torn down by ``_cleanup_synthetic_rnd`` + the env restore here +
+    in ``main()``. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (fake_claude)
+    + a temp ``ANCHOR_WORKTREE_BASE`` keep every model/PTY interaction off the real
+    engine; nothing touches the live ``:8777`` service.
+    """
+    name = "R&D v4 surface"
+    if not rnd_env.get("runner_cmd"):
+        report.check(name, True, "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    # Force the STUB PTY backend + a hermetic worktree base + a temp skills dir
+    # for the whole walk; all restored in `finally`.
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_skills = os.environ.get("ANCHOR_SKILLS_DIR")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v4-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    skills_dir = Path(_tf.mkdtemp(prefix="anchor-hc-v4-skills-"))
+    os.environ["ANCHOR_SKILLS_DIR"] = str(skills_dir)
+    # A deterministic, recognizable seed so the seed-once assertion is exact.
+    os.environ["ANCHOR_TERMINAL_SEED"] = "HC-V4-SEED-LOAD-SKILL"
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+    rnd_env["v3_temp_dirs"].append(skills_dir)
+
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import pty_manager as _pty
+        import effort_history as _eh
+        import summarizer as _summarizer
+        import deliverables as _deliv
+        import preview_server as _preview
+        import sessions as _sessions
+        import brownfield_scan as _bf
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v4-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "README.md").write_text("# hc v4 probe\n", encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v4", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v4 project", bool(pid), pid))
+
+        seed_tsid = None
+        if git_ok:
+            # ── (a) seed-once on a stub Research session (so the gemini engine
+            #         switch below is policy-allowed: gemini is research-only) ──
+            try:
+                rec = _ts.start_session(pid, "research", label="hc v4 seed")
+                seed_tsid = rec["session_id"]
+                seeded_flag = bool(rec.get("seeded"))
+                out1 = _pty.read_since(seed_tsid, 0)
+                out2 = _pty.read_since(seed_tsid, 0)
+                seed_marker = "HC-V4-SEED-LOAD-SKILL"
+                # Seed appears once and is identical across repeated reads (the
+                # stub echoes input → the marker is in the buffer, never re-sent).
+                seed_once = (out1.get("text", "").count(seed_marker)
+                             == out2.get("text", "").count(seed_marker)
+                             >= 1)
+                steps.append(("seed-once written + flag",
+                              seeded_flag and seed_once,
+                              f"seeded={seeded_flag} marker_seen="
+                              f"{out1.get('text','').count(seed_marker)}"))
+            except Exception as e:
+                steps.append(("seed-once", False, f"{type(e).__name__}: {e}"))
+
+            # ── (b) engine switch (no orphan PTY) ─────────────────────────────
+            if seed_tsid is not None:
+                try:
+                    live_before = set(_pty.live_sessions())
+                    sw = _ts.switch_engine(seed_tsid, "gemini")
+                    after = _rnd_session(seed_tsid)
+                    last_eng = _ts.last_engine_for_project(pid)
+                    # The session id is preserved; exactly one live PTY for it.
+                    live_after = set(_pty.live_sessions())
+                    no_orphan = (seed_tsid in live_after
+                                 and len(live_after) <= len(live_before))
+                    steps.append(("engine switch",
+                                  sw.get("ok", bool(sw))
+                                  and (after or {}).get("backend") == "gemini"
+                                  and last_eng == "gemini"
+                                  and no_orphan,
+                                  f"backend={(after or {}).get('backend')} "
+                                  f"last={last_eng}"))
+                except Exception as e:
+                    steps.append(("engine switch", False,
+                                  f"{type(e).__name__}: {e}"))
+                # Reap the seed session's PTY + worktree (no leak).
+                try:
+                    _ts.kill(seed_tsid, project_id=pid)
+                except Exception:
+                    pass
+        else:
+            steps.append(("seed-once / engine switch", True,
+                          "skipped (git unavailable)"))
+
+        # ── (c) doc-roles on a discovered planning session ────────────────────
+        try:
+            bd = proj_folder / "planning" / "hc-v4-plan"
+            bd.mkdir(parents=True, exist_ok=True)
+            (bd / "MASTER-PLAN.md").write_text(
+                "# Master Plan\n\n## North Star\nhc v4 doc-roles.\n",
+                encoding="utf-8")
+            (bd / "IMPLEMENTATION-PLAN.md").write_text(
+                "# Implementation Plan\n\n## Wave 1\nhc.\n", encoding="utf-8")
+            scan = _bf.scan(str(proj_folder))
+            _eh.adopt_discovered(proj_folder, pid, scan)
+            plan_sessions = _sessions.list_sessions(str(proj_folder), pid,
+                                                    "planning")
+            if plan_sessions:
+                psid = plan_sessions[0]["session_id"]
+                roles = _summarizer.session_doc_roles(pid, "planning", psid,
+                                                      folder_path=str(proj_folder))
+                steps.append(("doc-roles dict", isinstance(roles, dict),
+                              f"roles={list(roles.keys())}"))
+            else:
+                steps.append(("doc-roles", False, "no planning session grouped"))
+        except Exception as e:
+            steps.append(("doc-roles", False, f"{type(e).__name__}: {e}"))
+
+        # ── (d) rollup: lifetime + 30d shape ──────────────────────────────────
+        try:
+            shape = {"tokens", "cost_usd", "wall_clock_ms", "sessions"}
+            life = _eh.project_effort_rollup(pid, window="lifetime",
+                                             folder_path=str(proj_folder))
+            d30 = _eh.project_effort_rollup(pid, window="30d", now=time.time(),
+                                            folder_path=str(proj_folder))
+            steps.append(("rollup lifetime+30d",
+                          set(life.keys()) == shape and set(d30.keys()) == shape,
+                          f"life={life.get('sessions')} 30d={d30.get('sessions')}"))
+        except Exception as e:
+            steps.append(("rollup", False, f"{type(e).__name__}: {e}"))
+
+        # ── (e) grass promote → seeded stub session; idea stays in grass ──────
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid, "hc v4 grass idea")
+                idea_id = idea.get("job_id")
+                prec = _eh.promote_grass_to_lane(pid, idea_id, "research",
+                                                 folder_path=str(proj_folder))
+                ptsid = prec.get("session_id")
+                still = _eh.get_grass_idea(str(proj_folder), pid, idea_id)
+                steps.append(("grass promote (seeded, copy)",
+                              bool(ptsid) and still is not None
+                              and prec.get("status") == "running",
+                              f"idea_kept={still is not None}"))
+                try:
+                    if ptsid:
+                        _ts.kill(ptsid, project_id=pid)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("grass promote", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass promote", True, "skipped (git unavailable)"))
+
+        # ── (f) type-aware deliverable launch — skill verify + service (stub) ─
+        try:
+            # A skill deliverable present under the TEMP skills dir → "available",
+            # verified by existence ONLY (no spawn).
+            (skills_dir / "hcskill").mkdir(parents=True, exist_ok=True)
+            (skills_dir / "hcskill" / "SKILL.md").write_text(
+                "# hcskill\n", encoding="utf-8")
+            (proj_folder / "hcskill").mkdir(parents=True, exist_ok=True)
+            srec = _deliv.pin_deliverable(str(proj_folder), pid, "hcskill",
+                                          name="hcskill", dtype="skill")
+            sres = _deliv.launch_deliverable(str(proj_folder), pid,
+                                             srec.get("job_id"))
+            steps.append(("deliverable skill verify (no spawn)",
+                          sres.get("ok") and sres.get("status")
+                          == _deliv.VERIFY_AVAILABLE,
+                          f"status={sres.get('status')}"))
+
+            # A service deliverable launched through a STUB preview_server: assert
+            # the chosen port is OS-free + != 8777 WITHOUT binding a real server.
+            free_port = _preview.pick_free_port()
+
+            class _StubPreview:
+                STATUS_RUNNING = _preview.STATUS_RUNNING
+                LIVE_PORT = _preview.LIVE_PORT
+
+                def list_previews(self, project_id=None):
+                    return []
+
+                def start_preview(self, folder_path, project_id, target=None,
+                                  **kw):
+                    assert free_port != self.LIVE_PORT
+                    return {"ok": True, "port": free_port,
+                            "url": f"http://127.0.0.1:{free_port}/",
+                            "preview_id": "hc-v4-svc"}
+
+            (proj_folder / "svc.py").write_text("print('svc')\n", encoding="utf-8")
+            vrec = _deliv.pin_deliverable(str(proj_folder), pid, "svc.py",
+                                          name="hc svc", dtype="service")
+            vres = _deliv.launch_deliverable(str(proj_folder), pid,
+                                             vrec.get("job_id"),
+                                             preview_mod=_StubPreview())
+            steps.append(("deliverable service (stub, port != 8777)",
+                          vres.get("ok") and vres.get("port") == free_port
+                          and vres.get("port") != _preview.LIVE_PORT,
+                          f"port={vres.get('port')}"))
+        except Exception as e:
+            steps.append(("deliverable launch", False,
+                          f"{type(e).__name__}: {e}"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_SKILLS_DIR", prev_skills),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
+def _rnd_session(session_id):
+    """Best-effort read of one managed session record by id (for the v4 walk)."""
+    try:
+        import session_registry as _sreg
+        return _sreg.get_session(session_id)
+    except Exception:
+        return None
+
+
 def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
     """Remove the synthetic project(s) + throwaway folder + inbox probe line."""
     # Drop the synthetic project ids from the live registry (never delete real ones).
@@ -1189,6 +1455,7 @@ def main():
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)
         check_rnd_v3_surface(report, server_proc, rnd_env)
+        check_rnd_v4_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
