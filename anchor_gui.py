@@ -153,11 +153,36 @@ def cache_bust_script():
 
 # ── Parsing ────────────────────────────────────────────────────────────
 
+#: Warnings from the most recent gather_all() — markdown files that could not
+#: be read/parsed and were skipped so one bad file can't 500 the whole
+#: dashboard. Best-effort, for diagnostics/tests and future UI surfacing. (The
+#: daily healthcheck independently flags malformed files via its own strict
+#: parse check.)
+LAST_GATHER_WARNINGS = []
+
+
+def _read_md_text(filepath):
+    """Read a markdown file as text, resilient to non-UTF-8 bytes.
+
+    Anchor always writes markdown as UTF-8, but a file edited by an external
+    tool can arrive in another encoding (e.g. a Windows-1252 em-dash, byte
+    0x97). A single such byte must never take down the dashboard: try strict
+    UTF-8 first, and on a UnicodeDecodeError fall back to a lenient decode so
+    the stray byte degrades to a replacement char instead of raising. The next
+    write re-saves the file as clean UTF-8. The daily healthcheck still reads
+    strictly, so a malformed file is still surfaced there for cleanup.
+    """
+    try:
+        return filepath.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return filepath.read_text(encoding="utf-8", errors="replace")
+
+
 def parse_tasks_from_md(filepath):
     tasks = []
     if not filepath or not filepath.exists():
         return tasks
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     for line in text.splitlines():
         m = re.match(r'\s*-\s*\[([ xX])\]\s*\*?\*?(.*?)(?:\*?\*?\s*—\s*(.*))?$', line)
         if m:
@@ -219,7 +244,7 @@ def parse_projects_from_md(filepath):
     projects = []
     if not filepath or not filepath.exists():
         return projects
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     current = None
     for line in text.splitlines():
         h2 = re.match(r'^##\s+(.+)', line)
@@ -261,7 +286,7 @@ def parse_inbox_from_md(filepath):
     items = []
     if not filepath or not filepath.exists():
         return items
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     for line in text.splitlines():
         m = re.match(r'\s*-\s*(\d{4}-\d{2}-\d{2}):\s*(.*?)(?:\s*\[(\w+)\])?\s*$', line)
         if m:
@@ -275,7 +300,7 @@ def parse_archived_tasks(filepath):
     items = []
     if not filepath or not filepath.exists():
         return items
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     for line in text.splitlines():
         m = re.match(r'\s*-\s*(\d{4}-\d{2}-\d{2}):\s*(.*?)(?:\s*—\s*\[(\w+)\])?(?:\s*—\s*P(\d))?(?:\s*—\s*Notes:\s*(.*))?$', line)
         if m:
@@ -305,16 +330,34 @@ def gather_all():
                     t["domain"] = default_domain
                 all_tasks.append(t)
 
+    # Collect per-render warnings locally; a single unreadable/unparseable file
+    # must be skipped (recorded here) rather than 500-ing the whole dashboard.
+    # We accumulate into a local list and publish it atomically at the end, so
+    # concurrent gather_all() calls (ThreadingHTTPServer) never observe a torn
+    # mid-clear state of the module global.
+    _warn = []
+
+    def _safe(parse_fn, src, *, into, **kw):
+        try:
+            into(parse_fn(src), **kw)
+        except Exception as e:  # one bad file can't take down every view
+            _warn.append(f"{getattr(src, 'name', src)}: {e}")
+
     if DASHBOARD_MD.exists():
-        _add(parse_tasks_from_md(DASHBOARD_MD))
+        _safe(parse_tasks_from_md, DASHBOARD_MD, into=_add)
     if DOMAINS_DIR.exists():
         for f in sorted(DOMAINS_DIR.glob("*.md")):
-            _add(parse_tasks_from_md(f), default_domain=f.stem)
+            _safe(parse_tasks_from_md, f, into=_add, default_domain=f.stem)
 
     projects = []
     seen_p = set()
     if PROJECTS_MD.exists():
-        for p in parse_projects_from_md(PROJECTS_MD):
+        try:
+            parsed_projects = parse_projects_from_md(PROJECTS_MD)
+        except Exception as e:
+            parsed_projects = []
+            _warn.append(f"{PROJECTS_MD.name}: {e}")
+        for p in parsed_projects:
             key = p["name"].lower().strip()[:60]
             if key not in seen_p:
                 seen_p.add(key)
@@ -322,7 +365,13 @@ def gather_all():
 
     inbox = []
     if INBOX_MD.exists():
-        inbox.extend(parse_inbox_from_md(INBOX_MD))
+        try:
+            inbox.extend(parse_inbox_from_md(INBOX_MD))
+        except Exception as e:
+            _warn.append(f"{INBOX_MD.name}: {e}")
+
+    # Publish warnings atomically (slice-assign in place, no clear/append window).
+    LAST_GATHER_WARNINGS[:] = _warn
 
     # Filter out synthetic health-check probes so they never appear in any view
     all_tasks = [t for t in all_tasks if "__healthcheck__" not in t["text"].lower()]
@@ -2099,7 +2148,7 @@ def mark_done(task_text):
     for md_file in _all_md_files():
         if not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -2123,7 +2172,7 @@ def mark_undone(task_text):
     for md_file in _all_md_files():
         if not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -2149,7 +2198,7 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
     def _insert(filepath, section_names):
         if not filepath or not filepath.exists():
             return False
-        content = filepath.read_text(encoding="utf-8")
+        content = _read_md_text(filepath)
         for section in section_names:
             idx = content.find(section)
             if idx >= 0:
@@ -2177,7 +2226,7 @@ def capture_inbox(text, domain=""):
         # Fresh/empty data dir: create a minimal inbox so the capture is never
         # silently dropped.
         INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
-    content = INBOX_MD.read_text(encoding="utf-8")
+    content = _read_md_text(INBOX_MD)
     content = content.rstrip() + "\n" + line + "\n"
     INBOX_MD.write_text(content, encoding="utf-8")
     log_change(f"Captured: {text}")
@@ -2198,7 +2247,7 @@ def link_task(task_text, project_id):
     for md_file in _all_md_files():
         if not md_file or not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -2241,7 +2290,7 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
         if md_file.parent == DOMAINS_DIR:
             file_domain = md_file.stem  # e.g. "family", "academic", "writing", "commercial"
 
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -2327,7 +2376,7 @@ def edit_project(old_name, new_name=None, new_priority=None, new_domain=None,
     for proj_file in [PROJECTS_MD]:
         if not proj_file or not proj_file.exists():
             continue
-        text = proj_file.read_text(encoding="utf-8")
+        text = _read_md_text(proj_file)
         lines = text.splitlines()
         new_lines = []
         in_project = False
@@ -2404,7 +2453,7 @@ def _remove_task_from_files(task_text):
     for md_file in _all_md_files():
         if not md_file or not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -2445,7 +2494,7 @@ def _append_to_archive(filepath, task_dict):
 
     if not filepath.exists():
         filepath.write_text(f"# {filepath.stem.replace('_', ' ').title()}\n\n", encoding="utf-8")
-    content = filepath.read_text(encoding="utf-8")
+    content = _read_md_text(filepath)
     content = content.rstrip() + "\n" + line + "\n"
     filepath.write_text(content, encoding="utf-8")
 
@@ -2478,7 +2527,7 @@ def restore_task(task_text, from_archive="saved"):
     archive_file = SAVED_FOR_LATER_MD if from_archive == "saved" else CANCELLED_MD
     if not archive_file or not archive_file.exists():
         return False
-    text = archive_file.read_text(encoding="utf-8")
+    text = _read_md_text(archive_file)
     search = task_text.lower().strip()
     found = None
     new_lines = []

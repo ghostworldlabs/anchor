@@ -58,12 +58,25 @@ SAVED_FOR_LATER_MD = _paths.saved_for_later_md()
 
 # ── Parsing helpers ────────────────────────────────────────────────────
 
+def _read_md_text(filepath):
+    """Read a markdown file as text, resilient to non-UTF-8 bytes.
+
+    Mirrors anchor_gui._read_md_text: a stray non-UTF-8 byte (e.g. a
+    Windows-1252 em-dash, 0x97) in a markdown file must not crash the CLI.
+    Strict UTF-8 first; on a UnicodeDecodeError fall back to a lenient decode.
+    """
+    try:
+        return filepath.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return filepath.read_text(encoding="utf-8", errors="replace")
+
+
 def parse_tasks_from_md(filepath):
     """Extract checkbox tasks from a markdown file."""
     tasks = []
     if not filepath.exists():
         return tasks
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     for line in text.splitlines():
         m = re.match(r'\s*-\s*\[([ xX])\]\s*\*?\*?(.*?)(?:\*?\*?\s*—\s*(.*))?$', line)
         if m:
@@ -115,7 +128,7 @@ def parse_projects_from_md(filepath):
     projects = []
     if not filepath.exists():
         return projects
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     current = None
     for line in text.splitlines():
         h2 = re.match(r'^##\s+(.+)', line)
@@ -166,7 +179,7 @@ def parse_inbox_from_md(filepath):
     items = []
     if not filepath.exists():
         return items
-    text = filepath.read_text(encoding="utf-8")
+    text = _read_md_text(filepath)
     for line in text.splitlines():
         m = re.match(r'\s*-\s*(\d{4}-\d{2}-\d{2}):\s*(.*?)(?:\s*\[(\w+)\])?\s*$', line)
         if m:
@@ -320,7 +333,7 @@ def mark_done(task_text):
     for md_file in _all_md_files():
         if not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -358,7 +371,7 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
         """Insert a task line into the first matching section of a markdown file."""
         if not filepath or not filepath.exists():
             return False
-        content = filepath.read_text(encoding="utf-8")
+        content = _read_md_text(filepath)
         for section in section_names:
             idx = content.find(section)
             if idx >= 0:
@@ -393,7 +406,7 @@ def capture_inbox(text, domain=""):
         # Fresh/empty data dir: create a minimal inbox so the capture is never
         # silently dropped.
         INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
-    content = INBOX_MD.read_text(encoding="utf-8")
+    content = _read_md_text(INBOX_MD)
     content = content.rstrip() + "\n" + line + "\n"
     INBOX_MD.write_text(content, encoding="utf-8")
 
@@ -443,7 +456,7 @@ def _remove_task_from_files(task_text):
     for md_file in _all_md_files():
         if not md_file or not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
@@ -483,7 +496,7 @@ def _append_to_archive(filepath, task_dict):
 
     if not filepath.exists():
         filepath.write_text(f"# {filepath.stem.replace('_', ' ').title()}\n\n", encoding="utf-8")
-    content = filepath.read_text(encoding="utf-8")
+    content = _read_md_text(filepath)
     content = content.rstrip() + "\n" + line + "\n"
     filepath.write_text(content, encoding="utf-8")
 
@@ -520,7 +533,7 @@ def restore_task(task_text, from_archive="saved"):
     if not archive_file or not archive_file.exists():
         print(f"Archive file not found")
         return False
-    text = archive_file.read_text(encoding="utf-8")
+    text = _read_md_text(archive_file)
     search = task_text.lower().strip()
     found = None
     new_lines = []
@@ -568,7 +581,7 @@ def link_task(task_text, project_id):
     for md_file in _all_md_files():
         if not md_file.exists():
             continue
-        text = md_file.read_text(encoding="utf-8")
+        text = _read_md_text(md_file)
         new_lines = []
         changed = False
         for line in text.splitlines():
