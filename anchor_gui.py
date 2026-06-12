@@ -1138,6 +1138,23 @@ def render_project_tile_html(entry: dict) -> str:
         sline = {}
     dot_cls = _project_status_dot(entry, sline)
 
+    # Per-row cost/tokens/time rollup (v4 Wave 8, MASTER-PLAN cockpit dashboard
+    # rows). Reuses the Wave-3 `effort_history.project_effort_rollup` (RUN-session
+    # totals only — imported/discovered contribute 0, never fabricated) and the
+    # shared `_fmt_rollup_line` formatter. Rendered at LIFETIME by default; the
+    # R&D view's single global lifetime/30-day toggle (rndRowsRollupWindow) swaps
+    # every row's text in place via the read-only `/api/rnd/project_rollup`
+    # endpoint, so a no-JS view still shows lifetime totals. Never raises.
+    try:
+        roll = _eh.project_effort_rollup(pid_raw, window=_eh.WINDOW_LIFETIME)
+        roll_txt = html_lib.escape(_fmt_rollup_line(roll))
+    except Exception:
+        roll_txt = ""
+    rollup_block = (
+        f'<span class="rnd-row-roll" data-pid="{pid}" data-window="lifetime" '
+        f'title="Cost / tokens / time across run sessions">{roll_txt}</span>'
+    )
+
     is_active = state in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -1182,25 +1199,28 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
         f'{summary_block}'
         f'<span class="rnd-row-counts">{status}</span>'
+        f'{rollup_block}'
         f'{kebab}'
         f'</div>'
     )
 
 
 def _render_folder_groups(groups: dict) -> str:
-    """Render folder-grouped tiles (shared by the active + archive views)."""
-    blocks = []
+    """Render a FLAT one-line ROW list for the dashboard (v4 Wave 8).
+
+    The old per-folder directory header (``<summary class="rnd-folder-head">``
+    with the folder path) is GONE: the folder path now lives on the
+    PROJECT-WINDOW header (Wave 5, :func:`render_project_window_html`), not on the
+    main dashboard. Projects render as a single flat list of thin rows; this is
+    the locked "Dashboard rows" mockup, not a weakening. Shared by the active +
+    archive views.
+    """
+    rows = []
     for folder in sorted(groups):
-        tiles = "".join(render_project_tile_html(e) for e in groups[folder])
-        blocks.append(
-            f'<details class="rnd-folder" open>'
-            f'<summary class="rnd-folder-head">{html_lib.escape(folder)}'
-            f' <span class="rnd-folder-count">'
-            f'({len(groups[folder])})</span></summary>'
-            f'<div class="rnd-folder-tiles rnd-folder-rows">{tiles}</div>'
-            f'</details>'
-        )
-    return '<div class="rnd-projects">' + "".join(blocks) + '</div>'
+        rows.extend(render_project_tile_html(e) for e in groups[folder])
+    return ('<div class="rnd-projects">'
+            '<div class="rnd-folder-rows">' + "".join(rows) + '</div>'
+            '</div>')
 
 
 def render_projects_view_html(include_archived: bool = False,
@@ -1217,7 +1237,25 @@ def render_projects_view_html(include_archived: bool = False,
     if not groups:
         return ('<div class="rnd-projects"><p class="rnd-empty">'
                 'No active R&D projects. Use "+ New Project" to add one.</p></div>')
-    return _render_folder_groups(groups)
+    return _render_rows_rollup_toggle() + _render_folder_groups(groups)
+
+
+def _render_rows_rollup_toggle() -> str:
+    """A single GLOBAL lifetime/30-day toggle for the R&D rows' cost rollups
+    (v4 Wave 8). Clicking re-fetches every row's read-only
+    ``/api/rnd/project_rollup?window=...`` and swaps the text in place
+    (``rndRowsRollupWindow`` in the JS). Lifetime is the default; the toggle is
+    purely additive (a no-JS view still shows lifetime totals on each row)."""
+    return (
+        '<div class="rnd-rows-rolltog" role="group" '
+        'aria-label="project rollup window">'
+        '<span class="rnd-rows-rolltog-label">Σ&nbsp;effort:</span>'
+        '<b class="on" data-window="lifetime" '
+        'onclick="rndRowsRollupWindow(\'lifetime\',this)">lifetime</b>'
+        '<b data-window="30d" '
+        'onclick="rndRowsRollupWindow(\'30d\',this)">30d</b>'
+        '</div>'
+    )
 
 
 def render_archive_view_html() -> str:
@@ -4771,6 +4809,39 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 }}
 .gwl-footer img {{ width: 16px; height: 16px; border-radius: 4px; }}
 .gwl-footer .gwl-accent {{ color: #22c55e; }}
+
+/* v4 Wave 8 — Option B masthead lockup (branding_proposals.html Proposal B):
+   Anchor title · vertical divider · GWL mark + wordmark off to the side ·
+   "Powered by NextGen Nuclear ☢" pill pushed to the far right. Reuses the SINGLE
+   vendored brand mark (/vendor/brand/gwl-m-icon.svg); no second asset. */
+.masthead {{
+    display: flex; align-items: center; gap: 18px;
+    padding: 14px 0 18px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}}
+.masthead .mh-title {{
+    font-size: 28px; font-weight: 700; letter-spacing: -0.5px;
+    display: flex; align-items: center; gap: 9px;
+}}
+.masthead .mh-title .mh-anchor {{ color: var(--accent); }}
+.masthead .mh-vdiv {{ width: 1px; height: 38px; background: var(--border); flex-shrink: 0; }}
+.masthead .mh-lock {{ display: flex; align-items: center; gap: 10px; }}
+.masthead .mh-lock img {{
+    width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
+    box-shadow: 0 0 9px rgba(34, 197, 94, 0.4);
+}}
+.masthead .mh-words {{ line-height: 1.2; }}
+.masthead .mh-words .mh-w1 {{ font-size: 13px; font-weight: 700; color: #f8fafc; }}
+.masthead .mh-words .mh-w1 .gwl-accent {{ color: #22c55e; }}
+.masthead .mh-words .mh-w2 {{ font-size: 10.5px; color: var(--text-dim); margin-top: 2px; }}
+.masthead .mh-spacer {{ flex: 1; }}
+.masthead .mh-pill {{
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 11px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 600; color: #f8fafc;
+    background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(34, 197, 94, 0.4);
+}}
+.masthead .mh-pill .gwl-rad {{ color: #22c55e; }}
 .nav-section {{ margin-top: 16px; }}
 .nav-section h3 {{ font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim); padding: 0 20px 6px; }}
 .nav-item {{
@@ -5146,10 +5217,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 
 /* ── R&D project tiles (rich) ── */
 .rnd-projects {{ display: flex; flex-direction: column; gap: 14px; }}
-.rnd-folder {{ border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }}
-.rnd-folder-head {{ cursor: pointer; padding: 10px 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,.02); }}
-.rnd-folder-count {{ color: var(--text-dim); }}
-.rnd-folder-tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 12px; }}
+/* v4 Wave 8: the per-folder directory header (.rnd-folder/.rnd-folder-head/
+   .rnd-folder-tiles) was removed — projects render as a FLAT row list. */
 .rnd-name {{ font-weight: 600; font-size: 14px; }}
 .rnd-badge {{ font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }}
 .rnd-badge.rnd-p1 {{ background: rgba(248,113,113,.18); color: var(--danger); border-color: rgba(248,113,113,.3); }}
@@ -5182,6 +5251,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-row-counts {{ flex: 0 0 auto; }}
 .rnd-row-counts .rnd-status-line {{ gap: 5px; }}
 .rnd-row-counts .rnd-lane {{ padding: 2px 7px; font-size: 11px; }}
+/* v4 Wave 8 — per-row cost/tokens/time rollup + the R&D view's global window toggle. */
+.rnd-row-roll {{ flex: 0 0 auto; font-size: 11px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }}
+.rnd-rows-rolltog {{ display: inline-flex; align-items: center; gap: 4px; margin-bottom: 8px; font-size: 11px; color: var(--text-dim); }}
+.rnd-rows-rolltog-label {{ margin-right: 2px; }}
+.rnd-rows-rolltog b {{ font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-dim); font-weight: 600; cursor: pointer; }}
+.rnd-rows-rolltog b.on {{ background: rgba(108,156,252,.15); color: var(--accent); border-color: var(--accent); }}
 .rnd-kebab {{ flex: 0 0 auto; position: relative; }}
 .rnd-kebab-btn {{ background: transparent; border: 1px solid transparent; color: var(--text-dim); font-size: 16px; line-height: 1; padding: 2px 7px; border-radius: 6px; cursor: pointer; }}
 .rnd-kebab-btn:hover {{ border-color: var(--border); color: var(--text); }}
@@ -5230,6 +5305,21 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
   </nav>
 
   <div class="main">
+    <!-- v4 Wave 8 — Option B masthead lockup (Anchor · divider · GWL mark +
+         wordmark · NextGen Nuclear pill). Single vendored brand mark. -->
+    <div class="masthead">
+      <div class="mh-title"><span class="mh-anchor">&#9875;</span>Anchor</div>
+      <div class="mh-vdiv"></div>
+      <div class="mh-lock">
+        <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
+        <div class="mh-words">
+          <div class="mh-w1">Ghost World <span class="gwl-accent">Labs</span></div>
+          <div class="mh-w2">R&amp;D Mission Control</div>
+        </div>
+      </div>
+      <div class="mh-spacer"></div>
+      <div class="mh-pill">Powered by NextGen Nuclear <span class="gwl-rad">&#9762;</span></div>
+    </div>
     <!-- Dashboard view -->
     <div class="view" id="view-dashboard">
       {health_banner_html}
@@ -6087,6 +6177,38 @@ function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the A
 function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
 function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
 function rndRescan(pid) {{ apiCall('/api/rnd/rescan', {{id: pid}}); }}
+// v4 Wave 8 — one GLOBAL lifetime/30-day toggle for the dashboard rows' cost
+// rollups. Re-fetches each row's read-only /api/rnd/project_rollup?window=... and
+// swaps the .rnd-row-roll text in place (no page reload). The header renders
+// lifetime server-side, so a no-JS view still shows lifetime totals.
+function rndRowsRollupWindow(window_, btn) {{
+    if (btn && btn.parentNode) {{
+        var bs = btn.parentNode.querySelectorAll('b');
+        for (var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+        btn.classList.add('on');
+    }}
+    var tok = _anchorToken();
+    var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
+    var rolls = document.querySelectorAll('.rnd-row-roll[data-pid]');
+    for (var j = 0; j < rolls.length; j++) {{
+        (function (el) {{
+            var pid = el.getAttribute('data-pid') || '';
+            if (!pid) return;
+            var url = '/api/rnd/project_rollup?pid=' + encodeURIComponent(pid)
+                + '&window=' + encodeURIComponent(window_) + tq;
+            var hdrs = {{'Content-Type': 'application/json'}};
+            fetch(url, {{headers: hdrs}})
+                .then(function (r) {{ return r.json(); }})
+                .then(function (d) {{
+                    if (d && d.ok && typeof d.text === 'string') {{
+                        el.textContent = d.text;
+                        el.setAttribute('data-window', window_);
+                    }}
+                }})
+                .catch(function () {{}});
+        }})(rolls[j]);
+    }}
+}}
 // v3 Wave 5 — toggle a project ROW's kebab menu (lifecycle controls live here so
 // the thin row stays one line). Closes any other open menu first.
 function rndToggleKebab(ev, pid) {{
