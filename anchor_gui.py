@@ -2729,6 +2729,60 @@ async function stopAttached() {
   renderTabs();
 }
 
+// ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────
+// Clicking launch ADAPTS to the deliverable type:
+//   skill/tool → verify status (available/loaded/missing); NO process.
+//   service    → start a preview (free port ≠8777, isolated data dir) or pull
+//                up the running one; open the URL in a new tab + show Stop.
+//   program    → run-to-result; report success/failure.
+//   doc        → open the rendered view (the /artifact route) in a new tab.
+// Token-aware via _postJson (retries once on 401).
+async function launchDeliverable(btn) {
+  var li = btn.closest('.deliv-pinned');
+  var msg = li ? li.querySelector('.deliv-msg') : null;
+  var did = li ? li.getAttribute('data-deliv-id') : '';
+  var dtype = li ? li.getAttribute('data-deliv-type') : '';
+  if (!did) { if (msg) msg.textContent = 'no deliverable id'; return; }
+  if (msg) msg.textContent = 'launching…';
+  btn.disabled = true;
+  var payload = {project_id: PROJECT_ID, deliverable_id: did};
+  try {
+    var r = await _postJson('/api/rnd/launch_deliverable', payload);
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/launch_deliverable', payload);
+      data = await r.json();
+    }
+    if (!data || !data.ok) {
+      if (msg) msg.textContent = 'failed: ' + ((data && data.error) || 'unknown');
+      btn.disabled = false;
+      return;
+    }
+    if (dtype === 'service') {
+      if (li) li.setAttribute('data-preview-id', data.preview_id || '');
+      if (msg) msg.textContent = (data.pulled_up ? 'pulled up' : 'running')
+        + ' on port ' + (data.port || '?');
+      var stopBtn = li ? li.querySelector('.deliv-stop') : null;
+      if (stopBtn) stopBtn.style.display = '';
+      btn.style.display = 'none';
+      if (data.url) window.open(data.url, '_blank');
+    } else if (dtype === 'doc') {
+      if (msg) msg.textContent = 'opened';
+      btn.disabled = false;
+      if (data.href) window.open(data.href, '_blank');
+    } else if (dtype === 'skill' || dtype === 'tool') {
+      if (msg) msg.textContent = dtype + ': ' + (data.status || '?');
+      btn.disabled = false;
+    } else {  // program / script
+      if (msg) msg.textContent = 'result: ' + (data.status || (data.ok ? 'ok' : 'failed'));
+      btn.disabled = false;
+    }
+  } catch (e) {
+    if (msg) msg.textContent = 'error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
 // ── Runnable Anchor deliverable — ephemeral preview (v3 Wave 8) ─────────────
 // Run starts a preview server on a free port (≠8777) in an isolated temp data
 // dir, then opens the returned URL in a NEW TAB. Stop reaps it. Token-aware.
@@ -3712,19 +3766,36 @@ def render_deliverables_html(project_id: str, folder_path: str) -> str:
 
     # Pinned deliverables with Run/Stop (the runnable Anchor deliverable).
     if pinned:
+        # v4 Wave 7: the launch action ADAPTS to the deliverable type — the
+        # per-type affordance label mirrors the "📦 Deliverable" mockup card.
+        _launch_label = {
+            _deliv.TYPE_SERVICE: "▶ launch in window / pull up",
+            _deliv.TYPE_PROGRAM: "▶ run in a window",
+            _deliv.TYPE_SCRIPT: "▶ run in a window",
+            _deliv.TYPE_SKILL: "✓ verify status",
+            _deliv.TYPE_TOOL: "✓ verify status",
+            _deliv.TYPE_DOC: "📖 open rendered",
+        }
         items = []
         for r in pinned:
             name = html_lib.escape(
                 r.get("title") or r.get("artifact_path") or "")
             rel = r.get("artifact_path", "") or ""
-            dtype = html_lib.escape(r.get("deliverable_type", "") or "")
+            raw_type = (r.get("deliverable_type", "") or "").strip().lower()
+            if raw_type not in _deliv.VALID_TYPES:
+                raw_type = _deliv.infer_type(rel)
+            dtype = html_lib.escape(raw_type)
+            did = r.get("job_id", "") or ""
             rel_attr = html_lib.escape(rel, quote=True)
+            did_attr = html_lib.escape(did, quote=True)
+            label = html_lib.escape(_launch_label.get(raw_type, "▶ launch"))
             items.append(
-                f"<li class='deliv-pinned' data-deliv=\"{rel_attr}\">"
+                f"<li class='deliv-pinned' data-deliv=\"{rel_attr}\" "
+                f"data-deliv-id=\"{did_attr}\" data-deliv-type=\"{dtype}\">"
                 f"<span class='deliv-name'>{name}</span> "
                 f"<span style='color:#8a90a2;font-size:12px'>[{dtype}]</span> "
                 f"<button class='deliv-run' "
-                f"onclick=\"runDeliverable('{rel_attr}', this)\">Run</button> "
+                f"onclick=\"launchDeliverable(this)\">{label}</button> "
                 f"<button class='deliv-stop' "
                 f"onclick=\"stopDeliverable(this)\" style='display:none'>"
                 f"Stop</button> "
@@ -7230,6 +7301,44 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             self._send_json({"ok": False, "error": str(e)}, 400)
                         else:
                             self._send_json({"ok": True, "effort": rec})
+
+        elif self.path == "/api/rnd/launch_deliverable":
+            # v4 Wave 7: TYPE-AWARE launch of a pinned deliverable. Dispatches on
+            # the deliverable's type — skill/tool VERIFY status (no spawn);
+            # service launches/pulls-up a persistent preview (free port != 8777,
+            # isolated temp data dir); program runs to result; doc returns the
+            # rendered view href. Auth is enforced by the middleware above.
+            pid = (body.get("project_id", "") or body.get("pid", "")).strip()
+            deliverable_id = (body.get("deliverable_id", "") or "").strip()
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            elif not deliverable_id:
+                self._send_json({"ok": False,
+                                 "error": "deliverable_id required"}, 400)
+            else:
+                folder = proj.get("folder_path", "")
+                try:
+                    res = _deliv.launch_deliverable(folder, pid, deliverable_id)
+                except Exception as exc:  # never a 500 to the UI
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+                else:
+                    if not res.get("ok") and \
+                            res.get("reason") == "unknown deliverable":
+                        # Unknown deliverable id → clean 404 (not a crash).
+                        self._send_json({"ok": False,
+                                         "error": "unknown deliverable",
+                                         "reason": "unknown-deliverable"}, 404)
+                    elif not res.get("ok"):
+                        # Type-specific clean failure (e.g. service never came
+                        # up / program failed its contract) → 400, not a 500.
+                        self._send_json({"ok": False,
+                                         "error": res.get("reason")
+                                         or "launch failed",
+                                         "type": res.get("type"),
+                                         "port": res.get("port")}, 400)
+                    else:
+                        self._send_json({"ok": True, **res})
 
         # ── R&D control surface — lane launch + gate answer (UI wiring) ──
         elif self.path == "/api/rnd/launch_lane":
