@@ -365,3 +365,191 @@ def test_grounding_unit_edge_cases(mods):
         "cache", "validated", "summaries"]
     assert summ._key_terms("a an of") == []  # all <3 chars
     assert summ._key_terms("!!! ???") == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v3 Wave 5 — PROJECT summary (generate-once + cache + force + grounding).
+# IMPLEMENTATION-PLAN lines 124-141: a background project-summary generator that
+# mirrors the session pipeline, seeded from CLAUDE.md + recent plan docs +
+# deliverables, validated by the SAME grounding filter, cached under .anchor.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _project_with_identity_docs(rnd, folder):
+    """A project whose CLAUDE.md + recent plan doc form the grounding corpus."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "CLAUDE.md").write_text(
+        "# Anchor\n\n"
+        "## What this project is\n"
+        "Anchor is a productivity system that manages markdown task files.\n",
+        encoding="utf-8")
+    plan = folder / "planning" / "rnd-v3"
+    plan.mkdir(parents=True, exist_ok=True)
+    (plan / "MASTER-PLAN.md").write_text(
+        "# Mission Control\n\n"
+        "## North Star\n"
+        "Make the surface a truthful memory of trio work.\n",
+        encoding="utf-8")
+    proj = rnd.add_project("Anchor", str(folder))
+    return proj["id"]
+
+
+def test_project_summary_generate_once_and_cache(mods, tmp_path, monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid = _project_with_identity_docs(rnd, folder)
+
+    counter = tmp_path / "calls.txt"
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(counter))
+    grounded = "Anchor is a productivity system managing markdown task files"
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS", grounded)
+
+    # FIRST call → model runs GENERATE_RUNS times, writes the cache.
+    s1 = summ.summarize_project(folder, pid)
+    first = counter.read_text(encoding="utf-8") if counter.exists() else ""
+    assert len(first) == summ.GENERATE_RUNS
+    assert s1.get("kind") == "project"
+    assert "productivity system" in " ".join(s1["claims"]).lower()
+    # summary_text (the row's text) is the joined grounded claims.
+    assert "productivity system" in s1["summary_text"].lower()
+
+    # Cache files are written + git-trackable (.json + .md).
+    jp = summ._project_summary_json_path(folder, pid)
+    mp = summ._project_summary_md_path(folder, pid)
+    assert jp.exists() and mp.exists()
+
+    # SECOND call → served from cache, model NOT re-run (run-once).
+    s2 = summ.summarize_project(folder, pid)
+    second = counter.read_text(encoding="utf-8") if counter.exists() else ""
+    assert len(second) == len(first), "second call must serve cache, not re-run"
+    assert s2["claims"] == s1["claims"]
+    assert s2.get("generated_at") == s1.get("generated_at")
+
+    # load_cached_project (the render-path read) returns the same thing, no run.
+    cached = summ.load_cached_project(folder, pid)
+    assert cached["claims"] == s1["claims"]
+    assert len(counter.read_text(encoding="utf-8")) == len(first)
+
+
+def test_project_summary_force_reruns(mods, tmp_path, monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid = _project_with_identity_docs(rnd, folder)
+
+    counter = tmp_path / "calls.txt"
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(counter))
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "Anchor is a productivity system for task files")
+    s1 = summ.summarize_project(folder, pid)
+    n1 = len(counter.read_text(encoding="utf-8"))
+    assert n1 == summ.GENERATE_RUNS
+
+    # Cache hit: no new model calls.
+    summ.summarize_project(folder, pid)
+    assert len(counter.read_text(encoding="utf-8")) == n1
+
+    # force=True re-runs + overwrites with the new grounded content.
+    monkeypatch.setenv(
+        "STUB_SUMMARIZER_CLAIMS",
+        "North Star: a truthful memory of trio work")
+    s2 = summ.summarize_project(folder, pid, force=True)
+    n2 = len(counter.read_text(encoding="utf-8"))
+    assert n2 == n1 + summ.GENERATE_RUNS, "force must re-run the model"
+    assert "truthful memory" in " ".join(s2["claims"]).lower()
+    on_disk = summ.load_cached_project(folder, pid)
+    assert "truthful memory" in json.dumps(on_disk).lower()
+
+
+def test_project_summary_grounding_drops_ungrounded(mods, tmp_path, monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid = _project_with_identity_docs(rnd, folder)
+
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(tmp_path / "calls.txt"))
+    grounded = "Anchor is a productivity system for markdown task files"
+    ungrounded = "Quux frobnicate zzyzx wibble bogus unrelated claim"
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS", grounded + "\n" + ungrounded)
+
+    s = summ.summarize_project(folder, pid)
+    joined = " ".join(s["claims"]).lower()
+    assert "productivity system" in joined
+    assert "frobnicate" not in joined
+    assert "zzyzx" not in joined
+    # The on-disk cache is clean of the hallucinated terms too.
+    jp = summ._project_summary_json_path(folder, pid)
+    assert "frobnicate" not in jp.read_text(encoding="utf-8").lower()
+
+
+def test_project_summary_failed_run_does_not_poison_cache(mods, tmp_path,
+                                                          monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid = _project_with_identity_docs(rnd, folder)
+
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(tmp_path / "calls.txt"))
+    monkeypatch.setenv("STUB_SUMMARIZER_FAIL", "1")
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS", "ignored on failure")
+
+    out = summ.summarize_project(folder, pid)
+    assert out.get("error") == "generation_failed"
+    assert out["claims"] == []
+    jp = summ._project_summary_json_path(folder, pid)
+    assert not jp.exists(), "failed run must NOT write a poisoned cache"
+    assert summ.load_cached_project(folder, pid) is None
+
+    # Recovery → a real cached summary on retry.
+    monkeypatch.delenv("STUB_SUMMARIZER_FAIL", raising=False)
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "Anchor is a productivity system for task files")
+    good = summ.summarize_project(folder, pid)
+    assert "error" not in good
+    assert "productivity system" in " ".join(good["claims"]).lower()
+    assert jp.exists(), "successful retry must write the cache"
+
+
+# ── project run-once under CONCURRENCY (per-project lock) ─────────────────────
+
+def test_concurrent_summarize_project_runs_model_once(mods, tmp_path,
+                                                      monkeypatch):
+    """Two threads summarize the SAME uncached PROJECT at once. Mirrors the
+    session-level test_concurrent_summarize_runs_model_once: the per-project
+    lock + double-checked cache re-read must make the model run exactly
+    GENERATE_RUNS times total (not 2x), both callers get the SAME cached
+    summary, and the cache is written once."""
+    import threading
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid = _project_with_identity_docs(rnd, folder)
+
+    counter = tmp_path / "calls.txt"
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(counter))
+    monkeypatch.setenv(
+        "STUB_SUMMARIZER_CLAIMS",
+        "Anchor is a productivity system managing markdown task files")
+
+    results = {}
+    barrier = threading.Barrier(2)
+
+    def worker(name):
+        barrier.wait()  # maximize the race: both enter summarize together
+        results[name] = summ.summarize_project(folder, pid)
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start(); t2.start()
+    t1.join(timeout=120); t2.join(timeout=120)
+    assert not t1.is_alive() and not t2.is_alive(), "summarize threads hung"
+
+    calls = counter.read_text(encoding="utf-8") if counter.exists() else ""
+    assert len(calls) == summ.GENERATE_RUNS, (
+        f"model must run GENERATE_RUNS={summ.GENERATE_RUNS} times total under "
+        f"concurrency, not 2x; got {len(calls)} calls")
+    # Both callers got the identical (cached) summary.
+    assert results["a"]["claims"] == results["b"]["claims"]
+    assert results["a"].get("generated_at") == results["b"].get("generated_at")
+    assert "productivity system" in " ".join(results["a"]["claims"]).lower()
+    # The cache was written exactly once (.json + .md present, single content).
+    jp = summ._project_summary_json_path(folder, pid)
+    mp = summ._project_summary_md_path(folder, pid)
+    assert jp.exists() and mp.exists()
+    on_disk = summ.load_cached_project(folder, pid)
+    assert on_disk["claims"] == results["a"]["claims"]

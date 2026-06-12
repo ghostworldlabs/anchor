@@ -648,3 +648,347 @@ def render_summary_page(folder_path, project_id, lane, session_id,
     return {"mode": "reader",
             "content_type": "text/html; charset=utf-8",
             "body": page, "found": True}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROJECT summary (v3 Wave 5) — an accurate, cached, validated description of
+# WHAT A PROJECT IS, mirroring the session-summary pipeline above (do NOT fork).
+#
+# MASTER-PLAN §A/§B: the thin project row's summary text must be an accurate
+# cached project summary that REPLACES the weak first-paragraph blurb. It is
+# generated ONCE (proactively on rescan) from the project's CLAUDE.md/README/
+# Anchor.md (what the project IS) + the most-recent plan docs + declared/pinned
+# deliverables, validated by the SAME deterministic grounding filter, and cached
+# as small git-trackable JSON under the project's ``.anchor`` store. The render
+# path only READS the cache — it NEVER runs the model synchronously.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: File names probed (in order) for the "what the project IS" seed corpus.
+PROJECT_SEED_FILES = ("CLAUDE.md", "README.md", "README", "Anchor.md")
+#: Glob-ish relative locations of the most-recent plan docs to seed from.
+PROJECT_PLAN_DOC_NAMES = ("MASTER-PLAN.md", "IMPLEMENTATION-PLAN.md")
+PROJECT_PLAN_DIR = "planning"
+#: How many plan docs to fold into the seed (bounded).
+MAX_PROJECT_PLAN_DOCS = 4
+#: Cache file names for the per-project summary.
+PROJECT_SUMMARY_JSON = "project-summary.json"
+PROJECT_SUMMARY_MD = "project-summary.md"
+
+# Per-project generation lock (mirror of the per-session lock — run-once under
+# the ThreadingHTTPServer when two rescans race the same project).
+_PROJECT_LOCKS_GUARD = threading.Lock()
+_PROJECT_LOCKS = {}
+
+
+def _project_lock(folder_path, project_id):
+    key = (str(folder_path), str(project_id))
+    with _PROJECT_LOCKS_GUARD:
+        lk = _PROJECT_LOCKS.get(key)
+        if lk is None:
+            lk = threading.Lock()
+            _PROJECT_LOCKS[key] = lk
+        return lk
+
+
+def _project_store_dir(folder_path, project_id) -> Path:
+    """``<folder>/.anchor/projects/<id>/`` — the per-project store (not created)."""
+    return Path(folder_path) / ".anchor" / "projects" / str(project_id)
+
+
+def _project_summary_json_path(folder_path, project_id) -> Path:
+    return _project_store_dir(folder_path, project_id) / PROJECT_SUMMARY_JSON
+
+
+def _project_summary_md_path(folder_path, project_id) -> Path:
+    return _project_store_dir(folder_path, project_id) / PROJECT_SUMMARY_MD
+
+
+def _recent_plan_docs(folder_path) -> list:
+    """Best-effort: find the most-recent plan docs under ``planning/``.
+
+    Returns up to ``MAX_PROJECT_PLAN_DOCS`` ``Path``s named like a MASTER-PLAN /
+    IMPLEMENTATION-PLAN, newest-first by mtime (so ``rnd-v3`` wins over ``rnd-v1``).
+    Stdlib only; never raises.
+    """
+    out = []
+    try:
+        base = Path(folder_path) / PROJECT_PLAN_DIR
+        if not base.is_dir():
+            return out
+        cand = []
+        for p in base.rglob("*.md"):
+            try:
+                if p.name in PROJECT_PLAN_DOC_NAMES and p.is_file():
+                    cand.append((p.stat().st_mtime, p))
+            except OSError:
+                continue
+        cand.sort(key=lambda t: t[0], reverse=True)
+        out = [p for _, p in cand[:MAX_PROJECT_PLAN_DOCS]]
+    except OSError:
+        pass
+    return out
+
+
+def project_extraction_seed(folder_path, project_id) -> dict:
+    """Deterministically build the PROJECT seed corpus (mirror of extraction_seed).
+
+    Folds three bounded sources into one grounding corpus + anchor list:
+      1. the project's CLAUDE.md/README/Anchor.md (what the project IS),
+      2. the most-recent plan docs under ``planning/`` (goal / north-star), and
+      3. declared/pinned deliverables (what it ships).
+
+    Returns ``{"kind": "project", "title", "sources": [...], "anchors": [...],
+    "deliverables": [...], "text": "<combined corpus>"}``. Stdlib only; never
+    raises.
+    """
+    folder = Path(folder_path)
+    title = ""
+    sources = []
+    anchors = []
+    corpus_parts = []
+
+    # 1. "What the project IS" — first existing identity doc (bounded read).
+    for name in PROJECT_SEED_FILES:
+        path = folder / name
+        text = _read_bounded(path)
+        if text:
+            sources.append(name)
+            corpus_parts.append(text)
+            if not title:
+                title = _first_heading(text)
+            for heading, body in _lift_sections(text, _SECTION_SIGNALS["planning"]):
+                anchors.append({"heading": heading, "body": body, "from": name})
+            break
+
+    # 2. Most-recent plan docs (goal / north-star / key decisions).
+    for path in _recent_plan_docs(folder):
+        text = _read_bounded(path)
+        if not text:
+            continue
+        rel = path.name
+        try:
+            rel = str(path.relative_to(folder))
+        except (ValueError, OSError):
+            pass
+        sources.append(rel)
+        corpus_parts.append(text)
+        for heading, body in _lift_sections(text, _SECTION_SIGNALS["planning"]):
+            anchors.append({"heading": heading, "body": body, "from": rel})
+
+    # 3. Declared / pinned deliverables (what the project ships).
+    deliverables = []
+    try:
+        import deliverables as _deliv
+        for rec in _deliv.list_pinned_deliverables(folder, project_id):
+            label = (rec.get("name") or rec.get("artifact_path")
+                     or rec.get("path") or "").strip()
+            if label:
+                deliverables.append(label)
+                corpus_parts.append(label)
+                desc = (rec.get("description") or rec.get("desc") or "").strip()
+                if desc:
+                    corpus_parts.append(desc)
+    except Exception:
+        pass
+
+    if not title and sources:
+        title = sources[0]
+    return {
+        "kind": "project",
+        "title": title,
+        "sources": sources,
+        "anchors": anchors,
+        "deliverables": deliverables,
+        "text": "\n".join(corpus_parts),
+    }
+
+
+def _project_seed_prompt(seed: dict) -> str:
+    """Render the project seed as the bounded model prompt (mirror of _seed_prompt)."""
+    lines = [
+        "Summarize what this project IS in a few grounded bullet claims "
+        "(its purpose, what it does, and what it ships).",
+        f"Title: {seed.get('title', '')}",
+        "Anchors from the project documents:",
+    ]
+    for a in seed.get("anchors", []):
+        lines.append(f"- {a['heading']}: {a['body']}")
+    delivs = seed.get("deliverables", [])
+    if delivs:
+        lines.append("Declared deliverables:")
+        for d in delivs:
+            lines.append(f"- {d}")
+    return "\n".join(lines)
+
+
+def _run_project_model_once(folder_path, seed: dict, runner_env: dict = None):
+    """Run ONE bounded project-summary model call through the runner seam.
+
+    Identical contract to ``_run_model_once`` (RUN_FAILED sentinel on a
+    failed/timed-out job; ``[]`` on a clean run that emitted nothing), but seeded
+    with the PROJECT prompt. All model calls go through ``job_runner`` /
+    ``ANCHOR_RUNNER_CMD`` — NEVER live ``claude``.
+
+    ``runner_env`` (optional): when the generation is kicked off from a BACKGROUND
+    thread (proactive on-rescan generation), the caller snapshots the runner-seam
+    env (``ANCHOR_RUNNER_CMD`` + any test ``STUB_*`` vars) at trigger time and
+    forwards it here so the spawned job uses the runner/counter that were
+    configured THEN — not whatever the process env happens to be when the late
+    background thread finally runs. This keeps a late daemon thread from a prior
+    test from contaminating a later test's runner-call counter (test isolation).
+    """
+    prompt = _project_seed_prompt(seed)
+    rec = _jr.launch("research", cwd=str(folder_path), prompt=prompt,
+                     env=(runner_env or None))
+    jid = rec["job_id"]
+    _jr.wait(jid, timeout=60)
+    final = _jr.load_record(jid) or {}
+    if final.get("status") != _jr.STATUS_DONE:
+        return RUN_FAILED
+    claims = []
+    for line in _jr.all_lines(jid):
+        s = (line or "").strip()
+        if not s:
+            continue
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict) and obj.get("type"):
+                    continue
+            except (json.JSONDecodeError, ValueError):
+                pass
+        claims.append(re.sub(r"^[-*+]\s+", "", s))
+    return claims
+
+
+def _generate_project_candidates(folder_path, seed: dict, runs: int,
+                                 runner_env: dict = None):
+    """Generate ``runs`` project-summary candidate claim-lists (mirror)."""
+    candidates = []
+    failed = False
+    for _ in range(max(1, runs)):
+        out = _run_project_model_once(folder_path, seed, runner_env=runner_env)
+        if out is RUN_FAILED:
+            failed = True
+            continue
+        candidates.append(out)
+    return candidates, failed
+
+
+def render_project_markdown(structured: dict) -> str:
+    """Render a structured PROJECT summary to cache-ready markdown."""
+    title = structured.get("title") or "Project summary"
+    lines = [f"# {title}", "", "*Project summary · validated, cached*", ""]
+    claims = structured.get("claims", []) or []
+    if claims:
+        lines.append("## What this project is")
+        lines.append("")
+        for c in claims:
+            lines.append(f"- {c}")
+        lines.append("")
+    elif structured.get("no_grounded_claims"):
+        lines.append("## What this project is")
+        lines.append("")
+        lines.append("_No grounded description could be extracted from the "
+                     "project documents. You may rescan/regenerate to try again._")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _summary_text(structured: dict) -> str:
+    """Compact one-line summary text for the thin project row (claims joined)."""
+    claims = structured.get("claims", []) or []
+    return " ".join(c.strip() for c in claims if c and c.strip()).strip()
+
+
+def _write_project_cache(folder_path, project_id, structured: dict) -> dict:
+    """Write project-summary.json + .md under the project store (under lock)."""
+    with _paths.WRITE_LOCK:
+        d = _project_store_dir(folder_path, project_id)
+        d.mkdir(parents=True, exist_ok=True)
+        md = render_project_markdown(structured)
+        structured["markdown"] = md
+        structured["summary_text"] = _summary_text(structured)
+        jp = d / PROJECT_SUMMARY_JSON
+        tmp = jp.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(structured, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(jp)
+        (d / PROJECT_SUMMARY_MD).write_text(md, encoding="utf-8")
+    return structured
+
+
+def load_cached_project(folder_path, project_id):
+    """Return the cached structured PROJECT summary dict, or ``None``.
+
+    ``None`` means "not generated yet" — the row falls back to the blurb. This
+    function NEVER runs the model, so it is safe on the dashboard render path.
+    """
+    p = _project_summary_json_path(folder_path, project_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def summarize_project(folder_path, project_id, force: bool = False,
+                      runner_env: dict = None) -> dict:
+    """Summarize a PROJECT → validated, cached structured summary (Wave 5).
+
+    Run-once semantics (mirror of ``summarize_session``): unless ``force`` is set,
+    a cached project summary is returned WITHOUT running the model again.
+    ``force=True`` re-runs the model and overwrites the cache.
+
+    Pipeline: project extraction-seed → generate twice through the runner seam →
+    deterministic grounding validation → cache project-summary.json + .md.
+
+    A failed runner job (or no usable output) returns a retryable error state and
+    does NOT write the cache (no poisoning). An all-ungrounded successful run is
+    cached but flagged ``no_grounded_claims`` (run-once still holds).
+
+    This MAY run the model, so it must be called OFF the render path (e.g. from
+    the rescan handler / a background thread), never during a dashboard render.
+    """
+    if not force:
+        cached = load_cached_project(folder_path, project_id)
+        if cached is not None:
+            return cached
+
+    lock = _project_lock(folder_path, project_id)
+    with lock:
+        if not force:
+            cached = load_cached_project(folder_path, project_id)
+            if cached is not None:
+                return cached
+
+        seed = project_extraction_seed(folder_path, project_id)
+        candidates, failed = _generate_project_candidates(
+            folder_path, seed, GENERATE_RUNS, runner_env=runner_env)
+        if failed or not candidates:
+            return {
+                "project_id": str(project_id),
+                "kind": "project",
+                "title": seed.get("title", ""),
+                "claims": [],
+                "summary_text": "",
+                "sources": seed.get("sources", []),
+                "error": "generation_failed",
+                "generated_at": time.time(),
+                "runs": len(candidates),
+            }
+
+        claims = _validate(candidates, seed)
+        structured = {
+            "project_id": str(project_id),
+            "kind": "project",
+            "title": seed.get("title", ""),
+            "claims": claims,
+            "sources": seed.get("sources", []),
+            "generated_at": time.time(),
+            "runs": len(candidates),
+        }
+        if not claims:
+            structured["no_grounded_claims"] = True
+        return _write_project_cache(folder_path, project_id, structured)

@@ -842,8 +842,58 @@ def discover_and_adopt(project_id: str) -> dict:
     # ``reconcile_folder`` is what folds + hard-deletes them).
     sibling = _eh.adopt_sibling_sessions(folder, project_id)
     marker = _marker.write_anchor_md(folder)
+    # Wave 5 (v3): proactively (re)generate the accurate cached PROJECT summary
+    # off the render path. We force a regenerate here so a rescan picks up new
+    # plan docs / deliverables; the dashboard render only READS the cache.
+    _trigger_project_summary(folder, project_id, force=True)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
             "sibling_adopt": sibling, "marker": marker}
+
+
+#: Proactive project-summary generation is OFF by default so importing the module
+#: and calling endpoints in unit tests never spawns a background model job. The
+#: live server turns it ON in ``main()``; a test can opt in via the env flag
+#: ``ANCHOR_PROACTIVE_SUMMARY=1``. When OFF, summaries are still generated
+#: lazily/on demand (and the render path always just reads the cache).
+_PROACTIVE_SUMMARY_ENABLED = (
+    os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
+    in ("1", "true", "yes", "on"))
+
+
+def _trigger_project_summary(folder_path, project_id, force: bool = False):
+    """Kick off proactive project-summary generation WITHOUT blocking the caller.
+
+    Wave 5 (v3): the accurate cached project summary is generated proactively on
+    rescan through the runner seam (``ANCHOR_RUNNER_CMD`` → never live claude),
+    in a background daemon thread so the rescan/render path is never blocked by a
+    model run. All errors are swallowed — a failed generation just leaves the row
+    on its blurb fallback (and never poisons the cache, per summarizer FIX 2).
+
+    No-op unless proactive generation is enabled (the live server enables it; see
+    ``_PROACTIVE_SUMMARY_ENABLED``) so unit tests that merely register/open a
+    project never spawn a background model job.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    # Snapshot the runner-seam env at TRIGGER time so a late daemon thread uses
+    # the runner/counter configured now — not whatever the process env is when it
+    # finally runs. (Forwarded to the spawned job via job_runner.launch(env=...).
+    # In production this is just ANCHOR_RUNNER_CMD; in tests it also carries the
+    # STUB_* vars so a leaked thread can't bump a later test's call counter.)
+    runner_env = {k: v for k, v in os.environ.items()
+                  if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
+                  or k.startswith("FAKE_")}
+
+    def _run():
+        try:
+            _summarizer.summarize_project(folder_path, project_id, force=force,
+                                          runner_env=(runner_env or None))
+        except Exception:
+            pass
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
 
 
 def render_status_line_html(project_id: str) -> str:
@@ -876,20 +926,27 @@ def render_status_line_html(project_id: str) -> str:
     return '<div class="rnd-status-line">' + "".join(chips) + "</div>"
 
 
-def render_project_tile_html(entry: dict) -> str:
-    """Render a 'Rich' project tile: name, priority, state, effort rollup, notes,
-    and lifecycle actions (open-in-its-own-window, change priority, edit notes,
-    archive / retire — or reactivate for an inactive project)."""
+def _project_summary_text(entry: dict) -> tuple:
+    """Return ``(summary_text, source)`` for a project's thin-row summary.
+
+    Wave 5 (v3): the row's summary is the accurate CACHED project summary when
+    present (``summarizer.load_cached_project`` — read-only, NEVER runs the model
+    on the render path), else the existing blurb (seeded once from CLAUDE.md/
+    README/Anchor.md), else "". ``source`` is ``"summary"`` | ``"blurb"`` | ``""``.
+    """
     pid_raw = entry.get("id", "")
-    pid = html_lib.escape(pid_raw)
-    name = html_lib.escape(entry.get("name", ""))
-    pr = entry.get("priority", 2)
-    state = html_lib.escape(entry.get("state", "active"))
-    notes = entry.get("notes", "") or ""
-    notes_attr = html_lib.escape(notes, quote=True)
     folder = entry.get("folder_path", "")
-    # Project blurb ("what this project is"): seed once from CLAUDE.md/README/
-    # Anchor.md when empty, then render. Best-effort — never block the tile.
+    # 1. Cached project summary (read-only — no model run on the render path).
+    if folder:
+        try:
+            cached = _summarizer.load_cached_project(folder, pid_raw)
+            if cached:
+                txt = (cached.get("summary_text") or "").strip()
+                if txt:
+                    return txt, "summary"
+        except Exception:
+            pass
+    # 2. Fall back to the blurb (seed once if empty).
     blurb = entry.get("blurb", "") or ""
     if not blurb.strip():
         try:
@@ -898,30 +955,64 @@ def render_project_tile_html(entry: dict) -> str:
                 blurb = seeded.get("blurb", "") or ""
         except Exception:
             pass
-    blurb_attr = html_lib.escape(blurb, quote=True)
-    blurb_block = (f'<div class="rnd-blurb" data-blurb="{blurb_attr}">'
-                   f'{html_lib.escape(blurb)}</div>') if blurb.strip() else ''
-    status = render_status_line_html(pid_raw)
-    # Effort rollup ("amount of effort") — count + cost/time/tokens.
+    if blurb.strip():
+        return blurb.strip(), "blurb"
+    return "", ""
+
+
+def _project_status_dot(entry: dict, status_line: dict) -> str:
+    """Pick the row's status-dot class (kept simple + documented, Wave 5).
+
+    Mapping: green if ANY lane has a running session; for inactive projects
+    (archived/future/retired) a dimmed grey; otherwise a neutral idle grey. The
+    dot is purely advisory (the per-lane mini-counts carry the detail)."""
+    state = entry.get("state", "active")
+    if state in ("archived", "future", "retired"):
+        return "rnd-dot-idle"
     try:
-        total = _eh.project_rollup(pid_raw, folder).get("total", {})
-        n_eff = int(total.get("effort_count", 0) or 0)
-        n_imp = int(total.get("discovered_count", 0) or 0)
+        if any(int((status_line.get(l) or {}).get("running", 0) or 0) > 0
+               for l in status_line):
+            return "rnd-dot-running"
     except Exception:
-        total, n_eff, n_imp = {}, 0, 0
-    imported_bit = (f' · <span class="rnd-imported">{n_imp} imported</span>'
-                    if n_imp else "")
-    if n_eff:
-        effort_line = (f'<div class="rnd-effort">{n_eff} effort'
-                       f'{"s" if n_eff != 1 else ""}{imported_bit} · '
-                       f'{html_lib.escape(_fmt_cost(total))}</div>')
-    elif n_imp:
-        # Brownfield project with only imported artifacts (no Anchor runs yet).
-        effort_line = (f'<div class="rnd-effort">0 efforts{imported_bit}</div>')
-    else:
-        effort_line = '<div class="rnd-effort rnd-dim">no efforts yet</div>'
-    notes_block = (f'<div class="rnd-notes" title="{notes_attr}">&#128221; '
-                   f'{html_lib.escape(notes)}</div>') if notes.strip() else ''
+        pass
+    return "rnd-dot-idle"
+
+
+def render_project_tile_html(entry: dict) -> str:
+    """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
+    lines 124-141): ``name · accurate cached project summary · per-lane
+    mini-counts · status dot``. Clicking the row opens the project window;
+    lifecycle controls (P1/P2, rescan, blurb, notes, archive/retire/reactivate)
+    moved OFF the row into a kebab/hover menu so the row stays one line. This
+    REPLACES the old square ``.rnd-tile``."""
+    pid_raw = entry.get("id", "")
+    pid = html_lib.escape(pid_raw)
+    name = html_lib.escape(entry.get("name", ""))
+    pr = entry.get("priority", 2)
+    state = html_lib.escape(entry.get("state", "active"))
+    notes = entry.get("notes", "") or ""
+    notes_attr = html_lib.escape(notes, quote=True)
+    folder = entry.get("folder_path", "")
+
+    # Row summary text: cached project summary, else blurb (read-only path).
+    summary_text, _src = _project_summary_text(entry)
+    summary_attr = html_lib.escape(summary_text, quote=True)
+    summary_block = (f'<span class="rnd-row-summary" title="{summary_attr}">'
+                     f'{html_lib.escape(summary_text)}</span>'
+                     if summary_text else
+                     '<span class="rnd-row-summary rnd-dim">No summary yet</span>')
+    # data-blurb keeps the kebab "Blurb" prompt seeded with the editable blurb.
+    blurb = entry.get("blurb", "") or ""
+    blurb_attr = html_lib.escape(blurb, quote=True)
+
+    # Per-lane mini-counts (compact form of the status line) + status dot.
+    status = render_status_line_html(pid_raw)
+    try:
+        sline = _rnd.status_line(pid_raw)
+    except Exception:
+        sline = {}
+    dot_cls = _project_status_dot(entry, sline)
+
     is_active = state in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -944,22 +1035,29 @@ def render_project_tile_html(entry: dict) -> str:
             f'<button class="rnd-mini" onclick="rndBlurb(\'{pid}\')" title="Edit blurb (what this project is)">Blurb</button>'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
         )
+    # Kebab menu holds all lifecycle controls so the row stays thin. The row
+    # itself (click anywhere not on the kebab) opens the project window.
+    kebab = (
+        f'<div class="rnd-kebab" onclick="event.stopPropagation()">'
+        f'<button class="rnd-kebab-btn" onclick="rndToggleKebab(event,\'{pid}\')" '
+        f'title="Project actions" aria-label="Project actions">&#8942;</button>'
+        f'<div class="rnd-kebab-menu" id="rnd-kebab-{pid}">'
+        f'{lifecycle}'
+        f'</div>'
+        f'</div>'
+    )
     return (
-        f'<div class="rnd-tile" data-project-id="{pid}" data-notes="{notes_attr}">'
-        f'<div class="rnd-tile-head">'
+        f'<div class="rnd-row" data-project-id="{pid}" data-notes="{notes_attr}" '
+        f'data-blurb="{blurb_attr}" tabindex="0" role="button" '
+        f'onclick="openProjectWindow(\'{pid}\')" '
+        f'title="Open {name}">'
+        f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
-        f'</div>'
-        f'{blurb_block}'
-        f'{status}'
-        f'{effort_line}'
-        f'{notes_block}'
-        f'<div class="rnd-actions">'
-        f'<button class="rnd-mini rnd-open-btn" onclick="openProjectWindow(\'{pid}\')" '
-        f'title="Open in its own window (multiple projects at once)">Open &#8599;</button>'
-        f'{lifecycle}'
-        f'</div>'
+        f'{summary_block}'
+        f'<span class="rnd-row-counts">{status}</span>'
+        f'{kebab}'
         f'</div>'
     )
 
@@ -974,7 +1072,7 @@ def _render_folder_groups(groups: dict) -> str:
             f'<summary class="rnd-folder-head">{html_lib.escape(folder)}'
             f' <span class="rnd-folder-count">'
             f'({len(groups[folder])})</span></summary>'
-            f'<div class="rnd-folder-tiles">{tiles}</div>'
+            f'<div class="rnd-folder-tiles rnd-folder-rows">{tiles}</div>'
             f'</details>'
         )
     return '<div class="rnd-projects">' + "".join(blocks) + '</div>'
@@ -3977,18 +4075,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-folder-head {{ cursor: pointer; padding: 10px 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,.02); }}
 .rnd-folder-count {{ color: var(--text-dim); }}
 .rnd-folder-tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 12px; }}
-.rnd-tile {{ border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface2, #232733); display: flex; flex-direction: column; gap: 7px; }}
-.rnd-tile:hover {{ border-color: var(--accent); }}
-.rnd-tile-head {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
 .rnd-name {{ font-weight: 600; font-size: 14px; }}
 .rnd-badge {{ font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }}
 .rnd-badge.rnd-p1 {{ background: rgba(248,113,113,.18); color: var(--danger); border-color: rgba(248,113,113,.3); }}
 .rnd-badge.rnd-p2 {{ background: rgba(251,191,36,.15); color: var(--warning); border-color: rgba(251,191,36,.3); }}
 .rnd-badge[class*="rnd-state-archived"], .rnd-badge[class*="rnd-state-future"], .rnd-badge[class*="rnd-state-retired"] {{ background: rgba(255,255,255,.04); }}
-.rnd-effort {{ font-size: 11px; color: var(--accent); }}
 .rnd-imported {{ color: var(--text-dim); font-style: italic; font-size: 11px; }}
 .rnd-running {{ color: var(--success); font-size: 11px; }}
-.rnd-effort.rnd-dim {{ color: var(--text-dim); }}
 .rnd-status-line {{ margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }}
 .rnd-lane {{ padding: 4px 10px; border-radius: 6px; background: #1b2030; font-size: 13px; }}
 .rnd-lane.rnd-lane-empty {{ color: var(--text-dim); }}
@@ -4000,6 +4093,26 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-mini.rnd-pr-on {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-open-btn {{ background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-accent {{ border-color: var(--accent); color: var(--accent); }}
+/* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
+.rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
+.rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
+.rnd-row:hover {{ border-color: var(--accent); }}
+.rnd-row:focus {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
+.rnd-dot {{ flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); }}
+.rnd-dot.rnd-dot-running {{ background: var(--success); box-shadow: 0 0 5px var(--success); }}
+.rnd-dot.rnd-dot-idle {{ background: var(--text-dim); }}
+.rnd-row .rnd-name {{ flex: 0 0 auto; white-space: nowrap; }}
+.rnd-row-summary {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
+.rnd-row-summary.rnd-dim {{ color: var(--text-dim); opacity: .6; font-style: italic; }}
+.rnd-row-counts {{ flex: 0 0 auto; }}
+.rnd-row-counts .rnd-status-line {{ gap: 5px; }}
+.rnd-row-counts .rnd-lane {{ padding: 2px 7px; font-size: 11px; }}
+.rnd-kebab {{ flex: 0 0 auto; position: relative; }}
+.rnd-kebab-btn {{ background: transparent; border: 1px solid transparent; color: var(--text-dim); font-size: 16px; line-height: 1; padding: 2px 7px; border-radius: 6px; cursor: pointer; }}
+.rnd-kebab-btn:hover {{ border-color: var(--border); color: var(--text); }}
+.rnd-kebab-menu {{ display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; flex-direction: column; gap: 4px; min-width: 120px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }}
+.rnd-kebab-menu.rnd-kebab-open {{ display: flex; }}
+.rnd-kebab-menu .rnd-mini {{ width: 100%; text-align: left; }}
 .rnd-mini.rnd-danger:hover {{ border-color: var(--danger); color: var(--danger); }}
 .rnd-empty {{ color: var(--text-dim); font-size: 13px; }}
 </style>
@@ -4888,17 +5001,32 @@ function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the A
 function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
 function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
 function rndRescan(pid) {{ apiCall('/api/rnd/rescan', {{id: pid}}); }}
+// v3 Wave 5 — toggle a project ROW's kebab menu (lifecycle controls live here so
+// the thin row stays one line). Closes any other open menu first.
+function rndToggleKebab(ev, pid) {{
+    ev.stopPropagation();
+    var menu = document.getElementById('rnd-kebab-' + pid);
+    var wasOpen = menu && menu.classList.contains('rnd-kebab-open');
+    document.querySelectorAll('.rnd-kebab-menu.rnd-kebab-open').forEach(function(m) {{
+        m.classList.remove('rnd-kebab-open');
+    }});
+    if (menu && !wasOpen) menu.classList.add('rnd-kebab-open');
+}}
+document.addEventListener('click', function() {{
+    document.querySelectorAll('.rnd-kebab-menu.rnd-kebab-open').forEach(function(m) {{
+        m.classList.remove('rnd-kebab-open');
+    }});
+}});
 function rndNotes(pid) {{
-    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
+    var el = document.querySelector('.rnd-row[data-project-id="' + pid + '"]');
     var cur = el ? (el.getAttribute('data-notes') || '') : '';
     var n = window.prompt('Project notes:', cur);
     if (n === null) return;
     apiCall('/api/rnd/set_notes', {{id: pid, notes: n}});
 }}
 function rndBlurb(pid) {{
-    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
-    var bEl = el ? el.querySelector('.rnd-blurb') : null;
-    var cur = bEl ? (bEl.getAttribute('data-blurb') || '') : '';
+    var el = document.querySelector('.rnd-row[data-project-id="' + pid + '"]');
+    var cur = el ? (el.getAttribute('data-blurb') || '') : '';
     var n = window.prompt('What this project is (blurb):', cur);
     if (n === null) return;
     apiCall('/api/rnd/set_blurb', {{id: pid, blurb: n}});
@@ -6330,7 +6458,11 @@ def resolve_bind_host():
 
 
 def main():
-    global _server_instance
+    global _server_instance, _PROACTIVE_SUMMARY_ENABLED
+    # The live server proactively (re)generates the cached project summary on
+    # rescan/discovery (Wave 5). Unit tests leave this off (default) so importing
+    # the module never spawns a background model job.
+    _PROACTIVE_SUMMARY_ENABLED = True
     port = 8777
     no_browser = "--no-browser" in sys.argv
     if "--port" in sys.argv:

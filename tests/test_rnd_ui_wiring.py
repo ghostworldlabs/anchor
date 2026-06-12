@@ -570,17 +570,26 @@ def test_lifecycle_endpoints_round_trip_and_views(server):
 
 
 def test_tile_has_lifecycle_controls_and_multiwindow_open(gui_env):
-    """The rich tile + lifecycle JS are actually surfaced in the page (the exact
-    'built but not wired into the UI' regression that bit the first R&D build)."""
+    """The thin project ROW + kebab lifecycle controls are actually surfaced in
+    the page (the exact 'built but not wired into the UI' regression that bit the
+    first R&D build). v3 Wave 5 replaced the square ``.rnd-tile`` with a one-line
+    ``.rnd-row`` whose lifecycle controls live in a kebab menu and whose body
+    click opens the project window."""
     gui = gui_env
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         _mkproject(gui, Path(td) / "Tile", name="TileProj")
         html = gui.generate_html(*gui.gather_all())
-    for needle in ("function openProjectWindow", "openProjectWindow(",
-                   "rndSetPriority", "rndArchive", "rndRetire", "rndNotes",
-                   "function rndNotes", 'id="view-rnd-archive"',
-                   "showView('rnd-archive')", ".rnd-tile", "rnd-effort"):
+    for needle in (
+            # the thin row + its click-to-open-project-window affordance
+            'class="rnd-row"', "data-project-id=", "openProjectWindow('",
+            "function openProjectWindow",
+            # the kebab that holds the lifecycle controls
+            'class="rnd-kebab"', "rndToggleKebab",
+            # at least the lifecycle controls themselves
+            "rndSetPriority", "rndArchive", "rndRetire", "rndNotes",
+            "function rndNotes", 'id="view-rnd-archive"',
+            "showView('rnd-archive')"):
         assert needle in html, "page missing: " + needle
     # window.open with a per-project NAME => focus-existing, one window per project
     assert "'anchorproj_'" in html

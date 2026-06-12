@@ -225,3 +225,52 @@ independent of the v2 console drawer so Wave-6 inline summaries coexist.
 **Verdict: GO.**
 
 ---
+
+## Wave 5 — Thin project rows + accurate proactive project summary — GO (2026-06-11)
+
+**EXECUTE.** `summarizer.py` gains a PROJECT-summary path mirroring (reusing, not
+forking) the session pipeline: `summarize_project(folder, pid, force=False)` /
+`load_cached_project` seed from CLAUDE.md/README/Anchor.md + newest
+`planning/**/{MASTER,IMPLEMENTATION}-PLAN.md` + pinned deliverables → generate-twice
+through the `ANCHOR_RUNNER_CMD`/job_runner seam (never live claude) → the existing
+grounding filter → cache `.anchor/projects/<id>/project-summary.json(.md)`
+(generate-once; `force=True` regenerates; a failed run never poisons the cache).
+The dashboard RENDER path only READS the cache (`load_cached_project`), falling
+back to the blurb — it never runs the model. Proactive generation triggers on
+`POST /api/rnd/rescan` (→ `discover_and_adopt` → `_trigger_project_summary`, a
+background daemon thread gated by `_PROACTIVE_SUMMARY_ENABLED`/`ANCHOR_PROACTIVE_SUMMARY`).
+`anchor_gui.render_project_tile_html` rewritten to a **thin full-width `.rnd-row`**
+(status dot · name · cached-summary-or-blurb · per-lane mini-counts · `.rnd-kebab`
+lifecycle menu); row click → `openProjectWindow`.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **467 passed, 1 skipped**.
+0 leaked `{{`/`}}` in the projects view + generate_html.
+
+**REVIEW (2 independent adversarial reviewers).** Both GO-WITH-NITS. Reviewer A
+verified — with a live concurrency proof — generate-once/cache/force, no
+cache-poison on failure, grounding drops ungrounded claims, the render path never
+runs the model, and (the hard-scrutinized axis) the **proactive-on-rescan path is
+genuinely tested end-to-end** (a test enables the flag, POSTs rescan, and polls for
+the cached summary). Reviewer B verified the thin-row markup, summary precedence,
+HTML-escaping (XSS-safe incl. attribute-breakout), brace hygiene, status-dot
+semantics, and confirmed the `test_set_blurb` tile→row change was a legitimate
+plan-required migration (load-bearing assertion kept), not weakening.
+
+**FIX (bounded, 1 iter).** (1) MINOR: removed genuinely-dead `.rnd-tile`/
+`.rnd-tile-head`/`.rnd-effort` CSS (grep-confirmed emitted by ZERO render paths)
+and retargeted the stale `test_tile_has_lifecycle_controls_and_multiwindow_open`
+to assert the real `.rnd-row`/kebab/`openProjectWindow` structure — so the guard is
+meaningful again (also resolved the cross-file `rnd-tile` contradiction). (2)
+Synced `.anchor/.gitignore` with an explicit allow-list line for
+`project-summary.json/.md`. (3) Added a project-summary concurrency regression test
+(generate-once under 2 racing threads). Re-gate: **467 passed, 1 skipped**.
+
+**Accepted residual risk (recorded).** The grounding filter is deterministic
+term-overlap, not semantic (Reviewer A: a hallucinated claim CAN survive against a
+large project corpus). This is the same v2-inherited filter; mitigations
+(generate-twice fusion + min-2-grounded-terms + 0.7 ratio) remain. Re-architecting
+grounding to be semantic is out of this build's scope.
+
+**Verdict: GO.**
+
+---

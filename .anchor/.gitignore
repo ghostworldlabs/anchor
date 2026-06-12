@@ -24,6 +24,14 @@ projects/*/**/raw/
 !projects/*/**/summary.json
 !projects/*/**/summary.md
 
+# Re-include the validated, cached PROJECT-level summary (v3 Wave 5, C9). The
+# project-summary.{json,md} live directly under projects/<id>/ and — like the
+# session summaries above — are the durable, shareable cache and must be tracked.
+# (No ignore rule above matches them today; this allow-list keeps the documented
+# policy in sync with reality.)
+!projects/*/project-summary.json
+!projects/*/project-summary.md
+
 # Managed git worktrees for live sessions (v3 Mission Control). Each session
 # runs in its own worktree under .anchor/worktrees/<session_id>/; these are
 # transient working trees and must NEVER be tracked by the host repo.
