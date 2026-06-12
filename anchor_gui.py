@@ -6960,6 +6960,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 out = _termsess.kill(session)
                 self._send_json({"ok": True, "result": out})
 
+        elif self.path == "/api/rnd/term_set_engine":
+            # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
+            # Token-gated by the do_POST middleware above. Reaps + relaunches in
+            # the SAME worktree, re-seeds once, updates the registry backend.
+            session = (body.get("session", "") or "").strip()
+            engine = (body.get("engine", "") or "").strip()
+            if not session or not engine:
+                self._send_json({"ok": False,
+                                 "error": "session and engine required"}, 400)
+            elif engine not in _termsess.VALID_BACKENDS:
+                self._send_json({"ok": False,
+                                 "error": "invalid engine (expected claude|gemini)",
+                                 "reason": "invalid-engine"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                try:
+                    rec = _termsess.switch_engine(session, engine)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+                else:
+                    self._send_json({"ok": True, "session": rec})
+
         elif self.path == "/api/rnd/term_resize":
             session = (body.get("session", "") or "").strip()
             cols = body.get("cols")

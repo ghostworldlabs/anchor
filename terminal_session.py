@@ -29,9 +29,12 @@ error dict, never a crash). Stdlib only; the native PTY dep is isolated in
 ``pty_manager`` and selected by ``ANCHOR_PTY_BACKEND`` (``stub`` in all tests).
 """
 
+import json
 import os
 import uuid
+from pathlib import Path
 
+import paths as _paths
 import pty_manager as _pty
 import session_registry as _reg
 import worktrees as _wt
@@ -45,6 +48,84 @@ except Exception:  # pragma: no cover - lanes is always importable, defensive
 
 #: Backends this service accepts (mirrors session_registry.VALID_BACKENDS).
 VALID_BACKENDS = {_reg.BACKEND_CLAUDE, _reg.BACKEND_GEMINI}
+
+#: Default engine when a project has never picked one (v4 Wave 2).
+DEFAULT_ENGINE = _reg.BACKEND_CLAUDE
+
+#: Per-project last-used-engine pointer file, stored alongside the per-project
+#: cache under ``<folder>/.anchor/projects/<id>/`` (the convention summarizer
+#: uses for its project-summary.json). Persisted atomically under WRITE_LOCK.
+ENGINE_POINTER_NAME = "engine.json"
+
+
+# ── Per-project last-used engine persistence (v4 Wave 2) ─────────────────────
+#
+# The chosen engine (claude|gemini) is selected ONCE per session, but a project
+# "remembers" its last-used engine so a fresh session defaults to it. Persisted
+# as ``{"last_engine": "<engine>"}`` in ``engine.json`` under the per-project
+# store dir — the SAME ``<folder>/.anchor/projects/<id>/`` directory summarizer
+# caches into. Atomic write (tmp + os.replace) under ``paths.WRITE_LOCK`` so a
+# concurrent ThreadingHTTPServer writer / crash mid-write can't corrupt it.
+
+
+def _engine_pointer_path(project_id) -> Path:
+    """``<folder>/.anchor/projects/<id>/engine.json`` (not created).
+
+    Returns ``None`` if the project (and thus its folder) cannot be resolved.
+    """
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        return None
+    folder = proj.get("folder_path", "")
+    if not folder:
+        return None
+    return _rnd.project_store_dir(folder, project_id) / ENGINE_POINTER_NAME
+
+
+def last_engine_for_project(project_id) -> str:
+    """Return the project's last-used engine, defaulting to ``claude`` when unset.
+
+    Best-effort: a missing/corrupt/unreadable pointer (or an unknown project)
+    returns :data:`DEFAULT_ENGINE`. An out-of-range persisted value (not a known
+    backend) also falls back to the default rather than propagating garbage.
+    """
+    p = _engine_pointer_path(project_id)
+    if p is None or not p.exists():
+        return DEFAULT_ENGINE
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, ValueError):
+        return DEFAULT_ENGINE
+    eng = data.get("last_engine") if isinstance(data, dict) else None
+    if eng in VALID_BACKENDS:
+        return eng
+    return DEFAULT_ENGINE
+
+
+def set_last_engine_for_project(project_id, engine) -> bool:
+    """Persist the project's last-used engine (atomic, under WRITE_LOCK).
+
+    No-op (returns ``False``) for an unknown backend or an unresolvable project;
+    otherwise writes ``{"last_engine": engine}`` and returns ``True``. A write
+    failure is swallowed (returns ``False``) — remembering the engine is a
+    convenience, never worth crashing a live session over.
+    """
+    if engine not in VALID_BACKENDS:
+        return False
+    p = _engine_pointer_path(project_id)
+    if p is None:
+        return False
+    try:
+        with _paths.WRITE_LOCK:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text(
+                json.dumps({"last_engine": engine}, ensure_ascii=False),
+                encoding="utf-8")
+            os.replace(str(tmp), str(p))
+        return True
+    except OSError:
+        return False
 
 
 # ── Per-lane skill-seed map (v4 Wave 1) ──────────────────────────────────────
@@ -164,7 +245,12 @@ def _check_engine_allowed(lane, backend):
             raise TerminalSessionError(str(exc)) from exc
 
 
-def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
+#: Sentinel: ``backend`` not explicitly passed → default to the project's
+#: last-used engine (v4 Wave 2).
+_UNSET = object()
+
+
+def start_session(project_id, lane, backend=_UNSET, label=""):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -174,6 +260,11 @@ def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
     and greets once (the v4 Wave-1 seed; recorded as ``seeded=True`` so it is
     never re-sent). The pty id IS the registry ``session_id``.
 
+    v4 Wave 2: when ``backend`` is NOT explicitly passed it defaults to the
+    project's **last-used engine** (:func:`last_engine_for_project`, ``claude``
+    when unset); on a successful start the chosen engine is recorded as the
+    project's last_engine so the next session inherits it.
+
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
     On a worktree-creation failure it raises with the git reason (nothing is left
@@ -182,6 +273,10 @@ def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
     proj = _rnd.get_project(project_id)
     if proj is None:
         raise TerminalSessionError("unknown project: %s" % (project_id,))
+
+    # v4 Wave 2: no explicit engine → inherit the project's last-used one.
+    if backend is _UNSET:
+        backend = last_engine_for_project(project_id)
 
     # Validate the lane BEFORE creating any worktree/PTY — a typo must not mint a
     # real session. (Reuses the canonical lane set; engine policy is checked next.)
@@ -270,6 +365,110 @@ def start_session(project_id, lane, backend=_reg.BACKEND_CLAUDE, label=""):
                     sid, seeded=True, seed_text=seed_text)
             except Exception:
                 pass
+
+    # v4 Wave 2: remember the engine this session chose so the NEXT session for
+    # this project defaults to it. Best-effort (never fails a live session).
+    set_last_engine_for_project(project_id, backend)
+    return record
+
+
+def switch_engine(session_id, engine):
+    """Toggle a live session to the other engine, keeping its identity.
+
+    Reaps the current session's PTY child (keeping the SAME ``session_id``,
+    worktree, branch, lane, and label), launches a NEW PTY on ``engine`` in the
+    SAME worktree, re-applies the lane's skill seed ONCE on the new engine, and
+    updates the registry record's ``backend`` (+ ``seeded``/``seed_text``). The
+    project's last_engine is updated to ``engine`` on success.
+
+    Identity is preserved: the new PTY (which the manager mints under its own
+    opaque id) is rebound under the EXISTING ``session_id`` (the same trick
+    :func:`start_session` uses), so the registry, worktree and PTY keep keying
+    off one id — no orphan PTY and no orphan worktree.
+
+    On a relaunch FAILURE the record is rolled back to its prior, consistent
+    state (original backend/seed restored, no half-killed live PTY left behind,
+    the worktree untouched) and :class:`TerminalSessionError` is raised.
+
+    Raises :class:`TerminalSessionError` for an unknown session / unknown
+    backend / a disallowed lane+engine combination (engine policy is enforced
+    BEFORE the old PTY is reaped, so a refused switch never disturbs the session).
+    """
+    if engine not in VALID_BACKENDS:
+        raise TerminalSessionError(
+            "unknown backend %r (expected claude|gemini)" % (engine,))
+
+    record = _reg.get_session(session_id)
+    if record is None:
+        raise TerminalSessionError("unknown session: %s" % (session_id,))
+
+    lane = record.get("lane", "")
+    worktree_path = record.get("worktree_path", "")
+    project_id = record.get("project_id") or None
+    prior_backend = record.get("backend", DEFAULT_ENGINE)
+    prior_seeded = bool(record.get("seeded", False))
+    prior_seed_text = record.get("seed_text", "") or ""
+
+    if not worktree_path:
+        raise TerminalSessionError(
+            "session %s has no worktree to relaunch in" % (session_id,))
+
+    # Enforce the lane/engine policy BEFORE touching the live PTY — a refused
+    # switch (e.g. gemini on a plan/build lane) leaves the session exactly as-is.
+    _check_engine_allowed(lane, engine)
+
+    # 1) Reap the current PTY child (tolerate an already-dead/unknown one).
+    try:
+        _pty.kill(session_id)
+    except _pty.UnknownSession:
+        pass
+
+    # 2) Launch a NEW PTY on the other engine in the SAME worktree.
+    try:
+        pty_sid = _pty.start([engine], cwd=worktree_path)
+    except Exception as exc:
+        # Relaunch failed: leave the record CONSISTENT. The old PTY is already
+        # reaped, so mark the session IDLE (no live process) but keep its prior
+        # backend/seed bookkeeping intact — no orphan PTY, worktree untouched.
+        try:
+            _reg.update_session(
+                session_id, status=_reg.STATUS_IDLE, backend=prior_backend,
+                seeded=prior_seeded, seed_text=prior_seed_text)
+        except Exception:
+            pass
+        raise TerminalSessionError(
+            "failed to relaunch on %s (%s); session left idle, worktree intact"
+            % (engine, exc)) from exc
+
+    # 3) Rebind the new PTY under the EXISTING session_id (one id per session).
+    with _pty._TABLE_LOCK:
+        child = _pty._LIVE.pop(pty_sid, None)
+        if child is not None:
+            _pty._LIVE[session_id] = child
+
+    # 4) Update the registry record: new backend, RUNNING, seed reset (a fresh
+    #    engine needs the skill re-loaded once).
+    record = _reg.update_session(
+        session_id, backend=engine, status=_reg.STATUS_RUNNING,
+        seeded=False, seed_text="")
+
+    # 5) Re-apply the lane seed ONCE on the new engine (same discipline as start).
+    seed_text = seed_for_lane(lane)
+    if seed_text:
+        try:
+            _pty.write(session_id, seed_text)
+        except Exception:
+            seed_text = None
+        if seed_text:
+            try:
+                record = _reg.update_session(
+                    session_id, seeded=True, seed_text=seed_text)
+            except Exception:
+                pass
+
+    # 6) Remember the now-current engine for the project.
+    if project_id is not None:
+        set_last_engine_for_project(project_id, engine)
     return record
 
 
