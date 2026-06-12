@@ -434,6 +434,7 @@ import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
 import terminal_session as _termsess
+import handoff as _handoff
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -2699,6 +2700,29 @@ async function newTermSession(lane, backend, opts) {
   // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
   // extra field today (start_session ignores it); Wave 7 wires it through.
   if (opts && opts.seed_session) payload.seed_session = opts.seed_session;
+  // Wave 7 offer→confirm: for a BUILD lane, OFFER the most-recent plan set and
+  // only prime on confirm. We fetch the read-only proposal, and if a plan set
+  // exists, ask "Execute on this plan set?". YES → proceed (term_start primes).
+  // NO → drop the seed and launch a bare build session (non-blocking).
+  if (lane === 'build') {
+    try {
+      var qp = 'project_id=' + encodeURIComponent(PROJECT_ID) + '&lane=build';
+      if (opts && opts.seed_session)
+        qp += '&seed_session=' + encodeURIComponent(opts.seed_session);
+      var pr = await fetch('/api/rnd/handoff_proposal?' + qp);
+      var pd = await pr.json();
+      if (pd && pd.ok && pd.has_plan_set) {
+        var ps = pd.plan_set || {};
+        var msg = 'Execute on this plan set? ' +
+          (ps.title || ps.plan_dir || 'plan set') +
+          ' — ' + (ps.impl_plan_rel || ps.master_plan_rel || '');
+        if (!confirm(msg)) {
+          // User declined the offer: launch without seeding a plan set.
+          delete payload.seed_session;
+        }
+      }
+    } catch (e) { /* proposal is advisory; never block the launch */ }
+  }
   var r, data;
   try {
     r = await _postJson('/api/rnd/term_start', payload);
@@ -5920,6 +5944,39 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/api/rnd/handoff_proposal"):
+                # Read-only stage-handoff PROPOSAL (v3 Wave 7): the UI shows
+                # "execute on this plan set?" BEFORE launching a build session.
+                # Pure metadata (structure-only, no contents) — read endpoint,
+                # consistent with the other read GETs (no token required).
+                # /api/rnd/handoff_proposal?project_id=<id>&lane=build[&seed_session=<sid>]
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                lane = (q.get("lane", ["build"])[0] or "build").strip()
+                seed = (q.get("seed_session", [""])[0] or "").strip() or None
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                elif seed and _unsafe_path_seg(seed):
+                    self._send_json({"ok": False, "error": "bad seed"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            prop = _handoff.propose_handoff(
+                                folder, pid, lane, source_session_id=seed)
+                        except Exception:
+                            prop = {"has_plan_set": False}
+                        self._send_json({"ok": True, **prop})
             elif self.path.startswith("/api/rnd/session_summary"):
                 # Read-only structured SESSION summary as JSON (v3 Wave 6): the
                 # in-place accordion fetches this instead of navigating to the
@@ -6546,22 +6603,53 @@ class AnchorHandler(BaseHTTPRequestHandler):
             lane = (body.get("lane", "") or "").strip()
             backend = (body.get("backend", "") or "claude").strip() or "claude"
             label = body.get("label", "") or ""
-            # Wave 6 seam: a launch-from-panel carries the source session id as a
-            # seed hint. start_session does NOT consume it yet (a bare
-            # interactive PTY); Wave 7 wires the stage-handoff on top of this.
-            _seed_session = (body.get("seed_session", "") or "").strip()
+            # Wave 6 seam → Wave 7: a launch-from-panel carries the source
+            # session id as a seed hint. On a BUILD launch we now consume it:
+            # after start_session creates the session+worktree, we discover the
+            # most-recent plan set (preferring this seed_session's plan docs),
+            # prime the worktree with a HANDOFF reference file, and record the
+            # handoff in the per-project Anchor reference. The bare-PTY launch
+            # still works when there is no plan set (no crash; priming skipped).
+            _seed_session = (body.get("seed_session", "") or "").strip() or None
             if not pid or not lane:
                 self._send_json({"ok": False,
                                  "error": "project_id and lane required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
             else:
-                try:
-                    rec = _termsess.start_session(pid, lane, backend=backend,
-                                                  label=label)
-                    self._send_json({"ok": True, "session": rec})
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    try:
+                        rec = _termsess.start_session(pid, lane, backend=backend,
+                                                      label=label)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        handoff_info = None
+                        if lane in _handoff.BUILD_LANES:
+                            folder = proj.get("folder_path", "")
+                            try:
+                                plan_set = _handoff.discover_recent_plan_set(
+                                    folder, pid, source_session_id=_seed_session)
+                            except Exception:
+                                plan_set = None
+                            if plan_set:
+                                primed = _handoff.prime_worktree(
+                                    rec.get("worktree_path", ""), plan_set,
+                                    project_id=pid)
+                                recorded = _handoff.record_handoff(
+                                    folder, pid, rec.get("session_id", ""),
+                                    plan_set)
+                                handoff_info = {
+                                    "plan_set": plan_set,
+                                    "primed": primed,
+                                    "recorded": bool(recorded.get("ok")),
+                                }
+                        resp = {"ok": True, "session": rec}
+                        if handoff_info is not None:
+                            resp["handoff"] = handoff_info
+                        self._send_json(resp)
 
         elif self.path == "/api/rnd/term_kill":
             session = (body.get("session", "") or "").strip()

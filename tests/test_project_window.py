@@ -588,6 +588,27 @@ def test_session_summary_endpoint_rejects_traversal_pid(gui, tmp_path):
         server.server_close()
 
 
+# ── Wave 7 (v3) — build-launch offer→confirm wiring ──────────────────────────
+
+def test_build_launch_offers_handoff_proposal_with_confirm(gui, tmp_path):
+    """FIX 3: when launching a BUILD lane, newTermSession first fetches
+    /api/rnd/handoff_proposal and, if has_plan_set, shows a confirm() before
+    priming. Non-build lanes skip the proposal."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("HandoffUI", str(folder))["entry"]["id"]
+    html = gui.render_project_window_html(pid)
+    # The build-launch path references the proposal endpoint and a confirm gate.
+    assert "/api/rnd/handoff_proposal" in html
+    assert "has_plan_set" in html
+    assert "Execute on this plan set?" in html
+    # The proposal is only consulted for the build lane.
+    assert "lane === 'build'" in html
+    # Brace hygiene preserved (JS lives in the RAW string).
+    assert "{{" not in html
+    assert "}}" not in html
+
+
 def test_linked_task_with_quote_and_apostrophe_roundtrips(gui, tmp_path):
     """Regression (Wave 4 fix): a task whose text contains BOTH an apostrophe
     AND a double-quote (e.g. ``Fix it's "weird" bug``) must (a) render in the

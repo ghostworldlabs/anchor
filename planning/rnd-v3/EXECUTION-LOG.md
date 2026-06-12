@@ -321,3 +321,53 @@ pre-staging + the `Anchor.md` handoff record.
 **Verdict: GO.**
 
 ---
+
+## Wave 7 — Stage handoffs — GO (2026-06-12)
+
+**EXECUTE.** New `handoff.py`: `discover_recent_plan_set(folder, pid,
+source_session_id=)` (newest planning session with a MASTER+IMPL plan pair;
+`seed_session` overrides to a specific session; falls back to the newest
+`discovery.json` `by_lane.planning` group), `propose_handoff` (build lane →
+`{has_plan_set, plan_set, message}`), `prime_worktree` (writes a passive
+`HANDOFF.md` INSIDE the worktree referencing the plan doc paths — which already
+exist in the checkout — never copies contents, never auto-seeds a skill), and
+`record_handoff` (atomic, structure-only handoff record in `discovery.json`).
+`anchor_gui.py`: read-only `GET /api/rnd/handoff_proposal`; `term_start` on a build
+launch discovers→primes→records after `start_session`, gracefully skipping when no
+plan set exists. Consumes the Wave-6 `seed_session` seam.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **493 passed, 1 skipped**;
+`git worktree list` = main only.
+
+**REVIEW (2 independent adversarial reviewers).** Reviewer A returned **NO-GO** with
+an empirically-proven **BLOCKER**: the handoff record was non-durable —
+`anchor_marker.write_anchor_md` rewrote `discovery.json` from `scan.to_dict()`
+(which omits `handoffs`), so any rescan / `GET /project/<id>` open DESTROYED the
+record (record→rescan→`handoffs` gone), defeating the Done-when; the GREEN gate
+masked it because no test recorded→rescanned→re-asserted (MAJOR coverage gap).
+Reviewer B (GO-WITH-NITS) verified correct discovery/seed-override, graceful
+degradation, traversal-safe endpoint (no abs-path/contents leak), bare-PTY contract
+intact — and flagged the proposal endpoint as a dead UI (offer→confirm half-wired)
++ untested HTTP wiring + unsanitized lane/seed.
+
+**FIX (bounded, 1 iter).** (1) BLOCKER: `write_anchor_md` now READS the existing
+sidecar and MERGES `scan.to_dict()` with preserved non-scan keys (`handoffs`),
+writing atomically; `_sidecar_changed` compares only scan-owned keys (minus
+`generated_at`) so a no-op rescan neither churns nor drops `handoffs`. Regression
+test `test_handoff_survives_rescan` (record → rescan → no-op rescan, `handoffs`
+survives) — the exact zero-coverage scenario. **Independently re-verified by the
+orchestrator** (record:True, rescan#1:True, no-op#2:True). (2) Added end-to-end HTTP
+tests: real `POST term_start` build launch → `HANDOFF.md` in worktree +
+`discovery.json` record (survives), and a `handoff_proposal` endpoint test. (3)
+Wired the offer→confirm loop: a build launch fetches `handoff_proposal` and
+`confirm("Execute on this plan set?…")` before priming (endpoint no longer dead).
+(4) Symmetric `_unsafe_path_seg` on lane/seed_session. Re-gate: **493 passed, 1
+skipped**.
+
+**Seam for Wave 8/10.** Handoff records live in `discovery.json` (now rescan-durable)
+— Wave 10's healthcheck/distro-scan can rely on them. The general "Launch new
+session" seeds prior-stage outputs via `seed_session`.
+
+**Verdict: GO** (after the BLOCKER fix).
+
+---
