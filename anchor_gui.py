@@ -1525,6 +1525,58 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     return out
 
 
+def _idea_source_label(eff) -> str:
+    """Human source chip for a grass idea: 'from inbox' | 'discovered' | 'manual'.
+
+    Reads the effort record (NOT the trimmed view) so it can see the honest
+    provenance markers ``promoted_from`` / discovered / manual-add.
+    """
+    if _eh.is_discovered(eff):
+        return "discovered"
+    if (eff.get("promoted_from") or "") == "inbox":
+        return "from inbox"
+    return "manual"
+
+
+def _render_grass_board(folder_path, project_id) -> str:
+    """Render the Grass lane as an IDEA BOARD (v4 Wave 6) — not a flat text page.
+
+    Each grass effort (manual add / INBOX promotion / discovered idea-doc) becomes
+    an idea CARD showing the idea text, a source chip, and two promote actions —
+    **→ Research** and **→ Plan** — each calling ``promoteGrass(idea_id, lane)``
+    which POSTs ``/api/rnd/promote_grass`` and opens the new seeded session's
+    inline panel. The "+ add idea" / "+ from inbox" affordances are rendered by
+    the caller (the column footer), as in the mockup's Extras grass board.
+    """
+    try:
+        efforts = _eh.list_efforts(folder_path, project_id, "grass")
+    except Exception:
+        efforts = []
+    if not efforts:
+        return ("<div class='idea-empty'>No ideas yet — "
+                "capture one with “+ Add idea”.</div>")
+    cards = []
+    for eff in efforts:
+        text = (eff.get("title") or "").strip() or "(untitled idea)"
+        idea_id = eff.get("job_id", "") or ""
+        src = _idea_source_label(eff)
+        esc_text = html_lib.escape(text)
+        esc_id = html_lib.escape(idea_id, quote=True)
+        cards.append(
+            f"<div class='idea-card' data-idea=\"{esc_id}\">"
+            f"<div class='itxt'>{esc_text}</div>"
+            f"<div class='irow'>"
+            f"<span class='idea-src'>{html_lib.escape(src)}</span>"
+            f"<span class='isp'></span>"
+            f"<span class='idea-promote' "
+            f"onclick=\"promoteGrass('{esc_id}','research')\">→ Research</span>"
+            f"<span class='idea-promote' "
+            f"onclick=\"promoteGrass('{esc_id}','plan')\">→ Plan</span>"
+            f"</div></div>"
+        )
+    return "<div class='idea-board'>" + "".join(cards) + "</div>"
+
+
 def _render_kanban_html(folder_path, project_id):
     """Render the 5-column Kanban board (Research|Planning|Build|Deliverables|
     Grass Catchers).
@@ -1547,8 +1599,14 @@ def _render_kanban_html(folder_path, project_id):
             badge = "<span class='attn'>⚠ input</span>"
         elif any_live:
             badge = "<span class='live'><span class='dotpulse'></span>live</span>"
-        cards = _render_lane_sessions(
-            session_views, store_lane, project_id, trio_lane)
+        if trio_lane == "grass":
+            # v4 Wave 6: the grass lane is an IDEA BOARD (cards with promote
+            # actions), NOT a session tile/expander. It has no terminal of its
+            # own; promoting an idea creates the seeded session that does.
+            cards = _render_grass_board(folder_path, project_id)
+        else:
+            cards = _render_lane_sessions(
+                session_views, store_lane, project_id, trio_lane)
         # The "+ New run" affordance launches that lane. Research offers an
         # engine choice (Claude default + Gemini); plan/build are Claude-only;
         # deliverables are config-driven (no launch); grass catchers get a
@@ -1973,6 +2031,23 @@ def render_project_window_html(project_id: str) -> str:
         ".addnew{font-size:12px;color:var(--accent);cursor:pointer;"
         "display:inline-block;margin-top:4px}"
         ".addnew.rnd-dim{color:var(--text-dim);cursor:default}"
+        # ── v4 Wave 6: Grass Catcher IDEA BOARD (not a flat text page) ──
+        # The grass lane opens as a board of idea cards; each carries its text, a
+        # source chip (inbox / discovered / manual), and two promote actions
+        # (→ Research / → Plan) that start a NEW seeded session in that lane.
+        ".idea-board{display:flex;flex-direction:column;gap:7px}"
+        ".idea-card{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:7px;padding:9px 11px}"
+        ".idea-card .itxt{font-size:12px;color:var(--text);font-weight:500}"
+        ".idea-card .irow{display:flex;align-items:center;gap:8px;margin-top:6px}"
+        ".idea-src{font-size:10px;text-transform:uppercase;letter-spacing:.5px;"
+        "color:var(--text-dim);padding:1px 6px;border:1px solid var(--border);"
+        "border-radius:9px}"
+        ".idea-card .isp{flex:1}"
+        ".idea-promote{font-size:11px;color:var(--accent);cursor:pointer;"
+        "border:1px solid var(--border);border-radius:7px;padding:2px 8px}"
+        ".idea-promote:hover{border-color:var(--accent)}"
+        ".idea-empty{font-size:11px;color:var(--text-dim);padding:4px 2px}"
         ".dotpulse{width:7px;height:7px;border-radius:50%;background:var(--accent);"
         "animation:pulse 1.5s infinite;display:inline-block}"
         ".dotwarn{width:7px;height:7px;border-radius:50%;background:var(--warning);"
@@ -2463,6 +2538,39 @@ async function promoteInbox() {
   } catch (e) { alert('[promote inbox error] ' + e.message); return; }
   if (!data.ok) { alert('[promote inbox refused] ' + (data.error || 'unknown')); return; }
   location.reload();
+}
+
+// Promote a Grass Catcher idea into a NEW seeded session in a lane (Wave 6).
+// POST /api/rnd/promote_grass {project_id, idea_id, lane} → the backend starts a
+// session SEEDED with the idea text (reusing the Wave-1 seed path); we then
+// register it in MANAGED and open its inline panel (reusing openPanel/repopulate).
+// The idea REMAINS in grass (copy, never destroy).
+async function promoteGrass(ideaId, lane) {
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/promote_grass', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/promote_grass', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[promote grass error] ' + e.message); return; }
+  if (!data.ok || !data.session) {
+    alert('[promote refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  // Re-sync indices/labels from the registry shortly after.
+  setTimeout(repopulate, 600);
 }
 
 function _startPolling() {
@@ -7542,6 +7650,35 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": True, "effort": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/promote_grass":
+            # v4 Wave 6: promote a Grass Catcher idea into a NEW seeded session in
+            # the target lane (research|plan). Reuses the Wave-1 seed path via
+            # effort_history.promote_grass_to_lane → terminal_session.start_session
+            # so the opening turn loads the lane skill AND carries the idea text.
+            # The idea REMAINS in grass (copy, never destroy). Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            if not pid or not idea_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and lane required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False,
+                     "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.promote_grass_to_lane(pid, idea_id, lane)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart

@@ -172,7 +172,7 @@ def _default_seed_text(skill):
     ).format(skill=skill)
 
 
-def seed_for_lane(lane):
+def seed_for_lane(lane, seed_context=None):
     """Return the one-time seed text for ``lane`` (env-overridable), or ``None``.
 
     Resolution order (so tests can pin a deterministic value):
@@ -182,17 +182,38 @@ def seed_for_lane(lane):
 
     A lane with no mapped skill and no override returns ``None`` (no seed sent) —
     e.g. the ``grass`` future-ideas lane is a bare shell.
+
+    ``seed_context`` (v4 Wave 6) is an optional extra payload appended to the
+    chosen lane seed as the THING TO WORK ON — e.g. a Grass Catcher idea promoted
+    into a Research/Plan session. It is folded onto whatever seed was resolved
+    above (including an env override, so the promote path stays deterministic in
+    tests) so the SINGLE opening turn loads the lane skill AND carries the idea.
     """
+    base = None
     per_lane = os.environ.get(SEED_ENV_LANE_PREFIX + str(lane).upper())
     if per_lane is not None:
-        return per_lane
-    glob = os.environ.get(SEED_ENV_GLOBAL)
-    if glob is not None:
-        return glob
-    skill = LANE_SKILL.get(lane)
-    if not skill:
-        return None
-    return _default_seed_text(skill)
+        base = per_lane
+    else:
+        glob = os.environ.get(SEED_ENV_GLOBAL)
+        if glob is not None:
+            base = glob
+        else:
+            skill = LANE_SKILL.get(lane)
+            base = _default_seed_text(skill) if skill else None
+
+    ctx = (seed_context or "").strip()
+    if not ctx:
+        return base
+    # Fold the idea onto the lane seed as one combined opening turn. If the lane
+    # had no skill seed (None), the context alone becomes the opening turn.
+    suffix = (
+        "Here is the idea to work on (promoted from Grass Catchers): "
+        "{ctx}\n"
+    ).format(ctx=ctx)
+    if base is None:
+        return suffix
+    # Drop a trailing newline on the base so the two parts arrive as ONE turn.
+    return base.rstrip("\n") + " " + suffix
 
 
 def _valid_lanes():
@@ -250,7 +271,7 @@ def _check_engine_allowed(lane, backend):
 _UNSET = object()
 
 
-def start_session(project_id, lane, backend=_UNSET, label=""):
+def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -264,6 +285,12 @@ def start_session(project_id, lane, backend=_UNSET, label=""):
     project's **last-used engine** (:func:`last_engine_for_project`, ``claude``
     when unset); on a successful start the chosen engine is recorded as the
     project's last_engine so the next session inherits it.
+
+    v4 Wave 6: ``seed_context`` (optional) is folded onto the lane seed (via
+    :func:`seed_for_lane`) so the single opening turn loads the lane skill AND
+    carries an extra payload — e.g. a Grass Catcher idea promoted into this
+    Research/Plan session — as the thing to work on. It is recorded in
+    ``seed_text`` and, like the base seed, is written exactly once.
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -353,7 +380,7 @@ def start_session(project_id, lane, backend=_UNSET, label=""):
     #    bare shell (seed_text == None → nothing written). A write/persist failure
     #    is non-fatal: the session is already live and usable; we simply leave it
     #    un-seeded rather than tearing down a working terminal.
-    seed_text = seed_for_lane(lane)
+    seed_text = seed_for_lane(lane, seed_context=seed_context)
     if seed_text:
         try:
             _pty.write(sid, seed_text)
