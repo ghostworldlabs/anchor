@@ -77,3 +77,52 @@ UI may want a final-drain contract.
 **Verdict: GO.** Committed on branch `foreman/rnd-surface-v3`.
 
 ---
+
+## Wave 2 — Durable session registry + git-worktree isolation — GO (2026-06-11)
+
+**EXECUTE.** `session_registry.py` — durable, persisted-under-`.anchor/`
+(`sessions.json`, atomic tmp+`os.replace` under `paths.WRITE_LOCK`) registry of
+managed sessions `{session_id, project_id, lane, backend, worktree_path, branch,
+status, created_at, label}`; best-effort load (corrupt/torn/missing → empty);
+`register/get/list(filter)/update/remove`; status constants mapped to the locked
+colors (running→green, needs-attention/done→amber, failed→red, idle→grey);
+injectable `reconcile(live_session_ids, ...)` re-statuses dead sessions + surfaces
+orphan worktrees. `worktrees.py` — `create_worktree`/`remove_worktree`/
+`reap_orphans` via stdlib `subprocess`, worktrees under a git-ignored managed base
+(`paths.data_dir()/.anchor/worktrees/<sid>`, overridable via
+`ANCHOR_WORKTREE_BASE`), path-containment guard, never raises. Hermetic tests use
+temp git repos + temp base.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **429 passed, 1 skipped**.
+Build repo verified untouched: `git worktree list` shows only the main tree;
+`git branch --list 'anchor/session/*'` empty.
+
+**REVIEW (2 independent adversarial reviewers).** Both GO-WITH-NITS. Reviewer A
+verified durability/atomicity, corrupt-store survival, genuine disk restart
+round-trip, reconcile correctness, isolation-test integrity (no cheats). Reviewer
+B (safety focus) proved no path-traversal/absolute-id escape from the managed
+base, no `shell=True`, build repo never touched, `reap_orphans(empty)` can't prune
+the main tree — but found a MAJOR branch-naming bug + branch litter.
+
+**FIX (bounded, 1 iter).** (1) MAJOR: `branch_for` no longer truncates to 12
+chars (collision) — now full-id slug + 16-hex SHA-1; `create_worktree` ALWAYS
+creates a fresh branch (`git worktree add -b <branch> <path> <HEAD>`) and returns
+`branch-exists` rather than silently attaching to an existing branch's tip; new
+shared-12-char-prefix test proves distinct branches + isolation. (2) MINOR:
+`remove_worktree` now `git branch -D`s the per-session branch (tolerated) so the
+real repo doesn't accumulate `anchor/session/*` litter. (3) Test-integrity: the
+mislabeled `test_remove_refuses_unsafe_path` now actually drives a traversal +
+absolute id and asserts `reason=='unsafe-path'` with an outside sentinel
+surviving. (4) Clarified the `reconcile` `applied` docstring. Re-gate: **429
+passed, 1 skipped**; zero repo leakage.
+
+**Seam for Wave 3.** `start_session` flow: mint sid → `worktrees.create_worktree`
+→ `pty_manager.start(cwd=path)` → `session_registry.register_session(...,
+status=RUNNING)`. On kill: `update_session` then `remove_worktree`. On startup:
+`reconcile(live=pty_manager.live_sessions())` + `reap_orphans` + `ensure_gitignored`.
+Wave 3 must reconcile the pty_manager opaque id with the registry session_id
+(reuse the PTY id as session_id is simplest).
+
+**Verdict: GO.**
+
+---
