@@ -705,6 +705,42 @@ def xterm_asset(rel_path: str):
     return target.read_bytes(), ctype
 
 
+# ── Vendored Ghost World Labs brand mark static asset (Wave 9) ───────────────
+# The GWL brand mark (gwl-m-icon.svg) is vendored on-disk under vendor/brand/
+# and served traversal-safe exactly like the KaTeX/xterm/anchor-term assets. It
+# backs the home-page lockup and the dashboard favicon. Pure-data static SVG —
+# no native dependency, no secret.
+BRAND_DIR = ANCHOR_DIR / "vendor" / "brand"
+BRAND_URL_PREFIX = "/vendor/brand"
+_BRAND_CONTENT_TYPES = {
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
+
+
+def brand_asset(rel_path: str):
+    """Resolve a ``/vendor/brand/<rel>`` request to (bytes, content_type).
+
+    Path-traversal safe (same containment pattern as :func:`anchor_term_asset`
+    / :func:`xterm_asset` / ``report_viewer.katex_asset``): the resolved file
+    MUST stay within :data:`BRAND_DIR`. Returns ``None`` for a missing file or
+    an escape attempt (so a ``../`` traversal can never read outside the brand
+    dir).
+    """
+    rel = rel_path.lstrip("/")
+    target = (BRAND_DIR / rel).resolve()
+    try:
+        target.relative_to(BRAND_DIR.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    ctype = _BRAND_CONTENT_TYPES.get(target.suffix.lower(),
+                                     "application/octet-stream")
+    return target.read_bytes(), ctype
+
+
 # Single-instance project windows (Master Plan C2): opening a project that is
 # already open returns the EXISTING instance id rather than spawning a duplicate.
 # Server-side, process-local map {project_id: instance_id}. Guarded by the same
@@ -4105,6 +4141,7 @@ def generate_html(projects, tasks, inbox):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Anchor Dashboard — J.C. Liechty</title>
+<link rel="icon" href="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" type="image/svg+xml">
 <link rel="icon" href="/anchor.ico?v=2026-05-11" type="image/x-icon">
 <link rel="icon" href="/anchor.png?v=2026-05-11" type="image/png" sizes="256x256">
 <link rel="apple-touch-icon" href="/anchor-touch.png?v=2026-05-11">
@@ -4130,6 +4167,36 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .sidebar h1 {{ font-size: 20px; padding: 0 20px 4px; font-weight: 700; }}
 .sidebar h1 span {{ color: var(--accent); }}
 .sidebar .subtitle {{ font-size: 11px; color: var(--text-dim); padding: 0 20px 20px; }}
+
+/* Ghost World Labs brand lockup (Wave 9) — elegant, unobtrusive, theme-fit */
+.gwl-lockup {{
+    display: flex; align-items: center; gap: 9px;
+    padding: 14px 20px 4px;
+}}
+.gwl-lockup img {{
+    width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.35);
+}}
+.gwl-lockup .gwl-wordmark {{
+    font-size: 12px; font-weight: 700; letter-spacing: 0.3px;
+    color: #f8fafc; line-height: 1.1;
+}}
+.gwl-lockup .gwl-wordmark .gwl-accent {{ color: #22c55e; }}
+.gwl-badge {{
+    display: inline-flex; align-items: center; gap: 5px;
+    margin: 4px 20px 14px; padding: 3px 9px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.2px;
+    color: #f8fafc; background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(34, 197, 94, 0.35); border-radius: 999px;
+}}
+.gwl-badge .gwl-rad {{ color: #22c55e; }}
+.gwl-footer {{
+    margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--text-dim);
+}}
+.gwl-footer img {{ width: 16px; height: 16px; border-radius: 4px; }}
+.gwl-footer .gwl-accent {{ color: #22c55e; }}
 .nav-section {{ margin-top: 16px; }}
 .nav-section h3 {{ font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim); padding: 0 20px 6px; }}
 .nav-item {{
@@ -4554,6 +4621,11 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 <body>
 <div class="app">
   <nav class="sidebar">
+    <div class="gwl-lockup">
+      <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
+      <div class="gwl-wordmark">Ghost World <span class="gwl-accent">Labs</span></div>
+    </div>
+    <div class="gwl-badge">Powered by NextGen Nuclear <span class="gwl-rad">&#9762;</span></div>
     <h1><span>&#9875;</span> Anchor</h1>
     <div class="subtitle">J.C. Liechty — Life Dashboard</div>
     <div class="nav-section">
@@ -4744,6 +4816,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 
     <!-- Domain views -->
     {domain_views}
+
+    <!-- Ghost World Labs footer credit (Wave 9) -->
+    <div class="gwl-footer">
+      <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
+      <span>A <b class="gwl-accent">Ghost World Labs</b> tool &bull; Powered by NextGen Nuclear <span class="gwl-accent">&#9762;</span></span>
+    </div>
   </div>
 </div>
 
@@ -5989,6 +6067,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # served like KaTeX (traversal-safe). Loaded before anchor-term.js.
                 rel = urlparse(self.path).path[len(XTERM_URL_PREFIX):]
                 asset = xterm_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith(BRAND_URL_PREFIX):
+                # Read-only vendored Ghost World Labs brand mark static asset
+                # (Wave 9), served like KaTeX/xterm (traversal-safe). Backs the
+                # home-page lockup and the dashboard favicon.
+                rel = urlparse(self.path).path[len(BRAND_URL_PREFIX):]
+                asset = brand_asset(rel)
                 if asset is None:
                     self.send_response(404)
                     self.end_headers()

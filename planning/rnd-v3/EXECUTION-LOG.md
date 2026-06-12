@@ -417,3 +417,44 @@ candidates: `rnd preview-start/-stop/-list`.
 **Verdict: GO.**
 
 ---
+
+## Wave 9 — Ghost World Labs branding on the Home page — GO (2026-06-12)
+
+**EXECUTE.** Vendored `C:\dev\Agentic-Home\GWL-M-Icon.svg` → `vendor/brand/gwl-m-icon.svg`
+(real on-disk copy, byte-identical). New `BRAND_URL_PREFIX="/vendor/brand"` +
+`brand_asset` resolver (same `.resolve()` + `.relative_to(BRAND_DIR)` containment as
+`xterm_asset`/`katex_asset`), wired into `do_GET` (serves `image/svg+xml`, long cache,
+404 on miss/traversal). Favicon set to the GWL mark (`<link rel="icon"
+href="/vendor/brand/gwl-m-icon.svg" type="image/svg+xml">`, anchor.ico/png kept as
+fallback). `generate_html` gains a sidebar header **lockup** (ghost mark + "Ghost
+World **Labs**" wordmark + "Powered by NextGen Nuclear ☢" pill) and a footer credit,
+using the brand palette `#0f172a`/`#22c55e`/`#f8fafc` — elegant/unobtrusive, theme-fit.
+All new CSS in `generate_html`'s f-string with correctly doubled braces.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **515 passed, 1 skipped**.
+Independently verified: home page has 0 leaked `{{`/`}}`; all branding markup +
+favicon present; `brand_asset` serves the SVG and blocks `../`.
+
+**REVIEW (2 independent adversarial reviewers).** Both **GO**, no findings.
+Reviewer A probed the route with RAW sockets across 11 traversal vectors (raw `../`,
+`%2f`, `....//`, backslash, prefix-confusion, deep absolute) — ALL 404, zero leak,
+identical rigor to the existing vendored routes; braces clean; markup correct.
+Reviewer B verified every Done-when bullet against the rendered BODY (not CSS
+substrings), the palette/☢/unobtrusiveness, purely-additive no-regression, and
+Wave-9-only scope.
+
+**FIX (bounded, 1 iter).** Reviewer A NIT: the pytest traversal test used urllib
+(which normalizes `../` client-side), under-exercising the server-side block. Added
+`test_brand_route_blocks_raw_unnormalized_traversal` — a RAW-socket test sending
+literal un-normalized paths (`../../paths.py`, `..%2f..%2f`, `..\..\`,
+`../anchor_gui.py`) and asserting 404 + no source-code markers in the body, so a
+future weakening of `brand_asset` fails CI. `brand_asset` itself unchanged. Re-gate:
+**515 passed, 1 skipped**.
+
+**Seam for Wave 10.** The vendored `vendor/brand/gwl-m-icon.svg` is pure-data static
+SVG (no native dep, no secret) — the distro scan needs NO new exception for it (only
+Wave 1's `pywinpty` terminal exception).
+
+**Verdict: GO.**
+
+---
