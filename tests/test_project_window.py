@@ -244,6 +244,371 @@ def test_linked_tasks_strip_reflects_a_linked_task(gui, tmp_path):
     assert "rndUnlinkTask(" in html
 
 
+# ── Wave 4 (v3) — stacking window-manager UI markup ──────────────────────────
+
+def test_window_manager_markup_present(gui, tmp_path):
+    """The project window carries the Wave-4 session button bar + the stacking
+    window-manager container, the four status-color classes, the minimize
+    control, and the kill-confirm wiring (a confirm() + a term_kill reference)."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("WMProj", str(folder))["entry"]["id"]
+    html = gui.render_project_window_html(pid)
+    # Stable container ids.
+    assert "id='sessionBar'" in html
+    assert "id='windowLayer'" in html
+    # All four LOCKED status-color CSS classes.
+    for cls in ("sess-dot--green", "sess-dot--amber",
+                "sess-dot--red", "sess-dot--grey"):
+        assert cls in html, "missing status class: " + cls
+    # Minimize control + window window-class.
+    assert "termwin" in html
+    assert "minimized" in html
+    assert "_toggleMinimize" in html
+    # Kill = X gated behind a confirm() that POSTs term_kill.
+    assert "function killSession" in html
+    assert "confirm(" in html
+    assert "/api/rnd/term_kill" in html
+    # Repopulate-from-registry hook.
+    assert "function loadSessions" in html
+    assert "/api/rnd/term_sessions" in html
+    # The per-lane "new session" affordance calls term_start.
+    assert "newTermSession(" in html
+    assert "/api/rnd/term_start" in html
+
+
+def test_window_manager_wires_wave3_transport_endpoints(gui, tmp_path):
+    """Each terminal window mounts xterm.js over the Wave-3 transport: WS first
+    (term_ws), SSE-out + POST-in fallback (term_stream2 / term_input2), plus
+    term_resize. xterm.js (window.Terminal) is vendored + loaded."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("Wired", str(folder))["entry"]["id"]
+    html = gui.render_project_window_html(pid)
+    for ep in ("/api/rnd/term_ws", "/api/rnd/term_stream2",
+               "/api/rnd/term_input2", "/api/rnd/term_resize"):
+        assert ep in html, "missing endpoint: " + ep
+    # xterm.js terminal is instantiated for the window body.
+    assert "new window.Terminal(" in html
+    assert "/vendor/xterm/xterm.js" in html
+    # Token is appended to the WS/SSE URL from localStorage.
+    assert "token=" in html
+
+
+def test_window_manager_no_leaked_braces(gui, tmp_path):
+    """Brace hygiene: the Wave-4 window-manager CSS/JS (added in plain + RAW
+    string literals) must NOT leak doubled ``{{``/``}}`` into the served HTML."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("Braces", str(folder))["entry"]["id"]
+    html = gui.render_project_window_html(pid)
+    assert "{{" not in html
+    assert "}}" not in html
+    # Sanity: the v2 console drawer is left INTACT alongside the new surface.
+    assert "function openTerminal" in html
+    assert "function launchLane" in html
+
+
+# ── Wave 6 (v3) — in-place expandable session summaries ──────────────────────
+
+def _discovered_planning_session(gui, folder, pid):
+    """Record a 2-file brownfield-discovery planning session (one session)."""
+    import effort_history as eh
+    _record_discovered(eh, str(folder), pid, "plan",
+                       "planning/brownfield-discovery/MASTER-PLAN.md", 1000.0,
+                       title="Master Plan", kind="master-plan")
+    _record_discovered(eh, str(folder), pid, "plan",
+                       "planning/brownfield-discovery/NOTES.md", 1001.0)
+
+
+def test_session_card_inline_expand_wiring_not_navigation(gui, tmp_path):
+    """G/W/T: a session card's "summary" affordance EXPANDS an inline accordion
+    (a toggle that fetches /api/rnd/session_summary) — NOT a window.open to a
+    /summary page."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("InlineSumm", str(folder))["entry"]["id"]
+    _discovered_planning_session(gui, folder, pid)
+    html = gui.render_project_window_html(pid)
+
+    # The card carries an inline-expand toggle, not a /summary navigation.
+    assert "toggleSessionSummary(this)" in html
+    assert "class='session-summary-panel'" in html
+    assert "summary-toggle" in html
+    # The session card must NOT navigate to a separate /summary page.
+    assert "openSummary('/summary" not in html
+    assert "window.open('/summary" not in html
+    # The toggle carries pid/lane/session in data-* attributes for the fetch.
+    assert "data-pid=" in html
+    assert "data-lane=" in html
+    assert "data-session=" in html
+
+    # The JS toggle fetches the read-only JSON endpoint (no page navigation).
+    assert "function toggleSessionSummary" in html
+    assert "/api/rnd/session_summary" in html
+    assert "function _loadSessionSummary" in html
+
+
+def test_summary_panel_renders_doc_links_and_effort(gui, tmp_path):
+    """The expanded panel renders document links (report/artifact routes that
+    open in a NEW TAB) and an effort line (imported → 'no run metrics')."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("PanelRender", str(folder))["entry"]["id"]
+    _discovered_planning_session(gui, folder, pid)
+    html = gui.render_project_window_html(pid)
+
+    # The renderer wires doc links to the existing /report and /artifact routes,
+    # opening them in a NEW TAB (the only new tab).
+    assert "function _renderSessionSummary" in html
+    assert "target=\"_blank\"" in html or "target=\\\"_blank\\\"" in html
+    assert "member_links" in html
+    # Effort rendering: tokens + wall-clock; imported honestly shows no metrics.
+    assert "wall-clock" in html
+    assert "no run metrics" in html
+    assert "imported" in html.lower()
+
+
+def test_launch_new_session_button_wired_to_wave4_path(gui, tmp_path):
+    """The expanded panel's "Launch new session" button calls the Wave-3/4 launch
+    path (newTermSession → term_start), seeded from THIS session (a seed hint)."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("LaunchPanel", str(folder))["entry"]["id"]
+    _discovered_planning_session(gui, folder, pid)
+    html = gui.render_project_window_html(pid)
+
+    assert "Launch new session" in html
+    assert "summ-launch-btn" in html
+    assert "function _wireLaunchFromPanel" in html
+    # Wired to the Wave-4 launch path, carrying the seed-session hint.
+    assert "newTermSession(lane, null, {seed_session: sid})" in html
+    # newTermSession forwards the seed hint into the term_start payload (seam
+    # Wave 7 builds the handoff on).
+    assert "payload.seed_session = opts.seed_session" in html
+
+
+def test_summary_panel_no_leaked_braces(gui, tmp_path):
+    """Brace hygiene: the Wave-6 accordion JS/CSS must not leak doubled braces."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("W6Braces", str(folder))["entry"]["id"]
+    _discovered_planning_session(gui, folder, pid)
+    html = gui.render_project_window_html(pid)
+    assert "{{" not in html
+    assert "}}" not in html
+
+
+def test_session_summary_endpoint_returns_cached(gui, tmp_path, monkeypatch):
+    """GET /api/rnd/session_summary returns the cached structured summary for a
+    stub session (hermetic: generate via the stub runner first, then fetch the
+    cache). Exercises the read-only endpoint over a throwaway server."""
+    import json as _json
+    import threading as _threading
+    import urllib.request as _urlreq
+    from pathlib import Path as _Path
+
+    stub = (_Path(__file__).resolve().parent / "stub_summarizer.py").as_posix()
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {stub}")
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "North Star: cache validated summaries for each session")
+
+    import importlib
+    import job_runner
+    importlib.reload(job_runner)
+    import summarizer
+    importlib.reload(summarizer)
+    importlib.reload(gui)
+
+    folder = tmp_path / "P"
+    folder.mkdir()
+    # Real on-disk planning docs so the discovered session has a grounding corpus.
+    bd = folder / "planning" / "brownfield-discovery"
+    bd.mkdir(parents=True, exist_ok=True)
+    (bd / "MASTER-PLAN.md").write_text(
+        "# Master Plan\n\n## North Star\n"
+        "Make the surface a truthful memory of trio work.\n\n"
+        "## Key decisions\n"
+        "Cache validated summaries for each session.\n", encoding="utf-8")
+    pid = gui.select_existing_project("EndpointProj", str(folder))["entry"]["id"]
+
+    import effort_history as eh
+    import brownfield_scan
+    eh = importlib.reload(eh)
+    scan = brownfield_scan.scan(str(folder))
+    eh.adopt_discovered(folder, pid, scan)
+
+    import sessions as sess
+    sess = importlib.reload(sess)
+    sess_list = sess.list_sessions(folder, pid, "planning")
+    session = next(s for s in sess_list
+                   if any("brownfield-discovery" in m.get("artifact_path", "")
+                          for m in s.get("member_files", [])))
+    sid = session["session_id"]
+
+    # Pre-generate + cache the summary (run-once, through the stub seam).
+    summarizer.summarize_session(folder, pid, "planning", session)
+
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = _threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        from urllib.parse import quote as _q
+        url = (f"http://127.0.0.1:{port}/api/rnd/session_summary?"
+               f"pid={_q(pid)}&lane=planning&session={_q(sid)}")
+        with _urlreq.urlopen(url, timeout=10) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+        assert data["ok"] is True
+        assert data["status"] == "ready"
+        summ = data["summary"]
+        # Cached structured summary carries the Wave-6 fields.
+        assert "when_run" in summ
+        assert "north_star" in summ
+        assert "effort" in summ
+        # Imported session → effort honestly null.
+        assert summ["effort"] is None
+        assert "validated summaries" in " ".join(summ.get("claims", [])).lower()
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    # Reset the live job table so leaked runner state can't bleed across tests.
+    try:
+        job_runner._reset_live_table_for_tests()
+    except Exception:
+        pass
+
+
+def test_session_summary_endpoint_generating_fallback(gui, tmp_path,
+                                                      monkeypatch):
+    """When NOT cached, the endpoint returns {status:'generating'} (it must NOT
+    block on a synchronous model run)."""
+    import json as _json
+    import threading as _threading
+    import urllib.request as _urlreq
+
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("GenProj", str(folder))["entry"]["id"]
+    _discovered_planning_session(gui, folder, pid)
+    import sessions as sess
+    sess_list = sess.list_sessions(str(folder), pid, "plan")
+    sid = sess_list[0]["session_id"]
+
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = _threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        from urllib.parse import quote as _q
+        url = (f"http://127.0.0.1:{port}/api/rnd/session_summary?"
+               f"pid={_q(pid)}&lane=planning&session={_q(sid)}")
+        with _urlreq.urlopen(url, timeout=10) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+        # Proactive generation is OFF in unit tests, so an uncached summary
+        # returns the 'generating' fallback WITHOUT blocking on a model run.
+        assert data["ok"] is True
+        assert data["status"] == "generating"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_session_summary_endpoint_unknown_session_is_terminal(gui, tmp_path,
+                                                              monkeypatch):
+    """FIX 3: an UNKNOWN session id (or an unregistered pid) returns a TERMINAL
+    status (status='unknown'), NOT an endless {status:'generating'} — so a
+    polling UI panel STOPS instead of spinning forever."""
+    import json as _json
+    import threading as _threading
+    import urllib.request as _urlreq
+
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("UnkProj", str(folder))["entry"]["id"]
+    # A real session exists, but we ask for a DIFFERENT (non-existent) session id.
+    _discovered_planning_session(gui, folder, pid)
+
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = _threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        from urllib.parse import quote as _q
+        # (a) Known project, MISSING session id → terminal 'unknown'.
+        url = (f"http://127.0.0.1:{port}/api/rnd/session_summary?"
+               f"pid={_q(pid)}&lane=planning&session={_q('no::such::session')}")
+        with _urlreq.urlopen(url, timeout=10) as r:
+            data = _json.loads(r.read().decode("utf-8"))
+        assert data["status"] == "unknown", (
+            "missing session must be terminal, not endless 'generating'")
+        assert data["status"] != "generating"
+
+        # (b) UNKNOWN (unregistered) project id → terminal 'unknown'.
+        url2 = (f"http://127.0.0.1:{port}/api/rnd/session_summary?"
+                f"pid={_q('no-such-pid')}&lane=planning&session={_q('whatever')}")
+        with _urlreq.urlopen(url2, timeout=10) as r:
+            data2 = _json.loads(r.read().decode("utf-8"))
+        assert data2["status"] == "unknown"
+        assert data2["status"] != "generating"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_session_summary_endpoint_rejects_traversal_pid(gui, tmp_path):
+    """FIX 2: a traversal pid is rejected with 400 (symmetric with the existing
+    lane guard) before it can reach load_cached's path interpolation."""
+    import json as _json
+    import threading as _threading
+    import urllib.request as _urlreq
+    import urllib.error as _urlerr
+
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = _threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        from urllib.parse import quote as _q
+        url = (f"http://127.0.0.1:{port}/api/rnd/session_summary?"
+               f"pid={_q('../../etc')}&lane=planning&session={_q('s')}")
+        try:
+            with _urlreq.urlopen(url, timeout=10) as r:
+                code = r.getcode()
+                body = _json.loads(r.read().decode("utf-8"))
+        except _urlerr.HTTPError as e:
+            code = e.code
+            body = _json.loads(e.read().decode("utf-8"))
+        assert code == 400
+        assert body["ok"] is False
+        assert body["error"] == "bad pid"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ── Wave 7 (v3) — build-launch offer→confirm wiring ──────────────────────────
+
+def test_build_launch_offers_handoff_proposal_with_confirm(gui, tmp_path):
+    """FIX 3: when launching a BUILD lane, newTermSession first fetches
+    /api/rnd/handoff_proposal and, if has_plan_set, shows a confirm() before
+    priming. Non-build lanes skip the proposal."""
+    folder = tmp_path / "P"
+    folder.mkdir()
+    pid = gui.select_existing_project("HandoffUI", str(folder))["entry"]["id"]
+    html = gui.render_project_window_html(pid)
+    # The build-launch path references the proposal endpoint and a confirm gate.
+    assert "/api/rnd/handoff_proposal" in html
+    assert "has_plan_set" in html
+    assert "Execute on this plan set?" in html
+    # The proposal is only consulted for the build lane.
+    assert "lane === 'build'" in html
+    # Brace hygiene preserved (JS lives in the RAW string).
+    assert "{{" not in html
+    assert "}}" not in html
+
+
 def test_linked_task_with_quote_and_apostrophe_roundtrips(gui, tmp_path):
     """Regression (Wave 4 fix): a task whose text contains BOTH an apostrophe
     AND a double-quote (e.g. ``Fix it's "weird" bug``) must (a) render in the

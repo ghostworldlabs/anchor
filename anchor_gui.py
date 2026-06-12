@@ -433,6 +433,202 @@ import gate_adapter as _gate
 import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
+import terminal_session as _termsess
+import handoff as _handoff
+import preview_server as _preview
+import paths as _paths  # re-import alias (already imported above; harmless)
+
+
+# ── Hand-rolled stdlib WebSocket frame codec (RFC 6455) — PURE functions ─────
+# v3 "Mission Control" (MASTER-PLAN §D / Wave 3). The ConPTY terminal transport
+# is a minimal hand-rolled WebSocket carrying PTY bytes both ways over the raw
+# socket. The frame codec is factored into PURE, socket-free functions so it is
+# unit-testable without a connection.
+import base64 as _b64
+import hashlib as _hashlib
+import struct as _struct
+
+#: The RFC 6455 GUID concatenated with the client key to derive the accept hash.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# WebSocket opcodes.
+WS_OP_CONT = 0x0
+WS_OP_TEXT = 0x1
+WS_OP_BINARY = 0x2
+WS_OP_CLOSE = 0x8
+WS_OP_PING = 0x9
+WS_OP_PONG = 0xA
+
+
+def ws_accept_key(client_key: str) -> str:
+    """Compute the ``Sec-WebSocket-Accept`` value for a client key (RFC 6455).
+
+    ``base64(sha1(client_key + WS_GUID))``. Pure + deterministic so it is
+    unit-tested against the spec example
+    (``dGhlIHNhbXBsZSBub25jZQ==`` -> ``s3pPLMBiTxaQ9kYGzzhZRbK+xOo=``).
+    """
+    digest = _hashlib.sha1(
+        (client_key.strip() + WS_GUID).encode("ascii")).digest()
+    return _b64.b64encode(digest).decode("ascii")
+
+
+def encode_text_frame(text) -> bytes:
+    """Encode a server->client TEXT frame (FIN=1, unmasked — server frames are
+    never masked per RFC 6455)."""
+    if isinstance(text, str):
+        payload = text.encode("utf-8")
+    else:
+        payload = bytes(text)
+    return _encode_frame(WS_OP_TEXT, payload)
+
+
+def encode_close_frame(code=1000, reason=b"") -> bytes:
+    """Encode a server->client CLOSE frame with an optional status code."""
+    if isinstance(reason, str):
+        reason = reason.encode("utf-8")
+    payload = _struct.pack(">H", code) + reason if code is not None else b""
+    return _encode_frame(WS_OP_CLOSE, payload)
+
+
+def encode_pong_frame(payload=b"") -> bytes:
+    """Encode a server->client PONG frame echoing the ping payload."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    return _encode_frame(WS_OP_PONG, payload)
+
+
+def _encode_frame(opcode, payload: bytes) -> bytes:
+    """Build a single unmasked WebSocket frame (FIN=1) for ``opcode``+payload."""
+    b0 = 0x80 | (opcode & 0x0F)            # FIN=1, opcode
+    n = len(payload)
+    if n < 126:
+        header = _struct.pack(">BB", b0, n)
+    elif n < (1 << 16):
+        header = _struct.pack(">BBH", b0, 126, n)
+    else:
+        header = _struct.pack(">BBQ", b0, 127, n)
+    return header + payload
+
+
+#: Max bytes a single client frame's declared payload may be before the codec
+#: signals a clean close instead of accumulating an unbounded inbuf. Also caps
+#: the fragmentation-reassembly buffer (FIN=0 TEXT + CONTINUATION run).
+MAX_WS_FRAME = 1 << 20  # 1 MiB
+
+#: A pseudo-opcode the codec emits to tell the pump to close the connection on a
+#: protocol error (oversized frame, unmasked client data frame, bad fragment).
+#: It is NOT a real RFC 6455 opcode (0x10 is out of the 4-bit opcode range), so
+#: it can never collide with a genuine decoded frame.
+WS_SIGNAL_CLOSE = 0x10
+
+
+def decode_frames(buf: bytes, state=None, require_mask=False):
+    """Decode as many complete WebSocket frames as ``buf`` holds.
+
+    Returns ``(messages, rest)`` where ``messages`` is a list of
+    ``(opcode, payload_bytes)`` and ``rest`` is the trailing bytes of an
+    incomplete frame to carry forward.
+
+    ``decode_frames`` is dual-use: the pump decodes CLIENT frames (always masked)
+    and tests decode SERVER frames (never masked). Pass ``require_mask=True``
+    (the pump does) to enforce RFC 6455 §5.1 — an unmasked CLIENT frame is then a
+    protocol error and yields a single ``(WS_SIGNAL_CLOSE, ...)`` message so the
+    pump closes the connection. With ``require_mask=False`` (default) an unmasked
+    frame's payload is taken verbatim (so server→client frames decode cleanly).
+
+    Bounded (FIX 3): a frame whose DECLARED payload length exceeds
+    :data:`MAX_WS_FRAME` yields ``(WS_SIGNAL_CLOSE, ...)`` instead of buffering
+    toward an allocation — even before the payload bytes arrive.
+
+    Fragmentation reassembly (FIX 6, RFC 6455 §5.4): a TEXT/BINARY frame with
+    FIN=0 starts a message that is continued by CONTINUATION (opcode 0x0) frames
+    and delivered as ONE message when a CONTINUATION arrives with FIN=1. Control
+    frames (close/ping/pong) are delivered immediately and may interleave a
+    fragmented data message. Reassembly state is carried in the optional
+    ``state`` dict (the pump passes a persistent one); when ``state`` is None a
+    transient one is used (single-buffer/backward-compatible call form). The
+    reassembly buffer is itself bounded by :data:`MAX_WS_FRAME`.
+    """
+    if state is None:
+        state = {}
+    messages = []
+    i = 0
+    n = len(buf)
+    while True:
+        if n - i < 2:
+            break
+        b0 = buf[i]
+        b1 = buf[i + 1]
+        fin = bool(b0 & 0x80)
+        opcode = b0 & 0x0F
+        masked = bool(b1 & 0x80)
+        length = b1 & 0x7F
+        j = i + 2
+        if length == 126:
+            if n - j < 2:
+                break
+            length = _struct.unpack(">H", buf[j:j + 2])[0]
+            j += 2
+        elif length == 127:
+            if n - j < 8:
+                break
+            length = _struct.unpack(">Q", buf[j:j + 8])[0]
+            j += 8
+        # Reject an oversized DECLARED payload BEFORE waiting for/allocating it.
+        if length > MAX_WS_FRAME:
+            messages.append((WS_SIGNAL_CLOSE, b"frame too large"))
+            return messages, b""
+        is_control = bool(opcode & 0x8)
+        # RFC 6455 §5.1: a client frame MUST be masked. When decoding client
+        # frames (require_mask), an unmasked frame is a protocol error.
+        if require_mask and not masked:
+            messages.append((WS_SIGNAL_CLOSE, b"unmasked client frame"))
+            return messages, b""
+        mask = b""
+        if masked:
+            if n - j < 4:
+                break
+            mask = buf[j:j + 4]
+            j += 4
+        if n - j < length:
+            break  # incomplete payload — wait for more bytes
+        payload = bytearray(buf[j:j + length])
+        if masked and mask:
+            for k in range(length):
+                payload[k] ^= mask[k & 3]
+        payload = bytes(payload)
+        i = j + length
+
+        if is_control:
+            # Control frames are never fragmented; deliver immediately, even mid
+            # data-message reassembly.
+            messages.append((opcode, payload))
+            continue
+
+        if opcode == WS_OP_CONT:
+            if "frag_op" not in state:
+                # CONTINUATION with no message in progress — protocol error.
+                messages.append((WS_SIGNAL_CLOSE, b"unexpected continuation"))
+                return messages, b""
+            state["frag_buf"] = state.get("frag_buf", b"") + payload
+            if len(state["frag_buf"]) > MAX_WS_FRAME:
+                messages.append((WS_SIGNAL_CLOSE, b"fragmented message too large"))
+                return messages, b""
+            if fin:
+                messages.append((state.pop("frag_op"), state.pop("frag_buf")))
+            continue
+
+        # A new TEXT/BINARY data frame.
+        if not fin:
+            # Start of a fragmented message.
+            state["frag_op"] = opcode
+            state["frag_buf"] = payload
+            if len(state["frag_buf"]) > MAX_WS_FRAME:
+                messages.append((WS_SIGNAL_CLOSE, b"fragmented message too large"))
+                return messages, b""
+            continue
+        messages.append((opcode, payload))
+    return messages, buf[i:]
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -506,6 +702,42 @@ def xterm_asset(rel_path: str):
         return None
     ctype = _ANCHOR_TERM_CONTENT_TYPES.get(target.suffix.lower(),
                                            "application/octet-stream")
+    return target.read_bytes(), ctype
+
+
+# ── Vendored Ghost World Labs brand mark static asset (Wave 9) ───────────────
+# The GWL brand mark (gwl-m-icon.svg) is vendored on-disk under vendor/brand/
+# and served traversal-safe exactly like the KaTeX/xterm/anchor-term assets. It
+# backs the home-page lockup and the dashboard favicon. Pure-data static SVG —
+# no native dependency, no secret.
+BRAND_DIR = ANCHOR_DIR / "vendor" / "brand"
+BRAND_URL_PREFIX = "/vendor/brand"
+_BRAND_CONTENT_TYPES = {
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
+
+
+def brand_asset(rel_path: str):
+    """Resolve a ``/vendor/brand/<rel>`` request to (bytes, content_type).
+
+    Path-traversal safe (same containment pattern as :func:`anchor_term_asset`
+    / :func:`xterm_asset` / ``report_viewer.katex_asset``): the resolved file
+    MUST stay within :data:`BRAND_DIR`. Returns ``None`` for a missing file or
+    an escape attempt (so a ``../`` traversal can never read outside the brand
+    dir).
+    """
+    rel = rel_path.lstrip("/")
+    target = (BRAND_DIR / rel).resolve()
+    try:
+        target.relative_to(BRAND_DIR.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    ctype = _BRAND_CONTENT_TYPES.get(target.suffix.lower(),
+                                     "application/octet-stream")
     return target.read_bytes(), ctype
 
 
@@ -648,8 +880,145 @@ def discover_and_adopt(project_id: str) -> dict:
     # ``reconcile_folder`` is what folds + hard-deletes them).
     sibling = _eh.adopt_sibling_sessions(folder, project_id)
     marker = _marker.write_anchor_md(folder)
+    # Wave 5 (v3): proactively (re)generate the accurate cached PROJECT summary
+    # off the render path. We force a regenerate here so a rescan picks up new
+    # plan docs / deliverables; the dashboard render only READS the cache.
+    _trigger_project_summary(folder, project_id, force=True)
+    # Wave 6 (v3): proactively generate per-session summaries that lack a cache,
+    # so an expanded session accordion serves a ready cache rather than a
+    # "generating…" fallback. Background + gated like the project summary.
+    _trigger_project_session_summaries(folder, project_id)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
             "sibling_adopt": sibling, "marker": marker}
+
+
+#: Proactive project-summary generation is OFF by default so importing the module
+#: and calling endpoints in unit tests never spawns a background model job. The
+#: live server turns it ON in ``main()``; a test can opt in via the env flag
+#: ``ANCHOR_PROACTIVE_SUMMARY=1``. When OFF, summaries are still generated
+#: lazily/on demand (and the render path always just reads the cache).
+_PROACTIVE_SUMMARY_ENABLED = (
+    os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
+    in ("1", "true", "yes", "on"))
+
+
+def _trigger_project_summary(folder_path, project_id, force: bool = False):
+    """Kick off proactive project-summary generation WITHOUT blocking the caller.
+
+    Wave 5 (v3): the accurate cached project summary is generated proactively on
+    rescan through the runner seam (``ANCHOR_RUNNER_CMD`` → never live claude),
+    in a background daemon thread so the rescan/render path is never blocked by a
+    model run. All errors are swallowed — a failed generation just leaves the row
+    on its blurb fallback (and never poisons the cache, per summarizer FIX 2).
+
+    No-op unless proactive generation is enabled (the live server enables it; see
+    ``_PROACTIVE_SUMMARY_ENABLED``) so unit tests that merely register/open a
+    project never spawn a background model job.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    # Snapshot the runner-seam env at TRIGGER time so a late daemon thread uses
+    # the runner/counter configured now — not whatever the process env is when it
+    # finally runs. (Forwarded to the spawned job via job_runner.launch(env=...).
+    # In production this is just ANCHOR_RUNNER_CMD; in tests it also carries the
+    # STUB_* vars so a leaked thread can't bump a later test's call counter.)
+    runner_env = {k: v for k, v in os.environ.items()
+                  if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
+                  or k.startswith("FAKE_")}
+
+    def _run():
+        try:
+            _summarizer.summarize_project(folder_path, project_id, force=force,
+                                          runner_env=(runner_env or None))
+        except Exception:
+            pass
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def _trigger_session_summary(folder_path, project_id, lane, session,
+                             force: bool = False):
+    """Kick off proactive SESSION-summary generation WITHOUT blocking (Wave 6).
+
+    Mirror of ``_trigger_project_summary``: generates one session's cached,
+    validated summary through the runner seam in a background daemon thread, so
+    neither the render path nor the read-only ``/api/rnd/session_summary``
+    endpoint ever blocks on a model run. No-op unless proactive generation is
+    enabled (``_PROACTIVE_SUMMARY_ENABLED``) so unit tests that merely
+    register/open a project never spawn a background model job. Errors are
+    swallowed (a failed run never poisons the cache, per summarizer FIX 2).
+
+    The runner-seam env is snapshotted at trigger time (same isolation rationale
+    as the project-summary trigger) and forwarded to ``job_runner.launch``.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    runner_env = {k: v for k, v in os.environ.items()
+                  if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
+                  or k.startswith("FAKE_")}
+    if runner_env:
+        os.environ.setdefault("_ANCHOR_SESS_SUMMARY_ENV", "1")
+
+    def _run():
+        try:
+            # Forward the snapshotted runner env onto the spawned job for test
+            # isolation. summarize_session resolves the runner from the process
+            # env; in production this is just ANCHOR_RUNNER_CMD (already set).
+            prev = {}
+            for k, v in runner_env.items():
+                prev[k] = os.environ.get(k)
+                os.environ[k] = v
+            try:
+                _summarizer.summarize_session(folder_path, project_id, lane,
+                                              session, force=force)
+            finally:
+                for k, old in prev.items():
+                    if old is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = old
+        except Exception:
+            pass
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def _trigger_project_session_summaries(folder_path, project_id):
+    """Proactively generate summaries for all of a project's sessions lacking a
+    cache (Wave 6) — bounded, background, gated like the project-summary trigger.
+
+    Walks each trio lane's sessions (skipping the defensive ``loose::`` wrappers),
+    and for any session WITHOUT a cached summary kicks off a background
+    generation. No-op unless ``_PROACTIVE_SUMMARY_ENABLED``. Best-effort: any
+    error per lane/session is swallowed so a rescan is never blocked or broken.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    try:
+        lanes = [c[0] for c in _KANBAN_COLUMNS if c[0] != "grass"]
+    except Exception:
+        lanes = ["research", "plan", "build", "deliverables"]
+    for trio_lane in lanes:
+        try:
+            sess_list = _sessions.list_sessions(folder_path, project_id, trio_lane)
+        except Exception:
+            continue
+        for s in sess_list:
+            sid = (s.get("session_id") or "")
+            if not sid or sid.startswith("loose::"):
+                continue
+            store_lane = _eh._resolve_subdir(trio_lane)
+            try:
+                if _summarizer.load_cached(folder_path, project_id, store_lane,
+                                           sid) is not None:
+                    continue
+            except Exception:
+                pass
+            _trigger_session_summary(folder_path, project_id, trio_lane, s)
 
 
 def render_status_line_html(project_id: str) -> str:
@@ -682,20 +1051,27 @@ def render_status_line_html(project_id: str) -> str:
     return '<div class="rnd-status-line">' + "".join(chips) + "</div>"
 
 
-def render_project_tile_html(entry: dict) -> str:
-    """Render a 'Rich' project tile: name, priority, state, effort rollup, notes,
-    and lifecycle actions (open-in-its-own-window, change priority, edit notes,
-    archive / retire — or reactivate for an inactive project)."""
+def _project_summary_text(entry: dict) -> tuple:
+    """Return ``(summary_text, source)`` for a project's thin-row summary.
+
+    Wave 5 (v3): the row's summary is the accurate CACHED project summary when
+    present (``summarizer.load_cached_project`` — read-only, NEVER runs the model
+    on the render path), else the existing blurb (seeded once from CLAUDE.md/
+    README/Anchor.md), else "". ``source`` is ``"summary"`` | ``"blurb"`` | ``""``.
+    """
     pid_raw = entry.get("id", "")
-    pid = html_lib.escape(pid_raw)
-    name = html_lib.escape(entry.get("name", ""))
-    pr = entry.get("priority", 2)
-    state = html_lib.escape(entry.get("state", "active"))
-    notes = entry.get("notes", "") or ""
-    notes_attr = html_lib.escape(notes, quote=True)
     folder = entry.get("folder_path", "")
-    # Project blurb ("what this project is"): seed once from CLAUDE.md/README/
-    # Anchor.md when empty, then render. Best-effort — never block the tile.
+    # 1. Cached project summary (read-only — no model run on the render path).
+    if folder:
+        try:
+            cached = _summarizer.load_cached_project(folder, pid_raw)
+            if cached:
+                txt = (cached.get("summary_text") or "").strip()
+                if txt:
+                    return txt, "summary"
+        except Exception:
+            pass
+    # 2. Fall back to the blurb (seed once if empty).
     blurb = entry.get("blurb", "") or ""
     if not blurb.strip():
         try:
@@ -704,30 +1080,64 @@ def render_project_tile_html(entry: dict) -> str:
                 blurb = seeded.get("blurb", "") or ""
         except Exception:
             pass
-    blurb_attr = html_lib.escape(blurb, quote=True)
-    blurb_block = (f'<div class="rnd-blurb" data-blurb="{blurb_attr}">'
-                   f'{html_lib.escape(blurb)}</div>') if blurb.strip() else ''
-    status = render_status_line_html(pid_raw)
-    # Effort rollup ("amount of effort") — count + cost/time/tokens.
+    if blurb.strip():
+        return blurb.strip(), "blurb"
+    return "", ""
+
+
+def _project_status_dot(entry: dict, status_line: dict) -> str:
+    """Pick the row's status-dot class (kept simple + documented, Wave 5).
+
+    Mapping: green if ANY lane has a running session; for inactive projects
+    (archived/future/retired) a dimmed grey; otherwise a neutral idle grey. The
+    dot is purely advisory (the per-lane mini-counts carry the detail)."""
+    state = entry.get("state", "active")
+    if state in ("archived", "future", "retired"):
+        return "rnd-dot-idle"
     try:
-        total = _eh.project_rollup(pid_raw, folder).get("total", {})
-        n_eff = int(total.get("effort_count", 0) or 0)
-        n_imp = int(total.get("discovered_count", 0) or 0)
+        if any(int((status_line.get(l) or {}).get("running", 0) or 0) > 0
+               for l in status_line):
+            return "rnd-dot-running"
     except Exception:
-        total, n_eff, n_imp = {}, 0, 0
-    imported_bit = (f' · <span class="rnd-imported">{n_imp} imported</span>'
-                    if n_imp else "")
-    if n_eff:
-        effort_line = (f'<div class="rnd-effort">{n_eff} effort'
-                       f'{"s" if n_eff != 1 else ""}{imported_bit} · '
-                       f'{html_lib.escape(_fmt_cost(total))}</div>')
-    elif n_imp:
-        # Brownfield project with only imported artifacts (no Anchor runs yet).
-        effort_line = (f'<div class="rnd-effort">0 efforts{imported_bit}</div>')
-    else:
-        effort_line = '<div class="rnd-effort rnd-dim">no efforts yet</div>'
-    notes_block = (f'<div class="rnd-notes" title="{notes_attr}">&#128221; '
-                   f'{html_lib.escape(notes)}</div>') if notes.strip() else ''
+        pass
+    return "rnd-dot-idle"
+
+
+def render_project_tile_html(entry: dict) -> str:
+    """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
+    lines 124-141): ``name · accurate cached project summary · per-lane
+    mini-counts · status dot``. Clicking the row opens the project window;
+    lifecycle controls (P1/P2, rescan, blurb, notes, archive/retire/reactivate)
+    moved OFF the row into a kebab/hover menu so the row stays one line. This
+    REPLACES the old square ``.rnd-tile``."""
+    pid_raw = entry.get("id", "")
+    pid = html_lib.escape(pid_raw)
+    name = html_lib.escape(entry.get("name", ""))
+    pr = entry.get("priority", 2)
+    state = html_lib.escape(entry.get("state", "active"))
+    notes = entry.get("notes", "") or ""
+    notes_attr = html_lib.escape(notes, quote=True)
+    folder = entry.get("folder_path", "")
+
+    # Row summary text: cached project summary, else blurb (read-only path).
+    summary_text, _src = _project_summary_text(entry)
+    summary_attr = html_lib.escape(summary_text, quote=True)
+    summary_block = (f'<span class="rnd-row-summary" title="{summary_attr}">'
+                     f'{html_lib.escape(summary_text)}</span>'
+                     if summary_text else
+                     '<span class="rnd-row-summary rnd-dim">No summary yet</span>')
+    # data-blurb keeps the kebab "Blurb" prompt seeded with the editable blurb.
+    blurb = entry.get("blurb", "") or ""
+    blurb_attr = html_lib.escape(blurb, quote=True)
+
+    # Per-lane mini-counts (compact form of the status line) + status dot.
+    status = render_status_line_html(pid_raw)
+    try:
+        sline = _rnd.status_line(pid_raw)
+    except Exception:
+        sline = {}
+    dot_cls = _project_status_dot(entry, sline)
+
     is_active = state in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -750,22 +1160,29 @@ def render_project_tile_html(entry: dict) -> str:
             f'<button class="rnd-mini" onclick="rndBlurb(\'{pid}\')" title="Edit blurb (what this project is)">Blurb</button>'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
         )
+    # Kebab menu holds all lifecycle controls so the row stays thin. The row
+    # itself (click anywhere not on the kebab) opens the project window.
+    kebab = (
+        f'<div class="rnd-kebab" onclick="event.stopPropagation()">'
+        f'<button class="rnd-kebab-btn" onclick="rndToggleKebab(event,\'{pid}\')" '
+        f'title="Project actions" aria-label="Project actions">&#8942;</button>'
+        f'<div class="rnd-kebab-menu" id="rnd-kebab-{pid}">'
+        f'{lifecycle}'
+        f'</div>'
+        f'</div>'
+    )
     return (
-        f'<div class="rnd-tile" data-project-id="{pid}" data-notes="{notes_attr}">'
-        f'<div class="rnd-tile-head">'
+        f'<div class="rnd-row" data-project-id="{pid}" data-notes="{notes_attr}" '
+        f'data-blurb="{blurb_attr}" tabindex="0" role="button" '
+        f'onclick="openProjectWindow(\'{pid}\')" '
+        f'title="Open {name}">'
+        f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
-        f'</div>'
-        f'{blurb_block}'
-        f'{status}'
-        f'{effort_line}'
-        f'{notes_block}'
-        f'<div class="rnd-actions">'
-        f'<button class="rnd-mini rnd-open-btn" onclick="openProjectWindow(\'{pid}\')" '
-        f'title="Open in its own window (multiple projects at once)">Open &#8599;</button>'
-        f'{lifecycle}'
-        f'</div>'
+        f'{summary_block}'
+        f'<span class="rnd-row-counts">{status}</span>'
+        f'{kebab}'
         f'</div>'
     )
 
@@ -780,7 +1197,7 @@ def _render_folder_groups(groups: dict) -> str:
             f'<summary class="rnd-folder-head">{html_lib.escape(folder)}'
             f' <span class="rnd-folder-count">'
             f'({len(groups[folder])})</span></summary>'
-            f'<div class="rnd-folder-tiles">{tiles}</div>'
+            f'<div class="rnd-folder-tiles rnd-folder-rows">{tiles}</div>'
             f'</details>'
         )
     return '<div class="rnd-projects">' + "".join(blocks) + '</div>'
@@ -1139,6 +1556,11 @@ def _render_kanban_html(folder_path, project_id):
     return "<div class='kan'>" + "".join(cols) + "</div>"
 
 
+def _safe_dom_id(seg: str) -> str:
+    """A DOM-id-safe slug of a session id (which contains ``::`` etc.)."""
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
+
+
 def _render_lane_sessions(session_views, store_lane, project_id):
     """Render a lane's sessions: most-recent visible + a "previous sessions"
     expander holding the rest (v2 Wave 4).
@@ -1172,14 +1594,26 @@ def _render_lane_sessions(session_views, store_lane, project_id):
         summary_link = ""
         if rep_summarizable:
             trio_lane = rep.get("trio_lane", store_lane)
-            href = (f"/summary/{url_quote(project_id, safe='')}/"
-                    f"{url_quote(trio_lane, safe='')}/"
-                    f"{url_quote(sid, safe='')}")
+            # v3 Wave 6: clicking "summary" EXPANDS an inline accordion (no
+            # navigation to /summary). The toggle carries the pid/lane/sid in
+            # data-* attributes; the JS fetches /api/rnd/session_summary and
+            # renders the panel in place. The ONLY new tab is a doc link inside
+            # the rendered panel (report/artifact routes).
+            esc_pid = html_lib.escape(project_id, quote=True)
+            esc_lane = html_lib.escape(trio_lane, quote=True)
+            esc_sid = html_lib.escape(sid, quote=True)
+            panel_id = "summ_" + html_lib.escape(
+                _safe_dom_id(trio_lane + "_" + sid), quote=True)
             summary_link = (
                 f"<div class='session-summary-link'>"
-                f"<a href=\"#\" onclick=\""
-                f"openSummary('{html_lib.escape(href, quote=True)}');"
-                f"return false;\">summary</a></div>"
+                f"<a href=\"#\" class='summary-toggle' "
+                f"data-pid=\"{esc_pid}\" data-lane=\"{esc_lane}\" "
+                f"data-session=\"{esc_sid}\" data-panel=\"{panel_id}\" "
+                f"onclick=\"toggleSessionSummary(this);return false;\">"
+                f"summary</a>"
+                f"<div class='session-summary-panel' id=\"{panel_id}\" "
+                f"style='display:none'></div>"
+                f"</div>"
             )
         rest = members[1:]
         if not rest:
@@ -1282,6 +1716,14 @@ def render_project_window_html(project_id: str) -> str:
     status = render_status_line_html(project_id)
     rollup = render_cost_rollup_html(project_id, folder_raw)
     tasks_html = render_project_tasks_html(project_id)
+    # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
+    # pin it as the runnable deliverable so the Deliverables lane shows it with a
+    # Run action. Idempotent (content-addressed); best-effort.
+    try:
+        if (Path(folder_raw) / _preview.DEFAULT_TARGET).is_file():
+            ensure_anchor_deliverable(folder_raw, project_id)
+    except Exception:
+        pass
     deliverables_html = render_deliverables_html(project_id, folder_raw)
     pid_js = json.dumps(project_id)
     return (
@@ -1361,6 +1803,32 @@ def render_project_window_html(project_id: str) -> str:
         "cursor:pointer;list-style:none;padding:3px 2px}"
         ".prev-sessions>summary:hover{color:var(--accent)}"
         ".prev-sessions-body{margin-top:6px}"
+        # v3 Wave 6 — in-place expandable session summary accordion.
+        ".session-summary-link{margin:-2px 0 7px}"
+        ".summary-toggle{font-size:10.5px;color:var(--text-dim);"
+        "cursor:pointer;text-decoration:none}"
+        ".summary-toggle:hover{color:var(--accent)}"
+        ".session-summary-panel{margin-top:6px;padding:8px 10px;font-size:11px;"
+        "border:1px solid var(--border);border-radius:8px;"
+        "background:rgba(255,255,255,.02)}"
+        ".summ-loading{color:var(--text-dim);font-size:10.5px;font-style:italic}"
+        ".summ-title{font-weight:600;margin-bottom:5px;color:var(--text)}"
+        ".summ-field{margin:3px 0;color:var(--text);line-height:1.4}"
+        ".summ-field b{color:var(--text-dim);font-weight:600}"
+        ".summ-effort{color:var(--text-dim)}"
+        ".summ-note{font-style:italic;color:var(--text-dim)}"
+        ".summ-claims{margin:6px 0;padding-left:18px}"
+        ".summ-claims li{margin:2px 0}"
+        ".summ-docs{margin-top:6px}"
+        ".summ-docs b{color:var(--text-dim);font-size:10.5px}"
+        ".summ-docs ul{margin:4px 0;padding-left:18px}"
+        ".summ-docs a{color:var(--accent);text-decoration:none}"
+        ".summ-docs a:hover{text-decoration:underline}"
+        ".summ-launch{margin-top:8px}"
+        ".summ-launch-btn{font-size:10.5px;cursor:pointer;color:var(--accent);"
+        "background:rgba(108,156,252,.1);border:1px solid rgba(108,156,252,.4);"
+        "border-radius:6px;padding:3px 9px}"
+        ".summ-launch-btn:hover{background:rgba(108,156,252,.2)}"
         ".imported{font-size:10px;color:var(--text-dim);"
         "display:inline-flex;align-items:center;gap:5px;letter-spacing:.5px}"
         ".dotdisc{width:6px;height:6px;border-radius:50%;"
@@ -1426,6 +1894,57 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-running{color:var(--success);font-size:11px}"
         ".rnd-dim{color:var(--text-dim)}"
         "h2{font-size:14px;margin:18px 0 6px}"
+        # ── Wave 4: stacking window-manager UI (session bar + windows) ──
+        # NOTE: this is a PLAIN (non-f) string literal — single braces are FINE.
+        ".sessbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
+        "padding:10px 16px;border-top:1px solid var(--border);"
+        "background:var(--surface2)}"
+        ".sessbar .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-right:2px}"
+        ".sessbar .hint{font-size:11px;color:var(--text-dim);margin-left:auto}"
+        ".sessbtn{font-size:11.5px;padding:4px 11px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text);cursor:pointer;display:inline-flex;align-items:center;"
+        "gap:6px}"
+        ".sessbtn:hover{border-color:var(--accent)}"
+        ".sessbtn.open{border-color:var(--accent);background:rgba(108,156,252,.1)}"
+        ".sess-dot{width:8px;height:8px;border-radius:50%;display:inline-block;"
+        "background:var(--text-dim)}"
+        ".sess-dot--green{background:#4ade80}"
+        ".sess-dot--amber{background:#fbbf24}"
+        ".sess-dot--red{background:#f87171}"
+        ".sess-dot--grey{background:#8b8f9a}"
+        ".newsess{font-size:11px;padding:3px 10px;border-radius:7px;"
+        "border:1px dashed var(--border);background:transparent;"
+        "color:var(--accent);cursor:pointer}"
+        ".newsess:hover{border-color:var(--accent)}"
+        # The window LAYER is a positioned canvas the brick-stacked windows live in.
+        ".winlayer{position:relative;min-height:40px;padding:0 16px 16px}"
+        ".termwin{position:absolute;width:520px;height:340px;background:#0c0e14;"
+        "border:1px solid var(--border);border-radius:10px;overflow:hidden;"
+        "box-shadow:0 8px 24px rgba(0,0,0,.45);display:flex;flex-direction:column;"
+        "min-width:260px;min-height:120px}"
+        ".termwin.minimized{height:34px!important;min-height:0;resize:none}"
+        ".termwin.minimized .termbody,.termwin.minimized .winresize{display:none}"
+        ".termwin .wintitle{display:flex;align-items:center;gap:8px;"
+        "padding:6px 10px;background:var(--surface2);"
+        "border-bottom:1px solid var(--border);cursor:move;user-select:none;"
+        "font-size:12px}"
+        ".termwin .wintitle .wt-label{font-weight:600;white-space:nowrap;"
+        "overflow:hidden;text-overflow:ellipsis}"
+        ".termwin .wintitle .wt-meta{color:var(--text-dim);font-size:11px}"
+        ".termwin .wintitle .wt-sp{margin-left:auto}"
+        ".winbtn{width:20px;height:20px;line-height:18px;text-align:center;"
+        "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
+        ".winbtn:hover{color:var(--text);border-color:var(--accent)}"
+        ".winbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        ".termwin .termbody{flex:1;overflow:hidden;padding:4px}"
+        ".termwin .winresize{position:absolute;right:0;bottom:0;width:16px;"
+        "height:16px;cursor:nwse-resize}"
+        ".termwin .winresize::after{content:'';position:absolute;right:3px;"
+        "bottom:3px;width:7px;height:7px;border-right:2px solid var(--text-dim);"
+        "border-bottom:2px solid var(--text-dim)}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -1451,6 +1970,18 @@ def render_project_window_html(project_id: str) -> str:
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
         # ── Kanban board ──
         f"{kanban}"
+        # ── Wave 4: session button bar + stacking window manager (ConPTY) ──
+        # The bar is repopulated on load from /api/rnd/term_sessions; each button
+        # is status-colored and opens/attaches that session's terminal window.
+        "<div class='sessbar' id='sessionBar'>"
+        "<span class='lbl'>Live terminals</span>"
+        "<span id='sessionBtns'></span>"
+        "<button class='newsess' onclick=\"newTermSession('research')\">+ research</button>"
+        "<button class='newsess' onclick=\"newTermSession('plan')\">+ plan</button>"
+        "<button class='newsess' onclick=\"newTermSession('build')\">+ build</button>"
+        "<span class='hint' id='sessionBarHint'>no live terminal sessions</span>"
+        "</div>"
+        "<div class='winlayer' id='windowLayer'></div>"
         # ── Console drawer (session tabs + attached log + ask + stop) ──
         "<div class='console' id='console'>"
         "<div class='ctabs'><span class='lbl'>Sessions</span>"
@@ -1530,6 +2061,9 @@ window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   adoptLiveEfforts();
   _startPolling();
+  // Wave 4: repopulate the ConPTY session button bar from the registry so
+  // reopening the dashboard reflects live managed sessions.
+  loadSessions();
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -1906,11 +2440,206 @@ async function stopAttached() {
   renderTabs();
 }
 
+// ── Runnable Anchor deliverable — ephemeral preview (v3 Wave 8) ─────────────
+// Run starts a preview server on a free port (≠8777) in an isolated temp data
+// dir, then opens the returned URL in a NEW TAB. Stop reaps it. Token-aware.
+async function runDeliverable(deliverable, btn) {
+  var li = btn.closest('.deliv-pinned');
+  var msg = li ? li.querySelector('.deliv-msg') : null;
+  if (msg) msg.textContent = 'starting…';
+  btn.disabled = true;
+  var payload = {project_id: PROJECT_ID, deliverable: deliverable};
+  try {
+    var r = await _postJson('/api/rnd/preview_start', payload);
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/preview_start', payload);
+      data = await r.json();
+    }
+    if (data && data.ok && data.url) {
+      if (li) li.setAttribute('data-preview-id', data.preview_id || '');
+      if (msg) msg.textContent = 'running on port ' + (data.port || '?');
+      var stopBtn = li ? li.querySelector('.deliv-stop') : null;
+      if (stopBtn) stopBtn.style.display = '';
+      btn.style.display = 'none';
+      window.open(data.url, '_blank');
+    } else {
+      if (msg) msg.textContent = 'failed: ' + ((data && data.error) || 'unknown');
+      btn.disabled = false;
+    }
+  } catch (e) {
+    if (msg) msg.textContent = 'error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+async function stopDeliverable(btn) {
+  var li = btn.closest('.deliv-pinned');
+  var pid = li ? li.getAttribute('data-preview-id') : '';
+  var msg = li ? li.querySelector('.deliv-msg') : null;
+  if (!pid) { if (msg) msg.textContent = 'no running preview'; return; }
+  btn.disabled = true;
+  try {
+    var r = await _postJson('/api/rnd/preview_stop', {preview_id: pid});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/preview_stop', {preview_id: pid});
+      data = await r.json();
+    }
+    if (msg) msg.textContent = 'stopped';
+    btn.style.display = 'none';
+    if (li) li.removeAttribute('data-preview-id');
+    var runBtn = li ? li.querySelector('.deliv-run') : null;
+    if (runBtn) { runBtn.style.display = ''; runBtn.disabled = false; }
+  } catch (e) {
+    if (msg) msg.textContent = 'stop error: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
 function openReport(href) { window.open(href, '_blank'); }
 
-// Open a session's cached, validated summary page (Wave 6). DONE / imported
-// session cards link here; live/running cards keep attaching to the console.
+// Open a session's cached, validated summary page (Wave 6 back-compat: direct
+// /summary links still work; the session card no longer navigates here).
 function openSummary(href) { window.open(href, '_blank'); }
+
+// ── In-place expandable session summaries (v3 Wave 6) ───────────────────────
+// Clicking "summary" EXPANDS an inline accordion in the Kanban (NO navigation
+// to /summary). The panel fetches the cached structured summary as JSON and
+// renders when-run · what-was-asked · North-Star · doc links (the ONLY new tab)
+// · effort (tokens + wall-clock; imported → "no run metrics"), plus a "Launch
+// new session" button that calls the Wave-3/4 launch path seeded from THIS
+// session. Collapsing hides it; reopening serves the cache.
+function toggleSessionSummary(el) {
+  var panelId = el.getAttribute('data-panel');
+  var panel = document.getElementById(panelId);
+  if (!panel) return;
+  if (panel.style.display !== 'none' && panel.getAttribute('data-loaded') === '1') {
+    // Collapse.
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  if (panel.getAttribute('data-loaded') === '1') return;  // reopen → cache
+  var pid = el.getAttribute('data-pid');
+  var lane = el.getAttribute('data-lane');
+  var sid = el.getAttribute('data-session');
+  panel.innerHTML = '<div class="summ-loading">loading…</div>';
+  _loadSessionSummary(panel, pid, lane, sid, 0);
+}
+
+function _esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _sessionSummaryUrl(pid, lane, sid) {
+  return '/api/rnd/session_summary?pid=' + encodeURIComponent(pid)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sid);
+}
+
+function _loadSessionSummary(panel, pid, lane, sid, attempt) {
+  var _hdrs = {Accept: 'application/json'};
+  fetch(_sessionSummaryUrl(pid, lane, sid), {headers: _hdrs} )
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.status === 'ready' && data.summary) {
+        panel.innerHTML = _renderSessionSummary(data.summary, pid, lane, sid);
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+        return;
+      }
+      // TERMINAL status (unknown project / missing session): STOP polling and
+      // show an honest "summary unavailable" note instead of spinning forever.
+      if (data && (data.status === 'unknown' || data.status === 'not-found'
+                   || data.ok === false)) {
+        panel.innerHTML = '<div class="summ-loading">Summary unavailable for '
+          + 'this session.</div>' + _launchButtonHtml();
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+        return;
+      }
+      // "generating…" fallback: poll a bounded number of times, then stop.
+      if (attempt < 20) {
+        panel.innerHTML = '<div class="summ-loading">generating summary… '
+          + '(this runs once and is then cached)</div>';
+        setTimeout(function () {
+          _loadSessionSummary(panel, pid, lane, sid, attempt + 1);
+        }, 1500);
+      } else {
+        panel.innerHTML = '<div class="summ-loading">Summary is still '
+          + 'generating. Close and reopen shortly to view it.</div>'
+          + _launchButtonHtml();
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+      }
+    })
+    .catch(function (e) {
+      panel.innerHTML = '<div class="summ-loading">Could not load summary: '
+        + _esc(e.message) + '</div>';
+    });
+}
+
+function _renderSessionSummary(s, pid, lane, sid) {
+  var h = [];
+  if (s.title) h.push('<div class="summ-title">' + _esc(s.title) + '</div>');
+  if (s.when_run) h.push('<div class="summ-field"><b>When run:</b> '
+    + _esc(s.when_run) + '</div>');
+  if (s.what_was_asked) h.push('<div class="summ-field"><b>What was asked:</b> '
+    + _esc(s.what_was_asked) + '</div>');
+  if (s.north_star) h.push('<div class="summ-field"><b>North Star:</b> '
+    + _esc(s.north_star) + '</div>');
+  // Effort: imported sessions honestly show "no run metrics" (effort === null).
+  if (s.hasOwnProperty('effort')) {
+    if (s.effort === null) {
+      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
+        + 'imported — no run metrics</div>');
+    } else if (s.effort) {
+      var secs = ((s.effort.wall_clock_ms || 0) / 1000).toFixed(1);
+      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
+        + _esc(s.effort.tokens || 0) + ' tokens · ' + _esc(secs) + 's wall-clock · '
+        + _esc(s.effort.runs || 0) + ' run(s)</div>');
+    }
+  }
+  var claims = s.claims || [];
+  if (claims.length) {
+    var items = claims.map(function (c) { return '<li>' + _esc(c) + '</li>'; });
+    h.push('<ul class="summ-claims">' + items.join('') + '</ul>');
+  } else if (s.no_grounded_claims) {
+    h.push('<div class="summ-field summ-note">No grounded claims could be '
+      + 'extracted for this session.</div>');
+  }
+  // Document links — each opens the rendered markdown in a NEW TAB (the ONLY
+  // new tab) via the existing /report and /artifact routes.
+  var links = s.member_links || [];
+  if (links.length) {
+    var ls = links.map(function (lk) {
+      return '<li><a href="' + _esc(lk.href) + '" target="_blank" '
+        + 'rel="noopener">' + _esc(lk.label) + '</a></li>';
+    });
+    h.push('<div class="summ-docs"><b>Documents</b><ul>' + ls.join('')
+      + '</ul></div>');
+  }
+  h.push(_launchButtonHtml());
+  return '<div class="summ-body">' + h.join('') + '</div>';
+}
+
+function _launchButtonHtml() {
+  return '<div class="summ-launch"><button class="summ-launch-btn" '
+    + 'type="button">Launch new session</button></div>';
+}
+
+// Wire the panel's "Launch new session" button to the Wave-3/4 launch path,
+// seeded from THIS session. The lane + a seed hint (the source session id) ride
+// into newTermSession so Wave 7 can build the handoff on top of this seam.
+function _wireLaunchFromPanel(panel, lane, sid) {
+  var btn = panel.querySelector('.summ-launch-btn');
+  if (!btn) return;
+  btn.onclick = function () {
+    newTermSession(lane, null, {seed_session: sid});
+  };
+}
 
 // ── Lifecycle header actions (token-aware via _postJson) ────────────────────
 function _lifecycle(url, payload, reload) {
@@ -1965,6 +2694,356 @@ function rndUnlinkTask(el) {
   if (!confirm('Unlink this task from the project?')) return;
   // An empty project_id unlinks the matching task (backend contract).
   _lifecycle('/api/rnd/link_task', {text: text, project_id: ''});
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Wave 4 — stacking window-manager UI for ConPTY terminal sessions.
+//
+// A top bar of terse, STATUS-COLORED buttons (one per live managed session,
+// labeled "<lane> <index>"); clicking opens/attaches that session's terminal in
+// a draggable / resizable / minimizable WINDOW that stacks like a brick. Minimize
+// keeps the session/process RUNNING (it only hides the window). The X control is
+// KILL — gated behind a confirm() — which POSTs /api/rnd/term_kill, removes the
+// window, and refreshes the bar. xterm.js is mounted in each window over the
+// Wave-3 transport (WS first, SSE-out + POST-in fallback). All POSTs are
+// token-aware via _postJson; the WS/SSE URLs carry ?token= from localStorage.
+//
+// This is a NEW surface; it does NOT touch the v2 console drawer (openTerminal /
+// launchLane) above.
+// ════════════════════════════════════════════════════════════════════════════
+
+// MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
+var MANAGED = {};
+// WINDOWS: session_id -> {el, term, transport, body} for an OPEN window.
+var WINDOWS = {};
+var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" labels
+var _winZ = 30;           // z-index cursor so a focused window comes forward
+
+// Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E):
+//   running              -> green  (working; ignore)
+//   needs-attention/done -> amber  (come look)
+//   failed               -> red
+//   idle / unknown       -> grey
+function _statusColor(status) {
+  if (status === 'running') return 'green';
+  if (status === 'needs-attention' || status === 'done') return 'amber';
+  if (status === 'failed') return 'red';
+  return 'grey';
+}
+
+// Fetch the project's live managed sessions from the registry and paint the bar.
+async function loadSessions() {
+  var url = '/api/rnd/term_sessions?project_id=' + encodeURIComponent(PROJECT_ID);
+  var data;
+  try {
+    var r = await fetch(url);
+    data = await r.json();
+  } catch (e) { return; }
+  if (!data || !data.ok) return;
+  var sessions = data.sessions || [];
+  // Rebuild the MANAGED map, preserving a stable per-lane index per session.
+  var seen = {};
+  _laneCounters = {};
+  sessions.sort(function (a, b) {
+    return (a.created_at || 0) - (b.created_at || 0);
+  });
+  for (var i = 0; i < sessions.length; i++) {
+    var s = sessions[i];
+    if (!s.session_id) continue;
+    var lane = s.lane || 'session';
+    _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
+    var prev = MANAGED[s.session_id] || {};
+    MANAGED[s.session_id] = {
+      session_id: s.session_id, lane: lane, backend: s.backend || '',
+      status: s.status || 'idle', label: s.label || '',
+      idx: prev.idx || _laneCounters[lane]
+    };
+    seen[s.session_id] = true;
+  }
+  // Drop sessions the registry no longer reports (and close any stale window).
+  for (var sid in MANAGED) {
+    if (!seen[sid]) { _closeWindow(sid); delete MANAGED[sid]; }
+  }
+  renderSessionBar();
+}
+
+function renderSessionBar() {
+  var host = document.getElementById('sessionBtns');
+  if (!host) return;
+  host.innerHTML = '';
+  var ids = Object.keys(MANAGED);
+  for (var i = 0; i < ids.length; i++) {
+    var s = MANAGED[ids[i]];
+    var btn = document.createElement('button');
+    btn.className = 'sessbtn' + (WINDOWS[s.session_id] ? ' open' : '');
+    btn.setAttribute('data-session', s.session_id);
+    btn.setAttribute('data-status', s.status);
+    var dot = document.createElement('span');
+    dot.className = 'sess-dot sess-dot--' + _statusColor(s.status);
+    btn.appendChild(dot);
+    var txt = document.createElement('span');
+    txt.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+    btn.appendChild(txt);
+    (function (sid) {
+      btn.onclick = function () { openSessionWindow(sid); };
+    })(s.session_id);
+    host.appendChild(btn);
+  }
+  var hint = document.getElementById('sessionBarHint');
+  if (hint) hint.style.display = ids.length ? 'none' : '';
+}
+
+// Start a brand-new managed terminal session for a lane (Wave-3 term_start),
+// then refresh the bar and open its window. backend defaults to claude.
+async function newTermSession(lane, backend, opts) {
+  backend = backend || 'claude';
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
+  // Wave 6 seam: a seed hint (the source session id) rides into term_start so
+  // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
+  // extra field today (start_session ignores it); Wave 7 wires it through.
+  if (opts && opts.seed_session) payload.seed_session = opts.seed_session;
+  // Wave 7 offer→confirm: for a BUILD lane, OFFER the most-recent plan set and
+  // only prime on confirm. We fetch the read-only proposal, and if a plan set
+  // exists, ask "Execute on this plan set?". YES → proceed (term_start primes).
+  // NO → drop the seed and launch a bare build session (non-blocking).
+  if (lane === 'build') {
+    try {
+      var qp = 'project_id=' + encodeURIComponent(PROJECT_ID) + '&lane=build';
+      if (opts && opts.seed_session)
+        qp += '&seed_session=' + encodeURIComponent(opts.seed_session);
+      var pr = await fetch('/api/rnd/handoff_proposal?' + qp);
+      var pd = await pr.json();
+      if (pd && pd.ok && pd.has_plan_set) {
+        var ps = pd.plan_set || {};
+        var msg = 'Execute on this plan set? ' +
+          (ps.title || ps.plan_dir || 'plan set') +
+          ' — ' + (ps.impl_plan_rel || ps.master_plan_rel || '');
+        if (!confirm(msg)) {
+          // User declined the offer: launch without seeding a plan set.
+          delete payload.seed_session;
+        }
+      }
+    } catch (e) { /* proposal is advisory; never block the launch */ }
+  }
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_start', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_start', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[terminal start error] ' + e.message); return; }
+  if (!data.ok || !data.session) {
+    alert('[terminal refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || backend,
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openSessionWindow(sid);
+  // Re-sync indices/labels from the registry shortly after.
+  setTimeout(loadSessions, 600);
+}
+
+// Open (or focus) a stacking terminal window for a managed session.
+function openSessionWindow(sessionId) {
+  var s = MANAGED[sessionId];
+  if (!s) return;
+  if (WINDOWS[sessionId]) { _focusWindow(sessionId); return; }
+  var layer = document.getElementById('windowLayer');
+  if (!layer) return;
+
+  var win = document.createElement('div');
+  win.className = 'termwin';
+  win.setAttribute('data-session', sessionId);
+  // Brick-stack: offset each new window so they stack like bricks (2–3 visible).
+  var n = Object.keys(WINDOWS).length;
+  win.style.left = (16 + (n % 3) * 36) + 'px';
+  win.style.top = (16 + n * 30) + 'px';
+  win.style.zIndex = (++_winZ);
+
+  var bar = document.createElement('div');
+  bar.className = 'wintitle';
+  var label = document.createElement('span');
+  label.className = 'wt-label';
+  label.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+  var meta = document.createElement('span');
+  meta.className = 'wt-meta';
+  meta.textContent = s.backend ? ('· ' + s.backend) : '';
+  var sp = document.createElement('span');
+  sp.className = 'wt-sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'winbtn min';
+  minBtn.title = 'Minimize (keeps the session running)';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); _toggleMinimize(sessionId); };
+  var killBtn = document.createElement('button');
+  killBtn.className = 'winbtn kill';
+  killBtn.title = 'Kill this session';
+  killBtn.textContent = '×';
+  killBtn.onclick = function (e) { e.stopPropagation(); killSession(sessionId); };
+  bar.appendChild(label); bar.appendChild(meta);
+  bar.appendChild(sp); bar.appendChild(minBtn); bar.appendChild(killBtn);
+
+  var body = document.createElement('div');
+  body.className = 'termbody';
+
+  var grip = document.createElement('div');
+  grip.className = 'winresize';
+
+  win.appendChild(bar); win.appendChild(body); win.appendChild(grip);
+  layer.appendChild(win);
+
+  WINDOWS[sessionId] = {el: win, body: body, term: null, transport: null};
+  win.addEventListener('mousedown', function () { _focusWindow(sessionId); });
+  _wireDrag(win, bar);
+  _wireResize(win, grip);
+  _mountTerminal(sessionId, body);
+  renderSessionBar();
+}
+
+function _focusWindow(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (w && w.el) w.el.style.zIndex = (++_winZ);
+}
+
+function _toggleMinimize(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (!w || !w.el) return;
+  // Minimize ONLY hides/collapses the window — it NEVER kills the session.
+  w.el.classList.toggle('minimized');
+}
+
+function _closeWindow(sessionId) {
+  var w = WINDOWS[sessionId];
+  if (!w) return;
+  try { if (w.transport && w.transport.close) w.transport.close(); } catch (e) {}
+  try { if (w.term && w.term.dispose) w.term.dispose(); } catch (e) {}
+  if (w.el && w.el.parentNode) w.el.parentNode.removeChild(w.el);
+  delete WINDOWS[sessionId];
+}
+
+// X = KILL with a confirm gate. Only on YES do we POST term_kill, then close the
+// window + refresh the bar. (Minimize, by contrast, never kills.)
+async function killSession(sessionId) {
+  var s = MANAGED[sessionId];
+  var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
+  if (!confirm('Kill the "' + name + '" terminal session? This stops its process.')) return;
+  try {
+    var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_kill', {session: sessionId});
+      data = await r.json();
+    }
+  } catch (e) { alert('[kill error] ' + e.message); }
+  _closeWindow(sessionId);
+  delete MANAGED[sessionId];
+  renderSessionBar();
+  setTimeout(loadSessions, 400);
+}
+
+// Mount xterm.js in the window body over the Wave-3 transport. Prefer the
+// hand-rolled WebSocket (term_ws); fall back to SSE-out (term_stream2) + POST-in
+// (term_input2). Bytes from read_since are decoded str sent as UTF-8 text.
+function _mountTerminal(sessionId, body) {
+  var w = WINDOWS[sessionId];
+  if (!w) return;
+  if (!window.Terminal) {
+    body.textContent = 'terminal component failed to load';
+    return;
+  }
+  var _termTheme = {background: '#0c0e14'};
+  var term = new window.Terminal({convertEol: true, fontSize: 12, theme: _termTheme});
+  term.open(body);
+  w.term = term;
+  var tok = _anchorToken();
+  var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
+
+  // Outbound user keystrokes → term_input2 (works for BOTH transports; the WS
+  // also accepts frames, but routing input through the POST keeps one path).
+  term.onData(function (d) {
+    _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
+  });
+  // Resize → term_resize (best-effort, token-aware).
+  term.onResize(function (sz) {
+    _postJson('/api/rnd/term_resize',
+              {session: sessionId, cols: sz.cols, rows: sz.rows});
+  });
+
+  // Transport: try WebSocket first; on error fall back to the SSE stream.
+  var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+  var wsUrl = wsProto + '//' + location.host +
+              '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
+  var sseStarted = false;
+  function startSSE() {
+    if (sseStarted) return;
+    sseStarted = true;
+    var sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
+    var es = new EventSource(sseUrl);
+    w.transport = es;
+    es.addEventListener('output', function (ev) {
+      try { var p = JSON.parse(ev.data); if (p.text) term.write(p.text); } catch (e) {}
+    });
+    es.addEventListener('done', function () { try { es.close(); } catch (e) {} });
+    es.onerror = function () { /* bounded server stream; let it close */ };
+  }
+  try {
+    var ws = new WebSocket(wsUrl);
+    w.transport = ws;
+    ws.onmessage = function (ev) { term.write(ev.data); };
+    ws.onclose = function () {
+      // If the WS never carried data (e.g. upgrade unsupported), use SSE.
+      if (!sseStarted) startSSE();
+    };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} startSSE(); };
+  } catch (e) { startSSE(); }
+}
+
+// Titlebar drag — move the window within the layer (brick repositioning).
+function _wireDrag(win, handle) {
+  handle.addEventListener('mousedown', function (e) {
+    if (e.target.classList && e.target.classList.contains('winbtn')) return;
+    e.preventDefault();
+    var sx = e.clientX, sy = e.clientY;
+    var ox = win.offsetLeft, oy = win.offsetTop;
+    function mv(ev) {
+      win.style.left = Math.max(0, ox + (ev.clientX - sx)) + 'px';
+      win.style.top = Math.max(0, oy + (ev.clientY - sy)) + 'px';
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
+}
+
+// Resize handle — grow/shrink the window from its bottom-right corner.
+function _wireResize(win, grip) {
+  grip.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    e.stopPropagation();
+    var sx = e.clientX, sy = e.clientY;
+    var ow = win.offsetWidth, oh = win.offsetHeight;
+    function mv(ev) {
+      win.style.width = Math.max(260, ow + (ev.clientX - sx)) + 'px';
+      win.style.height = Math.max(120, oh + (ev.clientY - sy)) + 'px';
+    }
+    function up() {
+      document.removeEventListener('mousemove', mv);
+      document.removeEventListener('mouseup', up);
+    }
+    document.addEventListener('mousemove', mv);
+    document.addEventListener('mouseup', up);
+  });
 }
 """
 
@@ -2078,35 +3157,107 @@ def render_project_tasks_html(project_id: str) -> str:
             + "".join(rows) + "</ul>")
 
 
-def render_deliverables_html(project_id: str, folder_path: str) -> str:
-    """Render the project's deliverable status records (Wave 9 AC1).
+def ensure_anchor_deliverable(folder_path: str, project_id: str):
+    """Pin ``anchor_gui.py`` as the project's runnable Anchor deliverable (Wave 8).
 
-    Read-only: shows each deliverable's type + last run status (the dashboard
-    surfacing of the status records ``deliverables.run_deliverable`` persists).
+    Idempotent: ``deliverables.pin_deliverable`` is content-addressed by path, so
+    pinning the same file twice produces no duplicate. ``anchor_gui.py`` is a
+    long-running SERVER (not a run-to-completion program), so its run is the
+    ephemeral preview (``preview_server``), not the program contract — it is
+    pinned with type ``program`` only so it surfaces in the Deliverables lane.
+    Best-effort: a pin failure never breaks the window render.
+
+    Pin-if-absent: this runs on EVERY ``GET /project/<id>`` render, and
+    ``pin_deliverable`` → ``record_effort`` unconditionally rewrites the pointer
+    JSON under ``WRITE_LOCK``. To avoid needless disk-write/lock churn on this
+    hot path, skip the pin entirely when ``anchor_gui.py`` is already pinned for
+    this project; the first render still pins. The pinned content/id is
+    unchanged (content-addressed by path).
     """
+    try:
+        target = _preview.DEFAULT_TARGET
+        for rec in _deliv.list_pinned_deliverables(folder_path, project_id):
+            if (rec.get("artifact_path") or "") == target:
+                return rec  # already pinned — no write, no lock contention
+        return _deliv.pin_deliverable(
+            folder_path, project_id, target,
+            name=target, dtype=_deliv.TYPE_PROGRAM,
+            description="Anchor dashboard web app (run as an ephemeral preview)")
+    except Exception:
+        return None
+
+
+def render_deliverables_html(project_id: str, folder_path: str) -> str:
+    """Render the project's deliverables: pinned deliverables (with Run/Stop) +
+    deliverable run-status records (Wave 9 AC1 + v3 Wave 8 ephemeral preview).
+
+    The pinned ``anchor_gui.py`` deliverable gets a **Run** action that starts an
+    ephemeral preview on a free port (≠8777) and opens it in a new tab, plus a
+    **Stop** that reaps it — token-aware via the project-window JS.
+    """
+    pinned = []
+    try:
+        pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
+    except Exception:
+        pinned = []
     try:
         records = _deliv.list_status(folder_path, project_id)
     except Exception:
         records = []
-    if not records:
-        return ("<h2>Deliverables</h2><p style='color:#8a90a2'>"
-                "No deliverable runs recorded yet.</p>")
-    colors = {_deliv.STATUS_SUCCESS: "#4caf78",
-              _deliv.STATUS_FAILED: "#e06c75",
-              _deliv.STATUS_TIMED_OUT: "#d6a35c"}
-    rows = []
-    for r in records:
-        status = r.get("status", "")
-        color = colors.get(status, "#8a90a2")
-        name = html_lib.escape(r.get("name", "") or r.get("deliverable_id", ""))
-        dtype = html_lib.escape(r.get("type", ""))
-        rows.append(
-            f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
-            f"[{dtype}]</span> — <span style='color:{color}'>"
-            f"{html_lib.escape(status)}</span></li>"
-        )
-    return ("<h2>Deliverables</h2><ul style='list-style:none;padding:0'>"
-            + "".join(rows) + "</ul>")
+
+    out = ["<h2>Deliverables</h2>"]
+
+    # Pinned deliverables with Run/Stop (the runnable Anchor deliverable).
+    if pinned:
+        items = []
+        for r in pinned:
+            name = html_lib.escape(
+                r.get("title") or r.get("artifact_path") or "")
+            rel = r.get("artifact_path", "") or ""
+            dtype = html_lib.escape(r.get("deliverable_type", "") or "")
+            rel_attr = html_lib.escape(rel, quote=True)
+            items.append(
+                f"<li class='deliv-pinned' data-deliv=\"{rel_attr}\">"
+                f"<span class='deliv-name'>{name}</span> "
+                f"<span style='color:#8a90a2;font-size:12px'>[{dtype}]</span> "
+                f"<button class='deliv-run' "
+                f"onclick=\"runDeliverable('{rel_attr}', this)\">Run</button> "
+                f"<button class='deliv-stop' "
+                f"onclick=\"stopDeliverable(this)\" style='display:none'>"
+                f"Stop</button> "
+                f"<span class='deliv-msg' style='color:#8a90a2;"
+                f"font-size:12px'></span></li>"
+            )
+        out.append("<h3 style='margin:8px 0 4px;font-size:14px;color:#aeb4c2'>"
+                   "Pinned</h3>")
+        out.append("<ul style='list-style:none;padding:0'>"
+                   + "".join(items) + "</ul>")
+
+    # Run-status records (read-only history).
+    if records:
+        colors = {_deliv.STATUS_SUCCESS: "#4caf78",
+                  _deliv.STATUS_FAILED: "#e06c75",
+                  _deliv.STATUS_TIMED_OUT: "#d6a35c"}
+        rows = []
+        for r in records:
+            status = r.get("status", "")
+            color = colors.get(status, "#8a90a2")
+            name = html_lib.escape(
+                r.get("name", "") or r.get("deliverable_id", ""))
+            dtype = html_lib.escape(r.get("type", ""))
+            rows.append(
+                f"<li>{name} <span style='color:#8a90a2;font-size:12px'>"
+                f"[{dtype}]</span> — <span style='color:{color}'>"
+                f"{html_lib.escape(status)}</span></li>"
+            )
+        out.append("<h3 style='margin:8px 0 4px;font-size:14px;color:#aeb4c2'>"
+                   "Run history</h3>")
+        out.append("<ul style='list-style:none;padding:0'>"
+                   + "".join(rows) + "</ul>")
+
+    if not pinned and not records:
+        out.append("<p style='color:#8a90a2'>No deliverables yet.</p>")
+    return "".join(out)
 
 
 # ── Change operations ──────────────────────────────────────────────────
@@ -2990,6 +4141,7 @@ def generate_html(projects, tasks, inbox):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Anchor Dashboard — J.C. Liechty</title>
+<link rel="icon" href="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" type="image/svg+xml">
 <link rel="icon" href="/anchor.ico?v=2026-05-11" type="image/x-icon">
 <link rel="icon" href="/anchor.png?v=2026-05-11" type="image/png" sizes="256x256">
 <link rel="apple-touch-icon" href="/anchor-touch.png?v=2026-05-11">
@@ -3015,6 +4167,36 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .sidebar h1 {{ font-size: 20px; padding: 0 20px 4px; font-weight: 700; }}
 .sidebar h1 span {{ color: var(--accent); }}
 .sidebar .subtitle {{ font-size: 11px; color: var(--text-dim); padding: 0 20px 20px; }}
+
+/* Ghost World Labs brand lockup (Wave 9) — elegant, unobtrusive, theme-fit */
+.gwl-lockup {{
+    display: flex; align-items: center; gap: 9px;
+    padding: 14px 20px 4px;
+}}
+.gwl-lockup img {{
+    width: 26px; height: 26px; border-radius: 6px; flex-shrink: 0;
+    box-shadow: 0 0 8px rgba(34, 197, 94, 0.35);
+}}
+.gwl-lockup .gwl-wordmark {{
+    font-size: 12px; font-weight: 700; letter-spacing: 0.3px;
+    color: #f8fafc; line-height: 1.1;
+}}
+.gwl-lockup .gwl-wordmark .gwl-accent {{ color: #22c55e; }}
+.gwl-badge {{
+    display: inline-flex; align-items: center; gap: 5px;
+    margin: 4px 20px 14px; padding: 3px 9px;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.2px;
+    color: #f8fafc; background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(34, 197, 94, 0.35); border-radius: 999px;
+}}
+.gwl-badge .gwl-rad {{ color: #22c55e; }}
+.gwl-footer {{
+    margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--text-dim);
+}}
+.gwl-footer img {{ width: 16px; height: 16px; border-radius: 4px; }}
+.gwl-footer .gwl-accent {{ color: #22c55e; }}
 .nav-section {{ margin-top: 16px; }}
 .nav-section h3 {{ font-size: 10px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--text-dim); padding: 0 20px 6px; }}
 .nav-item {{
@@ -3394,18 +4576,13 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-folder-head {{ cursor: pointer; padding: 10px 14px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--text-dim); background: rgba(255,255,255,.02); }}
 .rnd-folder-count {{ color: var(--text-dim); }}
 .rnd-folder-tiles {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding: 12px; }}
-.rnd-tile {{ border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface2, #232733); display: flex; flex-direction: column; gap: 7px; }}
-.rnd-tile:hover {{ border-color: var(--accent); }}
-.rnd-tile-head {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
 .rnd-name {{ font-weight: 600; font-size: 14px; }}
 .rnd-badge {{ font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }}
 .rnd-badge.rnd-p1 {{ background: rgba(248,113,113,.18); color: var(--danger); border-color: rgba(248,113,113,.3); }}
 .rnd-badge.rnd-p2 {{ background: rgba(251,191,36,.15); color: var(--warning); border-color: rgba(251,191,36,.3); }}
 .rnd-badge[class*="rnd-state-archived"], .rnd-badge[class*="rnd-state-future"], .rnd-badge[class*="rnd-state-retired"] {{ background: rgba(255,255,255,.04); }}
-.rnd-effort {{ font-size: 11px; color: var(--accent); }}
 .rnd-imported {{ color: var(--text-dim); font-style: italic; font-size: 11px; }}
 .rnd-running {{ color: var(--success); font-size: 11px; }}
-.rnd-effort.rnd-dim {{ color: var(--text-dim); }}
 .rnd-status-line {{ margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }}
 .rnd-lane {{ padding: 4px 10px; border-radius: 6px; background: #1b2030; font-size: 13px; }}
 .rnd-lane.rnd-lane-empty {{ color: var(--text-dim); }}
@@ -3417,6 +4594,26 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-mini.rnd-pr-on {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-open-btn {{ background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-accent {{ border-color: var(--accent); color: var(--accent); }}
+/* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
+.rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
+.rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
+.rnd-row:hover {{ border-color: var(--accent); }}
+.rnd-row:focus {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
+.rnd-dot {{ flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); }}
+.rnd-dot.rnd-dot-running {{ background: var(--success); box-shadow: 0 0 5px var(--success); }}
+.rnd-dot.rnd-dot-idle {{ background: var(--text-dim); }}
+.rnd-row .rnd-name {{ flex: 0 0 auto; white-space: nowrap; }}
+.rnd-row-summary {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
+.rnd-row-summary.rnd-dim {{ color: var(--text-dim); opacity: .6; font-style: italic; }}
+.rnd-row-counts {{ flex: 0 0 auto; }}
+.rnd-row-counts .rnd-status-line {{ gap: 5px; }}
+.rnd-row-counts .rnd-lane {{ padding: 2px 7px; font-size: 11px; }}
+.rnd-kebab {{ flex: 0 0 auto; position: relative; }}
+.rnd-kebab-btn {{ background: transparent; border: 1px solid transparent; color: var(--text-dim); font-size: 16px; line-height: 1; padding: 2px 7px; border-radius: 6px; cursor: pointer; }}
+.rnd-kebab-btn:hover {{ border-color: var(--border); color: var(--text); }}
+.rnd-kebab-menu {{ display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; flex-direction: column; gap: 4px; min-width: 120px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }}
+.rnd-kebab-menu.rnd-kebab-open {{ display: flex; }}
+.rnd-kebab-menu .rnd-mini {{ width: 100%; text-align: left; }}
 .rnd-mini.rnd-danger:hover {{ border-color: var(--danger); color: var(--danger); }}
 .rnd-empty {{ color: var(--text-dim); font-size: 13px; }}
 </style>
@@ -3424,6 +4621,11 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 <body>
 <div class="app">
   <nav class="sidebar">
+    <div class="gwl-lockup">
+      <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
+      <div class="gwl-wordmark">Ghost World <span class="gwl-accent">Labs</span></div>
+    </div>
+    <div class="gwl-badge">Powered by NextGen Nuclear <span class="gwl-rad">&#9762;</span></div>
     <h1><span>&#9875;</span> Anchor</h1>
     <div class="subtitle">J.C. Liechty — Life Dashboard</div>
     <div class="nav-section">
@@ -3614,6 +4816,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 
     <!-- Domain views -->
     {domain_views}
+
+    <!-- Ghost World Labs footer credit (Wave 9) -->
+    <div class="gwl-footer">
+      <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
+      <span>A <b class="gwl-accent">Ghost World Labs</b> tool &bull; Powered by NextGen Nuclear <span class="gwl-accent">&#9762;</span></span>
+    </div>
   </div>
 </div>
 
@@ -4305,17 +5513,32 @@ function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the A
 function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
 function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
 function rndRescan(pid) {{ apiCall('/api/rnd/rescan', {{id: pid}}); }}
+// v3 Wave 5 — toggle a project ROW's kebab menu (lifecycle controls live here so
+// the thin row stays one line). Closes any other open menu first.
+function rndToggleKebab(ev, pid) {{
+    ev.stopPropagation();
+    var menu = document.getElementById('rnd-kebab-' + pid);
+    var wasOpen = menu && menu.classList.contains('rnd-kebab-open');
+    document.querySelectorAll('.rnd-kebab-menu.rnd-kebab-open').forEach(function(m) {{
+        m.classList.remove('rnd-kebab-open');
+    }});
+    if (menu && !wasOpen) menu.classList.add('rnd-kebab-open');
+}}
+document.addEventListener('click', function() {{
+    document.querySelectorAll('.rnd-kebab-menu.rnd-kebab-open').forEach(function(m) {{
+        m.classList.remove('rnd-kebab-open');
+    }});
+}});
 function rndNotes(pid) {{
-    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
+    var el = document.querySelector('.rnd-row[data-project-id="' + pid + '"]');
     var cur = el ? (el.getAttribute('data-notes') || '') : '';
     var n = window.prompt('Project notes:', cur);
     if (n === null) return;
     apiCall('/api/rnd/set_notes', {{id: pid, notes: n}});
 }}
 function rndBlurb(pid) {{
-    var el = document.querySelector('.rnd-tile[data-project-id="' + pid + '"]');
-    var bEl = el ? el.querySelector('.rnd-blurb') : null;
-    var cur = bEl ? (bEl.getAttribute('data-blurb') || '') : '';
+    var el = document.querySelector('.rnd-row[data-project-id="' + pid + '"]');
+    var cur = el ? (el.getAttribute('data-blurb') || '') : '';
     var n = window.prompt('What this project is (blurb):', cur);
     if (n === null) return;
     apiCall('/api/rnd/set_blurb', {{id: pid, blurb: n}});
@@ -4356,6 +5579,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
         body = json.dumps(data).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -4500,9 +5724,275 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # Client closed the connection — stop cleanly.
             return
 
+    # ── ConPTY terminal transport (Wave 3) ──────────────────────────────────
+    def _term_token_ok(self):
+        """Auth a terminal GET endpoint via the ``?token=`` query param.
+
+        Browsers can't set request headers on an EventSource / WebSocket
+        handshake, so the terminal GET surface (an RCE surface) authenticates via
+        a query-param token with the SAME semantics as ``paths.auth_ok``: if no
+        token is configured (``ANCHOR_TOKEN`` unset) it is allowed (local
+        back-compat); otherwise the provided token must match. Also accepts a
+        token carried in the ``Sec-WebSocket-Protocol`` header (for WS clients).
+        """
+        q = parse_qs(urlparse(self.path).query)
+        provided = (q.get("token", [None])[0])
+        if provided is None:
+            # WS clients may smuggle the token via the subprotocol header.
+            provided = self.headers.get("Sec-WebSocket-Protocol")
+        return _paths.auth_ok(provided)
+
+    def _serve_term_stream2(self):
+        """SSE-out fallback for a ConPTY session (Wave 3).
+
+        The plan's named fallback half: an ``text/event-stream`` of a ConPTY
+        session's output via ``pty_manager.read_since`` (through
+        ``terminal_session.read_since``). Modeled on :meth:`_serve_term_sse` —
+        bounded by ``max_ticks``, heartbeated, ends with a ``done`` event on a
+        terminal (``dead``) status or when the tick budget elapses. Query knobs
+        ``poll``/``max_ticks``/``hb``/``since`` mirror the v2 SSE handler.
+
+        AUTH: ``?token=`` (401 when a token is configured and missing/wrong).
+        """
+        if not self._term_token_ok():
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+        q = parse_qs(urlparse(self.path).query)
+        session = (q.get("session", [""])[0] or "").strip()
+        try:
+            since = int(q.get("since", ["0"])[0] or 0)
+        except (TypeError, ValueError):
+            since = 0
+        if not session:
+            self._send_json({"ok": False, "error": "missing session"}, 400)
+            return
+        try:
+            poll_interval = float(q.get("poll", ["0.25"])[0] or 0.25)
+        except (TypeError, ValueError):
+            poll_interval = 0.25
+        try:
+            max_ticks = int(q.get("max_ticks", ["240"])[0] or 240)
+        except (TypeError, ValueError):
+            max_ticks = 240
+        # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
+        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        poll_interval = min(1.0, max(0.01, poll_interval))
+        max_ticks = min(5000, max(1, max_ticks))
+        try:
+            heartbeat_every = int(q.get("hb", ["8"])[0] or 8)
+        except (TypeError, ValueError):
+            heartbeat_every = 8
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        cursor = since
+        last_status = None
+        idle = 0
+        try:
+            for _tick in range(max(1, max_ticks)):
+                try:
+                    out = _termsess.read_since(session, cursor)
+                    if not out.get("ok", True):  # unknown session
+                        self._sse_event("done", {"status": "error",
+                                                 "next": cursor, "error": True})
+                        return
+                    text = out.get("text", "")
+                    if text:
+                        self._sse_event("output", {"text": text,
+                                                   "next": out.get("next", cursor)})
+                        cursor = out.get("next", cursor)
+                        idle = 0
+                    else:
+                        idle += 1
+                    status = out.get("status")
+                    if status and status != last_status:
+                        self._sse_event("status", {"status": status})
+                        last_status = status
+                    if status == "dead":
+                        final = _termsess.read_since(session, cursor)
+                        ft = final.get("text", "") if isinstance(final, dict) else ""
+                        if ft:
+                            self._sse_event("output", {"text": ft,
+                                                       "next": final.get("next", cursor)})
+                            cursor = final.get("next", cursor)
+                        self._sse_event("done", {"status": status, "next": cursor})
+                        return
+                    if heartbeat_every and idle and idle % heartbeat_every == 0:
+                        self._sse_event("heartbeat", {"next": cursor})
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    raise
+                except Exception:
+                    try:
+                        self._sse_event("done", {"status": "error",
+                                                 "next": cursor, "error": True})
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    return
+                time.sleep(max(0.0, poll_interval))
+            self._sse_event("done", {"status": last_status or "running",
+                                     "next": cursor, "bounded": True})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
+    def _serve_term_ws(self):
+        """Hand-rolled stdlib WebSocket terminal endpoint (Wave 3, RFC 6455).
+
+        Detects the ``Upgrade: websocket`` handshake, authenticates via
+        ``?token=`` (or the ``Sec-WebSocket-Protocol`` header), computes the
+        ``Sec-WebSocket-Accept`` value, replies ``101 Switching Protocols``, then
+        takes over the raw socket and pumps PTY bytes BOTH ways:
+
+        - decode client frames (text/binary -> ``terminal_session.input``;
+          close -> end; ping -> pong);
+        - poll ``terminal_session.read_since`` for new output -> encode + send
+          server text frames.
+
+        The pump loop is BOUNDED/interruptible (``poll``/``max_ticks`` query
+        knobs, same as the SSE handler) so it ends cleanly on client close or a
+        terminal (``dead``) session and is testable without hanging.
+        """
+        # AUTH FIRST: never upgrade an unauthorized handshake.
+        if not self._term_token_ok():
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self._send_json({"ok": False, "error": "missing Sec-WebSocket-Key"},
+                            400)
+            return
+
+        q = parse_qs(urlparse(self.path).query)
+        session = (q.get("session", [""])[0] or "").strip()
+        if not session:
+            self._send_json({"ok": False, "error": "missing session"}, 400)
+            return
+        try:
+            poll_interval = float(q.get("poll", ["0.05"])[0] or 0.05)
+        except (TypeError, ValueError):
+            poll_interval = 0.05
+        try:
+            max_ticks = int(q.get("max_ticks", ["1200"])[0] or 1200)
+        except (TypeError, ValueError):
+            max_ticks = 1200
+        # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
+        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        poll_interval = min(1.0, max(0.01, poll_interval))
+        max_ticks = min(5000, max(1, max_ticks))
+
+        # ── 101 handshake ────────────────────────────────────────────────
+        accept = ws_accept_key(key)
+        handshake = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: " + accept + "\r\n"
+            "\r\n"
+        )
+        try:
+            self.connection.sendall(handshake.encode("ascii"))
+        except OSError:
+            return
+
+        # ── raw-socket pump (both ways), bounded + interruptible ─────────
+        sock = self.connection
+        sock.settimeout(max(0.01, poll_interval))
+        inbuf = b""
+        cursor = 0
+        ws_state = {}  # persistent fragmentation-reassembly state for decode_frames
+        try:
+            for _tick in range(max(1, max_ticks)):
+                # 1) Drain client -> PTY (non-blocking-ish via the socket timeout).
+                try:
+                    chunk = sock.recv(65536)
+                    if chunk == b"":
+                        break  # client closed the TCP connection
+                    inbuf += chunk
+                    # Guard the carried inbuf so an endless stream of incomplete
+                    # frame headers can't grow it without bound either.
+                    if len(inbuf) > MAX_WS_FRAME:
+                        break
+                    msgs, inbuf = decode_frames(inbuf, ws_state,
+                                                require_mask=True)
+                    closed = False
+                    for opcode, payload in msgs:
+                        if opcode in (WS_SIGNAL_CLOSE, WS_OP_CLOSE):
+                            # Protocol error or a client close -> clean close.
+                            closed = True
+                            break
+                        if opcode == WS_OP_PING:
+                            try:
+                                sock.sendall(encode_pong_frame(payload))
+                            except OSError:
+                                closed = True
+                                break
+                            continue
+                        if opcode == WS_OP_PONG:
+                            continue  # unsolicited pong — ignore
+                        if opcode in (WS_OP_TEXT, WS_OP_BINARY):
+                            # Reassembled, complete data message (CONT frames are
+                            # folded in by the codec — never delivered alone).
+                            data = payload.decode("utf-8", "replace")
+                            res = _termsess.input(session, data)
+                            if not res.get("ok"):
+                                closed = True
+                                break
+                    if closed:
+                        break
+                except socket.timeout:
+                    pass
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    break
+
+                # 2) Pump PTY -> client.
+                try:
+                    out = _termsess.read_since(session, cursor)
+                except Exception:
+                    break
+                if not out.get("ok", True):
+                    break  # unknown session
+                text = out.get("text", "")
+                if text:
+                    try:
+                        sock.sendall(encode_text_frame(text))
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        break
+                    cursor = out.get("next", cursor)
+                if out.get("status") == "dead":
+                    # Drain any final output, then close cleanly.
+                    final = _termsess.read_since(session, cursor)
+                    ft = final.get("text", "") if isinstance(final, dict) else ""
+                    if ft:
+                        try:
+                            sock.sendall(encode_text_frame(ft))
+                        except OSError:
+                            pass
+                    break
+        finally:
+            try:
+                sock.sendall(encode_close_frame())
+            except OSError:
+                pass
+
     def do_GET(self):
         try:
             _path_only = urlparse(self.path).path
+            if (self.headers.get("Upgrade", "").lower() == "websocket"
+                    and _path_only == "/api/rnd/term_ws"):
+                # Hand-rolled stdlib WebSocket terminal transport (Wave 3). Must
+                # be checked BEFORE the normal GET dispatch because it takes over
+                # the raw socket. Auth-gated inside (?token=).
+                self._serve_term_ws()
+                return
+            if _path_only == "/api/rnd/term_stream2":
+                # SSE-out fallback for a ConPTY session (Wave 3). Auth-gated
+                # inside (?token=). Distinct from the v2 /api/rnd/term_stream.
+                self._serve_term_stream2()
+                return
             if _path_only == "/" or _path_only == "/dashboard":
                 # Serve the dashboard for "/" REGARDLESS of query string so the
                 # cache-busting reload ("/?v=<build_id>") lands on the dashboard
@@ -4577,6 +6067,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # served like KaTeX (traversal-safe). Loaded before anchor-term.js.
                 rel = urlparse(self.path).path[len(XTERM_URL_PREFIX):]
                 asset = xterm_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith(BRAND_URL_PREFIX):
+                # Read-only vendored Ghost World Labs brand mark static asset
+                # (Wave 9), served like KaTeX/xterm (traversal-safe). Backs the
+                # home-page lockup and the dashboard favicon.
+                rel = urlparse(self.path).path[len(BRAND_URL_PREFIX):]
+                asset = brand_asset(rel)
                 if asset is None:
                     self.send_response(404)
                     self.end_headers()
@@ -4670,6 +6172,96 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/api/rnd/handoff_proposal"):
+                # Read-only stage-handoff PROPOSAL (v3 Wave 7): the UI shows
+                # "execute on this plan set?" BEFORE launching a build session.
+                # Pure metadata (structure-only, no contents) — read endpoint,
+                # consistent with the other read GETs (no token required).
+                # /api/rnd/handoff_proposal?project_id=<id>&lane=build[&seed_session=<sid>]
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                lane = (q.get("lane", ["build"])[0] or "build").strip()
+                seed = (q.get("seed_session", [""])[0] or "").strip() or None
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                elif seed and _unsafe_path_seg(seed):
+                    self._send_json({"ok": False, "error": "bad seed"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            prop = _handoff.propose_handoff(
+                                folder, pid, lane, source_session_id=seed)
+                        except Exception:
+                            prop = {"has_plan_set": False}
+                        self._send_json({"ok": True, **prop})
+            elif self.path.startswith("/api/rnd/session_summary"):
+                # Read-only structured SESSION summary as JSON (v3 Wave 6): the
+                # in-place accordion fetches this instead of navigating to the
+                # /summary page. If cached → return it. If NOT cached → kick off
+                # background generation (run-once, runner seam) and return a
+                # {status:"generating"} fallback so the panel can re-fetch. This
+                # NEVER runs the model synchronously on the request thread.
+                # /api/rnd/session_summary?pid=<id>&lane=<lane>&session=<sid>
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0] or "").strip()
+                lane = (q.get("lane", [""])[0] or "").strip()
+                session_id = (q.get("session", [""])[0] or "").strip()
+                if not pid or not lane or not session_id:
+                    self._send_json({"ok": False,
+                                     "error": "pid, lane, session required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    store_lane = _eh._resolve_subdir(lane)
+                    cached = None
+                    try:
+                        cached = _summarizer.load_cached(
+                            folder, pid, store_lane, session_id)
+                    except Exception:
+                        cached = None
+                    if isinstance(cached, dict) and not cached.get("error"):
+                        self._send_json({"ok": True, "status": "ready",
+                                         "summary": cached})
+                    elif proj is None:
+                        # Unknown / unregistered project → TERMINAL status so a
+                        # polling panel STOPS (never an endless "generating").
+                        self._send_json({"ok": True, "status": "unknown"})
+                    else:
+                        # Not cached (or a prior failed/uncached run): resolve the
+                        # live session record so generation can seed from its
+                        # members. If the session id is not among the project's
+                        # sessions for this lane → TERMINAL "unknown" (the panel
+                        # stops polling). Otherwise kick off background
+                        # generation run-once and tell the panel to poll.
+                        session = None
+                        try:
+                            for s in _sessions.list_sessions(folder, pid, lane):
+                                if s.get("session_id") == session_id:
+                                    session = s
+                                    break
+                        except Exception:
+                            session = None
+                        if session is None:
+                            self._send_json({"ok": True, "status": "unknown"})
+                        else:
+                            _trigger_session_summary(
+                                folder, pid, lane, session)
+                            self._send_json({"ok": True, "status": "generating"})
             elif self.path.startswith("/artifact/"):
                 # Read-only serving of a DISCOVERED (brownfield) artifact from a
                 # project's folder (Wave 4). Traversal-safe via the proven
@@ -4707,6 +6299,32 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
+            elif self.path.startswith("/api/rnd/term_sessions"):
+                # Read-only (Wave 4): live managed terminal sessions for a
+                # project — the repopulate-from-registry hook the window-manager
+                # button bar paints from on load. Returns a SAFE projection of
+                # each registry record (NO absolute worktree_path — the UI has
+                # no need for it). Consistent with /api/rnd/projects (GET, no
+                # mutation, no auth gate).
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip()
+                try:
+                    recs = _termsess.list_sessions(project_id=pid or None)
+                except Exception:
+                    recs = []
+                safe = []
+                for r in recs:
+                    if not isinstance(r, dict):
+                        continue
+                    safe.append({
+                        "session_id": r.get("session_id"),
+                        "lane": r.get("lane", ""),
+                        "backend": r.get("backend", ""),
+                        "status": r.get("status", ""),
+                        "label": r.get("label", ""),
+                        "created_at": r.get("created_at"),
+                    })
+                self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
@@ -4752,6 +6370,32 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         if not pid or r.get("project_id") == pid]
                 jobs.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
                 self._send_json({"ok": True, "jobs": jobs})
+            elif self.path.startswith("/api/rnd/previews"):
+                # Read-only: list ephemeral deliverable previews for a project
+                # (reconciles dead previews → stopped so the UI repopulates
+                # truthfully on reconnect). Wave 8. Returns a SAFE projection of
+                # each registry record — NO absolute filesystem paths
+                # (data_dir / folder_path); the UI only needs the id/url/port/
+                # status. Consistent with the term_sessions projection (which
+                # strips worktree_path). The persisted record (.anchor/
+                # previews.json) keeps the full fields for reaping.
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip() or None
+                safe = []
+                for r in _preview.list_previews(pid):
+                    if not isinstance(r, dict):
+                        continue
+                    safe.append({
+                        "preview_id": r.get("preview_id"),
+                        "project_id": r.get("project_id"),
+                        "target": r.get("target", ""),
+                        "port": r.get("port"),
+                        "url": r.get("url", ""),
+                        "status": r.get("status", ""),
+                        "started_at": r.get("started_at"),
+                        "stopped_at": r.get("stopped_at"),
+                    })
+                self._send_json({"ok": True, "previews": safe})
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -5204,6 +6848,150 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "status": (out or {}).get("status"),
                 })
 
+        # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
+        elif self.path == "/api/rnd/preview_start":
+            # Spin up an EPHEMERAL preview of the project's deliverable web app
+            # (e.g. anchor_gui.py) on an OS-assigned free port (NEVER 8777) in an
+            # isolated TEMP ANCHOR_DATA_DIR — so it can never bind or disturb the
+            # live :8777 service. Auth is enforced by the middleware above.
+            pid = (body.get("project_id", "") or "").strip()
+            proj = _rnd.get_project(pid)
+            if proj is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                folder = proj.get("folder_path", "")
+                target = (body.get("deliverable") or body.get("target")
+                          or _preview.DEFAULT_TARGET)
+                res = _preview.start_preview(folder, pid, target=target)
+                if res.get("ok"):
+                    self._send_json({"ok": True, "url": res.get("url"),
+                                     "preview_id": res.get("preview_id"),
+                                     "port": res.get("port"),
+                                     "pid": res.get("pid")})
+                else:
+                    # Clean 400 (e.g. target missing / never came up), not a 500.
+                    self._send_json({"ok": False,
+                                     "error": res.get("reason", "preview failed"),
+                                     "port": res.get("port")}, 400)
+
+        elif self.path == "/api/rnd/preview_stop":
+            # Tree-kill + reap a running preview. Idempotent; 404 for unknown id.
+            preview_id = (body.get("preview_id", "") or "").strip()
+            res = _preview.stop_preview(preview_id)
+            if res.get("ok"):
+                self._send_json({"ok": True,
+                                 "preview_id": res.get("preview_id"),
+                                 "status": res.get("status")})
+            else:
+                self._send_json({"ok": False,
+                                 "error": res.get("reason", "unknown preview"),
+                                 "reason": "unknown-preview"}, 404)
+
+        # ── ConPTY terminal session lifecycle (Wave 3) ────────────────
+        # These are the NEW ConPTY surface — distinct from the v2 REPL
+        # endpoints (start_terminal/term_input/term_stream). Auth is enforced
+        # by the middleware above (mutating POSTs).
+        elif self.path == "/api/rnd/term_start":
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "claude").strip() or "claude"
+            label = body.get("label", "") or ""
+            # Wave 6 seam → Wave 7: a launch-from-panel carries the source
+            # session id as a seed hint. On a BUILD launch we now consume it:
+            # after start_session creates the session+worktree, we discover the
+            # most-recent plan set (preferring this seed_session's plan docs),
+            # prime the worktree with a HANDOFF reference file, and record the
+            # handoff in the per-project Anchor reference. The bare-PTY launch
+            # still works when there is no plan set (no crash; priming skipped).
+            _seed_session = (body.get("seed_session", "") or "").strip() or None
+            if not pid or not lane:
+                self._send_json({"ok": False,
+                                 "error": "project_id and lane required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    try:
+                        rec = _termsess.start_session(pid, lane, backend=backend,
+                                                      label=label)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        handoff_info = None
+                        if lane in _handoff.BUILD_LANES:
+                            folder = proj.get("folder_path", "")
+                            try:
+                                plan_set = _handoff.discover_recent_plan_set(
+                                    folder, pid, source_session_id=_seed_session)
+                            except Exception:
+                                plan_set = None
+                            if plan_set:
+                                primed = _handoff.prime_worktree(
+                                    rec.get("worktree_path", ""), plan_set,
+                                    project_id=pid)
+                                recorded = _handoff.record_handoff(
+                                    folder, pid, rec.get("session_id", ""),
+                                    plan_set)
+                                handoff_info = {
+                                    "plan_set": plan_set,
+                                    "primed": primed,
+                                    "recorded": bool(recorded.get("ok")),
+                                }
+                        resp = {"ok": True, "session": rec}
+                        if handoff_info is not None:
+                            resp["handoff"] = handoff_info
+                        self._send_json(resp)
+
+        elif self.path == "/api/rnd/term_kill":
+            session = (body.get("session", "") or "").strip()
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                out = _termsess.kill(session)
+                self._send_json({"ok": True, "result": out})
+
+        elif self.path == "/api/rnd/term_resize":
+            session = (body.get("session", "") or "").strip()
+            cols = body.get("cols")
+            rows = body.get("rows")
+            if not session or cols is None or rows is None:
+                self._send_json({"ok": False,
+                                 "error": "session, cols, rows required"}, 400)
+            else:
+                out = _termsess.resize(session, cols, rows)
+                if out.get("ok"):
+                    self._send_json({"ok": True})
+                elif out.get("reason") == "unknown-session":
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
+                else:
+                    self._send_json({"ok": False,
+                                     "error": out.get("detail", "bad request"),
+                                     "reason": out.get("reason")}, 400)
+
+        elif self.path == "/api/rnd/term_input2":
+            # POST-in half of the SSE-out + POST-in fallback transport. Authed by
+            # the middleware above.
+            session = (body.get("session", "") or "").strip()
+            data = body.get("data", "")
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            else:
+                out = _termsess.input(session, data)
+                if out.get("ok"):
+                    self._send_json({"ok": True})
+                else:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
+
         # ── R&D validated, cached session summary (Wave 6) ────────────
         elif self.path == "/api/rnd/regenerate_summary":
             # Force re-run + re-cache a session's validated summary. Auth is
@@ -5384,7 +7172,11 @@ def resolve_bind_host():
 
 
 def main():
-    global _server_instance
+    global _server_instance, _PROACTIVE_SUMMARY_ENABLED
+    # The live server proactively (re)generates the cached project summary on
+    # rescan/discovery (Wave 5). Unit tests leave this off (default) so importing
+    # the module never spawns a background model job.
+    _PROACTIVE_SUMMARY_ENABLED = True
     port = 8777
     no_browser = "--no-browser" in sys.argv
     if "--port" in sys.argv:

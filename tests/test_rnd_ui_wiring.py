@@ -570,18 +570,191 @@ def test_lifecycle_endpoints_round_trip_and_views(server):
 
 
 def test_tile_has_lifecycle_controls_and_multiwindow_open(gui_env):
-    """The rich tile + lifecycle JS are actually surfaced in the page (the exact
-    'built but not wired into the UI' regression that bit the first R&D build)."""
+    """The thin project ROW + kebab lifecycle controls are actually surfaced in
+    the page (the exact 'built but not wired into the UI' regression that bit the
+    first R&D build). v3 Wave 5 replaced the square ``.rnd-tile`` with a one-line
+    ``.rnd-row`` whose lifecycle controls live in a kebab menu and whose body
+    click opens the project window."""
     gui = gui_env
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         _mkproject(gui, Path(td) / "Tile", name="TileProj")
         html = gui.generate_html(*gui.gather_all())
-    for needle in ("function openProjectWindow", "openProjectWindow(",
-                   "rndSetPriority", "rndArchive", "rndRetire", "rndNotes",
-                   "function rndNotes", 'id="view-rnd-archive"',
-                   "showView('rnd-archive')", ".rnd-tile", "rnd-effort"):
+    for needle in (
+            # the thin row + its click-to-open-project-window affordance
+            'class="rnd-row"', "data-project-id=", "openProjectWindow('",
+            "function openProjectWindow",
+            # the kebab that holds the lifecycle controls
+            'class="rnd-kebab"', "rndToggleKebab",
+            # at least the lifecycle controls themselves
+            "rndSetPriority", "rndArchive", "rndRetire", "rndNotes",
+            "function rndNotes", 'id="view-rnd-archive"',
+            "showView('rnd-archive')"):
         assert needle in html, "page missing: " + needle
     # window.open with a per-project NAME => focus-existing, one window per project
     assert "'anchorproj_'" in html
     assert "{{" not in html and "}}" not in html
+
+
+# ── Wave 4 (v3) — read-only term_sessions endpoint (repopulate-from-registry) ─
+#
+# Hermetic: a stub PTY backend + a temp git repo project + a temp worktree base
+# so no real ConPTY/claude runs and NO worktree is ever created off the build
+# repo. Reloads the v3 terminal stack on top of the standard gui_env reload.
+
+def _have_git():
+    import subprocess
+    try:
+        return subprocess.run(["git", "--version"],
+                              capture_output=True).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _git(repo, *args):
+    import subprocess
+    return subprocess.run(["git", "-C", str(repo), *args],
+                          capture_output=True, text=True)
+
+
+@pytest.fixture
+def term_server(tmp_path, monkeypatch):
+    """Boot a throwaway server with the v3 terminal stack on a stub PTY backend.
+
+    Mirrors the `server` fixture but also sets ANCHOR_PTY_BACKEND=stub +
+    ANCHOR_WORKTREE_BASE (a temp dir) and reloads the Wave-1/2/3 modules so a
+    stub session can be started against a hermetic temp git repo — never the
+    build repo.
+    """
+    if not _have_git():
+        pytest.skip("git not on PATH")
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_WORKTREE_BASE", str(tmp_path / "wt-base"))
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    import paths
+    importlib.reload(paths)
+    paths.ensure_data_dirs()
+    import pty_manager
+    importlib.reload(pty_manager)
+    import rnd_registry
+    importlib.reload(rnd_registry)
+    import session_registry
+    importlib.reload(session_registry)
+    import worktrees
+    importlib.reload(worktrees)
+    import lanes
+    importlib.reload(lanes)
+    import terminal_session
+    importlib.reload(terminal_session)
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "initial")
+    proj = rnd_registry.add_project("TermProj", str(repo), scaffold=False)
+
+    srv = gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    assert port != 8777
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield gui, f"http://127.0.0.1:{port}", proj["id"], terminal_session, repo
+    finally:
+        # Reap any started stub sessions so no worktree leaks.
+        for rec in terminal_session.list_sessions():
+            try:
+                terminal_session.kill(rec["session_id"])
+            except Exception:
+                pass
+        srv.shutdown()
+        srv.server_close()
+        t.join(timeout=5)
+
+
+def test_term_sessions_empty_for_fresh_project(term_server):
+    """GET /api/rnd/term_sessions returns {ok, sessions: []} for a project with
+    no managed sessions."""
+    gui, base, pid, ts, repo = term_server
+    code, body = _get(base + "/api/rnd/term_sessions?project_id=" + pid)
+    assert code == 200
+    assert body["ok"] is True
+    assert body["sessions"] == []
+
+
+def test_term_sessions_lists_started_stub_session(term_server):
+    """A stub ConPTY session started via terminal_session.start_session appears
+    in the endpoint with its lane/backend/status — and the response NEVER leaks
+    the absolute worktree_path."""
+    gui, base, pid, ts, repo = term_server
+    rec = ts.start_session(pid, "plan", backend="claude")
+    sid = rec["session_id"]
+    code, body = _get(base + "/api/rnd/term_sessions?project_id=" + pid)
+    assert code == 200 and body["ok"] is True
+    sessions = body["sessions"]
+    assert len(sessions) == 1
+    s = sessions[0]
+    assert s["session_id"] == sid
+    assert s["lane"] == "plan"
+    assert s["backend"] == "claude"
+    assert s["status"] == "running"
+    # The UI projection must NOT include the absolute worktree path.
+    assert "worktree_path" not in s
+    # The created worktree lives under the temp base, never the build repo.
+    import subprocess
+    wl = subprocess.run(["git", "worktree", "list"],
+                        capture_output=True, text=True,
+                        cwd=str(Path(__file__).resolve().parents[1]))
+    assert "wt-base" not in wl.stdout  # build-repo worktree list untouched
+
+
+def test_term_sessions_malicious_label_is_inert_xss_guard(term_server):
+    """XSS regression guard for the session-bar / window-titlebar path.
+
+    A session started with a malicious ``label`` (``<img src=x onerror=...>``)
+    must:
+      1. be carried in the term_sessions JSON verbatim (data integrity), and
+      2. be served with ``Content-Type: application/json`` (so the payload is
+         inert in that response — a browser will not execute it), and
+      3. NOT be embedded as a raw executable HTML sink in the server-rendered
+         project window. The session bar is populated CLIENT-SIDE from this
+         endpoint via ``textContent``/``_esc`` (not ``innerHTML``), so the
+         served window HTML must not contain the raw payload at all.
+
+    A future regression to ``innerHTML`` (or server-rendering the label) would
+    re-introduce the raw payload and fail this test.
+    """
+    gui, base, pid, ts, repo = term_server
+    payload = "<img src=x onerror=alert(1)>"
+    rec = ts.start_session(pid, "plan", backend="claude", label=payload)
+    sid = rec["session_id"]
+
+    # 1+2: the endpoint carries the label verbatim AND is inert JSON.
+    req = urllib.request.Request(
+        base + "/api/rnd/term_sessions?project_id=" + pid, method="GET")
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        ctype = resp.headers.get("Content-Type", "")
+        body = json.loads(resp.read())
+    assert resp.status == 200
+    assert ctype.split(";")[0].strip() == "application/json"
+    sessions = body["sessions"]
+    s = next(x for x in sessions if x["session_id"] == sid)
+    assert s["label"] == payload  # data integrity: label round-trips
+
+    # 3: the SERVED window HTML does NOT embed the raw executable payload.
+    html = gui.render_project_window_html(pid)
+    assert payload not in html
+    assert "<img src=x onerror=" not in html
+    # The bar is built client-side from the endpoint via textContent, not
+    # server-rendered — confirm that architecture is intact.
+    assert "loadSessions(" in html
+    assert "/api/rnd/term_sessions" in html

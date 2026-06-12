@@ -186,9 +186,22 @@ def write_anchor_md(folder_path) -> dict:
             sc = sidecar_path(folder, pid)
             try:
                 sc.parent.mkdir(parents=True, exist_ok=True)
-                payload = json.dumps(scan.to_dict(), indent=2, ensure_ascii=False)
-                # No-churn for the sidecar too (compare modulo generated_at).
+                scan_dict = scan.to_dict()
+                # Preserve non-scan keys (e.g. `handoffs`) that other modules
+                # append to the sidecar — scan.to_dict() owns only the scan
+                # keys, so a naive overwrite would DROP them on every rescan.
                 old = sc.read_text(encoding="utf-8") if sc.exists() else ""
+                merged = dict(scan_dict)
+                try:
+                    prev = json.loads(old) if old else {}
+                except (json.JSONDecodeError, ValueError):
+                    prev = {}
+                if isinstance(prev, dict):
+                    for k, v in prev.items():
+                        if k not in scan_dict:
+                            merged[k] = v
+                payload = json.dumps(merged, indent=2, ensure_ascii=False)
+                # No-churn for the sidecar too (compare scan-owned content only).
                 if _sidecar_changed(old, payload):
                     sc.write_text(payload, encoding="utf-8")
                 sidecars.append(str(sc))
@@ -199,13 +212,30 @@ def write_anchor_md(folder_path) -> dict:
                 "sidecars": sidecars}
 
 
+#: Keys the brownfield scan OWNS in the sidecar. The no-churn comparison is
+#: restricted to these (minus the volatile ``generated_at``) so preserved
+#: non-scan keys like ``handoffs`` neither trigger a spurious rewrite nor get
+#: dropped.
+_SCAN_KEYS = frozenset(("by_lane", "docs", "counts", "generated_at",
+                        "root", "truncated"))
+
+
 def _sidecar_changed(old_json: str, new_json: str) -> bool:
-    """True if the sidecar content changed (ignoring the generated_at field)."""
+    """True if the SCAN-OWNED sidecar content changed.
+
+    Compares only the scan-owned keys (ignoring ``generated_at`` and any
+    preserved non-scan keys such as ``handoffs``), so a no-op rescan with a
+    ``handoffs`` key present reports no change AND a real scan change still
+    rewrites.
+    """
     def _strip(s):
         try:
             d = json.loads(s)
         except (json.JSONDecodeError, ValueError):
             return None
-        d.pop("generated_at", None)
-        return json.dumps(d, sort_keys=True)
+        if not isinstance(d, dict):
+            return None
+        scan_only = {k: v for k, v in d.items()
+                     if k in _SCAN_KEYS and k != "generated_at"}
+        return json.dumps(scan_only, sort_keys=True)
     return _strip(old_json) != _strip(new_json)

@@ -68,18 +68,33 @@ therefore never leaks) a real value.
   pointer-record). Source code that merely constructs the string
   ``.anchor/projects/...`` does NOT trip it.
 
+- **Third-party / native imports (stdlib-only enforcement)**: every staged
+  first-party (non-``vendor/``, non-``tests/``) ``.py`` file is parsed with
+  ``ast`` and each top-level import is checked. An import of a module that is
+  NEITHER stdlib NOR a first-party Anchor module is an undeclared third-party /
+  native dependency and FAILS the scan — UNLESS it is the single DECLARED,
+  file-scoped exception: ``import winpty`` (the native ``pywinpty`` ConPTY
+  backend) is allowed ONLY in ``pty_manager.py`` (lazy, terminal-subsystem-only).
+  ``import winpty`` anywhere else, or ANY other native/third-party import (e.g.
+  ``import numpy``) in any product file, is still refused. ``tests/`` are
+  dev-only (pytest is a declared dev dependency) and ``vendor/`` is third-party
+  by construction (documented PROVENANCE), so both are exempt from this rule.
+
 No inline suppression marker exists. No shipped file embeds a real secret, so no
 file needs (or can grant itself) an exemption — a leaking product file CANNOT
 suppress its own detection.
 
-Stdlib only. Never publishes/pushes anywhere — it builds a local export dir.
+Stdlib only (the scanner itself uses only ``ast``/``re``/``json`` etc.). Never
+publishes/pushes anywhere — it builds a local export dir.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -107,6 +122,35 @@ _EMAIL_ALLOWLIST_DOMAINS = ("example.com", "example.org", "example.net")
 # stored here — any other concrete account name in a user-profile path is
 # flagged generically.
 _USERPATH_ALLOWED_ACCOUNTS = frozenset({"example"})
+
+
+# ── Third-party / native-dependency import allowlist ─────────────────────────
+#
+# The shipped Anchor product is **Python standard library only** — with EXACTLY
+# ONE declared, scoped exception: the v3 ConPTY terminal subsystem may use the
+# native ``pywinpty`` package (imported in Python as ``winpty``). That import is
+# LAZY (inside ``pty_manager.PywinptyBackend.start``) and the rest of Anchor is
+# unaffected when the native dep is absent (the terminal subsystem reports "real
+# terminal unavailable").
+#
+# The import scan (``scan_third_party_imports``) parses every staged FIRST-PARTY
+# (non-vendor) ``.py`` file and flags any ``import``/``from … import`` of a
+# top-level module that is NEITHER stdlib NOR a first-party Anchor module — i.e.
+# an undeclared third-party / native dependency leaking into the product. The
+# allowlist below is the SINGLE declared exception, and it is SCOPED: ``winpty``
+# is permitted ONLY in ``pty_manager.py``. An ``import winpty`` anywhere else, or
+# ANY other third-party import (e.g. ``import numpy`` / ``import requests``) in
+# any first-party file, is still REFUSED.
+#
+# Each entry maps the imported top-level module name → the set of first-party
+# files (POSIX relpaths) where it is allowed, plus a human reason.
+_THIRD_PARTY_IMPORT_ALLOWLIST = {
+    "winpty": {
+        "files": frozenset({"pty_manager.py"}),
+        "reason": ("pty_manager.py — terminal subsystem (ConPTY), the only "
+                   "native-dep exception (lazy import; degrades if absent)"),
+    },
+}
 
 
 class PersonalDataError(Exception):
@@ -337,6 +381,12 @@ def _is_vendored(rel: str) -> bool:
     return norm.startswith("vendor/") or "/vendor/" in norm
 
 
+def _is_test_file(rel: str) -> bool:
+    """True for shipped dev-only test files (``tests/...``)."""
+    norm = rel.replace("\\", "/")
+    return norm.startswith("tests/") or "/tests/" in norm
+
+
 def _scan_text(rel: str, text: str):
     """Yield ``(rel, category, snippet)`` for each personal-data hit in text.
 
@@ -401,6 +451,148 @@ def _scan_registry_artifact(rel: str, text: str):
                 return
 
 
+# ── Third-party import scan (stdlib-only enforcement + pywinpty exception) ────
+
+def _stdlib_module_names() -> frozenset:
+    """The set of standard-library top-level module names.
+
+    Uses ``sys.stdlib_module_names`` (Python 3.10+). On older interpreters
+    (the product supports 3.8+) falls back to a curated superset of the stdlib
+    modules Anchor actually imports plus the common ones, so the scan never
+    false-positives a stdlib import as "third-party".
+    """
+    names = getattr(sys, "stdlib_module_names", None)
+    if names:
+        return frozenset(names)
+    # Fallback for 3.8/3.9 — a generous stdlib allowlist.
+    return frozenset({
+        "__future__", "abc", "argparse", "ast", "asyncio", "base64", "bisect",
+        "builtins", "bz2", "calendar", "collections", "concurrent",
+        "configparser", "contextlib", "copy", "csv", "ctypes", "dataclasses",
+        "datetime", "decimal", "difflib", "dis", "email", "enum", "errno",
+        "fnmatch", "functools", "gc", "getpass", "glob", "gzip", "hashlib",
+        "heapq", "hmac", "html", "http", "importlib", "inspect", "io",
+        "ipaddress", "itertools", "json", "keyword", "linecache", "locale",
+        "logging", "lzma", "math", "mimetypes", "multiprocessing", "operator",
+        "os", "pathlib", "pickle", "pkgutil", "platform", "posixpath", "pprint",
+        "queue", "random", "re", "secrets", "select", "selectors", "shlex",
+        "shutil", "signal", "site", "socket", "socketserver", "sqlite3", "ssl",
+        "stat", "string", "struct", "subprocess", "sys", "tempfile", "textwrap",
+        "threading", "time", "timeit", "token", "tokenize", "traceback",
+        "types", "typing", "unicodedata", "unittest", "urllib", "uuid",
+        "warnings", "weakref", "webbrowser", "xml", "zipfile", "zlib",
+    })
+
+
+def _first_party_module_names(root: Path) -> frozenset:
+    """Top-level first-party module names = the basenames of repo-root ``.py``
+    files plus first-party packages (a dir with ``__init__.py``).
+
+    These are NOT third-party imports — an Anchor module importing another
+    Anchor module is fine. Derived from the on-disk tree, not hard-coded, so a
+    new first-party module is recognized automatically.
+    """
+    names = set()
+    try:
+        for p in root.iterdir():
+            if p.is_file() and p.suffix == ".py":
+                names.add(p.stem)
+            elif p.is_dir() and (p / "__init__.py").exists():
+                names.add(p.name)
+    except OSError:
+        pass
+    # The vendored brand/katex/xterm dirs are static assets, not import targets,
+    # but ``tests`` is a first-party package (imported as ``tests.fake_claude``).
+    names.add("tests")
+    return frozenset(names)
+
+
+def _import_top_levels(text: str):
+    """Yield ``(top_level_module, lineno)`` for each import in Python source.
+
+    Relative imports (``from . import x``) have no top-level module name and are
+    skipped. Uses ``ast`` so commented-out / string-literal imports never trip.
+    Unparseable source yields nothing (the text scan still runs over it).
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top = alias.name.split(".", 1)[0]
+                if top:
+                    yield top, node.lineno
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                continue  # relative import — first-party by construction
+            if node.module:
+                top = node.module.split(".", 1)[0]
+                if top:
+                    yield top, node.lineno
+
+
+def _import_allowed(module: str, rel: str) -> bool:
+    """True if ``module`` imported in first-party file ``rel`` is permitted.
+
+    Permitted iff it is in the declared allowlist AND ``rel`` is one of the
+    files that entry is scoped to (e.g. ``winpty`` only in ``pty_manager.py``).
+    """
+    entry = _THIRD_PARTY_IMPORT_ALLOWLIST.get(module)
+    if entry is None:
+        return False
+    rel_norm = rel.replace("\\", "/")
+    return rel_norm in entry["files"]
+
+
+def scan_third_party_imports(files, root: Path | None = None):
+    """Scan staged FIRST-PARTY ``.py`` files for undeclared third-party imports.
+
+    ``files`` is a list of ``(relpath, abspath)`` pairs (the staged set). For
+    each first-party (non-``vendor/``) ``.py`` file, every top-level import is
+    checked: if it is neither stdlib nor a first-party Anchor module, it is a
+    third-party / native dependency. Such an import FAILS the scan UNLESS it is
+    the declared, file-scoped exception (``winpty`` in ``pty_manager.py``).
+
+    Returns a list of ``(rel, "third-party-import", snippet)`` hits — empty when
+    the staged product is stdlib-only modulo the declared pywinpty exception.
+
+    vendor/ files are third-party by definition (documented PROVENANCE) and are
+    NOT subject to this stdlib-only rule, mirroring the generic-entropy skip.
+    """
+    root = Path(root) if root else REPO_ROOT
+    stdlib = _stdlib_module_names()
+    first_party = _first_party_module_names(root)
+    hits = []
+    for rel, abspath in files:
+        rel_norm = rel.replace("\\", "/")
+        if not rel_norm.endswith(".py"):
+            continue
+        if _is_vendored(rel_norm):
+            continue
+        if _is_test_file(rel_norm):
+            # tests/ are dev-only (shipped solely so a collaborator can run the
+            # gate); pytest is a DECLARED dev dependency, not a product runtime
+            # import. The stdlib-only rule governs the PRODUCT import path.
+            continue
+        try:
+            text = abspath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for module, lineno in _import_top_levels(text):
+            if module in stdlib or module in first_party:
+                continue
+            if _import_allowed(module, rel_norm):
+                continue
+            hits.append((
+                rel_norm,
+                "third-party-import",
+                f"undeclared non-stdlib import '{module}' (line {lineno})",
+            ))
+    return hits
+
+
 def _snip(s: str, n: int = 60) -> str:
     s = s.replace("\n", " ")
     return s if len(s) <= n else s[:n] + "…"
@@ -418,8 +610,14 @@ _BINARY_EXTS = {".woff", ".woff2", ".ttf", ".eot", ".png", ".ico",
                 ".jpg", ".jpeg", ".gif", ".pdf"}
 
 
-def scan_paths(files: list[tuple[str, Path]]):
-    """Scan ``(relpath, abspath)`` pairs -> list of hits. Empty list == clean."""
+def scan_paths(files: list[tuple[str, Path]], root: Path | None = None):
+    """Scan ``(relpath, abspath)`` pairs -> list of hits. Empty list == clean.
+
+    Runs the personal-data / secret scan over every text file AND the
+    third-party-import scan over first-party ``.py`` files (stdlib-only modulo
+    the declared pywinpty exception). ``root`` (optional) is used to derive the
+    first-party module set for the import scan; defaults to the repo root.
+    """
     hits = []
     for rel, abspath in files:
         if Path(rel).suffix.lower() in _BINARY_EXTS:
@@ -430,6 +628,7 @@ def scan_paths(files: list[tuple[str, Path]]):
             continue  # treat undecodable as binary; no textual scan
         hits.extend(_scan_text(rel, text))
         hits.extend(_scan_registry_artifact(rel, text))
+    hits.extend(scan_third_party_imports(files, root=root))
     return hits
 
 
@@ -457,8 +656,14 @@ dependency-free assets. There is no personal task/project data, no R&D registry,
 and no `.anchor/` store in this export; you start from an empty state.
 
 ## Requirements
-- Python 3.8+ (the shipped product is **Python standard library only** — no
-  third-party runtime dependencies).
+- Python 3.8+ (the shipped product is **Python standard library only** — with
+  ONE optional, isolated exception: the v3 ConPTY terminal subsystem can use the
+  native `pywinpty` package).
+- **Optional terminal extra (`pywinpty`):** real in-browser ConPTY terminals
+  (`pty_manager.py`) need `pywinpty` (`pip install .[terminal]`, Windows only).
+  It is imported LAZILY and ONLY by the terminal subsystem — if absent, the
+  terminal feature reports "real terminal unavailable" and the rest of Anchor is
+  unaffected. The core import path stays stdlib-only.
 - Optional system tools, invoked as subprocesses when present: `claude`
   (Claude Code), `git`, `latexmk` (for PDF reports).
 
@@ -539,11 +744,13 @@ def build_distro(root: Path | None = None,
 
     readme_path = emit_readme(output_dir) if emit_readme_file else None
 
-    # Scan the staged set (NOT the source tree) — what we'd actually ship.
+    # Scan the staged set (NOT the source tree) — what we'd actually ship. The
+    # import scan derives first-party module names from the SOURCE ``root`` being
+    # built (so a custom test tree's modules are recognized as first-party).
     scan_pairs = list(staged_pairs)
     if readme_path is not None:
         scan_pairs.append(("README.md", readme_path))
-    hits = scan_paths(scan_pairs)
+    hits = scan_paths(scan_pairs, root=root)
     if hits:
         if cleanup_on_fail:
             shutil.rmtree(output_dir, ignore_errors=True)

@@ -31,6 +31,25 @@ brownfield_scan.py
 anchor_marker.py
 distro.py
 
+# ── R&D control surface v2 modules ─────────────────────────────────────────
+sessions.py
+summarizer.py
+deliverables.py
+rnd_terminal.py
+
+# ── R&D control surface v3 "Mission Control" modules ───────────────────────
+# pty_manager.py is the ONE module permitted a native import (winpty / pywinpty);
+# it is LAZY + terminal-only and the declared exception in the distro import scan.
+pty_manager.py
+session_registry.py
+worktrees.py
+terminal_session.py
+handoff.py
+preview_server.py
+
+# ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
+vendor/brand/gwl-m-icon.svg
+
 # ── Vendored, dependency-free assets (KaTeX for the report viewer) ──────────
 vendor/katex/katex.min.js
 vendor/katex/katex.min.css
@@ -38,6 +57,10 @@ vendor/katex/auto-render.min.js
 vendor/katex/PROVENANCE.txt
 vendor/katex/fetch_katex.sh
 vendor/katex/fonts/**
+
+# ── Vendored terminal console assets (xterm.js + the anchor-term fallback) ──
+vendor/xterm/**
+vendor/anchor-term/**
 
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml

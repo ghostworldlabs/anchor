@@ -23,6 +23,12 @@ R&D control-surface mirror (v2 — delegates to the shared modules):
     python3 anchor.py rnd pin-deliverable <project_id> <path> [--name N] [--type doc|script|skill|program] [--desc "..."]
     python3 anchor.py rnd set-blurb <project_id> "what this project is"
     python3 anchor.py rnd regenerate-summary <project_id> --lane planning --session <session_id>
+
+R&D v3 "Mission Control" inspection mirror (read-only; live terminals/previews
+are interactive and have NO CLI form):
+    python3 anchor.py rnd term-sessions <project_id>          # managed ConPTY terminal sessions
+    python3 anchor.py rnd previews <project_id>               # ephemeral deliverable-run previews
+    python3 anchor.py rnd handoff <project_id> [--lane build] [--seed-session <session_id>]
 """
 
 import json, os, re, sys
@@ -749,6 +755,55 @@ def rnd_regenerate_summary(project_id, lane, session_id):
                                          force=True)
 
 
+# ── R&D v3 surface mirror (Wave 10) ────────────────────────────────────────
+# Read-only INSPECTION of the new v3 "Mission Control" data: managed ConPTY
+# terminal sessions (``session_registry``), ephemeral deliverable-run previews
+# (``preview_server``), and stage handoffs (``handoff``). These DELEGATE to the
+# shared modules — no forked logic. There is intentionally NO CLI for the live
+# interactive terminal (start/input/SSE/WS) or for preview START/STOP — those are
+# interactive / mutating live operations driven by the dashboard, never one-shot
+# CLI calls. The CLI mirrors only the data/inspection seams.
+
+def rnd_term_sessions(project_id):
+    """CLI mirror of ``session_registry.list_sessions`` — managed terminal sessions.
+
+    Returns the project's managed ConPTY/REPL terminal session records
+    (newest-first), validating the project id first.
+    """
+    import session_registry as _sreg
+    _rnd_resolve(project_id)
+    return _sreg.list_sessions(project_id=project_id)
+
+
+def rnd_previews(project_id):
+    """CLI mirror of ``preview_server.list_previews`` — deliverable-run previews.
+
+    Returns the project's ephemeral deliverable preview records (newest-first).
+    ``list_previews`` first reconciles any dead preview to ``stopped`` so the CLI
+    reflects the truth (it never spawns or kills anything).
+    """
+    import preview_server as _preview
+    _rnd_resolve(project_id)
+    return _preview.list_previews(project_id=project_id)
+
+
+def rnd_handoff(project_id, lane="build", seed_session=None):
+    """CLI mirror of ``handoff.propose_handoff`` — the most-recent plan set + records.
+
+    Returns ``{proposal, handoffs}``: ``proposal`` is the read-only
+    ``propose_handoff`` result (``has_plan_set`` / ``plan_set`` / ``message`` —
+    the most-recent plan set a build session would execute on, honoring an
+    optional ``seed_session`` override) and ``handoffs`` is the list of recorded
+    handoffs from ``discovery.json``. Inspection only — primes/records nothing.
+    """
+    import handoff as _handoff
+    _proj, folder = _rnd_resolve(project_id)
+    proposal = _handoff.propose_handoff(folder, project_id, lane,
+                                        source_session_id=seed_session)
+    recorded = _handoff.list_handoffs(folder, project_id)
+    return {"proposal": proposal, "handoffs": recorded}
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -874,7 +929,8 @@ def _rnd_cli(args):
     """
     if not args:
         print("Usage: anchor.py rnd <sessions|status|reconcile|add-idea|"
-              "promote-inbox|pin-deliverable|set-blurb|regenerate-summary> ...")
+              "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
+              "term-sessions|previews|handoff> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -900,7 +956,7 @@ def _rnd_cli(args):
             if a.startswith("--"):
                 # flags that take a value consume the next token
                 if a in ("--lane", "--session", "--notes", "--name",
-                         "--type", "--desc"):
+                         "--type", "--desc", "--seed-session"):
                     skip = True
                 continue
             out.append(a)
@@ -1008,6 +1064,57 @@ def _rnd_cli(args):
             claims = summary.get("claims", [])
             print(f"OK: Summary regenerated for session {session_id}: "
                   f"{len(claims)} grounded claim(s)")
+
+        elif sub == "term-sessions":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd term-sessions <project_id>")
+                return
+            recs = rnd_term_sessions(pos[0])
+            print(f"{len(recs)} managed terminal session(s):")
+            for r in recs:
+                print(f"  - [{r.get('status','')}] {r.get('lane','')}"
+                      f"/{r.get('backend','')} "
+                      f"{r.get('label','') or '(no label)'} "
+                      f"- id={r.get('session_id','')}")
+
+        elif sub == "previews":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd previews <project_id>")
+                return
+            recs = rnd_previews(pos[0])
+            print(f"{len(recs)} deliverable preview(s):")
+            for r in recs:
+                print(f"  - [{r.get('status','')}] {r.get('target','')} "
+                      f"port={r.get('port','')} {r.get('url','')} "
+                      f"- id={r.get('preview_id','')}")
+
+        elif sub == "handoff":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd handoff <project_id> "
+                      "[--lane build] [--seed-session <session_id>]")
+                return
+            lane = _opt("--lane", "build")
+            seed = _opt("--seed-session")
+            out = rnd_handoff(pos[0], lane=lane, seed_session=seed)
+            prop = out.get("proposal", {})
+            if prop.get("has_plan_set"):
+                ps = prop.get("plan_set", {})
+                print(f"Most-recent plan set (lane '{lane}'): "
+                      f"{ps.get('title','(untitled)')}")
+                print(f"  master: {ps.get('master_plan_rel','')}")
+                print(f"  impl:   {ps.get('impl_plan_rel','')}")
+                print(f"  plan dir: {ps.get('plan_dir','')}")
+            else:
+                print(f"No plan set available for lane '{lane}'.")
+            recorded = out.get("handoffs", [])
+            print(f"{len(recorded)} recorded handoff(s):")
+            for h in recorded:
+                print(f"  - build={h.get('build_session_id','')} "
+                      f"plan={h.get('plan_session_id','')} "
+                      f"dir={h.get('plan_dir','')}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

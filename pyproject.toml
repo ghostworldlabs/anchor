@@ -8,6 +8,10 @@ requires-python = ">=3.8"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# OPTIONAL terminal extra: the v3 ConPTY terminal subsystem (pty_manager's real
+# pywinpty backend) is the ONE place that may use a native dep. It is NOT part of
+# the stdlib-only core import path — installed only via `pip install .[terminal]`.
+terminal = ["pywinpty>=2.0; sys_platform == 'win32'"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
