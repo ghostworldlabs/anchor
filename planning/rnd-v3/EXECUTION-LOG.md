@@ -274,3 +274,50 @@ grounding to be semantic is out of this build's scope.
 **Verdict: GO.**
 
 ---
+
+## Wave 6 — In-place expandable session summaries — GO (2026-06-11)
+
+**EXECUTE.** `summarizer.py` enriches the structured SESSION summary to the locked
+§B shape: `when_run` (real session timestamp), `what_was_asked` (bounded
+seed/prompt), `north_star` (lifted from the session's MASTER-PLAN member),
+`effort` (`_aggregate_effort` sums the session's member job cost records →
+`{tokens, wall_clock_ms, cost_usd, runs}`; **imported/discovered → `null` =
+"imported — no run metrics", never fabricated**) — all cached in `summary.json` +
+`render_markdown`. `anchor_gui.py`: clicking a session expands an **inline
+accordion** (no `/summary` navigation — `openSummary` is now dead/back-compat) that
+fetches the new read-only `GET /api/rnd/session_summary?pid&lane&session` (cache →
+`ready`; uncached → background gen + `generating`, never a synchronous model run)
+and renders when/what/North-Star/effort + **doc links that open rendered markdown
+in a new tab** (the only new-tab, via `/report`·`/artifact`). A **"Launch new
+session"** button in the panel calls the Wave-4 path (`newTermSession` →
+`term_start`) carrying `seed_session` (the Wave-7 seam). Proactive session-summary
+generation triggers on rescan (background, gated).
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **478 passed, 1 skipped**.
+0 leaked `{{`/`}}` in the project window + dashboard.
+
+**REVIEW (2 independent adversarial reviewers).** Both GO-WITH-NITS; no
+BLOCKER/MAJOR. Reviewer A proved the **honesty contract** (no imported/discovered
+session can surface fabricated effort — the would-be-MAJOR axis), correct effort
+aggregation, grounded content fields, and a read-only non-blocking endpoint.
+Reviewer B confirmed the accordion genuinely replaces `/summary` navigation
+(`openSummary` dead, enforced by a negative test), doc links are the only new tab,
+launch-from-panel is token-aware, escaping is XSS-safe (incl. the href sink), and
+the tests are additive (no `/summary` test weakened).
+
+**FIX (bounded, 1 iter).** (1) Strengthened the effort test to drive a REAL
+`fake_claude --result` envelope end-to-end (envelope → `_cost_from_envelope` →
+`attach_cost` → `_aggregate_effort`), asserting the non-null aggregated
+`{tokens=142, wall_clock_ms=4567, runs}`. (2) Added symmetric `_unsafe_path_seg(pid)`
+rejection on the endpoint. (3) Unknown pid/session now returns a terminal
+`status:"unknown"` (panel stops polling + shows "summary unavailable") instead of
+spinning on "generating" forever. Re-gate: **478 passed, 1 skipped**.
+
+**Seam for Wave 7.** The launch-from-panel button puts `seed_session` (source
+session id) into the `term_start` payload; `start_session` accepts-but-does-not-yet-
+consume it. Wave 7 wires it through to most-recent-plan-set discovery + worktree
+pre-staging + the `Anchor.md` handoff record.
+
+**Verdict: GO.**
+
+---

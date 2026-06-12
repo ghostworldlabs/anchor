@@ -846,6 +846,10 @@ def discover_and_adopt(project_id: str) -> dict:
     # off the render path. We force a regenerate here so a rescan picks up new
     # plan docs / deliverables; the dashboard render only READS the cache.
     _trigger_project_summary(folder, project_id, force=True)
+    # Wave 6 (v3): proactively generate per-session summaries that lack a cache,
+    # so an expanded session accordion serves a ready cache rather than a
+    # "generating…" fallback. Background + gated like the project summary.
+    _trigger_project_session_summaries(folder, project_id)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
             "sibling_adopt": sibling, "marker": marker}
 
@@ -894,6 +898,89 @@ def _trigger_project_summary(folder_path, project_id, force: bool = False):
         threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
+
+
+def _trigger_session_summary(folder_path, project_id, lane, session,
+                             force: bool = False):
+    """Kick off proactive SESSION-summary generation WITHOUT blocking (Wave 6).
+
+    Mirror of ``_trigger_project_summary``: generates one session's cached,
+    validated summary through the runner seam in a background daemon thread, so
+    neither the render path nor the read-only ``/api/rnd/session_summary``
+    endpoint ever blocks on a model run. No-op unless proactive generation is
+    enabled (``_PROACTIVE_SUMMARY_ENABLED``) so unit tests that merely
+    register/open a project never spawn a background model job. Errors are
+    swallowed (a failed run never poisons the cache, per summarizer FIX 2).
+
+    The runner-seam env is snapshotted at trigger time (same isolation rationale
+    as the project-summary trigger) and forwarded to ``job_runner.launch``.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    runner_env = {k: v for k, v in os.environ.items()
+                  if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
+                  or k.startswith("FAKE_")}
+    if runner_env:
+        os.environ.setdefault("_ANCHOR_SESS_SUMMARY_ENV", "1")
+
+    def _run():
+        try:
+            # Forward the snapshotted runner env onto the spawned job for test
+            # isolation. summarize_session resolves the runner from the process
+            # env; in production this is just ANCHOR_RUNNER_CMD (already set).
+            prev = {}
+            for k, v in runner_env.items():
+                prev[k] = os.environ.get(k)
+                os.environ[k] = v
+            try:
+                _summarizer.summarize_session(folder_path, project_id, lane,
+                                              session, force=force)
+            finally:
+                for k, old in prev.items():
+                    if old is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = old
+        except Exception:
+            pass
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def _trigger_project_session_summaries(folder_path, project_id):
+    """Proactively generate summaries for all of a project's sessions lacking a
+    cache (Wave 6) — bounded, background, gated like the project-summary trigger.
+
+    Walks each trio lane's sessions (skipping the defensive ``loose::`` wrappers),
+    and for any session WITHOUT a cached summary kicks off a background
+    generation. No-op unless ``_PROACTIVE_SUMMARY_ENABLED``. Best-effort: any
+    error per lane/session is swallowed so a rescan is never blocked or broken.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    try:
+        lanes = [c[0] for c in _KANBAN_COLUMNS if c[0] != "grass"]
+    except Exception:
+        lanes = ["research", "plan", "build", "deliverables"]
+    for trio_lane in lanes:
+        try:
+            sess_list = _sessions.list_sessions(folder_path, project_id, trio_lane)
+        except Exception:
+            continue
+        for s in sess_list:
+            sid = (s.get("session_id") or "")
+            if not sid or sid.startswith("loose::"):
+                continue
+            store_lane = _eh._resolve_subdir(trio_lane)
+            try:
+                if _summarizer.load_cached(folder_path, project_id, store_lane,
+                                           sid) is not None:
+                    continue
+            except Exception:
+                pass
+            _trigger_session_summary(folder_path, project_id, trio_lane, s)
 
 
 def render_status_line_html(project_id: str) -> str:
@@ -1431,6 +1518,11 @@ def _render_kanban_html(folder_path, project_id):
     return "<div class='kan'>" + "".join(cols) + "</div>"
 
 
+def _safe_dom_id(seg: str) -> str:
+    """A DOM-id-safe slug of a session id (which contains ``::`` etc.)."""
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
+
+
 def _render_lane_sessions(session_views, store_lane, project_id):
     """Render a lane's sessions: most-recent visible + a "previous sessions"
     expander holding the rest (v2 Wave 4).
@@ -1464,14 +1556,26 @@ def _render_lane_sessions(session_views, store_lane, project_id):
         summary_link = ""
         if rep_summarizable:
             trio_lane = rep.get("trio_lane", store_lane)
-            href = (f"/summary/{url_quote(project_id, safe='')}/"
-                    f"{url_quote(trio_lane, safe='')}/"
-                    f"{url_quote(sid, safe='')}")
+            # v3 Wave 6: clicking "summary" EXPANDS an inline accordion (no
+            # navigation to /summary). The toggle carries the pid/lane/sid in
+            # data-* attributes; the JS fetches /api/rnd/session_summary and
+            # renders the panel in place. The ONLY new tab is a doc link inside
+            # the rendered panel (report/artifact routes).
+            esc_pid = html_lib.escape(project_id, quote=True)
+            esc_lane = html_lib.escape(trio_lane, quote=True)
+            esc_sid = html_lib.escape(sid, quote=True)
+            panel_id = "summ_" + html_lib.escape(
+                _safe_dom_id(trio_lane + "_" + sid), quote=True)
             summary_link = (
                 f"<div class='session-summary-link'>"
-                f"<a href=\"#\" onclick=\""
-                f"openSummary('{html_lib.escape(href, quote=True)}');"
-                f"return false;\">summary</a></div>"
+                f"<a href=\"#\" class='summary-toggle' "
+                f"data-pid=\"{esc_pid}\" data-lane=\"{esc_lane}\" "
+                f"data-session=\"{esc_sid}\" data-panel=\"{panel_id}\" "
+                f"onclick=\"toggleSessionSummary(this);return false;\">"
+                f"summary</a>"
+                f"<div class='session-summary-panel' id=\"{panel_id}\" "
+                f"style='display:none'></div>"
+                f"</div>"
             )
         rest = members[1:]
         if not rest:
@@ -1653,6 +1757,32 @@ def render_project_window_html(project_id: str) -> str:
         "cursor:pointer;list-style:none;padding:3px 2px}"
         ".prev-sessions>summary:hover{color:var(--accent)}"
         ".prev-sessions-body{margin-top:6px}"
+        # v3 Wave 6 — in-place expandable session summary accordion.
+        ".session-summary-link{margin:-2px 0 7px}"
+        ".summary-toggle{font-size:10.5px;color:var(--text-dim);"
+        "cursor:pointer;text-decoration:none}"
+        ".summary-toggle:hover{color:var(--accent)}"
+        ".session-summary-panel{margin-top:6px;padding:8px 10px;font-size:11px;"
+        "border:1px solid var(--border);border-radius:8px;"
+        "background:rgba(255,255,255,.02)}"
+        ".summ-loading{color:var(--text-dim);font-size:10.5px;font-style:italic}"
+        ".summ-title{font-weight:600;margin-bottom:5px;color:var(--text)}"
+        ".summ-field{margin:3px 0;color:var(--text);line-height:1.4}"
+        ".summ-field b{color:var(--text-dim);font-weight:600}"
+        ".summ-effort{color:var(--text-dim)}"
+        ".summ-note{font-style:italic;color:var(--text-dim)}"
+        ".summ-claims{margin:6px 0;padding-left:18px}"
+        ".summ-claims li{margin:2px 0}"
+        ".summ-docs{margin-top:6px}"
+        ".summ-docs b{color:var(--text-dim);font-size:10.5px}"
+        ".summ-docs ul{margin:4px 0;padding-left:18px}"
+        ".summ-docs a{color:var(--accent);text-decoration:none}"
+        ".summ-docs a:hover{text-decoration:underline}"
+        ".summ-launch{margin-top:8px}"
+        ".summ-launch-btn{font-size:10.5px;cursor:pointer;color:var(--accent);"
+        "background:rgba(108,156,252,.1);border:1px solid rgba(108,156,252,.4);"
+        "border-radius:6px;padding:3px 9px}"
+        ".summ-launch-btn:hover{background:rgba(108,156,252,.2)}"
         ".imported{font-size:10px;color:var(--text-dim);"
         "display:inline-flex;align-items:center;gap:5px;letter-spacing:.5px}"
         ".dotdisc{width:6px;height:6px;border-radius:50%;"
@@ -2266,9 +2396,147 @@ async function stopAttached() {
 
 function openReport(href) { window.open(href, '_blank'); }
 
-// Open a session's cached, validated summary page (Wave 6). DONE / imported
-// session cards link here; live/running cards keep attaching to the console.
+// Open a session's cached, validated summary page (Wave 6 back-compat: direct
+// /summary links still work; the session card no longer navigates here).
 function openSummary(href) { window.open(href, '_blank'); }
+
+// ── In-place expandable session summaries (v3 Wave 6) ───────────────────────
+// Clicking "summary" EXPANDS an inline accordion in the Kanban (NO navigation
+// to /summary). The panel fetches the cached structured summary as JSON and
+// renders when-run · what-was-asked · North-Star · doc links (the ONLY new tab)
+// · effort (tokens + wall-clock; imported → "no run metrics"), plus a "Launch
+// new session" button that calls the Wave-3/4 launch path seeded from THIS
+// session. Collapsing hides it; reopening serves the cache.
+function toggleSessionSummary(el) {
+  var panelId = el.getAttribute('data-panel');
+  var panel = document.getElementById(panelId);
+  if (!panel) return;
+  if (panel.style.display !== 'none' && panel.getAttribute('data-loaded') === '1') {
+    // Collapse.
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = 'block';
+  if (panel.getAttribute('data-loaded') === '1') return;  // reopen → cache
+  var pid = el.getAttribute('data-pid');
+  var lane = el.getAttribute('data-lane');
+  var sid = el.getAttribute('data-session');
+  panel.innerHTML = '<div class="summ-loading">loading…</div>';
+  _loadSessionSummary(panel, pid, lane, sid, 0);
+}
+
+function _esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _sessionSummaryUrl(pid, lane, sid) {
+  return '/api/rnd/session_summary?pid=' + encodeURIComponent(pid)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sid);
+}
+
+function _loadSessionSummary(panel, pid, lane, sid, attempt) {
+  var _hdrs = {Accept: 'application/json'};
+  fetch(_sessionSummaryUrl(pid, lane, sid), {headers: _hdrs} )
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.status === 'ready' && data.summary) {
+        panel.innerHTML = _renderSessionSummary(data.summary, pid, lane, sid);
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+        return;
+      }
+      // TERMINAL status (unknown project / missing session): STOP polling and
+      // show an honest "summary unavailable" note instead of spinning forever.
+      if (data && (data.status === 'unknown' || data.status === 'not-found'
+                   || data.ok === false)) {
+        panel.innerHTML = '<div class="summ-loading">Summary unavailable for '
+          + 'this session.</div>' + _launchButtonHtml();
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+        return;
+      }
+      // "generating…" fallback: poll a bounded number of times, then stop.
+      if (attempt < 20) {
+        panel.innerHTML = '<div class="summ-loading">generating summary… '
+          + '(this runs once and is then cached)</div>';
+        setTimeout(function () {
+          _loadSessionSummary(panel, pid, lane, sid, attempt + 1);
+        }, 1500);
+      } else {
+        panel.innerHTML = '<div class="summ-loading">Summary is still '
+          + 'generating. Close and reopen shortly to view it.</div>'
+          + _launchButtonHtml();
+        _wireLaunchFromPanel(panel, lane, sid);
+        panel.setAttribute('data-loaded', '1');
+      }
+    })
+    .catch(function (e) {
+      panel.innerHTML = '<div class="summ-loading">Could not load summary: '
+        + _esc(e.message) + '</div>';
+    });
+}
+
+function _renderSessionSummary(s, pid, lane, sid) {
+  var h = [];
+  if (s.title) h.push('<div class="summ-title">' + _esc(s.title) + '</div>');
+  if (s.when_run) h.push('<div class="summ-field"><b>When run:</b> '
+    + _esc(s.when_run) + '</div>');
+  if (s.what_was_asked) h.push('<div class="summ-field"><b>What was asked:</b> '
+    + _esc(s.what_was_asked) + '</div>');
+  if (s.north_star) h.push('<div class="summ-field"><b>North Star:</b> '
+    + _esc(s.north_star) + '</div>');
+  // Effort: imported sessions honestly show "no run metrics" (effort === null).
+  if (s.hasOwnProperty('effort')) {
+    if (s.effort === null) {
+      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
+        + 'imported — no run metrics</div>');
+    } else if (s.effort) {
+      var secs = ((s.effort.wall_clock_ms || 0) / 1000).toFixed(1);
+      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
+        + _esc(s.effort.tokens || 0) + ' tokens · ' + _esc(secs) + 's wall-clock · '
+        + _esc(s.effort.runs || 0) + ' run(s)</div>');
+    }
+  }
+  var claims = s.claims || [];
+  if (claims.length) {
+    var items = claims.map(function (c) { return '<li>' + _esc(c) + '</li>'; });
+    h.push('<ul class="summ-claims">' + items.join('') + '</ul>');
+  } else if (s.no_grounded_claims) {
+    h.push('<div class="summ-field summ-note">No grounded claims could be '
+      + 'extracted for this session.</div>');
+  }
+  // Document links — each opens the rendered markdown in a NEW TAB (the ONLY
+  // new tab) via the existing /report and /artifact routes.
+  var links = s.member_links || [];
+  if (links.length) {
+    var ls = links.map(function (lk) {
+      return '<li><a href="' + _esc(lk.href) + '" target="_blank" '
+        + 'rel="noopener">' + _esc(lk.label) + '</a></li>';
+    });
+    h.push('<div class="summ-docs"><b>Documents</b><ul>' + ls.join('')
+      + '</ul></div>');
+  }
+  h.push(_launchButtonHtml());
+  return '<div class="summ-body">' + h.join('') + '</div>';
+}
+
+function _launchButtonHtml() {
+  return '<div class="summ-launch"><button class="summ-launch-btn" '
+    + 'type="button">Launch new session</button></div>';
+}
+
+// Wire the panel's "Launch new session" button to the Wave-3/4 launch path,
+// seeded from THIS session. The lane + a seed hint (the source session id) ride
+// into newTermSession so Wave 7 can build the handoff on top of this seam.
+function _wireLaunchFromPanel(panel, lane, sid) {
+  var btn = panel.querySelector('.summ-launch-btn');
+  if (!btn) return;
+  btn.onclick = function () {
+    newTermSession(lane, null, {seed_session: sid});
+  };
+}
 
 // ── Lifecycle header actions (token-aware via _postJson) ────────────────────
 function _lifecycle(url, payload, reload) {
@@ -2424,9 +2692,13 @@ function renderSessionBar() {
 
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
 // then refresh the bar and open its window. backend defaults to claude.
-async function newTermSession(lane, backend) {
+async function newTermSession(lane, backend, opts) {
   backend = backend || 'claude';
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
+  // Wave 6 seam: a seed hint (the source session id) rides into term_start so
+  // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
+  // extra field today (start_session ignores it); Wave 7 wires it through.
+  if (opts && opts.seed_session) payload.seed_session = opts.seed_session;
   var r, data;
   try {
     r = await _postJson('/api/rnd/term_start', payload);
@@ -5648,6 +5920,63 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
+            elif self.path.startswith("/api/rnd/session_summary"):
+                # Read-only structured SESSION summary as JSON (v3 Wave 6): the
+                # in-place accordion fetches this instead of navigating to the
+                # /summary page. If cached → return it. If NOT cached → kick off
+                # background generation (run-once, runner seam) and return a
+                # {status:"generating"} fallback so the panel can re-fetch. This
+                # NEVER runs the model synchronously on the request thread.
+                # /api/rnd/session_summary?pid=<id>&lane=<lane>&session=<sid>
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0] or "").strip()
+                lane = (q.get("lane", [""])[0] or "").strip()
+                session_id = (q.get("session", [""])[0] or "").strip()
+                if not pid or not lane or not session_id:
+                    self._send_json({"ok": False,
+                                     "error": "pid, lane, session required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    store_lane = _eh._resolve_subdir(lane)
+                    cached = None
+                    try:
+                        cached = _summarizer.load_cached(
+                            folder, pid, store_lane, session_id)
+                    except Exception:
+                        cached = None
+                    if isinstance(cached, dict) and not cached.get("error"):
+                        self._send_json({"ok": True, "status": "ready",
+                                         "summary": cached})
+                    elif proj is None:
+                        # Unknown / unregistered project → TERMINAL status so a
+                        # polling panel STOPS (never an endless "generating").
+                        self._send_json({"ok": True, "status": "unknown"})
+                    else:
+                        # Not cached (or a prior failed/uncached run): resolve the
+                        # live session record so generation can seed from its
+                        # members. If the session id is not among the project's
+                        # sessions for this lane → TERMINAL "unknown" (the panel
+                        # stops polling). Otherwise kick off background
+                        # generation run-once and tell the panel to poll.
+                        session = None
+                        try:
+                            for s in _sessions.list_sessions(folder, pid, lane):
+                                if s.get("session_id") == session_id:
+                                    session = s
+                                    break
+                        except Exception:
+                            session = None
+                        if session is None:
+                            self._send_json({"ok": True, "status": "unknown"})
+                        else:
+                            _trigger_session_summary(
+                                folder, pid, lane, session)
+                            self._send_json({"ok": True, "status": "generating"})
             elif self.path.startswith("/artifact/"):
                 # Read-only serving of a DISCOVERED (brownfield) artifact from a
                 # project's folder (Wave 4). Traversal-safe via the proven
@@ -6217,6 +6546,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
             lane = (body.get("lane", "") or "").strip()
             backend = (body.get("backend", "") or "claude").strip() or "claude"
             label = body.get("label", "") or ""
+            # Wave 6 seam: a launch-from-panel carries the source session id as a
+            # seed hint. start_session does NOT consume it yet (a bare
+            # interactive PTY); Wave 7 wires the stage-handoff on top of this.
+            _seed_session = (body.get("seed_session", "") or "").strip()
             if not pid or not lane:
                 self._send_json({"ok": False,
                                  "error": "project_id and lane required"}, 400)

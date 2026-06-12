@@ -368,6 +368,193 @@ def test_grounding_unit_edge_cases(mods):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# v3 Wave 6 — richer session summary CONTENT: when_run · what_was_asked ·
+# north_star · effort (tokens + wall-clock from member cost records). An IMPORTED
+# (brownfield-discovered) session honestly yields effort = null — NOT fabricated.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _run_planning_session_with_cost(rnd, eh, sessions, folder):
+    """Build a RUN (non-discovered) planning session whose two member efforts
+    carry on-disk docs (for grounding) + cost records (for effort), then return
+    (project_id, session)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    rundir = folder / "planning" / "run-abc"
+    rundir.mkdir(parents=True, exist_ok=True)
+    (rundir / "MASTER-PLAN.md").write_text(
+        "# Run Master Plan\n\n"
+        "## North Star\n"
+        "Make the surface a truthful memory of trio work.\n\n"
+        "## Key decisions\n"
+        "Cache validated summaries per session.\n",
+        encoding="utf-8")
+    proj = rnd.add_project("RunProj", str(folder))
+    pid = proj["id"]
+    # One RUN job_id (so the two efforts group into ONE run session) with cost
+    # + prompt_seed (what-was-asked) on the master-plan member.
+    jid = "job-runabc-1"
+    eh.record_effort(
+        folder, pid, "planning", jid, skill="crucible",
+        prompt_seed="Plan the v3 Mission Control surface",
+        extra={
+            "artifact_path": "planning/run-abc/MASTER-PLAN.md",
+            "created_at": 1_700_000_000.0,
+            "title": "Run Master Plan", "kind": "master-plan",
+            "cost": {"total_cost_usd": 0.03, "duration_ms": 4000,
+                     "input_tokens": 100, "output_tokens": 50,
+                     "total_tokens": 150},
+        })
+    sess_list = sessions.list_sessions(folder, pid, "planning")
+    assert sess_list
+    session = sess_list[0]
+    assert session["provenance"] == "run"
+    return pid, session
+
+
+def test_session_summary_richer_fields_cached(mods, tmp_path, monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    pid, session = _run_planning_session_with_cost(rnd, eh, sessions, folder)
+
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(tmp_path / "calls.txt"))
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "North Star: cache validated summaries per session")
+
+    s = summ.summarize_session(folder, pid, "planning", session)
+    # Richer content fields are produced.
+    assert s.get("when_run"), "when_run should be the session date"
+    assert "2023" in s["when_run"] or "-" in s["when_run"]
+    assert "mission control" in s.get("what_was_asked", "").lower()
+    assert "truthful memory" in s.get("north_star", "").lower()
+    # Effort aggregated from the member cost record (tokens + wall-clock).
+    eff = s.get("effort")
+    assert isinstance(eff, dict)
+    assert eff["tokens"] == 150
+    assert eff["wall_clock_ms"] == 4000
+    assert eff["runs"] == 1
+
+    # The fields survive into the on-disk cache (summary.json).
+    jp = summ._summary_json_path(folder, pid, "planning", session["session_id"])
+    on_disk = json.loads(jp.read_text(encoding="utf-8"))
+    assert on_disk["when_run"] == s["when_run"]
+    assert on_disk["effort"]["tokens"] == 150
+    assert "truthful memory" in on_disk["north_star"].lower()
+    # Rendered markdown carries the new fields.
+    md = on_disk.get("markdown") or summ.render_markdown(on_disk)
+    assert "When run:" in md
+    assert "What was asked:" in md
+    assert "North Star:" in md
+    assert "tokens" in md and "wall-clock" in md
+
+
+def test_session_summary_effort_from_real_result_envelope(mods, tmp_path,
+                                                          monkeypatch):
+    """End-to-end: a REAL job through the runner seam with fake_claude.py
+    --result emits a genuine result envelope (input=100, output=42,
+    total_cost_usd=0.0123, duration_ms=4567). The production capture path
+    (job_runner._cost_from_envelope → effort_history.attach_cost via
+    finalize_effort → effort['cost'] → summarizer._aggregate_effort) lands the
+    cost on the effort; the session summary's `effort` is then the NON-NULL
+    aggregated dict derived from that envelope — exercising the non-null effort
+    path with NO hand-built cost stub.
+
+    Hermetic: no live claude. The cost-producing job runs fake_claude.py (env
+    flipped just for that launch); the summarize step runs the summarizer stub.
+    """
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    folder.mkdir(parents=True, exist_ok=True)
+    # A real planning doc on disk so the summary has a grounding corpus.
+    rundir = folder / "planning" / "run-real"
+    rundir.mkdir(parents=True, exist_ok=True)
+    (rundir / "MASTER-PLAN.md").write_text(
+        "# Real Run Master Plan\n\n"
+        "## North Star\n"
+        "Make the surface a truthful memory of trio work.\n\n"
+        "## Key decisions\n"
+        "Cache validated summaries per session.\n",
+        encoding="utf-8")
+    proj = rnd.add_project("RealRunProj", str(folder))
+    pid = proj["id"]
+
+    fake = (Path(__file__).resolve().parent / "fake_claude.py").as_posix()
+    jid = "job-real-1"
+    # Launch a REAL job that emits the genuine --result envelope. Flip the runner
+    # command to fake_claude.py JUST for this launch, then restore the summarizer
+    # stub for the summarize step.
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {fake}")
+    rec = jr.launch("plan", cwd=str(folder), job_id=jid,
+                    extra_args=["--lines", "1", "--result"])
+    final = jr.wait(jid, timeout=30)
+    assert final["status"] == jr.STATUS_DONE
+    # Sanity: cost was captured onto the job record via the production path.
+    cap = final.get("cost") or {}
+    assert cap.get("total_tokens") == 142
+    assert cap.get("duration_ms") == 4567
+
+    # Record + finalize the effort so the captured cost lands on the effort
+    # (production capture path; no hand-built cost dict). The doc is the member.
+    eh.record_effort(
+        folder, pid, "planning", jid, skill="crucible",
+        prompt_seed="Plan the v3 Mission Control surface",
+        extra={
+            "artifact_path": "planning/run-real/MASTER-PLAN.md",
+            "created_at": 1_700_000_000.0,
+            "title": "Real Run Master Plan", "kind": "master-plan",
+        })
+    eh.finalize_effort(folder, pid, "planning", jid, final, auto_commit=False)
+
+    # Restore the summarizer stub for the summarize step.
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {STUB}")
+    monkeypatch.setenv("STUB_SUMMARIZER_COUNTER", str(tmp_path / "calls.txt"))
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "North Star: cache validated summaries per session")
+
+    sess_list = sessions.list_sessions(folder, pid, "planning")
+    assert sess_list
+    session = sess_list[0]
+    assert session["provenance"] == "run"
+
+    s = summ.summarize_session(folder, pid, "planning", session)
+    # The NON-NULL effort is the REAL aggregate derived from the envelope —
+    # NOT a hard-coded stub.
+    eff = s.get("effort")
+    assert isinstance(eff, dict), "non-null effort expected for a run session"
+    assert eff["tokens"] == 142
+    assert eff["wall_clock_ms"] == 4567
+    assert eff["cost_usd"] == pytest.approx(0.0123)
+    assert eff["runs"] >= 1
+
+    # The real effort survives into the on-disk cache.
+    jp = summ._summary_json_path(folder, pid, "planning", session["session_id"])
+    on_disk = json.loads(jp.read_text(encoding="utf-8"))
+    assert on_disk["effort"]["tokens"] == 142
+    assert on_disk["effort"]["wall_clock_ms"] == 4567
+
+
+def test_imported_session_effort_is_null_no_fabrication(mods, tmp_path,
+                                                        monkeypatch):
+    jr, eh, rnd, sessions, summ = mods
+    folder = tmp_path / "proj"
+    # The brownfield-discovery helper builds an IMPORTED (discovered) session.
+    pid, session = _planning_session_with_docs(rnd, eh, sessions, folder)
+    assert session["provenance"] == "imported"
+
+    monkeypatch.setenv("STUB_SUMMARIZER_CLAIMS",
+                       "North Star: cache validated summaries")
+    s = summ.summarize_session(folder, pid, "planning", session)
+    # Effort is present-but-null for an imported session (honesty contract).
+    assert "effort" in s
+    assert s["effort"] is None, "imported session must NOT fabricate effort"
+    # On-disk cache preserves the honest null.
+    jp = summ._summary_json_path(folder, pid, "planning", session["session_id"])
+    on_disk = json.loads(jp.read_text(encoding="utf-8"))
+    assert on_disk["effort"] is None
+    # Rendered markdown shows the honest "imported — no run metrics" note.
+    md = on_disk.get("markdown") or summ.render_markdown(on_disk)
+    assert "imported" in md.lower() and "no run metrics" in md.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # v3 Wave 5 — PROJECT summary (generate-once + cache + force + grounding).
 # IMPLEMENTATION-PLAN lines 124-141: a background project-summary generator that
 # mirrors the session pipeline, seeded from CLAUDE.md + recent plan docs +

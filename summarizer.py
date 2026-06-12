@@ -57,6 +57,11 @@ MAX_SEED_BYTES = 16 * 1024
 #: How many model candidate runs to fuse (frozen design: generate TWICE).
 GENERATE_RUNS = 2
 
+#: Provenance marker for an IMPORTED (brownfield-discovered) session — its effort
+#: is honestly ``None`` ("imported — no run metrics"), never fabricated (Wave 6).
+#: Mirrors ``sessions.PROV_IMPORTED`` without a hard import cycle.
+_SESS_IMPORTED = "imported"
+
 #: A claim is grounded iff at least this fraction of its KEY TERMS (>=3 chars,
 #: alphanumeric tokens) appear in the combined seed/member text. Raised from the
 #: original 0.5 to a stricter 0.7 (FIX 3) so a claim must share a clear majority
@@ -211,6 +216,12 @@ def _lift_sections(text: str, signals) -> list:
     return out
 
 
+#: Heading signals (case-insensitive substring) whose body is the session's
+#: North-Star / goal — lifted from a MASTER-PLAN member if present (v3 Wave 6).
+_NORTH_STAR_SIGNALS = ("north star", "north-star", "objective", "goal",
+                       "mission")
+
+
 def extraction_seed(folder_path, project_id, lane, session) -> dict:
     """Deterministically pull anchors from the session's member docs (step a).
 
@@ -219,16 +230,22 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
     whose heading matches the lane signal set. Returns a structured seed::
 
         {"lane", "title", "members": [{job_id, title, rel}],
-         "anchors": [{"heading", "body", "from"}], "text": "<combined text>"}
+         "anchors": [{"heading", "body", "from"}], "when_run", "what_was_asked",
+         "north_star", "text": "<combined text>"}
 
     ``text`` is the combined grounding corpus the validation pass checks claims
-    against. Stdlib only; never raises.
+    against. The v3 Wave 6 fields — ``when_run`` (session date), ``what_was_asked``
+    (the seed/intent from ``prompt_seed`` / first member), and ``north_star``
+    (lifted from a MASTER-PLAN member's North-Star/goal heading) — are derived
+    deterministically here so they survive into the cache. Stdlib only; never
+    raises.
     """
     kind = _lane_kind(lane)
     signals = _SECTION_SIGNALS.get(kind, _SECTION_SIGNALS["planning"])
     members_out = []
     anchors = []
     corpus_parts = []
+    north_star = ""
     members = session.get("member_files", []) or []
     for member in members[:MAX_SEED_DOCS]:
         path = _member_path(folder_path, project_id, lane, member)
@@ -243,6 +260,22 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
                 anchors.append({"heading": heading, "body": body,
                                 "from": title or rel or
                                 (member.get("job_id") or "")})
+            # North-Star: prefer a MASTER-PLAN-like member's goal/north-star
+            # section (reuses _lift_sections). First non-empty wins.
+            if not north_star:
+                is_master = ("master" in (title or "").lower()
+                             or "master" in rel.lower()
+                             or "master" in (member.get("kind") or "").lower())
+                for _h, body in _lift_sections(text, _NORTH_STAR_SIGNALS):
+                    if body and (is_master or not anchors):
+                        north_star = body
+                        break
+                # Fall back to ANY member's north-star section if no master one.
+                if not north_star:
+                    for _h, body in _lift_sections(text, _NORTH_STAR_SIGNALS):
+                        if body:
+                            north_star = body
+                            break
         if title:
             corpus_parts.append(title)
         members_out.append({
@@ -255,7 +288,105 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
         "title": (session.get("title") or "").strip(),
         "members": members_out,
         "anchors": anchors,
+        "when_run": _session_when_run(session),
+        "what_was_asked": _session_what_was_asked(session, members_out),
+        "north_star": north_star.strip(),
         "text": "\n".join(corpus_parts),
+    }
+
+
+def _session_when_run(session) -> str:
+    """The session's run date (ISO ``YYYY-MM-DD``) from its timestamp, or ''.
+
+    Uses the session ``timestamp`` (= ``max(created_at)`` across members, set by
+    ``sessions.list_sessions``); falls back to the max member ``created_at``.
+    """
+    ts = session.get("timestamp")
+    if not ts:
+        for m in (session.get("member_files", []) or []):
+            try:
+                c = float(m.get("created_at", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                c = 0.0
+            if c > (ts or 0):
+                ts = c
+    try:
+        ts = float(ts or 0.0)
+    except (TypeError, ValueError):
+        return ""
+    if ts <= 0:
+        return ""
+    try:
+        return time.strftime("%Y-%m-%d", time.localtime(ts))
+    except (ValueError, OSError):
+        return ""
+
+
+#: Max chars of the seed/intent surfaced as "what was asked" (bounded).
+MAX_WHAT_ASKED = 500
+
+
+def _session_what_was_asked(session, members_out) -> str:
+    """The session's seed/intent (bounded): a member ``prompt_seed`` else title.
+
+    Reads the first member carrying a ``prompt_seed`` (the run's intent); falls
+    back to the session title / first member title. Bounded to ``MAX_WHAT_ASKED``.
+    """
+    for m in (session.get("member_files", []) or []):
+        seed = (m.get("prompt_seed") or "").strip()
+        if seed:
+            return seed[:MAX_WHAT_ASKED]
+    title = (session.get("title") or "").strip()
+    if title:
+        return title[:MAX_WHAT_ASKED]
+    for m in members_out:
+        t = (m.get("title") or "").strip()
+        if t:
+            return t[:MAX_WHAT_ASKED]
+    return ""
+
+
+def _aggregate_effort(session) -> dict:
+    """Aggregate the session's run effort from its members' cost records.
+
+    Returns ``{"tokens", "wall_clock_ms", "cost_usd", "runs"}`` summed over the
+    session's RUN members' ``cost`` blocks (via ``effort_history`` accumulation),
+    OR ``None`` for an IMPORTED session (``provenance == "imported"``) so the UI
+    honestly shows "imported — no run metrics" — NEVER fabricated metrics.
+
+    A session whose members carry no cost yet (run with no captured envelope)
+    yields a zeroed-but-present effort (``runs`` = member count) — that is honest
+    (the run happened; cost simply wasn't captured), distinct from imported=null.
+    """
+    if (session.get("provenance") or "") == _SESS_IMPORTED:
+        return None
+    members = session.get("member_files", []) or []
+    # Defensive: a session whose every member is a discovered (brownfield) effort
+    # is effectively imported — no run metrics, even if provenance wasn't set.
+    if members and all(_eh.is_discovered(m) for m in members):
+        return None
+    acc = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0,
+           "duration_ms": 0, "total_cost_usd": 0.0}
+    runs = 0
+    for m in members:
+        if _eh.is_discovered(m):
+            continue
+        runs += 1
+        cost = m.get("cost") or {}
+        acc["input_tokens"] += int(cost.get("input_tokens", 0) or 0)
+        acc["output_tokens"] += int(cost.get("output_tokens", 0) or 0)
+        acc["total_tokens"] += int(cost.get("total_tokens", 0) or 0)
+        acc["duration_ms"] += int(cost.get("duration_ms", 0) or 0)
+        try:
+            acc["total_cost_usd"] += float(cost.get("total_cost_usd", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            pass
+    tokens = acc["total_tokens"] or (acc["input_tokens"] + acc["output_tokens"])
+    return {
+        "tokens": tokens,
+        "wall_clock_ms": acc["duration_ms"],
+        "cost_usd": round(acc["total_cost_usd"], 6),
+        "runs": runs,
     }
 
 
@@ -475,6 +606,30 @@ def render_markdown(structured: dict) -> str:
     if lane:
         lines.append(f"*Lane: {lane} · validated, cached summary*")
         lines.append("")
+    # v3 Wave 6 — locked content shape: when-run · what-was-asked · North-Star ·
+    # effort (tokens + wall-clock; imported → "no run metrics").
+    when_run = (structured.get("when_run") or "").strip()
+    what_asked = (structured.get("what_was_asked") or "").strip()
+    north_star = (structured.get("north_star") or "").strip()
+    if when_run:
+        lines.append(f"**When run:** {when_run}")
+        lines.append("")
+    if what_asked:
+        lines.append(f"**What was asked:** {what_asked}")
+        lines.append("")
+    if north_star:
+        lines.append(f"**North Star:** {north_star}")
+        lines.append("")
+    effort = structured.get("effort", None)
+    if effort is None and "effort" in structured:
+        lines.append("**Effort:** imported — no run metrics")
+        lines.append("")
+    elif isinstance(effort, dict):
+        secs = (effort.get("wall_clock_ms", 0) or 0) / 1000.0
+        lines.append(
+            f"**Effort:** {effort.get('tokens', 0)} tokens · "
+            f"{secs:.1f}s wall-clock · {effort.get('runs', 0)} run(s)")
+        lines.append("")
     claims = structured.get("claims", []) or []
     if claims:
         heading = {
@@ -561,6 +716,7 @@ def summarize_session(folder_path, project_id, lane, session,
                 return cached
 
         seed = extraction_seed(folder_path, project_id, store_lane, session)
+        effort = _aggregate_effort(session)
         candidates, failed = _generate_candidates(folder_path, seed,
                                                   GENERATE_RUNS)
         # FIX 2 — no cache poisoning on failure: if a runner job FAILED/timed
@@ -573,6 +729,10 @@ def summarize_session(folder_path, project_id, lane, session,
                 "title": seed.get("title", ""),
                 "claims": [],
                 "member_links": _member_links(seed, project_id, store_lane),
+                "when_run": seed.get("when_run", ""),
+                "what_was_asked": seed.get("what_was_asked", ""),
+                "north_star": seed.get("north_star", ""),
+                "effort": effort,
                 "error": "generation_failed",
                 "generated_at": time.time(),
                 "runs": len(candidates),
@@ -585,6 +745,10 @@ def summarize_session(folder_path, project_id, lane, session,
             "title": seed.get("title", ""),
             "claims": claims,
             "member_links": _member_links(seed, project_id, store_lane),
+            "when_run": seed.get("when_run", ""),
+            "what_was_asked": seed.get("what_was_asked", ""),
+            "north_star": seed.get("north_star", ""),
+            "effort": effort,
             "generated_at": time.time(),
             "runs": len(candidates),
         }
