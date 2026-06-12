@@ -372,9 +372,18 @@ def read_since(session_id, cursor=0):
     """
     child = _get(session_id)
     text, nxt = child.read_since(cursor)
+    # Absolute count of chars dropped from the FRONT of the bounded tail window.
+    # A reattaching client compares this against its cursor to know whether older
+    # scrollback was discarded (see terminal_session.attach's ``truncated``).
+    try:
+        with child._lock:
+            dropped = int(child._dropped)
+    except Exception:
+        dropped = 0
     return {
         "text": text,
         "next": nxt,
+        "dropped": dropped,
         "status": "running" if child.is_alive() else "dead",
     }
 

@@ -126,3 +126,57 @@ Wave 3 must reconcile the pty_manager opaque id with the registry session_id
 **Verdict: GO.**
 
 ---
+
+## Wave 3 — ConPTY terminal manager + transport + auth — GO (2026-06-11)
+
+**EXECUTE.** `terminal_session.py` ties Wave-1 PTY + Wave-2 registry/worktrees into
+a live service: `start_session(project_id, lane, backend)` (creates worktree →
+launches a BARE interactive PTY in it via `pty_manager.start([backend],
+cwd=worktree)` → registers ONE id = the reused PTY id, `status=running`),
+`attach` (reattach replays the full retained screen buffer via `read_since(.,0)`),
+`input`/`resize`/`read_since`, `kill` (reap PTY + remove worktree + terminal
+status), `list_sessions`. Transport in `anchor_gui.py`: a stdlib hand-rolled
+**WebSocket** `GET /api/rnd/term_ws` (pure RFC-6455 codec `ws_accept_key`/
+`encode_text_frame`/`decode_frames`; 101 upgrade then bidirectional pump) + the
+**SSE-out** `GET /api/rnd/term_stream2` and **POST-in** `term_input2` fallback,
+plus lifecycle POSTs `term_start`/`term_kill`/`term_resize`. New names avoid
+colliding with the v2 stream-json REPL endpoints.
+
+**GATE (orchestrator-run).** `python -m pytest -v` → **449 passed, 1 skipped**.
+`ws_accept_key('dGhlIHNhbXBsZSBub25jZQ==')` == the RFC-6455 reference
+`s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`. Build repo untouched (`git worktree list` = main
+only; no `anchor/session/*` branches).
+
+**REVIEW (2 independent adversarial reviewers).** Both GO-WITH-NITS; no BLOCKER.
+Reviewer A (security/transport) verified — by code, tests, AND live 401 probes —
+that auth is enforced BEFORE any side effect on ALL six terminal endpoints (WS
+rejected 401 before the 101 upgrade; GET transports gate via `_term_token_ok`
+query-param token; POSTs ride the do_POST middleware), the codec is alloc-safe,
+the pumps are bounded (no hang). Reviewer B (service) verified rollback-safe
+lifecycle, one-id-per-session under concurrency, kill isolation (can't remove the
+wrong worktree), pure detach, and full Wave-3 G/W/T coverage.
+
+**FIX (bounded, 1 iter).** (1) MAJOR: `start_session` now rolls back the PTY +
+worktree if `register_session` raises (no reconcile-invisible orphan). (2) Clamped
+`poll`∈[0.01,1.0]/`max_ticks`∈[1,5000] on both new GET transports
+(authed-self-DoS). (3) `MAX_WS_FRAME`=1 MiB cap in `decode_frames` (close on
+oversized; no unbounded inbuf). (4) `attach` now surfaces `dropped`/`truncated` so
+a reattach is honest about discarded scrollback. (5) Unknown-lane rejected before
+any worktree/PTY. (6) WS fragmentation reassembly (FIN handling) +
+unmasked-client-frame → protocol-error close (RFC §5.4/§5.1), gated behind
+`require_mask` to keep server-frame decode tests valid. Re-gate: **449 passed, 1
+skipped**; WS reference key still correct; zero repo leakage.
+
+**Seam for Wave 4 (UI).** Endpoints: `POST term_start
+{project_id,lane,backend,label?}→{ok,session}`, `GET term_ws?session=&token=`
+(live), `GET term_stream2?session=&token=` (fallback), `POST term_input2
+{session,data}`, `POST term_resize {session,cols,rows}`, `POST term_kill
+{session}`. Status→color: running=green · needs-attention/done=amber · failed=red
+· idle=grey. Repopulate via `terminal_session.list_sessions(project_id=...)`;
+first paint via `attach()` (`buffer`/`cursor`/`status`/`dropped`). Known seam:
+`read_since` returns decoded `str` sent as UTF-8 WS text frames — fine for
+xterm.js text; binary control-seq framing is a possible Wave-4 refinement.
+
+**Verdict: GO.**
+
+---

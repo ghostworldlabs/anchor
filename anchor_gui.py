@@ -433,6 +433,200 @@ import gate_adapter as _gate
 import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
+import terminal_session as _termsess
+import paths as _paths  # re-import alias (already imported above; harmless)
+
+
+# ── Hand-rolled stdlib WebSocket frame codec (RFC 6455) — PURE functions ─────
+# v3 "Mission Control" (MASTER-PLAN §D / Wave 3). The ConPTY terminal transport
+# is a minimal hand-rolled WebSocket carrying PTY bytes both ways over the raw
+# socket. The frame codec is factored into PURE, socket-free functions so it is
+# unit-testable without a connection.
+import base64 as _b64
+import hashlib as _hashlib
+import struct as _struct
+
+#: The RFC 6455 GUID concatenated with the client key to derive the accept hash.
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+# WebSocket opcodes.
+WS_OP_CONT = 0x0
+WS_OP_TEXT = 0x1
+WS_OP_BINARY = 0x2
+WS_OP_CLOSE = 0x8
+WS_OP_PING = 0x9
+WS_OP_PONG = 0xA
+
+
+def ws_accept_key(client_key: str) -> str:
+    """Compute the ``Sec-WebSocket-Accept`` value for a client key (RFC 6455).
+
+    ``base64(sha1(client_key + WS_GUID))``. Pure + deterministic so it is
+    unit-tested against the spec example
+    (``dGhlIHNhbXBsZSBub25jZQ==`` -> ``s3pPLMBiTxaQ9kYGzzhZRbK+xOo=``).
+    """
+    digest = _hashlib.sha1(
+        (client_key.strip() + WS_GUID).encode("ascii")).digest()
+    return _b64.b64encode(digest).decode("ascii")
+
+
+def encode_text_frame(text) -> bytes:
+    """Encode a server->client TEXT frame (FIN=1, unmasked — server frames are
+    never masked per RFC 6455)."""
+    if isinstance(text, str):
+        payload = text.encode("utf-8")
+    else:
+        payload = bytes(text)
+    return _encode_frame(WS_OP_TEXT, payload)
+
+
+def encode_close_frame(code=1000, reason=b"") -> bytes:
+    """Encode a server->client CLOSE frame with an optional status code."""
+    if isinstance(reason, str):
+        reason = reason.encode("utf-8")
+    payload = _struct.pack(">H", code) + reason if code is not None else b""
+    return _encode_frame(WS_OP_CLOSE, payload)
+
+
+def encode_pong_frame(payload=b"") -> bytes:
+    """Encode a server->client PONG frame echoing the ping payload."""
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    return _encode_frame(WS_OP_PONG, payload)
+
+
+def _encode_frame(opcode, payload: bytes) -> bytes:
+    """Build a single unmasked WebSocket frame (FIN=1) for ``opcode``+payload."""
+    b0 = 0x80 | (opcode & 0x0F)            # FIN=1, opcode
+    n = len(payload)
+    if n < 126:
+        header = _struct.pack(">BB", b0, n)
+    elif n < (1 << 16):
+        header = _struct.pack(">BBH", b0, 126, n)
+    else:
+        header = _struct.pack(">BBQ", b0, 127, n)
+    return header + payload
+
+
+#: Max bytes a single client frame's declared payload may be before the codec
+#: signals a clean close instead of accumulating an unbounded inbuf. Also caps
+#: the fragmentation-reassembly buffer (FIN=0 TEXT + CONTINUATION run).
+MAX_WS_FRAME = 1 << 20  # 1 MiB
+
+#: A pseudo-opcode the codec emits to tell the pump to close the connection on a
+#: protocol error (oversized frame, unmasked client data frame, bad fragment).
+#: It is NOT a real RFC 6455 opcode (0x10 is out of the 4-bit opcode range), so
+#: it can never collide with a genuine decoded frame.
+WS_SIGNAL_CLOSE = 0x10
+
+
+def decode_frames(buf: bytes, state=None, require_mask=False):
+    """Decode as many complete WebSocket frames as ``buf`` holds.
+
+    Returns ``(messages, rest)`` where ``messages`` is a list of
+    ``(opcode, payload_bytes)`` and ``rest`` is the trailing bytes of an
+    incomplete frame to carry forward.
+
+    ``decode_frames`` is dual-use: the pump decodes CLIENT frames (always masked)
+    and tests decode SERVER frames (never masked). Pass ``require_mask=True``
+    (the pump does) to enforce RFC 6455 §5.1 — an unmasked CLIENT frame is then a
+    protocol error and yields a single ``(WS_SIGNAL_CLOSE, ...)`` message so the
+    pump closes the connection. With ``require_mask=False`` (default) an unmasked
+    frame's payload is taken verbatim (so server→client frames decode cleanly).
+
+    Bounded (FIX 3): a frame whose DECLARED payload length exceeds
+    :data:`MAX_WS_FRAME` yields ``(WS_SIGNAL_CLOSE, ...)`` instead of buffering
+    toward an allocation — even before the payload bytes arrive.
+
+    Fragmentation reassembly (FIX 6, RFC 6455 §5.4): a TEXT/BINARY frame with
+    FIN=0 starts a message that is continued by CONTINUATION (opcode 0x0) frames
+    and delivered as ONE message when a CONTINUATION arrives with FIN=1. Control
+    frames (close/ping/pong) are delivered immediately and may interleave a
+    fragmented data message. Reassembly state is carried in the optional
+    ``state`` dict (the pump passes a persistent one); when ``state`` is None a
+    transient one is used (single-buffer/backward-compatible call form). The
+    reassembly buffer is itself bounded by :data:`MAX_WS_FRAME`.
+    """
+    if state is None:
+        state = {}
+    messages = []
+    i = 0
+    n = len(buf)
+    while True:
+        if n - i < 2:
+            break
+        b0 = buf[i]
+        b1 = buf[i + 1]
+        fin = bool(b0 & 0x80)
+        opcode = b0 & 0x0F
+        masked = bool(b1 & 0x80)
+        length = b1 & 0x7F
+        j = i + 2
+        if length == 126:
+            if n - j < 2:
+                break
+            length = _struct.unpack(">H", buf[j:j + 2])[0]
+            j += 2
+        elif length == 127:
+            if n - j < 8:
+                break
+            length = _struct.unpack(">Q", buf[j:j + 8])[0]
+            j += 8
+        # Reject an oversized DECLARED payload BEFORE waiting for/allocating it.
+        if length > MAX_WS_FRAME:
+            messages.append((WS_SIGNAL_CLOSE, b"frame too large"))
+            return messages, b""
+        is_control = bool(opcode & 0x8)
+        # RFC 6455 §5.1: a client frame MUST be masked. When decoding client
+        # frames (require_mask), an unmasked frame is a protocol error.
+        if require_mask and not masked:
+            messages.append((WS_SIGNAL_CLOSE, b"unmasked client frame"))
+            return messages, b""
+        mask = b""
+        if masked:
+            if n - j < 4:
+                break
+            mask = buf[j:j + 4]
+            j += 4
+        if n - j < length:
+            break  # incomplete payload — wait for more bytes
+        payload = bytearray(buf[j:j + length])
+        if masked and mask:
+            for k in range(length):
+                payload[k] ^= mask[k & 3]
+        payload = bytes(payload)
+        i = j + length
+
+        if is_control:
+            # Control frames are never fragmented; deliver immediately, even mid
+            # data-message reassembly.
+            messages.append((opcode, payload))
+            continue
+
+        if opcode == WS_OP_CONT:
+            if "frag_op" not in state:
+                # CONTINUATION with no message in progress — protocol error.
+                messages.append((WS_SIGNAL_CLOSE, b"unexpected continuation"))
+                return messages, b""
+            state["frag_buf"] = state.get("frag_buf", b"") + payload
+            if len(state["frag_buf"]) > MAX_WS_FRAME:
+                messages.append((WS_SIGNAL_CLOSE, b"fragmented message too large"))
+                return messages, b""
+            if fin:
+                messages.append((state.pop("frag_op"), state.pop("frag_buf")))
+            continue
+
+        # A new TEXT/BINARY data frame.
+        if not fin:
+            # Start of a fragmented message.
+            state["frag_op"] = opcode
+            state["frag_buf"] = payload
+            if len(state["frag_buf"]) > MAX_WS_FRAME:
+                messages.append((WS_SIGNAL_CLOSE, b"fragmented message too large"))
+                return messages, b""
+            continue
+        messages.append((opcode, payload))
+    return messages, buf[i:]
 
 
 def _unsafe_path_seg(seg: str) -> bool:
@@ -4500,9 +4694,275 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # Client closed the connection — stop cleanly.
             return
 
+    # ── ConPTY terminal transport (Wave 3) ──────────────────────────────────
+    def _term_token_ok(self):
+        """Auth a terminal GET endpoint via the ``?token=`` query param.
+
+        Browsers can't set request headers on an EventSource / WebSocket
+        handshake, so the terminal GET surface (an RCE surface) authenticates via
+        a query-param token with the SAME semantics as ``paths.auth_ok``: if no
+        token is configured (``ANCHOR_TOKEN`` unset) it is allowed (local
+        back-compat); otherwise the provided token must match. Also accepts a
+        token carried in the ``Sec-WebSocket-Protocol`` header (for WS clients).
+        """
+        q = parse_qs(urlparse(self.path).query)
+        provided = (q.get("token", [None])[0])
+        if provided is None:
+            # WS clients may smuggle the token via the subprotocol header.
+            provided = self.headers.get("Sec-WebSocket-Protocol")
+        return _paths.auth_ok(provided)
+
+    def _serve_term_stream2(self):
+        """SSE-out fallback for a ConPTY session (Wave 3).
+
+        The plan's named fallback half: an ``text/event-stream`` of a ConPTY
+        session's output via ``pty_manager.read_since`` (through
+        ``terminal_session.read_since``). Modeled on :meth:`_serve_term_sse` —
+        bounded by ``max_ticks``, heartbeated, ends with a ``done`` event on a
+        terminal (``dead``) status or when the tick budget elapses. Query knobs
+        ``poll``/``max_ticks``/``hb``/``since`` mirror the v2 SSE handler.
+
+        AUTH: ``?token=`` (401 when a token is configured and missing/wrong).
+        """
+        if not self._term_token_ok():
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+        q = parse_qs(urlparse(self.path).query)
+        session = (q.get("session", [""])[0] or "").strip()
+        try:
+            since = int(q.get("since", ["0"])[0] or 0)
+        except (TypeError, ValueError):
+            since = 0
+        if not session:
+            self._send_json({"ok": False, "error": "missing session"}, 400)
+            return
+        try:
+            poll_interval = float(q.get("poll", ["0.25"])[0] or 0.25)
+        except (TypeError, ValueError):
+            poll_interval = 0.25
+        try:
+            max_ticks = int(q.get("max_ticks", ["240"])[0] or 240)
+        except (TypeError, ValueError):
+            max_ticks = 240
+        # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
+        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        poll_interval = min(1.0, max(0.01, poll_interval))
+        max_ticks = min(5000, max(1, max_ticks))
+        try:
+            heartbeat_every = int(q.get("hb", ["8"])[0] or 8)
+        except (TypeError, ValueError):
+            heartbeat_every = 8
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        cursor = since
+        last_status = None
+        idle = 0
+        try:
+            for _tick in range(max(1, max_ticks)):
+                try:
+                    out = _termsess.read_since(session, cursor)
+                    if not out.get("ok", True):  # unknown session
+                        self._sse_event("done", {"status": "error",
+                                                 "next": cursor, "error": True})
+                        return
+                    text = out.get("text", "")
+                    if text:
+                        self._sse_event("output", {"text": text,
+                                                   "next": out.get("next", cursor)})
+                        cursor = out.get("next", cursor)
+                        idle = 0
+                    else:
+                        idle += 1
+                    status = out.get("status")
+                    if status and status != last_status:
+                        self._sse_event("status", {"status": status})
+                        last_status = status
+                    if status == "dead":
+                        final = _termsess.read_since(session, cursor)
+                        ft = final.get("text", "") if isinstance(final, dict) else ""
+                        if ft:
+                            self._sse_event("output", {"text": ft,
+                                                       "next": final.get("next", cursor)})
+                            cursor = final.get("next", cursor)
+                        self._sse_event("done", {"status": status, "next": cursor})
+                        return
+                    if heartbeat_every and idle and idle % heartbeat_every == 0:
+                        self._sse_event("heartbeat", {"next": cursor})
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    raise
+                except Exception:
+                    try:
+                        self._sse_event("done", {"status": "error",
+                                                 "next": cursor, "error": True})
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        pass
+                    return
+                time.sleep(max(0.0, poll_interval))
+            self._sse_event("done", {"status": last_status or "running",
+                                     "next": cursor, "bounded": True})
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            return
+
+    def _serve_term_ws(self):
+        """Hand-rolled stdlib WebSocket terminal endpoint (Wave 3, RFC 6455).
+
+        Detects the ``Upgrade: websocket`` handshake, authenticates via
+        ``?token=`` (or the ``Sec-WebSocket-Protocol`` header), computes the
+        ``Sec-WebSocket-Accept`` value, replies ``101 Switching Protocols``, then
+        takes over the raw socket and pumps PTY bytes BOTH ways:
+
+        - decode client frames (text/binary -> ``terminal_session.input``;
+          close -> end; ping -> pong);
+        - poll ``terminal_session.read_since`` for new output -> encode + send
+          server text frames.
+
+        The pump loop is BOUNDED/interruptible (``poll``/``max_ticks`` query
+        knobs, same as the SSE handler) so it ends cleanly on client close or a
+        terminal (``dead``) session and is testable without hanging.
+        """
+        # AUTH FIRST: never upgrade an unauthorized handshake.
+        if not self._term_token_ok():
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
+        key = self.headers.get("Sec-WebSocket-Key")
+        if not key:
+            self._send_json({"ok": False, "error": "missing Sec-WebSocket-Key"},
+                            400)
+            return
+
+        q = parse_qs(urlparse(self.path).query)
+        session = (q.get("session", [""])[0] or "").strip()
+        if not session:
+            self._send_json({"ok": False, "error": "missing session"}, 400)
+            return
+        try:
+            poll_interval = float(q.get("poll", ["0.05"])[0] or 0.05)
+        except (TypeError, ValueError):
+            poll_interval = 0.05
+        try:
+            max_ticks = int(q.get("max_ticks", ["1200"])[0] or 1200)
+        except (TypeError, ValueError):
+            max_ticks = 1200
+        # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
+        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        poll_interval = min(1.0, max(0.01, poll_interval))
+        max_ticks = min(5000, max(1, max_ticks))
+
+        # ── 101 handshake ────────────────────────────────────────────────
+        accept = ws_accept_key(key)
+        handshake = (
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: " + accept + "\r\n"
+            "\r\n"
+        )
+        try:
+            self.connection.sendall(handshake.encode("ascii"))
+        except OSError:
+            return
+
+        # ── raw-socket pump (both ways), bounded + interruptible ─────────
+        sock = self.connection
+        sock.settimeout(max(0.01, poll_interval))
+        inbuf = b""
+        cursor = 0
+        ws_state = {}  # persistent fragmentation-reassembly state for decode_frames
+        try:
+            for _tick in range(max(1, max_ticks)):
+                # 1) Drain client -> PTY (non-blocking-ish via the socket timeout).
+                try:
+                    chunk = sock.recv(65536)
+                    if chunk == b"":
+                        break  # client closed the TCP connection
+                    inbuf += chunk
+                    # Guard the carried inbuf so an endless stream of incomplete
+                    # frame headers can't grow it without bound either.
+                    if len(inbuf) > MAX_WS_FRAME:
+                        break
+                    msgs, inbuf = decode_frames(inbuf, ws_state,
+                                                require_mask=True)
+                    closed = False
+                    for opcode, payload in msgs:
+                        if opcode in (WS_SIGNAL_CLOSE, WS_OP_CLOSE):
+                            # Protocol error or a client close -> clean close.
+                            closed = True
+                            break
+                        if opcode == WS_OP_PING:
+                            try:
+                                sock.sendall(encode_pong_frame(payload))
+                            except OSError:
+                                closed = True
+                                break
+                            continue
+                        if opcode == WS_OP_PONG:
+                            continue  # unsolicited pong — ignore
+                        if opcode in (WS_OP_TEXT, WS_OP_BINARY):
+                            # Reassembled, complete data message (CONT frames are
+                            # folded in by the codec — never delivered alone).
+                            data = payload.decode("utf-8", "replace")
+                            res = _termsess.input(session, data)
+                            if not res.get("ok"):
+                                closed = True
+                                break
+                    if closed:
+                        break
+                except socket.timeout:
+                    pass
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    break
+
+                # 2) Pump PTY -> client.
+                try:
+                    out = _termsess.read_since(session, cursor)
+                except Exception:
+                    break
+                if not out.get("ok", True):
+                    break  # unknown session
+                text = out.get("text", "")
+                if text:
+                    try:
+                        sock.sendall(encode_text_frame(text))
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        break
+                    cursor = out.get("next", cursor)
+                if out.get("status") == "dead":
+                    # Drain any final output, then close cleanly.
+                    final = _termsess.read_since(session, cursor)
+                    ft = final.get("text", "") if isinstance(final, dict) else ""
+                    if ft:
+                        try:
+                            sock.sendall(encode_text_frame(ft))
+                        except OSError:
+                            pass
+                    break
+        finally:
+            try:
+                sock.sendall(encode_close_frame())
+            except OSError:
+                pass
+
     def do_GET(self):
         try:
             _path_only = urlparse(self.path).path
+            if (self.headers.get("Upgrade", "").lower() == "websocket"
+                    and _path_only == "/api/rnd/term_ws"):
+                # Hand-rolled stdlib WebSocket terminal transport (Wave 3). Must
+                # be checked BEFORE the normal GET dispatch because it takes over
+                # the raw socket. Auth-gated inside (?token=).
+                self._serve_term_ws()
+                return
+            if _path_only == "/api/rnd/term_stream2":
+                # SSE-out fallback for a ConPTY session (Wave 3). Auth-gated
+                # inside (?token=). Distinct from the v2 /api/rnd/term_stream.
+                self._serve_term_stream2()
+                return
             if _path_only == "/" or _path_only == "/dashboard":
                 # Serve the dashboard for "/" REGARDLESS of query string so the
                 # cache-busting reload ("/?v=<build_id>") lands on the dashboard
@@ -5203,6 +5663,76 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "job_id": job_id,
                     "status": (out or {}).get("status"),
                 })
+
+        # ── ConPTY terminal session lifecycle (Wave 3) ────────────────
+        # These are the NEW ConPTY surface — distinct from the v2 REPL
+        # endpoints (start_terminal/term_input/term_stream). Auth is enforced
+        # by the middleware above (mutating POSTs).
+        elif self.path == "/api/rnd/term_start":
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "claude").strip() or "claude"
+            label = body.get("label", "") or ""
+            if not pid or not lane:
+                self._send_json({"ok": False,
+                                 "error": "project_id and lane required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _termsess.start_session(pid, lane, backend=backend,
+                                                  label=label)
+                    self._send_json({"ok": True, "session": rec})
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/term_kill":
+            session = (body.get("session", "") or "").strip()
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                out = _termsess.kill(session)
+                self._send_json({"ok": True, "result": out})
+
+        elif self.path == "/api/rnd/term_resize":
+            session = (body.get("session", "") or "").strip()
+            cols = body.get("cols")
+            rows = body.get("rows")
+            if not session or cols is None or rows is None:
+                self._send_json({"ok": False,
+                                 "error": "session, cols, rows required"}, 400)
+            else:
+                out = _termsess.resize(session, cols, rows)
+                if out.get("ok"):
+                    self._send_json({"ok": True})
+                elif out.get("reason") == "unknown-session":
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
+                else:
+                    self._send_json({"ok": False,
+                                     "error": out.get("detail", "bad request"),
+                                     "reason": out.get("reason")}, 400)
+
+        elif self.path == "/api/rnd/term_input2":
+            # POST-in half of the SSE-out + POST-in fallback transport. Authed by
+            # the middleware above.
+            session = (body.get("session", "") or "").strip()
+            data = body.get("data", "")
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            else:
+                out = _termsess.input(session, data)
+                if out.get("ok"):
+                    self._send_json({"ok": True})
+                else:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
 
         # ── R&D validated, cached session summary (Wave 6) ────────────
         elif self.path == "/api/rnd/regenerate_summary":
