@@ -191,9 +191,10 @@ def test_most_recent_plus_previous_sessions_expander(gui, tmp_path):
     # Exactly one "previous sessions" expander for the lane with 2 sessions.
     assert "previous sessions (1)" in html
     assert html.count("previous sessions (") == 1
-    # The multi-file session collapses its extra members behind a per-card
-    # "files (N)" expander rather than rendering N separate cards.
-    assert "files (2)" in html
+    # v4.1 cockpit-render: a multi-file session is ONE Paradigm-2 tile that shows
+    # its member count ("2 files") rather than rendering N separate cards. (The
+    # per-member doc links moved into the opened panel's summary.)
+    assert "2 files" in html
 
 
 def test_single_session_lane_has_no_previous_expander(gui, tmp_path):
@@ -335,47 +336,57 @@ def _discovered_planning_session(gui, folder, pid):
 
 
 def test_session_card_inline_expand_wiring_not_navigation(gui, tmp_path):
-    """G/W/T: a session card's "summary" affordance EXPANDS an inline accordion
-    (a toggle that fetches /api/rnd/session_summary) — NOT a window.open to a
-    /summary page."""
+    """G/W/T: clicking a lane TILE EXPANDS an inline panel in place (openPanel →
+    _loadPanelSummary, which fetches /api/rnd/session_summary) — NOT a window.open
+    to a /summary page.
+
+    v4.1 cockpit-render: the per-card "summary" accordion was removed; the summary
+    now renders INSIDE the opened inline panel (same intent — inline, no nav). The
+    tile carries data-session/data-lane and an openPanel hook; the panel fetch
+    keys on (pid, lane, session)."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("InlineSumm", str(folder))["entry"]["id"]
     _discovered_planning_session(gui, folder, pid)
     html = gui.render_project_window_html(pid)
 
-    # The card carries an inline-expand toggle, not a /summary navigation.
-    assert "toggleSessionSummary(this)" in html
-    assert "class='session-summary-panel'" in html
-    assert "summary-toggle" in html
-    # The session card must NOT navigate to a separate /summary page.
+    # The tile is the inline-expand entry point (no /summary navigation).
+    assert "laneTileClick(event," in html
+    assert "function openPanel" in html
+    assert "function _loadPanelSummary" in html
+    # The tile must NOT navigate to a separate /summary page, and the old per-card
+    # accordion toggle is gone (detail moved into the opened panel).
     assert "openSummary('/summary" not in html
     assert "window.open('/summary" not in html
-    # The toggle carries pid/lane/session in data-* attributes for the fetch.
-    assert "data-pid=" in html
-    assert "data-lane=" in html
+    assert "toggleSessionSummary(this)" not in html
+    assert "class='session-summary-panel'" not in html
+    # The tile carries data-session/data-lane for the panel's summary fetch.
     assert "data-session=" in html
-
-    # The JS toggle fetches the read-only JSON endpoint (no page navigation).
-    assert "function toggleSessionSummary" in html
+    assert "data-lane=" in html
+    # The panel loads the summary from the read-only JSON endpoint (no page nav).
     assert "/api/rnd/session_summary" in html
-    assert "function _loadSessionSummary" in html
 
 
 def test_summary_panel_renders_doc_links_and_effort(gui, tmp_path):
-    """The expanded panel renders document links (report/artifact routes that
-    open in a NEW TAB) and an effort line (imported → 'no run metrics')."""
+    """The opened inline panel renders the split summary: document links
+    (report/artifact routes that open in a NEW TAB) and an effort line (imported →
+    'no run metrics').
+
+    v4.1 cockpit-render: the split summary is built by _renderSplitSummary from
+    /api/rnd/session_summary + /api/rnd/session_doc_roles, replacing the old
+    per-card _renderSessionSummary accordion (same intent — doc links + honest
+    effort line)."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("PanelRender", str(folder))["entry"]["id"]
     _discovered_planning_session(gui, folder, pid)
     html = gui.render_project_window_html(pid)
 
-    # The renderer wires doc links to the existing /report and /artifact routes,
-    # opening them in a NEW TAB (the only new tab).
-    assert "function _renderSessionSummary" in html
+    # The split renderer wires doc links to the existing routes, opening them in a
+    # NEW TAB (the only new tab). The role links resolve from session_doc_roles.
+    assert "function _renderSplitSummary" in html
     assert "target=\"_blank\"" in html or "target=\\\"_blank\\\"" in html
-    assert "member_links" in html
+    assert "/api/rnd/session_doc_roles" in html
     # Effort rendering: tokens + wall-clock; imported honestly shows no metrics.
     assert "wall-clock" in html
     assert "no run metrics" in html

@@ -80,11 +80,13 @@ def test_running_session_tile_carries_green_light(gui, tmp_path):
                      extra={"status": jr.STATUS_RUNNING})
     # Force the live-status join: the job record reports RUNNING.
     html = gui.render_project_window_html(pid)
-    # The lane tile + a status light element are present.
-    assert "class='lane-tile'" in html
-    # The recent plan session tile carries SOME light + the openPanel hook.
-    assert "data-light=" in html
-    assert "<span class='lt " in html
+    # v4.1 cockpit-render: the lane's most-recent session is a Paradigm-2 .tile
+    # carrying the legacy lane-tile alias + a status light element.
+    assert "tile lane-tile" in html
+    # The recent plan session tile carries the GREEN light (running bucket) + the
+    # openPanel hook (a non-discovered RUNNING effort → green).
+    assert "data-light=\"green\"" in html
+    assert "<span class='lt green" in html
     assert "laneTileClick(event," in html
     assert "openPanel(" in html
 

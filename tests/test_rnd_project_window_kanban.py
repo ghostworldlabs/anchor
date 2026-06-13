@@ -134,15 +134,20 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
 
     html = gui.render_project_window_html(pid)
 
-    # The 4 Kanban columns.
-    assert "class='kan'" in html
+    # v4.1 cockpit-render: the board is the Paradigm-2 lane grid (.p2lanes / 5
+    # .p2col columns), replacing the old .kan/.col board.
+    assert "class='p2lanes'" in html
+    assert html.count("class='p2col'") == 5
     for label in ("Research", "Planning", "Build", "Deliverables"):
         assert label in html
-    # Version labels by recency (research has 2 efforts -> v2 newest, v1 oldest).
+    # Version labels by recency (research has 2 sessions -> v2 newest, v1 oldest),
+    # now shown in the tile's .lane row.
     assert ">v2<" in html
     assert ">v1<" in html
-    # Effort cards.
-    assert "class='effort'" in html
+    # Genuine Paradigm-2 tiles (with the legacy lane-tile alias) — NOT effort cards.
+    assert "tile lane-tile" in html
+    assert "class='effort'" not in html
+    assert "class='kan'" not in html
     # Per-lane "New run" affordances. v4 Wave 1: these launch the SEEDED ConPTY
     # path (newTermSession → term_start → terminal_session.start_session), NOT
     # the v2 unseeded REPL (openTerminal / start_terminal) that caused the
@@ -229,19 +234,34 @@ def test_xterm_static_route_served_over_http_and_traversal_safe(server):
 
 
 def test_window_done_effort_links_report_viewer(gui_env, tmp_path):
-    """A DONE effort card carries the /report/<pid>/<lane>/<job_id> link shape."""
+    """A DONE run session resolves to the /report/<pid>/<lane>/<job_id> link via
+    the summarizer member-links (surfaced in the opened panel's split summary).
+
+    v4.1 cockpit-render: the lane tile no longer carries the /report link inline;
+    the report viewer is reached from the panel's doc links (member_links /
+    session_doc_roles, which reuse the existing /report route). Same intent — a
+    done session links to its report viewer."""
     gui = gui_env
     import effort_history as eh
+    import sessions as sess
+    import summarizer as summ
     folder = tmp_path / "Done"
     proj = _mkproject(folder, "DoneProj")
     pid = proj["id"]
     fp = str(folder)
     eh.record_effort(fp, pid, "research", "donejob", skill="researchPrime",
                      extra={"status": "done"})
+    # The done RUN session resolves to a /report/<pid>/<lane>/<job_id> doc link
+    # (the panel's split summary shows these role-tagged links).
+    sess_list = sess.list_sessions(fp, pid, "research")
+    assert sess_list, "no research session recorded"
+    sid = sess_list[0]["session_id"]
+    roles = summ.session_doc_roles(pid, "research", sid, folder_path=fp)
+    hrefs = [r["href"] for r in roles.values()]
+    assert any(h == f"/report/{pid}/research/donejob" for h in hrefs), hrefs
+    # The JS helper that opens a report in a new tab is still present.
     html = gui.render_project_window_html(pid)
-    # Report-link shape for a done effort (the report viewer route).
-    assert f"/report/{pid}/research/donejob" in html
-    assert "openReport(" in html
+    assert "function openReport" in html
 
 
 def test_window_xss_escapes_project_name(gui_env, tmp_path):

@@ -59,24 +59,27 @@ def test_real_vN_present_and_discovered_has_no_vN(gui, tmp_path):
 
     html = gui.render_project_window_html(pid)
 
-    # Real research efforts keep their version labels.
+    # v4.1 cockpit-render: lanes render Paradigm-2 tiles. Real research efforts
+    # keep their version labels (shown in the tile's .lane row).
     assert ">v2<" in html
     assert ">v1<" in html
-    # The discovered card is present and honestly marked.
-    assert 'data-discovered="1"' in html
+    # The discovered session's tile is present and honestly marked "imported"
+    # (grey light, no run metrics — never masqueraded as a run).
     assert "imported" in html
-    # The discovered card links to the /artifact route, NOT /report.
-    assert f"/artifact/{pid}" in html
+    assert "data-light=\"grey\"" in html
 
-    # The discovered card must NOT carry a vN token. Isolate the discovered card
-    # markup and assert no ">v" version label inside it.
+    # The discovered session's tile must NOT carry a vN version label. Isolate the
+    # planning-lane tile(s) and assert no version token inside.
     import re
-    disc_cards = re.findall(r"<div class='effort discovered'.*?</div></div>",
-                            html, re.S)
-    assert disc_cards, "no discovered card rendered"
-    for card in disc_cards:
-        assert ">v" not in card, f"discovered card has a vN: {card!r}"
-        assert 'data-discovered="1"' in card
+    plan_tiles = re.findall(
+        r"<div class='tile lane-tile[^>]*data-lane=\"plan\"[^>]*>.*?</div></div></div>",
+        html, re.S)
+    assert plan_tiles, "no planning tile rendered"
+    for tile in plan_tiles:
+        assert re.search(r">v\d", tile) is None, \
+            f"discovered tile has a vN: {tile!r}"
+        # The discovered tile shows the imported state, not a version label.
+        assert "imported" in tile
 
 
 def test_tile_and_rollup_show_imported_count(gui, tmp_path):
