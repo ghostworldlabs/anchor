@@ -59,6 +59,25 @@ def test_generate_html_embeds_self_healing_js(tmp_path, monkeypatch):
     assert "}}" not in html
 
 
+def test_open_project_window_versionstamps_url(tmp_path, monkeypatch):
+    """A project opened from the dashboard carries ``?v=<build id>`` so a project
+    window left open across a DEPLOY no longer matches the new URL — the browser
+    re-navigates (reloads) the named window instead of merely focusing the stale
+    pre-deploy page. Guards the v4 'project window looked unchanged' regression."""
+    gui = _reload_gui(tmp_path, monkeypatch)
+    html = gui.generate_html(*gui.gather_all())
+    assert "openProjectWindow" in html
+    # The window.open URL is version-stamped with the live build id.
+    assert (
+        "'/project/' + encodeURIComponent(pid) + '?v=" + gui.BUILD_ID
+    ) in html
+    # The named target is retained (no duplicate windows per project).
+    assert "'anchorproj_' + pid" in html
+    # No f-string brace leak.
+    assert "{{" not in html
+    assert "}}" not in html
+
+
 def test_build_id_non_empty(tmp_path, monkeypatch):
     gui = _reload_gui(tmp_path, monkeypatch)
     assert isinstance(gui.BUILD_ID, str)

@@ -6167,9 +6167,12 @@ function demoteProject(b64) {{ apiCall('/api/demote_project', {{name: dec(b64)}}
 // ── R&D project lifecycle (rich tiles) ──
 // Open a project in ITS OWN window, named per-project: if that window is already
 // open, this focuses it instead of opening a duplicate (multiple projects at a
-// time, but one window each).
+// time, but one window each). The URL is version-stamped with the build id so a
+// project window left open across a DEPLOY no longer matches the new URL and the
+// browser re-navigates (reloads) it — otherwise a same-name/same-URL window is
+// merely focused (no re-fetch) and would show stale pre-deploy HTML.
 function openProjectWindow(pid) {{
-    var w = window.open('/project/' + encodeURIComponent(pid), 'anchorproj_' + pid);
+    var w = window.open('/project/' + encodeURIComponent(pid) + '?v={BUILD_ID}', 'anchorproj_' + pid);
     if (w) {{ try {{ w.focus(); }} catch (e) {{}} }}
 }}
 function rndSetPriority(pid, pr) {{ apiCall('/api/rnd/set_priority', {{id: pid, priority: pr}}); }}
