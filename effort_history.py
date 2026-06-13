@@ -310,6 +310,77 @@ def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
     return record_effort(folder_path, project_id, "grass", jid, extra=extra)
 
 
+#: The lanes a grass idea may be promoted into (v4 Wave 6). Only the two TRIO
+#: starting lanes — a Research run or a Plan run — make sense as a seeded launch.
+PROMOTE_LANES = ("research", "plan")
+
+
+def get_grass_idea(folder_path, project_id: str, idea_id: str):
+    """Return ONE grass idea pointer-record by its ``job_id``, or ``None``.
+
+    Matches against the grass lane's effort records (manual adds, INBOX
+    promotions, discovered idea-docs). Best-effort: an unknown id returns
+    ``None`` (never raises).
+    """
+    want = (idea_id or "").strip()
+    if not want:
+        return None
+    for rec in list_efforts(folder_path, project_id, "grass"):
+        if (rec.get("job_id") or "") == want:
+            return rec
+    return None
+
+
+def promote_grass_to_lane(project_id: str, idea_id: str, lane: str,
+                          folder_path=None, backend=None) -> dict:
+    """Promote a Grass Catcher idea into a NEW seeded session in ``lane`` (Wave 6).
+
+    Looks up the grass idea by ``idea_id``, then starts a brand-new terminal
+    session in the target lane (``research`` | ``plan``) **seeded with the idea
+    text** by REUSING the Wave-1 seed path: it delegates to
+    ``terminal_session.start_session(..., seed_context=<idea text>)``, so the
+    single opening turn loads the lane's trio skill (researchPrime / Crucible)
+    AND carries the idea as the thing to work on. The Wave-1 seed-once /
+    no-re-emit discipline is inherited unchanged.
+
+    COPY, NEVER DESTROY: the idea record is left untouched in the grass lane (a
+    promotion is a copy). Returns the NEW session's registry record.
+
+    Raises ``ValueError`` for an invalid lane (not research/plan) or an idea that
+    is not found in the project's grass lane.
+    """
+    lane = (lane or "").strip()
+    if lane not in PROMOTE_LANES:
+        raise ValueError(
+            "promote lane must be one of %s, got %r"
+            % (", ".join(PROMOTE_LANES), lane))
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    idea_text = (idea.get("title") or "").strip()
+    if not idea_text:
+        raise ValueError("grass idea has no text: %s" % (idea_id,))
+
+    # Reuse the Wave-1 seed path (do NOT fork seed logic): start_session writes
+    # the lane skill seed + the idea exactly once. Lazy import to keep
+    # effort_history free of a hard dependency on the terminal stack.
+    import terminal_session as _ts
+    label = "from grass: " + (idea_text[:40])
+    kwargs = {"label": label, "seed_context": idea_text}
+    if backend is not None:
+        kwargs["backend"] = backend
+    record = _ts.start_session(project_id, lane, **kwargs)
+    # The idea REMAINS in grass — promotion copies, never moves. (Nothing here
+    # deletes or mutates the grass record.)
+    return record
+
+
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────
 
 def discovered_job_id(lane: str, rel: str) -> str:
@@ -731,6 +802,121 @@ def project_rollup(project_id: str, folder_path=None) -> dict:
         total["effort_count"] += lr["effort_count"]
         total["discovered_count"] += lr["discovered_count"]
     return {"total": total, "lanes": lanes_out}
+
+
+# ── Project cost/tokens/time rollup over RUN sessions (v4 Wave 3) ───────────
+#
+# The v4 cockpit shows a per-project ``Σ tokens · $ · time`` rollup with a
+# lifetime / 30-day toggle. Unlike :func:`project_rollup` (which sums every real
+# effort), this rollup is SESSION-SCOPED and honesty-bounded:
+#
+#   - It sums ``job_runner`` COST RECORDS for the project's RUN-PROVENANCE
+#     sessions ONLY (``sessions.list_sessions`` groups efforts into sessions and
+#     tags each ``provenance`` = "run" | "imported"). IMPORTED / DISCOVERED
+#     sessions contribute ZERO — never fabricated.
+#   - ``window='30d'`` excludes cost records older than 30 days relative to
+#     ``now`` (injectable for deterministic tests; defaults to real ``time``).
+#
+# Returns ``{"tokens", "cost_usd", "wall_clock_ms", "sessions"}`` where
+# ``sessions`` is the count of RUN sessions that contributed at least one
+# in-window member. Stdlib only.
+
+#: Seconds in the 30-day rolling window.
+WINDOW_30D_SECONDS = 30 * 24 * 60 * 60.0
+
+#: Accepted ``window`` values for :func:`project_effort_rollup`.
+WINDOW_LIFETIME = "lifetime"
+WINDOW_30D = "30d"
+
+
+def _member_when(member: dict) -> float:
+    """A member's cost timestamp for windowing: ``finished_at`` else ``created_at``.
+
+    ``attach_cost`` stamps ``finished_at`` (job completion) alongside the cost
+    block; we prefer it as the "when this cost was incurred" time and fall back
+    to the effort's ``created_at`` (launch time) when a finish time is absent.
+    Returns 0.0 when neither is parseable.
+    """
+    for key in ("finished_at", "created_at"):
+        val = member.get(key)
+        if val in (None, ""):
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def project_effort_rollup(project_id: str, window: str = WINDOW_LIFETIME,
+                          now=None, folder_path=None) -> dict:
+    """Per-project cost/tokens/time rollup over RUN sessions (v4 Wave 3).
+
+    Sums ``job_runner`` cost records for the project's RUN-provenance sessions
+    only (imported/discovered sessions contribute 0 — never fabricated). With
+    ``window='30d'`` only cost records whose timestamp is within the last 30 days
+    of ``now`` are counted; ``window='lifetime'`` (default) counts all of them.
+
+    ``now`` is injectable (a float epoch) for deterministic tests; it defaults to
+    the real clock. ``folder_path`` is resolved from the registry when omitted
+    (mirrors :func:`project_rollup`).
+
+    Returns ``{"tokens": int, "cost_usd": float, "wall_clock_ms": int,
+    "sessions": int}`` where ``sessions`` is the number of RUN sessions that
+    contributed at least one in-window cost record. Stdlib only; never raises.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        folder_path = (proj or {}).get("folder_path", "")
+    cutoff = None
+    if window == WINDOW_30D:
+        ref = float(now) if now is not None else time.time()
+        cutoff = ref - WINDOW_30D_SECONDS
+
+    # Lazy import to avoid the sessions↔effort_history cycle at module load.
+    import sessions as _sessions
+
+    tokens = 0
+    cost_usd = 0.0
+    wall_clock_ms = 0
+    session_count = 0
+    for lane in ROLLUP_LANES:
+        try:
+            lane_sessions = _sessions.list_sessions(folder_path, project_id, lane)
+        except Exception:
+            lane_sessions = []
+        for sess in lane_sessions:
+            # RUN-provenance only — imported/discovered sessions add nothing.
+            if (sess.get("provenance") or "") != _sessions.PROV_RUN:
+                continue
+            contributed = False
+            for member in (sess.get("member_files", []) or []):
+                # Defensive: skip any discovered member inside a run session
+                # (it carries no real cost — honesty contract).
+                if is_discovered(member):
+                    continue
+                if cutoff is not None and _member_when(member) < cutoff:
+                    continue
+                cost = member.get("cost") or {}
+                m_tokens = int(cost.get("total_tokens", 0) or 0)
+                if not m_tokens:
+                    m_tokens = (int(cost.get("input_tokens", 0) or 0)
+                                + int(cost.get("output_tokens", 0) or 0))
+                tokens += m_tokens
+                wall_clock_ms += int(cost.get("duration_ms", 0) or 0)
+                try:
+                    cost_usd += float(cost.get("total_cost_usd", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    pass
+                contributed = True
+            if contributed:
+                session_count += 1
+    return {
+        "tokens": tokens,
+        "cost_usd": round(cost_usd, 6),
+        "wall_clock_ms": wall_clock_ms,
+        "sessions": session_count,
+    }
 
 
 # ── C9: per-effort auto-commit of the .anchor/ pointer-record ───────────────

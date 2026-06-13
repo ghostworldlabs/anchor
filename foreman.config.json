@@ -1,12 +1,20 @@
 {
-  "project": "anchor-rnd-surface-v3",
+  "project": "anchor-rnd-surface-v4",
   "docs": {
-    "description": "planning/rnd-v3/MASTER-PLAN.md",
-    "plan": "planning/rnd-v3/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/rnd-v3/EXECUTION-LOG.md"
+    "description": "planning/rnd-v4/MASTER-PLAN.md",
+    "plan": "planning/rnd-v4/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/rnd-v4/EXECUTION-LOG.md"
   },
   "test_command": "python -m pytest -v",
-  "notes": "Build cwd = repo root C:\\dev\\Anchor. v3 = Mission Control. Wave 1 is a ConPTY-under-service spike that HALTS to the user on failure. Terminal subsystem may use pywinpty (the ONLY native-dep waiver, isolated); everything else stdlib. All model/PTY interactions verified via tests/fake_claude.py + a stub PTY backend (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY in the gate. Builds on v2 (rnd-v2). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string.",
+  "notes": "Build cwd = repo root C:\\dev\\Anchor. v4 = 'Project Cockpit' — re-lays-out the project window (Paradigm 2 inline expanding panels), fixes the terminal to ONE substrate (v3 ConPTY only; the v2 stream-json REPL rnd_terminal.py is unwired from the cockpit, not deleted), and repairs dashboard surfaces (grass idea board, type-aware deliverable launch, drop the directory row line, restore cost/tokens/time rollup, Option B branding). Builds on v3 (rnd-v3): terminal_session.py, pty_manager.py, session_registry.py, worktrees.py, summarizer.py, deliverables.py, preview_server.py, handoff.py, vendor/xterm, vendor/brand. Wave 1 fixes the repeating-prompt bug (skill auto-load-once + greet-once; seed never re-sent). All model/PTY interactions verified via tests/fake_claude.py + stub PTY backend (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY in the gate; any spawned preview/service binds an OS-assigned port HARD-guarded != 8777 with an isolated temp ANCHOR_DATA_DIR. pywinpty is the ONLY native-dep waiver (lazy, pty_manager.py only); distro.py import scan must stay green. anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string.",
+  "prior_config_rnd_v3": {
+    "project": "anchor-rnd-surface-v3",
+    "docs": {
+      "description": "planning/rnd-v3/MASTER-PLAN.md",
+      "plan": "planning/rnd-v3/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v3/EXECUTION-LOG.md"
+    }
+  },
   "prior_config_rnd_v2": {
     "docs": {
       "description": "planning/rnd-v2/MASTER-PLAN.md",

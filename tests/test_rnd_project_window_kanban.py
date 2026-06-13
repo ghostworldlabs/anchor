@@ -143,11 +143,13 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     assert ">v1<" in html
     # Effort cards.
     assert "class='effort'" in html
-    # Per-lane "New run" affordances. Wave 7: these open the interactive TERMINAL
-    # (openTerminal) that replaced the raw-log launch console.
-    assert "openTerminal('research','claude')" in html
-    assert "openTerminal('plan')" in html
-    assert "openTerminal('build')" in html
+    # Per-lane "New run" affordances. v4 Wave 1: these launch the SEEDED ConPTY
+    # path (newTermSession → term_start → terminal_session.start_session), NOT
+    # the v2 unseeded REPL (openTerminal / start_terminal) that caused the
+    # repeating-prompt bug.
+    assert "newTermSession('research','claude')" in html
+    assert "newTermSession('plan')" in html
+    assert "newTermSession('build')" in html
     assert "New research run" in html
     # Real xterm.js terminal: the vendored library + stylesheet are included and
     # the window still mounts through the unchanged window.AnchorTerm.mount API.

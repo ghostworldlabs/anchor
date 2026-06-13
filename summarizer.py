@@ -594,6 +594,238 @@ def _member_links(seed: dict, project_id: str, lane: str) -> list:
     return out
 
 
+# ── Per-lane document roles (v4 Wave 3) ──────────────────────────────────────
+#
+# The v4 cockpit summary panel shows each session's member docs **tagged by
+# ROLE** (not a flat link list). Roles are LANE-SPECIFIC and locked:
+#
+#   research → exec (executive summary)   · report (full report/PDF)
+#              · agent (agent-readable JSON) · provenance (refs.bib / run.log)
+#   planning → master (MASTER-PLAN.md) · impl (IMPLEMENTATION-PLAN.md)
+#              · northstar (North-Star* / NORTH-STAR*)
+#   build    → northstar · deliverable (the project's pinned/linked deliverable)
+#              · execlog (EXECUTION-LOG.md) · plan (the plan it executes — handoff)
+#
+# Each role's ``href`` reuses the EXISTING routes (``/report/<pid>/<lane>/<job>``
+# for run docs, ``/artifact/<pid>?path=<rel>`` for discovered/on-disk files).
+# Roles whose document is ABSENT are OMITTED — never fabricated. Stdlib only.
+
+
+def _artifact_href(project_id: str, rel: str) -> str:
+    """``/artifact/<pid>?path=<rel>`` — the existing discovered-file route."""
+    from urllib.parse import quote as _q
+    return f"/artifact/{_q(str(project_id), safe='')}?path={_q(rel, safe='')}"
+
+
+def _report_href(project_id: str, lane: str, job_id: str) -> str:
+    """``/report/<pid>/<lane>/<job_id>`` — the existing run-report route."""
+    from urllib.parse import quote as _q
+    return (f"/report/{_q(str(project_id), safe='')}/"
+            f"{_q(str(lane), safe='')}/{_q(str(job_id), safe='')}")
+
+
+def _member_href(project_id: str, lane: str, member: dict):
+    """The working route for one session member, or ``None``.
+
+    DISCOVERED / on-disk members (carry ``artifact_path``) → ``/artifact`` route;
+    RUN members (carry a ``job_id``) → ``/report`` route. Mirrors
+    :func:`_member_links` so role hrefs use exactly the same existing routes.
+    """
+    rel = (member.get("artifact_path") or "").strip()
+    if rel:
+        return _artifact_href(project_id, rel.replace("\\", "/"))
+    jid = (member.get("job_id") or "").strip()
+    if jid:
+        return _report_href(project_id, lane, jid)
+    return None
+
+
+def _member_basename(member: dict) -> str:
+    """Lowercased basename of a member's artifact path (POSIX), or ''."""
+    from pathlib import PurePosixPath
+    rel = (member.get("artifact_path") or "").strip().replace("\\", "/")
+    if not rel:
+        return ""
+    return PurePosixPath(rel).name.lower()
+
+
+def _member_label(member: dict) -> str:
+    """A human label for a member doc (title → basename → job_id)."""
+    title = (member.get("title") or "").strip()
+    if title:
+        return title
+    base = _member_basename(member)
+    if base:
+        return base
+    return (member.get("job_id") or "").strip() or "member"
+
+
+def _research_roles(project_id, store_lane, members) -> dict:
+    """Resolve research roles: exec / report / agent / provenance.
+
+    First match per role wins (members are newest-first). report.* / *.pdf →
+    report; an executive/summary markdown → exec; *.json → agent; refs.bib or
+    run.log → provenance. Absent roles are simply not added.
+    """
+    roles = {}
+    for m in members:
+        base = _member_basename(m)
+        href = _member_href(project_id, store_lane, m)
+        if href is None:
+            continue
+        label = _member_label(m)
+        suffix = base.rsplit(".", 1)[-1] if "." in base else ""
+        # report — the full report. Either a discovered file named report.* /
+        # *.pdf, OR a RUN member (no artifact_path) whose report.md/.pdf the
+        # ``/report`` route serves directly (the run-session common case).
+        rel = (m.get("artifact_path") or "").strip()
+        jid = (m.get("job_id") or "").strip()
+        if "report" not in roles and (
+                suffix == "pdf" or base.startswith("report.") or base == "report"
+                or (not rel and jid)):
+            roles["report"] = {"label": label, "href": href}
+            continue
+        # exec — an executive summary markdown (exec/summary in the name)
+        if "exec" not in roles and suffix in ("md", "markdown", "txt") and (
+                "exec" in base or "summary" in base):
+            roles["exec"] = {"label": label, "href": href}
+            continue
+        # agent — an agent-readable JSON
+        if "agent" not in roles and suffix == "json":
+            roles["agent"] = {"label": label, "href": href}
+            continue
+        # provenance — refs.bib / run.log (citations + the raw run log)
+        if "provenance" not in roles and (base in ("refs.bib", "run.log")
+                                          or suffix in ("bib", "log")):
+            roles["provenance"] = {"label": label, "href": href}
+            continue
+    return roles
+
+
+def _planning_roles(project_id, store_lane, members) -> dict:
+    """Resolve planning roles: master / impl / northstar (by filename)."""
+    roles = {}
+    for m in members:
+        base = _member_basename(m)
+        href = _member_href(project_id, store_lane, m)
+        if href is None:
+            continue
+        label = _member_label(m)
+        if "master" not in roles and base.startswith("master-plan"):
+            roles["master"] = {"label": label, "href": href}
+            continue
+        if "impl" not in roles and base.startswith("implementation-plan"):
+            roles["impl"] = {"label": label, "href": href}
+            continue
+        if "northstar" not in roles and base.startswith("north-star"):
+            roles["northstar"] = {"label": label, "href": href}
+            continue
+    return roles
+
+
+def _build_roles(folder_path, project_id, store_lane, members) -> dict:
+    """Resolve build roles: northstar / execlog / deliverable / plan.
+
+    northstar + execlog come from the session's own member files (by filename).
+    deliverable is the project's pinned/linked deliverable (``deliverables.py``);
+    plan is the most-recent plan set this build would execute on (``handoff.py``)
+    — both link via the existing routes. Absent roles are omitted.
+    """
+    roles = {}
+    for m in members:
+        base = _member_basename(m)
+        href = _member_href(project_id, store_lane, m)
+        if href is None:
+            continue
+        label = _member_label(m)
+        if "northstar" not in roles and base.startswith("north-star"):
+            roles["northstar"] = {"label": label, "href": href}
+            continue
+        if "execlog" not in roles and base.startswith("execution-log"):
+            roles["execlog"] = {"label": label, "href": href}
+            continue
+
+    # deliverable — the project's pinned/linked deliverable (newest pinned wins).
+    try:
+        import deliverables as _deliv
+        pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
+        if pinned:
+            rec = pinned[0]
+            rel = (rec.get("artifact_path") or "").strip().replace("\\", "/")
+            if rel:
+                roles["deliverable"] = {
+                    "label": rec.get("title") or rel,
+                    "href": _artifact_href(project_id, rel),
+                }
+    except Exception:
+        pass
+
+    # plan — the most-recent plan set a build session executes on (handoff).
+    try:
+        import handoff as _handoff
+        plan_set = _handoff.discover_recent_plan_set(folder_path, project_id)
+        if plan_set:
+            rel = (plan_set.get("master_plan_rel")
+                   or plan_set.get("impl_plan_rel") or "").strip()
+            rel = rel.replace("\\", "/")
+            if rel:
+                roles["plan"] = {
+                    "label": plan_set.get("title") or rel,
+                    "href": _artifact_href(project_id, rel),
+                }
+    except Exception:
+        pass
+    return roles
+
+
+def _find_session(folder_path, project_id, store_lane, session_id):
+    """Return the session record for ``session_id`` in a lane, or ``None``."""
+    import sessions as _sessions
+    for s in _sessions.list_sessions(folder_path, project_id, store_lane):
+        if s.get("session_id") == session_id:
+            return s
+    return None
+
+
+def session_doc_roles(project_id, lane, session_id, folder_path=None) -> dict:
+    """Per-lane ROLE→doc map for one session (v4 Wave 3, MASTER-PLAN cockpit).
+
+    Maps the session's member docs (by filename) to the LANE'S locked role set
+    and returns ``{role: {"label": str, "href": str}}`` where each ``href`` uses
+    the EXISTING routes (``/report`` for run docs, ``/artifact`` for discovered/
+    on-disk files; the deliverable/plan roles also resolve via those routes).
+
+    Role sets:
+      - research → exec · report · agent · provenance
+      - planning → master · impl · northstar
+      - build    → northstar · deliverable · execlog · plan
+
+    Roles whose document is ABSENT are OMITTED — never fabricated. ``folder_path``
+    is resolved from the registry when omitted (mirrors ``project_rollup``).
+    Stdlib only; never raises (returns ``{}`` on any resolution failure).
+    """
+    if folder_path is None:
+        import rnd_registry as _rnd2
+        proj = _rnd2.get_project(project_id)
+        folder_path = (proj or {}).get("folder_path", "")
+    store_lane = _eh._resolve_subdir(lane)
+    try:
+        session = _find_session(folder_path, project_id, store_lane, session_id)
+    except Exception:
+        session = None
+    if not session:
+        return {}
+    members = session.get("member_files", []) or []
+    kind = _lane_kind(store_lane)
+    if kind == "research":
+        return _research_roles(project_id, store_lane, members)
+    if kind == "planning":
+        return _planning_roles(project_id, store_lane, members)
+    if kind == "build":
+        return _build_roles(folder_path, project_id, store_lane, members)
+    return {}
+
+
 def render_markdown(structured: dict) -> str:
     """Render the structured summary to cache-ready markdown (step d).
 

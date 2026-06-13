@@ -55,10 +55,22 @@ TYPE_DOC = "doc"
 TYPE_SCRIPT = "script"
 TYPE_SKILL = "skill"
 TYPE_PROGRAM = "program"
+#: v4 Wave 7 added two launch-by-type kinds:
+#:   - ``tool``    — an agent tool; launch VERIFIES availability (no spawn).
+#:   - ``service`` — a long-running server; launch runs it as a persistent
+#:                   ``preview_server`` preview (free port != 8777, isolated temp
+#:                   data dir) and pulls up the running one on a second launch.
+TYPE_TOOL = "tool"
+TYPE_SERVICE = "service"
 
 #: Types that are EXECUTED as a subprocess (vs. ``doc`` which is read/rendered).
 EXECUTABLE_TYPES = frozenset((TYPE_SCRIPT, TYPE_SKILL, TYPE_PROGRAM))
-VALID_TYPES = frozenset((TYPE_DOC,)) | EXECUTABLE_TYPES
+#: Types whose launch is a STATUS VERIFICATION only — never a process spawn
+#: (skill/tool are "available if present / loaded at runtime"; for a deliverable
+#: we verify by existence/registry — NO spawn, per IMPLEMENTATION-PLAN Wave 7).
+VERIFY_TYPES = frozenset((TYPE_SKILL, TYPE_TOOL))
+VALID_TYPES = (frozenset((TYPE_DOC, TYPE_SERVICE)) | EXECUTABLE_TYPES
+               | VERIFY_TYPES)
 
 # ── Status values (the dashboard shows these) ───────────────────────────────
 
@@ -516,3 +528,223 @@ def list_pinned_deliverables(folder_path, project_id: str) -> list:
         if rec.get("source") in (SOURCE_DECLARED, SOURCE_PINNED):
             out.append(rec)
     return out
+
+
+def get_pinned_deliverable(folder_path, project_id: str, deliverable_id: str):
+    """Return the pinned/declared deliverable effort whose ``job_id`` matches.
+
+    Deliverables are surfaced as deliverables-lane effort records keyed by a
+    content-addressed ``job_id`` (see :func:`pin_deliverable`). ``launch_*`` and
+    the launch endpoint identify a deliverable by that id. Returns the record
+    dict or ``None`` (unknown id → the endpoint answers 404).
+    """
+    for rec in list_pinned_deliverables(folder_path, project_id):
+        if rec.get("job_id") == deliverable_id:
+            return rec
+    return None
+
+
+# ── v4 Wave 7: type-aware launch ────────────────────────────────────────────
+#
+# Every Foreman run auto-pins one deliverable. Clicking *launch* adapts to the
+# deliverable TYPE (canonical UI: the "📦 Deliverable" Extras card):
+#   - skill / tool → VERIFY status only (available | loaded | missing). NO spawn.
+#   - service      → launch a PERSISTENT preview (reuses preview_server's
+#                    discipline: free port != 8777, isolated temp data dir,
+#                    loopback bind, health-check). A SECOND launch pulls up the
+#                    already-running one instead of double-spawning.
+#   - program      → run in a window: run-to-result via run_deliverable (captured
+#                    output / exit-0 contract).
+#   - doc          → return the rendered view href (the existing /artifact route;
+#                    report_viewer renders markdown).
+#
+# Reuses preview_server + report_viewer + the deliverables run/pin primitives —
+# nothing is forked. Every spawned port is OS-assigned + HARD-guarded != 8777
+# with an isolated temp data dir; nothing touches the live :8777 or real data.
+
+#: Verify-status values returned for skill/tool launches (no process spawn).
+VERIFY_AVAILABLE = "available"
+VERIFY_LOADED = "loaded"
+VERIFY_MISSING = "missing"
+
+#: The user's agent-skills root (``~/.claude/skills/<name>``). Overridable via
+#: ``ANCHOR_SKILLS_DIR`` so tests verify against a temp dir — NEVER the live one.
+_SKILLS_ENV = "ANCHOR_SKILLS_DIR"
+#: The user's agent-tools root, if configured (``ANCHOR_TOOLS_DIR``). Tools have
+#: no single canonical on-disk home, so tool verification is registry/dir-based
+#: and overridable for tests; absent → the tool is reported ``missing`` honestly.
+_TOOLS_ENV = "ANCHOR_TOOLS_DIR"
+
+
+def _skills_root() -> Path:
+    """The agent-skills directory (``$ANCHOR_SKILLS_DIR`` else ``~/.claude/skills``)."""
+    override = os.environ.get(_SKILLS_ENV)
+    if override:
+        return Path(override)
+    return Path.home() / ".claude" / "skills"
+
+
+def _tools_root():
+    """The agent-tools directory if configured (``$ANCHOR_TOOLS_DIR``), else None."""
+    override = os.environ.get(_TOOLS_ENV)
+    return Path(override) if override else None
+
+
+def _verify_name(rec: dict) -> str:
+    """The skill/tool identifier to verify — the title, else the artifact stem."""
+    name = (rec.get("title") or "").strip()
+    if name:
+        return name
+    rel = rec.get("artifact_path") or ""
+    return Path(rel).stem or rel
+
+
+def verify_skill_or_tool(dtype: str, rec: dict) -> dict:
+    """Verify a skill/tool deliverable's STATUS by existence — NO process spawn.
+
+    A skill is "available" if present on disk under the skills root; a tool is
+    "available" if present under the (configured) tools root. We deliberately do
+    NOT spawn anything: a deliverable's skill/tool is verified by
+    existence/registry only (IMPLEMENTATION-PLAN Wave 7 — "verify available /
+    loaded; NO spawn"). ``loaded`` (runtime-active) is reported when a presence
+    marker indicates an active load; absent the marker we report ``available``
+    for a present skill/tool. Returns ``{kind, status, detail, name}``.
+    """
+    name = _verify_name(rec)
+    if dtype == TYPE_SKILL:
+        root = _skills_root()
+        sdir = root / name
+        # A skill is "available" if its directory (or a SKILL.md) is present.
+        present = sdir.is_dir() or (root / f"{name}.md").is_file() \
+            or (sdir / "SKILL.md").is_file()
+        if present:
+            return {"kind": TYPE_SKILL, "status": VERIFY_AVAILABLE,
+                    "name": name,
+                    "detail": f"skill {name!r} present at {sdir}"}
+        return {"kind": TYPE_SKILL, "status": VERIFY_MISSING, "name": name,
+                "detail": f"skill {name!r} not found under {root}"}
+    # tool
+    root = _tools_root()
+    if root is not None:
+        tdir = root / name
+        present = tdir.exists() or (root / f"{name}.py").is_file() \
+            or (root / f"{name}.json").is_file()
+        if present:
+            return {"kind": TYPE_TOOL, "status": VERIFY_AVAILABLE, "name": name,
+                    "detail": f"tool {name!r} present under {root}"}
+        return {"kind": TYPE_TOOL, "status": VERIFY_MISSING, "name": name,
+                "detail": f"tool {name!r} not found under {root}"}
+    return {"kind": TYPE_TOOL, "status": VERIFY_MISSING, "name": name,
+            "detail": "no tools registry configured (set ANCHOR_TOOLS_DIR)"}
+
+
+def _doc_href(project_id: str, rel: str) -> str:
+    """The rendered-view href for a ``doc`` deliverable (the /artifact route).
+
+    Reuses the existing traversal-safe ``GET /artifact/<pid>?path=<rel>`` route,
+    which serves a discovered artifact (markdown is rendered by report_viewer).
+    """
+    from urllib.parse import quote
+    return f"/artifact/{quote(project_id, safe='')}?path={quote(rel, safe='')}"
+
+
+def launch_deliverable(folder_path, project_id: str, deliverable_id: str,
+                       preview_mod=None, health_timeout: float = None,
+                       timeout: float = DEFAULT_TIMEOUT) -> dict:
+    """Type-aware launch of a pinned deliverable. Dispatches on its type.
+
+    Resolves the pinned deliverable by ``deliverable_id`` (its content-addressed
+    ``job_id``) and adapts:
+
+    - **skill / tool** → VERIFY status only (``available`` | ``loaded`` |
+      ``missing``); returns ``{ok, kind, type, status, detail}``. NO spawn.
+    - **service** → launch a PERSISTENT preview (``preview_server.start_preview``
+      — free port != 8777, isolated temp ``ANCHOR_DATA_DIR``, loopback bind,
+      health-check before returning the URL). If a RUNNING preview for this
+      deliverable's target already exists, PULL IT UP (return its URL) instead
+      of double-spawning. Returns ``{ok, type, url, port, preview_id, pulled_up}``.
+    - **program** → run-to-result via :func:`run_deliverable` (captured output /
+      exit-0 contract, stdin closed, tree-kill on timeout). Returns
+      ``{ok, type, status, record}``.
+    - **doc** → return the rendered-view href (existing ``/artifact`` route).
+      Returns ``{ok, type, href}``.
+
+    ``preview_mod`` lets a test inject a stubbed ``preview_server`` (so the gate
+    never spawns a real long-running server bound to a real port). Unknown id →
+    ``{ok: False, reason: "unknown deliverable"}`` (the endpoint maps that to a
+    404).
+    """
+    rec = get_pinned_deliverable(folder_path, project_id, deliverable_id)
+    if rec is None:
+        return {"ok": False, "reason": "unknown deliverable",
+                "deliverable_id": deliverable_id}
+
+    dtype = (rec.get("deliverable_type") or "").strip().lower()
+    if dtype not in VALID_TYPES:
+        dtype = infer_type(rec.get("artifact_path") or "")
+    rel = rec.get("artifact_path") or ""
+
+    # skill / tool → verify only, never spawn.
+    if dtype in VERIFY_TYPES:
+        res = verify_skill_or_tool(dtype, rec)
+        return {"ok": True, "type": dtype, "deliverable_id": deliverable_id,
+                **res}
+
+    # doc → rendered view href (no process).
+    if dtype == TYPE_DOC:
+        if not rel:
+            return {"ok": False, "reason": "doc deliverable has no path",
+                    "deliverable_id": deliverable_id}
+        return {"ok": True, "type": TYPE_DOC, "deliverable_id": deliverable_id,
+                "href": _doc_href(project_id, rel)}
+
+    # service → persistent preview; pull up the running one if present.
+    if dtype == TYPE_SERVICE:
+        pv = preview_mod
+        if pv is None:
+            import preview_server as pv  # lazy: only services need it
+        # Pull-up-if-running: a live preview for this target is reused, not
+        # double-spawned.
+        for prev in pv.list_previews(project_id):
+            if (prev.get("status") == pv.STATUS_RUNNING
+                    and (prev.get("target") or "") == rel):
+                return {"ok": True, "type": TYPE_SERVICE,
+                        "deliverable_id": deliverable_id,
+                        "url": prev.get("url"), "port": prev.get("port"),
+                        "preview_id": prev.get("preview_id"),
+                        "pulled_up": True}
+        kw = {}
+        if health_timeout is not None:
+            kw["health_timeout"] = health_timeout
+        res = pv.start_preview(folder_path, project_id, target=rel, **kw)
+        if not res.get("ok"):
+            return {"ok": False, "type": TYPE_SERVICE,
+                    "deliverable_id": deliverable_id,
+                    "reason": res.get("reason", "preview did not start"),
+                    "port": res.get("port")}
+        return {"ok": True, "type": TYPE_SERVICE,
+                "deliverable_id": deliverable_id,
+                "url": res.get("url"), "port": res.get("port"),
+                "preview_id": res.get("preview_id"), "pulled_up": False}
+
+    # program (or script) → run-to-result with the per-type contract.
+    target_path = rel
+    try:
+        abs_target = (Path(folder_path) / rel).as_posix() if rel else None
+    except Exception:
+        abs_target = rel
+    record = run_deliverable(
+        TYPE_PROGRAM if dtype == TYPE_PROGRAM else TYPE_SCRIPT,
+        argv=[sys.executable, abs_target] if (abs_target and
+              Path(str(abs_target)).suffix.lower() == ".py") else None,
+        target=abs_target,
+        cwd=folder_path,
+        timeout=timeout,
+        folder_path=folder_path,
+        project_id=project_id,
+        deliverable_id=deliverable_id,
+        name=rec.get("title") or rel,
+    )
+    return {"ok": record.get("status") == STATUS_SUCCESS, "type": dtype,
+            "deliverable_id": deliverable_id, "status": record.get("status"),
+            "record": record}
