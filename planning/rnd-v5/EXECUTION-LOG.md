@@ -147,3 +147,40 @@
   "no deliverable pinned yet — pin one" (honest, no fabrication).
 - **COMMIT (scoped):** `550c580` — deliverables.py + anchor_gui.py +
   test_build_deliverable.py only (no runtime churn).
+
+## Wave 5 — Grass Catcher B+C hybrid idea workbench — GREEN (2026-06-14)
+
+- **EXECUTE** (fresh sub-agent): Grass column tile opens a FULL-WIDTH workbench panel
+  matching the mockup — filter tabs (All/raw/refined/promoted + counts + search +
+  add/from-inbox), two-pane (idea list + selected-idea workbench: text, Develop
+  Research/Plan, engine toggle, Promote, workbench terminal, refinement history with
+  pull). effort_history extended: stable grass-<hash> ids, status raw→refined→
+  promoted, versioned refinements grass-<id>/dev-N (append-only, race-safe), pull,
+  develop (seeded session), promote-link. Endpoints token-gated; read-only GET grass.
+- **GATE (orchestrator-run, stub PTY):** 698 passed, 1 skipped (baseline 684+1, +14).
+- **REVIEW (adversarial, prompted to refute): HALT — 1 BLOCKER, 1 MINOR.**
+  **BLOCKER:** `grass_save_refinement` existed + was backend-tested but had NO JS
+  caller — the develop → "refined output saved back as a new version" loop
+  (IMPL-PLAN line 150 / Wave-5 G/W/T line 162) was UNREACHABLE in the product, and
+  the Playwright test masked it by PRE-FABRICATING the refinement (calling
+  `eh.save_grass_refinement` directly before asserting it rendered). MINOR:
+  discovered-idea promote-link vulnerable to reconcile pruning if its source doc is
+  later deleted (pre-existing edge). The other 6 points CONFIRMED-OK: COPY-never-
+  destroy proven at every path (append-only, race-safe dev-N, promote annotates in
+  place); status lifecycle coherent; pull seeds real content; UI gate is a REAL
+  Playwright test (not grep) for filter/search/select/develop; mockup structure
+  present; endpoints token-gated + reuse the seed path; stdlib-only; never :8777.
+- **FIX (orchestrator):** wired a "Save refinement" control into the workbench
+  terminal bar (enabled once a Develop session is live) → POSTs the session output to
+  `grass_save_refinement` → re-fetches + re-renders the history so the new
+  grass-<id>/dev-N row appears with pull controls and the idea flips to refined.
+  Extended the Playwright test to click Save and assert `dev-2` appears AS A RESULT
+  (not pre-seeded). (MINOR left as a noted pre-existing edge.)
+- **RE-GATE (orchestrator-run, stub PTY):** 698 passed, 1 skipped. UI verified:
+  rendered-DOM (filter tabs + two-pane + history; old idea-board markup gone), real
+  Playwright filter→search→select→develop→SAVE→dev-N-appears, and an orchestrator
+  screenshot vs the mockup (filter tabs · two-pane list+workbench · id/status/source
+  chips · Develop/engine/Promote · terminal + Save · refinement history with pull —
+  strong fidelity).
+- **COMMIT (scoped):** `bf8b438` — effort_history.py + anchor_gui.py +
+  test_grass_workbench.py + test_grass_board.py only (no runtime churn).
