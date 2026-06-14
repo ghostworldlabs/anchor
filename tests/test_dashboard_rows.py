@@ -147,9 +147,12 @@ def test_masthead_renders_option_b_lockup(env):
     # The Anchor title text and the GWL wordmark + green "Labs".
     assert "Anchor" in html
     assert "Ghost World" in html and "Labs" in html
-    # The NextGen Nuclear credit with the ☢ radiation glyph (&#9762;).
+    # The NextGen Nuclear credit with the radiation trefoil. It is rendered as an
+    # inline SVG (green fill) rather than the ☢ emoji glyph (&#9762;) so it stays
+    # green on platforms — notably iOS — that force-color the emoji presentation.
     assert "Powered by NextGen Nuclear" in html
-    assert "&#9762;" in html
+    assert 'aria-label="radiation"' in html
+    assert 'fill="#22c55e"' in html
 
 
 def test_masthead_pill_is_to_the_right_of_lock(env):

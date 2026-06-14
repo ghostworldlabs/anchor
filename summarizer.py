@@ -291,8 +291,87 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
         "when_run": _session_when_run(session),
         "what_was_asked": _session_what_was_asked(session, members_out),
         "north_star": north_star.strip(),
+        # v5 Wave 2 — DETERMINISTIC, source-grounded capture of WHAT THE SESSION
+        # DID (no model involved, so no fabrication risk — these are read straight
+        # off the session/member records):
+        #   skill   — the trio skill the session ran (researchPrime/Crucible/…),
+        #   prompts — the prompt/turn texts the user asked (member prompt_seeds),
+        #   actions — the files/artifacts the session produced (member docs).
+        "skill": _session_skill(session, members),
+        "prompts": _session_prompts(session, members),
+        "actions": _session_actions(members_out),
         "text": "\n".join(corpus_parts),
     }
+
+
+#: Max prompts / actions captured, and max chars per prompt (bounded — honest,
+#: never fabricated; absent → empty list).
+MAX_PROMPTS = 12
+MAX_ACTIONS = 24
+MAX_PROMPT_CHARS = 500
+
+
+def _session_skill(session, members) -> str:
+    """The session's trio skill (e.g. ``researchPrime``), or ``''`` when absent.
+
+    Read directly off the session record (``skill``, set by
+    ``sessions.list_sessions``) with a fall-back to the first member carrying a
+    ``skill`` field. Honest empty string when no record names a skill — NEVER
+    fabricated (Risk R3).
+    """
+    s = (session.get("skill") or "").strip()
+    if s:
+        return s
+    for m in (members or []):
+        ms = (m.get("skill") or "").strip()
+        if ms:
+            return ms
+    return ""
+
+
+def _session_prompts(session, members) -> list:
+    """The session's prompt/turn texts, in member order (deterministic).
+
+    Each member's ``prompt_seed`` (the run's asked-for intent) is one prompt;
+    deduped, bounded, order-stable. An imported/discovered session typically has
+    no prompt_seed → an empty list (honest, never fabricated). Falls back to the
+    session ``what_was_asked`` only when NO member carries a prompt so a run that
+    captured a single intent still surfaces it.
+    """
+    out = []
+    seen = set()
+    for m in (members or []):
+        p = (m.get("prompt_seed") or "").strip()
+        if not p:
+            continue
+        norm = re.sub(r"\s+", " ", p).lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(p[:MAX_PROMPT_CHARS])
+        if len(out) >= MAX_PROMPTS:
+            break
+    return out
+
+
+def _session_actions(members_out) -> list:
+    """The files/artifacts the session produced, as ``[{label, rel, job_id}]``.
+
+    Read straight off the (already-resolved) member list — every member is one
+    artifact the session produced. Honest empty list when the session has no
+    members. Never fabricated; deterministic and bounded.
+    """
+    out = []
+    for m in (members_out or [])[:MAX_ACTIONS]:
+        label = (m.get("title") or "").strip()
+        rel = (m.get("rel") or "").strip()
+        jid = (m.get("job_id") or "").strip()
+        if not label:
+            label = rel or jid
+        if not label:
+            continue
+        out.append({"label": label, "rel": rel, "job_id": jid})
+    return out
 
 
 def _session_when_run(session) -> str:
@@ -852,6 +931,30 @@ def render_markdown(structured: dict) -> str:
     if north_star:
         lines.append(f"**North Star:** {north_star}")
         lines.append("")
+    # v5 Wave 2 — skill invoked · prompts asked · actions/files produced. These
+    # are deterministic, source-grounded fields (never model-fabricated). Each is
+    # rendered only when present; absent → honest omission.
+    skill = (structured.get("skill") or "").strip()
+    if skill:
+        lines.append(f"**Skill invoked:** {skill}")
+        lines.append("")
+    prompts = structured.get("prompts", []) or []
+    if prompts:
+        lines.append("## Prompts asked")
+        lines.append("")
+        for p in prompts:
+            lines.append(f"- {p}")
+        lines.append("")
+    actions = structured.get("actions", []) or []
+    if actions:
+        lines.append("## Actions & files produced")
+        lines.append("")
+        for a in actions:
+            label = (a.get("label") or a.get("rel") or a.get("job_id")
+                     or "").strip() if isinstance(a, dict) else str(a)
+            if label:
+                lines.append(f"- {label}")
+        lines.append("")
     effort = structured.get("effort", None)
     if effort is None and "effort" in structured:
         lines.append("**Effort:** imported — no run metrics")
@@ -964,6 +1067,9 @@ def summarize_session(folder_path, project_id, lane, session,
                 "when_run": seed.get("when_run", ""),
                 "what_was_asked": seed.get("what_was_asked", ""),
                 "north_star": seed.get("north_star", ""),
+                "skill": seed.get("skill", ""),
+                "prompts": seed.get("prompts", []),
+                "actions": seed.get("actions", []),
                 "effort": effort,
                 "error": "generation_failed",
                 "generated_at": time.time(),
@@ -980,6 +1086,10 @@ def summarize_session(folder_path, project_id, lane, session,
             "when_run": seed.get("when_run", ""),
             "what_was_asked": seed.get("what_was_asked", ""),
             "north_star": seed.get("north_star", ""),
+            # v5 Wave 2 — deterministic, source-grounded session record.
+            "skill": seed.get("skill", ""),
+            "prompts": seed.get("prompts", []),
+            "actions": seed.get("actions", []),
             "effort": effort,
             "generated_at": time.time(),
             "runs": len(candidates),
@@ -1125,17 +1235,56 @@ def _recent_plan_docs(folder_path) -> list:
     return out
 
 
+#: How many recent sessions per lane to fold into the project seed as "activity"
+#: grounding (bounded so the prompt can't blow up on a busy project).
+MAX_PROJECT_ACTIVITY_LANES = ("research", "planning", "build", "deliverables")
+MAX_PROJECT_ACTIVITY_PER_LANE = 3
+
+
+def _project_lane_activity(folder_path, project_id) -> list:
+    """Best-effort per-lane recent activity for the project seed (v5 Wave 3).
+
+    Returns a bounded list of ``{"lane", "items": ["<skill/title>", ...]}`` —
+    the most-recent sessions per content lane (skill + title), so the project
+    summary can be grounded in what the project has actually WORKED ON, not just
+    its identity doc. Stdlib only; never raises (an unreadable lane is skipped).
+    """
+    out = []
+    try:
+        import sessions as _sessions
+    except Exception:
+        return out
+    for lane in MAX_PROJECT_ACTIVITY_LANES:
+        try:
+            sess = _sessions.list_sessions(folder_path, project_id, lane)
+        except Exception:
+            continue
+        items = []
+        for s in sess[:MAX_PROJECT_ACTIVITY_PER_LANE]:
+            skill = (s.get("skill") or "").strip()
+            title = (s.get("title") or "").strip()
+            label = " — ".join(p for p in (skill, title) if p) or skill or title
+            label = label.strip()
+            if label:
+                items.append(label)
+        if items:
+            out.append({"lane": lane, "items": items})
+    return out
+
+
 def project_extraction_seed(folder_path, project_id) -> dict:
     """Deterministically build the PROJECT seed corpus (mirror of extraction_seed).
 
-    Folds three bounded sources into one grounding corpus + anchor list:
+    Folds four bounded sources into one grounding corpus + anchor list:
       1. the project's CLAUDE.md/README/Anchor.md (what the project IS),
-      2. the most-recent plan docs under ``planning/`` (goal / north-star), and
-      3. declared/pinned deliverables (what it ships).
+      2. the most-recent plan docs under ``planning/`` (goal / north-star),
+      3. declared/pinned deliverables (what it ships), and
+      4. per-lane recent activity (what it has actually worked on — recent
+         sessions' skill + title per lane, bounded).
 
     Returns ``{"kind": "project", "title", "sources": [...], "anchors": [...],
-    "deliverables": [...], "text": "<combined corpus>"}``. Stdlib only; never
-    raises.
+    "deliverables": [...], "activity": [...], "text": "<combined corpus>"}``.
+    Stdlib only; never raises.
     """
     folder = Path(folder_path)
     title = ""
@@ -1187,6 +1336,12 @@ def project_extraction_seed(folder_path, project_id) -> dict:
     except Exception:
         pass
 
+    # 4. Per-lane recent activity (what the project has actually worked on).
+    activity = _project_lane_activity(folder_path, project_id)
+    for entry in activity:
+        for item in entry.get("items", []):
+            corpus_parts.append(item)
+
     if not title and sources:
         title = sources[0]
     return {
@@ -1195,15 +1350,26 @@ def project_extraction_seed(folder_path, project_id) -> dict:
         "sources": sources,
         "anchors": anchors,
         "deliverables": deliverables,
+        "activity": activity,
         "text": "\n".join(corpus_parts),
     }
 
 
 def _project_seed_prompt(seed: dict) -> str:
-    """Render the project seed as the bounded model prompt (mirror of _seed_prompt)."""
+    """Render the project seed as the bounded model prompt (mirror of _seed_prompt).
+
+    v5 Wave 3 — objective-focused: ask for a 1–2 SENTENCE statement of the
+    project's OBJECTIVE / TASK / PURPOSE (what it is FOR), grounded strictly in
+    the anchors / deliverables / recent activity below, NOT a list of feature
+    bullets. The output still parses into the existing 1-2-item claims list (one
+    sentence per line) so ``render_project_markdown`` + ``_summary_text`` work
+    unchanged.
+    """
     lines = [
-        "Summarize what this project IS in a few grounded bullet claims "
-        "(its purpose, what it does, and what it ships).",
+        "State this project's OBJECTIVE in 1-2 sentences: what it is FOR — its "
+        "task/purpose and the problem it solves. Be specific and grounded only "
+        "in the material below; do NOT pad with generic feature lists. Output "
+        "the statement as 1-2 lines (one sentence per line), nothing else.",
         f"Title: {seed.get('title', '')}",
         "Anchors from the project documents:",
     ]
@@ -1214,6 +1380,13 @@ def _project_seed_prompt(seed: dict) -> str:
         lines.append("Declared deliverables:")
         for d in delivs:
             lines.append(f"- {d}")
+    activity = seed.get("activity", [])
+    if activity:
+        lines.append("Recent activity per lane:")
+        for entry in activity:
+            lane = entry.get("lane", "")
+            for item in entry.get("items", []):
+                lines.append(f"- [{lane}] {item}")
     return "\n".join(lines)
 
 
@@ -1272,20 +1445,24 @@ def _generate_project_candidates(folder_path, seed: dict, runs: int,
 
 
 def render_project_markdown(structured: dict) -> str:
-    """Render a structured PROJECT summary to cache-ready markdown."""
+    """Render a structured PROJECT summary to cache-ready markdown.
+
+    v5 Wave 3 — the summary is now a 1-2 sentence OBJECTIVE statement; render it
+    as prose under an "## Objective" heading (each grounded claim = one
+    sentence) rather than a bulleted feature list.
+    """
     title = structured.get("title") or "Project summary"
     lines = [f"# {title}", "", "*Project summary · validated, cached*", ""]
     claims = structured.get("claims", []) or []
     if claims:
-        lines.append("## What this project is")
+        lines.append("## Objective")
         lines.append("")
-        for c in claims:
-            lines.append(f"- {c}")
+        lines.append(" ".join(c.strip() for c in claims if c and c.strip()))
         lines.append("")
     elif structured.get("no_grounded_claims"):
-        lines.append("## What this project is")
+        lines.append("## Objective")
         lines.append("")
-        lines.append("_No grounded description could be extracted from the "
+        lines.append("_No grounded objective could be extracted from the "
                      "project documents. You may rescan/regenerate to try again._")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

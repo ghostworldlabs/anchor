@@ -987,6 +987,90 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+#: Max chars of prior-session context folded into a continue-live seed (bounded).
+_MAX_CONTINUE_SEED_CHARS = 4000
+
+
+def _build_continue_seed(folder_path, project_id, lane, source_session_id):
+    """Build the seed_context text for "Continue in a live session" (v5 Wave 2).
+
+    READ-ONLY: resolves the prior (done/historical) session and assembles a
+    compact context string from its CACHED summary, preferring (in order):
+
+      1. the cached summary's rendered markdown (``markdown``), else
+      2. a deterministic digest of the cached summary's structured fields
+         (skill · what-was-asked · north-star · prompts · files produced), else
+      3. the live session record's intent (``what_was_asked`` / ``title``).
+
+    NEVER mutates the original session/summary (Risk R2) — every access is a read.
+    Returns a bounded string (or ``""`` when nothing resolves, in which case the
+    new session is started bare-seeded with just the lane skill). Stdlib only;
+    never raises.
+    """
+    store_lane = _eh._resolve_subdir(lane)
+    cached = None
+    try:
+        cached = _summarizer.load_cached(folder_path, project_id, store_lane,
+                                         source_session_id)
+    except Exception:
+        cached = None
+
+    parts = ["This is a continuation of an earlier session in the "
+             + str(lane) + " lane. Here is its summary so you can pick up the "
+             "work:"]
+    if isinstance(cached, dict):
+        md = (cached.get("markdown") or "").strip()
+        if md:
+            parts.append(md)
+        else:
+            skill = (cached.get("skill") or "").strip()
+            if skill:
+                parts.append("Skill: " + skill)
+            asked = (cached.get("what_was_asked") or "").strip()
+            if asked:
+                parts.append("Originally asked: " + asked)
+            ns = (cached.get("north_star") or "").strip()
+            if ns:
+                parts.append("North Star: " + ns)
+            prompts = cached.get("prompts") or []
+            if prompts:
+                parts.append("Prompts asked: "
+                             + " | ".join(str(p) for p in prompts))
+            actions = cached.get("actions") or []
+            labels = []
+            for a in actions:
+                if isinstance(a, dict):
+                    lbl = (a.get("label") or a.get("rel")
+                           or a.get("job_id") or "").strip()
+                else:
+                    lbl = str(a).strip()
+                if lbl:
+                    labels.append(lbl)
+            if labels:
+                parts.append("Files produced: " + ", ".join(labels))
+    else:
+        # No cached summary — fall back to the live session record's intent.
+        session = None
+        try:
+            for s in _sessions.list_sessions(folder_path, project_id, lane):
+                if s.get("session_id") == source_session_id:
+                    session = s
+                    break
+        except Exception:
+            session = None
+        if session:
+            asked = (session.get("title") or "").strip()
+            if asked:
+                parts.append("Originally: " + asked)
+
+    text = "\n\n".join(p for p in parts if p and p.strip()).strip()
+    # If we never resolved any real prior context (only the lead-in line), return
+    # empty so the new session is started bare-seeded (just the lane skill).
+    if len(parts) <= 1:
+        return ""
+    return text[:_MAX_CONTINUE_SEED_CHARS]
+
+
 def _trigger_project_session_summaries(folder_path, project_id):
     """Proactively generate summaries for all of a project's sessions lacking a
     cache (Wave 6) — bounded, background, gated like the project-summary trigger.
@@ -1576,43 +1660,139 @@ def _idea_source_label(eff) -> str:
     return "manual"
 
 
-def _render_grass_board(folder_path, project_id) -> str:
-    """Render the Grass lane as an IDEA BOARD (v4 Wave 6) — not a flat text page.
+#: Human label for a grass idea's lifecycle status (used by the workbench chips).
+_GRASS_STATUS_LABEL = {
+    _eh.GRASS_RAW: "raw",
+    _eh.GRASS_REFINED: "refined",
+    _eh.GRASS_PROMOTED: "promoted",
+}
 
-    Each grass effort (manual add / INBOX promotion / discovered idea-doc) becomes
-    an idea CARD showing the idea text, a source chip, and two promote actions —
-    **→ Research** and **→ Plan** — each calling ``promoteGrass(idea_id, lane)``
-    which POSTs ``/api/rnd/promote_grass`` and opens the new seeded session's
-    inline panel. The "+ add idea" / "+ from inbox" affordances are rendered by
-    the caller (the column footer), as in the mockup's Extras grass board.
+
+def _render_grass_column_tile(folder_path, project_id) -> str:
+    """Render the Grass LANE column content: a single tile that OPENS the
+    full-width two-pane idea workbench panel (v5 Wave 5).
+
+    The 5-column cockpit board's Grass column is too narrow for the B+C hybrid
+    two-pane workbench, so the column shows one clickable tile (idea count +
+    status mix) whose click (``openGrassWorkbench()``) expands the workbench panel
+    in ``#panelStack`` — exactly like a lane tile opens a session panel. The old
+    single-column ``idea-board`` / ``idea-card`` markup is GONE.
     """
     try:
-        efforts = _eh.list_efforts(folder_path, project_id, "grass")
+        ideas = _eh.grass_workbench_data(folder_path, project_id)
     except Exception:
-        efforts = []
-    if not efforts:
-        return ("<div class='idea-empty'>No ideas yet — "
-                "capture one with “+ Add idea”.</div>")
-    cards = []
-    for eff in efforts:
-        text = (eff.get("title") or "").strip() or "(untitled idea)"
-        idea_id = eff.get("job_id", "") or ""
-        src = _idea_source_label(eff)
-        esc_text = html_lib.escape(text)
-        esc_id = html_lib.escape(idea_id, quote=True)
-        cards.append(
-            f"<div class='idea-card' data-idea=\"{esc_id}\">"
-            f"<div class='itxt'>{esc_text}</div>"
-            f"<div class='irow'>"
-            f"<span class='idea-src'>{html_lib.escape(src)}</span>"
-            f"<span class='isp'></span>"
-            f"<span class='idea-promote' "
-            f"onclick=\"promoteGrass('{esc_id}','research')\">→ Research</span>"
-            f"<span class='idea-promote' "
-            f"onclick=\"promoteGrass('{esc_id}','plan')\">→ Plan</span>"
-            f"</div></div>"
+        ideas = []
+    n = len(ideas)
+    n_raw = sum(1 for i in ideas if i["status"] == _eh.GRASS_RAW)
+    n_ref = sum(1 for i in ideas if i["status"] == _eh.GRASS_REFINED)
+    n_pro = sum(1 for i in ideas if i["status"] == _eh.GRASS_PROMOTED)
+    light = "green" if n_ref else ("amber" if n_raw else "grey")
+    sub = (f"{n_raw} raw · {n_ref} refined · {n_pro} promoted"
+           if n else "no ideas yet")
+    return (
+        f"<div class='tile lane-tile grass-tile' data-grass-tile='1' "
+        f"data-light='{light}' onclick='openGrassWorkbench()'>"
+        f"<div class='tr1'><span class='lane'>ideas</span>"
+        f"<span class='ver'></span>"
+        f"<span class='lt {light}' aria-hidden='true'></span></div>"
+        f"<div class='ttl'>Idea workbench</div>"
+        f"<div class='st'><span class='state done'>{html_lib.escape(sub)}</span>"
+        f"<span class='age'>· {n} idea{'s' if n != 1 else ''}</span></div>"
+        f"</div>"
+    )
+
+
+def _render_grass_idea_li(idea) -> str:
+    """Render one idea as a ``.gli`` row for the workbench LEFT list (mockup C)."""
+    status = idea["status"]
+    cls_extra = (" r" if status == _eh.GRASS_REFINED
+                 else (" p" if status == _eh.GRASS_PROMOTED else ""))
+    title = html_lib.escape(idea["title"] or "(untitled idea)")
+    short = html_lib.escape(idea["short_id"])
+    idea_attr = html_lib.escape(idea["idea_id"], quote=True)
+    st_lbl = html_lib.escape(_GRASS_STATUS_LABEL.get(status, status))
+    src = html_lib.escape(idea["source"])
+    return (
+        f"<div class='gli{cls_extra}' data-idea=\"{idea_attr}\" "
+        f"data-status='{html_lib.escape(status)}' "
+        f"data-title=\"{html_lib.escape(idea['title'], quote=True)}\">"
+        f"<div class='t'>{title}</div>"
+        f"<div class='m'><span class='dot'></span>"
+        f"<span class='idchip'>{short}</span>"
+        f"<span class='stchip {html_lib.escape(status)}'>{st_lbl}</span>"
+        f"<span class='srcchip'>{src}</span></div></div>"
+    )
+
+
+def _render_grass_workbench(folder_path, project_id) -> str:
+    """Render the FULL B+C hybrid Grass workbench (the approved mockup), as a
+    hidden template the panel manager clones into ``#panelStack`` (v5 Wave 5).
+
+    Structure (matching ``_mockups/grass_catcher_refined.html``):
+      - ``.gtabs`` filter-tab row: 🌿 · All/raw/refined/promoted (with counts) ·
+        a ``.gsearch`` search box · ``+ Add idea`` / ``+ From inbox`` buttons.
+      - ``.gwrap`` two-pane grid: ``.glist`` (filtered idea list, ``.gli`` rows
+        with ``.idchip``/``.stchip``/``.srcchip``) · ``.gwork`` (the selected
+        idea's workbench: title + id + status, ``.desc``, ``.devbar`` with
+        Develop 🔬 Research / 📐 Plan + engine toggle + → Promote to a lane, a
+        ``.tpane`` workbench terminal, and ``.ghist`` refinement history with
+        per-version pull buttons).
+
+    The JS (``openGrassWorkbench`` / ``selectGrassIdea`` / ``filterGrass`` /
+    ``developGrass`` / ``pullGrass``) wires interactivity; this server render
+    provides the data-bearing DOM (so the rendered-DOM assertions are real).
+    """
+    try:
+        ideas = _eh.grass_workbench_data(folder_path, project_id)
+    except Exception:
+        ideas = []
+    n = len(ideas)
+    n_raw = sum(1 for i in ideas if i["status"] == _eh.GRASS_RAW)
+    n_ref = sum(1 for i in ideas if i["status"] == _eh.GRASS_REFINED)
+    n_pro = sum(1 for i in ideas if i["status"] == _eh.GRASS_PROMOTED)
+    tabs = (
+        "<div class='gtabs'>"
+        "<span class='ic'>&#127807;</span>"
+        f"<span class='gtab on' data-filter='all'>All <span class='n'>{n}</span></span>"
+        f"<span class='gtab' data-filter='raw'>raw <span class='n'>{n_raw}</span></span>"
+        f"<span class='gtab' data-filter='refined'>refined "
+        f"<span class='n'>{n_ref}</span></span>"
+        f"<span class='gtab' data-filter='promoted'>promoted "
+        f"<span class='n'>{n_pro}</span></span>"
+        "<span class='sp'></span>"
+        "<input class='gsearch' type='search' placeholder='search ideas&hellip;' "
+        "oninput='filterGrass()'>"
+        "<button class='mini' onclick='addIdea()'>+ Add idea</button>"
+        "<button class='mini' onclick='promoteInbox()'>+ From inbox</button>"
+        "</div>"
+    )
+    if ideas:
+        lis = "".join(_render_grass_idea_li(i) for i in ideas)
+        list_html = (
+            f"<div class='glist'>{lis}"
+            "<div class='gadd'><button class='mini' style='width:100%' "
+            "onclick='addIdea()'>+ Add idea</button></div></div>"
         )
-    return "<div class='idea-board'>" + "".join(cards) + "</div>"
+    else:
+        list_html = (
+            "<div class='glist'><div class='gli-empty'>No ideas yet — "
+            "capture one with &ldquo;+ Add idea&rdquo;.</div>"
+            "<div class='gadd'><button class='mini' style='width:100%' "
+            "onclick='addIdea()'>+ Add idea</button></div></div>"
+        )
+    # The right workbench pane starts EMPTY (a "select an idea" hint); selecting
+    # a .gli populates it client-side from the row's data + a fetch of /api/rnd/grass.
+    work_html = (
+        "<div class='gwork' data-empty='1'>"
+        "<div class='gwork-empty'>Select an idea on the left to develop it.</div>"
+        "</div>"
+    )
+    return (
+        "<div class='grass-workbench' data-grass-workbench='1'>"
+        f"{tabs}"
+        f"<div class='gwrap'>{list_html}{work_html}</div>"
+        "</div>"
+    )
 
 
 def _render_kanban_html(folder_path, project_id):
@@ -1646,10 +1826,11 @@ def _render_kanban_html(folder_path, project_id):
         elif any_live:
             badge = "<span class='lt green' title='running'></span>"
         if trio_lane == "grass":
-            # The grass lane is an IDEA BOARD (cards with promote actions), NOT a
-            # session tile/expander. It has no terminal of its own; promoting an
-            # idea creates the seeded session that does.
-            cards = _render_grass_board(folder_path, project_id)
+            # v5 Wave 5: the grass lane column shows ONE tile that opens the
+            # full-width two-pane B+C hybrid workbench panel (the column is too
+            # narrow for the two-pane workbench). The old single-column idea-board
+            # markup is gone; the workbench template is appended after the board.
+            cards = _render_grass_column_tile(folder_path, project_id)
         elif trio_lane == "deliverables":
             # The deliverables lane is launch-by-type TILES (mockup Paradigm-2),
             # NOT session/effort cards: a tile per pinned deliverable whose click
@@ -1691,7 +1872,15 @@ def _render_kanban_html(folder_path, project_id):
             f"<div class='col-tiles' id='cards_{lane_attr}'>{cards}</div>"
             f"{add}</div>"
         )
-    return "<div class='p2lanes'>" + "".join(cols) + "</div>"
+    board = "<div class='p2lanes'>" + "".join(cols) + "</div>"
+    # v5 Wave 5: the full two-pane Grass workbench, rendered ONCE as a hidden
+    # template the panel manager (openGrassWorkbench) clones into #panelStack.
+    workbench = (
+        "<div id='grassWorkbenchTpl' style='display:none'>"
+        + _render_grass_workbench(folder_path, project_id)
+        + "</div>"
+    )
+    return board + workbench
 
 
 def _safe_dom_id(seg: str) -> str:
@@ -1970,6 +2159,17 @@ def render_project_window_html(project_id: str) -> str:
             pass
     blurb_attr = html_lib.escape(blurb_raw, quote=True)
     blurb_esc = html_lib.escape(blurb_raw)
+    # v5 Wave 3: the project's cached OBJECTIVE summary (read-only — NEVER runs
+    # the model on the render path). Shown in the header as the "objective" line;
+    # falls back to the blurb when no summary is cached yet.
+    objective_raw = ""
+    try:
+        cached = _summarizer.load_cached_project(folder_raw, project_id)
+        if cached:
+            objective_raw = (cached.get("summary_text") or "").strip()
+    except Exception:
+        objective_raw = ""
+    objective_esc = html_lib.escape(objective_raw)
     is_active = state_raw in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -1993,19 +2193,30 @@ def render_project_window_html(project_id: str) -> str:
             f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
         )
-    kanban = _render_kanban_html(folder_raw, project_id)
-    status = render_status_line_html(project_id)
-    header_rollup = render_header_rollup_html(project_id)
-    tasks_html = render_project_tasks_html(project_id)
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
     # pin it as the runnable deliverable so the Deliverables LANE shows it as a
     # launch-by-type tile. Idempotent (content-addressed); best-effort. (The loose
     # bottom "Deliverables / Pinned" section is gone — deliverables are the lane.)
+    # MUST run BEFORE _render_kanban_html so the freshly-pinned deliverable shows
+    # in the Deliverables lane on THIS render (not only the next one).
     try:
         if (Path(folder_raw) / _preview.DEFAULT_TARGET).is_file():
             ensure_anchor_deliverable(folder_raw, project_id)
     except Exception:
         pass
+    # v5 Wave 4: backfill — scan this project's BUILD sessions and auto-pin any
+    # unambiguously-resolved deliverable so it appears in the Deliverables lane.
+    # Idempotent (content-addressed pins); ambiguous/none left unpinned (never
+    # fabricated). Best-effort: a failure never breaks the window render. Runs
+    # BEFORE the kanban render so the auto-pinned deliverable surfaces this render.
+    try:
+        _deliv.backfill_build_deliverables(folder_raw, project_id)
+    except Exception:
+        pass
+    kanban = _render_kanban_html(folder_raw, project_id)
+    status = render_status_line_html(project_id)
+    header_rollup = render_header_rollup_html(project_id)
+    tasks_html = render_project_tasks_html(project_id)
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -2095,6 +2306,72 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px solid var(--border);border-radius:7px;padding:2px 8px}"
         ".idea-promote:hover{border-color:var(--accent)}"
         ".idea-empty{font-size:11px;color:var(--text-dim);padding:4px 2px}"
+        # ── v5 Wave 5: Grass B+C hybrid workbench (mockup grass_catcher_refined) ──
+        ".grass-tile{cursor:pointer}"
+        ".grass-workbench{background:var(--surface);border:1px solid var(--border);"
+        "border-radius:10px;overflow:hidden}"
+        ".gtabs{display:flex;align-items:center;gap:5px;padding:9px 12px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex-wrap:wrap}"
+        ".gtabs .ic{font-size:15px;margin-right:4px}"
+        ".gtab{font-size:12px;padding:5px 12px;border-radius:20px;"
+        "border:1px solid var(--border);color:var(--text-dim);cursor:pointer}"
+        ".gtab.on{color:var(--text);background:rgba(108,156,252,.12);"
+        "border-color:var(--accent)}"
+        ".gtab .n{opacity:.7}"
+        ".gtabs .sp{flex:1}"
+        ".gsearch{font-size:12px;padding:4px 9px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);color:var(--text);"
+        "min-width:140px}"
+        ".gwrap{display:grid;grid-template-columns:320px 1fr;min-height:430px}"
+        ".glist{border-right:1px solid var(--border);background:#13161f;"
+        "overflow:auto;max-height:560px}"
+        ".gli{padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer}"
+        ".gli:hover{background:var(--surface2)}"
+        ".gli.sel{background:rgba(108,156,252,.1);border-left:3px solid var(--accent)}"
+        ".gli .t{font-size:12.5px;line-height:1.35}"
+        ".gli .m{font-size:10.5px;color:var(--text-dim);margin-top:4px;display:flex;"
+        "gap:7px;align-items:center;flex-wrap:wrap}"
+        ".gli .dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim)}"
+        ".gli.r .dot{background:var(--success)}.gli.p .dot{background:var(--accent)}"
+        ".gli-empty{padding:14px 13px;color:var(--text-dim);font-size:12px}"
+        ".idchip{font-family:ui-monospace,Consolas,monospace;font-size:10px;"
+        "color:var(--text-dim);background:var(--surface);border:1px solid var(--border);"
+        "border-radius:5px;padding:1px 6px}"
+        ".srcchip{font-size:10px;color:var(--text-dim);border:1px solid var(--border);"
+        "border-radius:20px;padding:1px 8px}"
+        ".stchip{font-size:10px;border-radius:20px;padding:1px 8px}"
+        ".stchip.raw{color:var(--text-dim);border:1px solid var(--border)}"
+        ".stchip.refined{color:var(--success);border:1px solid rgba(34,197,94,.4);"
+        "background:rgba(34,197,94,.08)}"
+        ".stchip.promoted{color:var(--accent);border:1px solid rgba(108,156,252,.4);"
+        "background:rgba(108,156,252,.08)}"
+        ".gwork{padding:15px 18px;min-width:0;display:flex;flex-direction:column}"
+        ".gwork-empty{color:var(--text-dim);font-size:13px;padding:20px 4px}"
+        ".gwork h3{font-size:16px;margin-bottom:5px;display:flex;align-items:center;"
+        "gap:9px;flex-wrap:wrap}"
+        ".gwork .desc{font-size:13px;color:var(--text);margin-bottom:4px}"
+        ".gwork .sub{font-size:12px;color:var(--text-dim);margin-bottom:12px}"
+        ".devbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;"
+        "margin-bottom:4px}"
+        ".devbar .lbl{font-size:11px;color:var(--text-dim)}.devbar .sp{flex:1}"
+        ".mini.go{border-color:rgba(34,197,94,.5)}"
+        ".grass-workbench .tpane{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden;margin-top:11px;resize:vertical;"
+        "min-height:150px;display:flex;flex-direction:column}"
+        ".grass-workbench .tpane .tbar{display:flex;align-items:center;gap:8px;"
+        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
+        ".grass-workbench .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
+        ".grass-workbench .tpane .term-host{flex:1;overflow:auto;min-height:120px}"
+        ".ghist{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
+        ".ghist .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:7px}"
+        ".ghist .hr{font-size:12px;color:var(--text);padding:6px 0;"
+        "border-bottom:1px solid var(--border);display:flex;gap:9px;"
+        "align-items:center;flex-wrap:wrap}"
+        ".ghist .hr a{color:var(--accent);text-decoration:none}"
+        ".ghist .hr .sp{flex:1}"
+        ".ghist-empty{font-size:11.5px;color:var(--text-dim)}"
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
@@ -2170,7 +2447,27 @@ def render_project_window_html(project_id: str) -> str:
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
+        # v5 Wave 1: the panel header carries THREE distinct controls —
+        #   .min   '–'  minimize (keeps the session running)
+        #   .close '×'  CLOSE-to-tile (tears down the panel DOM only; the session
+        #               record + lane tile persist; reopenable). NON-destructive.
+        #   .hardkill '🗑' KILL (confirm-gated → term_kill → reap PTY + worktree +
+        #               drop the tile). Visually distinct (danger glyph/color).
+        ".panelbtn.close:hover{color:var(--text);border-color:var(--accent)}"
+        ".panelbtn.hardkill{color:var(--danger);border-color:var(--border)}"
+        ".panelbtn.hardkill:hover{color:#fff;background:var(--danger);"
+        "border-color:var(--danger)}"
+        # Legacy alias retained so any old reference to .kill still styles as danger.
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        # v5 Wave 1: the live-session bar (reopenable chips for LIVE managed
+        # sessions that aren't server-rendered board tiles). Empty → no height.
+        ".live-session-bar{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}"
+        ".live-session-bar:empty{margin:0}"
+        ".live-chip{display:inline-flex;align-items:center;gap:6px;"
+        "padding:4px 10px;border-radius:14px;cursor:pointer;font-size:12px;"
+        "background:var(--surface2);border:1px solid var(--border)}"
+        ".live-chip:hover{border-color:var(--accent)}"
+        ".live-chip .ttl{font-weight:600}"
         # Per-session engine toggle in the panel bar (◆ Claude / ✦ Gemini). Chosen
         # once; flipping POSTs term_set_engine to relaunch this session on the other
         # engine in the SAME worktree (mockup Paradigm-2 panel header).
@@ -2198,6 +2495,21 @@ def render_project_window_html(project_id: str) -> str:
         "flex-shrink:0}"
         ".panel .summary .smat .effbar{font-size:11px;color:var(--text-dim);"
         "margin-top:auto}"
+        # v5 Wave 4 — a BUILD panel's resolved deliverable (a link) or honest
+        # "none yet" placeholder.
+        ".panel .summary .smat .bdeliv{display:flex;gap:10px;align-items:center;"
+        "font-size:12px;margin-bottom:9px}"
+        ".panel .summary .smat .bdeliv .k{color:var(--text-dim);min-width:92px;"
+        "flex-shrink:0}"
+        ".panel .summary .smat .bdeliv .doc{display:inline-flex;gap:6px;"
+        "align-items:center;font-size:11.5px;padding:3px 10px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text);text-decoration:none}"
+        ".panel .summary .smat .bdeliv .doc:hover{border-color:var(--accent)}"
+        ".panel .summary .smat .bdeliv .doc .role{font-size:9.5px;"
+        "color:var(--text-dim)}"
+        ".panel .summary .smat .bdeliv.none{color:var(--warning);"
+        "font-style:italic}"
         ".panel .summary .slinks{border-left:1px solid var(--border);"
         "padding-left:18px;display:flex;flex-direction:column}"
         ".panel .summary .slinks .slh{font-size:10px;text-transform:uppercase;"
@@ -2225,6 +2537,21 @@ def render_project_window_html(project_id: str) -> str:
         "min-height:90px}"
         ".panel .tpane .ro-note{color:var(--text-dim);font-size:12px;"
         "font-family:ui-monospace,Consolas,monospace;padding:11px 13px}"
+        # v5 Wave 2 — past-session read-only view (skill/prompts/files + Continue).
+        ".panel .tpane .ro-past{padding:11px 13px;font-size:12px;"
+        "color:var(--text);overflow:auto}"
+        ".panel .tpane .ro-actions{margin-bottom:9px}"
+        ".panel .tpane .ro-continue{background:#1f6feb;color:#fff;border:0;"
+        "border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .tpane .ro-continue:hover{background:#388bfd}"
+        ".panel .tpane .ro-sec{display:flex;gap:10px;margin-top:8px;"
+        "font-size:12px}"
+        ".panel .tpane .ro-sec .ro-k{color:var(--text-dim);min-width:92px;"
+        "font-weight:600}"
+        ".panel .tpane .ro-list{margin:3px 0 4px 0;padding-left:20px;"
+        "color:var(--text-dim);font-size:11.5px}"
+        ".panel .tpane .ro-list li{margin:2px 0}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -2240,6 +2567,12 @@ def render_project_window_html(project_id: str) -> str:
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
         f"{lifecycle}"
         "</div></div>"
+        # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
+        + (f"<div class='proj-objective' data-objective='1' "
+           f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
+           f"font-size:13px;color:var(--text)'>"
+           f"<b style='color:var(--accent)'>Objective:</b> {objective_esc}</div>"
+           if objective_raw else "")
         # ── Project blurb ("what this project is"; click 'Blurb' above to edit) ──
         + (f"<div class='rnd-blurb' data-blurb='{blurb_attr}' "
            f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
@@ -2262,6 +2595,13 @@ def render_project_window_html(project_id: str) -> str:
         # bar carries the engine ◆Claude/✦Gemini toggle (term_set_engine), a
         # minimize, and a kill (× confirm). No old console drawer / live-terminals
         # bar / loose cost-rollup / loose deliverables-pinned section remains.
+        # v5 Wave 1: a thin LIVE-session bar above the panel stack. A live managed
+        # terminal session (started via "+ new <lane>") is NOT a server-rendered
+        # board tile, so close-to-tile would otherwise leave no reopen vector. The
+        # session bar renders one clickable chip per LIVE managed session — closing
+        # its panel keeps the chip (reopenable); hard-kill removes it. (No-op /
+        # empty when there are no live sessions; populated by renderSessionBar.)
+        "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
         # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
@@ -2408,6 +2748,320 @@ async function promoteGrass(ideaId, lane) {
   renderSessionBar();
   openPanel(sid);
   // Re-sync indices/labels from the registry shortly after.
+  setTimeout(repopulate, 600);
+}
+
+// ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
+// The grass lane column tile (.grass-tile) opens a FULL-WIDTH two-pane workbench
+// panel in #panelStack (the column is too narrow for the two-pane workbench). The
+// workbench markup is rendered server-side into #grassWorkbenchTpl and cloned in.
+// Tabs + search scope the left list; selecting a .gli loads the right workbench;
+// Develop starts a SEEDED live session in the workbench terminal; a saved
+// refinement appears in the history (grass-<id>/dev-N) and is pullable.
+var _grassEngine = 'claude';   // workbench engine toggle (research can use gemini)
+var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
+var _grassDevSession = null;    // the active Develop session id (for Save refinement)
+
+function openGrassWorkbench() {
+  var stack = document.getElementById('panelStack');
+  var tpl = document.getElementById('grassWorkbenchTpl');
+  if (!stack || !tpl) return;
+  var existing = document.getElementById('grassPanel');
+  if (existing) {
+    if (existing.classList.contains('minimized')) existing.classList.remove('minimized');
+    existing.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'grassPanel';
+  var bar = document.createElement('div');
+  bar.className = 'pbar';
+  var title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = '🌿 Grass Catcher — idea workbench';
+  var sp = document.createElement('span');
+  sp.className = 'sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'panelbtn min';
+  minBtn.title = 'Minimize';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); panel.classList.add('minimized'); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); panel.remove(); };
+  bar.appendChild(title); bar.appendChild(sp);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn);
+  var pin = document.createElement('div');
+  pin.className = 'pin';
+  pin.innerHTML = tpl.innerHTML;     // clone the rendered workbench markup
+  panel.appendChild(bar); panel.appendChild(pin);
+  stack.appendChild(panel);
+  _wireGrassWorkbench(panel);
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  // Hydrate the idea data (status + refinements) for the right workbench.
+  _loadGrassData();
+}
+
+function _wireGrassWorkbench(panel) {
+  // Tabs: click sets the active filter and re-filters the list.
+  var tabs = panel.querySelectorAll('.gtab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].onclick = (function (tab) {
+      return function () {
+        var all = panel.querySelectorAll('.gtab');
+        for (var j = 0; j < all.length; j++) all[j].classList.remove('on');
+        tab.classList.add('on');
+        filterGrass();
+      };
+    })(tabs[i]);
+  }
+  // Rows: click selects the idea.
+  var rows = panel.querySelectorAll('.gli');
+  for (var k = 0; k < rows.length; k++) {
+    rows[k].onclick = (function (row) {
+      return function () { selectGrassIdea(row.getAttribute('data-idea')); };
+    })(rows[k]);
+  }
+}
+
+async function _loadGrassData() {
+  try {
+    var r = await fetch('/api/rnd/grass?project_id=' + encodeURIComponent(PROJECT_ID)
+                        + _grassTokenQ());
+    var data = await r.json();
+    if (data && data.ok && data.ideas) {
+      _grassData = {};
+      for (var i = 0; i < data.ideas.length; i++) _grassData[data.ideas[i].idea_id] = data.ideas[i];
+    }
+  } catch (e) { /* read-only; workbench still works from row data */ }
+}
+function _grassTokenQ() {
+  var t = _anchorToken();
+  return t ? ('&token=' + encodeURIComponent(t)) : '';
+}
+
+// filterGrass(): scope the left .gli list by the active status tab + the search box.
+function filterGrass() {
+  var panel = document.getElementById('grassPanel');
+  if (!panel) return;
+  var active = panel.querySelector('.gtab.on');
+  var filter = active ? (active.getAttribute('data-filter') || 'all') : 'all';
+  var sbox = panel.querySelector('.gsearch');
+  var q = sbox ? (sbox.value || '').trim().toLowerCase() : '';
+  var rows = panel.querySelectorAll('.gli');
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var st = row.getAttribute('data-status') || 'raw';
+    var ttl = (row.getAttribute('data-title') || '').toLowerCase();
+    var okStatus = (filter === 'all') || (st === filter);
+    var okSearch = !q || ttl.indexOf(q) !== -1;
+    row.style.display = (okStatus && okSearch) ? '' : 'none';
+  }
+}
+
+// selectGrassIdea(ideaId): load the chosen idea's RIGHT workbench (text +
+// devbar + a terminal pane + refinement history). Marks the row selected.
+function selectGrassIdea(ideaId) {
+  var panel = document.getElementById('grassPanel');
+  if (!panel) return;
+  var rows = panel.querySelectorAll('.gli');
+  var row = null;
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].classList.remove('sel');
+    if (rows[i].getAttribute('data-idea') === ideaId) { row = rows[i]; rows[i].classList.add('sel'); }
+  }
+  if (!row) return;
+  var rec = _grassData[ideaId] || {};
+  var title = (rec.title != null) ? rec.title : (row.getAttribute('data-title') || '');
+  var status = rec.status || row.getAttribute('data-status') || 'raw';
+  var short = rec.short_id || '';
+  var notes = rec.notes || '';
+  var work = panel.querySelector('.gwork');
+  if (!work) return;
+  work.removeAttribute('data-empty');
+  work.setAttribute('data-idea', ideaId);
+  var html = ''
+    + '<h3>' + _esc(title || '(untitled idea)')
+    + ' <span class="idchip">' + _esc(short) + '</span>'
+    + ' <span class="stchip ' + _esc(status) + '">' + _esc(status) + '</span></h3>'
+    + (notes ? '<div class="desc">' + _esc(notes) + '</div>' : '')
+    + '<div class="sub">Develop with a tool — the session is seeded with this '
+    + 'idea’s text + any refinements. Output is saved here with a new id and '
+    + 'is pullable into a Research or Plan run.</div>'
+    + '<div class="devbar"><span class="lbl">Develop:</span>'
+    + '<button class="mini go" data-dev="research">🔬 Research</button>'
+    + '<button class="mini go" data-dev="plan">📐 Plan</button>'
+    + '<span class="sp"></span>'
+    + '<span class="lbl">Engine</span>'
+    + '<button class="mini gengtog">◆ Claude</button>'
+    + '<button class="mini gpromote">→ Promote to a lane</button></div>'
+    + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
+    + '· select Develop to start</span><span class="sp"></span>'
+    + '<button class="mini gsave" disabled title="Save the develop session\'s '
+    + 'output as a new grass-&lt;id&gt;/dev-N refinement">💾 Save refinement</button></div>'
+    + '<div class="term-host" data-grass-term="1"></div></div>'
+    + '<div class="ghist"><div class="h">Refinement history · pull any version '
+    + 'into another effort</div><div class="ghist-rows"></div></div>';
+  work.innerHTML = html;
+  // Wire the devbar.
+  var dbtns = work.querySelectorAll('button[data-dev]');
+  for (var d = 0; d < dbtns.length; d++) {
+    dbtns[d].onclick = (function (lane) {
+      return function () { developGrass(ideaId, lane); };
+    })(dbtns[d].getAttribute('data-dev'));
+  }
+  var eng = work.querySelector('.gengtog');
+  if (eng) eng.onclick = function () {
+    _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
+    eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
+  };
+  var prom = work.querySelector('.gpromote');
+  if (prom) prom.onclick = function () {
+    var lane = window.prompt('Promote into which lane? (research / plan)', 'research');
+    if (!lane) return;
+    lane = lane.trim();
+    if (lane !== 'research' && lane !== 'plan') { alert('lane must be research or plan'); return; }
+    promoteGrass(ideaId, lane);
+  };
+  // The Save-refinement button is enabled only once a Develop session is live for
+  // THIS idea (set in developGrass); switching ideas starts disabled.
+  _grassDevSession = null;
+  var sv = work.querySelector('.gsave');
+  if (sv) { sv.disabled = true; sv.onclick = function () { saveGrassRefinement(ideaId); }; }
+  _renderGrassHistory(work, rec.refinements || []);
+}
+
+function _renderGrassHistory(work, refs) {
+  var box = work.querySelector('.ghist-rows');
+  if (!box) return;
+  if (!refs || !refs.length) {
+    box.innerHTML = '<div class="ghist-empty">No refinements yet — Develop the idea '
+      + 'with Research or Plan to save one.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < refs.length; i++) {
+    var r = refs[i];
+    var rid = r.refinement_id || '';
+    var lbl = r.label || (r.text ? r.text.slice(0, 60) : 'refinement');
+    html += '<div class="hr"><span class="idchip">' + _esc(rid) + '</span> '
+      + _esc(lbl) + '<span class="sp"></span>'
+      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="research">pull into Research…</button>'
+      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="plan">pull into Plan…</button></div>';
+  }
+  box.innerHTML = html;
+  var pbtns = box.querySelectorAll('button[data-pull]');
+  var ideaId = work.getAttribute('data-idea');
+  for (var k = 0; k < pbtns.length; k++) {
+    pbtns[k].onclick = (function (rid, lane) {
+      return function () { pullGrass(ideaId, rid, lane); };
+    })(pbtns[k].getAttribute('data-pull'), pbtns[k].getAttribute('data-lane'));
+  }
+}
+
+// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
+// refinements) and mount its terminal in the right pane's .term-host. Token-aware.
+async function developGrass(ideaId, lane) {
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_develop', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_develop', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[develop error] ' + e.message); return; }
+  if (!data.ok || !data.session) { alert('[develop refused] ' + (data.error || 'unknown')); return; }
+  var sid = data.session.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: data.session.lane || lane,
+    backend: data.session.backend || _grassEngine,
+    status: data.session.status || 'running', label: data.session.label || '',
+    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
+  };
+  renderSessionBar();
+  // Mount the live terminal into the workbench term-host (reuse _mountTerminal).
+  var host = work ? work.querySelector('[data-grass-term]') : null;
+  var lab = work ? work.querySelector('.tpane .lab') : null;
+  if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
+  if (host) {
+    host.setAttribute('data-session', sid);
+    PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+    _mountTerminal(sid, host);
+  }
+  // A develop session is now live for this idea → enable "Save refinement".
+  _grassDevSession = sid;
+  var sv = work ? work.querySelector('.gsave') : null;
+  if (sv) sv.disabled = false;
+}
+
+// saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
+// versioned refinement (grass-<id>/dev-N) and re-render the history so it appears
+// with a pull control. Closes the develop→save→appears loop end to end. The
+// session's visible terminal text is captured best-effort as the refinement text;
+// the session_id links the refinement to the run. Token-aware.
+async function saveGrassRefinement(ideaId) {
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  var host = work ? work.querySelector('[data-grass-term]') : null;
+  var text = host ? ((host.innerText || '').trim().slice(-4000)) : '';
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId,
+                 session_id: _grassDevSession || null,
+                 label: 'Refinement from workbench session', text: text};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_save_refinement', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_save_refinement', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[save error] ' + e.message); return; }
+  if (!data.ok) { alert('[save refused] ' + (data.error || 'unknown')); return; }
+  // Re-fetch the grass data and re-render THIS idea's history so the new
+  // grass-<id>/dev-N row appears with its pull controls.
+  await _loadGrassData();
+  var rec = _grassData[ideaId] || {};
+  _renderGrassHistory(work, rec.refinements || []);
+  // The idea is now REFINED — reflect it on the workbench chip + the list row.
+  var chip = work.querySelector('h3 .stchip');
+  if (chip) { chip.className = 'stchip refined'; chip.textContent = 'refined'; }
+  var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (lrow) lrow.setAttribute('data-status', 'refined');
+}
+
+// pullGrass(ideaId, refinementId, lane): pull a refinement version into a NEW
+// seeded session (research/plan) and open its inline panel. Token-aware.
+async function pullGrass(ideaId, refinementId, lane) {
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId,
+                 refinement_id: refinementId, lane: lane, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_pull', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_pull', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[pull error] ' + e.message); return; }
+  if (!data.ok || !data.session) { alert('[pull refused] ' + (data.error || 'unknown')); return; }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || _grassEngine,
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
   setTimeout(repopulate, 600);
 }
 
@@ -2581,8 +3235,10 @@ function rndUnlinkTask(el) {
 // the #panelStack BELOW the board — panels stack down the page, they never float
 // or overlap. A second click / the panel's "– min" button collapses it back to
 // the tile (minimizePanel) WITHOUT killing the session. The panel's "×" button is
-// KILL, gated behind a confirm() (killPanel → POST /api/rnd/term_kill); for a
-// historical (non-live) panel the × simply closes the DOM. repopulate() reads
+// CLOSE-to-tile (closePanel) — it tears down the panel DOM only and leaves the
+// session record + lane tile intact (reopenable). A SEPARATE "🗑 Kill" button is
+// the deliberate hard-kill, gated behind a confirm() (killPanel → POST
+// /api/rnd/term_kill) that also removes the session's tile. repopulate() reads
 // /api/rnd/term_sessions to keep the MANAGED map in sync (so a tile for an
 // already-running terminal can re-open its panel).
 //
@@ -2610,6 +3266,14 @@ function _statusColor(status) {
   return 'grey';
 }
 
+// _isTerminalStatus: mirror session_registry.TERMINAL_STATUSES ({done, failed}).
+// The live-session bar is the reopen vector for LIVE (non-terminal) sessions
+// ONLY; a terminal session (a hard-killed one is marked 'done', a crashed one
+// 'failed') must never sit in it.
+function _isTerminalStatus(status) {
+  return status === 'done' || status === 'failed';
+}
+
 // repopulate(): fetch the project's live managed sessions from the registry and
 // re-sync the MANAGED map (so a tile / re-open keys on a real, stable record).
 // Kept under the historical name loadSessions too (callers use it).
@@ -2631,6 +3295,14 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
+    // v5 Wave 1 (BLOCKER fix): the live-session bar holds LIVE sessions only. A
+    // terminal session (a deliberate hard-kill marks the registry record 'done';
+    // a crash 'failed') is excluded — otherwise a killed chip would REAPPEAR on
+    // the next repopulate() (term_sessions reports every status). A session that
+    // just went terminal is also not re-added here, so the drop-loop below evicts
+    // it from MANAGED and closes any stale panel. Historical/done work is reopened
+    // from its server-rendered board tile, not this live bar.
+    if (_isTerminalStatus(s.status)) continue;
     var lane = s.lane || 'session';
     _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
     var prev = MANAGED[s.session_id] || {};
@@ -2650,11 +3322,45 @@ async function repopulate() {
 // Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
 
-// renderSessionBar(): the v3 "Live terminals" button bar was REMOVED in v4.1 —
-// the inline panel stack is the only terminal surface now. The panel manager
-// still calls this after MANAGED changes; with no bar to paint it is a safe
-// no-op (kept so those call sites need no special-casing).
-function renderSessionBar() { /* no live-terminals bar in the cockpit */ }
+// renderSessionBar(): v5 Wave 1 — render one clickable TILE per LIVE managed
+// session into #sessionBar. A live terminal session (started via "+ new <lane>")
+// is NOT a server-rendered board tile, so this bar IS its reopenable tile: after
+// close-to-tile its chip persists (click it → openPanel re-attaches the live
+// terminal); a deliberate hard-kill removes the chip (via _removeSessionTile, the
+// SAME selector — these chips carry .tile + data-session). Empty bar when there
+// are no live managed sessions. Idempotent (rebuilds from MANAGED each call).
+function renderSessionBar() {
+  var bar = document.getElementById('sessionBar');
+  if (!bar) return;
+  // Don't clobber a chip the panel manager is mid-removing: rebuild from MANAGED.
+  bar.innerHTML = '';
+  var ids = Object.keys(MANAGED);
+  for (var i = 0; i < ids.length; i++) {
+    var sid = ids[i];
+    var s = MANAGED[sid];
+    if (!s) continue;
+    var chip = document.createElement('span');
+    // .tile + data-session so _synthSessionRecord / _removeSessionTile bind, and
+    // the live-tile click hook is the SAME laneTileClick → openPanel path.
+    chip.className = 'tile lane-tile live-chip';
+    chip.setAttribute('data-session', sid);
+    chip.setAttribute('data-lane', s.lane || '');
+    chip.setAttribute('data-light', _statusColor(s.status));
+    chip.setAttribute('data-live', '1');
+    var sidCopy = sid;
+    chip.onclick = (function (theId) {
+      return function (ev) { laneTileClick(ev, theId); };
+    })(sidCopy);
+    var dot = document.createElement('span');
+    dot.className = 'lt ' + _statusColor(s.status);
+    var lbl = document.createElement('span');
+    lbl.className = 'ttl';
+    lbl.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+    chip.appendChild(dot);
+    chip.appendChild(lbl);
+    bar.appendChild(chip);
+  }
+}
 
 // laneTileClick: a Paradigm-2 lane tile was clicked → open its inline panel.
 // The tile no longer contains report links / a summary accordion, so the click
@@ -2735,8 +3441,9 @@ async function newTermSession(lane, backend, opts) {
 // #panelStack below the board. A second openPanel on an OPEN, non-minimized panel
 // toggles it back to minimized (collapse-to-tile); an already-minimized panel
 // re-expands. The session keeps running throughout — this only shows/hides the
-// panel body. The panel header carries "– min" (minimizePanel) + "× kill"
-// (killPanel, confirm-gated).
+// panel body. The panel header carries "– min" (minimizePanel), "× close"
+// (closePanel — close-to-tile, NON-destructive) + "🗑 Kill" (killPanel,
+// confirm-gated reap that also removes the tile).
 function openPanel(sessionId) {
   // A LIVE managed terminal session → attach its PTY (as today). ANY other tile
   // (historical / discovered / imported) → SYNTHESIZE a panel record from its
@@ -2785,24 +3492,32 @@ function openPanel(sessionId) {
   // so the toggle is omitted there.
   var engEl = null;
   if (isLive) engEl = _buildEngineToggle(sessionId, s);
+  // v5 Wave 1 — THREE visually + behaviorally distinct panel-header controls:
+  //   (a) '–'  minimize  — collapse to a header strip; session keeps running.
+  //   (b) '×'  CLOSE     — close-to-tile: tear down the panel DOM + transport
+  //        ONLY. Does NOT kill the PTY / remove the worktree / drop the registry
+  //        record / remove the lane tile. The session stays reopenable (click its
+  //        tile to re-attach a live terminal or re-show the summary). Live AND
+  //        historical panels use this same non-destructive close.
+  //   (c) '🗑' KILL      — deliberate hard-kill, confirm-gated. Reaps the PTY +
+  //        worktree (POST /api/rnd/term_kill), removes the MANAGED record AND the
+  //        session's lane tile (gone). For a historical/non-live session with no
+  //        live PTY, Kill still removes the tile/record cleanly (no orphan).
   var minBtn = document.createElement('button');
   minBtn.className = 'panelbtn min';
   minBtn.title = 'Minimize (keeps the session running)';
   minBtn.textContent = '–';
   minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close panel (keeps the session — reopen from its tile)';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); closePanel(sessionId); };
   var killBtn = document.createElement('button');
-  killBtn.className = 'panelbtn kill';
-  if (isLive) {
-    killBtn.title = 'Kill this session';
-    killBtn.textContent = '×';
-    killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
-  } else {
-    // Historical/discovered: there is no process to kill — the × just closes
-    // the panel (tears down the DOM, leaves the session record alone).
-    killBtn.title = 'Close';
-    killBtn.textContent = '×';
-    killBtn.onclick = function (e) { e.stopPropagation(); _closePanel(sessionId); renderSessionBar(); };
-  }
+  killBtn.className = 'panelbtn hardkill';
+  killBtn.title = 'Kill this session (terminate + remove its tile)';
+  killBtn.textContent = '🗑';
+  killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
   bar.appendChild(sp);
   if (engEl) {
@@ -2812,7 +3527,7 @@ function openPanel(sessionId) {
     bar.appendChild(englbl);
     bar.appendChild(engEl);
   }
-  bar.appendChild(minBtn); bar.appendChild(killBtn);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn); bar.appendChild(killBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -2951,15 +3666,126 @@ async function setSessionEngine(sessionId, engine, tog) {
   setTimeout(repopulate, 600);
 }
 
-// _mountReadOnlyBody: a NON-live session has no PTY. Render a static read-only
-// area in the terminal host: a "session complete" note. (The summary block above
-// carries the full materials + doc links; clicking a doc opens the rendered file
-// in a new tab.) Kept deliberately simple — no transport, no input line.
+// _mountReadOnlyBody (v5 Wave 2): a NON-live (done/historical) session has no
+// PTY. Instead of a dead-end "session complete" note, render a REAL past-session
+// view in the terminal host: the SKILL invoked, the PROMPTS asked, and the
+// ACTIONS/files produced (from the cached session summary), plus a "Continue in a
+// live session" button that starts a NEW live session in the SAME lane seeded
+// with this session's context. Honest placeholders when a field is absent.
 function _mountReadOnlyBody(sessionId, host, s) {
-  var note = (s.status === 'running')
-    ? 'Session is running in the background — no live terminal attached.'
-    : 'Session complete — see the summary and document links above.';
-  host.innerHTML = '<div class="ro-note">' + _esc(note) + '</div>';
+  var runningNote = (s.status === 'running')
+    ? '<div class="ro-note">Session is running in the background — no live '
+      + 'terminal attached.</div>'
+    : '';
+  // Skeleton with a Continue button (always available for a historical session)
+  // and a region we fill async from the cached session summary.
+  host.innerHTML = runningNote
+    + '<div class="ro-past" data-session="' + _esc(sessionId) + '">'
+    + '<div class="ro-actions">'
+    + '<button class="ro-continue" type="button">▶ Continue in a live session</button>'
+    + '</div>'
+    + '<div class="ro-detail"><div class="summ-loading">loading past-session '
+    + 'summary…</div></div>'
+    + '</div>';
+  var btn = host.querySelector('.ro-continue');
+  if (btn) btn.onclick = function (e) {
+    e.stopPropagation();
+    continueSession(sessionId, s.lane);
+  };
+  var detail = host.querySelector('.ro-detail');
+  _fillPastSessionDetail(sessionId, (s && s.lane) || '', detail);
+}
+
+// _fillPastSessionDetail: fetch the cached session summary and render the
+// skill/prompts/produced-files (v5 Wave 2). Read-only; honest placeholders for
+// absent fields. The summary GET returns the full cached structured dict, so the
+// new skill/prompts/actions fields ride along.
+function _fillPastSessionDetail(sessionId, lane, detail) {
+  if (!detail) return;
+  var sUrl = '/api/rnd/session_summary?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sessionId);
+  fetch(sUrl, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var summ = (d && d.status === 'ready' && d.summary) ? d.summary : null;
+      detail.innerHTML = _renderPastSession(summ);
+    })
+    .catch(function () {
+      detail.innerHTML = '<div class="ro-note">Summary unavailable.</div>';
+    });
+}
+
+// _renderPastSession(summary): the skill/prompts/produced-files block for a
+// historical session's read-only body. Every section is honest — absent data
+// renders an explicit placeholder, never fabricated content.
+function _renderPastSession(summary) {
+  if (!summary) {
+    return '<div class="ro-note">No cached summary yet for this session — '
+      + 'it is being generated. Reopen shortly, or continue it live above.</div>';
+  }
+  var out = [];
+  var skill = (summary.skill || '').trim ? (summary.skill || '').trim() : summary.skill;
+  out.push('<div class="ro-sec"><span class="ro-k">Skill invoked</span><span>'
+    + (skill ? _esc(skill) : '<i>not recorded</i>') + '</span></div>');
+  var prompts = summary.prompts || [];
+  out.push('<div class="ro-sec"><span class="ro-k">Prompts asked</span></div>');
+  if (prompts.length) {
+    var pl = ['<ul class="ro-list">'];
+    for (var i = 0; i < prompts.length; i++)
+      pl.push('<li>' + _esc(prompts[i]) + '</li>');
+    pl.push('</ul>');
+    out.push(pl.join(''));
+  } else {
+    out.push('<div class="ro-note"><i>No prompts recorded for this session.</i></div>');
+  }
+  var actions = summary.actions || [];
+  out.push('<div class="ro-sec"><span class="ro-k">Files produced</span></div>');
+  if (actions.length) {
+    var al = ['<ul class="ro-list">'];
+    for (var j = 0; j < actions.length; j++) {
+      var a = actions[j];
+      var lbl = (a && (a.label || a.rel || a.job_id)) || '';
+      al.push('<li>' + _esc(lbl) + '</li>');
+    }
+    al.push('</ul>');
+    out.push(al.join(''));
+  } else {
+    out.push('<div class="ro-note"><i>No files recorded for this session.</i></div>');
+  }
+  return out.join('');
+}
+
+// continueSession(sessionId, lane): v5 Wave 2 — POST /api/rnd/continue_session
+// (token-authed) to start a NEW live session in the SAME lane, seeded with the
+// prior session's summary/context. The ORIGINAL session is never mutated. On
+// success the new session is added to MANAGED and its panel opened/attached
+// (reusing the live-session panel path).
+async function continueSession(sessionId, lane) {
+  var payload = {project_id: PROJECT_ID, lane: lane, source_session: sessionId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/continue_session', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/continue_session', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[continue error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[continue refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  setTimeout(repopulate, 600);
 }
 
 // Per-session terminal-pane height (in-memory persistence across minimize /
@@ -2989,9 +3815,9 @@ function _loadPanelSummary(sessionId, host) {
     + '&lane=' + encodeURIComponent(lane)
     + '&session=' + encodeURIComponent(sessionId)
     + _tokenQ();
-  var summary = null, roles = {};
+  var summary = null, roles = {}, buildDeliv = null;
   function _paint() {
-    host.innerHTML = _renderSplitSummary(summary, roles, lane);
+    host.innerHTML = _renderSplitSummary(summary, roles, lane, buildDeliv);
   }
   fetch(sUrl, _jsonHdrs())
     .then(function (r) { return r.json(); })
@@ -3003,6 +3829,18 @@ function _loadPanelSummary(sessionId, host) {
     .then(function (r) { return r.json(); })
     .then(function (d) { if (d && d.ok && d.roles) roles = d.roles; })
     .catch(function () {})
+    .then(function () {
+      // v5 Wave 4 — a BUILD session's panel surfaces ITS resolved deliverable
+      // (or an honest "none yet" placeholder). Read-only; never fabricated.
+      if (lane !== 'build') return null;
+      var dUrl = '/api/rnd/build_deliverable?pid=' + encodeURIComponent(PROJECT_ID)
+        + '&lane=build&session=' + encodeURIComponent(sessionId) + _tokenQ();
+      return fetch(dUrl, _jsonHdrs())
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.ok) buildDeliv = d; })
+        .catch(function () {});
+    })
+    .catch(function () {})
     .then(_paint);
 }
 
@@ -3011,8 +3849,22 @@ function _loadPanelSummary(sessionId, host) {
 // the bottom. RIGHT (.slinks) = role-tagged doc links; a second link group (when
 // present) uses .slh.two (margin-top:auto) so it pins to the bottom — making both
 // columns fill the same height per the mockup.
-function _renderSplitSummary(summary, roles, lane) {
+function _renderSplitSummary(summary, roles, lane, buildDeliv) {
   var L = [];   // left materials
+  // v5 Wave 4 — a BUILD panel shows ITS deliverable (resolved → a link; absent →
+  // an honest placeholder). Rendered FIRST so it is prominent in the materials.
+  if (lane === 'build' && buildDeliv) {
+    if (buildDeliv.resolved && buildDeliv.deliverable) {
+      var bd = buildDeliv.deliverable;
+      L.push('<div class="bdeliv resolved"><span class="k">Deliverable</span>'
+        + '<a class="doc" href="' + _esc(bd.href || '#') + '" target="_blank" '
+        + 'rel="noopener">' + _esc(bd.name || bd.path || 'deliverable')
+        + '<span class="role">' + _esc(bd.type || '') + '</span></a></div>');
+    } else {
+      L.push('<div class="bdeliv none">' + _esc(buildDeliv.reason
+        || 'no deliverable pinned yet') + ' — pin one</div>');
+    }
+  }
   if (summary) {
     if (summary.title) L.push('<div class="sgoal">' + _esc(summary.title) + '</div>');
     if (summary.north_star) L.push('<div class="row"><span class="k">North Star</span><span>' + _esc(summary.north_star) + '</span></div>');
@@ -3134,7 +3986,9 @@ function minimizePanel(sessionId) {
 }
 
 // _closePanel: tear down the panel DOM + transport WITHOUT killing the session
-// (used when the registry no longer reports the session, e.g. after a kill).
+// (used by close-to-tile, and when the registry no longer reports a session, e.g.
+// after a kill). It NEVER touches the MANAGED record or the lane tile — the
+// session stays reopenable from its tile.
 function _closePanel(sessionId) {
   var p = PANELS[sessionId];
   if (!p) return;
@@ -3145,13 +3999,39 @@ function _closePanel(sessionId) {
   delete PANELS[sessionId];
 }
 
-// killPanel: the panel "×" = KILL, gated behind a confirm(). Only on YES do we
-// POST /api/rnd/term_kill, then tear down the panel + refresh the bar. (Minimize,
-// by contrast, never kills — the session keeps running.)
+// closePanel: the panel "×" = CLOSE-to-tile. Tears down the panel DOM + transport
+// ONLY (via _closePanel). It does NOT kill the PTY, NOT remove the worktree, NOT
+// remove the registry record, NOT remove the lane tile — the session stays
+// reopenable (click its tile → laneTileClick → openPanel re-attaches a live
+// terminal for a running session, or re-shows the summary for a historical one).
+// Live AND historical panels use this same non-destructive close.
+function closePanel(sessionId) {
+  _closePanel(sessionId);
+  renderSessionBar();
+}
+
+// _removeSessionTile: drop the lane-board tile for a session from the DOM (used by
+// the deliberate hard-kill only — close-to-tile NEVER removes a tile). Removes the
+// most-recent visible tile AND any tile inside a "previous sessions" expander.
+function _removeSessionTile(sessionId) {
+  var sel = '.tile[data-session="' + _cssEsc(sessionId) + '"]';
+  var tiles = document.querySelectorAll(sel);
+  for (var i = 0; i < tiles.length; i++) {
+    var el = tiles[i];
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+}
+
+// killPanel: the panel "🗑 Kill" = deliberate HARD-KILL, gated behind a confirm().
+// Only on YES do we POST /api/rnd/term_kill (reap PTY + remove worktree + mark the
+// registry record terminal), then tear down the panel, drop the MANAGED record AND
+// remove the session's lane tile so it's gone. For a historical/non-live session
+// the server returns 404 (unknown-session) — that's fine; we STILL remove the
+// tile + record cleanly (no orphan). (Minimize/close, by contrast, never kill.)
 async function killPanel(sessionId) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
-  if (!confirm('Kill the "' + name + '" terminal session? This stops its process.')) return;
+  if (!confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
   try {
     var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
     var data = await r.json();
@@ -3159,9 +4039,12 @@ async function killPanel(sessionId) {
       r = await _postJson('/api/rnd/term_kill', {session: sessionId});
       data = await r.json();
     }
+    // A 404 unknown-session (historical tile with no live PTY) is NOT an error
+    // for kill — there is simply no process to reap; we still drop the tile.
   } catch (e) { alert('[kill error] ' + e.message); }
   _closePanel(sessionId);
   delete MANAGED[sessionId];
+  _removeSessionTile(sessionId);
   renderSessionBar();
   setTimeout(repopulate, 400);
 }
@@ -4890,7 +5773,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
       <div class="gwl-wordmark">Ghost World <span class="gwl-accent">Labs</span></div>
     </div>
-    <div class="gwl-badge">Powered by NextGen Nuclear <span class="gwl-rad">&#9762;</span></div>
+    <div class="gwl-badge">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     <h1><span>&#9875;</span> Anchor</h1>
     <div class="subtitle">J.C. Liechty — Life Dashboard</div>
     <div class="nav-section">
@@ -4934,7 +5817,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </div>
       <div class="mh-spacer"></div>
-      <div class="mh-pill">Powered by NextGen Nuclear <span class="gwl-rad">&#9762;</span></div>
+      <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     </div>
     <!-- Dashboard view -->
     <div class="view" id="view-dashboard">
@@ -5079,7 +5962,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div class="date">{today_str}</div>
       </div>
       <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Per-project R&amp;D control surface. <b>Open</b> a project to launch research / plan / build jobs in its own window (run several at once). Use the tile buttons to change priority, add notes, or archive / retire a project. <a href="#" onclick="showView('rnd-archive');return false" style="color:var(--accent)">View Archive &#8594;</a></p>
-      {rnd_projects_html}
+      <div id="rndProjectsRows">{rnd_projects_html}</div>
     </div>
 
     <div class="view" id="view-rnd-archive" style="display:none">
@@ -5100,7 +5983,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     <!-- Ghost World Labs footer credit (Wave 9) -->
     <div class="gwl-footer">
       <img src="/vendor/brand/gwl-m-icon.svg?v={BUILD_ID}" alt="Ghost World Labs">
-      <span>A <b class="gwl-accent">Ghost World Labs</b> tool &bull; Powered by NextGen Nuclear <span class="gwl-accent">&#9762;</span></span>
+      <span>A <b class="gwl-accent">Ghost World Labs</b> tool &bull; Powered by NextGen Nuclear <svg class="gwl-rad" width="11" height="11" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></span>
     </div>
   </div>
 </div>
@@ -5467,7 +6350,56 @@ function showView(view) {{
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const navEl = document.querySelector('.nav-item[data-view="' + view + '"]');
     if (navEl) navEl.classList.add('active');
+    // v5 Wave 3: when the R&D view opens, pull the latest rows so a change made
+    // in a project window (or another tab) shows up without a manual reload.
+    if (view === 'rnd') rndRowsRefresh();
 }}
+
+// ── v5 Wave 3: live-ish R&D rows refresh (no full page reload) ──
+// Poll the read-only rows fragment ONLY while the R&D view is active AND the
+// tab is visible; swap the container's innerHTML only when the fragment CHANGED
+// (diff-before-swap → no DOM churn / scroll jumps). Failure-tolerant: a failed
+// fetch is a silent no-op, never throws.
+function _rndViewActive() {{
+    const v = document.getElementById('view-rnd');
+    return !!(v && v.style.display !== 'none'
+              && document.visibilityState === 'visible');
+}}
+function rndRowsRefresh() {{
+    try {{
+        if (!_rndViewActive()) return;
+        // Don't clobber an OPEN kebab menu (the swap would re-render it closed) —
+        // skip this tick; the user is mid-interaction. The next tick refreshes.
+        if (document.querySelector('.rnd-kebab-menu.rnd-kebab-open')) return;
+        const box = document.getElementById('rndProjectsRows');
+        if (!box) return;
+        fetch('/api/rnd/projects_html', {{cache: 'no-store'}})
+          .then(function (r) {{ return r.ok ? r.json() : null; }})
+          .then(function (d) {{
+              if (!d || !d.ok || typeof d.html !== 'string') return;
+              if (!_rndViewActive()) return;              // re-check after await
+              if (document.querySelector('.rnd-kebab-menu.rnd-kebab-open')) return;
+              if (d.html === box.innerHTML) return;       // diff-before-swap
+              // Preserve the user's lifetime/30d rollup-window toggle across the
+              // swap: the server fragment always renders 'lifetime' as active, so
+              // capture the active window BEFORE the swap and re-apply it after
+              // (otherwise the 15s poll would silently revert a 30d selection).
+              var onBtn = box.querySelector('.rnd-rows-rolltog b.on[data-window]');
+              var savedWin = onBtn ? onBtn.getAttribute('data-window') : 'lifetime';
+              box.innerHTML = d.html;
+              if (savedWin && savedWin !== 'lifetime') {{
+                  var reBtn = box.querySelector(
+                      '.rnd-rows-rolltog b[data-window="' + savedWin + '"]');
+                  if (reBtn) rndRowsRollupWindow(savedWin, reBtn);
+              }}
+          }})
+          .catch(function () {{}});                       // silent no-op
+    }} catch (e) {{}}
+}}
+setInterval(rndRowsRefresh, 15000);
+document.addEventListener('visibilitychange', function () {{
+    if (document.visibilityState === 'visible') rndRowsRefresh();
+}});
 
 // ── Modal helpers ──
 function closeModal(id) {{
@@ -6613,6 +7545,79 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     except Exception:
                         roles = {}
                     self._send_json({"ok": True, "roles": roles})
+            elif self.path.startswith("/api/rnd/build_deliverable"):
+                # Read-only (v5 Wave 4): resolve the DELIVERABLE one BUILD session
+                # produced — explicit signals only, never fabricated. The build
+                # panel fetches this to show the deliverable (name/type/link) or an
+                # honest "no deliverable pinned yet" placeholder when unresolved.
+                # NO mutation, NO model call. AUTH: ``?token=`` (read-only GET).
+                # /api/rnd/build_deliverable?pid=<id>&lane=build&session=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0]
+                       or q.get("project_id", [""])[0] or "").strip()
+                lane = (q.get("lane", ["build"])[0] or "build").strip()
+                session_id = (q.get("session", [""])[0] or "").strip()
+                if not pid or not session_id:
+                    self._send_json({"ok": False,
+                                     "error": "pid, session required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    result = {"resolved": False, "deliverable": None,
+                              "reason": "no deliverable pinned yet"}
+                    try:
+                        session = None
+                        for s in _sessions.list_sessions(folder, pid, lane):
+                            if s.get("session_id") == session_id:
+                                session = s
+                                break
+                        if session is not None:
+                            result = _deliv.resolve_build_deliverable(
+                                folder, pid, session)
+                    except Exception:
+                        result = {"resolved": False, "deliverable": None,
+                                  "reason": "no deliverable pinned yet"}
+                    self._send_json({"ok": True,
+                                     "resolved": bool(result.get("resolved")),
+                                     "deliverable": result.get("deliverable"),
+                                     "reason": result.get("reason", "")})
+            elif self.path.startswith("/api/rnd/grass"):
+                # Read-only (v5 Wave 5): the project's Grass ideas + their status
+                # + versioned refinements, for the two-pane idea workbench. NO
+                # mutation, NO model call. AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token set). Project-scoped (no cross-project
+                # grass view). /api/rnd/grass?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            ideas = _eh.grass_workbench_data(folder, pid)
+                        except Exception:
+                            ideas = []
+                        self._send_json({"ok": True, "ideas": ideas})
             elif self.path.startswith("/api/rnd/project_rollup"):
                 # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
                 # (effort_history.project_effort_rollup, Wave 3) for the header's
@@ -6705,6 +7710,20 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "created_at": r.get("created_at"),
                     })
                 self._send_json({"ok": True, "sessions": safe})
+            elif self.path.startswith("/api/rnd/projects_html"):
+                # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
+                # already-open main dashboard can poll for changes (new session,
+                # added idea, priority/notes/blurb edit, archive, new project,
+                # refreshed summary, rollups) and swap them in WITHOUT a full
+                # page reload. REUSES render_projects_view_html (which reads
+                # ONLY the cached summaries — no synchronous model run here). No
+                # mutation, no auth gate (consistent with /api/rnd/projects).
+                try:
+                    frag = render_projects_view_html()
+                except Exception:
+                    frag = ('<div class="rnd-projects"><p class="rnd-empty">'
+                            'No active R&amp;D projects.</p></div>')
+                self._send_json({"ok": True, "html": frag})
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
@@ -7537,6 +8556,162 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(ve)}, 400)
                 except _termsess.TerminalSessionError as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_develop":
+            # v5 Wave 5: DEVELOP a grass idea in a seeded WORKBENCH session in the
+            # target lane (research|plan). Reuses the Wave-1 seed path via
+            # effort_history.develop_grass_idea → terminal_session.start_session,
+            # seeding the idea text + its latest refinements. The idea STAYS in
+            # grass (copy, never destroy). Auth enforced by the middleware above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and lane required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.develop_grass_idea(pid, idea_id, lane,
+                                                 backend=backend)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_save_refinement":
+            # v5 Wave 5: save a NEW versioned refinement (grass-<id>/dev-N) for an
+            # idea (append-only; auto-incrementing N). Marks the idea REFINED.
+            # Auth enforced above. 404 unknown project, 400 unknown idea/empty.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and idea_id required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        rec = _eh.save_grass_refinement(
+                            folder, pid, idea_id,
+                            text=body.get("text", ""),
+                            label=body.get("label", ""),
+                            artifacts=body.get("artifacts") or [],
+                            session_id=body.get("session_id") or None)
+                        self._send_json({"ok": True, "refinement": rec})
+                    except ValueError as ve:
+                        self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_set_status":
+            # v5 Wave 5: set a grass idea's lifecycle status (raw/refined/
+            # promoted), validating the transition. Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            status = (body.get("status", "") or "").strip()
+            if not pid or not idea_id or not status:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and status required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        rec = _eh.set_grass_status(
+                            folder, pid, idea_id, status,
+                            promoted_to_session=body.get("promoted_to_session"),
+                            promoted_to_lane=body.get("promoted_to_lane"))
+                        self._send_json({"ok": True, "idea": rec})
+                    except ValueError as ve:
+                        self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_pull":
+            # v5 Wave 5: PULL a chosen refinement version into a NEW seeded session
+            # (research|plan). Reuses the Wave-1 seed path. Idea + refinement are
+            # left untouched. Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            refinement_id = (body.get("refinement_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id or not refinement_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id, refinement_id and lane "
+                              "required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.pull_grass_refinement(
+                        pid, idea_id, refinement_id, lane, backend=backend)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/continue_session":
+            # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
+            # historical session, SEEDED with that prior session's context (its
+            # cached summary, else a deterministic digest of its members). The
+            # ORIGINAL session/registry record is NEVER mutated (Risk R2) — we
+            # only READ it. Reuses terminal_session.start_session(seed_context=…)
+            # (the Wave-1 seed path), so the new session's single opening turn
+            # loads the lane skill AND carries the prior context. Auth enforced by
+            # the do_POST middleware above (mutating/terminal).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            lane = (body.get("lane", "") or "").strip()
+            source = (body.get("source_session", "")
+                      or body.get("session", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not lane or not source:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, lane and source_session required"},
+                    400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    seed_context = _build_continue_seed(
+                        folder, pid, lane, source)
+                    try:
+                        if backend:
+                            rec = _termsess.start_session(
+                                pid, lane, backend=backend,
+                                seed_context=seed_context)
+                        else:
+                            rec = _termsess.start_session(
+                                pid, lane, seed_context=seed_context)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        self._send_json({"ok": True, "session": rec,
+                                         "seeded_from": source})
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart

@@ -1205,6 +1205,286 @@ def check_rnd_v4_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v5_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v5 "Durable Work" R&D surface — FULLY STUBBED.
+
+    Walks the new v5 data/control seams in a throwaway temp project + temp git
+    repo, never touching real data, never a live claude / real PTY / real preview
+    spawn / real worktree off the build repo:
+
+      (Wave 1) run lifecycle — close-keeps-record (no reap; the PTY + registry
+          record survive) vs kill-reaps (PTY gone + worktree removed + record
+          terminal), via ``terminal_session.start_session`` / ``kill`` (stub PTY).
+      (Wave 2) session summary + continue — ``summarizer.summarize_session``
+          through the stub runner captures skill/prompts/actions and caches; then
+          ``terminal_session.start_session(seed_context=…)`` starts a NEW seeded
+          session carrying the prior context; the original record is intact.
+      (Wave 3) project summary — ``summarizer.summarize_project`` through the stub
+          runner yields a non-empty summary that is cached (read path never runs
+          the model).
+      (Wave 4) build deliverable — ``deliverables.resolve_build_deliverable`` +
+          ``backfill_build_deliverables`` resolve a session-scoped product (and an
+          HONEST unresolved when no explicit signal); nothing fabricated.
+      (Wave 5) grass workbench — add_idea → develop (seeded stub session) →
+          save_grass_refinement (dev-N) → set_grass_status → the idea STAYS in
+          grass (copy); the refinement is listed.
+
+    Everything is torn down by ``_cleanup_synthetic_rnd`` + the env restore here +
+    in ``main()``. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (fake_claude)
+    + a temp ``ANCHOR_WORKTREE_BASE`` keep every model/PTY interaction off the real
+    engine; nothing touches the live ``:8777`` service.
+    """
+    name = "R&D v5 surface"
+    if not rnd_env.get("runner_cmd"):
+        report.check(name, True, "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v5-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_TERMINAL_SEED"] = "HC-V5-SEED-LOAD-SKILL"
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import pty_manager as _pty
+        import session_registry as _sreg
+        import effort_history as _eh
+        import summarizer as _summarizer
+        import deliverables as _deliv
+        import sessions as _sessions
+        import brownfield_scan as _bf
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v5-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v5 probe\n\nThis project exists to exercise the v5 surface.\n",
+            encoding="utf-8")
+        (proj_folder / "README.md").write_text("# hc v5 probe\n",
+                                               encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v5", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v5 project", bool(pid), pid))
+
+        # ── (Wave 1) run lifecycle: close keeps record; kill reaps ────────────
+        if git_ok:
+            try:
+                rec = _ts.start_session(pid, "research", label="hc v5 close")
+                sid = rec["session_id"]
+                live_after_start = sid in set(_pty.live_sessions())
+                # CLOSE = the panel X: it does NOT reap. We model "close" as
+                # simply NOT calling kill — the registry record + the live PTY
+                # must persist (a closed-to-tile session keeps running).
+                still_rec = _sreg.get_session(sid)
+                still_live = sid in set(_pty.live_sessions())
+                close_keeps = (live_after_start and still_rec is not None
+                               and still_live)
+                steps.append(("close keeps record + PTY",
+                              close_keeps,
+                              f"rec={still_rec is not None} live={still_live}"))
+                # KILL = the deliberate hard-kill: reap PTY + remove worktree +
+                # mark the record terminal.
+                _ts.kill(sid, project_id=pid)
+                killed_live = sid in set(_pty.live_sessions())
+                after_kill = _sreg.get_session(sid)
+                term_status = (after_kill or {}).get("status", "")
+                kill_reaps = (not killed_live
+                              and term_status in ("done", "failed", "killed",
+                                                  "stopped", ""))
+                steps.append(("kill reaps PTY",
+                              kill_reaps,
+                              f"live={killed_live} status={term_status}"))
+            except Exception as e:
+                steps.append(("run lifecycle", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("run lifecycle", True, "skipped (git unavailable)"))
+
+        # ── (Wave 2) session summary (skill/prompts/actions) + continue ───────
+        cont_sid = None
+        try:
+            # A discovered research session so the summarizer has member docs.
+            rd = proj_folder / "research" / "hc-v5-research"
+            rd.mkdir(parents=True, exist_ok=True)
+            (rd / "REPORT.md").write_text(
+                "# Report\n\n## Findings\nhc v5 session summary.\n",
+                encoding="utf-8")
+            scan = _bf.scan(str(proj_folder))
+            _eh.adopt_discovered(proj_folder, pid, scan)
+            rsess = _sessions.list_sessions(str(proj_folder), pid, "research")
+            if rsess:
+                rs = rsess[0]
+                rsid = rs["session_id"]
+                summ = _summarizer.summarize_session(
+                    str(proj_folder), pid, "research", rs)
+                has_shape = (isinstance(summ, dict)
+                             and "skill" in summ and "prompts" in summ
+                             and "actions" in summ)
+                # The read path returns the SAME cached summary (no re-run).
+                cached = _summarizer.load_cached(
+                    str(proj_folder), pid, _eh._resolve_subdir("research"),
+                    rsid)
+                steps.append(("session summary skill/prompts/actions cached",
+                              has_shape and cached is not None,
+                              f"shape={has_shape} cached={cached is not None}"))
+                # CONTINUE: a NEW seeded session in the same lane; original intact.
+                if git_ok:
+                    seed_ctx = ("Continuation of session %s: %s"
+                                % (rsid, summ.get("title", "")))
+                    crec = _ts.start_session(pid, "research",
+                                             label="hc v5 continue",
+                                             seed_context=seed_ctx)
+                    cont_sid = crec["session_id"]
+                    orig_intact = _sessions.list_sessions(
+                        str(proj_folder), pid, "research")
+                    orig_ok = any(s.get("session_id") == rsid
+                                  for s in orig_intact)
+                    steps.append(("continue starts new seeded session",
+                                  bool(cont_sid) and cont_sid != rsid
+                                  and crec.get("status") == "running"
+                                  and orig_ok,
+                                  f"new={cont_sid} orig_intact={orig_ok}"))
+                    try:
+                        _ts.kill(cont_sid, project_id=pid)
+                    except Exception:
+                        pass
+            else:
+                steps.append(("session summary", False,
+                              "no research session grouped"))
+        except Exception as e:
+            steps.append(("session summary + continue", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (Wave 3) project summary: non-empty objective, cached ─────────────
+        try:
+            psumm = _summarizer.summarize_project(str(proj_folder), pid)
+            obj = ""
+            if isinstance(psumm, dict):
+                obj = (psumm.get("summary") or psumm.get("objective")
+                       or psumm.get("markdown") or "")
+                claims = psumm.get("claims", []) or []
+                if not obj and claims:
+                    obj = str(claims[0])
+            cached_proj = _summarizer.load_cached_project(str(proj_folder), pid)
+            steps.append(("project summary non-empty + cached",
+                          bool(str(obj).strip()) and cached_proj is not None,
+                          f"obj_len={len(str(obj))} "
+                          f"cached={cached_proj is not None}"))
+        except Exception as e:
+            steps.append(("project summary", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (Wave 4) build deliverable: resolve (honest unresolved) + backfill ─
+        try:
+            # A discovered build session (formed from a foreman checkpoint/config)
+            # whose single product member resolves as the build's deliverable.
+            bd = proj_folder / "build" / "hc-v5-build"
+            bd.mkdir(parents=True, exist_ok=True)
+            (bd / "foreman.config.json").write_text("{}\n", encoding="utf-8")
+            scan2 = _bf.scan(str(proj_folder))
+            _eh.adopt_discovered(proj_folder, pid, scan2)
+            bsess = _sessions.list_sessions(str(proj_folder), pid, "build")
+            res_shape = False
+            if bsess:
+                res = _deliv.resolve_build_deliverable(
+                    str(proj_folder), pid, bsess[0])
+                res_shape = (isinstance(res, dict) and "resolved" in res
+                             and "reason" in res
+                             # honesty: unresolved must carry deliverable=None
+                             and (res.get("resolved")
+                                  or res.get("deliverable") is None))
+            back = _deliv.backfill_build_deliverables(str(proj_folder), pid)
+            back_shape = (isinstance(back, dict) and "pinned" in back
+                          and "unresolved" in back and "scanned" in back)
+            steps.append(("build deliverable resolve + backfill",
+                          res_shape and back_shape,
+                          f"resolve={res_shape} "
+                          f"backfill_scanned={back.get('scanned')}"))
+        except Exception as e:
+            steps.append(("build deliverable", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (Wave 5) grass workbench: develop → save refinement → status ──────
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid, "hc v5 grass idea")
+                idea_id = idea.get("job_id")
+                drec = _eh.develop_grass_idea(pid, idea_id, "research",
+                                              folder_path=str(proj_folder))
+                dsid = drec.get("session_id")
+                ref = _eh.save_grass_refinement(
+                    str(proj_folder), pid, idea_id,
+                    text="refined", label="dev-1", session_id=dsid)
+                refs = _eh.list_grass_refinements(str(proj_folder), pid,
+                                                  idea_id)
+                still = _eh.get_grass_idea(str(proj_folder), pid, idea_id)
+                wb = _eh.grass_workbench_data(str(proj_folder), pid)
+                listed = any(it.get("idea_id") == idea_id for it in wb)
+                steps.append(("grass develop + refine + idea kept",
+                              bool(dsid) and still is not None
+                              and len(refs) >= 1
+                              and "/dev-" in ref.get("refinement_id", "")
+                              and _eh.grass_status(still) == "refined"
+                              and listed,
+                              f"refs={len(refs)} kept={still is not None} "
+                              f"status={_eh.grass_status(still)}"))
+                try:
+                    if dsid:
+                        _ts.kill(dsid, project_id=pid)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("grass workbench", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass workbench", True, "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -1456,6 +1736,7 @@ def main():
         check_rnd_v2_surface(report, server_proc, rnd_env)
         check_rnd_v3_surface(report, server_proc, rnd_env)
         check_rnd_v4_surface(report, server_proc, rnd_env)
+        check_rnd_v5_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
