@@ -1660,43 +1660,139 @@ def _idea_source_label(eff) -> str:
     return "manual"
 
 
-def _render_grass_board(folder_path, project_id) -> str:
-    """Render the Grass lane as an IDEA BOARD (v4 Wave 6) — not a flat text page.
+#: Human label for a grass idea's lifecycle status (used by the workbench chips).
+_GRASS_STATUS_LABEL = {
+    _eh.GRASS_RAW: "raw",
+    _eh.GRASS_REFINED: "refined",
+    _eh.GRASS_PROMOTED: "promoted",
+}
 
-    Each grass effort (manual add / INBOX promotion / discovered idea-doc) becomes
-    an idea CARD showing the idea text, a source chip, and two promote actions —
-    **→ Research** and **→ Plan** — each calling ``promoteGrass(idea_id, lane)``
-    which POSTs ``/api/rnd/promote_grass`` and opens the new seeded session's
-    inline panel. The "+ add idea" / "+ from inbox" affordances are rendered by
-    the caller (the column footer), as in the mockup's Extras grass board.
+
+def _render_grass_column_tile(folder_path, project_id) -> str:
+    """Render the Grass LANE column content: a single tile that OPENS the
+    full-width two-pane idea workbench panel (v5 Wave 5).
+
+    The 5-column cockpit board's Grass column is too narrow for the B+C hybrid
+    two-pane workbench, so the column shows one clickable tile (idea count +
+    status mix) whose click (``openGrassWorkbench()``) expands the workbench panel
+    in ``#panelStack`` — exactly like a lane tile opens a session panel. The old
+    single-column ``idea-board`` / ``idea-card`` markup is GONE.
     """
     try:
-        efforts = _eh.list_efforts(folder_path, project_id, "grass")
+        ideas = _eh.grass_workbench_data(folder_path, project_id)
     except Exception:
-        efforts = []
-    if not efforts:
-        return ("<div class='idea-empty'>No ideas yet — "
-                "capture one with “+ Add idea”.</div>")
-    cards = []
-    for eff in efforts:
-        text = (eff.get("title") or "").strip() or "(untitled idea)"
-        idea_id = eff.get("job_id", "") or ""
-        src = _idea_source_label(eff)
-        esc_text = html_lib.escape(text)
-        esc_id = html_lib.escape(idea_id, quote=True)
-        cards.append(
-            f"<div class='idea-card' data-idea=\"{esc_id}\">"
-            f"<div class='itxt'>{esc_text}</div>"
-            f"<div class='irow'>"
-            f"<span class='idea-src'>{html_lib.escape(src)}</span>"
-            f"<span class='isp'></span>"
-            f"<span class='idea-promote' "
-            f"onclick=\"promoteGrass('{esc_id}','research')\">→ Research</span>"
-            f"<span class='idea-promote' "
-            f"onclick=\"promoteGrass('{esc_id}','plan')\">→ Plan</span>"
-            f"</div></div>"
+        ideas = []
+    n = len(ideas)
+    n_raw = sum(1 for i in ideas if i["status"] == _eh.GRASS_RAW)
+    n_ref = sum(1 for i in ideas if i["status"] == _eh.GRASS_REFINED)
+    n_pro = sum(1 for i in ideas if i["status"] == _eh.GRASS_PROMOTED)
+    light = "green" if n_ref else ("amber" if n_raw else "grey")
+    sub = (f"{n_raw} raw · {n_ref} refined · {n_pro} promoted"
+           if n else "no ideas yet")
+    return (
+        f"<div class='tile lane-tile grass-tile' data-grass-tile='1' "
+        f"data-light='{light}' onclick='openGrassWorkbench()'>"
+        f"<div class='tr1'><span class='lane'>ideas</span>"
+        f"<span class='ver'></span>"
+        f"<span class='lt {light}' aria-hidden='true'></span></div>"
+        f"<div class='ttl'>Idea workbench</div>"
+        f"<div class='st'><span class='state done'>{html_lib.escape(sub)}</span>"
+        f"<span class='age'>· {n} idea{'s' if n != 1 else ''}</span></div>"
+        f"</div>"
+    )
+
+
+def _render_grass_idea_li(idea) -> str:
+    """Render one idea as a ``.gli`` row for the workbench LEFT list (mockup C)."""
+    status = idea["status"]
+    cls_extra = (" r" if status == _eh.GRASS_REFINED
+                 else (" p" if status == _eh.GRASS_PROMOTED else ""))
+    title = html_lib.escape(idea["title"] or "(untitled idea)")
+    short = html_lib.escape(idea["short_id"])
+    idea_attr = html_lib.escape(idea["idea_id"], quote=True)
+    st_lbl = html_lib.escape(_GRASS_STATUS_LABEL.get(status, status))
+    src = html_lib.escape(idea["source"])
+    return (
+        f"<div class='gli{cls_extra}' data-idea=\"{idea_attr}\" "
+        f"data-status='{html_lib.escape(status)}' "
+        f"data-title=\"{html_lib.escape(idea['title'], quote=True)}\">"
+        f"<div class='t'>{title}</div>"
+        f"<div class='m'><span class='dot'></span>"
+        f"<span class='idchip'>{short}</span>"
+        f"<span class='stchip {html_lib.escape(status)}'>{st_lbl}</span>"
+        f"<span class='srcchip'>{src}</span></div></div>"
+    )
+
+
+def _render_grass_workbench(folder_path, project_id) -> str:
+    """Render the FULL B+C hybrid Grass workbench (the approved mockup), as a
+    hidden template the panel manager clones into ``#panelStack`` (v5 Wave 5).
+
+    Structure (matching ``_mockups/grass_catcher_refined.html``):
+      - ``.gtabs`` filter-tab row: 🌿 · All/raw/refined/promoted (with counts) ·
+        a ``.gsearch`` search box · ``+ Add idea`` / ``+ From inbox`` buttons.
+      - ``.gwrap`` two-pane grid: ``.glist`` (filtered idea list, ``.gli`` rows
+        with ``.idchip``/``.stchip``/``.srcchip``) · ``.gwork`` (the selected
+        idea's workbench: title + id + status, ``.desc``, ``.devbar`` with
+        Develop 🔬 Research / 📐 Plan + engine toggle + → Promote to a lane, a
+        ``.tpane`` workbench terminal, and ``.ghist`` refinement history with
+        per-version pull buttons).
+
+    The JS (``openGrassWorkbench`` / ``selectGrassIdea`` / ``filterGrass`` /
+    ``developGrass`` / ``pullGrass``) wires interactivity; this server render
+    provides the data-bearing DOM (so the rendered-DOM assertions are real).
+    """
+    try:
+        ideas = _eh.grass_workbench_data(folder_path, project_id)
+    except Exception:
+        ideas = []
+    n = len(ideas)
+    n_raw = sum(1 for i in ideas if i["status"] == _eh.GRASS_RAW)
+    n_ref = sum(1 for i in ideas if i["status"] == _eh.GRASS_REFINED)
+    n_pro = sum(1 for i in ideas if i["status"] == _eh.GRASS_PROMOTED)
+    tabs = (
+        "<div class='gtabs'>"
+        "<span class='ic'>&#127807;</span>"
+        f"<span class='gtab on' data-filter='all'>All <span class='n'>{n}</span></span>"
+        f"<span class='gtab' data-filter='raw'>raw <span class='n'>{n_raw}</span></span>"
+        f"<span class='gtab' data-filter='refined'>refined "
+        f"<span class='n'>{n_ref}</span></span>"
+        f"<span class='gtab' data-filter='promoted'>promoted "
+        f"<span class='n'>{n_pro}</span></span>"
+        "<span class='sp'></span>"
+        "<input class='gsearch' type='search' placeholder='search ideas&hellip;' "
+        "oninput='filterGrass()'>"
+        "<button class='mini' onclick='addIdea()'>+ Add idea</button>"
+        "<button class='mini' onclick='promoteInbox()'>+ From inbox</button>"
+        "</div>"
+    )
+    if ideas:
+        lis = "".join(_render_grass_idea_li(i) for i in ideas)
+        list_html = (
+            f"<div class='glist'>{lis}"
+            "<div class='gadd'><button class='mini' style='width:100%' "
+            "onclick='addIdea()'>+ Add idea</button></div></div>"
         )
-    return "<div class='idea-board'>" + "".join(cards) + "</div>"
+    else:
+        list_html = (
+            "<div class='glist'><div class='gli-empty'>No ideas yet — "
+            "capture one with &ldquo;+ Add idea&rdquo;.</div>"
+            "<div class='gadd'><button class='mini' style='width:100%' "
+            "onclick='addIdea()'>+ Add idea</button></div></div>"
+        )
+    # The right workbench pane starts EMPTY (a "select an idea" hint); selecting
+    # a .gli populates it client-side from the row's data + a fetch of /api/rnd/grass.
+    work_html = (
+        "<div class='gwork' data-empty='1'>"
+        "<div class='gwork-empty'>Select an idea on the left to develop it.</div>"
+        "</div>"
+    )
+    return (
+        "<div class='grass-workbench' data-grass-workbench='1'>"
+        f"{tabs}"
+        f"<div class='gwrap'>{list_html}{work_html}</div>"
+        "</div>"
+    )
 
 
 def _render_kanban_html(folder_path, project_id):
@@ -1730,10 +1826,11 @@ def _render_kanban_html(folder_path, project_id):
         elif any_live:
             badge = "<span class='lt green' title='running'></span>"
         if trio_lane == "grass":
-            # The grass lane is an IDEA BOARD (cards with promote actions), NOT a
-            # session tile/expander. It has no terminal of its own; promoting an
-            # idea creates the seeded session that does.
-            cards = _render_grass_board(folder_path, project_id)
+            # v5 Wave 5: the grass lane column shows ONE tile that opens the
+            # full-width two-pane B+C hybrid workbench panel (the column is too
+            # narrow for the two-pane workbench). The old single-column idea-board
+            # markup is gone; the workbench template is appended after the board.
+            cards = _render_grass_column_tile(folder_path, project_id)
         elif trio_lane == "deliverables":
             # The deliverables lane is launch-by-type TILES (mockup Paradigm-2),
             # NOT session/effort cards: a tile per pinned deliverable whose click
@@ -1775,7 +1872,15 @@ def _render_kanban_html(folder_path, project_id):
             f"<div class='col-tiles' id='cards_{lane_attr}'>{cards}</div>"
             f"{add}</div>"
         )
-    return "<div class='p2lanes'>" + "".join(cols) + "</div>"
+    board = "<div class='p2lanes'>" + "".join(cols) + "</div>"
+    # v5 Wave 5: the full two-pane Grass workbench, rendered ONCE as a hidden
+    # template the panel manager (openGrassWorkbench) clones into #panelStack.
+    workbench = (
+        "<div id='grassWorkbenchTpl' style='display:none'>"
+        + _render_grass_workbench(folder_path, project_id)
+        + "</div>"
+    )
+    return board + workbench
 
 
 def _safe_dom_id(seg: str) -> str:
@@ -2201,6 +2306,72 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px solid var(--border);border-radius:7px;padding:2px 8px}"
         ".idea-promote:hover{border-color:var(--accent)}"
         ".idea-empty{font-size:11px;color:var(--text-dim);padding:4px 2px}"
+        # ── v5 Wave 5: Grass B+C hybrid workbench (mockup grass_catcher_refined) ──
+        ".grass-tile{cursor:pointer}"
+        ".grass-workbench{background:var(--surface);border:1px solid var(--border);"
+        "border-radius:10px;overflow:hidden}"
+        ".gtabs{display:flex;align-items:center;gap:5px;padding:9px 12px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex-wrap:wrap}"
+        ".gtabs .ic{font-size:15px;margin-right:4px}"
+        ".gtab{font-size:12px;padding:5px 12px;border-radius:20px;"
+        "border:1px solid var(--border);color:var(--text-dim);cursor:pointer}"
+        ".gtab.on{color:var(--text);background:rgba(108,156,252,.12);"
+        "border-color:var(--accent)}"
+        ".gtab .n{opacity:.7}"
+        ".gtabs .sp{flex:1}"
+        ".gsearch{font-size:12px;padding:4px 9px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);color:var(--text);"
+        "min-width:140px}"
+        ".gwrap{display:grid;grid-template-columns:320px 1fr;min-height:430px}"
+        ".glist{border-right:1px solid var(--border);background:#13161f;"
+        "overflow:auto;max-height:560px}"
+        ".gli{padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer}"
+        ".gli:hover{background:var(--surface2)}"
+        ".gli.sel{background:rgba(108,156,252,.1);border-left:3px solid var(--accent)}"
+        ".gli .t{font-size:12.5px;line-height:1.35}"
+        ".gli .m{font-size:10.5px;color:var(--text-dim);margin-top:4px;display:flex;"
+        "gap:7px;align-items:center;flex-wrap:wrap}"
+        ".gli .dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim)}"
+        ".gli.r .dot{background:var(--success)}.gli.p .dot{background:var(--accent)}"
+        ".gli-empty{padding:14px 13px;color:var(--text-dim);font-size:12px}"
+        ".idchip{font-family:ui-monospace,Consolas,monospace;font-size:10px;"
+        "color:var(--text-dim);background:var(--surface);border:1px solid var(--border);"
+        "border-radius:5px;padding:1px 6px}"
+        ".srcchip{font-size:10px;color:var(--text-dim);border:1px solid var(--border);"
+        "border-radius:20px;padding:1px 8px}"
+        ".stchip{font-size:10px;border-radius:20px;padding:1px 8px}"
+        ".stchip.raw{color:var(--text-dim);border:1px solid var(--border)}"
+        ".stchip.refined{color:var(--success);border:1px solid rgba(34,197,94,.4);"
+        "background:rgba(34,197,94,.08)}"
+        ".stchip.promoted{color:var(--accent);border:1px solid rgba(108,156,252,.4);"
+        "background:rgba(108,156,252,.08)}"
+        ".gwork{padding:15px 18px;min-width:0;display:flex;flex-direction:column}"
+        ".gwork-empty{color:var(--text-dim);font-size:13px;padding:20px 4px}"
+        ".gwork h3{font-size:16px;margin-bottom:5px;display:flex;align-items:center;"
+        "gap:9px;flex-wrap:wrap}"
+        ".gwork .desc{font-size:13px;color:var(--text);margin-bottom:4px}"
+        ".gwork .sub{font-size:12px;color:var(--text-dim);margin-bottom:12px}"
+        ".devbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap;"
+        "margin-bottom:4px}"
+        ".devbar .lbl{font-size:11px;color:var(--text-dim)}.devbar .sp{flex:1}"
+        ".mini.go{border-color:rgba(34,197,94,.5)}"
+        ".grass-workbench .tpane{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden;margin-top:11px;resize:vertical;"
+        "min-height:150px;display:flex;flex-direction:column}"
+        ".grass-workbench .tpane .tbar{display:flex;align-items:center;gap:8px;"
+        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
+        ".grass-workbench .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
+        ".grass-workbench .tpane .term-host{flex:1;overflow:auto;min-height:120px}"
+        ".ghist{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
+        ".ghist .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:7px}"
+        ".ghist .hr{font-size:12px;color:var(--text);padding:6px 0;"
+        "border-bottom:1px solid var(--border);display:flex;gap:9px;"
+        "align-items:center;flex-wrap:wrap}"
+        ".ghist .hr a{color:var(--accent);text-decoration:none}"
+        ".ghist .hr .sp{flex:1}"
+        ".ghist-empty{font-size:11.5px;color:var(--text-dim)}"
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
@@ -2577,6 +2748,320 @@ async function promoteGrass(ideaId, lane) {
   renderSessionBar();
   openPanel(sid);
   // Re-sync indices/labels from the registry shortly after.
+  setTimeout(repopulate, 600);
+}
+
+// ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
+// The grass lane column tile (.grass-tile) opens a FULL-WIDTH two-pane workbench
+// panel in #panelStack (the column is too narrow for the two-pane workbench). The
+// workbench markup is rendered server-side into #grassWorkbenchTpl and cloned in.
+// Tabs + search scope the left list; selecting a .gli loads the right workbench;
+// Develop starts a SEEDED live session in the workbench terminal; a saved
+// refinement appears in the history (grass-<id>/dev-N) and is pullable.
+var _grassEngine = 'claude';   // workbench engine toggle (research can use gemini)
+var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
+var _grassDevSession = null;    // the active Develop session id (for Save refinement)
+
+function openGrassWorkbench() {
+  var stack = document.getElementById('panelStack');
+  var tpl = document.getElementById('grassWorkbenchTpl');
+  if (!stack || !tpl) return;
+  var existing = document.getElementById('grassPanel');
+  if (existing) {
+    if (existing.classList.contains('minimized')) existing.classList.remove('minimized');
+    existing.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'grassPanel';
+  var bar = document.createElement('div');
+  bar.className = 'pbar';
+  var title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = '🌿 Grass Catcher — idea workbench';
+  var sp = document.createElement('span');
+  sp.className = 'sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'panelbtn min';
+  minBtn.title = 'Minimize';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); panel.classList.add('minimized'); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); panel.remove(); };
+  bar.appendChild(title); bar.appendChild(sp);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn);
+  var pin = document.createElement('div');
+  pin.className = 'pin';
+  pin.innerHTML = tpl.innerHTML;     // clone the rendered workbench markup
+  panel.appendChild(bar); panel.appendChild(pin);
+  stack.appendChild(panel);
+  _wireGrassWorkbench(panel);
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  // Hydrate the idea data (status + refinements) for the right workbench.
+  _loadGrassData();
+}
+
+function _wireGrassWorkbench(panel) {
+  // Tabs: click sets the active filter and re-filters the list.
+  var tabs = panel.querySelectorAll('.gtab');
+  for (var i = 0; i < tabs.length; i++) {
+    tabs[i].onclick = (function (tab) {
+      return function () {
+        var all = panel.querySelectorAll('.gtab');
+        for (var j = 0; j < all.length; j++) all[j].classList.remove('on');
+        tab.classList.add('on');
+        filterGrass();
+      };
+    })(tabs[i]);
+  }
+  // Rows: click selects the idea.
+  var rows = panel.querySelectorAll('.gli');
+  for (var k = 0; k < rows.length; k++) {
+    rows[k].onclick = (function (row) {
+      return function () { selectGrassIdea(row.getAttribute('data-idea')); };
+    })(rows[k]);
+  }
+}
+
+async function _loadGrassData() {
+  try {
+    var r = await fetch('/api/rnd/grass?project_id=' + encodeURIComponent(PROJECT_ID)
+                        + _grassTokenQ());
+    var data = await r.json();
+    if (data && data.ok && data.ideas) {
+      _grassData = {};
+      for (var i = 0; i < data.ideas.length; i++) _grassData[data.ideas[i].idea_id] = data.ideas[i];
+    }
+  } catch (e) { /* read-only; workbench still works from row data */ }
+}
+function _grassTokenQ() {
+  var t = _anchorToken();
+  return t ? ('&token=' + encodeURIComponent(t)) : '';
+}
+
+// filterGrass(): scope the left .gli list by the active status tab + the search box.
+function filterGrass() {
+  var panel = document.getElementById('grassPanel');
+  if (!panel) return;
+  var active = panel.querySelector('.gtab.on');
+  var filter = active ? (active.getAttribute('data-filter') || 'all') : 'all';
+  var sbox = panel.querySelector('.gsearch');
+  var q = sbox ? (sbox.value || '').trim().toLowerCase() : '';
+  var rows = panel.querySelectorAll('.gli');
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var st = row.getAttribute('data-status') || 'raw';
+    var ttl = (row.getAttribute('data-title') || '').toLowerCase();
+    var okStatus = (filter === 'all') || (st === filter);
+    var okSearch = !q || ttl.indexOf(q) !== -1;
+    row.style.display = (okStatus && okSearch) ? '' : 'none';
+  }
+}
+
+// selectGrassIdea(ideaId): load the chosen idea's RIGHT workbench (text +
+// devbar + a terminal pane + refinement history). Marks the row selected.
+function selectGrassIdea(ideaId) {
+  var panel = document.getElementById('grassPanel');
+  if (!panel) return;
+  var rows = panel.querySelectorAll('.gli');
+  var row = null;
+  for (var i = 0; i < rows.length; i++) {
+    rows[i].classList.remove('sel');
+    if (rows[i].getAttribute('data-idea') === ideaId) { row = rows[i]; rows[i].classList.add('sel'); }
+  }
+  if (!row) return;
+  var rec = _grassData[ideaId] || {};
+  var title = (rec.title != null) ? rec.title : (row.getAttribute('data-title') || '');
+  var status = rec.status || row.getAttribute('data-status') || 'raw';
+  var short = rec.short_id || '';
+  var notes = rec.notes || '';
+  var work = panel.querySelector('.gwork');
+  if (!work) return;
+  work.removeAttribute('data-empty');
+  work.setAttribute('data-idea', ideaId);
+  var html = ''
+    + '<h3>' + _esc(title || '(untitled idea)')
+    + ' <span class="idchip">' + _esc(short) + '</span>'
+    + ' <span class="stchip ' + _esc(status) + '">' + _esc(status) + '</span></h3>'
+    + (notes ? '<div class="desc">' + _esc(notes) + '</div>' : '')
+    + '<div class="sub">Develop with a tool — the session is seeded with this '
+    + 'idea’s text + any refinements. Output is saved here with a new id and '
+    + 'is pullable into a Research or Plan run.</div>'
+    + '<div class="devbar"><span class="lbl">Develop:</span>'
+    + '<button class="mini go" data-dev="research">🔬 Research</button>'
+    + '<button class="mini go" data-dev="plan">📐 Plan</button>'
+    + '<span class="sp"></span>'
+    + '<span class="lbl">Engine</span>'
+    + '<button class="mini gengtog">◆ Claude</button>'
+    + '<button class="mini gpromote">→ Promote to a lane</button></div>'
+    + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
+    + '· select Develop to start</span><span class="sp"></span>'
+    + '<button class="mini gsave" disabled title="Save the develop session\'s '
+    + 'output as a new grass-&lt;id&gt;/dev-N refinement">💾 Save refinement</button></div>'
+    + '<div class="term-host" data-grass-term="1"></div></div>'
+    + '<div class="ghist"><div class="h">Refinement history · pull any version '
+    + 'into another effort</div><div class="ghist-rows"></div></div>';
+  work.innerHTML = html;
+  // Wire the devbar.
+  var dbtns = work.querySelectorAll('button[data-dev]');
+  for (var d = 0; d < dbtns.length; d++) {
+    dbtns[d].onclick = (function (lane) {
+      return function () { developGrass(ideaId, lane); };
+    })(dbtns[d].getAttribute('data-dev'));
+  }
+  var eng = work.querySelector('.gengtog');
+  if (eng) eng.onclick = function () {
+    _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
+    eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
+  };
+  var prom = work.querySelector('.gpromote');
+  if (prom) prom.onclick = function () {
+    var lane = window.prompt('Promote into which lane? (research / plan)', 'research');
+    if (!lane) return;
+    lane = lane.trim();
+    if (lane !== 'research' && lane !== 'plan') { alert('lane must be research or plan'); return; }
+    promoteGrass(ideaId, lane);
+  };
+  // The Save-refinement button is enabled only once a Develop session is live for
+  // THIS idea (set in developGrass); switching ideas starts disabled.
+  _grassDevSession = null;
+  var sv = work.querySelector('.gsave');
+  if (sv) { sv.disabled = true; sv.onclick = function () { saveGrassRefinement(ideaId); }; }
+  _renderGrassHistory(work, rec.refinements || []);
+}
+
+function _renderGrassHistory(work, refs) {
+  var box = work.querySelector('.ghist-rows');
+  if (!box) return;
+  if (!refs || !refs.length) {
+    box.innerHTML = '<div class="ghist-empty">No refinements yet — Develop the idea '
+      + 'with Research or Plan to save one.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < refs.length; i++) {
+    var r = refs[i];
+    var rid = r.refinement_id || '';
+    var lbl = r.label || (r.text ? r.text.slice(0, 60) : 'refinement');
+    html += '<div class="hr"><span class="idchip">' + _esc(rid) + '</span> '
+      + _esc(lbl) + '<span class="sp"></span>'
+      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="research">pull into Research…</button>'
+      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="plan">pull into Plan…</button></div>';
+  }
+  box.innerHTML = html;
+  var pbtns = box.querySelectorAll('button[data-pull]');
+  var ideaId = work.getAttribute('data-idea');
+  for (var k = 0; k < pbtns.length; k++) {
+    pbtns[k].onclick = (function (rid, lane) {
+      return function () { pullGrass(ideaId, rid, lane); };
+    })(pbtns[k].getAttribute('data-pull'), pbtns[k].getAttribute('data-lane'));
+  }
+}
+
+// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
+// refinements) and mount its terminal in the right pane's .term-host. Token-aware.
+async function developGrass(ideaId, lane) {
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_develop', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_develop', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[develop error] ' + e.message); return; }
+  if (!data.ok || !data.session) { alert('[develop refused] ' + (data.error || 'unknown')); return; }
+  var sid = data.session.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: data.session.lane || lane,
+    backend: data.session.backend || _grassEngine,
+    status: data.session.status || 'running', label: data.session.label || '',
+    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
+  };
+  renderSessionBar();
+  // Mount the live terminal into the workbench term-host (reuse _mountTerminal).
+  var host = work ? work.querySelector('[data-grass-term]') : null;
+  var lab = work ? work.querySelector('.tpane .lab') : null;
+  if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
+  if (host) {
+    host.setAttribute('data-session', sid);
+    PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+    _mountTerminal(sid, host);
+  }
+  // A develop session is now live for this idea → enable "Save refinement".
+  _grassDevSession = sid;
+  var sv = work ? work.querySelector('.gsave') : null;
+  if (sv) sv.disabled = false;
+}
+
+// saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
+// versioned refinement (grass-<id>/dev-N) and re-render the history so it appears
+// with a pull control. Closes the develop→save→appears loop end to end. The
+// session's visible terminal text is captured best-effort as the refinement text;
+// the session_id links the refinement to the run. Token-aware.
+async function saveGrassRefinement(ideaId) {
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  var host = work ? work.querySelector('[data-grass-term]') : null;
+  var text = host ? ((host.innerText || '').trim().slice(-4000)) : '';
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId,
+                 session_id: _grassDevSession || null,
+                 label: 'Refinement from workbench session', text: text};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_save_refinement', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_save_refinement', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[save error] ' + e.message); return; }
+  if (!data.ok) { alert('[save refused] ' + (data.error || 'unknown')); return; }
+  // Re-fetch the grass data and re-render THIS idea's history so the new
+  // grass-<id>/dev-N row appears with its pull controls.
+  await _loadGrassData();
+  var rec = _grassData[ideaId] || {};
+  _renderGrassHistory(work, rec.refinements || []);
+  // The idea is now REFINED — reflect it on the workbench chip + the list row.
+  var chip = work.querySelector('h3 .stchip');
+  if (chip) { chip.className = 'stchip refined'; chip.textContent = 'refined'; }
+  var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (lrow) lrow.setAttribute('data-status', 'refined');
+}
+
+// pullGrass(ideaId, refinementId, lane): pull a refinement version into a NEW
+// seeded session (research/plan) and open its inline panel. Token-aware.
+async function pullGrass(ideaId, refinementId, lane) {
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId,
+                 refinement_id: refinementId, lane: lane, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_pull', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_pull', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[pull error] ' + e.message); return; }
+  if (!data.ok || !data.session) { alert('[pull refused] ' + (data.error || 'unknown')); return; }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || _grassEngine,
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
   setTimeout(repopulate, 600);
 }
 
@@ -7103,6 +7588,36 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                      "resolved": bool(result.get("resolved")),
                                      "deliverable": result.get("deliverable"),
                                      "reason": result.get("reason", "")})
+            elif self.path.startswith("/api/rnd/grass"):
+                # Read-only (v5 Wave 5): the project's Grass ideas + their status
+                # + versioned refinements, for the two-pane idea workbench. NO
+                # mutation, NO model call. AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token set). Project-scoped (no cross-project
+                # grass view). /api/rnd/grass?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            ideas = _eh.grass_workbench_data(folder, pid)
+                        except Exception:
+                            ideas = []
+                        self._send_json({"ok": True, "ideas": ideas})
             elif self.path.startswith("/api/rnd/project_rollup"):
                 # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
                 # (effort_history.project_effort_rollup, Wave 3) for the header's
@@ -8036,6 +8551,120 @@ class AnchorHandler(BaseHTTPRequestHandler):
             else:
                 try:
                     rec = _eh.promote_grass_to_lane(pid, idea_id, lane)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_develop":
+            # v5 Wave 5: DEVELOP a grass idea in a seeded WORKBENCH session in the
+            # target lane (research|plan). Reuses the Wave-1 seed path via
+            # effort_history.develop_grass_idea → terminal_session.start_session,
+            # seeding the idea text + its latest refinements. The idea STAYS in
+            # grass (copy, never destroy). Auth enforced by the middleware above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and lane required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.develop_grass_idea(pid, idea_id, lane,
+                                                 backend=backend)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_save_refinement":
+            # v5 Wave 5: save a NEW versioned refinement (grass-<id>/dev-N) for an
+            # idea (append-only; auto-incrementing N). Marks the idea REFINED.
+            # Auth enforced above. 404 unknown project, 400 unknown idea/empty.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and idea_id required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        rec = _eh.save_grass_refinement(
+                            folder, pid, idea_id,
+                            text=body.get("text", ""),
+                            label=body.get("label", ""),
+                            artifacts=body.get("artifacts") or [],
+                            session_id=body.get("session_id") or None)
+                        self._send_json({"ok": True, "refinement": rec})
+                    except ValueError as ve:
+                        self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_set_status":
+            # v5 Wave 5: set a grass idea's lifecycle status (raw/refined/
+            # promoted), validating the transition. Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            status = (body.get("status", "") or "").strip()
+            if not pid or not idea_id or not status:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and status required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        rec = _eh.set_grass_status(
+                            folder, pid, idea_id, status,
+                            promoted_to_session=body.get("promoted_to_session"),
+                            promoted_to_lane=body.get("promoted_to_lane"))
+                        self._send_json({"ok": True, "idea": rec})
+                    except ValueError as ve:
+                        self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_pull":
+            # v5 Wave 5: PULL a chosen refinement version into a NEW seeded session
+            # (research|plan). Reuses the Wave-1 seed path. Idea + refinement are
+            # left untouched. Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            refinement_id = (body.get("refinement_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id or not refinement_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id, refinement_id and lane "
+                              "required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.pull_grass_refinement(
+                        pid, idea_id, refinement_id, lane, backend=backend)
                     self._send_json({"ok": True, "session": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)

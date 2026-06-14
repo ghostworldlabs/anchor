@@ -109,24 +109,27 @@ def env(tmp_path, monkeypatch):
 
 # ── (a) The grass lane renders an idea board with promote actions ────────────
 
-def test_grass_renders_idea_board_with_promote_actions(env):
+def test_grass_renders_workbench_with_ideas(env):
+    # v5 Wave 5: the grass surface is now the B+C hybrid two-pane WORKBENCH (the
+    # old single-column idea-board/idea-card markup is gone — see the negative
+    # assertions in test_grass_workbench.py). Both ideas appear as .gli rows; the
+    # workbench carries the filter tabs + two-pane structure + add affordance.
     eh, gui, repo, pid = env["eh"], env["gui"], env["repo"], env["pid"]
     eh.add_idea(repo, pid, "Voice control via local Whisper", notes="someday")
     eh.add_idea(repo, pid, "Energy-aware scene scheduling")
 
     html = gui.render_project_window_html(pid)
-    # Idea-board markup + both idea texts present as cards.
-    assert "idea-board" in html
-    assert "idea-card" in html
+    assert "grass-workbench" in html
+    assert "gtabs" in html
+    assert "gwrap" in html
     assert "Voice control via local Whisper" in html
     assert "Energy-aware scene scheduling" in html
-    # Each card offers the two promote actions wired to promoteGrass(...).
-    assert "→ Research" in html
-    assert "→ Plan" in html
-    assert "promoteGrass(" in html
-    # A source chip is rendered (manual add → "manual").
-    assert "idea-src" in html
-    assert "manual" in html
+    # The two idea rows carry the workbench .gli markup + status chips.
+    assert "class='gli" in html or 'class="gli' in html
+    assert "stchip raw" in html
+    # The promote action survives — now inside the workbench (per-idea Promote
+    # button is JS-wired) AND the column tile opens the workbench.
+    assert "openGrassWorkbench" in html
     # "+ Add idea" affordance is still present.
     assert "Add idea" in html
 
@@ -137,13 +140,16 @@ def test_grass_source_chip_reflects_provenance(env):
     eh.promote_inbox(repo, pid, "Promote me", inbox_items=inbox_items)
     html = gui.render_project_window_html(pid)
     assert "Promote me" in html
-    assert "from inbox" in html
+    # source chip "inbox" rendered in the workbench .gli row
+    assert "srcchip" in html
+    assert "inbox" in html
 
 
 def test_empty_grass_board_renders_placeholder(env):
     gui, pid = env["gui"], env["pid"]
     html = gui.render_project_window_html(pid)
     assert "data-col-lane='grass'" in html
+    # The empty workbench shows an honest "no ideas yet" hint (and the lane tile).
     assert "No ideas yet" in html
 
 

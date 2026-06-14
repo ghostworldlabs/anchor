@@ -222,10 +222,56 @@ def latest_effort(folder_path, project_id: str, lane: str):
 #: artifact, NOT a brownfield-discovered one.
 IDEA_PREFIX = "idea-"
 
+#: The Grass idea lifecycle (v5 Wave 5). An idea is captured RAW; developing it
+#: with a tool (research/plan in the workbench terminal) yields a saved
+#: refinement and marks it REFINED; promoting it into a lane marks it PROMOTED
+#: and links the idea to the run it became. The legacy stored value ``"idea"``
+#: is normalized to RAW so pre-v5 records keep working.
+GRASS_RAW = "raw"
+GRASS_REFINED = "refined"
+GRASS_PROMOTED = "promoted"
+GRASS_STATUSES = (GRASS_RAW, GRASS_REFINED, GRASS_PROMOTED)
+
+#: Allowed status transitions. A forward walk (raw->refined->promoted) plus the
+#: idempotent self-transition and the practical back-steps (re-refining a
+#: promoted idea, or re-developing a refined one) — but never an unknown status.
+_GRASS_TRANSITIONS = {
+    GRASS_RAW: {GRASS_RAW, GRASS_REFINED, GRASS_PROMOTED},
+    GRASS_REFINED: {GRASS_RAW, GRASS_REFINED, GRASS_PROMOTED},
+    GRASS_PROMOTED: {GRASS_REFINED, GRASS_PROMOTED},
+}
+
+#: Subdir under the grass lane dir holding per-idea versioned refinements.
+GRASS_REFINEMENTS_DIRNAME = "refinements"
+
+
+def grass_status(rec: dict) -> str:
+    """Normalize a grass idea record's lifecycle status to a GRASS_STATUSES value.
+
+    Maps the legacy ``"idea"`` (and any missing/unknown value) to :data:`GRASS_RAW`
+    so pre-v5 idea cards render with an honest status.
+    """
+    st = (rec or {}).get("status", "") or ""
+    return st if st in GRASS_STATUSES else GRASS_RAW
+
 
 def _new_idea_job_id() -> str:
     """A fresh, unique job_id for a manual/promoted grass idea."""
     return f"{IDEA_PREFIX}{hashlib.sha1(f'{time.time_ns()}'.encode()).hexdigest()[:16]}"
+
+
+def grass_short_id(idea_id: str) -> str:
+    """A short, stable, display-friendly id for an idea (mockup ``grass-1a2b``).
+
+    Derived deterministically from the idea's stored job_id so the same idea
+    always shows the same short id. The canonical ``idea_id`` (the stored
+    ``job_id``) remains the lookup key; this is purely cosmetic.
+    """
+    raw = (idea_id or "").strip()
+    if not raw:
+        return "grass-0000"
+    h = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:4]
+    return f"grass-{h}"
 
 
 def add_idea(folder_path, project_id: str, text: str, notes: str = "") -> dict:
@@ -247,7 +293,10 @@ def add_idea(folder_path, project_id: str, text: str, notes: str = "") -> dict:
         "kind": "idea",
         "title": text,
         "notes": (notes or "").strip(),
-        "status": "idea",
+        # v5 Wave 5: ideas carry a raw->refined->promoted lifecycle status. A
+        # freshly captured idea is RAW. (The legacy value ``"idea"`` is treated
+        # as RAW by :func:`grass_status` so old records keep working.)
+        "status": GRASS_RAW,
     }
     return record_effort(folder_path, project_id, "grass", jid, extra=extra)
 
@@ -304,7 +353,7 @@ def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
         "kind": "idea",
         "title": (match.get("text") or "").strip(),
         "notes": " ".join(note_bits),
-        "status": "idea",
+        "status": GRASS_RAW,
         "promoted_from": "inbox",
     }
     return record_effort(folder_path, project_id, "grass", jid, extra=extra)
@@ -376,9 +425,290 @@ def promote_grass_to_lane(project_id: str, idea_id: str, lane: str,
     if backend is not None:
         kwargs["backend"] = backend
     record = _ts.start_session(project_id, lane, **kwargs)
-    # The idea REMAINS in grass — promotion copies, never moves. (Nothing here
-    # deletes or mutates the grass record.)
+    # The idea REMAINS in grass — promotion copies, never moves. We only
+    # ANNOTATE the idea record in place (status -> promoted + a link to the run
+    # it became); nothing here deletes or rewrites the idea's identity/title.
+    try:
+        set_grass_status(folder_path, project_id, idea_id, GRASS_PROMOTED,
+                         promoted_to_session=record.get("session_id"),
+                         promoted_to_lane=lane)
+    except Exception:
+        # A failed annotation must never tear down a live, seeded session.
+        pass
     return record
+
+
+# ── Grass idea lifecycle: status + versioned refinements + develop/pull (W5) ─
+
+def set_grass_status(folder_path, project_id: str, idea_id: str, status: str,
+                     promoted_to_session: str = None,
+                     promoted_to_lane: str = None) -> dict:
+    """Set a grass idea's lifecycle status (raw/refined/promoted), validated.
+
+    Rejects an unknown target status and an illegal transition (see
+    :data:`_GRASS_TRANSITIONS`) with ``ValueError`` — so an idea can never land
+    in a bogus state. When promoting, ``promoted_to_session`` / ``promoted_to_lane``
+    are stored on the idea so a PROMOTED idea LINKS to the run it became.
+
+    Updates the idea's pointer-record IN PLACE (same job_id) — the idea's
+    identity/title/history are untouched (COPY-never-destroy). Returns the
+    updated record. Raises ``ValueError`` for an unknown idea or status.
+    """
+    status = (status or "").strip()
+    if status not in GRASS_STATUSES:
+        raise ValueError(
+            "grass status must be one of %s, got %r"
+            % (", ".join(GRASS_STATUSES), status))
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    cur = grass_status(idea)
+    if status not in _GRASS_TRANSITIONS.get(cur, set()):
+        raise ValueError(
+            "illegal grass status transition %s -> %s" % (cur, status))
+    extra = {"status": status}
+    if status == GRASS_PROMOTED:
+        if promoted_to_session:
+            extra["promoted_to_session"] = promoted_to_session
+        if promoted_to_lane:
+            extra["promoted_to_lane"] = promoted_to_lane
+    return record_effort(folder_path, project_id, "grass",
+                         idea.get("job_id", idea_id), extra=extra)
+
+
+def _refinements_dir(folder_path, project_id: str, idea_id: str) -> Path:
+    """``<grass-lane>/refinements/<sanitized-idea-id>/`` (not created)."""
+    safe = "".join(c if (c.isalnum() or c in "-_") else "_"
+                   for c in (idea_id or "x"))
+    return (lane_dir(folder_path, project_id, "grass")
+            / GRASS_REFINEMENTS_DIRNAME / safe)
+
+
+def _refinement_id(idea_id: str, n: int) -> str:
+    """The logical, display id for refinement version ``n`` (``grass-<id>/dev-N``)."""
+    return "%s/dev-%d" % (grass_short_id(idea_id), n)
+
+
+def list_grass_refinements(folder_path, project_id: str, idea_id: str) -> list:
+    """Return an idea's versioned refinements, **NEWEST-FIRST** (highest dev-N).
+
+    Each refinement is a small JSON record:
+    ``{refinement_id, idea_id, version, label, text, artifacts, session_id,
+       created_at}``. Best-effort: a missing dir / corrupt file yields ``[]`` /
+    is skipped. Never raises.
+    """
+    d = _refinements_dir(folder_path, project_id, idea_id)
+    if not d.exists():
+        return []
+    out = []
+    try:
+        entries = list(d.glob("dev-*.json"))
+    except OSError:
+        return []
+    for p in entries:
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    out.sort(key=lambda r: int(r.get("version", 0) or 0), reverse=True)
+    return out
+
+
+def save_grass_refinement(folder_path, project_id: str, idea_id: str,
+                          text: str = "", label: str = "",
+                          artifacts=None, session_id: str = None) -> dict:
+    """Append a NEW versioned refinement (``grass-<id>/dev-N``) for an idea (W5).
+
+    The version ``N`` auto-increments (1-based) over the idea's existing
+    refinements — nothing is overwritten (append-only history, newest-first on
+    read). The refinement references produced ``text`` and/or ``artifacts`` (a
+    list of folder-relative paths) and, when developed live, the ``session_id``
+    that produced it. Saving a refinement marks the idea REFINED (raw->refined).
+
+    Returns the stored refinement record. Raises ``ValueError`` for an unknown
+    idea. All writes under WRITE_LOCK.
+    """
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+    with _paths.WRITE_LOCK:
+        d = _refinements_dir(folder_path, project_id, jid)
+        d.mkdir(parents=True, exist_ok=True)
+        existing = list_grass_refinements(folder_path, project_id, jid)
+        version = (max((int(r.get("version", 0) or 0) for r in existing),
+                       default=0) + 1)
+        rec = {
+            "refinement_id": _refinement_id(jid, version),
+            "idea_id": jid,
+            "version": version,
+            "label": (label or "").strip(),
+            "text": (text or "").strip(),
+            "artifacts": list(artifacts or []),
+            "session_id": session_id or "",
+            "created_at": time.time(),
+        }
+        p = d / ("dev-%d.json" % version)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(rec, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+    # Mark the idea refined (idempotent if already refined; promoted stays
+    # promoted — a promoted idea can still gain refinements without demotion).
+    if grass_status(idea) == GRASS_RAW:
+        try:
+            set_grass_status(folder_path, project_id, jid, GRASS_REFINED)
+        except ValueError:
+            pass
+    return rec
+
+
+def _grass_develop_seed(idea: dict, refinements) -> str:
+    """Build the seed_context for a develop/pull session: the idea text + its
+    latest refinement(s), so the workbench session resumes from prior work."""
+    bits = []
+    title = (idea.get("title") or "").strip()
+    if title:
+        bits.append("Idea: " + title)
+    notes = (idea.get("notes") or "").strip()
+    if notes:
+        bits.append("Notes: " + notes)
+    for r in (refinements or [])[:3]:  # newest-first; cap context size
+        rid = r.get("refinement_id", "")
+        txt = (r.get("text") or "").strip()
+        if txt:
+            bits.append("Prior refinement %s: %s" % (rid, txt))
+    return "\n".join(bits)
+
+
+def develop_grass_idea(project_id: str, idea_id: str, lane: str,
+                       folder_path=None, backend=None) -> dict:
+    """DEVELOP a grass idea in a seeded workbench session (v5 Wave 5).
+
+    Starts a NEW live terminal session in the target lane (``research`` | ``plan``)
+    SEEDED (``seed_context``) with the idea text PLUS its latest refinements
+    (reuses the Wave-1 seed path via ``terminal_session.start_session`` — never
+    forks seed logic). The idea STAYS in grass (copy, never destroy). Returns the
+    NEW session's registry record (the workbench terminal attaches to it).
+
+    Unlike :func:`promote_grass_to_lane` (which marks the idea PROMOTED), develop
+    keeps the idea available for further iteration; the *saved refinement* (via
+    :func:`save_grass_refinement`) is what marks it REFINED.
+
+    Raises ``ValueError`` for an invalid lane or an unknown idea.
+    """
+    lane = (lane or "").strip()
+    if lane not in PROMOTE_LANES:
+        raise ValueError(
+            "develop lane must be one of %s, got %r"
+            % (", ".join(PROMOTE_LANES), lane))
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    refinements = list_grass_refinements(folder_path, project_id,
+                                         idea.get("job_id", idea_id))
+    seed = _grass_develop_seed(idea, refinements)
+    if not seed.strip():
+        raise ValueError("grass idea has no text: %s" % (idea_id,))
+    import terminal_session as _ts
+    label = "develop: " + ((idea.get("title") or "")[:40])
+    kwargs = {"label": label, "seed_context": seed}
+    if backend is not None:
+        kwargs["backend"] = backend
+    return _ts.start_session(project_id, lane, **kwargs)
+
+
+def pull_grass_refinement(project_id: str, idea_id: str, refinement_id: str,
+                          lane: str, folder_path=None, backend=None) -> dict:
+    """PULL a chosen refinement version into a NEW seeded session (v5 Wave 5).
+
+    Seeds a fresh ``research`` | ``plan`` session with the chosen refinement's
+    content (reuses the Wave-1 seed path) — "pull a refinement into another
+    effort". The idea + refinement are left untouched. Returns the NEW session
+    record.
+
+    Raises ``ValueError`` for an invalid lane, unknown idea, or unknown
+    refinement id.
+    """
+    lane = (lane or "").strip()
+    if lane not in PROMOTE_LANES:
+        raise ValueError(
+            "pull lane must be one of %s, got %r"
+            % (", ".join(PROMOTE_LANES), lane))
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+    want = (refinement_id or "").strip()
+    chosen = None
+    for r in list_grass_refinements(folder_path, project_id, jid):
+        if r.get("refinement_id") == want or str(r.get("version")) == want:
+            chosen = r
+            break
+    if chosen is None:
+        raise ValueError("refinement not found: %s" % (refinement_id,))
+    title = (idea.get("title") or "").strip()
+    rtext = (chosen.get("text") or "").strip()
+    seed_bits = []
+    if title:
+        seed_bits.append("Idea: " + title)
+    seed_bits.append("Pulled refinement %s: %s"
+                     % (chosen.get("refinement_id", want), rtext or "(no text)"))
+    seed = "\n".join(seed_bits)
+    import terminal_session as _ts
+    label = "pull %s" % (chosen.get("refinement_id", want))
+    kwargs = {"label": label, "seed_context": seed}
+    if backend is not None:
+        kwargs["backend"] = backend
+    return _ts.start_session(project_id, lane, **kwargs)
+
+
+def grass_workbench_data(folder_path, project_id: str) -> list:
+    """Aggregate the project's grass ideas for the workbench UI (read-only, W5).
+
+    Returns a list (the grass lane order, newest-first) of dicts:
+    ``{idea_id, short_id, title, notes, status, source, promoted_to_session,
+       promoted_to_lane, refinements:[…newest-first…]}``. Best-effort; never
+    raises.
+    """
+    out = []
+    try:
+        efforts = list_efforts(folder_path, project_id, "grass")
+    except Exception:
+        efforts = []
+    for eff in efforts:
+        jid = eff.get("job_id", "") or ""
+        refs = list_grass_refinements(folder_path, project_id, jid)
+        if is_discovered(eff):
+            source = "discovered"
+        elif (eff.get("promoted_from") or "") == "inbox":
+            source = "inbox"
+        else:
+            source = "manual"
+        out.append({
+            "idea_id": jid,
+            "short_id": grass_short_id(jid),
+            "title": (eff.get("title") or "").strip(),
+            "notes": (eff.get("notes") or "").strip(),
+            "status": grass_status(eff),
+            "source": source,
+            "promoted_to_session": eff.get("promoted_to_session", ""),
+            "promoted_to_lane": eff.get("promoted_to_lane", ""),
+            "refinements": refs,
+        })
+    return out
 
 
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────
