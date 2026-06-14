@@ -184,3 +184,41 @@
   strong fidelity).
 - **COMMIT (scoped):** `bf8b438` — effort_history.py + anchor_gui.py +
   test_grass_workbench.py + test_grass_board.py only (no runtime churn).
+
+## Wave 6 — CLI mirror + healthcheck v5 + distro scan + docs (PROJECT DONE) — GREEN (2026-06-14)
+
+- **EXECUTE** (fresh sub-agent): anchor.py rnd CLI mirror (`session-summary` →
+  summarizer.load_cached cache-only · `grass` → effort_history.grass_workbench_data ·
+  `build-deliverable` → deliverables.resolve_build_deliverable), each delegating to the
+  shared module; `check_rnd_v5_surface` (fully stubbed) registered in the healthcheck
+  sequence walking all 5 wave surfaces + teardown/env-restore + never :8777; CLAUDE.md
+  v5 section + API rows + CLI list + healthcheck note.
+- **GATE (orchestrator-run, stub PTY):** 715 passed, 1 skipped (baseline 698+1, +17).
+  `python -m distro` → scan clean (119 files; only the pywinpty exception).
+- **REVIEW (adversarial, prompted to refute): SHIP — 0 BLOCKER, 2 MINOR.** All 7 points
+  CONFIRMED-OK + **PROJECT-DONE: YES**: CLI delegates (read-only, cache-only summary);
+  healthcheck fully stubbed + tears down + env-restored + never :8777 (independently
+  asserted); distro clean + no Playwright in any product module (AST grep);
+  CLAUDE.md accurate (every documented endpoint/function exists); no v2/v3/v4
+  regression. MINOR: (a) `rnd grass` crashed with UnicodeEncodeError on a cp1252
+  console when printing a "→"/em-dash idea title (pre-existing CLI-wide; surfaced by
+  the new subcommand); (b) process: commit Wave 6 + add untracked tests.
+- **FIX (orchestrator):** anchor.py main() reconfigures stdout/stderr to UTF-8
+  (errors=replace) — verified live (`rnd grass` on the real registry now prints the
+  "→" title, exit 0). Guard test added (test_cli_grass_handles_non_ascii_idea_title).
+- **RE-GATE (orchestrator-run, stub PTY):** 716 passed, 1 skipped; distro scan clean.
+- **COMMIT (scoped):** `862e249` — anchor.py + anchor_healthcheck.py + CLAUDE.md +
+  test_cli_v5.py + test_healthcheck_v5.py + test_distro_scan_v5.py only (no runtime churn).
+
+## PROJECT DONE — all 6 waves GREEN (716 passed, 1 skipped) — 2026-06-14
+
+Every Definition-of-done item satisfied by committed code: close-to-tile vs deliberate
+hard-kill (W1); past-session real summary skill/prompts/actions + continue-in-live (W2);
+objective project summaries on row+header (cache-only render) + timely dashboard
+reflection (W3, folded user request); deliverable-per-build session-scoped resolve +
+backfill + honest-when-none (W4); Grass B+C hybrid workbench filter-tabs+two-pane+
+develop+versioned/pullable refinements+promote-links+search (W5); CLI mirrors the new
+seams + check_rnd_v5_surface fully stubbed + distro clean + CLAUDE.md updated (W6).
+Every UI wave verified by rendered-DOM (positive+negative) + a real Playwright/Chromium
+interaction test + an orchestrator screenshot. REMAINING (human/orchestrator gate):
+preview-from-branch screenshots + USER SIGN-OFF before the --no-ff merge to master.
