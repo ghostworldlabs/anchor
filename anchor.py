@@ -36,6 +36,13 @@ terminal start/switch + deliverable launch are interactive and have NO CLI form)
     python3 anchor.py rnd doc-roles <project_id> --lane <lane> --session <id>  # per-lane role->doc map
     python3 anchor.py rnd deliverable-type <project_id> <deliverable_id>  # type detection (skill/tool also verify)
     python3 anchor.py rnd engine <project_id>                 # the project's last-used engine
+
+R&D v5 "Durable Work" inspection mirror (read-only DATA seams; continue-live,
+grass develop/promote, save-refinement, deliverable launch are interactive and
+have NO CLI form):
+    python3 anchor.py rnd session-summary <project_id> --lane <lane> --session <id>  # cached session summary (skill/prompts/actions)
+    python3 anchor.py rnd grass <project_id>                  # grass ideas + status + refinement counts
+    python3 anchor.py rnd build-deliverable <project_id> --session <id> [--lane build]  # the deliverable a build produced (honest unresolved)
 """
 
 import json, os, re, sys
@@ -885,9 +892,81 @@ def rnd_engine(project_id):
     return _ts.last_engine_for_project(project_id)
 
 
+# ── R&D v5 "Durable Work" data mirror (Wave 6) ─────────────────────────────
+# Read-only DATA/INSPECTION seams the durable-work surface exposes. These
+# DELEGATE to the shared v5 modules (no forked logic). There is intentionally NO
+# CLI for the live interactive operations (continue-live, develop/promote a grass
+# idea, save-refinement, set-status, deliverable LAUNCH) — those are interactive /
+# mutating live operations driven by the dashboard. The CLI mirrors only the
+# data/inspection seams.
+
+def rnd_session_summary(project_id, lane, session_id):
+    """CLI mirror of the cached validated SESSION summary (read-only, v5 Wave 2).
+
+    Mirrors the read-only ``GET /api/rnd/session_summary`` contract: returns the
+    CACHED structured summary (skill · prompts · actions · member links) when one
+    exists, else ``None`` — it NEVER runs the model synchronously (cache only;
+    use ``rnd regenerate-summary`` to force a re-run). Raises ``KeyError`` for an
+    unknown project.
+    """
+    import effort_history as _eh
+    import summarizer as _summarizer
+    _proj, folder = _rnd_resolve(project_id)
+    store_lane = _eh._resolve_subdir(lane)
+    cached = _summarizer.load_cached(folder, project_id, store_lane, session_id)
+    if isinstance(cached, dict) and cached.get("error"):
+        return None
+    return cached
+
+
+def rnd_grass(project_id):
+    """CLI mirror of ``effort_history.grass_workbench_data`` — the idea board.
+
+    Returns the project's grass ideas (newest-first), each carrying its id +
+    status (raw/refined/promoted) + versioned refinements + source. Read-only —
+    developing / promoting an idea is a live operation with no CLI form.
+    """
+    import effort_history as _eh
+    _proj, folder = _rnd_resolve(project_id)
+    return _eh.grass_workbench_data(folder, project_id)
+
+
+def rnd_build_deliverable(project_id, session_id, lane="build"):
+    """CLI mirror of ``deliverables.resolve_build_deliverable`` — per-build product.
+
+    Resolves the deliverable a BUILD session produced from EXPLICIT signals only
+    (pinned path / declared marker / config / session product); returns the
+    ``{resolved, deliverable, signal, reason}`` dict — an HONEST ``resolved=False``
+    when nothing resolves (never a fabricated path). Read-only; no spawn, no model
+    call. Raises ``KeyError`` for an unknown project and ``ValueError`` for an
+    unknown session so the CLI prints a clean error.
+    """
+    import sessions as _sessions
+    import deliverables as _deliv
+    _proj, folder = _rnd_resolve(project_id)
+    session = None
+    for s in _sessions.list_sessions(folder, project_id, lane):
+        if s.get("session_id") == session_id:
+            session = s
+            break
+    if session is None:
+        raise ValueError(f"unknown session: {session_id}")
+    return _deliv.resolve_build_deliverable(folder, project_id, session)
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
+    # Print UTF-8 regardless of the console code page. On a Windows cp1252 console
+    # `print()` of non-ASCII output (e.g. a grass idea title containing "→" or an
+    # em-dash) otherwise raises UnicodeEncodeError and aborts the command. Best-
+    # effort: reconfigure stdout/stderr to UTF-8 with replacement (Python 3.7+).
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
     if len(sys.argv) < 2:
         print(__doc__)
         return
@@ -1012,7 +1091,8 @@ def _rnd_cli(args):
         print("Usage: anchor.py rnd <sessions|status|reconcile|add-idea|"
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
               "term-sessions|previews|handoff|rollup|doc-roles|"
-              "deliverable-type|engine> ...")
+              "deliverable-type|engine|session-summary|grass|"
+              "build-deliverable> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1251,6 +1331,71 @@ def _rnd_cli(args):
                 return
             eng = rnd_engine(pos[0])
             print(f"Last-used engine for {pos[0]}: {eng}")
+
+        elif sub == "session-summary":
+            pos = _positionals()
+            lane = _opt("--lane")
+            session_id = _opt("--session")
+            if not pos or not lane or not session_id:
+                print("Usage: anchor.py rnd session-summary <project_id> "
+                      "--lane <lane> --session <session_id>")
+                return
+            summary = rnd_session_summary(pos[0], lane, session_id)
+            if summary is None:
+                print(f"No cached summary for session {session_id} "
+                      f"(lane '{lane}'). Run `rnd regenerate-summary` to "
+                      f"generate one.")
+                return
+            print(f"Session summary for {session_id} (lane '{lane}'):")
+            print(f"  skill:    {summary.get('skill','') or '(none)'}")
+            prompts = summary.get("prompts", []) or []
+            print(f"  prompts:  {len(prompts)}")
+            for p in prompts:
+                print(f"    - {str(p).strip()[:100]}")
+            actions = summary.get("actions", []) or []
+            print(f"  actions:  {len(actions)}")
+            for a in actions:
+                print(f"    - {str(a).strip()[:100]}")
+            claims = summary.get("claims", []) or []
+            print(f"  claims:   {len(claims)} grounded")
+
+        elif sub == "grass":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd grass <project_id>")
+                return
+            ideas = rnd_grass(pos[0])
+            print(f"{len(ideas)} grass idea(s):")
+            for it in ideas:
+                refs = it.get("refinements", []) or []
+                promoted = it.get("promoted_to_session", "")
+                link = f" -> {promoted}" if promoted else ""
+                print(f"  - [{it.get('status','')}] {it.get('title','')} "
+                      f"({it.get('short_id','')}) "
+                      f"src={it.get('source','')} "
+                      f"refinements={len(refs)}{link} "
+                      f"- id={it.get('idea_id','')}")
+
+        elif sub == "build-deliverable":
+            pos = _positionals()
+            session_id = _opt("--session")
+            lane = _opt("--lane", "build")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd build-deliverable <project_id> "
+                      "--session <session_id> [--lane build]")
+                return
+            res = rnd_build_deliverable(pos[0], session_id, lane=lane)
+            if res.get("resolved"):
+                d = res.get("deliverable", {}) or {}
+                print(f"Build deliverable for session {session_id}: RESOLVED")
+                print(f"  name:   {d.get('name','')}")
+                print(f"  type:   {d.get('type','')}")
+                print(f"  path:   {d.get('rel') or d.get('path','')}")
+                print(f"  signal: {res.get('signal','')}")
+            else:
+                print(f"Build deliverable for session {session_id}: "
+                      f"UNRESOLVED")
+                print(f"  reason: {res.get('reason','no deliverable pinned yet')}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")
