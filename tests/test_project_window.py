@@ -254,15 +254,19 @@ def test_window_manager_markup_present(gui, tmp_path):
     """The project window carries the inline PANEL-STACK container, the locked
     status-light color classes, the accordion panel manager contract
     (open/minimize/kill/repopulate), and the kill-confirm wiring (a confirm() + a
-    term_kill reference). v4.1: the old "Live terminals" session bar was REMOVED —
-    the panel stack is the only terminal surface; status colors now ride the .lt
-    light classes (green/amber/red/grey). NO floating-window markup remains."""
+    term_kill reference). v4.1 removed the old v3 floating-window "Live terminals"
+    bar; v5 Wave 1 reintroduces a #sessionBar — but as the close-to-tile REOPEN
+    vector (clickable live-session chips), NOT the old floating-window manager.
+    Status colors ride the .lt light classes (green/amber/red/grey)."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("WMProj", str(folder))["entry"]["id"]
     html = gui.render_project_window_html(pid)
-    # The inline panel stack is the only terminal surface (no live-terminals bar).
-    assert "id='sessionBar'" not in html
+    # v5 Wave 1: the #sessionBar is back as the live-session reopen vector (chips),
+    # alongside the inline panel stack (the terminal surface). The OLD floating
+    # window-manager markup stays gone (asserted further below).
+    assert "id='sessionBar'" in html
+    assert "class='live-session-bar'" in html
     assert "id='panelStack'" in html
     assert "class='panel-stack'" in html
     # All four LOCKED status-color CSS classes (the .lt status-light variants).

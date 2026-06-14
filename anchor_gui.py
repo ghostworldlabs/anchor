@@ -2170,7 +2170,27 @@ def render_project_window_html(project_id: str) -> str:
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
+        # v5 Wave 1: the panel header carries THREE distinct controls —
+        #   .min   '–'  minimize (keeps the session running)
+        #   .close '×'  CLOSE-to-tile (tears down the panel DOM only; the session
+        #               record + lane tile persist; reopenable). NON-destructive.
+        #   .hardkill '🗑' KILL (confirm-gated → term_kill → reap PTY + worktree +
+        #               drop the tile). Visually distinct (danger glyph/color).
+        ".panelbtn.close:hover{color:var(--text);border-color:var(--accent)}"
+        ".panelbtn.hardkill{color:var(--danger);border-color:var(--border)}"
+        ".panelbtn.hardkill:hover{color:#fff;background:var(--danger);"
+        "border-color:var(--danger)}"
+        # Legacy alias retained so any old reference to .kill still styles as danger.
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        # v5 Wave 1: the live-session bar (reopenable chips for LIVE managed
+        # sessions that aren't server-rendered board tiles). Empty → no height.
+        ".live-session-bar{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}"
+        ".live-session-bar:empty{margin:0}"
+        ".live-chip{display:inline-flex;align-items:center;gap:6px;"
+        "padding:4px 10px;border-radius:14px;cursor:pointer;font-size:12px;"
+        "background:var(--surface2);border:1px solid var(--border)}"
+        ".live-chip:hover{border-color:var(--accent)}"
+        ".live-chip .ttl{font-weight:600}"
         # Per-session engine toggle in the panel bar (◆ Claude / ✦ Gemini). Chosen
         # once; flipping POSTs term_set_engine to relaunch this session on the other
         # engine in the SAME worktree (mockup Paradigm-2 panel header).
@@ -2262,6 +2282,13 @@ def render_project_window_html(project_id: str) -> str:
         # bar carries the engine ◆Claude/✦Gemini toggle (term_set_engine), a
         # minimize, and a kill (× confirm). No old console drawer / live-terminals
         # bar / loose cost-rollup / loose deliverables-pinned section remains.
+        # v5 Wave 1: a thin LIVE-session bar above the panel stack. A live managed
+        # terminal session (started via "+ new <lane>") is NOT a server-rendered
+        # board tile, so close-to-tile would otherwise leave no reopen vector. The
+        # session bar renders one clickable chip per LIVE managed session — closing
+        # its panel keeps the chip (reopenable); hard-kill removes it. (No-op /
+        # empty when there are no live sessions; populated by renderSessionBar.)
+        "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
         # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
@@ -2581,8 +2608,10 @@ function rndUnlinkTask(el) {
 // the #panelStack BELOW the board — panels stack down the page, they never float
 // or overlap. A second click / the panel's "– min" button collapses it back to
 // the tile (minimizePanel) WITHOUT killing the session. The panel's "×" button is
-// KILL, gated behind a confirm() (killPanel → POST /api/rnd/term_kill); for a
-// historical (non-live) panel the × simply closes the DOM. repopulate() reads
+// CLOSE-to-tile (closePanel) — it tears down the panel DOM only and leaves the
+// session record + lane tile intact (reopenable). A SEPARATE "🗑 Kill" button is
+// the deliberate hard-kill, gated behind a confirm() (killPanel → POST
+// /api/rnd/term_kill) that also removes the session's tile. repopulate() reads
 // /api/rnd/term_sessions to keep the MANAGED map in sync (so a tile for an
 // already-running terminal can re-open its panel).
 //
@@ -2610,6 +2639,14 @@ function _statusColor(status) {
   return 'grey';
 }
 
+// _isTerminalStatus: mirror session_registry.TERMINAL_STATUSES ({done, failed}).
+// The live-session bar is the reopen vector for LIVE (non-terminal) sessions
+// ONLY; a terminal session (a hard-killed one is marked 'done', a crashed one
+// 'failed') must never sit in it.
+function _isTerminalStatus(status) {
+  return status === 'done' || status === 'failed';
+}
+
 // repopulate(): fetch the project's live managed sessions from the registry and
 // re-sync the MANAGED map (so a tile / re-open keys on a real, stable record).
 // Kept under the historical name loadSessions too (callers use it).
@@ -2631,6 +2668,14 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
+    // v5 Wave 1 (BLOCKER fix): the live-session bar holds LIVE sessions only. A
+    // terminal session (a deliberate hard-kill marks the registry record 'done';
+    // a crash 'failed') is excluded — otherwise a killed chip would REAPPEAR on
+    // the next repopulate() (term_sessions reports every status). A session that
+    // just went terminal is also not re-added here, so the drop-loop below evicts
+    // it from MANAGED and closes any stale panel. Historical/done work is reopened
+    // from its server-rendered board tile, not this live bar.
+    if (_isTerminalStatus(s.status)) continue;
     var lane = s.lane || 'session';
     _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
     var prev = MANAGED[s.session_id] || {};
@@ -2650,11 +2695,45 @@ async function repopulate() {
 // Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
 
-// renderSessionBar(): the v3 "Live terminals" button bar was REMOVED in v4.1 —
-// the inline panel stack is the only terminal surface now. The panel manager
-// still calls this after MANAGED changes; with no bar to paint it is a safe
-// no-op (kept so those call sites need no special-casing).
-function renderSessionBar() { /* no live-terminals bar in the cockpit */ }
+// renderSessionBar(): v5 Wave 1 — render one clickable TILE per LIVE managed
+// session into #sessionBar. A live terminal session (started via "+ new <lane>")
+// is NOT a server-rendered board tile, so this bar IS its reopenable tile: after
+// close-to-tile its chip persists (click it → openPanel re-attaches the live
+// terminal); a deliberate hard-kill removes the chip (via _removeSessionTile, the
+// SAME selector — these chips carry .tile + data-session). Empty bar when there
+// are no live managed sessions. Idempotent (rebuilds from MANAGED each call).
+function renderSessionBar() {
+  var bar = document.getElementById('sessionBar');
+  if (!bar) return;
+  // Don't clobber a chip the panel manager is mid-removing: rebuild from MANAGED.
+  bar.innerHTML = '';
+  var ids = Object.keys(MANAGED);
+  for (var i = 0; i < ids.length; i++) {
+    var sid = ids[i];
+    var s = MANAGED[sid];
+    if (!s) continue;
+    var chip = document.createElement('span');
+    // .tile + data-session so _synthSessionRecord / _removeSessionTile bind, and
+    // the live-tile click hook is the SAME laneTileClick → openPanel path.
+    chip.className = 'tile lane-tile live-chip';
+    chip.setAttribute('data-session', sid);
+    chip.setAttribute('data-lane', s.lane || '');
+    chip.setAttribute('data-light', _statusColor(s.status));
+    chip.setAttribute('data-live', '1');
+    var sidCopy = sid;
+    chip.onclick = (function (theId) {
+      return function (ev) { laneTileClick(ev, theId); };
+    })(sidCopy);
+    var dot = document.createElement('span');
+    dot.className = 'lt ' + _statusColor(s.status);
+    var lbl = document.createElement('span');
+    lbl.className = 'ttl';
+    lbl.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+    chip.appendChild(dot);
+    chip.appendChild(lbl);
+    bar.appendChild(chip);
+  }
+}
 
 // laneTileClick: a Paradigm-2 lane tile was clicked → open its inline panel.
 // The tile no longer contains report links / a summary accordion, so the click
@@ -2735,8 +2814,9 @@ async function newTermSession(lane, backend, opts) {
 // #panelStack below the board. A second openPanel on an OPEN, non-minimized panel
 // toggles it back to minimized (collapse-to-tile); an already-minimized panel
 // re-expands. The session keeps running throughout — this only shows/hides the
-// panel body. The panel header carries "– min" (minimizePanel) + "× kill"
-// (killPanel, confirm-gated).
+// panel body. The panel header carries "– min" (minimizePanel), "× close"
+// (closePanel — close-to-tile, NON-destructive) + "🗑 Kill" (killPanel,
+// confirm-gated reap that also removes the tile).
 function openPanel(sessionId) {
   // A LIVE managed terminal session → attach its PTY (as today). ANY other tile
   // (historical / discovered / imported) → SYNTHESIZE a panel record from its
@@ -2785,24 +2865,32 @@ function openPanel(sessionId) {
   // so the toggle is omitted there.
   var engEl = null;
   if (isLive) engEl = _buildEngineToggle(sessionId, s);
+  // v5 Wave 1 — THREE visually + behaviorally distinct panel-header controls:
+  //   (a) '–'  minimize  — collapse to a header strip; session keeps running.
+  //   (b) '×'  CLOSE     — close-to-tile: tear down the panel DOM + transport
+  //        ONLY. Does NOT kill the PTY / remove the worktree / drop the registry
+  //        record / remove the lane tile. The session stays reopenable (click its
+  //        tile to re-attach a live terminal or re-show the summary). Live AND
+  //        historical panels use this same non-destructive close.
+  //   (c) '🗑' KILL      — deliberate hard-kill, confirm-gated. Reaps the PTY +
+  //        worktree (POST /api/rnd/term_kill), removes the MANAGED record AND the
+  //        session's lane tile (gone). For a historical/non-live session with no
+  //        live PTY, Kill still removes the tile/record cleanly (no orphan).
   var minBtn = document.createElement('button');
   minBtn.className = 'panelbtn min';
   minBtn.title = 'Minimize (keeps the session running)';
   minBtn.textContent = '–';
   minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close panel (keeps the session — reopen from its tile)';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); closePanel(sessionId); };
   var killBtn = document.createElement('button');
-  killBtn.className = 'panelbtn kill';
-  if (isLive) {
-    killBtn.title = 'Kill this session';
-    killBtn.textContent = '×';
-    killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
-  } else {
-    // Historical/discovered: there is no process to kill — the × just closes
-    // the panel (tears down the DOM, leaves the session record alone).
-    killBtn.title = 'Close';
-    killBtn.textContent = '×';
-    killBtn.onclick = function (e) { e.stopPropagation(); _closePanel(sessionId); renderSessionBar(); };
-  }
+  killBtn.className = 'panelbtn hardkill';
+  killBtn.title = 'Kill this session (terminate + remove its tile)';
+  killBtn.textContent = '🗑';
+  killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
   bar.appendChild(sp);
   if (engEl) {
@@ -2812,7 +2900,7 @@ function openPanel(sessionId) {
     bar.appendChild(englbl);
     bar.appendChild(engEl);
   }
-  bar.appendChild(minBtn); bar.appendChild(killBtn);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn); bar.appendChild(killBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -3134,7 +3222,9 @@ function minimizePanel(sessionId) {
 }
 
 // _closePanel: tear down the panel DOM + transport WITHOUT killing the session
-// (used when the registry no longer reports the session, e.g. after a kill).
+// (used by close-to-tile, and when the registry no longer reports a session, e.g.
+// after a kill). It NEVER touches the MANAGED record or the lane tile — the
+// session stays reopenable from its tile.
 function _closePanel(sessionId) {
   var p = PANELS[sessionId];
   if (!p) return;
@@ -3145,13 +3235,39 @@ function _closePanel(sessionId) {
   delete PANELS[sessionId];
 }
 
-// killPanel: the panel "×" = KILL, gated behind a confirm(). Only on YES do we
-// POST /api/rnd/term_kill, then tear down the panel + refresh the bar. (Minimize,
-// by contrast, never kills — the session keeps running.)
+// closePanel: the panel "×" = CLOSE-to-tile. Tears down the panel DOM + transport
+// ONLY (via _closePanel). It does NOT kill the PTY, NOT remove the worktree, NOT
+// remove the registry record, NOT remove the lane tile — the session stays
+// reopenable (click its tile → laneTileClick → openPanel re-attaches a live
+// terminal for a running session, or re-shows the summary for a historical one).
+// Live AND historical panels use this same non-destructive close.
+function closePanel(sessionId) {
+  _closePanel(sessionId);
+  renderSessionBar();
+}
+
+// _removeSessionTile: drop the lane-board tile for a session from the DOM (used by
+// the deliberate hard-kill only — close-to-tile NEVER removes a tile). Removes the
+// most-recent visible tile AND any tile inside a "previous sessions" expander.
+function _removeSessionTile(sessionId) {
+  var sel = '.tile[data-session="' + _cssEsc(sessionId) + '"]';
+  var tiles = document.querySelectorAll(sel);
+  for (var i = 0; i < tiles.length; i++) {
+    var el = tiles[i];
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+}
+
+// killPanel: the panel "🗑 Kill" = deliberate HARD-KILL, gated behind a confirm().
+// Only on YES do we POST /api/rnd/term_kill (reap PTY + remove worktree + mark the
+// registry record terminal), then tear down the panel, drop the MANAGED record AND
+// remove the session's lane tile so it's gone. For a historical/non-live session
+// the server returns 404 (unknown-session) — that's fine; we STILL remove the
+// tile + record cleanly (no orphan). (Minimize/close, by contrast, never kill.)
 async function killPanel(sessionId) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
-  if (!confirm('Kill the "' + name + '" terminal session? This stops its process.')) return;
+  if (!confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
   try {
     var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
     var data = await r.json();
@@ -3159,9 +3275,12 @@ async function killPanel(sessionId) {
       r = await _postJson('/api/rnd/term_kill', {session: sessionId});
       data = await r.json();
     }
+    // A 404 unknown-session (historical tile with no live PTY) is NOT an error
+    // for kill — there is simply no process to reap; we still drop the tile.
   } catch (e) { alert('[kill error] ' + e.message); }
   _closePanel(sessionId);
   delete MANAGED[sessionId];
+  _removeSessionTile(sessionId);
   renderSessionBar();
   setTimeout(repopulate, 400);
 }
