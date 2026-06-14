@@ -1235,17 +1235,56 @@ def _recent_plan_docs(folder_path) -> list:
     return out
 
 
+#: How many recent sessions per lane to fold into the project seed as "activity"
+#: grounding (bounded so the prompt can't blow up on a busy project).
+MAX_PROJECT_ACTIVITY_LANES = ("research", "planning", "build", "deliverables")
+MAX_PROJECT_ACTIVITY_PER_LANE = 3
+
+
+def _project_lane_activity(folder_path, project_id) -> list:
+    """Best-effort per-lane recent activity for the project seed (v5 Wave 3).
+
+    Returns a bounded list of ``{"lane", "items": ["<skill/title>", ...]}`` —
+    the most-recent sessions per content lane (skill + title), so the project
+    summary can be grounded in what the project has actually WORKED ON, not just
+    its identity doc. Stdlib only; never raises (an unreadable lane is skipped).
+    """
+    out = []
+    try:
+        import sessions as _sessions
+    except Exception:
+        return out
+    for lane in MAX_PROJECT_ACTIVITY_LANES:
+        try:
+            sess = _sessions.list_sessions(folder_path, project_id, lane)
+        except Exception:
+            continue
+        items = []
+        for s in sess[:MAX_PROJECT_ACTIVITY_PER_LANE]:
+            skill = (s.get("skill") or "").strip()
+            title = (s.get("title") or "").strip()
+            label = " — ".join(p for p in (skill, title) if p) or skill or title
+            label = label.strip()
+            if label:
+                items.append(label)
+        if items:
+            out.append({"lane": lane, "items": items})
+    return out
+
+
 def project_extraction_seed(folder_path, project_id) -> dict:
     """Deterministically build the PROJECT seed corpus (mirror of extraction_seed).
 
-    Folds three bounded sources into one grounding corpus + anchor list:
+    Folds four bounded sources into one grounding corpus + anchor list:
       1. the project's CLAUDE.md/README/Anchor.md (what the project IS),
-      2. the most-recent plan docs under ``planning/`` (goal / north-star), and
-      3. declared/pinned deliverables (what it ships).
+      2. the most-recent plan docs under ``planning/`` (goal / north-star),
+      3. declared/pinned deliverables (what it ships), and
+      4. per-lane recent activity (what it has actually worked on — recent
+         sessions' skill + title per lane, bounded).
 
     Returns ``{"kind": "project", "title", "sources": [...], "anchors": [...],
-    "deliverables": [...], "text": "<combined corpus>"}``. Stdlib only; never
-    raises.
+    "deliverables": [...], "activity": [...], "text": "<combined corpus>"}``.
+    Stdlib only; never raises.
     """
     folder = Path(folder_path)
     title = ""
@@ -1297,6 +1336,12 @@ def project_extraction_seed(folder_path, project_id) -> dict:
     except Exception:
         pass
 
+    # 4. Per-lane recent activity (what the project has actually worked on).
+    activity = _project_lane_activity(folder_path, project_id)
+    for entry in activity:
+        for item in entry.get("items", []):
+            corpus_parts.append(item)
+
     if not title and sources:
         title = sources[0]
     return {
@@ -1305,15 +1350,26 @@ def project_extraction_seed(folder_path, project_id) -> dict:
         "sources": sources,
         "anchors": anchors,
         "deliverables": deliverables,
+        "activity": activity,
         "text": "\n".join(corpus_parts),
     }
 
 
 def _project_seed_prompt(seed: dict) -> str:
-    """Render the project seed as the bounded model prompt (mirror of _seed_prompt)."""
+    """Render the project seed as the bounded model prompt (mirror of _seed_prompt).
+
+    v5 Wave 3 — objective-focused: ask for a 1–2 SENTENCE statement of the
+    project's OBJECTIVE / TASK / PURPOSE (what it is FOR), grounded strictly in
+    the anchors / deliverables / recent activity below, NOT a list of feature
+    bullets. The output still parses into the existing 1-2-item claims list (one
+    sentence per line) so ``render_project_markdown`` + ``_summary_text`` work
+    unchanged.
+    """
     lines = [
-        "Summarize what this project IS in a few grounded bullet claims "
-        "(its purpose, what it does, and what it ships).",
+        "State this project's OBJECTIVE in 1-2 sentences: what it is FOR — its "
+        "task/purpose and the problem it solves. Be specific and grounded only "
+        "in the material below; do NOT pad with generic feature lists. Output "
+        "the statement as 1-2 lines (one sentence per line), nothing else.",
         f"Title: {seed.get('title', '')}",
         "Anchors from the project documents:",
     ]
@@ -1324,6 +1380,13 @@ def _project_seed_prompt(seed: dict) -> str:
         lines.append("Declared deliverables:")
         for d in delivs:
             lines.append(f"- {d}")
+    activity = seed.get("activity", [])
+    if activity:
+        lines.append("Recent activity per lane:")
+        for entry in activity:
+            lane = entry.get("lane", "")
+            for item in entry.get("items", []):
+                lines.append(f"- [{lane}] {item}")
     return "\n".join(lines)
 
 
@@ -1382,20 +1445,24 @@ def _generate_project_candidates(folder_path, seed: dict, runs: int,
 
 
 def render_project_markdown(structured: dict) -> str:
-    """Render a structured PROJECT summary to cache-ready markdown."""
+    """Render a structured PROJECT summary to cache-ready markdown.
+
+    v5 Wave 3 — the summary is now a 1-2 sentence OBJECTIVE statement; render it
+    as prose under an "## Objective" heading (each grounded claim = one
+    sentence) rather than a bulleted feature list.
+    """
     title = structured.get("title") or "Project summary"
     lines = [f"# {title}", "", "*Project summary · validated, cached*", ""]
     claims = structured.get("claims", []) or []
     if claims:
-        lines.append("## What this project is")
+        lines.append("## Objective")
         lines.append("")
-        for c in claims:
-            lines.append(f"- {c}")
+        lines.append(" ".join(c.strip() for c in claims if c and c.strip()))
         lines.append("")
     elif structured.get("no_grounded_claims"):
-        lines.append("## What this project is")
+        lines.append("## Objective")
         lines.append("")
-        lines.append("_No grounded description could be extracted from the "
+        lines.append("_No grounded objective could be extracted from the "
                      "project documents. You may rescan/regenerate to try again._")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

@@ -2054,6 +2054,17 @@ def render_project_window_html(project_id: str) -> str:
             pass
     blurb_attr = html_lib.escape(blurb_raw, quote=True)
     blurb_esc = html_lib.escape(blurb_raw)
+    # v5 Wave 3: the project's cached OBJECTIVE summary (read-only — NEVER runs
+    # the model on the render path). Shown in the header as the "objective" line;
+    # falls back to the blurb when no summary is cached yet.
+    objective_raw = ""
+    try:
+        cached = _summarizer.load_cached_project(folder_raw, project_id)
+        if cached:
+            objective_raw = (cached.get("summary_text") or "").strip()
+    except Exception:
+        objective_raw = ""
+    objective_esc = html_lib.escape(objective_raw)
     is_active = state_raw in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
@@ -2359,6 +2370,12 @@ def render_project_window_html(project_id: str) -> str:
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
         f"{lifecycle}"
         "</div></div>"
+        # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
+        + (f"<div class='proj-objective' data-objective='1' "
+           f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
+           f"font-size:13px;color:var(--text)'>"
+           f"<b style='color:var(--accent)'>Objective:</b> {objective_esc}</div>"
+           if objective_raw else "")
         # ── Project blurb ("what this project is"; click 'Blurb' above to edit) ──
         + (f"<div class='rnd-blurb' data-blurb='{blurb_attr}' "
            f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
@@ -5408,7 +5425,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div class="date">{today_str}</div>
       </div>
       <p style="color:var(--text-dim);font-size:13px;margin-bottom:16px">Per-project R&amp;D control surface. <b>Open</b> a project to launch research / plan / build jobs in its own window (run several at once). Use the tile buttons to change priority, add notes, or archive / retire a project. <a href="#" onclick="showView('rnd-archive');return false" style="color:var(--accent)">View Archive &#8594;</a></p>
-      {rnd_projects_html}
+      <div id="rndProjectsRows">{rnd_projects_html}</div>
     </div>
 
     <div class="view" id="view-rnd-archive" style="display:none">
@@ -5796,7 +5813,56 @@ function showView(view) {{
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
     const navEl = document.querySelector('.nav-item[data-view="' + view + '"]');
     if (navEl) navEl.classList.add('active');
+    // v5 Wave 3: when the R&D view opens, pull the latest rows so a change made
+    // in a project window (or another tab) shows up without a manual reload.
+    if (view === 'rnd') rndRowsRefresh();
 }}
+
+// ── v5 Wave 3: live-ish R&D rows refresh (no full page reload) ──
+// Poll the read-only rows fragment ONLY while the R&D view is active AND the
+// tab is visible; swap the container's innerHTML only when the fragment CHANGED
+// (diff-before-swap → no DOM churn / scroll jumps). Failure-tolerant: a failed
+// fetch is a silent no-op, never throws.
+function _rndViewActive() {{
+    const v = document.getElementById('view-rnd');
+    return !!(v && v.style.display !== 'none'
+              && document.visibilityState === 'visible');
+}}
+function rndRowsRefresh() {{
+    try {{
+        if (!_rndViewActive()) return;
+        // Don't clobber an OPEN kebab menu (the swap would re-render it closed) —
+        // skip this tick; the user is mid-interaction. The next tick refreshes.
+        if (document.querySelector('.rnd-kebab-menu.rnd-kebab-open')) return;
+        const box = document.getElementById('rndProjectsRows');
+        if (!box) return;
+        fetch('/api/rnd/projects_html', {{cache: 'no-store'}})
+          .then(function (r) {{ return r.ok ? r.json() : null; }})
+          .then(function (d) {{
+              if (!d || !d.ok || typeof d.html !== 'string') return;
+              if (!_rndViewActive()) return;              // re-check after await
+              if (document.querySelector('.rnd-kebab-menu.rnd-kebab-open')) return;
+              if (d.html === box.innerHTML) return;       // diff-before-swap
+              // Preserve the user's lifetime/30d rollup-window toggle across the
+              // swap: the server fragment always renders 'lifetime' as active, so
+              // capture the active window BEFORE the swap and re-apply it after
+              // (otherwise the 15s poll would silently revert a 30d selection).
+              var onBtn = box.querySelector('.rnd-rows-rolltog b.on[data-window]');
+              var savedWin = onBtn ? onBtn.getAttribute('data-window') : 'lifetime';
+              box.innerHTML = d.html;
+              if (savedWin && savedWin !== 'lifetime') {{
+                  var reBtn = box.querySelector(
+                      '.rnd-rows-rolltog b[data-window="' + savedWin + '"]');
+                  if (reBtn) rndRowsRollupWindow(savedWin, reBtn);
+              }}
+          }})
+          .catch(function () {{}});                       // silent no-op
+    }} catch (e) {{}}
+}}
+setInterval(rndRowsRefresh, 15000);
+document.addEventListener('visibilitychange', function () {{
+    if (document.visibilityState === 'visible') rndRowsRefresh();
+}});
 
 // ── Modal helpers ──
 function closeModal(id) {{
@@ -7034,6 +7100,20 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "created_at": r.get("created_at"),
                     })
                 self._send_json({"ok": True, "sessions": safe})
+            elif self.path.startswith("/api/rnd/projects_html"):
+                # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
+                # already-open main dashboard can poll for changes (new session,
+                # added idea, priority/notes/blurb edit, archive, new project,
+                # refreshed summary, rollups) and swap them in WITHOUT a full
+                # page reload. REUSES render_projects_view_html (which reads
+                # ONLY the cached summaries — no synchronous model run here). No
+                # mutation, no auth gate (consistent with /api/rnd/projects).
+                try:
+                    frag = render_projects_view_html()
+                except Exception:
+                    frag = ('<div class="rnd-projects"><p class="rnd-empty">'
+                            'No active R&amp;D projects.</p></div>')
+                self._send_json({"ok": True, "html": frag})
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
