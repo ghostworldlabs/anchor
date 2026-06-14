@@ -49,6 +49,15 @@ SUMMARIES_DIRNAME = "summaries"
 SUMMARY_JSON = "summary.json"
 SUMMARY_MD = "summary.md"
 
+#: Cache schema version. BUMP this whenever a fix changes what a *correct* cached
+#: summary looks like, so stale caches written by old code auto-heal: a cache
+#: stamped with an older (or missing) version is treated as a MISS by the
+#: loaders, so the next ``force``/rescan regenerates it. Bumped to 2 with the
+#: stream-json parser + grounding fix — every pre-fix project/session cache on
+#: disk was empty (the old parser discarded all model text), so all of them must
+#: be regenerated rather than served as a permanent blank.
+SUMMARY_SCHEMA_VERSION = 2
+
 #: How many member docs to read, and how many bytes per doc, for the extraction
 #: seed (bounded — mirrors brownfield_scan's conservative reads).
 MAX_SEED_DOCS = 12
@@ -72,6 +81,33 @@ GROUNDING_MIN_RATIO = 0.7
 #: corpus is treated as ungrounded — a single incidental shared word ("the",
 #: "session") is not enough to anchor a whole claim.
 GROUNDING_MIN_TERMS = 2
+
+#: A more lenient ratio for the PROJECT-OBJECTIVE path (v5 fix). A 1–2 sentence
+#: synthesized objective necessarily introduces connective/paraphrase content
+#: words that aren't literally in the corpus, so the 0.7 sentence-wide bar
+#: rejected every real objective (every cached project summary on disk was empty).
+#: A grounded MAJORITY of content terms (plus the >=2-term backstop) is enough to
+#: anchor a project objective; a hallucinated sentence still fails.
+PROJECT_GROUNDING_MIN_RATIO = 0.5
+
+#: Common English filler/connective words that should NOT count toward (or
+#: against) grounding — they carry no anchoring meaning and, being short, would
+#: otherwise match as incidental substrings of unrelated corpus words. Dropped
+#: from a claim's key terms before the ratio is computed so grounding rests on
+#: real content words, not glue. Lowercased; >=3 chars (shorter tokens never
+#: become key terms anyway via ``_TERM_RE``).
+_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "that", "this", "its", "are", "was", "were",
+    "has", "have", "had", "not", "but", "all", "any", "can", "from", "into",
+    "via", "per", "use", "used", "uses", "using", "such", "into", "onto",
+    "over", "out", "their", "them", "they", "these", "those", "which", "what",
+    "when", "where", "while", "who", "whom", "you", "your", "our", "ours",
+    "his", "her", "hers", "him", "she", "one", "two", "also", "than", "then",
+    "into", "across", "within", "between", "each", "both", "more", "most",
+    "some", "only", "every", "other", "another", "about", "after", "before",
+    "being", "been", "does", "doing", "done", "will", "would", "should",
+    "could", "may", "might", "must", "shall",
+})
 
 
 # ── Per-session generation lock (FIX 1: run-once under concurrency) ───────────
@@ -492,6 +528,24 @@ def _seed_prompt(seed: dict) -> str:
 RUN_FAILED = object()
 
 
+def _claims_from_job(job_id) -> list:
+    """Turn a finished job's captured output into candidate-claim lines.
+
+    Delegates to ``job_runner.extract_assistant_text`` (which knows the real
+    ``claude -p --output-format stream-json`` envelope shape — the previous
+    inline parser skipped EVERY ``{"type":...}`` line and so discarded all model
+    text in production), then strips a leading bullet marker so claims normalize.
+    Shared by the session (:func:`_run_model_once`) and project
+    (:func:`_run_project_model_once`) paths.
+    """
+    claims = []
+    for line in _jr.extract_assistant_text(_jr.all_lines(job_id)):
+        s = (line or "").strip()
+        if s:
+            claims.append(re.sub(r"^[-*+]\s+", "", s))
+    return claims
+
+
 def _run_model_once(folder_path, seed: dict):
     """Run ONE bounded model call through job_runner and return its claim lines.
 
@@ -519,22 +573,7 @@ def _run_model_once(folder_path, seed: dict):
     status = final.get("status")
     if status != _jr.STATUS_DONE:
         return RUN_FAILED
-    claims = []
-    for line in _jr.all_lines(jid):
-        s = (line or "").strip()
-        if not s:
-            continue
-        # Skip stream-json envelope lines (result / assistant frames).
-        if s.startswith("{") and s.endswith("}"):
-            try:
-                obj = json.loads(s)
-                if isinstance(obj, dict) and obj.get("type"):
-                    continue
-            except (json.JSONDecodeError, ValueError):
-                pass
-        # Strip a leading bullet marker so claims normalize.
-        claims.append(re.sub(r"^[-*+]\s+", "", s))
-    return claims
+    return _claims_from_job(jid)
 
 
 def _generate_candidates(folder_path, seed: dict, runs: int):
@@ -561,8 +600,14 @@ _TERM_RE = re.compile(r"[A-Za-z0-9]{3,}")
 
 
 def _key_terms(claim: str) -> list:
-    """The alphanumeric key terms (>=3 chars) of a claim, lowercased."""
-    return [t.lower() for t in _TERM_RE.findall(claim or "")]
+    """The alphanumeric CONTENT terms (>=3 chars, non-stopword) of a claim.
+
+    Stopwords are dropped (v5 fix) so grounding rests on real content words, not
+    connective glue — a synthesized objective's filler ("the", "with", "that")
+    neither props up nor sinks the grounding ratio.
+    """
+    return [t for t in (t.lower() for t in _TERM_RE.findall(claim or ""))
+            if t not in _STOPWORDS]
 
 
 def is_grounded(claim: str, corpus_lower: str,
@@ -595,12 +640,15 @@ def is_grounded(claim: str, corpus_lower: str,
     return (hits / len(uniq)) >= min_ratio
 
 
-def _validate(candidates: list, seed: dict) -> list:
+def _validate(candidates: list, seed: dict,
+              min_ratio: float = GROUNDING_MIN_RATIO) -> list:
     """Fuse candidate claim-lists, drop ungrounded claims, dedupe (step c).
 
     Cross-run fusion: union the candidates (a claim that appears in ANY run is a
     candidate), then keep only the grounded ones, deduped by normalized text,
-    order-stable.
+    order-stable. ``min_ratio`` lets the PROJECT-objective path relax the
+    sentence-wide grounding bar (synthesized prose) without loosening the
+    stricter per-claim session path.
     """
     corpus_lower = (seed.get("text") or "").lower()
     seen = set()
@@ -611,7 +659,7 @@ def _validate(candidates: list, seed: dict) -> list:
             if not norm or norm in seen:
                 continue
             seen.add(norm)
-            if is_grounded(claim, corpus_lower):
+            if is_grounded(claim, corpus_lower, min_ratio=min_ratio):
                 kept.append(claim.strip())
     return kept
 
@@ -639,14 +687,23 @@ def _summary_md_path(folder_path, project_id, lane, session_id) -> Path:
 
 
 def load_cached(folder_path, project_id, lane, session_id):
-    """Return the cached structured summary dict, or ``None``."""
+    """Return the cached structured summary dict, or ``None``.
+
+    A cache stamped with an older/missing ``schema_version`` is treated as a MISS
+    (returns ``None``) so it regenerates on the next ``force``/rescan — every
+    pre-fix cache was written by the broken parser and is empty, so it must not be
+    served as a permanent blank.
+    """
     p = _summary_json_path(folder_path, project_id, lane, session_id)
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+    if not isinstance(data, dict) or data.get("schema_version") != SUMMARY_SCHEMA_VERSION:
+        return None
+    return data
 
 
 def _member_links(seed: dict, project_id: str, lane: str) -> list:
@@ -1003,6 +1060,7 @@ def _write_cache(folder_path, project_id, lane, session_id,
         d.mkdir(parents=True, exist_ok=True)
         md = render_markdown(structured)
         structured["markdown"] = md
+        structured["schema_version"] = SUMMARY_SCHEMA_VERSION
         jp = d / SUMMARY_JSON
         tmp = jp.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(structured, indent=2, ensure_ascii=False),
@@ -1414,20 +1472,7 @@ def _run_project_model_once(folder_path, seed: dict, runner_env: dict = None):
     final = _jr.load_record(jid) or {}
     if final.get("status") != _jr.STATUS_DONE:
         return RUN_FAILED
-    claims = []
-    for line in _jr.all_lines(jid):
-        s = (line or "").strip()
-        if not s:
-            continue
-        if s.startswith("{") and s.endswith("}"):
-            try:
-                obj = json.loads(s)
-                if isinstance(obj, dict) and obj.get("type"):
-                    continue
-            except (json.JSONDecodeError, ValueError):
-                pass
-        claims.append(re.sub(r"^[-*+]\s+", "", s))
-    return claims
+    return _claims_from_job(jid)
 
 
 def _generate_project_candidates(folder_path, seed: dict, runs: int,
@@ -1482,6 +1527,7 @@ def _write_project_cache(folder_path, project_id, structured: dict) -> dict:
         md = render_project_markdown(structured)
         structured["markdown"] = md
         structured["summary_text"] = _summary_text(structured)
+        structured["schema_version"] = SUMMARY_SCHEMA_VERSION
         jp = d / PROJECT_SUMMARY_JSON
         tmp = jp.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(structured, indent=2, ensure_ascii=False),
@@ -1501,9 +1547,14 @@ def load_cached_project(folder_path, project_id):
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+    # A cache from old code (older/missing schema_version) is treated as a MISS
+    # so it regenerates on the next force/rescan instead of serving a stale blank.
+    if not isinstance(data, dict) or data.get("schema_version") != SUMMARY_SCHEMA_VERSION:
+        return None
+    return data
 
 
 def summarize_project(folder_path, project_id, force: bool = False,
@@ -1552,7 +1603,8 @@ def summarize_project(folder_path, project_id, force: bool = False,
                 "runs": len(candidates),
             }
 
-        claims = _validate(candidates, seed)
+        claims = _validate(candidates, seed,
+                           min_ratio=PROJECT_GROUNDING_MIN_RATIO)
         structured = {
             "project_id": str(project_id),
             "kind": "project",
