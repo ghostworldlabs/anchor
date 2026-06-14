@@ -47,3 +47,33 @@
   panel header showing the grey `×` and a distinct red `🗑` (visually confirmed).
 - **COMMIT (scoped):** `dd08c6b` — anchor_gui.py + test_run_lifecycle.py +
   test_project_window.py only (no runtime churn).
+
+## Wave 2 — Past-session view: real summary + "Continue in a live session" — GREEN (2026-06-14)
+
+- **EXECUTE** (fresh sub-agent): (A) `summarizer.summarize_session` extended with
+  three DETERMINISTIC source-grounded fields — `skill` / `prompts` / `actions`
+  (read straight off session+member records, NEVER through the model → zero
+  fabrication; honest empty/placeholder when absent). Model `claims` still go
+  through generate-twice + grounding filter; failed-runner branch still skips the
+  cache (no poison). (B) Historical panel JS (`_mountReadOnlyBody` rewritten →
+  `_renderPastSession`/`_fillPastSessionDetail`) replaces the "session complete"
+  dead-end with skill+prompts+files+doc-role links. (C) New token-gated
+  `POST /api/rnd/continue_session` (+ `_build_continue_seed`) → `start_session` in
+  the SAME lane seeded with the prior summary; original never mutated (R2).
+- **GATE (orchestrator-run, stub PTY):** 660 passed, 1 skipped (baseline 651+1, +9).
+- **REVIEW (adversarial, prompted to refute): SHIP — 0 BLOCKER, 2 MINOR.** All 7
+  scrutiny points CONFIRMED-OK: R3 grounding intact (skill/prompts/actions are real
+  reads; `frobnicate`/`zzyzx` ungrounded claims still dropped); cache generate-once
+  + force + no-poison-on-failure; R2 original byte-identical after continue + fresh
+  worktree; endpoint token-gated; UI gate is a REAL Playwright click→panel→summary→
+  continue test (NOT grep-only); stdlib-only; never :8777. MINOR: produced-file
+  labels not hyperlinked (doc links live in the summary block above — honest, not
+  dangling); handler covered via Playwright rather than a dedicated HTTP unit test.
+  Neither blocks. No FIX required.
+- **UI VERIFY (orchestrator):** screenshot of a discovered planning session's panel
+  — confirmed it shows the summary header + PLAN DOCUMENTS role links + "Skill
+  invoked: not recorded" + "Prompts asked: none recorded" + "Files produced:
+  Master Plan / Impl Plan" + the blue "▶ Continue in a live session" button
+  (honest placeholders for the imported case; `ro-sec`=3).
+- **COMMIT (scoped):** `6b781aa` — summarizer.py + anchor_gui.py +
+  test_session_continue.py only (no runtime churn).
