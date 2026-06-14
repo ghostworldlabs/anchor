@@ -544,6 +544,348 @@ def get_pinned_deliverable(folder_path, project_id: str, deliverable_id: str):
     return None
 
 
+# ── v5 Wave 4: deliverable PER FOREMAN BUILD (resolve · backfill) ────────────
+#
+# Every Build (Foreman) session resolves a DELIVERABLE — the artifact that build
+# produced. The cardinal rule (Master Plan Risk R4) is **never guess**: a
+# deliverable is resolved ONLY from explicit signals, in a fixed priority order,
+# and when no explicit signal exists the result is ``resolved=False`` with an
+# honest reason — NEVER a fabricated path.
+#
+# Signal priority (strongest first), all explicit:
+#   1. the build session's ``deliverable`` DOC-ROLE — summarizer.session_doc_roles
+#      resolves the build lane's ``deliverable`` role (the project's pinned/linked
+#      deliverable, already grounded). This is the strongest "what this build
+#      produced" signal.
+#   2. a PRODUCT member file of the build session — a session member with an
+#      ``artifact_path`` that is a real product artifact (NOT a plan/log doc:
+#      north-star / execution-log / master-plan / implementation-plan).
+#   3. an already-PINNED / DECLARED deliverable (list_pinned_deliverables) — the
+#      newest. (A prior build's auto-pin re-resolves to itself → idempotent.)
+#   4. a DECLARED ``Anchor.md`` ``## Deliverables`` marker entry.
+#   5. (WEAK / opt-in) a ``foreman.config`` entry that CLEARLY names a product
+#      artifact. ``foreman.config``'s ``docs`` block lists PLAN docs (description /
+#      plan / execution_log), NOT the product, so it is treated as a weak signal
+#      and only used when ``allow_config`` is set AND the entry is not a plan doc.
+#
+# AMBIGUOUS (e.g. several unrelated candidate members with no role/pin) → left
+# UNRESOLVED rather than guessing.
+
+#: Basenames (lowercased, prefix-matched) that are trio PLAN/LOG/CONFIG docs,
+#: never the product artifact a build delivers. Used to reject these as a build's
+#: deliverable (a foreman build session's discovered members ARE these trio files
+#: — the product is named by a pin/marker/doc-role, not by a config/log member).
+_PLAN_DOC_PREFIXES = (
+    "north-star", "master-plan", "implementation-plan", "execution-log",
+    "decision-log", "handoff", "readme", "claude.md", "anchor.md",
+    "foreman.config", "foreman-checkpoint", "foreman.checkpoint",
+)
+
+
+def _is_plan_doc(rel: str) -> bool:
+    """True if ``rel``'s basename is a trio plan/log/config doc (not a product)."""
+    base = Path(str(rel).replace("\\", "/")).name.lower()
+    return any(base.startswith(p) for p in _PLAN_DOC_PREFIXES)
+
+
+def _deliverable_view(folder_path, project_id, name, rel, dtype, source,
+                      href=None):
+    """Build the structured ``deliverable`` view dict, traversal-guarded.
+
+    ``rel`` is run through :func:`_relpath` (the same containment guard the pin
+    path uses) so a surfaced path can NEVER escape the project folder. A path
+    that fails the guard yields ``None`` (the caller then reports unresolved —
+    never a fabricated/out-of-folder path).
+    """
+    rel = (rel or "").strip().replace("\\", "/")
+    if not rel:
+        return None
+    try:
+        safe_rel = _relpath(folder_path, rel)
+    except ValueError:
+        return None
+    if not dtype or dtype not in VALID_TYPES:
+        dtype = infer_type(safe_rel)
+    if href is None:
+        href = _doc_href(project_id, safe_rel)
+    return {
+        "name": name or Path(safe_rel).name,
+        "path": safe_rel,
+        "rel": safe_rel,
+        "type": dtype,
+        "source": source,
+        "href": href,
+    }
+
+
+def resolve_build_deliverable(folder_path, project_id: str,
+                              build_session: dict,
+                              allow_config: bool = False) -> dict:
+    """Resolve the artifact a BUILD session produced — EXPLICIT signals only.
+
+    Returns ``{"resolved": bool, "deliverable": {...}|None, "reason": str,
+    "signal": str}``. ``deliverable`` (when resolved) carries
+    ``{name, path, rel, type, source, href}`` with a traversal-guarded path. When
+    no explicit signal resolves an artifact → ``resolved=False`` with an honest
+    ``reason`` and ``deliverable=None`` (NEVER a fabricated path; see Risk R4).
+
+    Resolution is SESSION-SCOPED (Risk R4 — never attribute one build's product to
+    another): (1) the build session's OWN product member file (a non-plan/log
+    member; >1 candidate → ambiguous unless a pin matches exactly one); (2) a
+    pinned/declared deliverable whose path is a MEMBER of THIS session; (3) ONLY
+    when the project has a SINGLE build session, the project-level newest pin /
+    ``Anchor.md`` marker / [opt-in] ``foreman.config`` product. With multiple
+    builds and no session-scoped signal → honest unresolved. Stdlib only; never
+    raises (any failure → unresolved with a reason).
+    """
+    bs = build_session or {}
+    members = bs.get("member_files", []) or []
+
+    # SESSION-SCOPED resolution (v5 Wave 4 fix). The ONLY honest "what THIS build
+    # produced" signal is the build session's own files. A project-level pin /
+    # marker / config is attributed to a build ONLY when it is session-tied OR the
+    # project has a SINGLE build (unambiguous). With several builds we refuse to
+    # guess which build a project-level deliverable belongs to (Risk R4) — earlier
+    # this used the PROJECT-scoped `deliverable` doc-role / newest pin, so EVERY
+    # build panel falsely claimed the same artifact regardless of what it produced.
+    product_members = []
+    for m in members:
+        rel = (m.get("artifact_path") or "").strip()
+        if not rel or _is_plan_doc(rel):
+            continue
+        product_members.append(m)
+
+    try:
+        pinned = list_pinned_deliverables(folder_path, project_id)
+    except Exception:
+        pinned = []
+    pinned_by_rel = {}
+    for rec in pinned:
+        pr = (rec.get("artifact_path") or "").strip().replace("\\", "/")
+        if pr and pr not in pinned_by_rel:
+            pinned_by_rel[pr] = rec
+
+    def _norm(r):
+        return (r or "").strip().replace("\\", "/")
+
+    def _member_view(m, rec=None):
+        rel = m.get("artifact_path") or ""
+        return _deliverable_view(
+            folder_path, project_id,
+            name=(rec.get("title") if rec else None)
+                 or m.get("title") or Path(_norm(rel)).name,
+            rel=rel,
+            dtype=(((rec.get("deliverable_type") if rec else "") or "")
+                   .strip().lower() or None),
+            source=(rec.get("source") if rec else None) or "build-output")
+
+    def _pin_view(rec):
+        return _deliverable_view(
+            folder_path, project_id, name=rec.get("title"),
+            rel=rec.get("artifact_path") or "",
+            dtype=(rec.get("deliverable_type") or "").strip().lower() or None,
+            source=rec.get("source") or SOURCE_PINNED)
+
+    # (1) The build session's OWN product member(s) — authoritative.
+    if len(product_members) == 1:
+        m = product_members[0]
+        rec = pinned_by_rel.get(_norm(m.get("artifact_path")))
+        view = _member_view(m, rec)
+        if view:
+            return {"resolved": True, "deliverable": view,
+                    "signal": ("pinned" if rec else "build-output"),
+                    "reason": ("resolved from this build's pinned product file"
+                               if rec else
+                               "resolved from the build session's product file")}
+    elif len(product_members) > 1:
+        # Several candidate products: a pin matching EXACTLY ONE disambiguates;
+        # otherwise genuinely ambiguous → unresolved (never a guess; Risk R4).
+        matched = [m for m in product_members
+                   if _norm(m.get("artifact_path")) in pinned_by_rel]
+        if len(matched) == 1:
+            m = matched[0]
+            view = _member_view(m, pinned_by_rel.get(_norm(m.get("artifact_path"))))
+            if view:
+                return {"resolved": True, "deliverable": view, "signal": "pinned",
+                        "reason": "resolved from this build's pinned product file"}
+        return {"resolved": False, "deliverable": None, "signal": "ambiguous",
+                "reason": ("ambiguous — %d candidate build artifacts; pin one"
+                           % len(product_members))}
+
+    # (2) No clear product member: a pinned/declared deliverable whose path is a
+    # MEMBER of THIS session (session-tied — safe even with multiple builds).
+    member_rels = {_norm(m.get("artifact_path")) for m in members}
+    for pr, rec in pinned_by_rel.items():
+        if pr in member_rels:
+            view = _pin_view(rec)
+            if view:
+                return {"resolved": True, "deliverable": view, "signal": "pinned",
+                        "reason": "resolved from this build's pinned product file"}
+
+    # (3) Project-level fallback (newest pin / declared marker / [opt-in] config)
+    # ONLY when this is the project's SOLE build session → attribution is
+    # unambiguous. With MORE THAN ONE build, refuse to guess (Risk R4) → honest
+    # unresolved so the user pins this build's deliverable explicitly.
+    try:
+        import sessions as _sessions
+        build_count = len(_sessions.list_sessions(folder_path, project_id,
+                                                  "build"))
+    except Exception:
+        build_count = 1
+    if build_count <= 1:
+        if pinned:
+            view = _pin_view(pinned[0])
+            if view:
+                return {"resolved": True, "deliverable": view, "signal": "pinned",
+                        "reason": "resolved from the project's pinned deliverable"}
+        try:
+            marker = parse_anchor_md_deliverables(folder_path)
+        except Exception:
+            marker = []
+        if marker:
+            it = marker[0]
+            view = _deliverable_view(
+                folder_path, project_id, name=Path(it["path"]).name,
+                rel=it["path"], dtype=it.get("type"), source=SOURCE_DECLARED)
+            if view:
+                return {"resolved": True, "deliverable": view, "signal": "marker",
+                        "reason": "resolved from an Anchor.md Deliverables marker"}
+        if allow_config:
+            view = _resolve_from_foreman_config(folder_path, project_id)
+            if view:
+                return {"resolved": True, "deliverable": view, "signal": "config",
+                        "reason": "resolved from a foreman.config product entry"}
+        reason = "no deliverable pinned yet"
+    else:
+        reason = ("no deliverable for this build yet — multiple builds; "
+                  "pin this build's deliverable")
+    return {"resolved": False, "deliverable": None, "signal": "none",
+            "reason": reason}
+
+
+def _rel_from_artifact_href(href: str) -> str:
+    """Recover the ``path`` rel from an ``/artifact/<pid>?path=<rel>`` href."""
+    try:
+        from urllib.parse import urlparse, parse_qs, unquote
+        q = parse_qs(urlparse(href).query)
+        return unquote((q.get("path", [""])[0]) or "")
+    except Exception:
+        return ""
+
+
+def _resolve_from_foreman_config(folder_path, project_id):
+    """[Weak] resolve a PRODUCT artifact named in ``foreman.config(.json)``.
+
+    ``foreman.config``'s ``docs`` block lists PLAN docs (description / plan /
+    execution_log), which are NOT the product — those are rejected by
+    :func:`_is_plan_doc`. Only a non-plan-doc product path under a ``deliverable``/
+    ``product``/``artifact`` key (or an explicit ``deliverable`` value) is used.
+    Returns a deliverable view or ``None``. Best-effort, never raises.
+    """
+    for nm in ("foreman.config.json", "foreman.config"):
+        p = Path(folder_path) / nm
+        try:
+            if not p.is_file():
+                continue
+            cfg = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(cfg, dict):
+            continue
+        # Explicit product keys only — never the ``docs`` (plan) block.
+        candidates = []
+        for key in ("deliverable", "product", "artifact"):
+            v = cfg.get(key)
+            if isinstance(v, str) and v.strip():
+                candidates.append(v.strip())
+        for rel in candidates:
+            if _is_plan_doc(rel):
+                continue
+            view = _deliverable_view(folder_path, project_id,
+                                     name=Path(rel).name, rel=rel,
+                                     dtype=None, source="config")
+            if view:
+                return view
+    return None
+
+
+def backfill_build_deliverables(folder_path, project_id: str,
+                                allow_config: bool = False) -> dict:
+    """Scan a project's BUILD sessions and AUTO-PIN unambiguously resolved
+    deliverables so they surface in the Deliverables lane (v5 Wave 4 backfill).
+
+    For each build session (``sessions.list_sessions(.., 'build')``),
+    :func:`resolve_build_deliverable` is run; where it resolves an artifact from
+    an EXPLICIT, unambiguous signal, that artifact is pinned via
+    :func:`pin_deliverable` (content-addressed → IDEMPOTENT: re-running backfill
+    never duplicates). A build whose deliverable is UNRESOLVED/ambiguous is left
+    UNPINNED (never fabricated). Returns
+    ``{"pinned": [...records], "unresolved": [{session_id, reason}], "scanned": n}``.
+
+    A pin whose source is already a pinned/declared deliverable (signal
+    ``"pinned"`` / ``"marker"``) is NOT re-pinned (it is already in the lane) — so
+    backfill only adds NEW build outputs / doc-role artifacts. Stdlib only; never
+    raises (a per-session failure is recorded as unresolved).
+    """
+    import sessions as _sessions
+    pinned_out = []
+    unresolved = []
+    scanned = 0
+    try:
+        build_sessions = _sessions.list_sessions(folder_path, project_id, "build")
+    except Exception:
+        build_sessions = []
+    try:
+        already = {(r.get("artifact_path") or "").strip().replace("\\", "/")
+                   for r in list_pinned_deliverables(folder_path, project_id)}
+    except Exception:
+        already = set()
+    for bs in build_sessions:
+        scanned += 1
+        sid = bs.get("session_id") or ""
+        try:
+            res = resolve_build_deliverable(folder_path, project_id, bs,
+                                            allow_config=allow_config)
+        except Exception as e:  # never let one session break the scan
+            unresolved.append({"session_id": sid, "reason": f"error: {e}"})
+            continue
+        if not res.get("resolved"):
+            unresolved.append({"session_id": sid,
+                               "reason": res.get("reason", "unresolved")})
+            continue
+        signal = res.get("signal")
+        deliv = res.get("deliverable") or {}
+        # A "pinned" signal is ALREADY a deliverables-lane pin record → no new
+        # pin (the ``already`` guard below also covers re-runs). A "marker" /
+        # "doc-role" / "build-output" signal names a real product that may not
+        # yet be a pin record, so it IS pinned (idempotent via ``already``).
+        if signal == "pinned":
+            continue
+        rel = deliv.get("rel") or deliv.get("path") or ""
+        if not rel:
+            unresolved.append({"session_id": sid,
+                               "reason": "resolved without a path"})
+            continue
+        if rel.replace("\\", "/") in already:
+            continue  # already in the lane — idempotent, no disk churn
+        # A marker-resolved deliverable is honestly recorded as DECLARED; any
+        # other auto-resolved product (doc-role / build-output) as PINNED.
+        src = (SOURCE_DECLARED if deliv.get("source") == SOURCE_DECLARED
+               else SOURCE_PINNED)
+        try:
+            rec = pin_deliverable(
+                folder_path, project_id, rel,
+                name=deliv.get("name"),
+                dtype=deliv.get("type"),
+                description=f"auto-pinned from build session {sid}",
+                source=src)
+            pinned_out.append(rec)
+            already.add(rel.replace("\\", "/"))
+        except ValueError as e:  # traversal guard rejected — never fabricate
+            unresolved.append({"session_id": sid, "reason": str(e)})
+    return {"pinned": pinned_out, "unresolved": unresolved, "scanned": scanned}
+
+
 # ── v4 Wave 7: type-aware launch ────────────────────────────────────────────
 #
 # Every Foreman run auto-pins one deliverable. Clicking *launch* adapts to the

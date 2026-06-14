@@ -2088,19 +2088,30 @@ def render_project_window_html(project_id: str) -> str:
             f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
         )
-    kanban = _render_kanban_html(folder_raw, project_id)
-    status = render_status_line_html(project_id)
-    header_rollup = render_header_rollup_html(project_id)
-    tasks_html = render_project_tasks_html(project_id)
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
     # pin it as the runnable deliverable so the Deliverables LANE shows it as a
     # launch-by-type tile. Idempotent (content-addressed); best-effort. (The loose
     # bottom "Deliverables / Pinned" section is gone — deliverables are the lane.)
+    # MUST run BEFORE _render_kanban_html so the freshly-pinned deliverable shows
+    # in the Deliverables lane on THIS render (not only the next one).
     try:
         if (Path(folder_raw) / _preview.DEFAULT_TARGET).is_file():
             ensure_anchor_deliverable(folder_raw, project_id)
     except Exception:
         pass
+    # v5 Wave 4: backfill — scan this project's BUILD sessions and auto-pin any
+    # unambiguously-resolved deliverable so it appears in the Deliverables lane.
+    # Idempotent (content-addressed pins); ambiguous/none left unpinned (never
+    # fabricated). Best-effort: a failure never breaks the window render. Runs
+    # BEFORE the kanban render so the auto-pinned deliverable surfaces this render.
+    try:
+        _deliv.backfill_build_deliverables(folder_raw, project_id)
+    except Exception:
+        pass
+    kanban = _render_kanban_html(folder_raw, project_id)
+    status = render_status_line_html(project_id)
+    header_rollup = render_header_rollup_html(project_id)
+    tasks_html = render_project_tasks_html(project_id)
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -2313,6 +2324,21 @@ def render_project_window_html(project_id: str) -> str:
         "flex-shrink:0}"
         ".panel .summary .smat .effbar{font-size:11px;color:var(--text-dim);"
         "margin-top:auto}"
+        # v5 Wave 4 — a BUILD panel's resolved deliverable (a link) or honest
+        # "none yet" placeholder.
+        ".panel .summary .smat .bdeliv{display:flex;gap:10px;align-items:center;"
+        "font-size:12px;margin-bottom:9px}"
+        ".panel .summary .smat .bdeliv .k{color:var(--text-dim);min-width:92px;"
+        "flex-shrink:0}"
+        ".panel .summary .smat .bdeliv .doc{display:inline-flex;gap:6px;"
+        "align-items:center;font-size:11.5px;padding:3px 10px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);"
+        "color:var(--text);text-decoration:none}"
+        ".panel .summary .smat .bdeliv .doc:hover{border-color:var(--accent)}"
+        ".panel .summary .smat .bdeliv .doc .role{font-size:9.5px;"
+        "color:var(--text-dim)}"
+        ".panel .summary .smat .bdeliv.none{color:var(--warning);"
+        "font-style:italic}"
         ".panel .summary .slinks{border-left:1px solid var(--border);"
         "padding-left:18px;display:flex;flex-direction:column}"
         ".panel .summary .slinks .slh{font-size:10px;text-transform:uppercase;"
@@ -3304,9 +3330,9 @@ function _loadPanelSummary(sessionId, host) {
     + '&lane=' + encodeURIComponent(lane)
     + '&session=' + encodeURIComponent(sessionId)
     + _tokenQ();
-  var summary = null, roles = {};
+  var summary = null, roles = {}, buildDeliv = null;
   function _paint() {
-    host.innerHTML = _renderSplitSummary(summary, roles, lane);
+    host.innerHTML = _renderSplitSummary(summary, roles, lane, buildDeliv);
   }
   fetch(sUrl, _jsonHdrs())
     .then(function (r) { return r.json(); })
@@ -3318,6 +3344,18 @@ function _loadPanelSummary(sessionId, host) {
     .then(function (r) { return r.json(); })
     .then(function (d) { if (d && d.ok && d.roles) roles = d.roles; })
     .catch(function () {})
+    .then(function () {
+      // v5 Wave 4 — a BUILD session's panel surfaces ITS resolved deliverable
+      // (or an honest "none yet" placeholder). Read-only; never fabricated.
+      if (lane !== 'build') return null;
+      var dUrl = '/api/rnd/build_deliverable?pid=' + encodeURIComponent(PROJECT_ID)
+        + '&lane=build&session=' + encodeURIComponent(sessionId) + _tokenQ();
+      return fetch(dUrl, _jsonHdrs())
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.ok) buildDeliv = d; })
+        .catch(function () {});
+    })
+    .catch(function () {})
     .then(_paint);
 }
 
@@ -3326,8 +3364,22 @@ function _loadPanelSummary(sessionId, host) {
 // the bottom. RIGHT (.slinks) = role-tagged doc links; a second link group (when
 // present) uses .slh.two (margin-top:auto) so it pins to the bottom — making both
 // columns fill the same height per the mockup.
-function _renderSplitSummary(summary, roles, lane) {
+function _renderSplitSummary(summary, roles, lane, buildDeliv) {
   var L = [];   // left materials
+  // v5 Wave 4 — a BUILD panel shows ITS deliverable (resolved → a link; absent →
+  // an honest placeholder). Rendered FIRST so it is prominent in the materials.
+  if (lane === 'build' && buildDeliv) {
+    if (buildDeliv.resolved && buildDeliv.deliverable) {
+      var bd = buildDeliv.deliverable;
+      L.push('<div class="bdeliv resolved"><span class="k">Deliverable</span>'
+        + '<a class="doc" href="' + _esc(bd.href || '#') + '" target="_blank" '
+        + 'rel="noopener">' + _esc(bd.name || bd.path || 'deliverable')
+        + '<span class="role">' + _esc(bd.type || '') + '</span></a></div>');
+    } else {
+      L.push('<div class="bdeliv none">' + _esc(buildDeliv.reason
+        || 'no deliverable pinned yet') + ' — pin one</div>');
+    }
+  }
   if (summary) {
     if (summary.title) L.push('<div class="sgoal">' + _esc(summary.title) + '</div>');
     if (summary.north_star) L.push('<div class="row"><span class="k">North Star</span><span>' + _esc(summary.north_star) + '</span></div>');
@@ -7008,6 +7060,49 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     except Exception:
                         roles = {}
                     self._send_json({"ok": True, "roles": roles})
+            elif self.path.startswith("/api/rnd/build_deliverable"):
+                # Read-only (v5 Wave 4): resolve the DELIVERABLE one BUILD session
+                # produced — explicit signals only, never fabricated. The build
+                # panel fetches this to show the deliverable (name/type/link) or an
+                # honest "no deliverable pinned yet" placeholder when unresolved.
+                # NO mutation, NO model call. AUTH: ``?token=`` (read-only GET).
+                # /api/rnd/build_deliverable?pid=<id>&lane=build&session=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0]
+                       or q.get("project_id", [""])[0] or "").strip()
+                lane = (q.get("lane", ["build"])[0] or "build").strip()
+                session_id = (q.get("session", [""])[0] or "").strip()
+                if not pid or not session_id:
+                    self._send_json({"ok": False,
+                                     "error": "pid, session required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _unsafe_path_seg(lane):
+                    self._send_json({"ok": False, "error": "bad lane"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    result = {"resolved": False, "deliverable": None,
+                              "reason": "no deliverable pinned yet"}
+                    try:
+                        session = None
+                        for s in _sessions.list_sessions(folder, pid, lane):
+                            if s.get("session_id") == session_id:
+                                session = s
+                                break
+                        if session is not None:
+                            result = _deliv.resolve_build_deliverable(
+                                folder, pid, session)
+                    except Exception:
+                        result = {"resolved": False, "deliverable": None,
+                                  "reason": "no deliverable pinned yet"}
+                    self._send_json({"ok": True,
+                                     "resolved": bool(result.get("resolved")),
+                                     "deliverable": result.get("deliverable"),
+                                     "reason": result.get("reason", "")})
             elif self.path.startswith("/api/rnd/project_rollup"):
                 # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
                 # (effort_history.project_effort_rollup, Wave 3) for the header's
