@@ -113,3 +113,37 @@
   before peak prices").
 - **COMMIT (scoped):** `3bcac71` — summarizer.py + anchor_gui.py +
   test_project_summary_v5.py only (no runtime churn).
+
+## Wave 4 — Deliverable per Foreman build (resolve · backfill · list) — GREEN (2026-06-14)
+
+- **EXECUTE** (fresh sub-agent): `deliverables.resolve_build_deliverable` +
+  `backfill_build_deliverables` (idempotent auto-pin) + read-only
+  `GET /api/rnd/build_deliverable`; build panel renders its deliverable (`.bdeliv`)
+  or the honest "no deliverable pinned yet — pin one"; Deliverables lane lists
+  backfilled deliverables (auto-pin runs before the kanban render).
+- **GATE (orchestrator-run, stub PTY):** 683 passed, 1 skipped (baseline 671+1, +12).
+- **REVIEW (adversarial, prompted to refute): HALT — 2 BLOCKER, 1 MINOR.**
+  **B1 (R4 fabrication):** the top signal used `summarizer.session_doc_roles`'s
+  `deliverable` role, which is PROJECT-scoped (newest pin) — so EVERY build panel
+  claimed the same artifact (e.g. anchor_gui.py) regardless of what it produced
+  (proven with two probes). **B2 (false-green gate):** `test_resolve_from_doc_role`
+  ENCODED the bug and there was ZERO multi-build-per-project coverage, so all 12
+  tests + the real Playwright test passed on broken behavior. MINOR: `_is_plan_doc`
+  startswith over-exclusion (readme*/handoff* → false unresolved, never a
+  fabrication). Other 5 points CONFIRMED-OK (no fabrication elsewhere; backfill
+  idempotent; endpoint read-only/traversal-safe; UI test real not grep; stdlib-only;
+  distro clean; never :8777).
+- **FIX (orchestrator):** rewrote resolution SESSION-SCOPED — (1) the build's own
+  product member (>1 → ambiguous unless a pin disambiguates to one); (2) a pin whose
+  path is a MEMBER of THIS session; (3) project-level pin/marker/[opt-in]config ONLY
+  when the project has a SINGLE build (unambiguous). Multiple builds + no
+  session-scoped signal → honest unresolved. Dropped the project-scoped doc-role
+  signal. Replaced the bug-encoding test with a MULTI-BUILD regression lock + a
+  single-build project-pin positive test. (MINOR left as a noted benign follow-up.)
+- **RE-GATE (orchestrator-run, stub PTY):** 684 passed, 1 skipped. UI verified:
+  rendered-DOM (lane lists it / panel `.bdeliv.resolved` / negative `.bdeliv.none`
+  placeholder), real Playwright lane+panel+placeholder, and orchestrator screenshots
+  of a build panel showing "Deliverable: myapp.py [program]" (resolved) AND
+  "no deliverable pinned yet — pin one" (honest, no fabrication).
+- **COMMIT (scoped):** `550c580` — deliverables.py + anchor_gui.py +
+  test_build_deliverable.py only (no runtime churn).
