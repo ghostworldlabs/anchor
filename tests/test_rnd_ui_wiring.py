@@ -483,38 +483,34 @@ def test_select_existing_missing_path_no_crash_endpoint(server, tmp_path):
 
 # ── C: project window carries the launch controls + log drawer hooks ─────────
 
-def test_project_window_has_lane_controls_and_log_drawer(gui_env):
+def test_project_window_has_lane_controls_and_panel_terminal(gui_env):
     gui = gui_env
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         proj = _mkproject(gui, Path(td) / "win", "WindowProj")
         html = gui.render_project_window_html(proj["id"])
-    # Lane-launch controls. v4 Wave 1: the "+ New run" affordances launch the
-    # SEEDED ConPTY path (newTermSession → term_start), NOT the v2 unseeded REPL
-    # (openTerminal / start_terminal) that caused the repeating-prompt bug.
-    # Research carries an engine choice (Claude default + Gemini); plan/build
-    # stay Claude-only (no engine arg).
+    # Lane-launch controls. The "+ new <lane>" affordances launch the SEEDED
+    # ConPTY path (newTermSession → term_start). Research carries an engine choice
+    # (Claude default + Gemini); plan/build stay Claude-only (no engine arg).
     assert "newTermSession('research','claude')" in html
     assert "newTermSession('plan')" in html
     assert "newTermSession('build')" in html
-    # Terminal substrate hooks: the window mounts the REAL xterm.js terminal via
-    # the anchor-term adapter (which still exposes window.AnchorTerm.mount) and
-    # starts a session via /api/rnd/start_terminal; the SSE stream URL itself
-    # lives in the vendored anchor-term.js static asset.
-    assert "AnchorTerm" in html
-    assert "window.AnchorTerm.mount" in html
-    assert "/api/rnd/start_terminal" in html
-    # The genuine xterm.js library + stylesheet are vendored and included, and
-    # xterm.js loads BEFORE the anchor-term adapter that drives its Terminal.
+    assert "/api/rnd/term_start" in html
+    # Terminal substrate: a LIVE session mounts the REAL xterm.js terminal inside
+    # its inline panel over the v3 transport. v4.1: the v2 console-drawer REPL
+    # (anchor-term adapter / start_terminal raw-log mirror) was REMOVED — the
+    # panel terminal is the only surface.
+    assert "new window.Terminal(" in html
+    assert "/api/rnd/term_ws" in html
+    assert "/api/rnd/term_stream2" in html
+    assert "/api/rnd/term_input2" in html
+    # The genuine xterm.js library + stylesheet are vendored and included.
     assert "/vendor/xterm/xterm.js" in html
     assert "/vendor/xterm/xterm.css" in html
-    assert "anchor-term.js" in html
-    assert html.index("/vendor/xterm/xterm.js") < html.index("anchor-term.js")
-    # Log drawer + gate hooks (the legacy raw-log mirror is KEPT for reattach).
-    assert "id='laneLog'" in html
-    assert "id='laneGate'" in html
-    assert "/api/rnd/tail" in html
-    assert "/api/rnd/answer_gate" in html
+    # The dead console drawer (raw-log mirror + inline gate) is gone.
+    assert "id='laneLog'" not in html
+    assert "id='laneGate'" not in html
+    assert "function openTerminal" not in html
     # The PROJECT_ID was injected for the JS.
     assert "PROJECT_ID" in html
 
@@ -755,7 +751,10 @@ def test_term_sessions_malicious_label_is_inert_xss_guard(term_server):
     html = gui.render_project_window_html(pid)
     assert payload not in html
     assert "<img src=x onerror=" not in html
-    # The bar is built client-side from the endpoint via textContent, not
-    # server-rendered — confirm that architecture is intact.
-    assert "loadSessions(" in html
+    # Sessions are synced client-side from the endpoint (textContent / panel
+    # title), never server-rendered into the page — confirm that architecture is
+    # intact. v4.1: the "Live terminals" bar was removed; repopulate() (aliased
+    # as loadSessions) does the client-side sync from the registry.
+    assert "loadSessions = repopulate" in html
+    assert "repopulate()" in html
     assert "/api/rnd/term_sessions" in html

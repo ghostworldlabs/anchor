@@ -251,21 +251,22 @@ def test_linked_tasks_strip_reflects_a_linked_task(gui, tmp_path):
 # seeded launch — re-encoded for the inline panel-stack host DOM.)
 
 def test_window_manager_markup_present(gui, tmp_path):
-    """The project window carries the Wave-4 live-terminals bar + the inline
-    PANEL-STACK container, the four status-color classes, the accordion panel
-    manager contract (open/minimize/kill/repopulate), and the kill-confirm wiring
-    (a confirm() + a term_kill reference). NO floating-window markup remains."""
+    """The project window carries the inline PANEL-STACK container, the locked
+    status-light color classes, the accordion panel manager contract
+    (open/minimize/kill/repopulate), and the kill-confirm wiring (a confirm() + a
+    term_kill reference). v4.1: the old "Live terminals" session bar was REMOVED —
+    the panel stack is the only terminal surface; status colors now ride the .lt
+    light classes (green/amber/red/grey). NO floating-window markup remains."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("WMProj", str(folder))["entry"]["id"]
     html = gui.render_project_window_html(pid)
-    # Stable container ids: the live-terminals bar + the inline panel stack.
-    assert "id='sessionBar'" in html
+    # The inline panel stack is the only terminal surface (no live-terminals bar).
+    assert "id='sessionBar'" not in html
     assert "id='panelStack'" in html
     assert "class='panel-stack'" in html
-    # All four LOCKED status-color CSS classes (the session-bar dot variants).
-    for cls in ("sess-dot--green", "sess-dot--amber",
-                "sess-dot--red", "sess-dot--grey"):
+    # All four LOCKED status-color CSS classes (the .lt status-light variants).
+    for cls in (".lt.green", ".lt.amber", ".lt.red", ".lt.grey"):
         assert cls in html, "missing status class: " + cls
     # Accordion panel manager contract: open / minimize / kill / repopulate.
     assert "function openPanel" in html
@@ -278,13 +279,15 @@ def test_window_manager_markup_present(gui, tmp_path):
     assert "function killPanel" in html
     assert "confirm(" in html
     assert "/api/rnd/term_kill" in html
-    # Repopulate-from-registry hook (historical loadSessions alias preserved).
-    assert "function loadSessions" not in html  # replaced by repopulate()
+    # Repopulate keeps MANAGED in sync from the registry (loadSessions alias kept).
     assert "loadSessions = repopulate" in html
     assert "/api/rnd/term_sessions" in html
     # The per-lane "new session" affordance calls term_start.
     assert "newTermSession(" in html
     assert "/api/rnd/term_start" in html
+    # The per-panel engine toggle flips engines via term_set_engine.
+    assert "function _buildEngineToggle" in html
+    assert "/api/rnd/term_set_engine" in html
     # NO v3 floating-window markup/code remains in the cockpit.
     assert "termwin" not in html
     assert "windowLayer" not in html
@@ -318,9 +321,10 @@ def test_window_manager_no_leaked_braces(gui, tmp_path):
     html = gui.render_project_window_html(pid)
     assert "{{" not in html
     assert "}}" not in html
-    # Sanity: the v2 console drawer is left INTACT alongside the new surface.
-    assert "function openTerminal" in html
-    assert "function launchLane" in html
+    # Sanity: the inline panel surface is present; the v2 console drawer is gone.
+    assert "function openPanel" in html
+    assert "function openTerminal" not in html
+    assert "function launchLane" not in html
 
 
 # ── Wave 6 (v3) — in-place expandable session summaries ──────────────────────
@@ -394,20 +398,26 @@ def test_summary_panel_renders_doc_links_and_effort(gui, tmp_path):
 
 
 def test_launch_new_session_button_wired_to_wave4_path(gui, tmp_path):
-    """The expanded panel's "Launch new session" button calls the Wave-3/4 launch
-    path (newTermSession → term_start), seeded from THIS session (a seed hint)."""
+    """A new session can be launched via the Wave-3/4 path (newTermSession →
+    term_start). v4.1: the launch affordance is the lane footer "+ new <lane>"
+    launcher (the old in-panel "Launch new session" button + _wireLaunchFromPanel
+    were removed with the in-lane summary accordion). The seed-session seam that
+    Wave 7 builds the handoff on is still forwarded by newTermSession."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("LaunchPanel", str(folder))["entry"]["id"]
     _discovered_planning_session(gui, folder, pid)
     html = gui.render_project_window_html(pid)
 
-    assert "Launch new session" in html
-    assert "summ-launch-btn" in html
-    assert "function _wireLaunchFromPanel" in html
-    # Wired to the Wave-4 launch path, carrying the seed-session hint.
-    assert "newTermSession(lane, null, {seed_session: sid})" in html
-    # newTermSession forwards the seed hint into the term_start payload (seam
+    # The "+ new <lane>" launchers wire the seeded ConPTY path.
+    assert "newTermSession('research','claude')" in html
+    assert "newTermSession('plan')" in html
+    assert "newTermSession('build')" in html
+    assert "/api/rnd/term_start" in html
+    # The dead in-lane "Launch new session" button is gone.
+    assert "summ-launch-btn" not in html
+    assert "_wireLaunchFromPanel" not in html
+    # newTermSession still forwards the seed hint into the term_start payload (seam
     # Wave 7 builds the handoff on).
     assert "payload.seed_session = opts.seed_session" in html
 

@@ -185,12 +185,15 @@ def test_no_floating_window_markup_remains(gui, tmp_path):
 
 def test_cockpit_render_no_leaked_braces(gui, tmp_path):
     """The Paradigm-2 CSS/JS (plain + RAW string literals) must not leak doubled
-    ``{{``/``}}`` into the served HTML; the v2 console drawer stays intact."""
+    ``{{``/``}}`` into the served HTML. v4.1: the old v2 console drawer
+    (openTerminal / launchLane) was REMOVED — the inline panel stack is the only
+    terminal surface — so we assert the seeded panel launch path instead."""
     _, pid = _mkproject(gui, tmp_path)
     html = gui.render_project_window_html(pid)
     assert "{{" not in html
     assert "}}" not in html
-    # The seeded launch path + the v2 console drawer remain alongside the panels.
+    # The seeded launch path is the live affordance; the v2 console drawer is gone.
     assert "function newTermSession" in html
-    assert "function openTerminal" in html
-    assert "function launchLane" in html
+    assert "function openPanel" in html
+    assert "function openTerminal" not in html
+    assert "function launchLane" not in html
