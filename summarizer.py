@@ -291,8 +291,87 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
         "when_run": _session_when_run(session),
         "what_was_asked": _session_what_was_asked(session, members_out),
         "north_star": north_star.strip(),
+        # v5 Wave 2 — DETERMINISTIC, source-grounded capture of WHAT THE SESSION
+        # DID (no model involved, so no fabrication risk — these are read straight
+        # off the session/member records):
+        #   skill   — the trio skill the session ran (researchPrime/Crucible/…),
+        #   prompts — the prompt/turn texts the user asked (member prompt_seeds),
+        #   actions — the files/artifacts the session produced (member docs).
+        "skill": _session_skill(session, members),
+        "prompts": _session_prompts(session, members),
+        "actions": _session_actions(members_out),
         "text": "\n".join(corpus_parts),
     }
+
+
+#: Max prompts / actions captured, and max chars per prompt (bounded — honest,
+#: never fabricated; absent → empty list).
+MAX_PROMPTS = 12
+MAX_ACTIONS = 24
+MAX_PROMPT_CHARS = 500
+
+
+def _session_skill(session, members) -> str:
+    """The session's trio skill (e.g. ``researchPrime``), or ``''`` when absent.
+
+    Read directly off the session record (``skill``, set by
+    ``sessions.list_sessions``) with a fall-back to the first member carrying a
+    ``skill`` field. Honest empty string when no record names a skill — NEVER
+    fabricated (Risk R3).
+    """
+    s = (session.get("skill") or "").strip()
+    if s:
+        return s
+    for m in (members or []):
+        ms = (m.get("skill") or "").strip()
+        if ms:
+            return ms
+    return ""
+
+
+def _session_prompts(session, members) -> list:
+    """The session's prompt/turn texts, in member order (deterministic).
+
+    Each member's ``prompt_seed`` (the run's asked-for intent) is one prompt;
+    deduped, bounded, order-stable. An imported/discovered session typically has
+    no prompt_seed → an empty list (honest, never fabricated). Falls back to the
+    session ``what_was_asked`` only when NO member carries a prompt so a run that
+    captured a single intent still surfaces it.
+    """
+    out = []
+    seen = set()
+    for m in (members or []):
+        p = (m.get("prompt_seed") or "").strip()
+        if not p:
+            continue
+        norm = re.sub(r"\s+", " ", p).lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append(p[:MAX_PROMPT_CHARS])
+        if len(out) >= MAX_PROMPTS:
+            break
+    return out
+
+
+def _session_actions(members_out) -> list:
+    """The files/artifacts the session produced, as ``[{label, rel, job_id}]``.
+
+    Read straight off the (already-resolved) member list — every member is one
+    artifact the session produced. Honest empty list when the session has no
+    members. Never fabricated; deterministic and bounded.
+    """
+    out = []
+    for m in (members_out or [])[:MAX_ACTIONS]:
+        label = (m.get("title") or "").strip()
+        rel = (m.get("rel") or "").strip()
+        jid = (m.get("job_id") or "").strip()
+        if not label:
+            label = rel or jid
+        if not label:
+            continue
+        out.append({"label": label, "rel": rel, "job_id": jid})
+    return out
 
 
 def _session_when_run(session) -> str:
@@ -852,6 +931,30 @@ def render_markdown(structured: dict) -> str:
     if north_star:
         lines.append(f"**North Star:** {north_star}")
         lines.append("")
+    # v5 Wave 2 — skill invoked · prompts asked · actions/files produced. These
+    # are deterministic, source-grounded fields (never model-fabricated). Each is
+    # rendered only when present; absent → honest omission.
+    skill = (structured.get("skill") or "").strip()
+    if skill:
+        lines.append(f"**Skill invoked:** {skill}")
+        lines.append("")
+    prompts = structured.get("prompts", []) or []
+    if prompts:
+        lines.append("## Prompts asked")
+        lines.append("")
+        for p in prompts:
+            lines.append(f"- {p}")
+        lines.append("")
+    actions = structured.get("actions", []) or []
+    if actions:
+        lines.append("## Actions & files produced")
+        lines.append("")
+        for a in actions:
+            label = (a.get("label") or a.get("rel") or a.get("job_id")
+                     or "").strip() if isinstance(a, dict) else str(a)
+            if label:
+                lines.append(f"- {label}")
+        lines.append("")
     effort = structured.get("effort", None)
     if effort is None and "effort" in structured:
         lines.append("**Effort:** imported — no run metrics")
@@ -964,6 +1067,9 @@ def summarize_session(folder_path, project_id, lane, session,
                 "when_run": seed.get("when_run", ""),
                 "what_was_asked": seed.get("what_was_asked", ""),
                 "north_star": seed.get("north_star", ""),
+                "skill": seed.get("skill", ""),
+                "prompts": seed.get("prompts", []),
+                "actions": seed.get("actions", []),
                 "effort": effort,
                 "error": "generation_failed",
                 "generated_at": time.time(),
@@ -980,6 +1086,10 @@ def summarize_session(folder_path, project_id, lane, session,
             "when_run": seed.get("when_run", ""),
             "what_was_asked": seed.get("what_was_asked", ""),
             "north_star": seed.get("north_star", ""),
+            # v5 Wave 2 — deterministic, source-grounded session record.
+            "skill": seed.get("skill", ""),
+            "prompts": seed.get("prompts", []),
+            "actions": seed.get("actions", []),
             "effort": effort,
             "generated_at": time.time(),
             "runs": len(candidates),

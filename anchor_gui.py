@@ -987,6 +987,90 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+#: Max chars of prior-session context folded into a continue-live seed (bounded).
+_MAX_CONTINUE_SEED_CHARS = 4000
+
+
+def _build_continue_seed(folder_path, project_id, lane, source_session_id):
+    """Build the seed_context text for "Continue in a live session" (v5 Wave 2).
+
+    READ-ONLY: resolves the prior (done/historical) session and assembles a
+    compact context string from its CACHED summary, preferring (in order):
+
+      1. the cached summary's rendered markdown (``markdown``), else
+      2. a deterministic digest of the cached summary's structured fields
+         (skill · what-was-asked · north-star · prompts · files produced), else
+      3. the live session record's intent (``what_was_asked`` / ``title``).
+
+    NEVER mutates the original session/summary (Risk R2) — every access is a read.
+    Returns a bounded string (or ``""`` when nothing resolves, in which case the
+    new session is started bare-seeded with just the lane skill). Stdlib only;
+    never raises.
+    """
+    store_lane = _eh._resolve_subdir(lane)
+    cached = None
+    try:
+        cached = _summarizer.load_cached(folder_path, project_id, store_lane,
+                                         source_session_id)
+    except Exception:
+        cached = None
+
+    parts = ["This is a continuation of an earlier session in the "
+             + str(lane) + " lane. Here is its summary so you can pick up the "
+             "work:"]
+    if isinstance(cached, dict):
+        md = (cached.get("markdown") or "").strip()
+        if md:
+            parts.append(md)
+        else:
+            skill = (cached.get("skill") or "").strip()
+            if skill:
+                parts.append("Skill: " + skill)
+            asked = (cached.get("what_was_asked") or "").strip()
+            if asked:
+                parts.append("Originally asked: " + asked)
+            ns = (cached.get("north_star") or "").strip()
+            if ns:
+                parts.append("North Star: " + ns)
+            prompts = cached.get("prompts") or []
+            if prompts:
+                parts.append("Prompts asked: "
+                             + " | ".join(str(p) for p in prompts))
+            actions = cached.get("actions") or []
+            labels = []
+            for a in actions:
+                if isinstance(a, dict):
+                    lbl = (a.get("label") or a.get("rel")
+                           or a.get("job_id") or "").strip()
+                else:
+                    lbl = str(a).strip()
+                if lbl:
+                    labels.append(lbl)
+            if labels:
+                parts.append("Files produced: " + ", ".join(labels))
+    else:
+        # No cached summary — fall back to the live session record's intent.
+        session = None
+        try:
+            for s in _sessions.list_sessions(folder_path, project_id, lane):
+                if s.get("session_id") == source_session_id:
+                    session = s
+                    break
+        except Exception:
+            session = None
+        if session:
+            asked = (session.get("title") or "").strip()
+            if asked:
+                parts.append("Originally: " + asked)
+
+    text = "\n\n".join(p for p in parts if p and p.strip()).strip()
+    # If we never resolved any real prior context (only the lead-in line), return
+    # empty so the new session is started bare-seeded (just the lane skill).
+    if len(parts) <= 1:
+        return ""
+    return text[:_MAX_CONTINUE_SEED_CHARS]
+
+
 def _trigger_project_session_summaries(folder_path, project_id):
     """Proactively generate summaries for all of a project's sessions lacking a
     cache (Wave 6) — bounded, background, gated like the project-summary trigger.
@@ -2245,6 +2329,21 @@ def render_project_window_html(project_id: str) -> str:
         "min-height:90px}"
         ".panel .tpane .ro-note{color:var(--text-dim);font-size:12px;"
         "font-family:ui-monospace,Consolas,monospace;padding:11px 13px}"
+        # v5 Wave 2 — past-session read-only view (skill/prompts/files + Continue).
+        ".panel .tpane .ro-past{padding:11px 13px;font-size:12px;"
+        "color:var(--text);overflow:auto}"
+        ".panel .tpane .ro-actions{margin-bottom:9px}"
+        ".panel .tpane .ro-continue{background:#1f6feb;color:#fff;border:0;"
+        "border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .tpane .ro-continue:hover{background:#388bfd}"
+        ".panel .tpane .ro-sec{display:flex;gap:10px;margin-top:8px;"
+        "font-size:12px}"
+        ".panel .tpane .ro-sec .ro-k{color:var(--text-dim);min-width:92px;"
+        "font-weight:600}"
+        ".panel .tpane .ro-list{margin:3px 0 4px 0;padding-left:20px;"
+        "color:var(--text-dim);font-size:11.5px}"
+        ".panel .tpane .ro-list li{margin:2px 0}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -3039,15 +3138,126 @@ async function setSessionEngine(sessionId, engine, tog) {
   setTimeout(repopulate, 600);
 }
 
-// _mountReadOnlyBody: a NON-live session has no PTY. Render a static read-only
-// area in the terminal host: a "session complete" note. (The summary block above
-// carries the full materials + doc links; clicking a doc opens the rendered file
-// in a new tab.) Kept deliberately simple — no transport, no input line.
+// _mountReadOnlyBody (v5 Wave 2): a NON-live (done/historical) session has no
+// PTY. Instead of a dead-end "session complete" note, render a REAL past-session
+// view in the terminal host: the SKILL invoked, the PROMPTS asked, and the
+// ACTIONS/files produced (from the cached session summary), plus a "Continue in a
+// live session" button that starts a NEW live session in the SAME lane seeded
+// with this session's context. Honest placeholders when a field is absent.
 function _mountReadOnlyBody(sessionId, host, s) {
-  var note = (s.status === 'running')
-    ? 'Session is running in the background — no live terminal attached.'
-    : 'Session complete — see the summary and document links above.';
-  host.innerHTML = '<div class="ro-note">' + _esc(note) + '</div>';
+  var runningNote = (s.status === 'running')
+    ? '<div class="ro-note">Session is running in the background — no live '
+      + 'terminal attached.</div>'
+    : '';
+  // Skeleton with a Continue button (always available for a historical session)
+  // and a region we fill async from the cached session summary.
+  host.innerHTML = runningNote
+    + '<div class="ro-past" data-session="' + _esc(sessionId) + '">'
+    + '<div class="ro-actions">'
+    + '<button class="ro-continue" type="button">▶ Continue in a live session</button>'
+    + '</div>'
+    + '<div class="ro-detail"><div class="summ-loading">loading past-session '
+    + 'summary…</div></div>'
+    + '</div>';
+  var btn = host.querySelector('.ro-continue');
+  if (btn) btn.onclick = function (e) {
+    e.stopPropagation();
+    continueSession(sessionId, s.lane);
+  };
+  var detail = host.querySelector('.ro-detail');
+  _fillPastSessionDetail(sessionId, (s && s.lane) || '', detail);
+}
+
+// _fillPastSessionDetail: fetch the cached session summary and render the
+// skill/prompts/produced-files (v5 Wave 2). Read-only; honest placeholders for
+// absent fields. The summary GET returns the full cached structured dict, so the
+// new skill/prompts/actions fields ride along.
+function _fillPastSessionDetail(sessionId, lane, detail) {
+  if (!detail) return;
+  var sUrl = '/api/rnd/session_summary?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sessionId);
+  fetch(sUrl, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var summ = (d && d.status === 'ready' && d.summary) ? d.summary : null;
+      detail.innerHTML = _renderPastSession(summ);
+    })
+    .catch(function () {
+      detail.innerHTML = '<div class="ro-note">Summary unavailable.</div>';
+    });
+}
+
+// _renderPastSession(summary): the skill/prompts/produced-files block for a
+// historical session's read-only body. Every section is honest — absent data
+// renders an explicit placeholder, never fabricated content.
+function _renderPastSession(summary) {
+  if (!summary) {
+    return '<div class="ro-note">No cached summary yet for this session — '
+      + 'it is being generated. Reopen shortly, or continue it live above.</div>';
+  }
+  var out = [];
+  var skill = (summary.skill || '').trim ? (summary.skill || '').trim() : summary.skill;
+  out.push('<div class="ro-sec"><span class="ro-k">Skill invoked</span><span>'
+    + (skill ? _esc(skill) : '<i>not recorded</i>') + '</span></div>');
+  var prompts = summary.prompts || [];
+  out.push('<div class="ro-sec"><span class="ro-k">Prompts asked</span></div>');
+  if (prompts.length) {
+    var pl = ['<ul class="ro-list">'];
+    for (var i = 0; i < prompts.length; i++)
+      pl.push('<li>' + _esc(prompts[i]) + '</li>');
+    pl.push('</ul>');
+    out.push(pl.join(''));
+  } else {
+    out.push('<div class="ro-note"><i>No prompts recorded for this session.</i></div>');
+  }
+  var actions = summary.actions || [];
+  out.push('<div class="ro-sec"><span class="ro-k">Files produced</span></div>');
+  if (actions.length) {
+    var al = ['<ul class="ro-list">'];
+    for (var j = 0; j < actions.length; j++) {
+      var a = actions[j];
+      var lbl = (a && (a.label || a.rel || a.job_id)) || '';
+      al.push('<li>' + _esc(lbl) + '</li>');
+    }
+    al.push('</ul>');
+    out.push(al.join(''));
+  } else {
+    out.push('<div class="ro-note"><i>No files recorded for this session.</i></div>');
+  }
+  return out.join('');
+}
+
+// continueSession(sessionId, lane): v5 Wave 2 — POST /api/rnd/continue_session
+// (token-authed) to start a NEW live session in the SAME lane, seeded with the
+// prior session's summary/context. The ORIGINAL session is never mutated. On
+// success the new session is added to MANAGED and its panel opened/attached
+// (reusing the live-session panel path).
+async function continueSession(sessionId, lane) {
+  var payload = {project_id: PROJECT_ID, lane: lane, source_session: sessionId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/continue_session', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/continue_session', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[continue error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[continue refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  setTimeout(repopulate, 600);
 }
 
 // Per-session terminal-pane height (in-memory persistence across minimize /
@@ -7656,6 +7866,48 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(ve)}, 400)
                 except _termsess.TerminalSessionError as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/continue_session":
+            # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
+            # historical session, SEEDED with that prior session's context (its
+            # cached summary, else a deterministic digest of its members). The
+            # ORIGINAL session/registry record is NEVER mutated (Risk R2) — we
+            # only READ it. Reuses terminal_session.start_session(seed_context=…)
+            # (the Wave-1 seed path), so the new session's single opening turn
+            # loads the lane skill AND carries the prior context. Auth enforced by
+            # the do_POST middleware above (mutating/terminal).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            lane = (body.get("lane", "") or "").strip()
+            source = (body.get("source_session", "")
+                      or body.get("session", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not lane or not source:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, lane and source_session required"},
+                    400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    seed_context = _build_continue_seed(
+                        folder, pid, lane, source)
+                    try:
+                        if backend:
+                            rec = _termsess.start_session(
+                                pid, lane, backend=backend,
+                                seed_context=seed_context)
+                        else:
+                            rec = _termsess.start_session(
+                                pid, lane, seed_context=seed_context)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        self._send_json({"ok": True, "session": rec,
+                                         "seeded_from": source})
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
