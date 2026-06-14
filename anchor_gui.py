@@ -1616,12 +1616,17 @@ def _render_grass_board(folder_path, project_id) -> str:
 
 
 def _render_kanban_html(folder_path, project_id):
-    """Render the 5-column Kanban board (Research|Planning|Build|Deliverables|
-    Grass Catchers).
+    """Render the Paradigm-2 lane board: 5 ``.p2col`` columns (Research|Planning|
+    Build|Deliverables|Grass) inside a ``.p2lanes`` grid (v4.1 cockpit-render).
 
-    Each lane renders SESSIONS, not per-file cards (v2 Wave 4): the MOST-RECENT
-    session is the visible card; the remaining sessions sit behind a "previous
-    sessions (N)" ``<details>`` expander. One trio run = one card.
+    Each content lane (research/plan/build) renders GENUINE Paradigm-2 ``.tile``
+    cards — the MOST-RECENT session is the visible tile (status light + click-to-
+    -openPanel hook); the remaining sessions sit behind a "previous sessions (N)"
+    ``<details>`` expander, ALSO rendered as tiles (NOT effort cards, NO report
+    links / summary accordions / file expanders — that detail lives in the opened
+    panel). The Deliverables lane renders launch-by-type tiles; the Grass lane is
+    the idea board. Each column has an ``<h4>`` header (glyph + label + a live/attn
+    lane badge) and a "+ new <lane>" launcher.
     """
     efforts_by_lane = _gather_project_efforts(folder_path, project_id)
     sessions_by_lane = _gather_project_sessions(
@@ -1632,29 +1637,35 @@ def _render_kanban_html(folder_path, project_id):
         session_views = sessions_by_lane.get(trio_lane, [])
         any_live = any(v["is_live"] and not v["needs_input"] for v in views)
         any_input = any(v["needs_input"] for v in views)
+        # The lane header badge is a small status light (mockup: <span class="lt">
+        # in the <h4>): amber when a session needs you, a pulsing green when one is
+        # live, otherwise nothing.
         badge = ""
         if any_input:
-            badge = "<span class='attn'>⚠ input</span>"
+            badge = "<span class='lt amber' title='needs you'></span>"
         elif any_live:
-            badge = "<span class='live'><span class='dotpulse'></span>live</span>"
+            badge = "<span class='lt green' title='running'></span>"
         if trio_lane == "grass":
-            # v4 Wave 6: the grass lane is an IDEA BOARD (cards with promote
-            # actions), NOT a session tile/expander. It has no terminal of its
-            # own; promoting an idea creates the seeded session that does.
+            # The grass lane is an IDEA BOARD (cards with promote actions), NOT a
+            # session tile/expander. It has no terminal of its own; promoting an
+            # idea creates the seeded session that does.
             cards = _render_grass_board(folder_path, project_id)
+        elif trio_lane == "deliverables":
+            # The deliverables lane is launch-by-type TILES (mockup Paradigm-2),
+            # NOT session/effort cards: a tile per pinned deliverable whose click
+            # launches it per its type contract.
+            cards = _render_deliverable_lane_tiles(folder_path, project_id)
         else:
             cards = _render_lane_sessions(
                 session_views, store_lane, project_id, trio_lane)
-        # The "+ New run" affordance launches that lane. Research offers an
-        # engine choice (Claude default + Gemini); plan/build are Claude-only;
-        # deliverables are config-driven (no launch); grass catchers get a
-        # placeholder add affordance (content feeds wired in Wave 5).
+        # The "+ new <lane>" launcher. Research offers an engine choice (Claude
+        # default + Gemini); plan/build are Claude-only via the seeded ConPTY path
+        # (newTermSession → term_start → terminal_session.start_session);
+        # deliverables are config-driven (no launch); grass gets manual add +
+        # promote-from-INBOX.
         if trio_lane == "deliverables":
-            add = (f"<span class='addnew rnd-dim' title='Deliverables are run "
-                   f"from the project config'>{html_lib.escape(add_label)}</span>")
+            add = ""
         elif trio_lane == "grass":
-            # Grass Catchers content feeds (Wave 5): manual add + promote from
-            # INBOX. Both POST behind the auth gate via the project-window JS.
             add = (
                 f"<span class='addnew' onclick=\"addIdea()\">"
                 f"{html_lib.escape(add_label)}</span> "
@@ -1662,9 +1673,6 @@ def _render_kanban_html(folder_path, project_id):
                 f"+ From inbox</span>"
             )
         elif trio_lane == "research":
-            # v3 Wave 1 fix: the lane launch uses the SEEDED ConPTY path
-            # (newTermSession → term_start → terminal_session.start_session),
-            # NOT the v2 unseeded stream-json REPL (openTerminal/start_terminal).
             add = (
                 "<span class='addnew' onclick=\"newTermSession('research','claude')\">"
                 "+ New research run (Claude)</span> "
@@ -1672,17 +1680,18 @@ def _render_kanban_html(folder_path, project_id):
                 "Gemini</span>"
             )
         else:
-            # v3 Wave 1 fix: seeded ConPTY launch (see research-lane note above).
             add = (f"<span class='addnew' onclick=\"newTermSession('{trio_lane}')\">"
                    f"{html_lib.escape(add_label)}</span>")
+        lane_attr = html_lib.escape(trio_lane, quote=True)
         cols.append(
-            f"<div class='col' data-col-lane='{html_lib.escape(trio_lane, quote=True)}'>"
+            f"<div class='p2col' data-col-lane='{lane_attr}'>"
             f"<h4><span>{glyph}</span> {html_lib.escape(label)} "
-            f"<span class='badge' id='badge_{html_lib.escape(trio_lane, quote=True)}'>{badge}</span></h4>"
-            f"<div class='col-cards' id='cards_{html_lib.escape(trio_lane, quote=True)}'>{cards}</div>"
+            f"<span class='sp'></span>"
+            f"<span class='badge' id='badge_{lane_attr}'>{badge}</span></h4>"
+            f"<div class='col-tiles' id='cards_{lane_attr}'>{cards}</div>"
             f"{add}</div>"
         )
-    return "<div class='kan'>" + "".join(cols) + "</div>"
+    return "<div class='p2lanes'>" + "".join(cols) + "</div>"
 
 
 def _safe_dom_id(seg: str) -> str:
@@ -1690,114 +1699,173 @@ def _safe_dom_id(seg: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
 
 
+def _session_tile_title(rep) -> str:
+    """The visible title for a Paradigm-2 lane tile, derived from a session's
+    representative effort view. Discovered → its ``title``; a run → its prompt
+    hint / skill ``sub``; falls back to a lane-agnostic placeholder."""
+    if not rep:
+        return "session"
+    if rep.get("discovered"):
+        return (rep.get("title") or rep.get("artifact_path") or "imported").strip()
+    sub = (rep.get("sub") or "").strip()
+    if sub:
+        return sub
+    return (rep.get("skill") or "session").strip() or "session"
+
+
+def _session_state_text(rep):
+    """Return ``(state_class, state_label)`` for a tile's ``.st`` state span,
+    mapped from the representative effort view (mirrors the mockup states:
+    running / needs you / fail / done / imported / idle)."""
+    if not rep:
+        return ("done", "idle")
+    if rep.get("discovered"):
+        return ("done", "imported")
+    if rep.get("needs_input"):
+        return ("attn", "needs you")
+    if rep.get("is_live"):
+        return ("running", "running")
+    if rep.get("is_done"):
+        return ("done", "done")
+    pill = (rep.get("pill_cls") or "").strip()
+    if pill == "fail":
+        return ("fail", rep.get("pill_lbl") or "failed")
+    return ("done", rep.get("pill_lbl") or rep.get("status") or "idle")
+
+
+def _render_lane_tile(sv, trio_lane, project_id):
+    """Render ONE session as a GENUINE Paradigm-2 ``.tile`` (v4.1 cockpit-render).
+
+    Schema (per the mockup): ``.tr1`` (lane + version + status light ``.lt``),
+    ``.ttl`` (title), ``.st`` (state + age). The tile carries a status light
+    (locked color bucket via :func:`_session_light_class`) and a click hook
+    (``laneTileClick`` → ``openPanel``) that opens the full-width inline panel —
+    where the summary + transcript/terminal live. The tile itself contains NO
+    report-viewer links, NO summary accordion, NO files expander; that detail
+    moved INTO the opened panel. The legacy ``lane-tile`` class + ``data-light``
+    are preserved alongside ``.tile`` so the panel-open hooks/tests still bind.
+    """
+    members = sv.get("members", [])
+    rep = members[0] if members else None
+    if rep is None:
+        return ""
+    light = _session_light_class(rep)
+    sid = sv.get("session_id", "") or ""
+    sid_attr = html_lib.escape(sid, quote=True)
+    lane_attr = html_lib.escape(trio_lane, quote=True)
+    ver = html_lib.escape(rep.get("ver") or "")
+    age = html_lib.escape(rep.get("age") or "")
+    title = html_lib.escape(_session_tile_title(rep))
+    state_cls, state_lbl = _session_state_text(rep)
+    state_lbl = html_lib.escape(state_lbl)
+    # Extra tile class for the attn/fail accent borders (mockup .tile.attn/.fail).
+    extra = ""
+    if light == "amber" and rep.get("needs_input"):
+        extra = " attn"
+    elif light == "red":
+        extra = " fail"
+    st_bits = [f"<span class='state {html_lib.escape(state_cls)}'>{state_lbl}</span>"]
+    if age:
+        st_bits.append(f"<span class='age'>· {age}</span>")
+    n_members = len(members)
+    counts = ""
+    if n_members > 1:
+        counts = (f"<div class='counts'>{n_members} files</div>")
+    # Live-job data hooks: a live/needs-input representative carries its job_id +
+    # live flag as data-* attributes (used by tests + any future re-adoption of a
+    # background job). The cockpit opens such a tile through laneTileClick →
+    # openPanel like any other. (Discovered/done tiles carry no live hooks.)
+    live_data = ""
+    if rep.get("is_live"):
+        jid = rep.get("job_id", "") or ""
+        live_data = (
+            f" data-job-id=\"{html_lib.escape(jid, quote=True)}\""
+            f" data-trio-lane=\"{lane_attr}\""
+            f" data-ver=\"{ver}\" data-live=\"1\"")
+    return (
+        f"<div class='tile lane-tile{extra}' data-session=\"{sid_attr}\" "
+        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{live_data} "
+        f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
+        f"<div class='tr1'><span class='lane'>{ver or lane_attr}</span>"
+        f"<span class='ver'></span>"
+        f"<span class='lt {light}' aria-hidden='true'></span></div>"
+        f"<div class='ttl'>{title}</div>"
+        f"<div class='st'>{''.join(st_bits)}</div>"
+        f"{counts}"
+        f"</div>"
+    )
+
+
 def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
-    """Render a lane's sessions: most-recent visible + a "previous sessions"
-    expander holding the rest (v2 Wave 4).
+    """Render a lane's sessions as Paradigm-2 tiles: most-recent visible +
+    a "previous sessions (N)" expander holding the rest, ALSO as tiles
+    (v4.1 cockpit-render — replaces the old effort-card lane content).
 
-    v4 Wave 4 (Paradigm 2): the MOST-RECENT session card is the lane TILE — it
-    carries a status-light element (``.lt green/amber/red/grey`` from
-    :func:`_session_light_class`) and a click-to-expand hook
-    (``onclick="openPanel('<sid>')"``) that opens a full-width inline panel in
-    the panel stack below the board (NOT a floating window, NOT page nav).
-
-    Each session renders as ONE card (its representative = ``members[0]``); the
-    remaining members of a multi-file session sit behind a small per-card
-    "files (N)" expander so a 7-file Crucible run is one card, not seven. The
-    representative keeps the existing click target (report viewer / attach /
-    artifact); DONE / imported sessions ALSO get a "summary" affordance opening
-    the cached validated summary page (Wave 6). Live / running cards keep
-    attaching to the console (no Wave 4/7 regression).
+    The MOST-RECENT session is the visible lane TILE — a status light
+    (``.lt green/amber/red/grey`` from :func:`_session_light_class`) + a
+    click-to-expand hook (``laneTileClick`` → ``openPanel``) opening the
+    full-width inline panel (NOT a floating window, NOT page nav). The remaining
+    sessions are tiles inside a ``<details class='prev-sessions'>`` expander. No
+    tile carries report links / a summary accordion / a files expander — that
+    detail lives in the opened panel.
     """
     if not session_views:
         return ""
-    def _render_session_card(sv):
-        members = sv.get("members", [])
-        if not members:
-            return ""
-        rep = members[0]
-        head = _render_effort_card(rep, store_lane, project_id)
-        # Wave 6 summary affordance: only for DONE or imported (non-live)
-        # sessions, and not for the defensive "loose::" single-effort wrappers
-        # (those have no grouped session record to summarize). Live/running
-        # representatives keep their console-attach click untouched.
-        sid = sv.get("session_id", "") or ""
-        rep_summarizable = (
-            (rep.get("is_done") or rep.get("discovered"))
-            and not rep.get("is_live")
-            and sid and not sid.startswith("loose::")
-        )
-        summary_link = ""
-        if rep_summarizable:
-            trio_lane = rep.get("trio_lane", store_lane)
-            # v3 Wave 6: clicking "summary" EXPANDS an inline accordion (no
-            # navigation to /summary). The toggle carries the pid/lane/sid in
-            # data-* attributes; the JS fetches /api/rnd/session_summary and
-            # renders the panel in place. The ONLY new tab is a doc link inside
-            # the rendered panel (report/artifact routes).
-            esc_pid = html_lib.escape(project_id, quote=True)
-            esc_lane = html_lib.escape(trio_lane, quote=True)
-            esc_sid = html_lib.escape(sid, quote=True)
-            panel_id = "summ_" + html_lib.escape(
-                _safe_dom_id(trio_lane + "_" + sid), quote=True)
-            summary_link = (
-                f"<div class='session-summary-link'>"
-                f"<a href=\"#\" class='summary-toggle' "
-                f"data-pid=\"{esc_pid}\" data-lane=\"{esc_lane}\" "
-                f"data-session=\"{esc_sid}\" data-panel=\"{panel_id}\" "
-                f"onclick=\"toggleSessionSummary(this);return false;\">"
-                f"summary</a>"
-                f"<div class='session-summary-panel' id=\"{panel_id}\" "
-                f"style='display:none'></div>"
-                f"</div>"
-            )
-        rest = members[1:]
-        if not rest:
-            if summary_link:
-                return f"<div class='session'>{head}{summary_link}</div>"
-            return head
-        inner = "".join(
-            _render_effort_card(m, store_lane, project_id) for m in rest)
-        return (
-            f"<div class='session'>{head}{summary_link}"
-            f"<details class='session-files'>"
-            f"<summary>files ({len(rest) + 1})</summary>"
-            f"<div class='session-files-body'>{inner}</div>"
-            f"</details></div>"
-        )
-    def _lane_tile(sv):
-        """Wrap the recent session card as the Paradigm-2 lane TILE: a status
-        light (locked color bucket) + a click-to-expand hook that opens the
-        inline panel for this session (no floating window, no page nav)."""
-        inner = _render_session_card(sv)
-        if not inner:
-            return ""
-        members = sv.get("members", [])
-        rep = members[0] if members else None
-        light = _session_light_class(rep)
-        sid = sv.get("session_id", "") or ""
-        sid_attr = html_lib.escape(sid, quote=True)
-        lane_attr = html_lib.escape(trio_lane, quote=True)
-        return (
-            f"<div class='lane-tile' data-session=\"{sid_attr}\" "
-            f"data-lane=\"{lane_attr}\" data-light=\"{light}\" "
-            f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
-            f"<span class='lt {light}' aria-hidden='true'></span>"
-            f"<div class='lane-tile-body'>{inner}</div>"
-            f"</div>"
-        )
-
-    recent = _lane_tile(session_views[0])
+    recent = _render_lane_tile(session_views[0], trio_lane, project_id)
     older = session_views[1:]
     if not older:
         return recent
-    older_cards = "".join(_render_session_card(sv) for sv in older)
+    older_tiles = "".join(
+        _render_lane_tile(sv, trio_lane, project_id) for sv in older)
     return (
         f"{recent}"
         f"<details class='prev-sessions'>"
         f"<summary>previous sessions ({len(older)})</summary>"
-        f"<div class='prev-sessions-body'>{older_cards}</div>"
+        f"<div class='prev-sessions-body'>{older_tiles}</div>"
         f"</details>"
     )
+
+
+# v4.1 cockpit-render — Deliverables lane = launch-by-type TILES.
+def _render_deliverable_lane_tiles(folder_path, project_id) -> str:
+    """Render the Deliverables lane as launch-by-type ``.tile`` cards (mockup
+    Paradigm-2): one tile per pinned deliverable, showing its name + type, whose
+    click launches it via the existing ``launchDeliverable`` JS (which POSTs the
+    type-appropriate run endpoint). Falls back to a placeholder when none are
+    pinned. Best-effort; never raises."""
+    try:
+        pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
+    except Exception:
+        pinned = []
+    if not pinned:
+        return ("<div class='idea-empty'>No deliverables pinned yet — a Foreman "
+                "build pins one on GREEN.</div>")
+    tiles = []
+    for r in pinned:
+        name = html_lib.escape(r.get("title") or r.get("artifact_path") or "")
+        rel = r.get("artifact_path", "") or ""
+        raw_type = (r.get("deliverable_type", "") or "").strip().lower()
+        if raw_type not in _deliv.VALID_TYPES:
+            raw_type = _deliv.infer_type(rel)
+        dtype = html_lib.escape(raw_type)
+        did = r.get("job_id", "") or ""
+        rel_attr = html_lib.escape(rel, quote=True)
+        did_attr = html_lib.escape(did, quote=True)
+        tiles.append(
+            f"<div class='tile deliv-tile deliv-pinned' data-deliv=\"{rel_attr}\" "
+            f"data-deliv-id=\"{did_attr}\" data-deliv-type=\"{dtype}\" "
+            f"onclick=\"launchDeliverable(this)\">"
+            f"<div class='tr1'><span class='lane'>{dtype}</span>"
+            f"<span class='lt grey' aria-hidden='true'></span></div>"
+            f"<div class='ttl'>{name}</div>"
+            f"<div class='st'><span class='state done'>▸ launch</span>"
+            f"<span class='deliv-msg' style='color:var(--text-dim);"
+            f"margin-left:6px'></span></div>"
+            f"<button class='deliv-stop' onclick=\"event.stopPropagation();"
+            f"stopDeliverable(this)\" style='display:none'>Stop</button>"
+            f"</div>"
+        )
+    return "".join(tiles)
 
 
 def _fmt_rollup_line(roll: dict) -> str:
@@ -1854,14 +1922,17 @@ def render_header_rollup_html(project_id: str) -> str:
 
 
 def render_project_window_html(project_id: str) -> str:
-    """Render the rich per-project window ("Dashboard A") for ``/project/<id>``.
+    """Render the per-project "Project Cockpit" (Paradigm 2) for ``/project/<id>``.
 
-    A 4-column Kanban (Research|Planning|Build|Deliverables) of versioned effort
-    cards, a multi-session console drawer that attaches to whichever live job you
-    click (its log tail + an Ask box for gates + a Stop button — acting on the
-    ATTACHED job only), the lifecycle header (priority/notes/archive/retire or
-    reactivate), the cost rollup + linked-tasks strip. Returns a standalone HTML
-    page. All engine/user content is HTML-escaped (XSS-safe).
+    A 5-column Paradigm-2 lane grid (``.p2lanes`` → Research|Planning|Build|
+    Deliverables|Grass) of clean status-light TILES (most-recent session per lane
+    + a "previous sessions" expander; Deliverables = launch-by-type tiles; Grass =
+    idea board). Clicking ANY tile (live OR historical) opens an inline expanding
+    panel in ``#panelStack`` with a split summary on top (materials + doc-role
+    links) and, below, a live xterm terminal for running sessions or a read-only
+    note for done/historical ones. Plus the lifecycle header with the cost/tokens/
+    time rollup. Returns a standalone HTML page; all engine/user content is
+    HTML-escaped (XSS-safe).
     """
     entry = _rnd.get_project(project_id)
     if entry is None:
@@ -1924,27 +1995,25 @@ def render_project_window_html(project_id: str) -> str:
         )
     kanban = _render_kanban_html(folder_raw, project_id)
     status = render_status_line_html(project_id)
-    rollup = render_cost_rollup_html(project_id, folder_raw)
     header_rollup = render_header_rollup_html(project_id)
     tasks_html = render_project_tasks_html(project_id)
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
-    # pin it as the runnable deliverable so the Deliverables lane shows it with a
-    # Run action. Idempotent (content-addressed); best-effort.
+    # pin it as the runnable deliverable so the Deliverables LANE shows it as a
+    # launch-by-type tile. Idempotent (content-addressed); best-effort. (The loose
+    # bottom "Deliverables / Pinned" section is gone — deliverables are the lane.)
     try:
         if (Path(folder_raw) / _preview.DEFAULT_TARGET).is_file():
             ensure_anchor_deliverable(folder_raw, project_id)
     except Exception:
         pass
-    deliverables_html = render_deliverables_html(project_id, folder_raw)
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"<title>{name} — Anchor R&amp;D</title>"
-        # Vendored REAL xterm.js terminal (canvas) + anchor-term chrome, both
-        # served like KaTeX. xterm.css styles the terminal grid; anchor-term.css
-        # styles the REPL chrome (input line, gates, adopt panel) around it.
+        # Vendored REAL xterm.js terminal (canvas), served like KaTeX. xterm.css
+        # styles the terminal grid mounted inside each live inline panel. (The v2
+        # anchor-term REPL chrome is no longer used by the cockpit.)
         f"<link rel='stylesheet' href='{XTERM_URL_PREFIX}/xterm.css'>"
-        f"<link rel='stylesheet' href='{ANCHOR_TERM_URL_PREFIX}/anchor-term.css'>"
         "<style>"
         ":root{--bg:#0f1117;--surface:#1a1d27;--surface2:#232733;"
         "--border:#2e3340;--text:#e2e4e9;--text-dim:#8b8f9a;--accent:#6c9cfc;"
@@ -1986,86 +2055,26 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-mini.rnd-pr-on{border-color:var(--accent);color:var(--accent)}"
         ".rnd-mini.rnd-danger:hover{border-color:var(--danger);color:var(--danger)}"
         ".rnd-mini.rnd-accent{border-color:var(--accent);color:var(--accent)}"
-        ".kan{display:grid;grid-template-columns:repeat(5,1fr);gap:0}"
-        ".kan .col{border-right:1px solid var(--border);min-height:180px;"
-        "padding:12px}"
-        ".kan .col:last-child{border-right:none}"
-        ".kan .col h4{font-size:11px;text-transform:uppercase;letter-spacing:1px;"
+        # v4.1 cockpit-render — Paradigm-2 lane board (.p2lanes / .p2col), the
+        # mockup's "Inline expanding panels" column layout (replaces .kan/.col).
+        ".p2lanes{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;"
+        "padding:14px 16px}"
+        ".p2col{min-width:0}"
+        ".p2col h4{font-size:10.5px;text-transform:uppercase;letter-spacing:1px;"
         "color:var(--text-dim);display:flex;align-items:center;gap:7px;"
-        "margin:0 0 10px}"
-        ".kan .col h4 .badge{margin-left:auto}"
-        ".attn{font-size:10px;font-weight:700;color:var(--warning);"
-        "background:rgba(251,191,36,.15);border:1px solid rgba(251,191,36,.4);"
-        "border-radius:20px;padding:1px 7px;display:inline-flex;align-items:center;"
-        "gap:4px}"
-        ".live{font-size:10px;font-weight:700;color:var(--accent);"
-        "background:rgba(108,156,252,.13);border:1px solid rgba(108,156,252,.4);"
-        "border-radius:20px;padding:1px 7px;display:inline-flex;align-items:center;"
-        "gap:4px}"
-        ".effort{background:var(--surface2);border:1px solid var(--border);"
-        "border-radius:8px;padding:8px 10px;margin-bottom:7px;font-size:12px;"
-        "cursor:pointer;transition:.12s}"
-        ".effort:hover{border-color:var(--accent)}"
-        ".effort.attached{border-color:var(--accent);"
-        "box-shadow:0 0 0 1px var(--accent) inset}"
-        ".effort .er{display:flex;align-items:center;gap:7px}"
-        ".effort .ver{font-weight:600}"
-        ".effort .age{margin-left:auto;color:var(--text-dim);font-size:11px}"
-        ".effort .sub{font-size:11px;color:var(--text-dim);margin-top:3px}"
-        ".effort .ecost{margin-left:6px;color:var(--success)}"
-        ".effort.discovered{border-style:dashed;opacity:.92}"
-        ".session-files{margin:-3px 0 7px}"
-        ".session-files>summary{font-size:10.5px;color:var(--text-dim);"
-        "cursor:pointer;list-style:none;padding-left:2px}"
-        ".session-files>summary:hover{color:var(--accent)}"
-        ".session-files-body{padding-left:8px;border-left:1px solid var(--border)}"
+        "margin:0 0 9px}"
+        ".p2col h4 .sp{flex:1}"
+        ".p2col .tile{margin-bottom:8px}"
+        ".col-tiles{min-height:24px}"
+        # The lane-header live/attn light is a small .lt dot in the <h4> (set by
+        # _render_kanban_html). The "previous sessions (N)" expander holds the
+        # older sessions AS TILES below the most-recent visible tile.
         ".prev-sessions{margin-top:2px}"
         ".prev-sessions>summary{font-size:11px;color:var(--text-dim);"
         "cursor:pointer;list-style:none;padding:3px 2px}"
         ".prev-sessions>summary:hover{color:var(--accent)}"
         ".prev-sessions-body{margin-top:6px}"
-        # v3 Wave 6 — in-place expandable session summary accordion.
-        ".session-summary-link{margin:-2px 0 7px}"
-        ".summary-toggle{font-size:10.5px;color:var(--text-dim);"
-        "cursor:pointer;text-decoration:none}"
-        ".summary-toggle:hover{color:var(--accent)}"
-        ".session-summary-panel{margin-top:6px;padding:8px 10px;font-size:11px;"
-        "border:1px solid var(--border);border-radius:8px;"
-        "background:rgba(255,255,255,.02)}"
         ".summ-loading{color:var(--text-dim);font-size:10.5px;font-style:italic}"
-        ".summ-title{font-weight:600;margin-bottom:5px;color:var(--text)}"
-        ".summ-field{margin:3px 0;color:var(--text);line-height:1.4}"
-        ".summ-field b{color:var(--text-dim);font-weight:600}"
-        ".summ-effort{color:var(--text-dim)}"
-        ".summ-note{font-style:italic;color:var(--text-dim)}"
-        ".summ-claims{margin:6px 0;padding-left:18px}"
-        ".summ-claims li{margin:2px 0}"
-        ".summ-docs{margin-top:6px}"
-        ".summ-docs b{color:var(--text-dim);font-size:10.5px}"
-        ".summ-docs ul{margin:4px 0;padding-left:18px}"
-        ".summ-docs a{color:var(--accent);text-decoration:none}"
-        ".summ-docs a:hover{text-decoration:underline}"
-        ".summ-launch{margin-top:8px}"
-        ".summ-launch-btn{font-size:10.5px;cursor:pointer;color:var(--accent);"
-        "background:rgba(108,156,252,.1);border:1px solid rgba(108,156,252,.4);"
-        "border-radius:6px;padding:3px 9px}"
-        ".summ-launch-btn:hover{background:rgba(108,156,252,.2)}"
-        ".imported{font-size:10px;color:var(--text-dim);"
-        "display:inline-flex;align-items:center;gap:5px;letter-spacing:.5px}"
-        ".dotdisc{width:6px;height:6px;border-radius:50%;"
-        "background:var(--text-dim);display:inline-block}"
-        ".effort .dkind{color:var(--text-dim);font-size:10px;"
-        "border:1px solid var(--border);border-radius:10px;padding:0 6px}"
-        ".statepill{font-size:10px;padding:1px 7px;border-radius:20px;"
-        "border:1px solid var(--border)}"
-        ".statepill.done{color:var(--success);border-color:rgba(74,222,128,.35);"
-        "background:rgba(74,222,128,.1)}"
-        ".statepill.run{color:var(--accent);border-color:rgba(108,156,252,.4);"
-        "background:rgba(108,156,252,.12)}"
-        ".statepill.input{color:var(--warning);border-color:rgba(251,191,36,.4);"
-        "background:rgba(251,191,36,.12)}"
-        ".statepill.fail{color:var(--danger);border-color:rgba(248,113,113,.4);"
-        "background:rgba(248,113,113,.12)}"
         ".addnew{font-size:12px;color:var(--accent);cursor:pointer;"
         "display:inline-block;margin-top:4px}"
         ".addnew.rnd-dim{color:var(--text-dim);cursor:default}"
@@ -2086,43 +2095,9 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px solid var(--border);border-radius:7px;padding:2px 8px}"
         ".idea-promote:hover{border-color:var(--accent)}"
         ".idea-empty{font-size:11px;color:var(--text-dim);padding:4px 2px}"
-        ".dotpulse{width:7px;height:7px;border-radius:50%;background:var(--accent);"
-        "animation:pulse 1.5s infinite;display:inline-block}"
-        ".dotwarn{width:7px;height:7px;border-radius:50%;background:var(--warning);"
-        "animation:pulse 1.5s infinite;display:inline-block}"
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
-        ".console{border-top:1px solid var(--border);background:#0c0e14}"
-        ".console .ctabs{display:flex;align-items:center;gap:6px;padding:8px 14px;"
-        "border-bottom:1px solid var(--border);flex-wrap:wrap}"
-        ".console .ctabs .lbl{font-size:10px;text-transform:uppercase;"
-        "letter-spacing:1px;color:var(--text-dim);margin-right:4px}"
-        ".ctab{font-size:11.5px;padding:4px 11px;border-radius:7px;"
-        "border:1px solid var(--border);background:var(--surface);"
-        "color:var(--text-dim);cursor:pointer;display:inline-flex;"
-        "align-items:center;gap:6px}"
-        ".ctab.sel{color:var(--text);border-color:var(--accent);"
-        "background:rgba(108,156,252,.1)}"
-        ".ctab.warn.sel{border-color:var(--warning);"
-        "background:rgba(251,191,36,.1);color:var(--warning)}"
-        ".console .cbody{padding:12px 16px}"
-        ".console .src{font-size:11px;color:var(--text-dim);margin-bottom:8px}"
-        ".console .log{font-family:ui-monospace,Consolas,monospace;font-size:12px;"
-        "color:#cdd2dc;white-space:pre-wrap;max-height:200px;overflow:auto}"
-        ".console .ask{margin-top:10px;background:var(--surface2);"
-        "border:1px solid rgba(251,191,36,.4);border-radius:8px;padding:10px}"
-        ".console .ask .qtext{font-size:12.5px;margin-bottom:8px}"
-        ".console .ask .opts{display:flex;gap:8px;flex-wrap:wrap}"
-        ".inputrow{display:flex;gap:8px;margin-top:9px}"
-        ".inputrow input{flex:1;background:var(--bg);border:1px solid var(--border);"
-        "border-radius:7px;padding:8px 11px;color:var(--text);font-size:13px}"
-        ".btn{font-size:12px;padding:5px 12px;border-radius:7px;"
-        "border:1px solid var(--border);background:var(--surface2);"
-        "color:var(--text);cursor:pointer}"
-        ".btn:hover{border-color:var(--accent)}"
-        ".btn.accent{background:var(--accent);color:#0b1020;"
-        "border-color:var(--accent);font-weight:600}"
         ".taskstrip{border-top:1px solid var(--border);padding:11px 16px}"
         ".rnd-status-line{margin:0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
@@ -2132,39 +2107,43 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-running{color:var(--success);font-size:11px}"
         ".rnd-dim{color:var(--text-dim)}"
         "h2{font-size:14px;margin:18px 0 6px}"
-        # ── Wave 4: stacking window-manager UI (session bar + windows) ──
-        # NOTE: this is a PLAIN (non-f) string literal — single braces are FINE.
-        ".sessbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;"
-        "padding:10px 16px;border-top:1px solid var(--border);"
-        "background:var(--surface2)}"
-        ".sessbar .lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
-        "color:var(--text-dim);margin-right:2px}"
-        ".sessbar .hint{font-size:11px;color:var(--text-dim);margin-left:auto}"
-        ".sessbtn{font-size:11.5px;padding:4px 11px;border-radius:7px;"
-        "border:1px solid var(--border);background:var(--surface);"
-        "color:var(--text);cursor:pointer;display:inline-flex;align-items:center;"
-        "gap:6px}"
-        ".sessbtn:hover{border-color:var(--accent)}"
-        ".sessbtn.open{border-color:var(--accent);background:rgba(108,156,252,.1)}"
-        ".sess-dot{width:8px;height:8px;border-radius:50%;display:inline-block;"
-        "background:var(--text-dim)}"
-        ".sess-dot--green{background:#4ade80}"
-        ".sess-dot--amber{background:#fbbf24}"
-        ".sess-dot--red{background:#f87171}"
-        ".sess-dot--grey{background:#8b8f9a}"
-        ".newsess{font-size:11px;padding:3px 10px;border-radius:7px;"
-        "border:1px dashed var(--border);background:transparent;"
-        "color:var(--accent);cursor:pointer}"
-        ".newsess:hover{border-color:var(--accent)}"
-        # ── v4 Wave 4: Paradigm-2 lane TILE status light (.lt) ──
-        # The most-recent session card in each lane is the lane tile; it carries a
-        # status light whose color comes from the LOCKED bucket (_session_light_class
-        # ↔ the JS _statusColor): running=green, needs-you/done=amber, failed=red,
-        # idle/discovered=grey. (Single-brace plain literals — NOT an f-string.)
-        ".lane-tile{position:relative;cursor:pointer}"
-        ".lane-tile-body{padding-left:14px}"
-        ".lt{position:absolute;left:2px;top:13px;width:9px;height:9px;"
-        "border-radius:50%;display:inline-block;background:var(--text-dim)}"
+        # ── v4.1 cockpit-render: Paradigm-2 lane TILE (.tile schema) + status
+        # light (.lt). The most-recent session in each lane is a clean .tile with
+        # a top row (.tr1 = lane/version + a status light .lt), a title (.ttl), and
+        # a state line (.st = state + age). The light color comes from the LOCKED
+        # bucket (_session_light_class ↔ the JS _statusColor): running=green,
+        # needs-you/done=amber, failed=red, idle/discovered=grey. The legacy
+        # .lane-tile class is kept as an alias on the same element so the panel-open
+        # hooks still bind. (Single-brace plain literals — NOT an f-string.)
+        ".tile{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:10px;padding:11px 12px;cursor:pointer;transition:.12s;"
+        "position:relative}"
+        ".tile:hover{border-color:var(--accent);transform:translateY(-1px)}"
+        ".tile.attn{border-color:rgba(251,191,36,.45)}"
+        ".tile.fail{border-color:rgba(248,113,113,.45)}"
+        ".tile .tr1{display:flex;align-items:center;gap:8px}"
+        ".tile .lane{font-size:11px;text-transform:uppercase;letter-spacing:.8px;"
+        "color:var(--text-dim);font-weight:700}"
+        ".tile .ver{margin-left:auto;font-size:11px;color:var(--text-dim)}"
+        ".tile .ttl{font-size:13px;font-weight:600;margin-top:6px;line-height:1.35;"
+        "word-break:break-word}"
+        ".tile .st{font-size:11px;color:var(--text-dim);margin-top:5px;"
+        "display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
+        ".tile .st .state{font-weight:600}"
+        ".tile .st .state.running{color:var(--success)}"
+        ".tile .st .state.attn{color:var(--warning)}"
+        ".tile .st .state.fail{color:var(--danger)}"
+        ".tile .st .state.done{color:var(--text-dim)}"
+        ".tile .st .age{color:var(--text-dim)}"
+        ".tile .counts{font-size:10.5px;color:var(--text-dim);margin-top:6px}"
+        ".tile .deliv-stop{font-size:11px;margin-top:6px;padding:2px 8px;"
+        "border-radius:6px;border:1px solid var(--border);"
+        "background:var(--surface);color:var(--text);cursor:pointer}"
+        # The status light is a small inline dot in the tile's .tr1 (and in the
+        # lane-header .badge / panel .pbar). Used inline-flex elsewhere too.
+        ".lt{width:9px;height:9px;border-radius:50%;display:inline-block;"
+        "flex-shrink:0;background:var(--text-dim)}"
+        ".tile .tr1 .lt{margin-left:auto}"
         ".lt.green{background:#22c55e}"
         ".lt.amber{background:#fbbf24}"
         ".lt.red{background:#f87171}"
@@ -2192,6 +2171,17 @@ def render_project_window_html(project_id: str) -> str:
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
+        # Per-session engine toggle in the panel bar (◆ Claude / ✦ Gemini). Chosen
+        # once; flipping POSTs term_set_engine to relaunch this session on the other
+        # engine in the SAME worktree (mockup Paradigm-2 panel header).
+        ".panel .pbar .englbl{font-size:10px;color:var(--text-dim);"
+        "margin-left:4px}"
+        ".engtog{display:inline-flex;border:1px solid var(--border);"
+        "border-radius:7px;overflow:hidden}"
+        ".engtog b{font-size:10.5px;padding:3px 9px;background:var(--surface);"
+        "color:var(--text-dim);cursor:pointer;font-weight:500}"
+        ".engtog b.on{background:rgba(34,197,94,.15);color:var(--success);"
+        "font-weight:700}"
         # ── v4 Wave 5: split summary — materials LEFT, role links RIGHT, both
         # columns filling EQUAL vertical height (mockup Paradigm-2 internals).
         # The left effort line sinks to the bottom (.smat .effbar{margin-top:auto});
@@ -2233,6 +2223,8 @@ def render_project_window_html(project_id: str) -> str:
         "margin-left:auto}"
         ".panel .tpane .term-host{background:#05070c;flex:1;overflow:auto;"
         "min-height:90px}"
+        ".panel .tpane .ro-note{color:var(--text-dim);font-size:12px;"
+        "font-family:ui-monospace,Consolas,monospace;padding:11px 13px}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -2259,59 +2251,26 @@ def render_project_window_html(project_id: str) -> str:
         +
         # ── 4-state status line (consistent with the dashboard tiles) ──
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
-        # ── Kanban board ──
+        # ── Paradigm-2 lane board (.p2lanes → 5 .p2col tile columns) ──
         f"{kanban}"
-        # ── v4 Wave 4: live-terminal bar + Paradigm-2 inline panel STACK ──
-        # The bar is repopulated on load from /api/rnd/term_sessions; each button
-        # is status-colored and opens/attaches that session's INLINE panel (no
-        # floating window). Clicking a lane tile (above) likewise calls openPanel.
-        "<div class='sessbar' id='sessionBar'>"
-        "<span class='lbl'>Live terminals</span>"
-        "<span id='sessionBtns'></span>"
-        "<button class='newsess' onclick=\"newTermSession('research')\">+ research</button>"
-        "<button class='newsess' onclick=\"newTermSession('plan')\">+ plan</button>"
-        "<button class='newsess' onclick=\"newTermSession('build')\">+ build</button>"
-        "<span class='hint' id='sessionBarHint'>no live terminal sessions</span>"
-        "</div>"
-        # The PANEL STACK: opened sessions expand inline here, stacking down the
-        # page (replaces the v3 floating window layer).
+        # ── Paradigm-2 inline PANEL STACK ──
+        # Clicking ANY lane tile (live OR historical) expands a full-width inline
+        # panel here, stacking down the page (NOT a floating window, NOT page nav).
+        # Each panel = a split summary on top (materials + role-links) + a
+        # full-width terminal pane below (live xterm for a running session; a
+        # read-only "session complete" note for a done/historical one). The panel
+        # bar carries the engine ◆Claude/✦Gemini toggle (term_set_engine), a
+        # minimize, and a kill (× confirm). No old console drawer / live-terminals
+        # bar / loose cost-rollup / loose deliverables-pinned section remains.
         "<div class='panel-stack' id='panelStack'></div>"
-        # ── Console drawer (session tabs + attached log + ask + stop) ──
-        "<div class='console' id='console'>"
-        "<div class='ctabs'><span class='lbl'>Sessions</span>"
-        "<span id='ctabs'></span>"
-        "<span id='ctabsHint' style='margin-left:auto;font-size:11px;"
-        "color:var(--text-dim)'>launch or click a live effort to attach ↑</span>"
-        "</div>"
-        "<div class='cbody'>"
-        "<div class='src' id='consoleSrc'>No session attached.</div>"
-        # Interactive terminal host (Wave 7): openTerminal() mounts the vendored
-        # anchor-term console here over the SSE stream. This replaces the raw-log
-        # launch console as the primary surface for NEW research/plan/build runs.
-        "<div id='termHost'></div>"
-        # Legacy raw-log mirror (kept as a fallback for reattaching to a
-        # background job via the /api/rnd/tail poll — does not break Wave 4/6).
-        "<div class='log' id='laneLog'></div>"
-        "<div id='laneGate' class='ask' style='display:none'></div>"
-        "<div class='inputrow' id='inputRow' style='display:none'>"
-        "<input id='replyText' placeholder='…or type a reply to this session'>"
-        "<button class='btn accent' onclick='sendReply()'>Send</button>"
-        "<button class='btn' onclick='stopAttached()'>Stop job</button>"
-        "</div></div></div>"
-        # ── Linked tasks strip ──
+        # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
         "</div>"
-        f"{rollup}"
-        f"{deliverables_html}"
         f"<p style='color:#8a90a2;font-size:12px'>instance "
         f"{html_lib.escape(inst['instance_id'])}</p>"
-        # Vendored REAL xterm.js (defines window.Terminal) — MUST load before the
-        # anchor-term adapter, which instantiates an xterm.js Terminal and layers
-        # the REPL chrome on top while preserving window.AnchorTerm.mount.
+        # Vendored REAL xterm.js (defines window.Terminal) — the cockpit panel JS
+        # instantiates an xterm.js Terminal directly over the v3 WS/SSE transport.
         f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
-        # anchor-term adapter (Wave 7+): drives the xterm.js Terminal and provides
-        # window.AnchorTerm.mount (SSE stream + input line + inline gate + adopt).
-        f"<script src='{ANCHOR_TERM_URL_PREFIX}/anchor-term.js'></script>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
@@ -2322,19 +2281,27 @@ def render_project_window_html(project_id: str) -> str:
     )
 
 
-# JS for the rich project window. Drives the multi-session console: a SESSIONS
-# map keyed by job_id (each with its own log tail, cursor, status, gate), an
-# ATTACHED job_id the console mirrors, session tabs, and per-session attach /
-# answer-gate / stop. answerGate + stopAttached ALWAYS act on the ATTACHED job
-# only (no cross-wire). Plain string (NOT an f-string), so braces are single. No
+# JS for the v4.1 "Project Cockpit" (Paradigm-2). Drives ONLY: the inline
+# expanding panel stack (openPanel/minimize/kill + the xterm transport for live
+# sessions, a read-only note for historical ones), the per-panel engine toggle
+# (term_set_engine), the lane-tile click (laneTileClick → openPanel), the lane
+# launchers (newTermSession → term_start), the grass idea board (add/promote),
+# type-aware deliverable launch, the lifecycle header, and the header rollup
+# toggle. NO console drawer / live-terminals bar / loose rollup or deliverables
+# section remain. Plain RAW string (NOT an f-string), so braces are single. No
 # template interpolation here beyond the PROJECT_ID var injected above.
 _PROJECT_WINDOW_JS = r"""
-// SESSIONS: job_id -> {jobId, lane, since, lines:[], status, pending, tabName}
-var SESSIONS = {};
-var _attached = null;          // job_id the console is currently mirroring
-var _pollTimer = null;
+// ════════════════════════════════════════════════════════════════════════════
+// v4.1 "Project Cockpit" — Paradigm-2 (inline expanding panels). The ONLY
+// terminal surface is the inline panel inside #panelStack (openPanel). There is
+// NO console drawer, NO live-terminals bar, NO loose cost-rollup / deliverables
+// section — those v3 leftovers were removed. Plain RAW string (single braces).
+// ════════════════════════════════════════════════════════════════════════════
 
-function _esc(s) { var d = document.createElement('div'); d.textContent = (s == null ? '' : s); return d.innerHTML; }
+function _esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 // ── Access token (D4) ──────────────────────────────────────────────────────
 // The shared-secret token is kept ONLY in this browser's localStorage and sent
@@ -2350,14 +2317,12 @@ function setAnchorToken() {
   try { if (t) { localStorage.setItem('anchor_token', t.trim()); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
   return true;
 }
-// On first load, if the server requires auth and no token is stored yet, ask once.
+// On first load: ask for a token once if required, then sync MANAGED from the
+// session registry so a tile for an already-running terminal can re-open its
+// inline panel.
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
-  adoptLiveEfforts();
-  _startPolling();
-  // Wave 4: repopulate the ConPTY session button bar from the registry so
-  // reopening the dashboard reflects live managed sessions.
-  loadSessions();
+  repopulate();
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -2366,174 +2331,6 @@ function _postJson(url, payload) {
   return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
 }
 function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
-
-// On load, adopt any live/needs-input effort cards rendered server-side as
-// sessions (so a background job that was already running shows up + can be
-// attached without a fresh launch).
-function adoptLiveEfforts() {
-  var cards = document.querySelectorAll('.effort[data-live="1"]');
-  for (var i = 0; i < cards.length; i++) {
-    var c = cards[i];
-    var jid = c.getAttribute('data-job-id');
-    if (jid && !SESSIONS[jid]) {
-      _ensureSession(jid, c.getAttribute('data-trio-lane') || '',
-                     c.getAttribute('data-ver') || '');
-    }
-  }
-  if (!_attached) {
-    var first = Object.keys(SESSIONS)[0];
-    if (first) attachSession(first);
-  }
-  renderTabs();
-}
-
-function _ensureSession(jobId, lane, ver) {
-  if (!SESSIONS[jobId]) {
-    SESSIONS[jobId] = {jobId: jobId, lane: lane || '', ver: ver || '',
-                       since: 0, lines: [], status: 'running', pending: null,
-                       tabName: ((lane || 'job') + (ver ? (' ' + ver) : ''))};
-  }
-  return SESSIONS[jobId];
-}
-
-function renderTabs() {
-  var host = document.getElementById('ctabs');
-  if (!host) return;
-  host.innerHTML = '';
-  var ids = Object.keys(SESSIONS);
-  for (var i = 0; i < ids.length; i++) {
-    var s = SESSIONS[ids[i]];
-    var span = document.createElement('span');
-    var warn = (s.pending ? ' warn' : '');
-    var sel = (s.jobId === _attached ? ' sel' : '');
-    span.className = 'ctab' + warn + sel;
-    var dot = s.pending ? "<span class='dotwarn'></span>"
-                        : (_isLiveStatus(s.status) ? "<span class='dotpulse'></span>" : '');
-    span.innerHTML = dot + _esc(s.tabName) + (s.pending ? ' · needs input' : '');
-    (function (jid) { span.onclick = function () { attachSession(jid); }; })(s.jobId);
-    host.appendChild(span);
-  }
-  var hint = document.getElementById('ctabsHint');
-  if (hint) hint.style.display = ids.length ? 'none' : '';
-}
-
-function _isLiveStatus(st) {
-  return st === 'running' || st === 'awaiting-input' || !st;
-}
-
-function attachSession(jobId) {
-  if (!SESSIONS[jobId]) _ensureSession(jobId, '', '');
-  _attached = jobId;
-  // Highlight the attached effort card.
-  var cards = document.querySelectorAll('.effort');
-  for (var i = 0; i < cards.length; i++) cards[i].classList.remove('attached');
-  var card = document.getElementById('effort_' + jobId);
-  if (card) card.classList.add('attached');
-  _renderAttached();
-  renderTabs();
-}
-
-function _renderAttached() {
-  var log = document.getElementById('laneLog');
-  var src = document.getElementById('consoleSrc');
-  var gate = document.getElementById('laneGate');
-  var inputRow = document.getElementById('inputRow');
-  if (!_attached || !SESSIONS[_attached]) {
-    if (src) src.textContent = 'No session attached.';
-    if (log) log.textContent = '';
-    if (gate) gate.style.display = 'none';
-    if (inputRow) inputRow.style.display = 'none';
-    return;
-  }
-  var s = SESSIONS[_attached];
-  if (src) {
-    src.innerHTML = 'Attached to: <b style="color:var(--text)">' +
-      _esc(s.tabName) + '</b> · ' + _esc(s.status || '') + ' · job ' + _esc(s.jobId);
-  }
-  if (log) { log.textContent = s.lines.join('\n'); log.scrollTop = log.scrollHeight; }
-  if (inputRow) inputRow.style.display = 'flex';
-  if (s.pending) { _renderGate(s.pending); }
-  else if (gate) { gate.style.display = 'none'; gate.innerHTML = ''; }
-}
-
-// ── Interactive terminal (Wave 7) ───────────────────────────────────────────
-// openTerminal starts a PERSISTENT stream-json REPL session for the lane and
-// mounts the vendored anchor-term console (SSE stream + input line + inline gate
-// + exit→discover→confirm-adopt). This is the affordance the "+ New
-// research/plan/build run" links call, replacing the raw-log launch console.
-var _activeTerm = null;
-async function openTerminal(lane, backend) {
-  backend = backend || 'claude';
-  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
-  var r, data;
-  try {
-    r = await _postJson('/api/rnd/start_terminal', payload);
-    data = await r.json();
-    if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/start_terminal', payload);
-      data = await r.json();
-    }
-  } catch (e) { alert('[terminal error] ' + e.message); return; }
-  if (!data.ok) {
-    alert('[terminal refused] ' + (data.error || data.reason || 'unknown'));
-    return;
-  }
-  var host = document.getElementById('termHost');
-  var src = document.getElementById('consoleSrc');
-  if (src) src.textContent = 'Interactive ' + lane + ' terminal · ' + backend +
-    ' · session ' + data.session;
-  // Hide the legacy raw-log mirror while the terminal is the active surface.
-  var legacy = document.getElementById('laneLog');
-  if (legacy) legacy.style.display = 'none';
-  if (_activeTerm && _activeTerm.dispose) _activeTerm.dispose();
-  if (!window.AnchorTerm) { alert('terminal component failed to load'); return; }
-  _activeTerm = window.AnchorTerm.mount({
-    host: host,
-    session: data.session,
-    lane: lane,
-    title: lane + ' · ' + backend,
-    // Token-aware POST helper the component uses for input/discover/adopt.
-    postJson: function (url, p) {
-      return _postJson(url, p).then(function (resp) {
-        return resp.json().then(function (d) {
-          if (_isUnauthorized(resp, d) && setAnchorToken()) {
-            return _postJson(url, p).then(function (r2) { return r2.json(); });
-          }
-          return d;
-        });
-      });
-    },
-    onAdopted: function () {
-      // The produced docs are now a session in the lane — refresh to show it.
-      setTimeout(function () { location.reload(); }, 800);
-    }
-  });
-}
-
-async function launchLane(lane, backend) {
-  // backend defaults to 'claude'. Only the research lane offers 'gemini';
-  // plan/build are Claude-only (enforced server-side too).
-  backend = backend || 'claude';
-  var r, data;
-  var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
-  try {
-    r = await _postJson('/api/rnd/launch_lane', payload);
-    data = await r.json();
-    if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/launch_lane', payload);
-      data = await r.json();
-    }
-  } catch (e) { alert('[launch error] ' + e.message); return; }
-  if (!data.ok) {
-    alert('[launch refused] ' + (data.error || data.reason || 'unknown'));
-    return;
-  }
-  var s = _ensureSession(data.job_id, lane, '');
-  s.status = data.status || 'running';
-  s.tabName = lane + (data.backend ? (' · ' + data.backend) : '');
-  attachSession(data.job_id);
-  _startPolling();
-}
 
 // ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
 // Manual add: prompt for idea text, POST /api/rnd/add_idea, then refresh so the
@@ -2611,162 +2408,6 @@ async function promoteGrass(ideaId, lane) {
   setTimeout(repopulate, 600);
 }
 
-function _startPolling() {
-  if (_pollTimer) clearTimeout(_pollTimer);
-  _pollOnce();
-}
-
-// Poll EVERY known session each tick so background sessions keep their gate +
-// status fresh (a lane badge can flip to ⚠ input even when not attached). Only
-// the ATTACHED session re-renders the console body.
-async function _pollOnce() {
-  var ids = Object.keys(SESSIONS);
-  var anyLive = false;
-  for (var i = 0; i < ids.length; i++) {
-    var s = SESSIONS[ids[i]];
-    var terminal = ['done', 'cancelled', 'interrupted', 'failed'];
-    if (s.status && terminal.indexOf(s.status) >= 0 && !s.pending) continue;
-    anyLive = true;
-    try {
-      var r = await fetch('/api/rnd/tail?job_id=' + encodeURIComponent(s.jobId) + '&since=' + s.since);
-      var data = await r.json();
-      if (data.lines && data.lines.length) {
-        for (var k = 0; k < data.lines.length; k++) {
-          var ln = data.lines[k];
-          s.lines.push(typeof ln === 'string' ? ln : JSON.stringify(ln));
-        }
-        s.since = data.next;
-      }
-      if (data.status) s.status = data.status;
-      s.pending = data.pending_prompt || null;
-    } catch (e) { /* keep polling */ }
-  }
-  // Refresh lane badges from the freshest session state, then the tabs + body.
-  _refreshBadges();
-  renderTabs();
-  if (_attached) _renderAttached();
-  _pollTimer = setTimeout(_pollOnce, 1500);
-}
-
-// Flip each lane header badge to ⚠ input / live based on its sessions.
-function _refreshBadges() {
-  var byLane = {};
-  var ids = Object.keys(SESSIONS);
-  for (var i = 0; i < ids.length; i++) {
-    var s = SESSIONS[ids[i]];
-    if (!s.lane) continue;
-    var b = byLane[s.lane] || (byLane[s.lane] = {live: false, input: false});
-    if (s.pending) b.input = true;
-    else if (_isLiveStatus(s.status) && (s.status === 'running' || s.status === 'awaiting-input')) b.live = true;
-  }
-  for (var lane in byLane) {
-    var el = document.getElementById('badge_' + lane);
-    if (!el) continue;
-    if (byLane[lane].input) el.innerHTML = "<span class='attn'>⚠ input</span>";
-    else if (byLane[lane].live) el.innerHTML = "<span class='live'><span class='dotpulse'></span>live</span>";
-  }
-}
-
-function _renderGate(prompt) {
-  var box = document.getElementById('laneGate');
-  if (!box) return;
-  // Build the gate DOM without inline onclick handlers. The option label is
-  // carried only as the button's text node + a data-gate-opt attribute; a single
-  // delegated listener (wired once below) reads getAttribute('data-gate-opt') and
-  // calls answerGate(label). This avoids the HTML-attribute breakout that an
-  // an inline onclick built from JSON.stringify(label) caused (the double quotes
-  // from JSON.stringify terminated the double-quoted onclick attribute), which made
-  // every gate option button non-functional.
-  box.innerHTML = '';
-  var q = document.createElement('div');
-  q.className = 'qtext';
-  var strong = document.createElement('strong');
-  strong.textContent = (prompt.question != null ? prompt.question : 'Input requested');
-  q.appendChild(strong);
-  box.appendChild(q);
-  var optsWrap = document.createElement('div');
-  optsWrap.className = 'opts';
-  var opts = prompt.options || [];
-  opts.forEach(function (o) {
-    var label = (o && o.label != null) ? o.label : String(o);
-    var btn = document.createElement('button');
-    btn.className = 'btn accent';
-    btn.setAttribute('data-gate-opt', label);  // attribute value is set via the DOM API, never string-concatenated into HTML
-    btn.textContent = label;
-    optsWrap.appendChild(btn);
-  });
-  box.appendChild(optsWrap);
-  // Wire the delegated click handler exactly once for this box.
-  if (!box._gateDelegated) {
-    box._gateDelegated = true;
-    box.addEventListener('click', function (e) {
-      var t = e.target;
-      while (t && t !== box && !(t.getAttribute && t.hasAttribute && t.hasAttribute('data-gate-opt'))) {
-        t = t.parentNode;
-      }
-      if (t && t.getAttribute && t.hasAttribute('data-gate-opt')) {
-        answerGate(t.getAttribute('data-gate-opt'));
-      }
-    });
-  }
-  box.style.display = 'block';
-}
-
-// answerGate ALWAYS targets the ATTACHED session (no cross-wire). The reply box
-// + the gate option buttons both route here.
-async function answerGate(choice) {
-  if (!_attached) return;
-  var jid = _attached;
-  try {
-    var payload = {job_id: jid, choice: choice};
-    var r = await _postJson('/api/rnd/answer_gate', payload);
-    var data = await r.json();
-    if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/answer_gate', payload);
-      data = await r.json();
-    }
-    if (SESSIONS[jid]) {
-      SESSIONS[jid].lines.push('[gate answered: ' + choice +
-        (data.written ? '' : ' (no-op: ' + data.reason + ')') + ']');
-      SESSIONS[jid].pending = null;
-    }
-  } catch (e) { if (SESSIONS[jid]) SESSIONS[jid].lines.push('[gate error] ' + e.message); }
-  var box = document.getElementById('laneGate');
-  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
-  if (_attached === jid) _renderAttached();
-  renderTabs();
-  _startPolling();
-}
-
-function sendReply() {
-  var inp = document.getElementById('replyText');
-  if (!inp || !inp.value.trim()) return;
-  var v = inp.value;
-  inp.value = '';
-  answerGate(v);
-}
-
-// stopAttached ALWAYS cancels the ATTACHED job only (no cross-wire).
-async function stopAttached() {
-  if (!_attached) return;
-  var jid = _attached;
-  try {
-    var r = await _postJson('/api/rnd/cancel_job', {job_id: jid});
-    var data = await r.json();
-    if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/cancel_job', {job_id: jid});
-      data = await r.json();
-    }
-    if (SESSIONS[jid]) {
-      SESSIONS[jid].status = (data && data.status) || 'cancelled';
-      SESSIONS[jid].pending = null;
-      SESSIONS[jid].lines.push('[stopped: ' + ((data && data.status) || 'cancelled') + ']');
-    }
-  } catch (e) { if (SESSIONS[jid]) SESSIONS[jid].lines.push('[stop error] ' + e.message); }
-  if (_attached === jid) _renderAttached();
-  renderTabs();
-}
-
 // ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────
 // Clicking launch ADAPTS to the deliverable type:
 //   skill/tool → verify status (available/loaded/missing); NO process.
@@ -2821,39 +2462,6 @@ async function launchDeliverable(btn) {
   }
 }
 
-// ── Runnable Anchor deliverable — ephemeral preview (v3 Wave 8) ─────────────
-// Run starts a preview server on a free port (≠8777) in an isolated temp data
-// dir, then opens the returned URL in a NEW TAB. Stop reaps it. Token-aware.
-async function runDeliverable(deliverable, btn) {
-  var li = btn.closest('.deliv-pinned');
-  var msg = li ? li.querySelector('.deliv-msg') : null;
-  if (msg) msg.textContent = 'starting…';
-  btn.disabled = true;
-  var payload = {project_id: PROJECT_ID, deliverable: deliverable};
-  try {
-    var r = await _postJson('/api/rnd/preview_start', payload);
-    var data = await r.json();
-    if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/preview_start', payload);
-      data = await r.json();
-    }
-    if (data && data.ok && data.url) {
-      if (li) li.setAttribute('data-preview-id', data.preview_id || '');
-      if (msg) msg.textContent = 'running on port ' + (data.port || '?');
-      var stopBtn = li ? li.querySelector('.deliv-stop') : null;
-      if (stopBtn) stopBtn.style.display = '';
-      btn.style.display = 'none';
-      window.open(data.url, '_blank');
-    } else {
-      if (msg) msg.textContent = 'failed: ' + ((data && data.error) || 'unknown');
-      btn.disabled = false;
-    }
-  } catch (e) {
-    if (msg) msg.textContent = 'error: ' + e.message;
-    btn.disabled = false;
-  }
-}
-
 async function stopDeliverable(btn) {
   var li = btn.closest('.deliv-pinned');
   var pid = li ? li.getAttribute('data-preview-id') : '';
@@ -2879,148 +2487,6 @@ async function stopDeliverable(btn) {
 }
 
 function openReport(href) { window.open(href, '_blank'); }
-
-// Open a session's cached, validated summary page (Wave 6 back-compat: direct
-// /summary links still work; the session card no longer navigates here).
-function openSummary(href) { window.open(href, '_blank'); }
-
-// ── In-place expandable session summaries (v3 Wave 6) ───────────────────────
-// Clicking "summary" EXPANDS an inline accordion in the Kanban (NO navigation
-// to /summary). The panel fetches the cached structured summary as JSON and
-// renders when-run · what-was-asked · North-Star · doc links (the ONLY new tab)
-// · effort (tokens + wall-clock; imported → "no run metrics"), plus a "Launch
-// new session" button that calls the Wave-3/4 launch path seeded from THIS
-// session. Collapsing hides it; reopening serves the cache.
-function toggleSessionSummary(el) {
-  var panelId = el.getAttribute('data-panel');
-  var panel = document.getElementById(panelId);
-  if (!panel) return;
-  if (panel.style.display !== 'none' && panel.getAttribute('data-loaded') === '1') {
-    // Collapse.
-    panel.style.display = 'none';
-    return;
-  }
-  panel.style.display = 'block';
-  if (panel.getAttribute('data-loaded') === '1') return;  // reopen → cache
-  var pid = el.getAttribute('data-pid');
-  var lane = el.getAttribute('data-lane');
-  var sid = el.getAttribute('data-session');
-  panel.innerHTML = '<div class="summ-loading">loading…</div>';
-  _loadSessionSummary(panel, pid, lane, sid, 0);
-}
-
-function _esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function _sessionSummaryUrl(pid, lane, sid) {
-  return '/api/rnd/session_summary?pid=' + encodeURIComponent(pid)
-    + '&lane=' + encodeURIComponent(lane)
-    + '&session=' + encodeURIComponent(sid);
-}
-
-function _loadSessionSummary(panel, pid, lane, sid, attempt) {
-  var _hdrs = {Accept: 'application/json'};
-  fetch(_sessionSummaryUrl(pid, lane, sid), {headers: _hdrs} )
-    .then(function (r) { return r.json(); })
-    .then(function (data) {
-      if (data && data.status === 'ready' && data.summary) {
-        panel.innerHTML = _renderSessionSummary(data.summary, pid, lane, sid);
-        _wireLaunchFromPanel(panel, lane, sid);
-        panel.setAttribute('data-loaded', '1');
-        return;
-      }
-      // TERMINAL status (unknown project / missing session): STOP polling and
-      // show an honest "summary unavailable" note instead of spinning forever.
-      if (data && (data.status === 'unknown' || data.status === 'not-found'
-                   || data.ok === false)) {
-        panel.innerHTML = '<div class="summ-loading">Summary unavailable for '
-          + 'this session.</div>' + _launchButtonHtml();
-        _wireLaunchFromPanel(panel, lane, sid);
-        panel.setAttribute('data-loaded', '1');
-        return;
-      }
-      // "generating…" fallback: poll a bounded number of times, then stop.
-      if (attempt < 20) {
-        panel.innerHTML = '<div class="summ-loading">generating summary… '
-          + '(this runs once and is then cached)</div>';
-        setTimeout(function () {
-          _loadSessionSummary(panel, pid, lane, sid, attempt + 1);
-        }, 1500);
-      } else {
-        panel.innerHTML = '<div class="summ-loading">Summary is still '
-          + 'generating. Close and reopen shortly to view it.</div>'
-          + _launchButtonHtml();
-        _wireLaunchFromPanel(panel, lane, sid);
-        panel.setAttribute('data-loaded', '1');
-      }
-    })
-    .catch(function (e) {
-      panel.innerHTML = '<div class="summ-loading">Could not load summary: '
-        + _esc(e.message) + '</div>';
-    });
-}
-
-function _renderSessionSummary(s, pid, lane, sid) {
-  var h = [];
-  if (s.title) h.push('<div class="summ-title">' + _esc(s.title) + '</div>');
-  if (s.when_run) h.push('<div class="summ-field"><b>When run:</b> '
-    + _esc(s.when_run) + '</div>');
-  if (s.what_was_asked) h.push('<div class="summ-field"><b>What was asked:</b> '
-    + _esc(s.what_was_asked) + '</div>');
-  if (s.north_star) h.push('<div class="summ-field"><b>North Star:</b> '
-    + _esc(s.north_star) + '</div>');
-  // Effort: imported sessions honestly show "no run metrics" (effort === null).
-  if (s.hasOwnProperty('effort')) {
-    if (s.effort === null) {
-      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
-        + 'imported — no run metrics</div>');
-    } else if (s.effort) {
-      var secs = ((s.effort.wall_clock_ms || 0) / 1000).toFixed(1);
-      h.push('<div class="summ-field summ-effort"><b>Effort:</b> '
-        + _esc(s.effort.tokens || 0) + ' tokens · ' + _esc(secs) + 's wall-clock · '
-        + _esc(s.effort.runs || 0) + ' run(s)</div>');
-    }
-  }
-  var claims = s.claims || [];
-  if (claims.length) {
-    var items = claims.map(function (c) { return '<li>' + _esc(c) + '</li>'; });
-    h.push('<ul class="summ-claims">' + items.join('') + '</ul>');
-  } else if (s.no_grounded_claims) {
-    h.push('<div class="summ-field summ-note">No grounded claims could be '
-      + 'extracted for this session.</div>');
-  }
-  // Document links — each opens the rendered markdown in a NEW TAB (the ONLY
-  // new tab) via the existing /report and /artifact routes.
-  var links = s.member_links || [];
-  if (links.length) {
-    var ls = links.map(function (lk) {
-      return '<li><a href="' + _esc(lk.href) + '" target="_blank" '
-        + 'rel="noopener">' + _esc(lk.label) + '</a></li>';
-    });
-    h.push('<div class="summ-docs"><b>Documents</b><ul>' + ls.join('')
-      + '</ul></div>');
-  }
-  h.push(_launchButtonHtml());
-  return '<div class="summ-body">' + h.join('') + '</div>';
-}
-
-function _launchButtonHtml() {
-  return '<div class="summ-launch"><button class="summ-launch-btn" '
-    + 'type="button">Launch new session</button></div>';
-}
-
-// Wire the panel's "Launch new session" button to the Wave-3/4 launch path,
-// seeded from THIS session. The lane + a seed hint (the source session id) ride
-// into newTermSession so Wave 7 can build the handoff on top of this seam.
-function _wireLaunchFromPanel(panel, lane, sid) {
-  var btn = panel.querySelector('.summ-launch-btn');
-  if (!btn) return;
-  btn.onclick = function () {
-    newTermSession(lane, null, {seed_session: sid});
-  };
-}
 
 // ── Lifecycle header actions (token-aware via _postJson) ────────────────────
 function _lifecycle(url, payload, reload) {
@@ -3105,24 +2571,21 @@ function rndUnlinkTask(el) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// v4 Wave 4 — Paradigm-2 INLINE ACCORDION PANEL MANAGER (replaces the v3 floating
-// window manager).
+// Paradigm-2 INLINE ACCORDION PANEL MANAGER — the ONLY terminal surface.
 //
 // Each lane's most-recent session is a TILE carrying a status light. Clicking a
 // tile (laneTileClick → openPanel) EXPANDS a full-width inline panel appended to
 // the #panelStack BELOW the board — panels stack down the page, they never float
 // or overlap. A second click / the panel's "– min" button collapses it back to
 // the tile (minimizePanel) WITHOUT killing the session. The panel's "×" button is
-// KILL, gated behind a confirm() (killPanel → POST /api/rnd/term_kill).
-// repopulate() reads /api/rnd/term_sessions and repaints the live-terminals bar.
+// KILL, gated behind a confirm() (killPanel → POST /api/rnd/term_kill); for a
+// historical (non-live) panel the × simply closes the DOM. repopulate() reads
+// /api/rnd/term_sessions to keep the MANAGED map in sync (so a tile for an
+// already-running terminal can re-open its panel).
 //
-// The terminal transport is UNCHANGED from v3 (WS term_ws first; SSE-out
-// term_stream2 + POST-in term_input2 fallback; term_resize); only the HOST DOM
-// changed from a floating window to a panel body. Wave 5 mounts xterm into the
-// panel body host; this wave ships the panel SHELL with a placeholder body.
-//
-// This is a NEW surface; it does NOT touch the v2 console drawer (openTerminal /
-// launchLane) above.
+// The terminal transport is UNCHANGED (WS term_ws first; SSE-out term_stream2 +
+// POST-in term_input2 fallback; term_resize), mounted into the panel body host.
+// A LIVE session mounts xterm; a DONE/historical session shows a read-only note.
 // ════════════════════════════════════════════════════════════════════════════
 
 // MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
@@ -3145,8 +2608,8 @@ function _statusColor(status) {
 }
 
 // repopulate(): fetch the project's live managed sessions from the registry and
-// repaint the live-terminals bar (the window-manager repopulate hook). Kept under
-// the historical name loadSessions too (callers + DOMContentLoaded use it).
+// re-sync the MANAGED map (so a tile / re-open keys on a real, stable record).
+// Kept under the historical name loadSessions too (callers use it).
 async function repopulate() {
   var url = '/api/rnd/term_sessions?project_id=' + encodeURIComponent(PROJECT_ID);
   var data;
@@ -3181,46 +2644,26 @@ async function repopulate() {
   }
   renderSessionBar();
 }
-// Back-compat alias: the historical name used by callers + DOMContentLoaded.
+// Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
 
-function renderSessionBar() {
-  var host = document.getElementById('sessionBtns');
-  if (!host) return;
-  host.innerHTML = '';
-  var ids = Object.keys(MANAGED);
-  for (var i = 0; i < ids.length; i++) {
-    var s = MANAGED[ids[i]];
-    var btn = document.createElement('button');
-    btn.className = 'sessbtn' + (PANELS[s.session_id] ? ' open' : '');
-    btn.setAttribute('data-session', s.session_id);
-    btn.setAttribute('data-status', s.status);
-    var dot = document.createElement('span');
-    dot.className = 'sess-dot sess-dot--' + _statusColor(s.status);
-    btn.appendChild(dot);
-    var txt = document.createElement('span');
-    txt.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
-    btn.appendChild(txt);
-    (function (sid) {
-      btn.onclick = function () { openPanel(sid); };
-    })(s.session_id);
-    host.appendChild(btn);
-  }
-  var hint = document.getElementById('sessionBarHint');
-  if (hint) hint.style.display = ids.length ? 'none' : '';
-}
+// renderSessionBar(): the v3 "Live terminals" button bar was REMOVED in v4.1 —
+// the inline panel stack is the only terminal surface now. The panel manager
+// still calls this after MANAGED changes; with no bar to paint it is a safe
+// no-op (kept so those call sites need no special-casing).
+function renderSessionBar() { /* no live-terminals bar in the cockpit */ }
 
-// laneTileClick: a lane tile's body was clicked. Ignore clicks that land on an
-// inner interactive control (a report/attach effort card, the inline summary
-// toggle, or a <summary>/<details> disclosure) so those keep their own behavior;
-// otherwise expand this session's inline panel.
+// laneTileClick: a Paradigm-2 lane tile was clicked → open its inline panel.
+// The tile no longer contains report links / a summary accordion, so the click
+// reliably reaches openPanel. We still ignore clicks that land on an explicit
+// control (a <details>/<summary> disclosure, an engine toggle, or an explicit
+// link/button) before reaching the tile, so those keep their own behavior.
 function laneTileClick(ev, sessionId) {
   var t = ev && ev.target;
-  while (t && t.classList && !t.classList.contains('lane-tile')) {
-    if (t.classList.contains('summary-toggle') ||
-        t.classList.contains('effort') ||
-        t.tagName === 'SUMMARY' || t.tagName === 'A') {
-      return;   // inner control handles its own click
+  while (t && t.classList && !t.classList.contains('tile')) {
+    if (t.tagName === 'SUMMARY' || t.tagName === 'A' ||
+        t.tagName === 'BUTTON' || t.classList.contains('engtog')) {
+      return;   // explicit control handles its own click
     }
     t = t.parentNode;
   }
@@ -3292,8 +2735,15 @@ async function newTermSession(lane, backend, opts) {
 // panel body. The panel header carries "– min" (minimizePanel) + "× kill"
 // (killPanel, confirm-gated).
 function openPanel(sessionId) {
+  // A LIVE managed terminal session → attach its PTY (as today). ANY other tile
+  // (historical / discovered / imported) → SYNTHESIZE a panel record from its
+  // DOM tile so the panel still opens with the split summary + a read-only body.
   var s = MANAGED[sessionId];
-  if (!s) return;
+  var isLive = !!s;
+  if (!s) {
+    s = _synthSessionRecord(sessionId);
+    if (!s) return;
+  }
   var existing = PANELS[sessionId];
   if (existing && existing.el) {
     // Second click toggles minimize/expand (no kill, no re-mount).
@@ -3325,6 +2775,13 @@ function openPanel(sessionId) {
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
   var sp = document.createElement('span');
   sp.className = 'sp';
+  // Per-session engine toggle (◆ Claude / ✦ Gemini). Chosen once; flipping POSTs
+  // term_set_engine to relaunch this LIVE session on the other engine in the same
+  // worktree. Research can switch freely; plan/build stay Claude-only (the server
+  // also enforces this). Historical/non-live sessions have no process to switch,
+  // so the toggle is omitted there.
+  var engEl = null;
+  if (isLive) engEl = _buildEngineToggle(sessionId, s);
   var minBtn = document.createElement('button');
   minBtn.className = 'panelbtn min';
   minBtn.title = 'Minimize (keeps the session running)';
@@ -3332,11 +2789,27 @@ function openPanel(sessionId) {
   minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
   var killBtn = document.createElement('button');
   killBtn.className = 'panelbtn kill';
-  killBtn.title = 'Kill this session';
-  killBtn.textContent = '×';
-  killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
+  if (isLive) {
+    killBtn.title = 'Kill this session';
+    killBtn.textContent = '×';
+    killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
+  } else {
+    // Historical/discovered: there is no process to kill — the × just closes
+    // the panel (tears down the DOM, leaves the session record alone).
+    killBtn.title = 'Close';
+    killBtn.textContent = '×';
+    killBtn.onclick = function (e) { e.stopPropagation(); _closePanel(sessionId); renderSessionBar(); };
+  }
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
-  bar.appendChild(sp); bar.appendChild(minBtn); bar.appendChild(killBtn);
+  bar.appendChild(sp);
+  if (engEl) {
+    var englbl = document.createElement('span');
+    englbl.className = 'englbl';
+    englbl.textContent = 'engine';
+    bar.appendChild(englbl);
+    bar.appendChild(engEl);
+  }
+  bar.appendChild(minBtn); bar.appendChild(killBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -3361,7 +2834,7 @@ function openPanel(sessionId) {
   tbar.className = 'tbar';
   var lab = document.createElement('span');
   lab.className = 'lab';
-  lab.textContent = (s.backend || 'terminal') + ' · ' + s.session_id;
+  lab.textContent = (isLive ? (s.backend || 'terminal') : 'log') + ' · ' + s.session_id;
   var rz = document.createElement('span');
   rz.className = 'rzhint';
   rz.textContent = '⇕ drag bottom edge to resize';
@@ -3380,11 +2853,110 @@ function openPanel(sessionId) {
 
   PANELS[sessionId] = {el: panel, body: host, term: null, transport: null,
                        tpane: tpane, fit: null, ro: null};
-  _mountTerminal(sessionId, host);
+  if (isLive) {
+    // LIVE managed terminal: mount xterm over the v3 transport (UNCHANGED).
+    _mountTerminal(sessionId, host);
+  } else {
+    // HISTORICAL/discovered session: NO live PTY. Show a read-only note (the
+    // summary above carries the materials + doc links). We try to load a
+    // transcript/log if one exists; otherwise a "session complete" note.
+    _mountReadOnlyBody(sessionId, host, s);
+  }
   _loadPanelSummary(sessionId, summ);
   _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
+}
+
+// _synthSessionRecord(sessionId): build a MANAGED-shaped record for a NON-live
+// tile from its DOM, so openPanel can render a panel for a historical /
+// discovered / imported session. Reads the tile's data-lane + data-light (the
+// locked status color the server stamped) off the page. Returns null only if no
+// such tile exists.
+function _synthSessionRecord(sessionId) {
+  var tile = document.querySelector('.tile[data-session="' + _cssEsc(sessionId) + '"]');
+  if (!tile) return null;
+  var lane = tile.getAttribute('data-lane') || '';
+  var light = tile.getAttribute('data-light') || 'grey';
+  // Map the light color back to a coarse status (only for the header dot/title).
+  var status = (light === 'green') ? 'running'
+             : (light === 'amber') ? 'done'
+             : (light === 'red') ? 'failed' : 'idle';
+  var ttlEl = tile.querySelector('.ttl');
+  var label = ttlEl ? (ttlEl.textContent || '').trim() : '';
+  return {session_id: sessionId, lane: lane, backend: '', status: status,
+          label: label, idx: '', historical: true};
+}
+
+// CSS.escape shim for the attribute selector (older engines lack CSS.escape).
+function _cssEsc(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/["\\\]]/g, '\\$&');
+}
+
+// _buildEngineToggle(sessionId, s): the ◆ Claude / ✦ Gemini toggle for the panel
+// bar. The currently-selected engine (s.backend, default claude) is highlighted;
+// clicking the OTHER engine POSTs term_set_engine (relaunch in the same worktree)
+// and updates the record + toggle on success. Returns the .engtog element.
+function _buildEngineToggle(sessionId, s) {
+  var cur = (s && s.backend) || 'claude';
+  var tog = document.createElement('span');
+  tog.className = 'engtog';
+  tog.title = 'Chosen once; flip to switch this session to the other engine.';
+  [['claude', '◆ Claude'], ['gemini', '✦ Gemini']].forEach(function (pair) {
+    var eng = pair[0];
+    var b = document.createElement('b');
+    b.textContent = pair[1];
+    b.setAttribute('data-engine', eng);
+    if (eng === cur) b.className = 'on';
+    b.onclick = function (e) {
+      e.stopPropagation();
+      if (eng === ((MANAGED[sessionId] || {}).backend || cur)) return;  // already on it
+      setSessionEngine(sessionId, eng, tog);
+    };
+    tog.appendChild(b);
+  });
+  return tog;
+}
+
+// setSessionEngine(sessionId, engine, tog): flip a LIVE session to the other
+// engine via /api/rnd/term_set_engine (relaunch in the same worktree). On success
+// update the MANAGED record + the toggle's on-state; on refusal (e.g. plan/build
+// is Claude-only) alert and leave the toggle unchanged.
+async function setSessionEngine(sessionId, engine, tog) {
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_set_engine', {session: sessionId, engine: engine});
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_set_engine', {session: sessionId, engine: engine});
+      data = await r.json();
+    }
+  } catch (e) { alert('[engine switch error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[engine switch refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  if (MANAGED[sessionId]) MANAGED[sessionId].backend = engine;
+  if (tog) {
+    var bs = tog.querySelectorAll('b');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].className = (bs[i].getAttribute('data-engine') === engine) ? 'on' : '';
+    }
+  }
+  // Re-sync the registry shortly (the relaunch mints a fresh PTY in the worktree).
+  setTimeout(repopulate, 600);
+}
+
+// _mountReadOnlyBody: a NON-live session has no PTY. Render a static read-only
+// area in the terminal host: a "session complete" note. (The summary block above
+// carries the full materials + doc links; clicking a doc opens the rendered file
+// in a new tab.) Kept deliberately simple — no transport, no input line.
+function _mountReadOnlyBody(sessionId, host, s) {
+  var note = (s.status === 'running')
+    ? 'Session is running in the background — no live terminal attached.'
+    : 'Session complete — see the summary and document links above.';
+  host.innerHTML = '<div class="ro-note">' + _esc(note) + '</div>';
 }
 
 // Per-session terminal-pane height (in-memory persistence across minimize /
@@ -3397,9 +2969,12 @@ var _panelHeights = {};
 // fetches are read-only; absent fields / roles are simply not rendered. The
 // terminal mounts regardless (the summary is advisory chrome).
 function _loadPanelSummary(sessionId, host) {
-  var s = MANAGED[sessionId];
-  if (!s || !host) return;
-  var lane = s.lane || '';
+  if (!host) return;
+  // The lane comes from the MANAGED record for a live session, else from the
+  // page tile (historical/discovered) so the summary/doc-roles fetch keys on the
+  // right (pid, lane, session).
+  var s = MANAGED[sessionId] || _synthSessionRecord(sessionId);
+  var lane = (s && s.lane) || '';
   // session_id here is the MANAGED (live-terminal) id; its lane is the trio lane
   // (research/plan/build). The summary/doc-roles endpoints key on (pid, lane,
   // session). A live terminal session may have no cached trio-session summary

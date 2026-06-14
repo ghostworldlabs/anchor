@@ -80,11 +80,13 @@ def test_running_session_tile_carries_green_light(gui, tmp_path):
                      extra={"status": jr.STATUS_RUNNING})
     # Force the live-status join: the job record reports RUNNING.
     html = gui.render_project_window_html(pid)
-    # The lane tile + a status light element are present.
-    assert "class='lane-tile'" in html
-    # The recent plan session tile carries SOME light + the openPanel hook.
-    assert "data-light=" in html
-    assert "<span class='lt " in html
+    # v4.1 cockpit-render: the lane's most-recent session is a Paradigm-2 .tile
+    # carrying the legacy lane-tile alias + a status light element.
+    assert "tile lane-tile" in html
+    # The recent plan session tile carries the GREEN light (running bucket) + the
+    # openPanel hook (a non-discovered RUNNING effort → green).
+    assert "data-light=\"green\"" in html
+    assert "<span class='lt green" in html
     assert "laneTileClick(event," in html
     assert "openPanel(" in html
 
@@ -183,12 +185,15 @@ def test_no_floating_window_markup_remains(gui, tmp_path):
 
 def test_cockpit_render_no_leaked_braces(gui, tmp_path):
     """The Paradigm-2 CSS/JS (plain + RAW string literals) must not leak doubled
-    ``{{``/``}}`` into the served HTML; the v2 console drawer stays intact."""
+    ``{{``/``}}`` into the served HTML. v4.1: the old v2 console drawer
+    (openTerminal / launchLane) was REMOVED — the inline panel stack is the only
+    terminal surface — so we assert the seeded panel launch path instead."""
     _, pid = _mkproject(gui, tmp_path)
     html = gui.render_project_window_html(pid)
     assert "{{" not in html
     assert "}}" not in html
-    # The seeded launch path + the v2 console drawer remain alongside the panels.
+    # The seeded launch path is the live affordance; the v2 console drawer is gone.
     assert "function newTermSession" in html
-    assert "function openTerminal" in html
-    assert "function launchLane" in html
+    assert "function openPanel" in html
+    assert "function openTerminal" not in html
+    assert "function launchLane" not in html

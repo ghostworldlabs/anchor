@@ -97,11 +97,19 @@ def test_register_populates_tile_and_kanban(server, tmp_path):
     code, home = _get_text(base + "/")
     assert "imported" in home
 
-    # Project window Kanban is non-empty (discovered cards present).
+    # Project window lane board is non-empty: the 3 discovered artifacts adopted
+    # (build/planning/research) render as 3 "imported" Paradigm-2 tiles (grey
+    # light, no run metrics). v4.1 cockpit-render: the per-card data-discovered
+    # hook moved off the tile; a discovered session's tile shows the "imported"
+    # state with a grey status light.
     code, win = _get_text(base + f"/project/{pid}")
-    assert 'data-discovered="1"' in win
-    # 3 discovered artifacts adopted (build/planning/research).
-    assert win.count('data-discovered="1"') == 3
+    assert "imported" in win
+    # One imported (grey) tile per discovered lane (3 total).
+    import re as _re
+    grey_tiles = _re.findall(
+        r"<div class='tile lane-tile[^']*' data-session=\"[^\"]+\" "
+        r"data-lane=\"[^\"]+\" data-light=\"grey\"", win)
+    assert len(grey_tiles) == 3, grey_tiles
     # Anchor.md was written at the folder root.
     assert (folder / "Anchor.md").exists()
 

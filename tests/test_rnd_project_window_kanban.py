@@ -134,15 +134,20 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
 
     html = gui.render_project_window_html(pid)
 
-    # The 4 Kanban columns.
-    assert "class='kan'" in html
+    # v4.1 cockpit-render: the board is the Paradigm-2 lane grid (.p2lanes / 5
+    # .p2col columns), replacing the old .kan/.col board.
+    assert "class='p2lanes'" in html
+    assert html.count("class='p2col'") == 5
     for label in ("Research", "Planning", "Build", "Deliverables"):
         assert label in html
-    # Version labels by recency (research has 2 efforts -> v2 newest, v1 oldest).
+    # Version labels by recency (research has 2 sessions -> v2 newest, v1 oldest),
+    # now shown in the tile's .lane row.
     assert ">v2<" in html
     assert ">v1<" in html
-    # Effort cards.
-    assert "class='effort'" in html
+    # Genuine Paradigm-2 tiles (with the legacy lane-tile alias) — NOT effort cards.
+    assert "tile lane-tile" in html
+    assert "class='effort'" not in html
+    assert "class='kan'" not in html
     # Per-lane "New run" affordances. v4 Wave 1: these launch the SEEDED ConPTY
     # path (newTermSession → term_start → terminal_session.start_session), NOT
     # the v2 unseeded REPL (openTerminal / start_terminal) that caused the
@@ -152,18 +157,24 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     assert "newTermSession('build')" in html
     assert "New research run" in html
     # Real xterm.js terminal: the vendored library + stylesheet are included and
-    # the window still mounts through the unchanged window.AnchorTerm.mount API.
+    # the inline panel mounts xterm directly (new window.Terminal). v4.1: the v2
+    # anchor-term REPL adapter is no longer used by the cockpit.
     assert "/vendor/xterm/xterm.js" in html
     assert "/vendor/xterm/xterm.css" in html
-    assert "anchor-term.js" in html
-    assert "window.AnchorTerm.mount" in html
-    # Multi-session console (session tabs + attached log + Ask + Stop).
-    assert "id='ctabs'" in html
-    assert "id='laneLog'" in html
-    assert "id='laneGate'" in html
-    assert "stopAttached(" in html
-    assert "attachSession(" in html
-    assert "SESSIONS" in html
+    assert "new window.Terminal(" in html
+    assert "anchor-term.js" not in html
+    # v4.1 cockpit: the multi-session CONSOLE DRAWER was removed. The terminal
+    # now lives ONLY inside an expanded inline panel (openPanel), and a live tile
+    # opens it via laneTileClick → openPanel. Assert the panel surface + that the
+    # old drawer ids/functions are gone.
+    assert "id='panelStack'" in html
+    assert "function openPanel" in html
+    assert "laneTileClick(" in html
+    assert "id='ctabs'" not in html
+    assert "id='laneLog'" not in html
+    assert "id='laneGate'" not in html
+    assert "stopAttached(" not in html
+    assert "function attachSession" not in html
     # Lifecycle header.
     assert "rndSetPriority(" in html
     assert "rndArchive(" in html
@@ -229,19 +240,34 @@ def test_xterm_static_route_served_over_http_and_traversal_safe(server):
 
 
 def test_window_done_effort_links_report_viewer(gui_env, tmp_path):
-    """A DONE effort card carries the /report/<pid>/<lane>/<job_id> link shape."""
+    """A DONE run session resolves to the /report/<pid>/<lane>/<job_id> link via
+    the summarizer member-links (surfaced in the opened panel's split summary).
+
+    v4.1 cockpit-render: the lane tile no longer carries the /report link inline;
+    the report viewer is reached from the panel's doc links (member_links /
+    session_doc_roles, which reuse the existing /report route). Same intent — a
+    done session links to its report viewer."""
     gui = gui_env
     import effort_history as eh
+    import sessions as sess
+    import summarizer as summ
     folder = tmp_path / "Done"
     proj = _mkproject(folder, "DoneProj")
     pid = proj["id"]
     fp = str(folder)
     eh.record_effort(fp, pid, "research", "donejob", skill="researchPrime",
                      extra={"status": "done"})
+    # The done RUN session resolves to a /report/<pid>/<lane>/<job_id> doc link
+    # (the panel's split summary shows these role-tagged links).
+    sess_list = sess.list_sessions(fp, pid, "research")
+    assert sess_list, "no research session recorded"
+    sid = sess_list[0]["session_id"]
+    roles = summ.session_doc_roles(pid, "research", sid, folder_path=fp)
+    hrefs = [r["href"] for r in roles.values()]
+    assert any(h == f"/report/{pid}/research/donejob" for h in hrefs), hrefs
+    # The JS helper that opens a report in a new tab is still present.
     html = gui.render_project_window_html(pid)
-    # Report-link shape for a done effort (the report viewer route).
-    assert f"/report/{pid}/research/donejob" in html
-    assert "openReport(" in html
+    assert "function openReport" in html
 
 
 def test_window_xss_escapes_project_name(gui_env, tmp_path):
@@ -257,31 +283,33 @@ def test_window_xss_escapes_project_name(gui_env, tmp_path):
 
 # ── gate option buttons must be functional (no HTML-attribute breakout) ──────
 
-def test_gate_buttons_use_safe_delegation_not_broken_inline_onclick(gui_env):
-    """Regression: the gate option buttons must be wired via a delegated
-    listener + data attribute, NOT an inline onclick built by string-concatenating
-    JSON.stringify(label) into a double-quoted attribute. That old pattern
-    (`onclick="answerGate(' + JSON.stringify(label) + ')"`) renders as
-    `onclick="answerGate("Approve")"`, where the inner double quote (always added
-    by JSON.stringify) terminates the attribute early — so clicking a gate option
-    button never called answerGate(label) and the spec's primary one-click gate
-    affordance was dead. We assert the served window JS no longer builds an inline
-    onclick from JSON.stringify, and DOES carry the safe delegation hooks."""
+def test_gate_answer_happens_in_panel_terminal_no_broken_onclick(gui_env):
+    """v4.1: the gate is answered INSIDE the panel terminal (the live ConPTY
+    session — an AskUserQuestion is presented + answered over the PTY/xterm), so
+    the old console-drawer one-click gate buttons (answerGate + the
+    data-gate-opt delegated listener) were removed. We assert (a) the panel
+    terminal transport that carries the answer is wired, and (b) the served window
+    JS never rebuilds the broken inline-onclick gate pattern
+    (`onclick="answerGate(' + JSON.stringify(label) + ')"`) that this test
+    originally guarded against."""
     gui = gui_env
     js = gui._PROJECT_WINDOW_JS
-    # The safe pattern is present: label carried in a data attribute + a single
-    # delegated click handler reading it.
-    assert "setAttribute('data-gate-opt', label)" in js
-    assert "getAttribute('data-gate-opt')" in js
-    assert "_gateDelegated" in js
-    # No NON-COMMENT line builds an inline onclick from JSON.stringify (the old bug).
+    # (a) The panel terminal mounts xterm over the v3 transport — that is where a
+    #     gate prompt is now shown and answered (keystrokes → term_input2).
+    assert "term_input2" in js
+    assert "new window.Terminal(" in js
+    # The dead console-drawer gate machinery is gone.
+    assert "data-gate-opt" not in js
+    assert "_gateDelegated" not in js
+    assert "function answerGate" not in js
+    # (b) No NON-COMMENT line builds an inline onclick from JSON.stringify, and the
+    #     broken literal substring never appears anywhere as code.
     for i, line in enumerate(js.splitlines(), 1):
         s = line.strip()
         if s.startswith("//"):
             continue
         assert not ("onclick" in line and "JSON.stringify" in line), (
             f"line {i} rebuilds the broken inline-onclick gate pattern: {line!r}")
-    # And the broken literal substring never appears anywhere as code.
     assert 'onclick="answerGate(' not in js
 
 
@@ -410,15 +438,16 @@ def test_two_sessions_switchable_and_answer_routes_to_job(server, tmp_path):
         jidB, GATE.read_text(encoding="utf-8").splitlines())
     assert prompt is not None
 
-    # The served window exposes BOTH jobs as live, switchable sessions.
+    # The served window exposes BOTH jobs as live tiles (each carries its job_id +
+    # live flag). v4.1: the console drawer is gone — a live tile opens its inline
+    # panel terminal via laneTileClick → openPanel — but the per-job answer-gate
+    # routing below is unchanged and is the real subject of this test.
     status, html = _get_text(base + f"/project/{pid}")
     assert status == 200
     assert f'data-job-id="{jidA}"' in html
     assert f'data-job-id="{jidB}"' in html
-    # Both are adopted as sessions (live cards) the console can attach to.
     assert html.count('data-live="1"') >= 2
-    assert "attachSession(" in html
-    assert "id='ctabs'" in html
+    assert "function openPanel" in html
 
     # An answer routes to the SPECIFIC job_id (job B's gate), not job A.
     code, ans = _post(base + "/api/rnd/answer_gate",
