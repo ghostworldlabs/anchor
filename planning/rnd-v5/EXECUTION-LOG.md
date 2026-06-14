@@ -77,3 +77,39 @@
   (honest placeholders for the imported case; `ro-sec`=3).
 - **COMMIT (scoped):** `6b781aa` — summarizer.py + anchor_gui.py +
   test_session_continue.py only (no runtime churn).
+
+## Wave 3 — Better project summaries (objective/purpose) + folded dashboard reflection — GREEN (2026-06-14)
+
+> Scope note: this wave ALSO delivers a user request raised mid-build — "project-
+> window changes should reflect on the main dashboard timely" — folded in here
+> because it touches the same dashboard-row/summary render path.
+
+- **EXECUTE** (fresh sub-agent): PART 1 — `summarizer.project_extraction_seed` adds
+  per-lane activity; `_project_seed_prompt` rewritten to ask for a grounded 1-2
+  sentence OBJECTIVE; `render_project_markdown` → prose `## Objective`; project
+  header renders the cached `Objective:` line; render path is cache-only (proven by
+  stub-counter). PART 2 (folded) — read-only `GET /api/rnd/projects_html` (reuses
+  `render_projects_view_html`), `#rndProjectsRows` container, `rndRowsRefresh()`
+  poll(~15s)+visibilitychange+showView('rnd') in-place swap (diff-before-swap,
+  hidden-view guard, failure-tolerant, no page reload).
+- **GATE (orchestrator-run, stub PTY):** 670 passed, 1 skipped (baseline 660+1, +10).
+- **REVIEW (adversarial, prompted to refute): SHIP — 0 BLOCKER, 1 MINOR (F1).** All
+  7 points CONFIRMED-OK: cache-only render with a NON-VACUOUS counter proof (counter
+  increments on a real run, stays put across renders); R3 grounding intact (per-lane
+  activity is deterministic, ungrounded claims still dropped, honest "No summary yet",
+  failed run no-poison); generate-once/force; the dashboard refresh swaps in place
+  with real guards; UI gate is a REAL Playwright in-place-refresh test (NOT grep);
+  stdlib-only + distro scan clean; never :8777. **F1 (MINOR):** the 15s poll
+  re-rendered the default fragment, reverting a user's 30d rollup toggle + closing an
+  open kebab.
+- **FIX (orchestrator):** `rndRowsRefresh` now skips the swap while a kebab is open
+  and preserves the active rollup window across the swap (capture before, re-apply
+  after). New regression test `test_refresh_preserves_rollup_toggle_and_open_kebab`
+  (scoped to `#rndProjectsRows` — the toggle markup also appears in a hidden view).
+- **RE-GATE (orchestrator-run, stub PTY):** 671 passed, 1 skipped. UI verified:
+  rendered-DOM (`#rndProjectsRows` + JS present), real Playwright in-place refresh +
+  toggle/kebab preservation, and an orchestrator screenshot of the project header
+  showing the grounded objective line ("…energy-aware HVAC scheduler that pre-cools
+  before peak prices").
+- **COMMIT (scoped):** `3bcac71` — summarizer.py + anchor_gui.py +
+  test_project_summary_v5.py only (no runtime churn).
