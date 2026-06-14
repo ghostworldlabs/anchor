@@ -3096,11 +3096,17 @@ function _fitPanelTerminal(sessionId) {
   try {
     if (p.fit && p.fit.fit) {
       p.fit.fit();              // triggers term.onResize → term_resize
-    } else if (p.term.resize && p.term.cols) {
-      // No fit addon: keep current cols, recompute rows from host height.
+    } else if (p.term.resize) {
+      // No fit addon: compute BOTH cols and rows from the host so the terminal
+      // fills the FULL panel width (xterm defaults to 80 cols → only the left
+      // ~third of a wide panel) and reflows on vertical resize. ~7.2px/char,
+      // ~17px/row at 12px monospace.
       var host = p.body;
-      var rows = Math.max(4, Math.floor((host.clientHeight || 90) / 17));
-      p.term.resize(p.term.cols, rows);   // triggers onResize → term_resize
+      var hw = (host && host.clientWidth) || 600;
+      var hh = (host && host.clientHeight) || 90;
+      var cols = Math.max(20, Math.floor((hw - 8) / 7.2));
+      var rows = Math.max(4, Math.floor((hh - 4) / 17));
+      p.term.resize(cols, rows);   // triggers onResize → term_resize
     }
   } catch (e) {}
 }
@@ -3171,16 +3177,48 @@ function _mountTerminal(sessionId, body) {
     return;
   }
   var _termTheme = {background: '#0c0e14'};
-  var term = new window.Terminal({convertEol: true, fontSize: 12, theme: _termTheme});
+  var term = new window.Terminal({convertEol: true, fontSize: 12,
+                                  theme: _termTheme, scrollback: 5000});
   term.open(body);
   w.term = term;
+  w.body = body;
   var tok = _anchorToken();
   var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
+
+  // Fit to the host NOW + shortly after layout settles (xterm starts at 80 cols).
+  _fitPanelTerminal(sessionId);
+  setTimeout(function () { _fitPanelTerminal(sessionId); }, 60);
 
   // Outbound user keystrokes → term_input2 (works for BOTH transports; the WS
   // also accepts frames, but routing input through the POST keeps one path).
   term.onData(function (d) {
     _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
+  });
+  // Keyboard paste: xterm emits Ctrl+V as the control byte \x16, so paste never
+  // happened (only right-click, which uses the browser's native paste event).
+  // Intercept Ctrl/Cmd+V → read the clipboard → term.paste (honors bracketed
+  // paste so multi-line prompts don't run line-by-line). Ctrl+Shift+C copies a
+  // selection. Everything else passes through unchanged.
+  term.attachCustomKeyEventHandler(function (e) {
+    if (e.type !== 'keydown') return true;
+    var mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.altKey && (e.key === 'v' || e.key === 'V')) {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (t) {
+          if (t) { try { term.paste(t); } catch (err) {
+            _postJson('/api/rnd/term_input2', {session: sessionId, data: t}); } }
+        }).catch(function () {});
+      }
+      return false;  // suppress the \x16 control byte
+    }
+    if (mod && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+      var sel = term.getSelection && term.getSelection();
+      if (sel && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sel).catch(function () {});
+        return false;
+      }
+    }
+    return true;
   });
   // Resize → term_resize (best-effort, token-aware).
   term.onResize(function (sz) {
@@ -6048,13 +6086,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             poll_interval = 0.25
         try:
-            max_ticks = int(q.get("max_ticks", ["240"])[0] or 240)
+            # High backstop (the loop ends on a terminal session or client
+            # disconnect); the old 240/5000 ceiling froze the SSE fallback after
+            # ~60s. Tests pass an explicit small max_ticks.
+            max_ticks = int(q.get("max_ticks", ["4000000"])[0] or 4000000)
         except (TypeError, ValueError):
-            max_ticks = 240
+            max_ticks = 4000000
         # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
-        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        # max_ticks in [1, 4_000_000] (high backstop — loop ends on close/done).
         poll_interval = min(1.0, max(0.01, poll_interval))
-        max_ticks = min(5000, max(1, max_ticks))
+        max_ticks = min(4000000, max(1, max_ticks))
         try:
             heartbeat_every = int(q.get("hb", ["8"])[0] or 8)
         except (TypeError, ValueError):
@@ -6153,13 +6194,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             poll_interval = 0.05
         try:
-            max_ticks = int(q.get("max_ticks", ["1200"])[0] or 1200)
+            # Default is effectively "for the life of the connection": the loop
+            # already breaks on client close (recv b"") or a dead session, so this
+            # is only a runaway backstop. The old 1200/5000 ceiling (~60-250s) was
+            # the FREEZE bug — a multi-minute session lost its stream and went
+            # silent. Tests pass an explicit small max_ticks via the query knob.
+            max_ticks = int(q.get("max_ticks", ["4000000"])[0] or 4000000)
         except (TypeError, ValueError):
-            max_ticks = 1200
+            max_ticks = 4000000
         # Clamp client-supplied knobs (self-DoS guard): poll in [0.01, 1.0]s,
-        # max_ticks in [1, 5000] — keeps tiny test values valid.
+        # max_ticks in [1, 4_000_000] (a high backstop — the loop ends on close).
         poll_interval = min(1.0, max(0.01, poll_interval))
-        max_ticks = min(5000, max(1, max_ticks))
+        max_ticks = min(4000000, max(1, max_ticks))
 
         # ── 101 handshake ────────────────────────────────────────────────
         accept = ws_accept_key(key)
