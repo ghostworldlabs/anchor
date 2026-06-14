@@ -1,25 +1,26 @@
 {
-  "project": "anchor-rnd-surface-v4",
+  "project": "anchor-rnd-surface-v5",
   "docs": {
-    "description": "planning/rnd-v4/MASTER-PLAN.md",
-    "plan": "planning/rnd-v4/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/rnd-v4/EXECUTION-LOG.md"
+    "description": "planning/rnd-v5/MASTER-PLAN.md",
+    "plan": "planning/rnd-v5/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/rnd-v5/EXECUTION-LOG.md"
   },
   "test_command": "python -m pytest -v",
-  "notes": "Build cwd = repo root C:\\dev\\Anchor. v4 = 'Project Cockpit' — re-lays-out the project window (Paradigm 2 inline expanding panels), fixes the terminal to ONE substrate (v3 ConPTY only; the v2 stream-json REPL rnd_terminal.py is unwired from the cockpit, not deleted), and repairs dashboard surfaces (grass idea board, type-aware deliverable launch, drop the directory row line, restore cost/tokens/time rollup, Option B branding). Builds on v3 (rnd-v3): terminal_session.py, pty_manager.py, session_registry.py, worktrees.py, summarizer.py, deliverables.py, preview_server.py, handoff.py, vendor/xterm, vendor/brand. Wave 1 fixes the repeating-prompt bug (skill auto-load-once + greet-once; seed never re-sent). All model/PTY interactions verified via tests/fake_claude.py + stub PTY backend (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY in the gate; any spawned preview/service binds an OS-assigned port HARD-guarded != 8777 with an isolated temp ANCHOR_DATA_DIR. pywinpty is the ONLY native-dep waiver (lazy, pty_manager.py only); distro.py import scan must stay green. anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string.",
+  "notes": "Build cwd = repo root C:\\dev\\Anchor. v5 = 'Durable Work' — builds on the merged v4.1 'Project Cockpit'. 6 waves: (1) run lifecycle close-to-tile vs deliberate hard-kill; (2) past-session real summary (skill+prompts+actions) + continue-in-live-session; (3) better project summaries (objective/purpose); (4) deliverable per Foreman build (resolve+backfill+list in lane AND build panel, honest when none); (5) Grass Catcher B+C hybrid workbench (filter tabs + two-pane + develop terminal + versioned/pullable refinements + promote links + search), per _mockups/grass_catcher_refined.html; (6) CLI mirror + check_rnd_v5_surface healthcheck + distro scan + CLAUDE.md. MANDATORY UI verification per the v4 lesson: every UI wave must pass rendered-DOM (positive+negative) + a real Playwright/Chromium interaction test + an orchestrator screenshot-vs-mockup + user sign-off before merge; a string-grep gate is an automatic HALT. Playwright is a DEV-ONLY test dep (pytest.importorskip), NEVER in product code; distro import scan must stay green. All model/PTY interactions via tests/fake_claude.py + stub PTY (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY/:8777/real data in the gate; spawned previews on an OS-assigned port HARD-guarded != 8777 + isolated temp ANCHOR_DATA_DIR. pywinpty is the only native-dep waiver (lazy, pty_manager.py only). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string.",
+  "prior_config_rnd_v4": {
+    "project": "anchor-rnd-surface-v4",
+    "docs": {
+      "description": "planning/rnd-v4/MASTER-PLAN.md",
+      "plan": "planning/rnd-v4/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v4/EXECUTION-LOG.md"
+    }
+  },
   "prior_config_rnd_v3": {
     "project": "anchor-rnd-surface-v3",
     "docs": {
       "description": "planning/rnd-v3/MASTER-PLAN.md",
       "plan": "planning/rnd-v3/IMPLEMENTATION-PLAN.md",
       "execution_log": "planning/rnd-v3/EXECUTION-LOG.md"
-    }
-  },
-  "prior_config_rnd_v2": {
-    "docs": {
-      "description": "planning/rnd-v2/MASTER-PLAN.md",
-      "plan": "planning/rnd-v2/IMPLEMENTATION-PLAN.md",
-      "execution_log": "planning/rnd-v2/EXECUTION-LOG.md"
     }
   }
 }
