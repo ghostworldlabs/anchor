@@ -2266,7 +2266,10 @@ def render_project_window_html(project_id: str) -> str:
         # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
         "</div>"
-        f"<p style='color:#8a90a2;font-size:12px'>instance "
+        # Visible build/version stamp so new-vs-cached is unmistakable at a glance.
+        f"<p style='color:#8a90a2;font-size:12px'>"
+        f"<b style='color:#22c55e'>Project Cockpit</b> (v4.1 · Paradigm 2) "
+        f"&bull; build {html_lib.escape(BUILD_ID)} &bull; instance "
         f"{html_lib.escape(inst['instance_id'])}</p>"
         # Vendored REAL xterm.js (defines window.Terminal) — the cockpit panel JS
         # instantiates an xterm.js Terminal directly over the v3 WS/SSE transport.
