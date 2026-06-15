@@ -2432,6 +2432,11 @@ def render_project_window_html(project_id: str) -> str:
         # session keeps running); the X kills behind a confirm. Wave 5 fills the
         # panel body (split summary + xterm terminal); this wave ships the shell.
         ".panel-stack{display:flex;flex-direction:column}"
+        # v6 Wave 6: transient note when killing a planning session auto-opens a
+        # linked build session. Advisory chrome — fades out after a few seconds.
+        ".autobuild-note{margin:6px 0;padding:6px 10px;border-radius:6px;"
+        "background:#0f291b;border:1px solid #22c55e;color:#86efac;"
+        "font-size:12px;font-weight:600}"
         ".panel{border-top:1px solid var(--border);background:var(--surface);"
         "position:relative}"
         ".panel.minimized .pin{display:none}"
@@ -4374,6 +4379,7 @@ async function killPanel(sessionId) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
   if (!confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
+  var autoBuild = null;
   try {
     var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
     var data = await r.json();
@@ -4383,6 +4389,9 @@ async function killPanel(sessionId) {
     }
     // A 404 unknown-session (historical tile with no live PTY) is NOT an error
     // for kill — there is simply no process to reap; we still drop the tile.
+    // v6 Wave 6: killing a PLANNING session that produced a real plan set
+    // auto-opens a linked BUILD session (server-side). Surface its new tile.
+    if (data && data.auto_build) autoBuild = data.auto_build;
   } catch (e) { alert('[kill error] ' + e.message); }
   _KILLED[sessionId] = 1;       // v6 Wave 4: suppress this id from future repopulate
   _closePanel(sessionId);
@@ -4390,7 +4399,48 @@ async function killPanel(sessionId) {
   delete FINISHED[sessionId];   // v6 Wave 4: also evict a finished tile if killed
   _removeSessionTile(sessionId);
   renderSessionBar();
+  // v6 Wave 6: mint the auto-opened build tile (new MANAGED entry + bar) and
+  // open its panel, with a tiny "auto-opened from this plan" note.
+  if (autoBuild && autoBuild.session_id) {
+    _addAutoBuildTile(autoBuild);
+  }
   setTimeout(repopulate, 400);
+}
+
+// _addAutoBuildTile(rec): v6 Wave 6 — register the server-started auto-advance
+// build session as a LIVE managed tile (same shape advanceSession uses), render
+// the bar, open its panel, and flash a tiny "→ auto-opened Build from this plan"
+// note so the user sees the planning→build hand-off happen.
+function _addAutoBuildTile(rec) {
+  var sid = rec.session_id;
+  var lane = rec.lane || 'build';
+  MANAGED[sid] = {
+    session_id: sid, lane: lane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || 'auto · from plan',
+    chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || '',
+    auto_from_plan: true,
+    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  _flashAutoBuildNote(rec);
+}
+
+// _flashAutoBuildNote(rec): a small, transient banner above the panel stack.
+function _flashAutoBuildNote(rec) {
+  try {
+    var host = document.getElementById('panelStack') || document.body;
+    var note = document.createElement('div');
+    note.className = 'autobuild-note';
+    note.setAttribute('data-session', rec.session_id);
+    var which = 'Build ' + (rec.session_id || '').slice(0, 6);
+    note.textContent = '→ auto-opened ' + which + ' from this plan';
+    if (host.firstChild) host.insertBefore(note, host.firstChild);
+    else host.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 6000);
+  } catch (e) { /* the tile already landed; the note is advisory */ }
 }
 
 // Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
@@ -8783,8 +8833,33 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "error": f"unknown session: {session}",
                                  "reason": "unknown-session"}, 404)
             else:
+                # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
+                # DONE transition that may auto-advance to build. Capture the plan
+                # set BEFORE kill() reaps the planning worktree (prime-before-reap),
+                # then kill (sets STATUS_DONE), then auto-advance (idempotent on
+                # parent_session_id; no plan ⇒ no advance). Best-effort: an
+                # auto-advance failure never breaks the kill.
+                rec = _termsess.get_session(session)
+                pid_for_advance = rec.get("project_id") if rec else None
+                planning_kill = (
+                    rec is not None
+                    and rec.get("lane") in _termsess._PLANNING_LANES
+                    and pid_for_advance)
+                pre_plan_set = None
+                if planning_kill:
+                    pre_plan_set = _termsess.capture_plan_set(
+                        pid_for_advance, session)
                 out = _termsess.kill(session)
-                self._send_json({"ok": True, "result": out})
+                auto_build = None
+                if planning_kill:
+                    try:
+                        auto_build = _termsess.auto_advance_planning_to_build(
+                            pid_for_advance, session,
+                            plan_set=pre_plan_set)
+                    except Exception:
+                        auto_build = None
+                self._send_json({"ok": True, "result": out,
+                                 "auto_build": auto_build})
 
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).

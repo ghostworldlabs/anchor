@@ -150,6 +150,41 @@ continue/cockpit guards GREEN. ⚠️ **Pending John's UI sign-off before merge.
 scoped.
 
 <!-- WAVE 5 done -->
-<!-- WAVE 6 — Auto advance planning→build (gated on a real plan) -->
+### Wave 6 — Auto advance planning→build (gated on a real plan) — GREEN (2026-06-14)
+
+**Built (backend + UI):** `terminal_session.auto_advance_planning_to_build(pid,
+planning_session_id, planning_worktree_path=None, plan_set=None)` — no-op unless the
+session is a planning lane AND terminal/DONE; idempotent (no-op if a build child with
+`parent_session_id==planning` exists); discovers the plan set via
+`handoff.discover_recent_plan_set(source_session_id=…)`; on a hit, starts a linked build
+(`start_session(lane='build', parent_session_id=…)`), `prime_worktree` (HANDOFF.md →
+plan docs), `record_stage_link('plan->build')`; None when no plan set. Plus
+`capture_plan_set` (pre-capture before reap) + `reconcile_and_advance`. Import graph
+stays acyclic (terminal_session→handoff one-way; session_registry imports neither).
+Trigger wired in `POST /api/rnd/term_kill` (planning lane → capture plan set BEFORE
+kill reaps → kill → advance → `auto_build` in the response); front-end `_addAutoBuildTile`
++ `_flashAutoBuildNote` from `killPanel`. Keep-alive `closePanel` POSTs nothing → never
+advances.
+
+**Orchestrator verification:** 12 backend+HTTP+DOM+Playwright tests — kill-with-plan →
+exactly one primed linked build (parent + inherited chain + HANDOFF.md references the
+REAL plan docs + stage edge); idempotent on re-advance/reconcile; no-plan→no-build;
+no-upstream-research root (chain_id==planning id); not-DONE/non-planning→no-advance;
+close→no-advance (negative). **Screenshot reviewed** — `_devtest/wave6_autobuild.png`
+shows the green "→ auto-opened Build … from this plan" banner, a new `auto · from plan`
+build tile, the `P planning → auto · from plan` breadcrumb, and the Foreman seed citing
+HANDOFF.md. Matches mockup Step 3 intent (auto leg).
+
+**Known limitation (flagged for John):** the `reconcile_and_advance` fallback is
+implemented + tested but NOT auto-invoked by the running server (there's no cockpit
+reconcile call site today; reconcile runs only via healthcheck/CLI). The PRIMARY trigger
+— hard-kill ("done with planning") — IS fully wired. Wiring a startup/load reconcile is
+a separate decision (left out to avoid a behavior change).
+
+**Gate:** **778 passed, 1 skipped** (+12). `tests/test_auto_advance_plan_to_build.py`
+(12) + run-lifecycle/session-chain guards GREEN. ⚠️ **Pending John's UI sign-off before
+merge.** Commit: scoped.
+
+<!-- WAVE 6 done -->
 <!-- WAVE 7 — Main dashboard reflects project activity -->
 <!-- WAVE 8 — CLI mirror + healthcheck v6 + distro + docs (PROJECT DONE) -->
