@@ -60,6 +60,34 @@ until a summary lands.
 **Gate:** **840 passed, 1 skipped** (+9). Backend-only. Commit: scoped.
 
 <!-- WAVE 2 done -->
-<!-- WAVE 3 — Live sessions integrated into the lane columns -->
+### Wave 3 — Live sessions integrated into the lane columns — GREEN (2026-06-15)
+
+**Built (UI):** Bridged live `session_registry` sessions into the board lane columns in
+`_gather_project_sessions` — `_registry_session_view` (SAFE: session_id/lane/status/label/
+created_at only) + `_merge_registry_sessions` (dedupe by session_id via `_strip_session_prefix`
+collapsing `run::<sid>`→`sid`; newest-first; on a hit keep the richer effort view but adopt
+the live status; on a miss append a synthetic view). Lane map: research/plan(planning alias)/
+build/deliverables; **general + grass excluded** from trio columns. Added a `.blurb` line to
+`_render_lane_tile` — `summarizer.session_blurb` (cache read) for finished sessions, else a
+short `tile_blurb` of the intent for running ones; honest empty. Top strip unchanged. Board
+render stays cache/registry-only (no model call).
+
+**Orchestrator verification:** `tests/test_board_live_integration_v7.py` — DOM (live session
+→ one green tile in its column; planning alias; general excluded [negative vs v6]; dedupe one
+tile per id; newest prominent + older under `prev-sessions`; clean short blurb) + no-model-call
+spy + Playwright (start plan session → tile in `#cards_plan` + chip in `#sessionBar`; finish +
+newer + reload → stays grey under expander). **Screenshot reviewed** — `_devtest/wave3_board.png`:
+"PLAN / session / running · now" tile in the Planning column + "● plan 1" strip chip. Matches
+mockup #2.
+
+**Honest nuance (flagged for John):** the board is server-rendered, so a started session's
+lane-column tile appears on the next render (reload/rescan); the **top strip is the instant
+view**. A small follow-up (a board-fragment refresh endpoint called from `newTermSession`)
+could make the lane-column tile appear instantly without a reload — offered, not built.
+
+**Gate:** **848 passed, 1 skipped** (+8). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 3 done -->
 <!-- WAVE 4 — "Open terminal" general session button -->
 <!-- WAVE 5 — CLI mirror + healthcheck v7 + distro + docs (PROJECT DONE) -->

@@ -1742,6 +1742,175 @@ def _render_effort_card(ev, store_lane, project_id):
     return f"<div class='{cls}'{data}>{inner}</div>"
 
 
+# v7 Wave 3 — bridge LIVE managed sessions (session_registry) into the board.
+#
+# The board's trio columns are keyed by the trio-lane values in _KANBAN_COLUMNS
+# (research / plan / build / deliverables / grass). A registry record's ``lane``
+# may use the store form (``planning``) or the trio form (``plan``); both map to
+# the ``plan`` board column. ``general`` (Wave 4) + ``grass`` are NOT trio board
+# columns and are EXCLUDED here.
+_REGISTRY_LANE_TO_COLUMN = {
+    "research": "research",
+    "plan": "plan",
+    "planning": "plan",
+    "build": "build",
+    "deliverables": "deliverables",
+}
+
+#: session_registry status → the locked light-color bucket (mirrors
+#: :func:`_session_light_class`; running=green, needs-attention=amber,
+#: done=amber, failed=red, idle/unknown=grey).
+_REG_STATUS_LIGHT = {
+    _sessreg.STATUS_RUNNING: "green",
+    _sessreg.STATUS_NEEDS_ATTENTION: "amber",
+    _sessreg.STATUS_DONE: "amber",
+    _sessreg.STATUS_FAILED: "red",
+    _sessreg.STATUS_IDLE: "grey",
+}
+
+
+def _registry_session_view(rec):
+    """Build a single board ``effort_view``-shaped dict from a LIVE managed
+    session record (``session_registry``), so a started session can render as a
+    lane tile BEFORE it has any effort-history rows (v7 Wave 3).
+
+    SAFE: reads only the projection-safe fields (session_id, lane, status,
+    label, created_at) — NEVER ``worktree_path`` / ``branch`` (those must not
+    leak into the page). The shape carries the same keys ``_render_lane_tile`` /
+    ``_session_state_text`` / ``_session_light_class`` read off a representative
+    effort view, plus the registry ``status`` and a ``from_registry`` marker so
+    the merge can keep the live status when deduping against an effort view.
+    """
+    status = (rec.get("status") or "").strip()
+    is_live = status == _sessreg.STATUS_RUNNING
+    needs_input = status == _sessreg.STATUS_NEEDS_ATTENTION
+    is_done = status in _sessreg.TERMINAL_STATUSES
+    if status == _sessreg.STATUS_RUNNING:
+        pill_cls, pill_lbl = "run", "running"
+    elif status == _sessreg.STATUS_NEEDS_ATTENTION:
+        pill_cls, pill_lbl = "input", "needs input"
+    elif status == _sessreg.STATUS_DONE:
+        pill_cls, pill_lbl = "done", "done"
+    elif status == _sessreg.STATUS_FAILED:
+        pill_cls, pill_lbl = "fail", "failed"
+    else:
+        pill_cls, pill_lbl = "", (status or "idle")
+    label = (rec.get("label") or "").strip()
+    return {
+        "job_id": "",
+        "trio_lane": _REGISTRY_LANE_TO_COLUMN.get(
+            (rec.get("lane") or "").strip(), ""),
+        "ver": "",
+        "status": status,
+        "pill_cls": pill_cls,
+        "pill_lbl": pill_lbl,
+        "is_live": is_live,
+        "needs_input": needs_input,
+        "is_done": is_done,
+        "age": _fmt_age(rec.get("created_at")),
+        "skill": "",
+        "sub": label,
+        "cost_usd": 0.0,
+        "discovered": False,
+        "artifact_path": "",
+        "title": label,
+        "kind": "",
+        # v7 Wave 3 merge markers (consumed only by _gather_project_sessions):
+        "from_registry": True,
+        "_reg_session_id": rec.get("session_id") or "",
+        "_reg_created_at": rec.get("created_at") or 0.0,
+        "_reg_status": status,
+        "_reg_light": _REG_STATUS_LIGHT.get(status, "grey"),
+    }
+
+
+def _strip_session_prefix(sid: str) -> str:
+    """Strip the effort session_id namespacing prefix (``run::`` / ``loose::`` /
+    ``discovered::`` …) to recover the bare id, for cross-form dedupe with a
+    managed registry session id (v7 Wave 3)."""
+    s = str(sid or "")
+    idx = s.find("::")
+    return s[idx + 2:] if idx >= 0 else s
+
+
+def _merge_registry_sessions(session_views, trio_lane, reg_by_column):
+    """Merge the LIVE managed sessions for ``trio_lane`` into the effort-derived
+    ``session_views`` (v7 Wave 3), deduped by session_id and ordered newest-first.
+
+    - A registry session whose id ALREADY appears as an effort session keeps the
+      richer effort view but adopts the LIVE registry status (so a just-started
+      run shows running even before its effort rows land).
+    - A registry session with no effort counterpart becomes a synthetic
+      single-member session_view.
+    - Ordered newest-first by created_at (registry ``created_at`` for synthetic
+      rows; the effort rep's already-newest order is preserved by sort-stability).
+
+    Returns the merged, newest-first list. ``general`` / ``grass`` never reach
+    here (not in ``_REGISTRY_LANE_TO_COLUMN`` values for the trio columns).
+    """
+    reg_rows = reg_by_column.get(trio_lane, [])
+    if not reg_rows:
+        return session_views
+    # Index existing effort session_views by id for dedupe + live-status adoption.
+    # An effort session derived from a run job is keyed ``run::<job_id>`` (and a
+    # defensive loose view ``loose::<job_id>``), while a managed registry session
+    # is keyed by the BARE session id — which equals that job_id when the session
+    # was adopted (terminal_session reuses the pty/session id as the job id). So
+    # we index BOTH the full key AND the prefix-stripped tail to dedupe across
+    # those two forms.
+    by_sid = {}
+    for sv in session_views:
+        sid = sv.get("session_id") or ""
+        by_sid.setdefault(sid, sv)
+        tail = _strip_session_prefix(sid)
+        if tail and tail != sid:
+            by_sid.setdefault(tail, sv)
+    merged = list(session_views)
+    # Stamp created_at onto each existing view for the newest-first sort (the
+    # rep member carries the effort age, not an epoch; fall back to 0 → sorts
+    # after timestamped registry rows of equal recency, which is fine).
+    order = {id(sv): i for i, sv in enumerate(merged)}
+    sort_ts = {id(sv): _sv_created_at(sv) for sv in merged}
+    for rv in reg_rows:
+        sid = rv.get("_reg_session_id") or ""
+        existing = by_sid.get(sid)
+        if existing is not None:
+            # DEDUPE: keep the richer effort view, adopt the live registry status
+            # onto its representative member so the tile light/state is current.
+            rep = (existing.get("members") or [None])[0]
+            if isinstance(rep, dict):
+                rep["is_live"] = rv["is_live"]
+                rep["needs_input"] = rv["needs_input"]
+                rep["is_done"] = rep.get("is_done") or rv["is_done"]
+                if rv["status"]:
+                    rep["status"] = rv["status"]
+                rep["pill_cls"] = rv["pill_cls"]
+                rep["pill_lbl"] = rv["pill_lbl"]
+            sort_ts[id(existing)] = max(
+                sort_ts.get(id(existing), 0.0), rv.get("_reg_created_at") or 0.0)
+            continue
+        sv = {"session_id": sid, "members": [rv]}
+        merged.append(sv)
+        by_sid[sid] = sv
+        order[id(sv)] = len(order)
+        sort_ts[id(sv)] = rv.get("_reg_created_at") or 0.0
+    # Newest-first by created_at; stable on ties (preserves original ordering).
+    merged.sort(key=lambda sv: (-(sort_ts.get(id(sv), 0.0)), order.get(id(sv), 0)))
+    return merged
+
+
+def _sv_created_at(sv):
+    """Best-effort epoch created_at for a session_view (for the merge sort).
+
+    A registry-sourced view carries ``_reg_created_at``; an effort view does not
+    carry an epoch on the rep (it carries a compact age), so it returns 0.0 and
+    relies on the stable secondary key to preserve effort order."""
+    rep = (sv.get("members") or [None])[0]
+    if isinstance(rep, dict) and rep.get("_reg_created_at"):
+        return float(rep.get("_reg_created_at") or 0.0)
+    return 0.0
+
+
 def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     """Group each lane's effort views into SESSIONS (v2 Wave 4, MASTER-PLAN §A).
 
@@ -1757,6 +1926,19 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     """
     if efforts_by_lane is None:
         efforts_by_lane = _gather_project_efforts(folder_path, project_id)
+    # v7 Wave 3 — pull the project's LIVE managed sessions ONCE and bucket them
+    # by board column (research/plan/build/deliverables). ``general``/``grass``
+    # are excluded (not in _REGISTRY_LANE_TO_COLUMN). Registry-only (no model
+    # call); never leaks worktree_path/branch (see _registry_session_view).
+    reg_by_column = {}
+    try:
+        for rec in _sessreg.list_sessions(project_id=project_id):
+            col = _REGISTRY_LANE_TO_COLUMN.get((rec.get("lane") or "").strip())
+            if not col:
+                continue
+            reg_by_column.setdefault(col, []).append(_registry_session_view(rec))
+    except Exception:
+        reg_by_column = {}
     out = {}
     for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
         views = efforts_by_lane.get(trio_lane, [])
@@ -1797,6 +1979,11 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
                     "session_id": f"loose::{jid}",
                     "members": [v],
                 })
+        # v7 Wave 3 — bridge in the LIVE managed sessions for this column,
+        # deduped by session_id + ordered newest-first (the most-recent becomes
+        # the prominent tile, older ones the expander).
+        session_views = _merge_registry_sessions(
+            session_views, trio_lane, reg_by_column)
         out[trio_lane] = session_views
     return out
 
@@ -1992,7 +2179,7 @@ def _render_kanban_html(folder_path, project_id):
             cards = _render_deliverable_lane_tiles(folder_path, project_id)
         else:
             cards = _render_lane_sessions(
-                session_views, store_lane, project_id, trio_lane)
+                session_views, store_lane, project_id, trio_lane, folder_path)
         # The "+ new <lane>" launcher. Research offers an engine choice (Claude
         # default + Gemini); plan/build are Claude-only via the seeded ConPTY path
         # (newTermSession → term_start → terminal_session.start_session);
@@ -2076,7 +2263,48 @@ def _session_state_text(rep):
     return ("done", rep.get("pill_lbl") or rep.get("status") or "idle")
 
 
-def _render_lane_tile(sv, trio_lane, project_id):
+def _session_tile_blurb(sv, folder_path, project_id, store_lane):
+    """The short, clean blurb line for a lane tile (v7 Wave 3).
+
+    Cache/registry-only — NEVER a synchronous model call on the render path:
+
+    - A FINISHED session prefers its CACHED session summary blurb
+      (:func:`summarizer.session_blurb`, a cache read; ``""`` when uncached).
+    - A RUNNING session (or a finished one with no cache yet) falls back to its
+      own short intent — the rep's ``sub`` (skill · prompt hint) or its
+      ``title``/``label`` — run through :func:`summarizer.tile_blurb` so it is
+      clean + capped (the Wave-1 normalizer).
+    - Honest empty (``""``) when there is neither; the caller renders nothing.
+
+    Stdlib only; never raises (degrades to ``""``).
+    """
+    rep = (sv.get("members") or [None])[0]
+    if not isinstance(rep, dict):
+        return ""
+    sid = (sv.get("session_id") or "").strip()
+    blurb = ""
+    # Prefer a cached SESSION summary blurb (cache read; no model call). Skip the
+    # synthetic "loose::<jid>" ids (no real cached summary keyed on them).
+    if sid and not sid.startswith("loose::"):
+        try:
+            blurb = _summarizer.session_blurb(
+                folder_path, project_id, store_lane, sid) or ""
+        except Exception:
+            blurb = ""
+    if blurb:
+        return blurb
+    # Fall back to the session's own short intent (running or uncached).
+    intent = (rep.get("sub") or rep.get("title") or "").strip()
+    if not intent:
+        return ""
+    try:
+        return _summarizer.tile_blurb(intent) or ""
+    except Exception:
+        return ""
+
+
+def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
+                      store_lane=""):
     """Render ONE session as a GENUINE Paradigm-2 ``.tile`` (v4.1 cockpit-render).
 
     Schema (per the mockup): ``.tr1`` (lane + version + status light ``.lt``),
@@ -2114,6 +2342,14 @@ def _render_lane_tile(sv, trio_lane, project_id):
     counts = ""
     if n_members > 1:
         counts = (f"<div class='counts'>{n_members} files</div>")
+    # v7 Wave 3 — a short, clean blurb line (cache/registry-only; no model call).
+    # Cached session-summary blurb for a finished session, else the session's own
+    # short intent for a running/uncached one; honest-empty renders nothing.
+    blurb_html = ""
+    if folder_path is not None:
+        blurb = _session_tile_blurb(sv, folder_path, project_id, store_lane)
+        if blurb:
+            blurb_html = f"<div class='blurb'>{html_lib.escape(blurb)}</div>"
     # Live-job data hooks: a live/needs-input representative carries its job_id +
     # live flag as data-* attributes (used by tests + any future re-adoption of a
     # background job). The cockpit opens such a tile through laneTileClick →
@@ -2133,13 +2369,15 @@ def _render_lane_tile(sv, trio_lane, project_id):
         f"<span class='ver'></span>"
         f"<span class='lt {light}' aria-hidden='true'></span></div>"
         f"<div class='ttl'>{title}</div>"
+        f"{blurb_html}"
         f"<div class='st'>{''.join(st_bits)}</div>"
         f"{counts}"
         f"</div>"
     )
 
 
-def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
+def _render_lane_sessions(session_views, store_lane, project_id, trio_lane="",
+                          folder_path=None):
     """Render a lane's sessions as Paradigm-2 tiles: most-recent visible +
     a "previous sessions (N)" expander holding the rest, ALSO as tiles
     (v4.1 cockpit-render — replaces the old effort-card lane content).
@@ -2154,12 +2392,14 @@ def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
     """
     if not session_views:
         return ""
-    recent = _render_lane_tile(session_views[0], trio_lane, project_id)
+    recent = _render_lane_tile(
+        session_views[0], trio_lane, project_id, folder_path, store_lane)
     older = session_views[1:]
     if not older:
         return recent
     older_tiles = "".join(
-        _render_lane_tile(sv, trio_lane, project_id) for sv in older)
+        _render_lane_tile(sv, trio_lane, project_id, folder_path, store_lane)
+        for sv in older)
     return (
         f"{recent}"
         f"<details class='prev-sessions'>"
@@ -2561,6 +2801,9 @@ def render_project_window_html(project_id: str) -> str:
         ".tile .ver{margin-left:auto;font-size:11px;color:var(--text-dim)}"
         ".tile .ttl{font-size:13px;font-weight:600;margin-top:6px;line-height:1.35;"
         "word-break:break-word}"
+        # v7 Wave 3 — the short session blurb line under the tile title.
+        ".tile .blurb{font-size:11px;color:var(--text-dim);margin-top:3px;"
+        "line-height:1.35;word-break:break-word}"
         ".tile .st{font-size:11px;color:var(--text-dim);margin-top:5px;"
         "display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
         ".tile .st .state{font-weight:600}"
