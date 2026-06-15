@@ -36,6 +36,7 @@ import json
 import re
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 import paths as _paths
@@ -1517,6 +1518,144 @@ def _summary_text(structured: dict) -> str:
     """Compact one-line summary text for the thin project row (claims joined)."""
     claims = structured.get("claims", []) or []
     return " ".join(c.strip() for c in claims if c and c.strip()).strip()
+
+
+# ── v7 Wave 1 — plain-text normalizer for DISPLAYED short summaries ──────────
+#
+# The cached summary text can carry markdown control sequences (``**bold**``,
+# ``## headings``, backticks, list markers, ``[link](url)``) and decorative
+# glyphs (``✓ → ☢ • —`` …) that look fine on the rendered ``/summary`` markdown
+# page but are noise on the SHORT one-line objective/tile display. These helpers
+# produce a clean, capped plain-text form for those SHORT display sites ONLY —
+# they NEVER touch the full-markdown render path (``render_markdown`` /
+# ``render_summary_page``). A normal already-clean sentence within the cap is
+# returned UNCHANGED (we deliberately do not strip normal apostrophes, quotes,
+# parentheses, digits, or sentence punctuation).
+
+#: Decorative glyphs we explicitly drop (status ticks, arrows, bullets, the
+#: NextGen Nuclear radiation mark, list/kebab carets). Box-drawing + emoji /
+#: other symbol codepoints are removed generically by the unicode-category pass.
+_DECORATIVE_GLYPHS = "✓✗✔✘→←↞↠⇒☢•●○▼▲◢⋮☑☐★☆◆◇■□▸▹►▶◀"
+
+#: Em-dash / en-dash / figure-dash / horizontal-bar → a plain hyphen-space.
+_DASHES = "—–―‒⸺⸻"
+
+#: Markdown link ``[text](url)`` → ``text`` (keep the visible label only).
+_MD_LINK_RE = re.compile(r"\[([^\]]*)\]\((?:[^)]*)\)")
+
+#: Leading list markers at the start of a logical chunk: ``- ``/``* ``/``+ ``
+#: or ``1. ``/``2) ``. Applied after whitespace-leading trim.
+_LIST_MARKER_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+
+
+def _strip_markdown_controls(text: str) -> str:
+    """Remove markdown control sequences from ``text`` while KEEPING the readable
+    content (code-span/link/bold *content* survives — only the markers go)."""
+    s = text
+    # Links first: [label](url) -> label (before backticks/brackets get touched).
+    s = _MD_LINK_RE.sub(r"\1", s)
+    # Bold/italic/strikethrough emphasis markers + inline code backticks: drop the
+    # marker characters, keep the spanned text.
+    s = s.replace("**", "").replace("__", "")
+    s = s.replace("`", "")
+    s = s.replace("~~", "")
+    # Heading marks (leading ``#``…) and blockquote marks (leading ``>``) on each
+    # logical line; also strip leading list markers per line.
+    out_lines = []
+    for line in s.split("\n"):
+        ln = re.sub(r"^\s*#{1,6}\s*", "", line)   # ## Heading -> Heading
+        ln = re.sub(r"^\s*>+\s?", "", ln)          # > quote -> quote
+        ln = _LIST_MARKER_RE.sub("", ln)           # - bullet -> bullet
+        out_lines.append(ln)
+    s = " ".join(out_lines)
+    # Inline heading marks: a run of ``#`` standing alone as a word (delimited by
+    # whitespace / start / end) is a stray heading marker — drop it. We do NOT
+    # touch ``#`` glued to a word (e.g. a ``C#`` or ``#tag``) so normal text is
+    # preserved.
+    s = re.sub(r"(?:(?<=\s)|^)#{1,6}(?=\s|$)", "", s)
+    return s
+
+
+def _strip_decorative(text: str) -> str:
+    """Drop decorative glyphs, normalize dashes to ``-``, and remove emoji /
+    symbol / box-drawing codepoints — while keeping letters, digits, normal
+    punctuation and whitespace."""
+    # Normalize the dash family to a plain hyphen up front.
+    out = []
+    for ch in text:
+        if ch in _DASHES:
+            out.append("-")
+            continue
+        if ch in _DECORATIVE_GLYPHS:
+            out.append(" ")
+            continue
+        if ch in (" ", "\t", "\n", "\r"):
+            out.append(ch)
+            continue
+        cat = unicodedata.category(ch)
+        # Keep letters (L*), numbers (N*), and punctuation (P*). Drop symbols
+        # (S* — emoji, math/other symbols, the radiation mark) and "other"
+        # control/format codepoints (C*). Box-drawing chars are category So and
+        # fall through here.
+        if cat[0] in ("L", "N", "P", "Z"):
+            out.append(ch)
+        else:
+            out.append(" ")
+    return "".join(out)
+
+
+def _normalize_plain(text, max_chars):
+    """Shared normalizer: strip markdown + decorative glyphs, collapse whitespace,
+    and cap at ``max_chars`` on a word boundary with an ellipsis if truncated."""
+    if not text:
+        return ""
+    s = _strip_markdown_controls(str(text))
+    s = _strip_decorative(s)
+    # Collapse all whitespace runs to single spaces, trim.
+    s = re.sub(r"\s+", " ", s).strip()
+    # Tidy a stray leading separator left by a removed marker (e.g. "- foo").
+    s = re.sub(r"^[\-:;,]\s*", "", s).strip()
+    if not s:
+        return ""
+    if max_chars and len(s) > max_chars:
+        # Cut on a word boundary within the cap, then add an ellipsis.
+        cut = s[:max_chars].rstrip()
+        if " " in cut:
+            cut = cut[:cut.rfind(" ")].rstrip()
+        cut = cut.rstrip(" ,;:-")
+        s = cut + "…"
+    return s
+
+
+def _coerce_summary_input(structured_or_text) -> str:
+    """Accept either a structured summary dict (claims joined, like
+    ``_summary_text``) or a plain string, and return the raw joined text."""
+    if isinstance(structured_or_text, dict):
+        txt = _summary_text(structured_or_text)
+        if not txt:
+            # Fall back to a plain ``summary``/``summary_text`` field if present.
+            txt = (structured_or_text.get("summary")
+                   or structured_or_text.get("summary_text") or "")
+        return txt or ""
+    return structured_or_text or ""
+
+
+def short_summary_text(structured_or_text, max_chars=140) -> str:
+    """Plain-text, capped SHORT objective line for the dashboard/project-window
+    display (≈ one sentence). Strips markdown control sequences and decorative
+    glyphs, collapses whitespace, and caps on a word boundary with an ellipsis.
+
+    Accepts the structured summary dict OR a plain string. A clean sentence
+    within the cap is returned UNCHANGED. NEVER used on the full ``/summary``
+    markdown path."""
+    return _normalize_plain(_coerce_summary_input(structured_or_text), max_chars)
+
+
+def tile_blurb(structured_or_text, max_chars=64) -> str:
+    """Plain-text, tightly-capped (≈ 8-12 words) blurb for a lane tile (Wave 3
+    wires this in). Same strip rules as :func:`short_summary_text`, just a
+    shorter cap. Accepts the structured summary dict OR a plain string."""
+    return _normalize_plain(_coerce_summary_input(structured_or_text), max_chars)
 
 
 def _write_project_cache(folder_path, project_id, structured: dict) -> dict:

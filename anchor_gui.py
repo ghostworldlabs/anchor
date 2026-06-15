@@ -1153,7 +1153,9 @@ def _project_summary_text(entry: dict) -> tuple:
             if cached:
                 txt = (cached.get("summary_text") or "").strip()
                 if txt:
-                    return txt, "summary"
+                    # v7 Wave 1: normalize the cached summary to a clean, capped
+                    # plain-text short line for the row (strip markdown/glyphs).
+                    return _summarizer.short_summary_text(txt), "summary"
         except Exception:
             pass
     # 2. Fall back to the blurb (seed once if empty).
@@ -2262,7 +2264,10 @@ def render_project_window_html(project_id: str) -> str:
     try:
         cached = _summarizer.load_cached_project(folder_raw, project_id)
         if cached:
-            objective_raw = (cached.get("summary_text") or "").strip()
+            # v7 Wave 1: clean, capped plain-text objective line (strip
+            # markdown/decorative glyphs) for the project-window header.
+            objective_raw = _summarizer.short_summary_text(
+                (cached.get("summary_text") or "").strip())
     except Exception:
         objective_raw = ""
     objective_esc = html_lib.escape(objective_raw)
