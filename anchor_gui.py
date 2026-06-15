@@ -988,6 +988,62 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+def _trigger_session_summary_on_finish(project_id, lane, session_id):
+    """Best-effort: schedule a BACKGROUND session-summary for a session that just
+    reached a terminal state (v7 Wave 2 — kill / finish→build / reconcile-dead).
+
+    Resolves the project folder + the effort-history ``session`` dict (the shape
+    ``_trigger_session_summary`` needs) from ``session_id`` and kicks off the
+    existing background generator. NON-BLOCKING and IDEMPOTENT:
+
+      - returns immediately (the generation runs on a daemon thread);
+      - skips when the session already has a CACHED summary (so a second finish /
+        a repeated reconcile poll never re-runs the model);
+      - a failed generation never poisons the cache (the summarizer surfaces
+        ``error`` WITHOUT writing, per FIX 2).
+
+    No-op unless ``_PROACTIVE_SUMMARY_ENABLED`` (the live server enables it; tests
+    opt in). Never raises — any resolution failure is swallowed so it can never
+    delay or break the finish (kill / finish→build / reconcile) response.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    try:
+        if not project_id or not lane or not session_id:
+            return
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return
+        store_lane = _eh._resolve_subdir(lane)
+        # Idempotent: a session that already has a cache is left alone (the
+        # summarizer would no-op it too, but skip the thread spin-up entirely).
+        try:
+            if _summarizer.load_cached(folder, project_id, store_lane,
+                                       session_id) is not None:
+                return
+        except Exception:
+            pass
+        session = None
+        try:
+            for s in _sessions.list_sessions(folder, project_id, lane):
+                if s.get("session_id") == session_id:
+                    session = s
+                    break
+        except Exception:
+            session = None
+        if session is None:
+            # The session has no effort-history members yet (e.g. nothing was
+            # produced) — seed a minimal record off the registry so the summarizer
+            # still has a session_id/title to key the (honest) cache to.
+            session = {"session_id": session_id}
+        _trigger_session_summary(folder, project_id, lane, session)
+    except Exception:
+        pass
+
+
 #: Max chars of prior-session context folded into a continue-live seed (bounded).
 _MAX_CONTINUE_SEED_CHARS = 4000
 
@@ -8350,7 +8406,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # would wrongly mark live ones stale).
                 try:
                     live = list(_termsess._pty.live_sessions())
-                    _termsess.reconcile_and_advance(live_session_ids=live)
+                    _rec_out = _termsess.reconcile_and_advance(
+                        live_session_ids=live)
+                    # v7 Wave 2: any session newly re-statused DONE by the
+                    # reconcile-dead path gets a background session-summary
+                    # scheduled (best-effort, non-blocking, idempotent — a cached
+                    # one is skipped, so repeated polls don't re-run the model).
+                    # Never breaks the read-only session-list response.
+                    try:
+                        marked = ((_rec_out or {}).get("reconcile", {})
+                                  or {}).get("marked", []) or []
+                        for _sid in marked:
+                            _r = _termsess.get_session(_sid)
+                            if _r is None:
+                                continue
+                            _trigger_session_summary_on_finish(
+                                _r.get("project_id"), _r.get("lane"), _sid)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 try:
@@ -9109,6 +9182,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     pre_plan_set = _termsess.capture_plan_set(
                         pid_for_advance, session)
                 out = _termsess.kill(session)
+                # v7 Wave 2: a killed session is DONE — schedule a background
+                # session-summary so the finished tile opens to a real summary
+                # (and so it's restartable). Best-effort + non-blocking +
+                # idempotent (skips a cached one); never delays the kill response.
+                try:
+                    _trigger_session_summary_on_finish(
+                        pid_for_advance or (rec.get("project_id") if rec else None),
+                        rec.get("lane") if rec else None, session)
+                except Exception:
+                    pass
                 auto_build = None
                 if planning_kill:
                     try:
@@ -9548,6 +9631,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             _sessreg.update_session(
                                 session, status=_sessreg.STATUS_DONE)
                         except KeyError:
+                            pass
+                        # v7 Wave 2: the finished planning session is DONE —
+                        # schedule a background session-summary (best-effort,
+                        # non-blocking, idempotent). Never delays this response.
+                        try:
+                            _trigger_session_summary_on_finish(
+                                pid, rec.get("lane"), session)
+                        except Exception:
                             pass
                         # 3) Auto-advance to ONE linked build (idempotent).
                         try:

@@ -1658,6 +1658,45 @@ def tile_blurb(structured_or_text, max_chars=64) -> str:
     return _normalize_plain(_coerce_summary_input(structured_or_text), max_chars)
 
 
+def session_blurb(folder_path, project_id, lane, session_id, max_chars=64) -> str:
+    """Short, clean one-line blurb for a session's lane tile (v7 Wave 2/3).
+
+    READ-ONLY cache lookup: loads the CACHED session summary (never a synchronous
+    model run) and returns a :func:`tile_blurb`-normalized one-liner of its most
+    informative SHORT field, preferring (in order):
+
+      1. the first grounded claim,
+      2. ``what_was_asked`` (the prompt the session ran on),
+      3. ``title``.
+
+    Returns ``""`` (honest empty — the caller renders a placeholder / the running
+    session's own intent) when there is no cache yet or the cache carries no usable
+    short text. NEVER fabricates and NEVER calls the model. Stdlib only; never
+    raises (any failure degrades to ``""``).
+    """
+    store_lane = _eh._resolve_subdir(lane)
+    try:
+        cached = load_cached(folder_path, project_id, store_lane, session_id)
+    except Exception:
+        cached = None
+    if not isinstance(cached, dict):
+        return ""
+    # Prefer the first grounded claim, then the prompt asked, then the title.
+    source = ""
+    claims = cached.get("claims") or []
+    for c in claims:
+        if c and str(c).strip():
+            source = str(c)
+            break
+    if not source:
+        source = (cached.get("what_was_asked") or "").strip()
+    if not source:
+        source = (cached.get("title") or "").strip()
+    if not source:
+        return ""
+    return tile_blurb(source, max_chars)
+
+
 def _write_project_cache(folder_path, project_id, structured: dict) -> dict:
     """Write project-summary.json + .md under the project store (under lock)."""
     with _paths.WRITE_LOCK:
