@@ -271,7 +271,8 @@ def _check_engine_allowed(lane, backend):
 _UNSET = object()
 
 
-def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None):
+def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
+                  parent_session_id=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -291,6 +292,13 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
     carries an extra payload — e.g. a Grass Catcher idea promoted into this
     Research/Plan session — as the thing to work on. It is recorded in
     ``seed_text`` and, like the base seed, is written exactly once.
+
+    v6 Wave 2: ``parent_session_id`` (optional) links this session into an
+    existing lineage. When given, the new session JOINS the parent's chain
+    (``chain_id`` = the parent's chain_id, resolved via
+    :func:`session_registry.chain_for`) and records ``parent_session_id``. When
+    omitted, the new session starts its OWN chain (chain_id == its own id). The
+    parent record is never mutated.
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -315,6 +323,17 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
     _check_engine_allowed(lane, backend)
 
     sid = _new_id()
+
+    # v6 Wave 2: resolve the chain this session joins. A parent links the new
+    # session into the parent's chain; with no parent the session starts its own
+    # singleton chain (chain_id defaults to its own sid in register_session). An
+    # unknown parent id is ignored (the session simply starts its own chain).
+    parent_id = parent_session_id or ""
+    chain_id = None
+    if parent_id:
+        chain_id = _reg.chain_for(parent_id)
+        if not chain_id:
+            parent_id = ""  # unknown parent → start a fresh chain
 
     # 1) Isolated worktree first — if this fails we never start a PTY.
     wt = _wt.create_worktree(project_id, sid)
@@ -359,6 +378,8 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
             status=_reg.STATUS_RUNNING,
             label=label,
             session_id=sid,
+            parent_session_id=parent_id,
+            chain_id=chain_id,
         )
     except Exception as exc:
         try:

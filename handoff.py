@@ -431,3 +431,91 @@ def list_handoffs(folder_path, project_id):
     out = [h for h in handoffs if isinstance(h, dict)]
     out.sort(key=lambda h: (h.get("when") is None, -(h.get("when") or 0.0)))
     return out
+
+
+# ── Generic stage edges (v6 Wave 2) ──────────────────────────────────────────
+#
+# A handoff (above) is specifically plan→build. v6 generalizes the notion to ANY
+# stage→stage edge in a session chain (e.g. research→plan as well as plan→build),
+# persisted the SAME rescan-durable way: a structure-only ``stage_links`` list in
+# ``discovery.json``. ``record_handoff``/``list_handoffs`` are unchanged; this is
+# an additive parallel list, so a build handoff and its plan→build stage edge can
+# coexist without interfering.
+
+def record_stage_link(folder_path, project_id, from_session_id, to_session_id,
+                      kind=""):
+    """Record a generic stage→stage edge between two sessions.
+
+    Appends a structure-only entry to a ``stage_links`` list in ``discovery.json``
+    (``{from_session_id, to_session_id, kind, when}``) under ``paths.WRITE_LOCK``
+    (atomic tmp+replace). Safe to commit — no file contents, no secrets.
+    Idempotent UPSERT on ``(from_session_id, to_session_id)``: re-recording the
+    same pair updates the existing entry (e.g. its ``kind``/``when``) rather than
+    duplicating it, so a retry/reconcile never bloats the file.
+
+    Rescan-durable: the entry survives a ``rescan`` because it lives in the same
+    ``discovery.json`` sidecar whose other keys are preserved across the
+    ``anchor_marker`` write-merge (exactly as ``handoffs`` is).
+
+    Returns ``{ok, entry, count}`` or ``{ok: False, reason}``. Never raises.
+    """
+    entry = {
+        "from_session_id": from_session_id or "",
+        "to_session_id": to_session_id or "",
+        "kind": kind or "",
+        "when": time.time(),
+    }
+    if not entry["from_session_id"] or not entry["to_session_id"]:
+        return {"ok": False, "reason": "missing-session-id"}
+    with _paths.WRITE_LOCK:
+        p = _marker.sidecar_path(folder_path, project_id)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return {"ok": False, "reason": f"mkdir-failed: {exc}"}
+        disc = {}
+        if p.exists():
+            try:
+                loaded = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    disc = loaded
+            except (json.JSONDecodeError, OSError):
+                disc = {}
+        links = disc.get("stage_links")
+        if not isinstance(links, list):
+            links = []
+        # Idempotent upsert on (from, to).
+        replaced = False
+        for i, e in enumerate(links):
+            if (isinstance(e, dict)
+                    and e.get("from_session_id") == entry["from_session_id"]
+                    and e.get("to_session_id") == entry["to_session_id"]):
+                links[i] = entry
+                replaced = True
+                break
+        if not replaced:
+            links.append(entry)
+        disc["stage_links"] = links
+        try:
+            tmp = p.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(disc, indent=2, ensure_ascii=False),
+                           encoding="utf-8")
+            tmp.replace(p)
+        except OSError as exc:
+            return {"ok": False, "reason": f"write-failed: {exc}"}
+    return {"ok": True, "entry": entry, "count": len(links)}
+
+
+def list_stage_links(folder_path, project_id):
+    """Return the recorded stage edges for a project (newest-first).
+
+    Read-only accessor over ``discovery.json``'s ``stage_links`` list (written by
+    :func:`record_stage_link`). Returns ``[]`` when there are none. Never raises.
+    """
+    disc = _load_discovery(folder_path, project_id)
+    links = disc.get("stage_links")
+    if not isinstance(links, list):
+        return []
+    out = [e for e in links if isinstance(e, dict)]
+    out.sort(key=lambda e: (e.get("when") is None, -(e.get("when") or 0.0)))
+    return out

@@ -39,7 +39,29 @@ test exercises a real background thread (polled, non-flaky over 3 runs); hermeti
 (+5). Commit: scoped (test file + this log).
 
 <!-- WAVE 1 done -->
-<!-- WAVE 2 — Session linkage backbone -->
+### Wave 2 — Session linkage backbone — GREEN (2026-06-14)
+
+**Built:** Durable session lineage. `session_registry._normalize` + `register_session`
+gain `parent_session_id` (str, "" for a root) and `chain_id` (defaults to the
+record's OWN session_id → existing records become singleton chains, back-compat
+holds); both added to the `update_session` allow-list. New `chain_for(session_id)` and
+`chain_members(chain_id)` (ordered via `_CHAIN_LANE_ORDER` research→plan→build→…, then
+created_at). `terminal_session.start_session(..., parent_session_id=None)` resolves the
+parent's chain and sets both fields (unknown parent → fresh chain; parent record never
+mutated). `handoff.record_stage_link` / `list_stage_links` add a generic, rescan-
+durable `stage_links` edge in `discovery.json` (generalizes plan→build to research→plan;
+coexists with the existing `handoffs`).
+
+**Review/risks:** chain_id defaulting is belt-and-suspenders (both register + normalize)
+so a record is never chain-less. Unknown parent silently starts a fresh chain (tested).
+Scoped to 3 product files + 1 test file.
+
+**Gate:** `ANCHOR_PTY_BACKEND=stub python -m pytest -q` → **747 passed, 1 skipped**
+(+18). `tests/test_session_chain.py` (18 tests): defaults/back-compat, inherit+order,
+chain_for/members, stage-edge persist across reload + rescan, start_session(parent)
+through stub PTY. Commit: scoped.
+
+<!-- WAVE 2 done -->
 <!-- WAVE 3 — First-class session windows (maximize + free resize) -->
 <!-- WAVE 4 — Tile lifecycle (new-session=new-tile + keep finished) -->
 <!-- WAVE 5 — Manual advance research→planning + chain breadcrumb -->

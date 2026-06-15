@@ -152,8 +152,17 @@ def _normalize(record: dict) -> dict:
         created_at = float(created) if created is not None else None
     except (TypeError, ValueError):
         created_at = None
+    sid = record.get("session_id")
+    # v6 Wave 2: durable session lineage. ``parent_session_id`` is the upstream
+    # session this one was advanced from ("" for a chain root); ``chain_id``
+    # groups research→plan→build into one chain. A record with neither field
+    # (every pre-v6 record) normalizes to parent="" and a SINGLETON chain whose
+    # id is its own session_id — so back-compat holds and existing sessions are
+    # already valid one-member chains.
+    parent_session_id = record.get("parent_session_id", "") or ""
+    chain_id = record.get("chain_id") or sid or ""
     return {
-        "session_id": record.get("session_id"),
+        "session_id": sid,
         "project_id": record.get("project_id", ""),
         "lane": record.get("lane", ""),
         "backend": backend,
@@ -167,6 +176,9 @@ def _normalize(record: dict) -> dict:
         # exact text written (for inspection / tests). Default False / "".
         "seeded": bool(record.get("seeded", False)),
         "seed_text": record.get("seed_text", "") or "",
+        # v6 Wave 2: durable lineage (see above).
+        "parent_session_id": parent_session_id,
+        "chain_id": chain_id,
     }
 
 
@@ -194,12 +206,19 @@ def _save_sessions(reg: dict) -> None:
 
 def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      worktree_path="", branch="", status=STATUS_IDLE,
-                     label="", session_id=None) -> dict:
+                     label="", session_id=None, parent_session_id="",
+                     chain_id=None) -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
     id is accepted (e.g. so a caller can mint the id, create the worktree under
     it, then register). ``created_at`` is stamped now (``time.time``).
+
+    v6 Wave 2: ``parent_session_id`` is the upstream session this one was
+    advanced from ("" for a chain root); ``chain_id`` groups the lineage. When
+    ``chain_id`` is None it DEFAULTS to the session's OWN id — i.e. a parentless
+    session starts its own singleton chain. A child should pass its parent's
+    ``chain_id`` to join that chain.
     """
     with _paths.WRITE_LOCK:
         reg = load_sessions()
@@ -216,6 +235,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "status": status,
             "created_at": time.time(),
             "label": label,
+            "parent_session_id": parent_session_id or "",
+            "chain_id": chain_id or sid,
         })
         reg[sid] = record
         _save_sessions(reg)
@@ -248,15 +269,61 @@ def list_sessions(project_id=None, status=None) -> list:
     return out
 
 
+# ── Session lineage / chains (v6 Wave 2) ────────────────────────────────────
+#
+# Stable lane ordering for a chain's members: research → plan/planning → build
+# → (anything else) then by created_at ascending. Both the trio-lane keys
+# (research/plan/build) and the on-disk dir names (planning/deliverables) are
+# scored so either naming sorts correctly.
+_CHAIN_LANE_ORDER = {
+    "research": 0,
+    "plan": 1,
+    "planning": 1,
+    "build": 2,
+    "deliverables": 3,
+    "grass": 4,
+}
+_CHAIN_LANE_DEFAULT = 9  # unknown lanes sort after the known trio order
+
+
+def chain_for(session_id: str):
+    """Return the ``chain_id`` of ``session_id``, or ``None`` if unknown."""
+    rec = load_sessions().get(session_id)
+    if rec is None:
+        return None
+    return rec.get("chain_id") or rec.get("session_id")
+
+
+def chain_members(chain_id: str) -> list:
+    """Return the ordered records belonging to ``chain_id``.
+
+    Ordered research → plan/planning → build → (others) by lane, then by
+    ``created_at`` ascending (records with no timestamp sort last within a
+    lane). Returns ``[]`` when no record carries the given ``chain_id``.
+    """
+    if not chain_id:
+        return []
+    reg = load_sessions()
+    members = [rec for rec in reg.values()
+               if (rec.get("chain_id") or rec.get("session_id")) == chain_id]
+    members.sort(key=lambda r: (
+        _CHAIN_LANE_ORDER.get(r.get("lane", ""), _CHAIN_LANE_DEFAULT),
+        r.get("created_at") is None,
+        r.get("created_at") or 0.0,
+    ))
+    return members
+
+
 def update_session(session_id: str, **fields) -> dict:
     """Update allowed fields of a session record. Returns the updated record.
 
     Allowed: ``project_id, lane, backend, worktree_path, branch, status,
-    label, seeded, seed_text``. ``session_id`` and ``created_at`` are immutable.
-    Raises ``KeyError`` if the id is unknown.
+    label, seeded, seed_text, parent_session_id, chain_id``. ``session_id`` and
+    ``created_at`` are immutable. Raises ``KeyError`` if the id is unknown.
     """
     allowed = {"project_id", "lane", "backend", "worktree_path", "branch",
-               "status", "label", "seeded", "seed_text"}
+               "status", "label", "seeded", "seed_text",
+               "parent_session_id", "chain_id"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
