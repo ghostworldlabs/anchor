@@ -3081,7 +3081,10 @@ def render_project_window_html(project_id: str) -> str:
         # ── 4-state status line (consistent with the dashboard tiles) ──
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
         # ── Paradigm-2 lane board (.p2lanes → 5 .p2col tile columns) ──
-        f"{kanban}"
+        # v7 Wave 6: wrap in a stable #kanbanBoard container so refreshBoard()
+        # can swap the server-rendered board fragment in place (instant-in-column
+        # tile after a session-lifecycle mutation) without a full page reload.
+        f"<div id='kanbanBoard'>{kanban}</div>"
         # ── Paradigm-2 inline PANEL STACK ──
         # Clicking ANY lane tile (live OR historical) expands a full-width inline
         # panel here, stacking down the page (NOT a floating window, NOT page nav).
@@ -3243,6 +3246,10 @@ async function promoteGrass(ideaId, lane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: re-fetch the server-rendered board so the just-started session's
+  // lane-column tile appears INSTANTLY (no page reload). The board is the single
+  // source of truth — re-fetch, don't JS-inject — so dedupe stays correct.
+  refreshBoard();
   // Re-sync indices/labels from the registry shortly after.
   setTimeout(repopulate, 600);
 }
@@ -3496,6 +3503,8 @@ async function developGrass(ideaId, lane) {
   _grassDevSession = sid;
   var sv = work ? work.querySelector('.gsave') : null;
   if (sv) sv.disabled = false;
+  // v7 Wave 6: instant-in-column tile for the new develop session.
+  refreshBoard();
 }
 
 // saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
@@ -3858,6 +3867,12 @@ async function repopulate() {
     if (!seenDone[dsid]) delete FINISHED[dsid];
   }
   renderSessionBar();
+  // v7 Wave 6: after re-syncing the live/finished maps from the registry, also
+  // re-fetch the server-rendered board so the lane-column tiles reflect the
+  // current set (a session that finished / advanced / reconciled-dead between
+  // polls). The board is the single source of truth for the columns — re-fetch,
+  // don't JS-inject — so a session shows EXACTLY ONE tile in its lane.
+  refreshBoard();
 }
 // Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
@@ -4029,6 +4044,10 @@ async function newTermSession(lane, backend, opts) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: re-fetch the server-rendered board so the just-started session's
+  // lane-column tile appears INSTANTLY (no page reload). The board is the single
+  // source of truth — re-fetch, don't JS-inject — so dedupe stays correct.
+  refreshBoard();
   // Re-sync indices/labels from the registry shortly after.
   setTimeout(repopulate, 600);
 }
@@ -4534,6 +4553,8 @@ async function advanceSession(sourceId, toLane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: instant-in-column tile for the advanced (build) session.
+  refreshBoard();
   setTimeout(repopulate, 600);
 }
 
@@ -4572,6 +4593,9 @@ async function finishToBuild(planningId) {
     // the planning panel's finish bar (no tile is created, the session stays live).
     _flashNoPlanNote(planningId, (data.reason || 'no plan set yet'));
   }
+  // v7 Wave 6: refresh the board so the planning→finished + new build tiles
+  // (the lane-column tiles) update instantly without a page reload.
+  refreshBoard();
   setTimeout(repopulate, 600);
 }
 
@@ -4860,6 +4884,30 @@ function _tokenQ() {
 var _ACCEPT_JSON = {Accept: 'application/json'};
 function _jsonHdrs() { return {headers: _ACCEPT_JSON}; }
 
+// ── refreshBoard (v7 Wave 6) ────────────────────────────────────────────────
+// Instant-in-column board refresh. After a session-lifecycle mutation (start /
+// finish / advance / promote / develop) the SERVER-rendered 5-lane board is the
+// single source of truth for the lane-column tiles, so we just re-fetch the
+// board fragment (GET /api/rnd/board_html, ?token=) and swap #kanbanBoard's
+// innerHTML in place — no full page reload. Because the tile comes from the
+// server render (NOT JS-injected), dedupe stays correct: a started session
+// shows EXACTLY ONE tile in its lane column. Guarded so it never throws into
+// the UI (a failed refresh just leaves the prior board until the next refresh /
+// reload). The top live strip (renderSessionBar) is unaffected — it stays the
+// instant chip view for live managed sessions; this only refreshes the columns.
+async function refreshBoard() {
+  try {
+    var url = '/api/rnd/board_html?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ();
+    var r = await fetch(url, Object.assign({cache: 'no-store'}, _jsonHdrs()));
+    if (!r || !r.ok) return;
+    var data = await r.json();
+    if (!data || !data.ok || typeof data.html !== 'string') return;
+    var board = document.getElementById('kanbanBoard');
+    if (!board) return;                    // guard: container absent
+    board.innerHTML = data.html;
+  } catch (e) { /* never throw into the UI */ }
+}
+
 // minimizePanel: collapse the panel back to a header-only strip. The session and
 // its terminal transport keep RUNNING — this only hides the panel body.
 function minimizePanel(sessionId) {
@@ -4942,6 +4990,9 @@ async function killPanel(sessionId) {
   if (autoBuild && autoBuild.session_id) {
     _addAutoBuildTile(autoBuild);
   }
+  // v7 Wave 6: re-fetch the server-rendered board so the killed session's tile
+  // is dropped (and any auto-opened build tile appears) instantly, no reload.
+  refreshBoard();
   setTimeout(repopulate, 400);
 }
 
@@ -8736,6 +8787,37 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         })
                     self._send_json({"ok": True, "chain_id": chain_id or "",
                                      "members": safe})
+            elif self.path.startswith("/api/rnd/board_html"):
+                # Read-only (v7 Wave 6): the project's rendered 5-lane board
+                # FRAGMENT, so an already-open project window can refresh the
+                # board IN PLACE after a session-lifecycle mutation (start /
+                # finish / advance / promote / develop) and the lane-column
+                # tile appears WITHOUT a full page reload. REUSES
+                # _render_kanban_html (the SAME server render the page used) —
+                # the board is the single source of truth, so the JS just
+                # re-fetches it (no duplicate JS-injected tile; dedupe stays
+                # correct = exactly one tile per session in its lane). SAFE: the
+                # kanban render already emits SAFE tiles (no absolute
+                # worktree_path / branch). AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token configured), consistent with the
+                # other ?token= GET seams. /api/rnd/board_html?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip()
+                entry = _rnd.get_project(pid) if pid else None
+                if not pid or entry is None:
+                    self._send_json({"ok": False,
+                                     "error": "unknown project"}, 404)
+                    return
+                folder_raw = entry.get("folder_path", "")
+                try:
+                    frag = _render_kanban_html(folder_raw, pid)
+                except Exception:
+                    frag = ("<div class='p2lanes'><p class='rnd-empty'>"
+                            "Board unavailable.</p></div>")
+                self._send_json({"ok": True, "html": frag})
             elif self.path.startswith("/api/rnd/projects_html"):
                 # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
                 # already-open main dashboard can poll for changes (new session,

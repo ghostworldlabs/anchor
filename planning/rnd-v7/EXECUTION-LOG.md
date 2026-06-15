@@ -136,7 +136,29 @@ no Playwright in product code)**; `rnd blurb` in the CLI usage; CLAUDE.md v7 sec
 
 ---
 
-## PROJECT DONE (2026-06-15) — pending John's UI sign-off + deploy
+### Wave 6 — polish (instant-in-column board refresh + Gemini on general) — GREEN (2026-06-15)
+
+**Built (the two flagged follow-ups):** (1) **instant-in-column** — `GET /api/rnd/board_html`
+(token via `?token=`, SAFE) returns `_render_kanban_html`; the board is wrapped in
+`#kanbanBoard`; a new `refreshBoard()` (in `_PROJECT_WINDOW_JS`) GETs it and swaps the
+container in place, wired into all 7 board-changing lifecycle calls (`newTermSession`,
+`promoteGrass`, `developGrass`, `advanceSession`, `finishToBuild`, `killPanel`, `repopulate`).
+Server stays the single source of truth (JS re-fetches, never injects) → exactly one tile, no
+dup. So a started session's lane-column tile now appears WITHOUT a reload. (2) **Gemini on
+general** — `lanes.GEMINI_LANES = {research, general}` (was research-only); `check_engine_allowed`
+now permits Gemini on a general session; plan/build still refuse.
+
+**Orchestrator verification:** `tests/test_v7_polish.py` (9) — board_html token-gated + SAFE +
+404; `#kanbanBoard` wraps the grid; `refreshBoard` wired in all 7 fns; Playwright — click "+ New
+plan run" → tile in `#cards_plan` WITHOUT reload, exactly one, no console errors; engine policy
+(gemini on general+research, refused plan/build). **Screenshot reviewed** —
+`_devtest/wave6_instant.png`: planning-column tile appears live after the click. 
+
+**Gate:** **888 passed, 1 skipped** (+9). Commit: scoped.
+
+---
+
+## PROJECT DONE (2026-06-15) — John signed off ("keep going") → MERGED + PUSHED
 
 All 5 waves GREEN. Branch `foreman/rnd-surface-v7` (off master `5ae3c2e`). Full suite **879
 passed, 1 skipped**. **NOT merged, service NOT restarted** — UI waves (3–4) await John's

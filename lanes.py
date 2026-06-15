@@ -63,8 +63,10 @@ DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
 
 #: The set of (lane, backend) pairs that are allowed. Everything else with a
 #: non-claude backend is refused. Claude works on all lanes; gemini only on
-#: research.
-GEMINI_LANES = frozenset((LANE_RESEARCH,))
+#: research AND the bare ``general`` exploration lane (v7 Wave 6). The trio
+#: lanes plan/build stay Claude-only (Crucible/Foreman are Claude Code engines
+#: Gemini can't run); ``general`` seeds no skill, so either engine is fine.
+GEMINI_LANES = frozenset((LANE_RESEARCH, "general"))
 
 
 class EngineNotAllowedError(ValueError):
@@ -253,10 +255,11 @@ def _write_launch_record(output_dir: Path, project_id: str, lane: str,
 
 
 def check_engine_allowed(lane: str, backend: str) -> None:
-    """Enforce the engine policy: Gemini is research-only; Claude runs anywhere.
+    """Enforce the engine policy: Gemini runs on research + general; Claude anywhere.
 
     Raises :class:`EngineNotAllowedError` if ``backend == "gemini"`` and ``lane``
-    is not the research lane. Claude (the default) is always allowed.
+    is not in ``GEMINI_LANES`` (research or the bare ``general`` exploration
+    lane). Claude (the default) is always allowed; plan/build stay Claude-only.
     """
     if backend == BACKEND_GEMINI and lane not in GEMINI_LANES:
         raise EngineNotAllowedError(lane, backend)
