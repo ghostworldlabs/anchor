@@ -2431,8 +2431,18 @@ def render_project_window_html(project_id: str) -> str:
         # session keeps running); the X kills behind a confirm. Wave 5 fills the
         # panel body (split summary + xterm terminal); this wave ships the shell.
         ".panel-stack{display:flex;flex-direction:column}"
-        ".panel{border-top:1px solid var(--border);background:var(--surface)}"
+        ".panel{border-top:1px solid var(--border);background:var(--surface);"
+        "position:relative}"
         ".panel.minimized .pin{display:none}"
+        # ── v6 Wave 3: maximize (▢) toggle — fills the cockpit viewport. A
+        # .panel.maxd is lifted out of the stacked column to a fixed full-screen
+        # overlay (high z-index) and restored on a second click. Its body stretches
+        # to use the height so the terminal re-fits to the larger area.
+        ".panel.maxd{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9000;"
+        "margin:0;border:0;overflow:auto;display:flex;flex-direction:column}"
+        ".panel.maxd .pin{flex:1;resize:none;width:auto;max-width:none;"
+        "min-height:0}"
+        ".panel.maxd .tpane{flex:1}"
         ".panel .pbar{display:flex;align-items:center;gap:9px;padding:9px 16px;"
         "background:var(--surface2);border-bottom:1px solid var(--border)}"
         ".panel .pbar .ic{font-size:14px}"
@@ -2441,12 +2451,20 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
         ".panel .pbar .sp{flex:1}"
         # Panel body STACKS: split summary on top, full-width terminal below.
-        ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px}"
+        # v6 Wave 3: the body is the FREE-resize box (resize:both) so dragging the
+        # panel's bottom-right corner resizes the whole panel — width AND height,
+        # not just the terminal sub-pane. Size persists per session (_panelRects).
+        ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px;"
+        "resize:both;overflow:auto;min-height:160px;min-width:360px;max-width:100%}"
         ".panel .panel-body{min-height:60px}"
         ".panelbtn{width:22px;height:20px;line-height:18px;text-align:center;"
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
+        # v6 Wave 3: the maximize (▢) toggle. When the panel is maxd the button
+        # shows its 'active' accent so it reads as a toggle.
+        ".panelbtn.max:hover{color:var(--text);border-color:var(--accent)}"
+        ".panel.maxd .panelbtn.max{color:var(--accent);border-color:var(--accent)}"
         # v5 Wave 1: the panel header carries THREE distinct controls —
         #   .min   '–'  minimize (keeps the session running)
         #   .close '×'  CLOSE-to-tile (tears down the panel DOM only; the session
@@ -3508,6 +3526,14 @@ function openPanel(sessionId) {
   minBtn.title = 'Minimize (keeps the session running)';
   minBtn.textContent = '–';
   minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
+  // v6 Wave 3: maximize (▢) — toggle the panel to fill the cockpit viewport
+  // (.panel.maxd) and back to its prior size. Either way the xterm terminal is
+  // re-fit so cols/rows track the new area (no freeze / clip).
+  var maxBtn = document.createElement('button');
+  maxBtn.className = 'panelbtn max';
+  maxBtn.title = 'Maximize / restore (re-fits the terminal)';
+  maxBtn.textContent = '▢';
+  maxBtn.onclick = function (e) { e.stopPropagation(); maximizePanel(sessionId); };
   var closeBtn = document.createElement('button');
   closeBtn.className = 'panelbtn close';
   closeBtn.title = 'Close panel (keeps the session — reopen from its tile)';
@@ -3527,13 +3553,22 @@ function openPanel(sessionId) {
     bar.appendChild(englbl);
     bar.appendChild(engEl);
   }
-  bar.appendChild(minBtn); bar.appendChild(closeBtn); bar.appendChild(killBtn);
+  bar.appendChild(minBtn); bar.appendChild(maxBtn);
+  bar.appendChild(closeBtn); bar.appendChild(killBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
   // full-width, vertically-resizable terminal pane BELOW.
   var pin = document.createElement('div');
   pin.className = 'pin';
+  // v6 Wave 3: the .pin body is the FREE-resize box (CSS resize:both). Restore
+  // this session's persisted panel rect (width + height) if the user resized it
+  // earlier this page load (_panelRects, keyed by session_id).
+  var _rect = _panelRects[sessionId];
+  if (_rect) {
+    if (_rect.w) pin.style.width = _rect.w;
+    if (_rect.h) pin.style.height = _rect.h;
+  }
 
   // (1) Split summary block — filled async from /api/rnd/session_summary +
   //     /api/rnd/session_doc_roles. Absent → just a thin loading note.
@@ -3555,7 +3590,7 @@ function openPanel(sessionId) {
   lab.textContent = (isLive ? (s.backend || 'terminal') : 'log') + ' · ' + s.session_id;
   var rz = document.createElement('span');
   rz.className = 'rzhint';
-  rz.textContent = '⇕ drag bottom edge to resize';
+  rz.textContent = '⤡ drag the panel corner to resize';
   tbar.appendChild(lab);
   tbar.appendChild(rz);
   var host = document.createElement('div');
@@ -3570,7 +3605,8 @@ function openPanel(sessionId) {
   stack.appendChild(panel);
 
   PANELS[sessionId] = {el: panel, body: host, term: null, transport: null,
-                       tpane: tpane, fit: null, ro: null};
+                       tpane: tpane, pin: pin, fit: null, ro: null, pinRo: null,
+                       maxd: false};
   if (isLive) {
     // LIVE managed terminal: mount xterm over the v3 transport (UNCHANGED).
     _mountTerminal(sessionId, host);
@@ -3791,6 +3827,10 @@ async function continueSession(sessionId, lane) {
 // Per-session terminal-pane height (in-memory persistence across minimize /
 // re-open within this page load). Keyed by session_id → CSS height string.
 var _panelHeights = {};
+// v6 Wave 3: per-session PANEL rect (the freely-resized .pin body's CSS width +
+// height). Keyed by session_id → {w, h}. Restored on re-open; NOT applied while
+// the panel is maximized (maxd) so restore returns to the pre-maximize size.
+var _panelRects = {};
 
 // _loadPanelSummary(sessionId, host): fill the split summary — materials LEFT
 // (.smat: goal / North-Star / what-was-asked / effort) from the cached session
@@ -3922,10 +3962,13 @@ var _DOC_ROLE_GROUPS = {
          two: ['northstar', 'plan']}
 };
 
-// _wirePanelResize(sessionId, tpane): the tpane has CSS `resize:vertical`, so the
-// browser draws the drag handle. We watch its size with a ResizeObserver and on
-// each change (a) persist the height for this session and (b) re-fit the xterm +
-// term_resize so cols/rows track the new pane size. Falls back to no-op if
+// _wirePanelResize(sessionId, tpane): v6 Wave 3 — the WHOLE panel is freely
+// resizable: the .pin body carries CSS `resize:both`, so the browser draws a
+// corner drag handle and the user can resize the panel to any width+height
+// (the inner .tpane also still has its own bottom-edge handle). We watch BOTH
+// boxes with ResizeObservers: on a .pin change persist the panel rect (w+h) in
+// _panelRects (skipping while maximized) and re-fit the terminal; on a .tpane
+// change persist the terminal height and re-fit. Falls back to no-op if
 // ResizeObserver is unavailable (the CSS resize still works visually).
 function _wirePanelResize(sessionId, tpane) {
   var p = PANELS[sessionId];
@@ -3936,6 +3979,58 @@ function _wirePanelResize(sessionId, tpane) {
   });
   ro.observe(tpane);
   p.ro = ro;
+  // The .pin free-resize box → persist the panel rect + re-fit on every change.
+  if (p.pin) {
+    var pro = new ResizeObserver(function () {
+      if (!p.maxd) {
+        _panelRects[sessionId] = {
+          w: p.pin.style.width || (p.pin.offsetWidth + 'px'),
+          h: p.pin.style.height || (p.pin.offsetHeight + 'px')
+        };
+      }
+      _fitPanelTerminal(sessionId);
+    });
+    pro.observe(p.pin);
+    p.pinRo = pro;
+  }
+}
+
+// maximizePanel(sessionId): v6 Wave 3 — toggle the panel to fill the cockpit
+// viewport (.panel.maxd: a fixed full-screen overlay) and back to its prior
+// freely-resized rect. On BOTH the maximize and the restore we re-fit the xterm
+// terminal (twice — immediately + after the layout settles) so cols/rows track
+// the new area and the terminal never freezes or clips. The session keeps
+// running throughout — this only changes the panel's geometry.
+function maximizePanel(sessionId) {
+  var p = PANELS[sessionId];
+  if (!p || !p.el) return;
+  // A maximize on a minimized panel first re-expands it (so there's something
+  // to fill the screen with).
+  if (p.el.classList.contains('minimized')) p.el.classList.remove('minimized');
+  if (!p.maxd) {
+    // Remember the freely-resized rect so restore returns to it exactly, then
+    // clear the inline size so .panel.maxd's fixed fill takes over.
+    if (p.pin) {
+      p._restoreRect = {w: p.pin.style.width, h: p.pin.style.height};
+      p.pin.style.width = '';
+      p.pin.style.height = '';
+    }
+    p.el.classList.add('maxd');
+    p.maxd = true;
+  } else {
+    p.el.classList.remove('maxd');
+    p.maxd = false;
+    // Restore the pre-maximize rect (if any).
+    if (p.pin && p._restoreRect) {
+      if (p._restoreRect.w) p.pin.style.width = p._restoreRect.w;
+      if (p._restoreRect.h) p.pin.style.height = p._restoreRect.h;
+    }
+  }
+  // Re-fit now and again after the geometry change paints (xterm needs the new
+  // host size to recompute cols/rows; the ResizeObserver also fires, but we call
+  // explicitly so the fit happens even on browsers that batch RO callbacks).
+  _fitPanelTerminal(sessionId);
+  setTimeout(function () { _fitPanelTerminal(sessionId); }, 60);
 }
 
 // _fitPanelTerminal(sessionId): re-fit the xterm to its host then push the new
@@ -3993,6 +4088,7 @@ function _closePanel(sessionId) {
   var p = PANELS[sessionId];
   if (!p) return;
   try { if (p.ro && p.ro.disconnect) p.ro.disconnect(); } catch (e) {}
+  try { if (p.pinRo && p.pinRo.disconnect) p.pinRo.disconnect(); } catch (e) {}
   try { if (p.transport && p.transport.close) p.transport.close(); } catch (e) {}
   try { if (p.term && p.term.dispose) p.term.dispose(); } catch (e) {}
   if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);

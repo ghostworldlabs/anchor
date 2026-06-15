@@ -62,7 +62,38 @@ chain_for/members, stage-edge persist across reload + rescan, start_session(pare
 through stub PTY. Commit: scoped.
 
 <!-- WAVE 2 done -->
-<!-- WAVE 3 — First-class session windows (maximize + free resize) -->
+### Wave 3 — First-class session windows (maximize + free resize) — GREEN (2026-06-14)
+
+**Built (UI):** Each session panel header gains a **maximize** (▢) control next to
+minimize; toggling adds `.panel.maxd` (position:fixed, fills the viewport, z-index
+9000) and restores the prior freely-resized rect. The whole panel body (`.pin`) is now
+`resize:both` (drag the corner → width AND height), persisted per session in a new
+`_panelRects` map. Maximize/restore AND resize re-fit the xterm via the existing
+`_fitPanelTerminal` (FitAddon when present; stub path recomputes cols/rows). v5
+minimize / close-to-tile / hard-kill kept exactly; layout stays the stacked column (no
+floating windows).
+
+**Orchestrator verification:** (a) DOM/source asserts (5) — maxBtn built + wired to
+`maximizePanel`; v5 controls unchanged; `.pin{resize:both}` + `.panel.maxd` present;
+`_panelRects` persistence; **negative** — resize no longer terminal-pane-only. (b) Real
+Playwright/Chromium test (1) — boot throwaway server + stub PTY, open panel, maximize
+→ fills ≥90% viewport + terminal cols/rows grew, restore → re-fit back, free-resize →
+re-fit + rect persisted, **no JS console errors**. (c) **Screenshots reviewed by the
+orchestrator** — `_devtest/wave3_normal.png` (four distinct controls + corner handle)
+and `wave3_maxed.png` (panel fills viewport, maximize toggle highlighted, terminal
+reflowed to full width) — match the mockup Step 2.
+
+**Honest nuance (for John):** dragging the panel *taller* grows the summary scroll area
+rather than terminal rows; *width* resize and *maximize* both re-fit the terminal
+correctly (the headline behavior). Candidate polish if you want vertical drag to grow
+the terminal instead.
+
+**Gate:** **753 passed, 1 skipped** (+6). `tests/test_window_controls_v6.py` (6) +
+`test_cockpit_paradigm2.py` render-guard GREEN. ⚠️ **Pending John's UI sign-off before
+merge.** Commit: scoped (anchor_gui.py + test + log; `_devtest/` screenshots not
+committed).
+
+<!-- WAVE 3 done -->
 <!-- WAVE 4 — Tile lifecycle (new-session=new-tile + keep finished) -->
 <!-- WAVE 5 — Manual advance research→planning + chain breadcrumb -->
 <!-- WAVE 6 — Auto advance planning→build (gated on a real plan) -->
