@@ -43,6 +43,10 @@ have NO CLI form):
     python3 anchor.py rnd session-summary <project_id> --lane <lane> --session <id>  # cached session summary (skill/prompts/actions)
     python3 anchor.py rnd grass <project_id>                  # grass ideas + status + refinement counts
     python3 anchor.py rnd build-deliverable <project_id> --session <id> [--lane build]  # the deliverable a build produced (honest unresolved)
+
+R&D v6 "Linked Pipeline" inspection mirror (read-only DATA seam; advance/continue
+are interactive and have NO CLI form):
+    python3 anchor.py rnd chain <project_id> --session <id>   # the ordered lineage chain (research -> planning -> build)
 """
 
 import json, os, re, sys
@@ -954,6 +958,40 @@ def rnd_build_deliverable(project_id, session_id, lane="build"):
     return _deliv.resolve_build_deliverable(folder, project_id, session)
 
 
+def rnd_chain(project_id, session_id):
+    """CLI mirror of ``session_registry.chain_for`` + ``chain_members`` (v6 Wave 2).
+
+    Resolves the ordered lineage chain (research → planning → build, then by
+    ``created_at``) that ``session_id`` belongs to. Returns
+    ``{chain_id, members}`` where ``members`` is a SAFE projection of each
+    record (``session_id`` · ``lane`` · ``label`` · ``status`` ·
+    ``parent_session_id`` · ``chain_id`` — never ``worktree_path`` / ``branch``),
+    mirroring the read-only ``GET /api/rnd/chain`` contract. When the session is
+    unknown (no chain), returns ``{chain_id: None, members: []}`` — honest-absent,
+    never fabricated. Read-only; no spawn, no model call. Raises ``KeyError`` for
+    an unknown project.
+    """
+    import session_registry as _sreg
+    # Validate the project id (the chain lives in the global session registry,
+    # but we keep the resolve for a clean unknown-project error like the others).
+    _rnd_resolve(project_id)
+    chain_id = _sreg.chain_for(session_id)
+    members_raw = _sreg.chain_members(chain_id) if chain_id else []
+    members = []
+    for r in members_raw:
+        if not isinstance(r, dict):
+            continue
+        members.append({
+            "session_id": r.get("session_id", ""),
+            "lane": r.get("lane", ""),
+            "label": r.get("label", ""),
+            "status": r.get("status", ""),
+            "parent_session_id": r.get("parent_session_id", ""),
+            "chain_id": r.get("chain_id", ""),
+        })
+    return {"chain_id": chain_id, "members": members}
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1092,7 +1130,7 @@ def _rnd_cli(args):
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
-              "build-deliverable> ...")
+              "build-deliverable|chain> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1396,6 +1434,29 @@ def _rnd_cli(args):
                 print(f"Build deliverable for session {session_id}: "
                       f"UNRESOLVED")
                 print(f"  reason: {res.get('reason','no deliverable pinned yet')}")
+
+        elif sub == "chain":
+            pos = _positionals()
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd chain <project_id> "
+                      "--session <session_id>")
+                return
+            out = rnd_chain(pos[0], session_id)
+            members = out.get("members", []) or []
+            if not members:
+                print(f"No chain for session {session_id} "
+                      f"(unknown session or no lineage).")
+                return
+            print(f"Chain {out.get('chain_id','')} "
+                  f"({len(members)} session(s), research -> planning -> build):")
+            for m in members:
+                marker = " *" if m.get("session_id") == session_id else ""
+                parent = m.get("parent_session_id", "") or "(root)"
+                print(f"  - [{m.get('lane','')}] {m.get('label','') or '(no label)'} "
+                      f"status={m.get('status','')} "
+                      f"parent={parent} "
+                      f"id={m.get('session_id','')}{marker}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

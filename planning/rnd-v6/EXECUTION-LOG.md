@@ -213,4 +213,46 @@ dashboard-rows/cockpit guards GREEN. ⚠️ **Pending John's UI sign-off before 
 Commit: scoped.
 
 <!-- WAVE 7 done -->
-<!-- WAVE 8 — CLI mirror + healthcheck v6 + distro + docs (PROJECT DONE) -->
+### Wave 8 — CLI mirror + healthcheck v6 + distro + docs — GREEN (2026-06-14) — PROJECT DONE
+
+**Built:** `anchor.py` `rnd chain <pid> --session <id>` — read-only ordered chain
+(research→plan→build) via `chain_for`+`chain_members`, SAFE projection (no worktree_path/
+branch), honest "no chain" when absent. `anchor_healthcheck.check_rnd_v6_surface` (fully
+stubbed: stub PTY + **stream-json stub runner** + temp worktree base + temp git project):
+walks (1) summaries through stream-json → grounded non-empty session + project objective
++ schema-version heal; (2) the chain — research root → linked planning → kill-with-plan
+→ exactly one idempotent linked build → `chain_members==[research,planning,build]`; (3)
+term_sessions includes terminal sessions + SAFE; reaps PTYs + temp dirs, restores all
+env, never binds :8777. `distro.py` unchanged (scan already clean). `CLAUDE.md` gains a
+full v6 section (module block + API rows for advance_session/chain/auto_build + `rnd
+chain` CLI + the new registry fields + handoff stage edge + the summarizer fix note).
+
+**Orchestrator verification:** distro scan re-run by orchestrator → **clean (130 files,
+sole pywinpty exception, no Playwright in product code)**. `rnd chain` in the CLI usage.
+20 new tests (cli 10 + healthcheck 5 + distro 5). 
+
+**FINAL GATE:** `ANCHOR_PTY_BACKEND=stub python -m pytest -q` → **807 passed, 1 skipped**
+(+20; +64 over the 743→807 v6 baseline). Commit: scoped (anchor.py + anchor_healthcheck.py
++ CLAUDE.md + 3 tests).
+
+---
+
+## PROJECT DONE (2026-06-14) — pending John's UI sign-off + deploy
+
+All 8 waves GREEN. Branch `foreman/rnd-surface-v6` (base = cherry-picked summarizer
+parse fix `1bd8b85`). Full suite **807 passed, 1 skipped** (baseline was 724 with the
+fix; 743/643 pre-fix). **NOT merged to master, service NOT restarted** — per the locked
+plan, the UI waves (3–7) require John's sign-off (Playwright + screenshots captured under
+`_devtest/`), then: merge → `nssm restart anchor` (elevated) → rescan each project to
+heal the empty summaries.
+
+**Wave tally:** W1 summaries-work (729) · W2 linkage (747) · W3 windows max/resize (753)
+· W4 tile lifecycle (760) · W5 advance+breadcrumb (766) · W6 auto plan→build (778) · W7
+dashboard reflection (787) · W8 CLI/healthcheck/distro/docs (807).
+
+**Open items flagged for John:** (1) Wave 3 — vertical panel drag grows the summary area,
+not terminal rows (width-resize + maximize re-fit the terminal correctly); candidate
+polish. (2) Wave 6 — the `reconcile_and_advance` fallback is implemented+tested but not
+auto-invoked by the live server; hard-kill is the wired trigger; auto-reconcile-on-load
+is a separate decision. (3) Auto plan→build fires on the deliberate hard-kill — if John
+prefers a dedicated "Finish → Build" button instead, that's a small add.
