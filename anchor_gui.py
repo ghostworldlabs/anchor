@@ -3053,6 +3053,14 @@ def render_project_window_html(project_id: str) -> str:
         "<div class='right'>"
         f"<span class='pri p{pr}'>P{pr}</span>"
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
+        # v7 Wave 4 (#4): "Open terminal" — start a BARE general session (no trio
+        # skill seed) via the existing newTermSession path. It opens an inline
+        # panel + a top-strip chip like any live session and carries the per-panel
+        # Claude/Gemini engine toggle. It is NOT a board lane column (John's choice
+        # B) and never auto-advances. Defaults to Claude; the panel toggle switches.
+        "<button class='rnd-mini rnd-accent' id='openTermBtn' "
+        "onclick=\"newTermSession('general','claude')\">"
+        "&#9000; Open terminal</button>"
         f"{lifecycle}"
         "</div></div>"
         # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──

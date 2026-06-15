@@ -223,10 +223,16 @@ def _valid_lanes():
 
     The terminal lane is threaded through ``lanes.check_engine_allowed``, so the
     authoritative names are the trio-lane keys (``research``/``plan``/``build``)
-    plus the future-ideas ``grass`` lane. We also accept the ``rnd_registry``
-    on-disk lane DIR names (``planning``/``deliverables``) so either naming
-    convention is tolerated — but a typo like ``"planx"`` is rejected BEFORE any
-    worktree/PTY is created.
+    plus the future-ideas ``grass`` lane and the v7 bare ``general`` lane. We also
+    accept the ``rnd_registry`` on-disk lane DIR names (``planning``/
+    ``deliverables``) so either naming convention is tolerated — but a typo like
+    ``"planx"`` is rejected BEFORE any worktree/PTY is created.
+
+    ``general`` (v7 Wave 4) is a deliberately BARE lane: it is NOT in
+    :data:`LANE_SKILL` (so :func:`seed_for_lane` returns ``None`` → no seed → a
+    bare PTY, like ``grass``), it is NOT a trio board column (excluded from
+    ``anchor_gui._REGISTRY_LANE_TO_COLUMN``), and it is NOT a planning lane (so
+    :func:`auto_advance_planning_to_build` never advances it).
     """
     lanes = set()
     try:
@@ -234,6 +240,7 @@ def _valid_lanes():
     except Exception:  # pragma: no cover - rnd_registry always defines it
         pass
     lanes.add("grass")
+    lanes.add("general")
     if _lanes is not None:
         try:
             lanes.update(_lanes.LANES.keys())

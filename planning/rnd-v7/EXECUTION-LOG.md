@@ -89,5 +89,29 @@ could make the lane-column tile appear instantly without a reload — offered, n
 Commit: scoped.
 
 <!-- WAVE 3 done -->
-<!-- WAVE 4 — "Open terminal" general session button -->
+### Wave 4 — "Open terminal" general session button — GREEN (2026-06-15)
+
+**Built (UI + backend):** `terminal_session._valid_lanes` now accepts `general` (one line);
+`general` has NO `LANE_SKILL` → `seed_for_lane` returns None → BARE PTY (like grass). An
+"⊞ Open terminal" button in the project-window header `.right` div launches `newTermSession('general','claude')`
+→ bare session, inline panel, top-strip chip, per-panel Claude/Gemini toggle. `general` is
+NOT in `_REGISTRY_LANE_TO_COLUMN` (excluded from trio board columns — no `cards_general`) and
+not in `_PLANNING_LANES` (never auto-advances). grass unchanged.
+
+**Orchestrator verification:** `tests/test_general_terminal_v7.py` (10) — backend (general
+valid + bare/no-seed vs research seeded; excluded from board columns + chain; killing a
+general session with a plan set → no build) + DOM (button present; NO general board column —
+negative) + Playwright (click → general chip + panel + no trio tile; no console errors).
+**Screenshot reviewed** — `_devtest/wave4_general.png`: the "Open terminal" header button, the
+5-column board (no general column), and an opened "general 1 · claude" bare panel + strip chip.
+Matches choice B.
+
+**Flagged for John:** Gemini is research-only by current engine policy, so toggling a general
+session to Gemini surfaces a clean refusal (not a crash). If you want the general terminal to
+allow Gemini, that's a one-line policy tweak — say the word.
+
+**Gate:** **858 passed, 1 skipped** (+10). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 4 done -->
 <!-- WAVE 5 — CLI mirror + healthcheck v7 + distro + docs (PROJECT DONE) -->
