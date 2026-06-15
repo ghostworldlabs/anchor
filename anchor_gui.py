@@ -1188,6 +1188,93 @@ def _project_status_dot(entry: dict, status_line: dict) -> str:
     return "rnd-dot-idle"
 
 
+# Map a registry session status → the locked status-light color word, mirroring
+# `_session_light_class` / the JS `_statusColor` (single source of truth for the
+# four colors). Used by the home-row "what's happening" line (Wave 7).
+_SESSION_STATUS_COLOR = {
+    _sessreg.STATUS_RUNNING: "green",
+    _sessreg.STATUS_NEEDS_ATTENTION: "amber",
+    _sessreg.STATUS_DONE: "amber",
+    _sessreg.STATUS_FAILED: "red",
+    _sessreg.STATUS_IDLE: "grey",
+}
+
+
+def _project_activity_reflection(pid_raw: str) -> dict:
+    """Return a CACHE/REGISTRY-only activity reflection for a home-dashboard row
+    (v6 Wave 7). Reads ONLY ``session_registry`` (no model call, no PTY) so it is
+    safe on the render path.
+
+    Returns ``{running: int, latest: {lane, label, status, color, age} | None}``:
+    - ``running`` — how many of the project's managed sessions are RUNNING;
+    - ``latest`` — the newest session (by ``created_at``) with a human label, its
+      lane, status, status-color word, and a compact age — for the "latest:
+      planning · Crucible pipeline plan (running)" line. ``None`` when the
+      project has no managed sessions at all (honest — never fabricated).
+    Never raises (a registry hiccup degrades to ``{running:0, latest:None}``).
+    """
+    out = {"running": 0, "latest": None}
+    try:
+        sessions = _sessreg.list_sessions(project_id=pid_raw)
+    except Exception:
+        return out
+    if not sessions:
+        return out
+    out["running"] = sum(1 for s in sessions
+                         if s.get("status") == _sessreg.STATUS_RUNNING)
+    # list_sessions is already newest-first by created_at, so [0] is the newest.
+    newest = sessions[0]
+    lane = (newest.get("lane") or "").strip()
+    status = (newest.get("status") or _sessreg.STATUS_IDLE).strip()
+    # A friendly title: the session's own label if it set one, else the lane name.
+    label = (newest.get("label") or "").strip() or (lane.capitalize() or "session")
+    out["latest"] = {
+        "lane": lane,
+        "label": label,
+        "status": status,
+        "color": _SESSION_STATUS_COLOR.get(status, "grey"),
+        "age": _fmt_age(newest.get("created_at")),
+    }
+    return out
+
+
+def _render_activity_reflection_html(refl: dict) -> str:
+    """Render the per-row activity-reflection block (v6 Wave 7): a running
+    indicator/count + a "what's happening" latest-session line. Honest empty
+    state ("idle — no sessions") when the project has none. Pure formatting of
+    the cache/registry-sourced ``refl`` dict; never runs the model."""
+    running = int(refl.get("running", 0) or 0)
+    latest = refl.get("latest")
+    parts = []
+    if running > 0:
+        # A live indicator (the pulsing dot CSS) + the count.
+        parts.append(
+            f'<span class="rnd-act-running" title="live sessions">'
+            f'<span class="rnd-act-pulse" aria-hidden="true"></span>'
+            f'running: {running}</span>'
+        )
+    if latest:
+        lane = latest.get("lane") or ""
+        lane_lbl = html_lib.escape(lane.capitalize() or "session")
+        title = html_lib.escape(latest.get("label") or "")
+        status = html_lib.escape(latest.get("status") or "")
+        color = html_lib.escape(latest.get("color") or "grey")
+        age = html_lib.escape(latest.get("age") or "")
+        age_txt = f' · {age}' if age else ""
+        parts.append(
+            f'<span class="rnd-act-latest">latest: '
+            f'<span class="rnd-act-lane">{lane_lbl}</span> · '
+            f'<span class="rnd-act-title">{title}</span> '
+            f'<span class="rnd-act-status rnd-act-{color}">'
+            f'({status})</span>{age_txt}</span>'
+        )
+    if not parts:
+        # Honest placeholder — never fabricate activity.
+        parts.append('<span class="rnd-act-latest rnd-dim">'
+                     'idle — no sessions yet</span>')
+    return '<div class="rnd-row-activity">' + "".join(parts) + "</div>"
+
+
 def render_project_tile_html(entry: dict) -> str:
     """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
     lines 124-141): ``name · accurate cached project summary · per-lane
@@ -1214,6 +1301,13 @@ def render_project_tile_html(entry: dict) -> str:
     # data-blurb keeps the kebab "Blurb" prompt seeded with the editable blurb.
     blurb = entry.get("blurb", "") or ""
     blurb_attr = html_lib.escape(blurb, quote=True)
+
+    # v6 Wave 7 — timely activity reflection (running count + newest-session
+    # "what's happening" line), sourced from the session registry ONLY (no model
+    # call on the render path). Honest "idle — no sessions yet" placeholder when
+    # the project has none.
+    activity_block = _render_activity_reflection_html(
+        _project_activity_reflection(pid_raw))
 
     # Per-lane mini-counts (compact form of the status line) + status dot.
     status = render_status_line_html(pid_raw)
@@ -1283,6 +1377,7 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
         f'{summary_block}'
+        f'{activity_block}'
         f'<span class="rnd-row-counts">{status}</span>'
         f'{rollup_block}'
         f'{kebab}'
@@ -6139,8 +6234,20 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-dot.rnd-dot-running {{ background: var(--success); box-shadow: 0 0 5px var(--success); }}
 .rnd-dot.rnd-dot-idle {{ background: var(--text-dim); }}
 .rnd-row .rnd-name {{ flex: 0 0 auto; white-space: nowrap; }}
-.rnd-row-summary {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
+.rnd-row-summary {{ flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
 .rnd-row-summary.rnd-dim {{ color: var(--text-dim); opacity: .6; font-style: italic; }}
+/* v6 Wave 7 — timely activity reflection: running indicator + "what's happening". */
+.rnd-row-activity {{ flex: 3 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); overflow: hidden; }}
+.rnd-act-running {{ flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-weight: 600; }}
+.rnd-act-pulse {{ width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 5px var(--success); animation: rndActPulse 1.4s ease-in-out infinite; }}
+@keyframes rndActPulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: .35; }} }}
+.rnd-act-latest {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.rnd-act-lane {{ text-transform: capitalize; color: var(--text); opacity: .85; }}
+.rnd-act-title {{ color: var(--text); opacity: .9; }}
+.rnd-act-status.rnd-act-green {{ color: var(--success); }}
+.rnd-act-status.rnd-act-amber {{ color: #e0a02a; }}
+.rnd-act-status.rnd-act-red {{ color: var(--danger, #e06c6c); }}
+.rnd-act-status.rnd-act-grey {{ color: var(--text-dim); }}
 .rnd-row-counts {{ flex: 0 0 auto; }}
 .rnd-row-counts .rnd-status-line {{ gap: 5px; }}
 .rnd-row-counts .rnd-lane {{ padding: 2px 7px; font-size: 11px; }}

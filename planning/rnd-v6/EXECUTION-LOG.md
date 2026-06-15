@@ -186,5 +186,31 @@ a separate decision (left out to avoid a behavior change).
 merge.** Commit: scoped.
 
 <!-- WAVE 6 done -->
-<!-- WAVE 7 — Main dashboard reflects project activity -->
+### Wave 7 — Main dashboard reflects project activity — GREEN (2026-06-14)
+
+**Built (UI):** Each home-dashboard R&D row (`render_project_tile_html`, also served by
+`GET /api/rnd/projects_html`) now shows, beyond the status dot: the **cached grounded
+objective** (Wave-1 `summarizer.load_cached_project`, read-only), a **running indicator
++ count** (pulsing dot + `running: N` from `list_sessions` STATUS_RUNNING), and a
+**"what's happening" line** (`latest: <Lane> · <title> (<status>) · <age>` from the
+newest registry session). Honest `idle — no sessions yet` placeholder; objective falls
+back to blurb/"No summary yet". New `_project_activity_reflection(pid)` (registry-only,
+try/except-guarded) + `_render_activity_reflection_html`. Existing dot/kebab/lane-counts/
+rollup kept; the `projects_html` in-place refresh renders the same upgraded row.
+
+**Orchestrator verification:** (a) DOM positive+negative — objective + running + activity
+present; done-only shows `(done)` + no pulse; no-activity → honest placeholder; row is no
+longer just a dot. (b) **No-model-call** spies on `_generate_candidates`/
+`_generate_project_candidates`/`summarize_*` → `calls==[]` after rendering the row AND the
+projects_html fragment (cache-only). (c) f-string brace-leak test (no `{{`/`}}` leak;
+`@keyframes` braces doubled). (d) Real Playwright — row shows `running:1` + objective +
+session title (not a dot); background cache update + `rndRowsRefresh()` → row updates in
+place; no console errors. (e) **Screenshot reviewed** — `_devtest/wave7_dashboard.png`:
+`LiveProj … Objective: build the lin… · ● running:1 · latest: Planning · Crucib… · ⋮`.
+
+**Gate:** **787 passed, 1 skipped** (+9). `tests/test_dashboard_reflection_v6.py` (9) +
+dashboard-rows/cockpit guards GREEN. ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 7 done -->
 <!-- WAVE 8 — CLI mirror + healthcheck v6 + distro + docs (PROJECT DONE) -->
