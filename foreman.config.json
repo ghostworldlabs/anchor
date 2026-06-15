@@ -1,26 +1,26 @@
 {
-  "project": "anchor-rnd-surface-v5",
+  "project": "anchor-rnd-surface-v6",
   "docs": {
-    "description": "planning/rnd-v5/MASTER-PLAN.md",
-    "plan": "planning/rnd-v5/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/rnd-v5/EXECUTION-LOG.md"
+    "description": "planning/rnd-v6/MASTER-PLAN.md",
+    "plan": "planning/rnd-v6/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/rnd-v6/EXECUTION-LOG.md"
   },
   "test_command": "python -m pytest -v",
-  "notes": "Build cwd = repo root C:\\dev\\Anchor. v5 = 'Durable Work' — builds on the merged v4.1 'Project Cockpit'. 6 waves: (1) run lifecycle close-to-tile vs deliberate hard-kill; (2) past-session real summary (skill+prompts+actions) + continue-in-live-session; (3) better project summaries (objective/purpose); (4) deliverable per Foreman build (resolve+backfill+list in lane AND build panel, honest when none); (5) Grass Catcher B+C hybrid workbench (filter tabs + two-pane + develop terminal + versioned/pullable refinements + promote links + search), per _mockups/grass_catcher_refined.html; (6) CLI mirror + check_rnd_v5_surface healthcheck + distro scan + CLAUDE.md. MANDATORY UI verification per the v4 lesson: every UI wave must pass rendered-DOM (positive+negative) + a real Playwright/Chromium interaction test + an orchestrator screenshot-vs-mockup + user sign-off before merge; a string-grep gate is an automatic HALT. Playwright is a DEV-ONLY test dep (pytest.importorskip), NEVER in product code; distro import scan must stay green. All model/PTY interactions via tests/fake_claude.py + stub PTY (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY/:8777/real data in the gate; spawned previews on an OS-assigned port HARD-guarded != 8777 + isolated temp ANCHOR_DATA_DIR. pywinpty is the only native-dep waiver (lazy, pty_manager.py only). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string.",
+  "notes": "Build cwd = repo root C:\\dev\\Anchor, branch foreman/rnd-surface-v6 (off master; base commit = cherry-picked summarizer stream-json parse fix 1bd8b85). v6 = 'Linked Pipeline' — builds on merged v5 'Durable Work'. From John dogfooding the cockpit. 8 waves: (1) summaries that actually work (land the prod stream-json parse fix + informative session/project content + stream-json-shaped regression stub + schema-version cache heal on rescan; backend); (2) session linkage backbone (parent_session_id + chain_id on the registry record, chain_for/chain_members, handoff generic stage edge research->plan too; backend); (3) first-class session windows: maximize + free resize on the STACKED panels, re-fit xterm (UI); (4) tile lifecycle: every new session mints a new tile + keep finished tiles newest-prominent with a 'previously done' group, term_sessions projection includes terminal sessions (UI); (5) manual advance research->planning via POST /api/rnd/advance_session (token-authed, seeded+linked) + chain breadcrumb (UI); (6) AUTOMATIC advance planning->build, gated on handoff.discover_recent_plan_set finding a MASTER+IMPL set tied to that planning session, primed via prime_worktree, idempotent one-build-per-planning, fires on the terminal-state transition not process self-exit, works with no upstream research (backend+UI); (7) main dashboard reflects project activity: running count + latest grounded objective summary + a recent-activity line, cache-only render, projects_html in-place refresh (UI); (8) CLI mirror (rnd chain) + check_rnd_v6_surface healthcheck (fully stubbed) + distro scan clean + CLAUDE.md (PROJECT DONE). LOCKED user decisions: windows STACKED not floating; new-session=new-tile always; research->plan MANUAL on click; plan->build AUTOMATIC only when a real plan exists; finished tiles KEPT newest-prominent + 'previously done'; chain durable+traversable with a breadcrumb. OUT OF SCOPE: calendar integration, app-builder version, floating windows. MANDATORY UI verification per the v4 lesson on Waves 3-7: rendered-DOM (positive+negative) + a real Playwright/Chromium interaction test + an orchestrator screenshot-vs-mockup (_mockups/rnd-v6/session_pipeline.html) + user sign-off before merge; a string-grep gate is an automatic HALT. Playwright is DEV-ONLY (pytest.importorskip), NEVER in product code; distro import scan must stay green. All model/PTY via tests/fake_claude.py + tests/stub_streamjson.py + stub PTY (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY/:8777/real data in the gate; spawned previews on an OS-assigned port HARD-guarded != 8777 + isolated temp ANCHOR_DATA_DIR. pywinpty is the only native-dep waiver (lazy, pty_manager.py only). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string. NO merge to master and NO nssm restart until John signs off; then merge + nssm restart anchor (elevated) + rescan each project to heal summaries.",
+  "prior_config_rnd_v5": {
+    "project": "anchor-rnd-surface-v5",
+    "docs": {
+      "description": "planning/rnd-v5/MASTER-PLAN.md",
+      "plan": "planning/rnd-v5/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v5/EXECUTION-LOG.md"
+    }
+  },
   "prior_config_rnd_v4": {
     "project": "anchor-rnd-surface-v4",
     "docs": {
       "description": "planning/rnd-v4/MASTER-PLAN.md",
       "plan": "planning/rnd-v4/IMPLEMENTATION-PLAN.md",
       "execution_log": "planning/rnd-v4/EXECUTION-LOG.md"
-    }
-  },
-  "prior_config_rnd_v3": {
-    "project": "anchor-rnd-surface-v3",
-    "docs": {
-      "description": "planning/rnd-v3/MASTER-PLAN.md",
-      "plan": "planning/rnd-v3/IMPLEMENTATION-PLAN.md",
-      "execution_log": "planning/rnd-v3/EXECUTION-LOG.md"
     }
   }
 }
