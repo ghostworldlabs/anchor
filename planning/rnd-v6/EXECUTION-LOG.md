@@ -94,7 +94,34 @@ merge.** Commit: scoped (anchor_gui.py + test + log; `_devtest/` screenshots not
 committed).
 
 <!-- WAVE 3 done -->
-<!-- WAVE 4 — Tile lifecycle (new-session=new-tile + keep finished) -->
+### Wave 4 — Tile lifecycle (new-session=new-tile + keep finished) — GREEN (2026-06-14)
+
+**Built (UI):** (a) Audited all five start paths (`newTermSession`, `continueSession`,
+`promoteGrass`, `developGrass`, `pullGrass`) — each already mints a distinct
+`MANAGED[sid]` tile on a fresh server id; a JS-source test locks it in. (b) Finished
+tiles now stay: `repopulate` splits live → `MANAGED` (colored) vs done/failed →
+`FINISHED` (greyed); `renderSessionBar` shows per-lane the most-recent finished as a
+prominent greyed tile and collapses older ones under a `<details>` **"previously done
+(N)"** expander; clicking a finished tile opens its read-only summary panel; closing
+keeps the tile, only hard-kill removes it. The `term_sessions` SAFE projection now also
+carries the Wave-2 lineage fields (still NO worktree_path/branch). Preserved the v5
+contract via a client `_KILLED` set: deliberate kill = gone forever; natural finish/
+reconcile-dead = greyed tile kept (this is what kept `test_run_lifecycle` GREEN).
+
+**Orchestrator verification:** (a) DOM/source asserts (positive+negative — the old
+`_isTerminalStatus` skip is gone; SAFE projection has no worktree_path/branch). (b) Real
+Playwright/Chromium — start THREE research sessions → 3 distinct tiles; finish the two
+oldest → both greyed + kept, newest-finished prominent, oldest under "previously done";
+click grouped finished tile → panel opens; no JS console errors. (c) **Screenshot
+reviewed** — `_devtest/wave4_tiles.png` shows `● research 3` (live) · `○ research ✓`
+(prominent finished) · `previously done (1)` expander + the grouped older tile — matches
+mockup Step 1 + Step 5.
+
+**Gate:** **760 passed, 1 skipped** (+7). `tests/test_tile_lifecycle_v6.py` (7) +
+cockpit/run-lifecycle guards GREEN. ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 4 done -->
 <!-- WAVE 5 — Manual advance research→planning + chain breadcrumb -->
 <!-- WAVE 6 — Auto advance planning→build (gated on a real plan) -->
 <!-- WAVE 7 — Main dashboard reflects project activity -->

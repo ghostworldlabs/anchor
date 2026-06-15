@@ -2486,6 +2486,21 @@ def render_project_window_html(project_id: str) -> str:
         "background:var(--surface2);border:1px solid var(--border)}"
         ".live-chip:hover{border-color:var(--accent)}"
         ".live-chip .ttl{font-weight:600}"
+        # v6 Wave 4: a FINISHED (done/failed) tile renders greyed (.done) with a
+        # ✓ check; it's still clickable (reopens its read-only summary panel).
+        ".live-chip.done{opacity:.72}"
+        ".live-chip .ck{color:#22c55e;font-size:11px;margin-left:2px}"
+        # "previously done (N)" expander: older finished sessions in a lane tuck
+        # under this small collapsible cluster so the row stays tidy.
+        ".live-session-bar .prevdone{display:inline-flex;align-items:center}"
+        ".live-session-bar .prevdone>summary{cursor:pointer;font-size:11px;"
+        "color:var(--text-dim);list-style:none;padding:4px 8px;border-radius:14px;"
+        "border:1px dashed var(--border);user-select:none}"
+        ".live-session-bar .prevdone>summary:hover{color:var(--text);"
+        "border-color:var(--accent)}"
+        ".live-session-bar .prevdone[open]>summary{color:var(--text)}"
+        ".live-session-bar .prevdone-tiles{display:inline-flex;flex-wrap:wrap;"
+        "gap:8px;margin-left:8px}"
         # Per-session engine toggle in the panel bar (◆ Claude / ✦ Gemini). Chosen
         # once; flipping POSTs term_set_engine to relaunch this session on the other
         # engine in the SAME worktree (mockup Paradigm-2 panel header).
@@ -3265,11 +3280,26 @@ function rndUnlinkTask(el) {
 // A LIVE session mounts xterm; a DONE/historical session shows a read-only note.
 // ════════════════════════════════════════════════════════════════════════════
 
-// MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
+// MANAGED: session_id -> {session_id, lane, backend, status, label, idx} for
+// LIVE (non-terminal) managed sessions — these mount a live xterm terminal.
 var MANAGED = {};
+// FINISHED (v6 Wave 4): session_id -> {session_id, lane, backend, status, label,
+// created_at, chain_id, parent_session_id, idx} for TERMINAL-status (done/failed)
+// managed sessions. v5 dropped these from the row; v6 KEEPS them as greyed,
+// reopenable tiles (per lane: newest prominent, older ones under "previously
+// done"). Clicking a finished tile opens a HISTORICAL (read-only) panel showing
+// the Wave-1 session summary — _synthSessionRecord reads the tile's data-* attrs,
+// so a finished tile is NOT in MANAGED and openPanel treats it as non-live.
+var FINISHED = {};
 // PANELS: session_id -> {el, body, term, transport} for an OPEN inline panel.
 var PANELS = {};
 var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" labels
+// _KILLED (v6 Wave 4): session ids the user DELIBERATELY hard-killed this page
+// load. term_kill marks the registry record 'done' (terminal) — indistinguishable
+// by status from a naturally-finished session — so without this set a killed tile
+// would re-enter the row as a greyed FINISHED tile on the next repopulate(). A
+// hard-kill means GONE; we suppress these ids from both MANAGED and FINISHED.
+var _KILLED = {};
 
 // Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E; this is
 // the SAME mapping the server's _session_light_class applies to the lane tiles):
@@ -3304,8 +3334,10 @@ async function repopulate() {
   } catch (e) { return; }
   if (!data || !data.ok) return;
   var sessions = data.sessions || [];
-  // Rebuild the MANAGED map, preserving a stable per-lane index per session.
-  var seen = {};
+  // Rebuild the MANAGED (live) + FINISHED (terminal) maps, preserving a stable
+  // per-lane index per session.
+  var seenLive = {};
+  var seenDone = {};
   _laneCounters = {};
   sessions.sort(function (a, b) {
     return (a.created_at || 0) - (b.created_at || 0);
@@ -3313,27 +3345,54 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
-    // v5 Wave 1 (BLOCKER fix): the live-session bar holds LIVE sessions only. A
-    // terminal session (a deliberate hard-kill marks the registry record 'done';
-    // a crash 'failed') is excluded — otherwise a killed chip would REAPPEAR on
-    // the next repopulate() (term_sessions reports every status). A session that
-    // just went terminal is also not re-added here, so the drop-loop below evicts
-    // it from MANAGED and closes any stale panel. Historical/done work is reopened
-    // from its server-rendered board tile, not this live bar.
-    if (_isTerminalStatus(s.status)) continue;
+    // v6 Wave 4: a DELIBERATELY hard-killed session is GONE — never re-add it
+    // (its registry record persists as 'done', which would otherwise re-enter it
+    // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
+    if (_KILLED[s.session_id]) continue;
     var lane = s.lane || 'session';
+    if (_isTerminalStatus(s.status)) {
+      // v6 Wave 4: a TERMINAL session (a deliberate hard-kill marks the registry
+      // record 'done'; a crash 'failed') is KEPT — but in FINISHED (a greyed,
+      // reopenable tile), NOT in MANAGED (so openPanel won't try to mount a live
+      // PTY for it; it synthesizes a read-only historical panel instead). If it
+      // was previously live, drop it from MANAGED + close its now-stale live panel
+      // (its PTY is gone) so the tile re-renders as finished.
+      if (MANAGED[s.session_id]) { _closePanel(s.session_id); delete MANAGED[s.session_id]; }
+      var pdone = FINISHED[s.session_id] || {};
+      FINISHED[s.session_id] = {
+        session_id: s.session_id, lane: lane, backend: s.backend || '',
+        status: s.status || 'done', label: s.label || '',
+        created_at: s.created_at || pdone.created_at || 0,
+        chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
+        idx: pdone.idx || 0
+      };
+      seenDone[s.session_id] = true;
+      continue;
+    }
+    // A LIVE (running/idle/needs-attention) session → colored tile in the row.
+    // If it was previously finished (e.g. reconcile re-statused it back live —
+    // rare), drop the stale FINISHED entry.
+    if (FINISHED[s.session_id]) delete FINISHED[s.session_id];
     _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
     var prev = MANAGED[s.session_id] || {};
     MANAGED[s.session_id] = {
       session_id: s.session_id, lane: lane, backend: s.backend || '',
       status: s.status || 'idle', label: s.label || '',
+      chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
+      created_at: s.created_at || prev.created_at || 0,
       idx: prev.idx || _laneCounters[lane]
     };
-    seen[s.session_id] = true;
+    seenLive[s.session_id] = true;
   }
-  // Drop sessions the registry no longer reports (and close any stale panel).
+  // Drop LIVE sessions the registry no longer reports at all (gone, not merely
+  // terminal — a terminal one moved to FINISHED above) and close any stale panel.
   for (var sid in MANAGED) {
-    if (!seen[sid]) { _closePanel(sid); delete MANAGED[sid]; }
+    if (!seenLive[sid]) { _closePanel(sid); delete MANAGED[sid]; }
+  }
+  // Drop FINISHED sessions the registry no longer reports (e.g. hard-kill removed
+  // the record). A killed tile must not reappear.
+  for (var dsid in FINISHED) {
+    if (!seenDone[dsid]) delete FINISHED[dsid];
   }
   renderSessionBar();
 }
@@ -3350,34 +3409,90 @@ var loadSessions = repopulate;
 function renderSessionBar() {
   var bar = document.getElementById('sessionBar');
   if (!bar) return;
-  // Don't clobber a chip the panel manager is mid-removing: rebuild from MANAGED.
+  // Don't clobber a chip the panel manager is mid-removing: rebuild from the maps.
   bar.innerHTML = '';
-  var ids = Object.keys(MANAGED);
-  for (var i = 0; i < ids.length; i++) {
-    var sid = ids[i];
-    var s = MANAGED[sid];
+  // (1) LIVE managed sessions → colored, reopenable tiles (running/idle/attn).
+  var live = Object.keys(MANAGED);
+  for (var i = 0; i < live.length; i++) {
+    var s = MANAGED[live[i]];
     if (!s) continue;
-    var chip = document.createElement('span');
-    // .tile + data-session so _synthSessionRecord / _removeSessionTile bind, and
-    // the live-tile click hook is the SAME laneTileClick → openPanel path.
-    chip.className = 'tile lane-tile live-chip';
-    chip.setAttribute('data-session', sid);
-    chip.setAttribute('data-lane', s.lane || '');
-    chip.setAttribute('data-light', _statusColor(s.status));
-    chip.setAttribute('data-live', '1');
-    var sidCopy = sid;
-    chip.onclick = (function (theId) {
-      return function (ev) { laneTileClick(ev, theId); };
-    })(sidCopy);
-    var dot = document.createElement('span');
-    dot.className = 'lt ' + _statusColor(s.status);
-    var lbl = document.createElement('span');
-    lbl.className = 'ttl';
-    lbl.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
-    chip.appendChild(dot);
-    chip.appendChild(lbl);
-    bar.appendChild(chip);
+    bar.appendChild(_buildBarTile(s, false));
   }
+  // (2) v6 Wave 4: FINISHED (done/failed) sessions → greyed, reopenable tiles.
+  //     Per lane the MOST-RECENT finished session is shown PROMINENTLY in the
+  //     row; older finished ones in that lane collapse under a small
+  //     "previously done (N)" expander so the row stays tidy but nothing is lost.
+  var doneIds = Object.keys(FINISHED);
+  if (doneIds.length) {
+    // Group by lane, newest-first within each lane (by created_at, then idx).
+    var byLane = {};
+    for (var j = 0; j < doneIds.length; j++) {
+      var d = FINISHED[doneIds[j]];
+      if (!d) continue;
+      var lane = d.lane || 'session';
+      (byLane[lane] = byLane[lane] || []).push(d);
+    }
+    var lanes = Object.keys(byLane).sort();
+    for (var k = 0; k < lanes.length; k++) {
+      var group = byLane[lanes[k]];
+      group.sort(function (a, b) {
+        return (b.created_at || 0) - (a.created_at || 0) || (b.idx || 0) - (a.idx || 0);
+      });
+      // The newest finished session in this lane is the prominent tile.
+      bar.appendChild(_buildBarTile(group[0], true));
+      // Older finished ones collapse under "previously done (N)".
+      if (group.length > 1) {
+        var det = document.createElement('details');
+        det.className = 'prevdone';
+        det.setAttribute('data-lane', lanes[k]);
+        var sum = document.createElement('summary');
+        sum.textContent = 'previously done (' + (group.length - 1) + ')';
+        det.appendChild(sum);
+        var wrap = document.createElement('span');
+        wrap.className = 'prevdone-tiles';
+        for (var m = 1; m < group.length; m++) {
+          wrap.appendChild(_buildBarTile(group[m], true));
+        }
+        det.appendChild(wrap);
+        bar.appendChild(det);
+      }
+    }
+  }
+}
+
+// _buildBarTile(s, finished): build one tiles-row tile element for a session
+// record. .tile + data-session so _synthSessionRecord / _removeSessionTile bind,
+// and the click hook is the SAME laneTileClick → openPanel path. A FINISHED tile
+// is greyed (.done) and carries data-light='grey' so openPanel synthesizes a
+// read-only historical panel (it is NOT in MANAGED). A LIVE tile carries
+// data-live='1' + its status color.
+function _buildBarTile(s, finished) {
+  var sid = s.session_id;
+  var chip = document.createElement('span');
+  var light = finished ? 'grey' : _statusColor(s.status);
+  chip.className = 'tile lane-tile live-chip' + (finished ? ' done' : '');
+  chip.setAttribute('data-session', sid);
+  chip.setAttribute('data-lane', s.lane || '');
+  chip.setAttribute('data-light', light);
+  if (finished) { chip.setAttribute('data-finished', '1'); }
+  else { chip.setAttribute('data-live', '1'); }
+  chip.onclick = (function (theId) {
+    return function (ev) { laneTileClick(ev, theId); };
+  })(sid);
+  var dot = document.createElement('span');
+  dot.className = 'lt ' + light;
+  var lbl = document.createElement('span');
+  lbl.className = 'ttl';
+  lbl.textContent = (s.label ? s.label : (s.lane + ' ' + (s.idx || '')));
+  chip.appendChild(dot);
+  chip.appendChild(lbl);
+  if (finished) {
+    var ck = document.createElement('span');
+    ck.className = 'ck';
+    ck.textContent = '✓';
+    chip.appendChild(ck);
+  }
+  return chip;
 }
 
 // laneTileClick: a Paradigm-2 lane tile was clicked → open its inline panel.
@@ -4138,8 +4253,10 @@ async function killPanel(sessionId) {
     // A 404 unknown-session (historical tile with no live PTY) is NOT an error
     // for kill — there is simply no process to reap; we still drop the tile.
   } catch (e) { alert('[kill error] ' + e.message); }
+  _KILLED[sessionId] = 1;       // v6 Wave 4: suppress this id from future repopulate
   _closePanel(sessionId);
   delete MANAGED[sessionId];
+  delete FINISHED[sessionId];   // v6 Wave 4: also evict a finished tile if killed
   _removeSessionTile(sessionId);
   renderSessionBar();
   setTimeout(repopulate, 400);
@@ -7781,12 +7898,19 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
             elif self.path.startswith("/api/rnd/term_sessions"):
-                # Read-only (Wave 4): live managed terminal sessions for a
-                # project — the repopulate-from-registry hook the window-manager
-                # button bar paints from on load. Returns a SAFE projection of
-                # each registry record (NO absolute worktree_path — the UI has
-                # no need for it). Consistent with /api/rnd/projects (GET, no
-                # mutation, no auth gate).
+                # Read-only: managed terminal sessions for a project — the
+                # repopulate-from-registry hook the cockpit tiles row paints from
+                # on load. Returns a SAFE projection of each registry record (NO
+                # absolute worktree_path / branch — the UI has no need for them,
+                # and they MUST NOT leak). Consistent with /api/rnd/projects
+                # (GET, no mutation, no auth gate).
+                #
+                # v6 Wave 4: this projection now INCLUDES terminal-status
+                # (done/failed) sessions too — finished tiles stay in the row as
+                # greyed, reopenable tiles (newest-prominent + "previously done").
+                # It also carries the Wave-2 lineage fields
+                # (parent_session_id / chain_id) so the front end can group a
+                # chain. Still SAFE: worktree_path / branch are NEVER included.
                 q = parse_qs(urlparse(self.path).query)
                 pid = (q.get("project_id", [""])[0] or "").strip()
                 try:
@@ -7799,11 +7923,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         continue
                     safe.append({
                         "session_id": r.get("session_id"),
+                        "project_id": r.get("project_id", ""),
                         "lane": r.get("lane", ""),
                         "backend": r.get("backend", ""),
                         "status": r.get("status", ""),
                         "label": r.get("label", ""),
                         "created_at": r.get("created_at"),
+                        "parent_session_id": r.get("parent_session_id", ""),
+                        "chain_id": r.get("chain_id", ""),
                     })
                 self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/projects_html"):
