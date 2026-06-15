@@ -434,6 +434,7 @@ import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
 import terminal_session as _termsess
+import session_registry as _sessreg
 import handoff as _handoff
 import preview_server as _preview
 import paths as _paths  # re-import alias (already imported above; harmless)
@@ -2585,6 +2586,27 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .tpane .ro-list{margin:3px 0 4px 0;padding-left:20px;"
         "color:var(--text-dim);font-size:11.5px}"
         ".panel .tpane .ro-list li{margin:2px 0}"
+        # v6 Wave 5 — "Advance to Planning →" bar (research panels) + the chain
+        # breadcrumb (panel header). The advance bar is the mockup Step-3 green
+        # control; the breadcrumb is a row of clickable chain nodes.
+        ".panel .pin .advbar{display:flex;align-items:center;gap:10px;"
+        "flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
+        "border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.07)}"
+        ".panel .pin .advbar .advt{font-size:11.5px;color:var(--text-dim)}"
+        ".panel .pin .advbar .advt b{color:#bff3cf}"
+        ".panel .pin .advbar .advbtn{margin-left:auto;font-size:12px;"
+        "padding:6px 13px;border-radius:7px;border:1px solid rgba(34,197,94,.55);"
+        "background:rgba(34,197,94,.14);color:#cdf5d8;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .pin .advbar .advbtn:hover{background:rgba(34,197,94,.26)}"
+        ".panel .pbar .chaincrumb{display:inline-flex;align-items:center;gap:4px;"
+        "flex-wrap:wrap;font-size:11px}"
+        ".panel .pbar .chaincrumb .cc-sep{color:var(--accent);font-weight:700}"
+        ".panel .pbar .chaincrumb .cc-node{color:var(--accent);cursor:pointer;"
+        "padding:1px 6px;border-radius:5px;border:1px solid transparent}"
+        ".panel .pbar .chaincrumb .cc-node:hover{border-color:var(--accent)}"
+        ".panel .pbar .chaincrumb .cc-node.cur{color:var(--text);"
+        "border-color:var(--border);background:var(--surface)}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -3616,6 +3638,12 @@ function openPanel(sessionId) {
   var meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
+  // v6 Wave 5: chain breadcrumb (R-1 → P-2 → …) — the lineage this session
+  // belongs to. Filled async from /api/rnd/chain; each node is clickable →
+  // openPanel(thatSession). Empty (hidden) for a session with no chain yet.
+  var crumb = document.createElement('span');
+  crumb.className = 'chaincrumb';
+  crumb.setAttribute('data-session', sessionId);
   var sp = document.createElement('span');
   sp.className = 'sp';
   // Per-session engine toggle (◆ Claude / ✦ Gemini). Chosen once; flipping POSTs
@@ -3660,6 +3688,7 @@ function openPanel(sessionId) {
   killBtn.textContent = '🗑';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
+  bar.appendChild(crumb);
   bar.appendChild(sp);
   if (engEl) {
     var englbl = document.createElement('span');
@@ -3715,6 +3744,30 @@ function openPanel(sessionId) {
   tpane.appendChild(host);
   pin.appendChild(tpane);
 
+  // v6 Wave 5: a research session's panel gets an "Advance to Planning →" bar
+  // (mockup Step 3). One click starts a NEW linked planning tile seeded from this
+  // research (advanceSession → POST /api/rnd/advance_session). Shown ONLY for the
+  // research lane this wave (the plan→build auto path is Wave 6).
+  if ((s.lane || '') === 'research') {
+    var adv = document.createElement('div');
+    adv.className = 'advbar';
+    var advt = document.createElement('span');
+    advt.className = 'advt';
+    advt.innerHTML = 'When this research is done, advance it to a new linked '
+      + '<b>planning</b> session, seeded from this work:';
+    var advb = document.createElement('button');
+    advb.className = 'advbtn';
+    advb.type = 'button';
+    advb.textContent = 'Advance to Planning →';
+    advb.onclick = function (e) {
+      e.stopPropagation();
+      advanceSession(sessionId, 'planning');
+    };
+    adv.appendChild(advt);
+    adv.appendChild(advb);
+    pin.appendChild(adv);
+  }
+
   panel.appendChild(bar);
   panel.appendChild(pin);
   stack.appendChild(panel);
@@ -3732,9 +3785,51 @@ function openPanel(sessionId) {
     _mountReadOnlyBody(sessionId, host, s);
   }
   _loadPanelSummary(sessionId, summ);
+  _loadChainBreadcrumb(sessionId, crumb);
   _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
+}
+
+// _CHAIN_ABBR: lane → the breadcrumb node prefix (research→R, planning/plan→P,
+// build→B). Mirrors the mockup's R-/P-/B- labels.
+var _CHAIN_ABBR = {research: 'R', planning: 'P', plan: 'P', build: 'B'};
+
+// _loadChainBreadcrumb(sessionId, host): fetch this session's lineage chain and
+// render a clickable breadcrumb (R-1 → P-2 → …) into the panel header. Read-only
+// (GET /api/rnd/chain, ?token=); each node opens that session's panel. A chain of
+// one (no lineage) renders nothing. Best-effort — any error leaves the crumb empty.
+function _loadChainBreadcrumb(sessionId, host) {
+  if (!host) return;
+  var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
+    + '&session=' + encodeURIComponent(sessionId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var members = (d && d.ok && d.members) ? d.members : [];
+      host.innerHTML = '';
+      if (members.length < 2) return;   // a lone session has no chain to show
+      members.forEach(function (m, i) {
+        if (i > 0) {
+          var sep = document.createElement('span');
+          sep.className = 'cc-sep';
+          sep.textContent = '→';
+          host.appendChild(sep);
+        }
+        var node = document.createElement('span');
+        var lane = m.lane || '';
+        var abbr = _CHAIN_ABBR[lane] || (lane ? lane.charAt(0).toUpperCase() : '?');
+        node.className = 'cc-node' + (m.session_id === sessionId ? ' cur' : '');
+        node.setAttribute('data-session', m.session_id);
+        node.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.title = lane + ' · ' + (m.status || '');
+        node.onclick = (function (theId) {
+          return function (ev) { ev.stopPropagation(); openPanel(theId); };
+        })(m.session_id);
+        host.appendChild(node);
+      });
+    })
+    .catch(function () {});
 }
 
 // _synthSessionRecord(sessionId): build a MANAGED-shaped record for a NON-live
@@ -3933,6 +4028,42 @@ async function continueSession(sessionId, lane) {
     session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  setTimeout(repopulate, 600);
+}
+
+// advanceSession(sourceId, toLane): v6 Wave 5 — MANUAL advance research →
+// planning. POST /api/rnd/advance_session (token-authed) to start a NEW LINKED
+// session in toLane (defaults 'planning'), seeded with the SOURCE session's
+// grounded summary/report; the SOURCE record is never mutated (server reuses the
+// read-only continue-seed builder). On success the new session is added to
+// MANAGED and its panel opened (reusing the continueSession success path); the
+// new tile lands in the SAME chain as the source.
+async function advanceSession(sourceId, toLane) {
+  toLane = toLane || 'planning';
+  var payload = {project_id: PROJECT_ID, source_session: sourceId, to_lane: toLane};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/advance_session', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/advance_session', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[advance error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[advance refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || '',
+    chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || sourceId,
+    idx: (_laneCounters[rec.lane || toLane] = (_laneCounters[rec.lane || toLane] || 0) + 1)
   };
   renderSessionBar();
   openPanel(sid);
@@ -7933,6 +8064,45 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "chain_id": r.get("chain_id", ""),
                     })
                 self._send_json({"ok": True, "sessions": safe})
+            elif self.path.startswith("/api/rnd/chain"):
+                # Read-only (v6 Wave 5): the ordered lineage chain a session
+                # belongs to, for the panel-header breadcrumb (R-1 → P-2 → …).
+                # Resolves chain_for(session) → chain_members(chain_id) and emits
+                # a SAFE projection of each member (session_id / lane / label /
+                # status / parent_session_id / chain_id — NEVER worktree_path or
+                # branch). AUTH: ``?token=`` (read-only GET; back-compat when no
+                # token configured). /api/rnd/chain?project_id=<id>&session=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                sid = (q.get("session", [""])[0]
+                       or q.get("session_id", [""])[0] or "").strip()
+                if not sid:
+                    self._send_json({"ok": False,
+                                     "error": "session required"}, 400)
+                else:
+                    try:
+                        chain_id = _sessreg.chain_for(sid)
+                        members = (_sessreg.chain_members(chain_id)
+                                   if chain_id else [])
+                    except Exception:
+                        chain_id = None
+                        members = []
+                    safe = []
+                    for r in members:
+                        if not isinstance(r, dict):
+                            continue
+                        safe.append({
+                            "session_id": r.get("session_id"),
+                            "lane": r.get("lane", ""),
+                            "label": r.get("label", ""),
+                            "status": r.get("status", ""),
+                            "parent_session_id": r.get("parent_session_id", ""),
+                            "chain_id": r.get("chain_id", ""),
+                        })
+                    self._send_json({"ok": True, "chain_id": chain_id or "",
+                                     "members": safe})
             elif self.path.startswith("/api/rnd/projects_html"):
                 # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
                 # already-open main dashboard can poll for changes (new session,
@@ -8935,6 +9105,64 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     else:
                         self._send_json({"ok": True, "session": rec,
                                          "seeded_from": source})
+
+        elif self.path == "/api/rnd/advance_session":
+            # v6 Wave 5: MANUAL advance research → planning. Starts a NEW live
+            # session in ``to_lane`` (defaults 'planning' for a research source),
+            # LINKED to the source via ``parent_session_id`` (so it inherits the
+            # source's ``chain_id`` — see session_registry.start_session / Wave 2),
+            # and SEEDED with the source session's grounded summary/report context.
+            # The seed is built by the SAME read-only _build_continue_seed helper
+            # (its cached summary, else a member digest), so the SOURCE session /
+            # registry record is NEVER mutated — we only READ it. Returns the new
+            # session record in the same JSON shape as continue_session. Auth is
+            # enforced by the do_POST token middleware above (mutating/terminal).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            source = (body.get("source_session", "")
+                      or body.get("session", "") or "").strip()
+            to_lane = (body.get("to_lane", "") or "").strip() or "planning"
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not source:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and source_session required"},
+                    400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    # Resolve the SOURCE session's lane for the seed lookup. The
+                    # seed reads the source's CACHED summary in ITS lane; default
+                    # to 'research' (the only source this wave advances).
+                    src_lane = "research"
+                    try:
+                        for r in _termsess.list_sessions(project_id=pid):
+                            if r.get("session_id") == source:
+                                src_lane = r.get("lane") or src_lane
+                                break
+                    except Exception:
+                        pass
+                    seed_context = _build_continue_seed(
+                        folder, pid, src_lane, source)
+                    try:
+                        if backend:
+                            rec = _termsess.start_session(
+                                pid, to_lane, backend=backend,
+                                seed_context=seed_context,
+                                parent_session_id=source)
+                        else:
+                            rec = _termsess.start_session(
+                                pid, to_lane, seed_context=seed_context,
+                                parent_session_id=source)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        self._send_json({"ok": True, "session": rec,
+                                         "advanced_from": source,
+                                         "to_lane": to_lane})
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart

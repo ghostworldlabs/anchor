@@ -122,7 +122,34 @@ cockpit/run-lifecycle guards GREEN. ⚠️ **Pending John's UI sign-off before m
 Commit: scoped.
 
 <!-- WAVE 4 done -->
-<!-- WAVE 5 — Manual advance research→planning + chain breadcrumb -->
+### Wave 5 — Manual advance research→planning + chain breadcrumb — GREEN (2026-06-14)
+
+**Built (UI + endpoints):** `POST /api/rnd/advance_session` (token-gated) — body
+`{project_id, source_session, to_lane?}`; builds the seed from the source's cached
+summary via the read-only `_build_continue_seed`, then
+`start_session(to_lane, parent_session_id=source, seed_context=…)`; returns the new
+record (continue_session shape); **source record never mutated**. `GET /api/rnd/chain`
+(token via `?token=`) — ordered `chain_members` SAFE projection (session_id/lane/label/
+status/parent/chain only; no worktree_path/branch). JS: a green **"Advance to Planning
+→"** bar in `openPanel` shown ONLY for a research lane (mockup Step 3); `advanceSession`
+mints a new linked planning tile + opens it; a clickable **chain breadcrumb** in the
+panel header from `GET /api/rnd/chain` (each node → openPanel). Reused `_build_continue_seed`,
+`chain_for`/`chain_members`, `start_session(parent_session_id=)` — no forks.
+
+**Orchestrator verification:** (a) endpoint tests — auth (401/403), missing→400, new
+planning session has parent==source + inherited chain_id + non-empty seed, **source
+byte-identical after**; chain GET token-gated + SAFE. (b) DOM positive+negative — advance
+bar only for research, not plan/build; breadcrumb present. (c) Real Playwright — research
+panel shows advance → click → new planning tile + ≥2-node breadcrumb → click research
+node → research panel; no console errors. (d) **Screenshot reviewed** —
+`_devtest/wave5_advance.png` shows the green "Advance to Planning →" bar on the research
+panel, matching mockup Step 3.
+
+**Gate:** **766 passed, 1 skipped** (+6). `tests/test_advance_research_to_plan.py` (6) +
+continue/cockpit guards GREEN. ⚠️ **Pending John's UI sign-off before merge.** Commit:
+scoped.
+
+<!-- WAVE 5 done -->
 <!-- WAVE 6 — Auto advance planning→build (gated on a real plan) -->
 <!-- WAVE 7 — Main dashboard reflects project activity -->
 <!-- WAVE 8 — CLI mirror + healthcheck v6 + distro + docs (PROJECT DONE) -->
