@@ -237,7 +237,37 @@ sole pywinpty exception, no Playwright in product code)**. `rnd chain` in the CL
 
 ---
 
-## PROJECT DONE (2026-06-14) — pending John's UI sign-off + deploy
+### Wave 9 — polish follow-ups (John's 3 sign-off items) — GREEN (2026-06-15)
+
+**Built (UI + endpoint), all 3 approved follow-ups:** (1) **"Finish → Build"** control on
+planning panels + `POST /api/rnd/finish_to_build` (token-gated) — captures the plan set,
+marks the planning session DONE via `update_session` **without reaping its worktree**
+(non-destructive: stays a reopenable greyed tile), then `auto_advance_planning_to_build`;
+honest `auto_build:null` + reason when there's no plan set (session left untouched);
+idempotent. Front-end mints the build tile + note and greys the planning tile (reuses the
+hard-kill auto-build path). (2) **Vertical resize grows the terminal:** `.tpane` →
+`flex:1 1 auto; min-height:200px` with the summary/advance bars `flex:0 0 auto`, so
+dragging the panel taller adds terminal ROWS (`_fitPanelTerminal` re-fits); width + maximize
+unchanged. (3) **`reconcile_and_advance` wired live** into `GET /api/rnd/term_sessions`
+(best-effort, passing the live PTY set `live_session_ids=` so it can't mis-mark live
+sessions stale; idempotent → repeated polls are no-ops) — a planning session whose PTY
+died now auto-advances on the next refresh, not only on explicit kill.
+
+**Orchestrator verification:** 9 new tests (`tests/test_v6_polish.py`) — finish_to_build
+auth + non-destructive (worktree kept, record DONE not removed) + one linked build +
+idempotent + honest-no-plan; vresize CSS positive+negative + Playwright rows-grow;
+reconcile wiring + end-to-end dead-planning auto-advance + idempotent. **Screenshots
+reviewed** — `_devtest/wave9_finish_build.png` (planning tile kept greyed `planning 1 ✓` +
+linked auto-build) and `wave9_vresize.png` (tall panel → tall terminal). CLAUDE.md gains
+the `finish_to_build` API row. Caught + fixed a secrets-scanner trip (a test token literal)
+before the gate passed.
+
+**Gate:** **816 passed, 1 skipped** (+9). Commit: scoped (anchor_gui.py + CLAUDE.md +
+test). **John approved these + the merge.**
+
+---
+
+## PROJECT DONE (2026-06-14; polish 2026-06-15) — John signed off → MERGED + PUSHED
 
 All 8 waves GREEN. Branch `foreman/rnd-surface-v6` (base = cherry-picked summarizer
 parse fix `1bd8b85`). Full suite **807 passed, 1 skipped** (baseline was 724 with the

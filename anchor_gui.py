@@ -2617,7 +2617,11 @@ def render_project_window_html(project_id: str) -> str:
         # columns filling EQUAL vertical height (mockup Paradigm-2 internals).
         # The left effort line sinks to the bottom (.smat .effbar{margin-top:auto});
         # the right's second link group pins to the bottom (.slinks .slh.two).
-        ".panel .summary{font-size:12px}"
+        # v6 Wave 9 (polish 2): the summary block keeps its NATURAL height at the
+        # top of the .pin flex column (flex:0 0 auto) so the terminal pane below it
+        # (flex:1 1 auto) absorbs all the extra height when the panel is dragged
+        # taller — growing terminal ROWS, not the summary.
+        ".panel .summary{font-size:12px;flex:0 0 auto}"
         ".panel .summary.split{display:grid;grid-template-columns:1.5fr 1fr;"
         "gap:20px;align-items:stretch}"
         ".panel .summary .smat{min-width:0;display:flex;flex-direction:column}"
@@ -2659,9 +2663,16 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .summary .summ-loading{color:var(--text-dim);font-style:italic}"
         # ── v4 Wave 5: full-width terminal pane BELOW the summary, VERTICALLY
         # RESIZABLE (drag the bottom edge; the JS fits + term_resize on resize).
+        # v6 Wave 9 (polish 2): the terminal pane FLEXES to fill the panel body's
+        # remaining vertical space (flex:1 1 auto) instead of a fixed height, so
+        # dragging the .pin panel taller grows the TERMINAL (more rows) — not the
+        # summary scroll area. A min-height keeps it usable at the panel's natural
+        # (un-resized) height; it still has its own bottom-edge handle
+        # (resize:vertical) for a terminal-only nudge. The .pin flex column (below)
+        # is what distributes the height.
         ".panel .tpane{background:#05070c;border:1px solid var(--border);"
-        "border-radius:8px;overflow:hidden;resize:vertical;min-height:150px;"
-        "height:240px;display:flex;flex-direction:column}"
+        "border-radius:8px;overflow:hidden;resize:vertical;"
+        "flex:1 1 auto;min-height:200px;display:flex;flex-direction:column}"
         ".panel .tpane .tbar{display:flex;align-items:center;gap:8px;"
         "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
         ".panel .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
@@ -2689,8 +2700,11 @@ def render_project_window_html(project_id: str) -> str:
         # v6 Wave 5 — "Advance to Planning →" bar (research panels) + the chain
         # breadcrumb (panel header). The advance bar is the mockup Step-3 green
         # control; the breadcrumb is a row of clickable chain nodes.
+        # The advance / finish bars keep their natural height in the .pin flex
+        # column (flex:0 0 auto) so they never steal vertical space from the
+        # flexing terminal pane (v6 Wave 9 polish 2).
         ".panel .pin .advbar{display:flex;align-items:center;gap:10px;"
-        "flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
+        "flex:0 0 auto;flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
         "border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.07)}"
         ".panel .pin .advbar .advt{font-size:11.5px;color:var(--text-dim)}"
         ".panel .pin .advbar .advt b{color:#bff3cf}"
@@ -2699,6 +2713,21 @@ def render_project_window_html(project_id: str) -> str:
         "background:rgba(34,197,94,.14);color:#cdf5d8;cursor:pointer;"
         "font-weight:600}"
         ".panel .pin .advbar .advbtn:hover{background:rgba(34,197,94,.26)}"
+        # v6 Wave 9 (polish 1): the planning "Finish → Build" bar. Same Step-3 green
+        # control family as the research advance bar (distinct class so it does not
+        # collide with the research-only advance-bar gate/assertions).
+        ".panel .pin .fbbar{display:flex;align-items:center;gap:10px;"
+        "flex:0 0 auto;flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
+        "border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.07)}"
+        ".panel .pin .fbbar .fbt{font-size:11.5px;color:var(--text-dim)}"
+        ".panel .pin .fbbar .fbt b{color:#bff3cf}"
+        ".panel .pin .fbbar .fbbtn{margin-left:auto;font-size:12px;"
+        "padding:6px 13px;border-radius:7px;border:1px solid rgba(34,197,94,.55);"
+        "background:rgba(34,197,94,.14);color:#cdf5d8;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .pin .fbbar .fbbtn:hover{background:rgba(34,197,94,.26)}"
+        ".panel .pin .fbbar .fbnote{margin-left:auto;font-size:11px;"
+        "color:var(--text-dim);font-style:italic}"
         ".panel .pbar .chaincrumb{display:inline-flex;align-items:center;gap:4px;"
         "flex-wrap:wrap;font-size:11px}"
         ".panel .pbar .chaincrumb .cc-sep{color:var(--accent);font-weight:700}"
@@ -3868,6 +3897,32 @@ function openPanel(sessionId) {
     pin.appendChild(adv);
   }
 
+  // v6 Wave 9 (polish 1): a PLANNING session's panel gets an explicit, friendly
+  // "Finish → Build" bar (mirrors the research advance bar style). One click POSTs
+  // /api/rnd/finish_to_build → captures the plan set, marks THIS planning session
+  // done (non-destructive — its worktree is kept, the tile stays reopenable), and
+  // auto-opens ONE linked build session. Honest when there is no plan set yet
+  // (shows a small note, opens no build). Shown ONLY for the plan/planning lane.
+  if ((s.lane || '') === 'plan' || (s.lane || '') === 'planning') {
+    var fbb = document.createElement('div');
+    fbb.className = 'fbbar';
+    var fbt = document.createElement('span');
+    fbt.className = 'fbt';
+    fbt.innerHTML = 'When this plan is ready, finish it and advance to a new '
+      + 'linked <b>build</b> session that executes on it:';
+    var fbbtn = document.createElement('button');
+    fbbtn.className = 'fbbtn';
+    fbbtn.type = 'button';
+    fbbtn.textContent = 'Finish → Build →';
+    fbbtn.onclick = function (e) {
+      e.stopPropagation();
+      finishToBuild(sessionId);
+    };
+    fbb.appendChild(fbt);
+    fbb.appendChild(fbbtn);
+    pin.appendChild(fbb);
+  }
+
   panel.appendChild(bar);
   panel.appendChild(pin);
   stack.appendChild(panel);
@@ -4168,6 +4223,82 @@ async function advanceSession(sourceId, toLane) {
   renderSessionBar();
   openPanel(sid);
   setTimeout(repopulate, 600);
+}
+
+// finishToBuild(planningId): v6 Wave 9 (polish 1) — the explicit, NON-destructive
+// plan→build advance. POSTs /api/rnd/finish_to_build (token-gated): the server
+// captures the plan set, marks THIS planning session done WITHOUT reaping its
+// worktree (it stays a reopenable finished tile — close-to-tile philosophy), then
+// auto-advances to ONE linked build (idempotent server-side). On success we mint
+// the build tile (_addAutoBuildTile + note, the SAME path the hard-kill auto-build
+// uses) and move the planning session to a greyed FINISHED tile (reusing the
+// Wave-4 finished-tile path). With NO plan set the server honestly returns
+// auto_build:null + a reason → we show a small note and create no build.
+async function finishToBuild(planningId) {
+  var payload = {project_id: PROJECT_ID, session: planningId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/finish_to_build', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/finish_to_build', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[finish→build error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[finish→build refused] '
+      + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  if (data.auto_build && data.auto_build.session_id) {
+    // Move the planning session to a finished (greyed, reopenable) tile — it is
+    // DONE but its worktree/record persist (non-destructive). Then mint the build.
+    _finishPlanningTile(planningId);
+    _addAutoBuildTile(data.auto_build);
+  } else {
+    // Honest: no plan set yet → nothing to build. Surface a small inline note on
+    // the planning panel's finish bar (no tile is created, the session stays live).
+    _flashNoPlanNote(planningId, (data.reason || 'no plan set yet'));
+  }
+  setTimeout(repopulate, 600);
+}
+
+// _finishPlanningTile(sessionId): move a now-DONE planning session from the LIVE
+// (MANAGED) map to the FINISHED map (greyed, reopenable tile — Wave-4 path) and
+// close its open panel. The registry record + worktree are KEPT server-side (the
+// finish was non-destructive); repopulate() will re-confirm it as a terminal tile.
+function _finishPlanningTile(sessionId) {
+  var s = MANAGED[sessionId];
+  if (s) {
+    FINISHED[sessionId] = {
+      session_id: sessionId, lane: s.lane || 'planning',
+      backend: s.backend || '', status: 'done', label: s.label || '',
+      created_at: s.created_at || 0, chain_id: s.chain_id || '',
+      parent_session_id: s.parent_session_id || '', idx: s.idx || 0
+    };
+    delete MANAGED[sessionId];
+  }
+  _closePanel(sessionId);
+  renderSessionBar();
+}
+
+// _flashNoPlanNote(sessionId, reason): when finish→build finds no plan set, show
+// a brief honest note in the planning panel's finish bar (no build fabricated).
+function _flashNoPlanNote(sessionId, reason) {
+  try {
+    var p = PANELS[sessionId];
+    var bar = p && p.el ? p.el.querySelector('.fbbar') : null;
+    if (!bar) return;
+    var old = bar.querySelector('.fbnote');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var note = document.createElement('span');
+    note.className = 'fbnote';
+    note.textContent = 'No plan set yet — nothing to build (' + reason + ')';
+    bar.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 6000);
+  } catch (e) { /* advisory only */ }
 }
 
 // Per-session terminal-pane height (in-memory persistence across minimize /
@@ -8201,6 +8332,22 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # chain. Still SAFE: worktree_path / branch are NEVER included.
                 q = parse_qs(urlparse(self.path).query)
                 pid = (q.get("project_id", [""])[0] or "").strip()
+                # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
+                # project-window refresh/poll path. Before listing, reconcile the
+                # registry against the LIVE PTY set: a managed planning session
+                # whose process is gone is re-statused DONE and (idempotently)
+                # auto-advanced to ONE linked build — so a planning session that
+                # DIED (not just an explicit hard-kill) advances on the next
+                # refresh. Idempotent on parent_session_id → repeated polls are
+                # no-ops. Best-effort + fully guarded: an error here NEVER breaks
+                # the (read-only) session list response. live_session_ids MUST be
+                # passed (the function default treats NO session as live, which
+                # would wrongly mark live ones stale).
+                try:
+                    live = list(_termsess._pty.live_sessions())
+                    _termsess.reconcile_and_advance(live_session_ids=live)
+                except Exception:
+                    pass
                 try:
                     recs = _termsess.list_sessions(project_id=pid or None)
                 except Exception:
@@ -9345,6 +9492,72 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         self._send_json({"ok": True, "session": rec,
                                          "advanced_from": source,
                                          "to_lane": to_lane})
+
+        elif self.path == "/api/rnd/finish_to_build":
+            # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
+            # Mirrors the term_kill auto-advance trigger, but WITHOUT reaping the
+            # planning session's worktree: it stays a reopenable, finished tile
+            # (close-to-tile philosophy). Steps:
+            #   1. capture the plan set NOW (before any reap) via capture_plan_set;
+            #   2. mark THIS planning session DONE via session_registry
+            #      .update_session(status=STATUS_DONE) — NOT kill() (worktree kept);
+            #   3. auto_advance_planning_to_build(..., plan_set=…) — idempotent on
+            #      parent_session_id, so a second call never duplicates the build.
+            # No plan set ⇒ {ok:true, auto_build:null, reason:"no plan set yet"} so
+            # the UI can be honest (never a fabricated build). Auth is enforced by
+            # the do_POST token middleware above (mutating).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            session = (body.get("session", "")
+                       or body.get("source_session", "") or "").strip()
+            if not pid or not session:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and session required"}, 400)
+            else:
+                rec = _termsess.get_session(session)
+                if rec is None:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
+                elif rec.get("lane") not in _termsess._PLANNING_LANES:
+                    self._send_json(
+                        {"ok": False,
+                         "error": "finish→build applies only to a planning "
+                                  "session",
+                         "reason": "not-planning"}, 400)
+                else:
+                    # 1) Capture the plan set BEFORE marking done (no reap here, so
+                    #    the worktree survives — but capture-first mirrors the
+                    #    kill path and is robust either way).
+                    plan_set = _termsess.capture_plan_set(pid, session)
+                    if not plan_set:
+                        # Honest: no plan set yet ⇒ no build (worktree untouched;
+                        # the session stays exactly as it was — we do NOT mark it
+                        # done if there is nothing to advance to).
+                        self._send_json({"ok": True, "auto_build": None,
+                                         "reason": "no plan set yet"})
+                    else:
+                        # 2) Mark the planning session DONE WITHOUT reaping its
+                        #    worktree (non-destructive — reopenable finished tile).
+                        try:
+                            _sessreg.update_session(
+                                session, status=_sessreg.STATUS_DONE)
+                        except KeyError:
+                            pass
+                        # 3) Auto-advance to ONE linked build (idempotent).
+                        try:
+                            auto_build = _termsess.auto_advance_planning_to_build(
+                                pid, session, plan_set=plan_set)
+                        except Exception:
+                            auto_build = None
+                        if auto_build is None:
+                            self._send_json(
+                                {"ok": True, "auto_build": None,
+                                 "reason": "no build (already advanced or "
+                                           "discovery failed)"})
+                        else:
+                            self._send_json({"ok": True,
+                                             "auto_build": auto_build})
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
