@@ -434,6 +434,7 @@ import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
 import terminal_session as _termsess
+import session_registry as _sessreg
 import handoff as _handoff
 import preview_server as _preview
 import paths as _paths  # re-import alias (already imported above; harmless)
@@ -1187,6 +1188,93 @@ def _project_status_dot(entry: dict, status_line: dict) -> str:
     return "rnd-dot-idle"
 
 
+# Map a registry session status → the locked status-light color word, mirroring
+# `_session_light_class` / the JS `_statusColor` (single source of truth for the
+# four colors). Used by the home-row "what's happening" line (Wave 7).
+_SESSION_STATUS_COLOR = {
+    _sessreg.STATUS_RUNNING: "green",
+    _sessreg.STATUS_NEEDS_ATTENTION: "amber",
+    _sessreg.STATUS_DONE: "amber",
+    _sessreg.STATUS_FAILED: "red",
+    _sessreg.STATUS_IDLE: "grey",
+}
+
+
+def _project_activity_reflection(pid_raw: str) -> dict:
+    """Return a CACHE/REGISTRY-only activity reflection for a home-dashboard row
+    (v6 Wave 7). Reads ONLY ``session_registry`` (no model call, no PTY) so it is
+    safe on the render path.
+
+    Returns ``{running: int, latest: {lane, label, status, color, age} | None}``:
+    - ``running`` — how many of the project's managed sessions are RUNNING;
+    - ``latest`` — the newest session (by ``created_at``) with a human label, its
+      lane, status, status-color word, and a compact age — for the "latest:
+      planning · Crucible pipeline plan (running)" line. ``None`` when the
+      project has no managed sessions at all (honest — never fabricated).
+    Never raises (a registry hiccup degrades to ``{running:0, latest:None}``).
+    """
+    out = {"running": 0, "latest": None}
+    try:
+        sessions = _sessreg.list_sessions(project_id=pid_raw)
+    except Exception:
+        return out
+    if not sessions:
+        return out
+    out["running"] = sum(1 for s in sessions
+                         if s.get("status") == _sessreg.STATUS_RUNNING)
+    # list_sessions is already newest-first by created_at, so [0] is the newest.
+    newest = sessions[0]
+    lane = (newest.get("lane") or "").strip()
+    status = (newest.get("status") or _sessreg.STATUS_IDLE).strip()
+    # A friendly title: the session's own label if it set one, else the lane name.
+    label = (newest.get("label") or "").strip() or (lane.capitalize() or "session")
+    out["latest"] = {
+        "lane": lane,
+        "label": label,
+        "status": status,
+        "color": _SESSION_STATUS_COLOR.get(status, "grey"),
+        "age": _fmt_age(newest.get("created_at")),
+    }
+    return out
+
+
+def _render_activity_reflection_html(refl: dict) -> str:
+    """Render the per-row activity-reflection block (v6 Wave 7): a running
+    indicator/count + a "what's happening" latest-session line. Honest empty
+    state ("idle — no sessions") when the project has none. Pure formatting of
+    the cache/registry-sourced ``refl`` dict; never runs the model."""
+    running = int(refl.get("running", 0) or 0)
+    latest = refl.get("latest")
+    parts = []
+    if running > 0:
+        # A live indicator (the pulsing dot CSS) + the count.
+        parts.append(
+            f'<span class="rnd-act-running" title="live sessions">'
+            f'<span class="rnd-act-pulse" aria-hidden="true"></span>'
+            f'running: {running}</span>'
+        )
+    if latest:
+        lane = latest.get("lane") or ""
+        lane_lbl = html_lib.escape(lane.capitalize() or "session")
+        title = html_lib.escape(latest.get("label") or "")
+        status = html_lib.escape(latest.get("status") or "")
+        color = html_lib.escape(latest.get("color") or "grey")
+        age = html_lib.escape(latest.get("age") or "")
+        age_txt = f' · {age}' if age else ""
+        parts.append(
+            f'<span class="rnd-act-latest">latest: '
+            f'<span class="rnd-act-lane">{lane_lbl}</span> · '
+            f'<span class="rnd-act-title">{title}</span> '
+            f'<span class="rnd-act-status rnd-act-{color}">'
+            f'({status})</span>{age_txt}</span>'
+        )
+    if not parts:
+        # Honest placeholder — never fabricate activity.
+        parts.append('<span class="rnd-act-latest rnd-dim">'
+                     'idle — no sessions yet</span>')
+    return '<div class="rnd-row-activity">' + "".join(parts) + "</div>"
+
+
 def render_project_tile_html(entry: dict) -> str:
     """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
     lines 124-141): ``name · accurate cached project summary · per-lane
@@ -1213,6 +1301,13 @@ def render_project_tile_html(entry: dict) -> str:
     # data-blurb keeps the kebab "Blurb" prompt seeded with the editable blurb.
     blurb = entry.get("blurb", "") or ""
     blurb_attr = html_lib.escape(blurb, quote=True)
+
+    # v6 Wave 7 — timely activity reflection (running count + newest-session
+    # "what's happening" line), sourced from the session registry ONLY (no model
+    # call on the render path). Honest "idle — no sessions yet" placeholder when
+    # the project has none.
+    activity_block = _render_activity_reflection_html(
+        _project_activity_reflection(pid_raw))
 
     # Per-lane mini-counts (compact form of the status line) + status dot.
     status = render_status_line_html(pid_raw)
@@ -1282,6 +1377,7 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
         f'{summary_block}'
+        f'{activity_block}'
         f'<span class="rnd-row-counts">{status}</span>'
         f'{rollup_block}'
         f'{kebab}'
@@ -2431,8 +2527,23 @@ def render_project_window_html(project_id: str) -> str:
         # session keeps running); the X kills behind a confirm. Wave 5 fills the
         # panel body (split summary + xterm terminal); this wave ships the shell.
         ".panel-stack{display:flex;flex-direction:column}"
-        ".panel{border-top:1px solid var(--border);background:var(--surface)}"
+        # v6 Wave 6: transient note when killing a planning session auto-opens a
+        # linked build session. Advisory chrome — fades out after a few seconds.
+        ".autobuild-note{margin:6px 0;padding:6px 10px;border-radius:6px;"
+        "background:#0f291b;border:1px solid #22c55e;color:#86efac;"
+        "font-size:12px;font-weight:600}"
+        ".panel{border-top:1px solid var(--border);background:var(--surface);"
+        "position:relative}"
         ".panel.minimized .pin{display:none}"
+        # ── v6 Wave 3: maximize (▢) toggle — fills the cockpit viewport. A
+        # .panel.maxd is lifted out of the stacked column to a fixed full-screen
+        # overlay (high z-index) and restored on a second click. Its body stretches
+        # to use the height so the terminal re-fits to the larger area.
+        ".panel.maxd{position:fixed;top:0;left:0;right:0;bottom:0;z-index:9000;"
+        "margin:0;border:0;overflow:auto;display:flex;flex-direction:column}"
+        ".panel.maxd .pin{flex:1;resize:none;width:auto;max-width:none;"
+        "min-height:0}"
+        ".panel.maxd .tpane{flex:1}"
         ".panel .pbar{display:flex;align-items:center;gap:9px;padding:9px 16px;"
         "background:var(--surface2);border-bottom:1px solid var(--border)}"
         ".panel .pbar .ic{font-size:14px}"
@@ -2441,12 +2552,20 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
         ".panel .pbar .sp{flex:1}"
         # Panel body STACKS: split summary on top, full-width terminal below.
-        ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px}"
+        # v6 Wave 3: the body is the FREE-resize box (resize:both) so dragging the
+        # panel's bottom-right corner resizes the whole panel — width AND height,
+        # not just the terminal sub-pane. Size persists per session (_panelRects).
+        ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px;"
+        "resize:both;overflow:auto;min-height:160px;min-width:360px;max-width:100%}"
         ".panel .panel-body{min-height:60px}"
         ".panelbtn{width:22px;height:20px;line-height:18px;text-align:center;"
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
         "color:var(--text-dim);cursor:pointer;font-size:12px;padding:0}"
         ".panelbtn:hover{color:var(--text);border-color:var(--accent)}"
+        # v6 Wave 3: the maximize (▢) toggle. When the panel is maxd the button
+        # shows its 'active' accent so it reads as a toggle.
+        ".panelbtn.max:hover{color:var(--text);border-color:var(--accent)}"
+        ".panel.maxd .panelbtn.max{color:var(--accent);border-color:var(--accent)}"
         # v5 Wave 1: the panel header carries THREE distinct controls —
         #   .min   '–'  minimize (keeps the session running)
         #   .close '×'  CLOSE-to-tile (tears down the panel DOM only; the session
@@ -2468,6 +2587,21 @@ def render_project_window_html(project_id: str) -> str:
         "background:var(--surface2);border:1px solid var(--border)}"
         ".live-chip:hover{border-color:var(--accent)}"
         ".live-chip .ttl{font-weight:600}"
+        # v6 Wave 4: a FINISHED (done/failed) tile renders greyed (.done) with a
+        # ✓ check; it's still clickable (reopens its read-only summary panel).
+        ".live-chip.done{opacity:.72}"
+        ".live-chip .ck{color:#22c55e;font-size:11px;margin-left:2px}"
+        # "previously done (N)" expander: older finished sessions in a lane tuck
+        # under this small collapsible cluster so the row stays tidy.
+        ".live-session-bar .prevdone{display:inline-flex;align-items:center}"
+        ".live-session-bar .prevdone>summary{cursor:pointer;font-size:11px;"
+        "color:var(--text-dim);list-style:none;padding:4px 8px;border-radius:14px;"
+        "border:1px dashed var(--border);user-select:none}"
+        ".live-session-bar .prevdone>summary:hover{color:var(--text);"
+        "border-color:var(--accent)}"
+        ".live-session-bar .prevdone[open]>summary{color:var(--text)}"
+        ".live-session-bar .prevdone-tiles{display:inline-flex;flex-wrap:wrap;"
+        "gap:8px;margin-left:8px}"
         # Per-session engine toggle in the panel bar (◆ Claude / ✦ Gemini). Chosen
         # once; flipping POSTs term_set_engine to relaunch this session on the other
         # engine in the SAME worktree (mockup Paradigm-2 panel header).
@@ -2483,7 +2617,11 @@ def render_project_window_html(project_id: str) -> str:
         # columns filling EQUAL vertical height (mockup Paradigm-2 internals).
         # The left effort line sinks to the bottom (.smat .effbar{margin-top:auto});
         # the right's second link group pins to the bottom (.slinks .slh.two).
-        ".panel .summary{font-size:12px}"
+        # v6 Wave 9 (polish 2): the summary block keeps its NATURAL height at the
+        # top of the .pin flex column (flex:0 0 auto) so the terminal pane below it
+        # (flex:1 1 auto) absorbs all the extra height when the panel is dragged
+        # taller — growing terminal ROWS, not the summary.
+        ".panel .summary{font-size:12px;flex:0 0 auto}"
         ".panel .summary.split{display:grid;grid-template-columns:1.5fr 1fr;"
         "gap:20px;align-items:stretch}"
         ".panel .summary .smat{min-width:0;display:flex;flex-direction:column}"
@@ -2525,9 +2663,16 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .summary .summ-loading{color:var(--text-dim);font-style:italic}"
         # ── v4 Wave 5: full-width terminal pane BELOW the summary, VERTICALLY
         # RESIZABLE (drag the bottom edge; the JS fits + term_resize on resize).
+        # v6 Wave 9 (polish 2): the terminal pane FLEXES to fill the panel body's
+        # remaining vertical space (flex:1 1 auto) instead of a fixed height, so
+        # dragging the .pin panel taller grows the TERMINAL (more rows) — not the
+        # summary scroll area. A min-height keeps it usable at the panel's natural
+        # (un-resized) height; it still has its own bottom-edge handle
+        # (resize:vertical) for a terminal-only nudge. The .pin flex column (below)
+        # is what distributes the height.
         ".panel .tpane{background:#05070c;border:1px solid var(--border);"
-        "border-radius:8px;overflow:hidden;resize:vertical;min-height:150px;"
-        "height:240px;display:flex;flex-direction:column}"
+        "border-radius:8px;overflow:hidden;resize:vertical;"
+        "flex:1 1 auto;min-height:200px;display:flex;flex-direction:column}"
         ".panel .tpane .tbar{display:flex;align-items:center;gap:8px;"
         "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
         ".panel .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
@@ -2552,6 +2697,45 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .tpane .ro-list{margin:3px 0 4px 0;padding-left:20px;"
         "color:var(--text-dim);font-size:11.5px}"
         ".panel .tpane .ro-list li{margin:2px 0}"
+        # v6 Wave 5 — "Advance to Planning →" bar (research panels) + the chain
+        # breadcrumb (panel header). The advance bar is the mockup Step-3 green
+        # control; the breadcrumb is a row of clickable chain nodes.
+        # The advance / finish bars keep their natural height in the .pin flex
+        # column (flex:0 0 auto) so they never steal vertical space from the
+        # flexing terminal pane (v6 Wave 9 polish 2).
+        ".panel .pin .advbar{display:flex;align-items:center;gap:10px;"
+        "flex:0 0 auto;flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
+        "border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.07)}"
+        ".panel .pin .advbar .advt{font-size:11.5px;color:var(--text-dim)}"
+        ".panel .pin .advbar .advt b{color:#bff3cf}"
+        ".panel .pin .advbar .advbtn{margin-left:auto;font-size:12px;"
+        "padding:6px 13px;border-radius:7px;border:1px solid rgba(34,197,94,.55);"
+        "background:rgba(34,197,94,.14);color:#cdf5d8;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .pin .advbar .advbtn:hover{background:rgba(34,197,94,.26)}"
+        # v6 Wave 9 (polish 1): the planning "Finish → Build" bar. Same Step-3 green
+        # control family as the research advance bar (distinct class so it does not
+        # collide with the research-only advance-bar gate/assertions).
+        ".panel .pin .fbbar{display:flex;align-items:center;gap:10px;"
+        "flex:0 0 auto;flex-wrap:wrap;padding:9px 11px;border-radius:8px;"
+        "border:1px solid rgba(34,197,94,.4);background:rgba(34,197,94,.07)}"
+        ".panel .pin .fbbar .fbt{font-size:11.5px;color:var(--text-dim)}"
+        ".panel .pin .fbbar .fbt b{color:#bff3cf}"
+        ".panel .pin .fbbar .fbbtn{margin-left:auto;font-size:12px;"
+        "padding:6px 13px;border-radius:7px;border:1px solid rgba(34,197,94,.55);"
+        "background:rgba(34,197,94,.14);color:#cdf5d8;cursor:pointer;"
+        "font-weight:600}"
+        ".panel .pin .fbbar .fbbtn:hover{background:rgba(34,197,94,.26)}"
+        ".panel .pin .fbbar .fbnote{margin-left:auto;font-size:11px;"
+        "color:var(--text-dim);font-style:italic}"
+        ".panel .pbar .chaincrumb{display:inline-flex;align-items:center;gap:4px;"
+        "flex-wrap:wrap;font-size:11px}"
+        ".panel .pbar .chaincrumb .cc-sep{color:var(--accent);font-weight:700}"
+        ".panel .pbar .chaincrumb .cc-node{color:var(--accent);cursor:pointer;"
+        "padding:1px 6px;border-radius:5px;border:1px solid transparent}"
+        ".panel .pbar .chaincrumb .cc-node:hover{border-color:var(--accent)}"
+        ".panel .pbar .chaincrumb .cc-node.cur{color:var(--text);"
+        "border-color:var(--border);background:var(--surface)}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -3247,11 +3431,26 @@ function rndUnlinkTask(el) {
 // A LIVE session mounts xterm; a DONE/historical session shows a read-only note.
 // ════════════════════════════════════════════════════════════════════════════
 
-// MANAGED: session_id -> {session_id, lane, backend, status, label, idx}
+// MANAGED: session_id -> {session_id, lane, backend, status, label, idx} for
+// LIVE (non-terminal) managed sessions — these mount a live xterm terminal.
 var MANAGED = {};
+// FINISHED (v6 Wave 4): session_id -> {session_id, lane, backend, status, label,
+// created_at, chain_id, parent_session_id, idx} for TERMINAL-status (done/failed)
+// managed sessions. v5 dropped these from the row; v6 KEEPS them as greyed,
+// reopenable tiles (per lane: newest prominent, older ones under "previously
+// done"). Clicking a finished tile opens a HISTORICAL (read-only) panel showing
+// the Wave-1 session summary — _synthSessionRecord reads the tile's data-* attrs,
+// so a finished tile is NOT in MANAGED and openPanel treats it as non-live.
+var FINISHED = {};
 // PANELS: session_id -> {el, body, term, transport} for an OPEN inline panel.
 var PANELS = {};
 var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" labels
+// _KILLED (v6 Wave 4): session ids the user DELIBERATELY hard-killed this page
+// load. term_kill marks the registry record 'done' (terminal) — indistinguishable
+// by status from a naturally-finished session — so without this set a killed tile
+// would re-enter the row as a greyed FINISHED tile on the next repopulate(). A
+// hard-kill means GONE; we suppress these ids from both MANAGED and FINISHED.
+var _KILLED = {};
 
 // Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E; this is
 // the SAME mapping the server's _session_light_class applies to the lane tiles):
@@ -3286,8 +3485,10 @@ async function repopulate() {
   } catch (e) { return; }
   if (!data || !data.ok) return;
   var sessions = data.sessions || [];
-  // Rebuild the MANAGED map, preserving a stable per-lane index per session.
-  var seen = {};
+  // Rebuild the MANAGED (live) + FINISHED (terminal) maps, preserving a stable
+  // per-lane index per session.
+  var seenLive = {};
+  var seenDone = {};
   _laneCounters = {};
   sessions.sort(function (a, b) {
     return (a.created_at || 0) - (b.created_at || 0);
@@ -3295,27 +3496,54 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
-    // v5 Wave 1 (BLOCKER fix): the live-session bar holds LIVE sessions only. A
-    // terminal session (a deliberate hard-kill marks the registry record 'done';
-    // a crash 'failed') is excluded — otherwise a killed chip would REAPPEAR on
-    // the next repopulate() (term_sessions reports every status). A session that
-    // just went terminal is also not re-added here, so the drop-loop below evicts
-    // it from MANAGED and closes any stale panel. Historical/done work is reopened
-    // from its server-rendered board tile, not this live bar.
-    if (_isTerminalStatus(s.status)) continue;
+    // v6 Wave 4: a DELIBERATELY hard-killed session is GONE — never re-add it
+    // (its registry record persists as 'done', which would otherwise re-enter it
+    // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
+    if (_KILLED[s.session_id]) continue;
     var lane = s.lane || 'session';
+    if (_isTerminalStatus(s.status)) {
+      // v6 Wave 4: a TERMINAL session (a deliberate hard-kill marks the registry
+      // record 'done'; a crash 'failed') is KEPT — but in FINISHED (a greyed,
+      // reopenable tile), NOT in MANAGED (so openPanel won't try to mount a live
+      // PTY for it; it synthesizes a read-only historical panel instead). If it
+      // was previously live, drop it from MANAGED + close its now-stale live panel
+      // (its PTY is gone) so the tile re-renders as finished.
+      if (MANAGED[s.session_id]) { _closePanel(s.session_id); delete MANAGED[s.session_id]; }
+      var pdone = FINISHED[s.session_id] || {};
+      FINISHED[s.session_id] = {
+        session_id: s.session_id, lane: lane, backend: s.backend || '',
+        status: s.status || 'done', label: s.label || '',
+        created_at: s.created_at || pdone.created_at || 0,
+        chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
+        idx: pdone.idx || 0
+      };
+      seenDone[s.session_id] = true;
+      continue;
+    }
+    // A LIVE (running/idle/needs-attention) session → colored tile in the row.
+    // If it was previously finished (e.g. reconcile re-statused it back live —
+    // rare), drop the stale FINISHED entry.
+    if (FINISHED[s.session_id]) delete FINISHED[s.session_id];
     _laneCounters[lane] = (_laneCounters[lane] || 0) + 1;
     var prev = MANAGED[s.session_id] || {};
     MANAGED[s.session_id] = {
       session_id: s.session_id, lane: lane, backend: s.backend || '',
       status: s.status || 'idle', label: s.label || '',
+      chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
+      created_at: s.created_at || prev.created_at || 0,
       idx: prev.idx || _laneCounters[lane]
     };
-    seen[s.session_id] = true;
+    seenLive[s.session_id] = true;
   }
-  // Drop sessions the registry no longer reports (and close any stale panel).
+  // Drop LIVE sessions the registry no longer reports at all (gone, not merely
+  // terminal — a terminal one moved to FINISHED above) and close any stale panel.
   for (var sid in MANAGED) {
-    if (!seen[sid]) { _closePanel(sid); delete MANAGED[sid]; }
+    if (!seenLive[sid]) { _closePanel(sid); delete MANAGED[sid]; }
+  }
+  // Drop FINISHED sessions the registry no longer reports (e.g. hard-kill removed
+  // the record). A killed tile must not reappear.
+  for (var dsid in FINISHED) {
+    if (!seenDone[dsid]) delete FINISHED[dsid];
   }
   renderSessionBar();
 }
@@ -3332,34 +3560,90 @@ var loadSessions = repopulate;
 function renderSessionBar() {
   var bar = document.getElementById('sessionBar');
   if (!bar) return;
-  // Don't clobber a chip the panel manager is mid-removing: rebuild from MANAGED.
+  // Don't clobber a chip the panel manager is mid-removing: rebuild from the maps.
   bar.innerHTML = '';
-  var ids = Object.keys(MANAGED);
-  for (var i = 0; i < ids.length; i++) {
-    var sid = ids[i];
-    var s = MANAGED[sid];
+  // (1) LIVE managed sessions → colored, reopenable tiles (running/idle/attn).
+  var live = Object.keys(MANAGED);
+  for (var i = 0; i < live.length; i++) {
+    var s = MANAGED[live[i]];
     if (!s) continue;
-    var chip = document.createElement('span');
-    // .tile + data-session so _synthSessionRecord / _removeSessionTile bind, and
-    // the live-tile click hook is the SAME laneTileClick → openPanel path.
-    chip.className = 'tile lane-tile live-chip';
-    chip.setAttribute('data-session', sid);
-    chip.setAttribute('data-lane', s.lane || '');
-    chip.setAttribute('data-light', _statusColor(s.status));
-    chip.setAttribute('data-live', '1');
-    var sidCopy = sid;
-    chip.onclick = (function (theId) {
-      return function (ev) { laneTileClick(ev, theId); };
-    })(sidCopy);
-    var dot = document.createElement('span');
-    dot.className = 'lt ' + _statusColor(s.status);
-    var lbl = document.createElement('span');
-    lbl.className = 'ttl';
-    lbl.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
-    chip.appendChild(dot);
-    chip.appendChild(lbl);
-    bar.appendChild(chip);
+    bar.appendChild(_buildBarTile(s, false));
   }
+  // (2) v6 Wave 4: FINISHED (done/failed) sessions → greyed, reopenable tiles.
+  //     Per lane the MOST-RECENT finished session is shown PROMINENTLY in the
+  //     row; older finished ones in that lane collapse under a small
+  //     "previously done (N)" expander so the row stays tidy but nothing is lost.
+  var doneIds = Object.keys(FINISHED);
+  if (doneIds.length) {
+    // Group by lane, newest-first within each lane (by created_at, then idx).
+    var byLane = {};
+    for (var j = 0; j < doneIds.length; j++) {
+      var d = FINISHED[doneIds[j]];
+      if (!d) continue;
+      var lane = d.lane || 'session';
+      (byLane[lane] = byLane[lane] || []).push(d);
+    }
+    var lanes = Object.keys(byLane).sort();
+    for (var k = 0; k < lanes.length; k++) {
+      var group = byLane[lanes[k]];
+      group.sort(function (a, b) {
+        return (b.created_at || 0) - (a.created_at || 0) || (b.idx || 0) - (a.idx || 0);
+      });
+      // The newest finished session in this lane is the prominent tile.
+      bar.appendChild(_buildBarTile(group[0], true));
+      // Older finished ones collapse under "previously done (N)".
+      if (group.length > 1) {
+        var det = document.createElement('details');
+        det.className = 'prevdone';
+        det.setAttribute('data-lane', lanes[k]);
+        var sum = document.createElement('summary');
+        sum.textContent = 'previously done (' + (group.length - 1) + ')';
+        det.appendChild(sum);
+        var wrap = document.createElement('span');
+        wrap.className = 'prevdone-tiles';
+        for (var m = 1; m < group.length; m++) {
+          wrap.appendChild(_buildBarTile(group[m], true));
+        }
+        det.appendChild(wrap);
+        bar.appendChild(det);
+      }
+    }
+  }
+}
+
+// _buildBarTile(s, finished): build one tiles-row tile element for a session
+// record. .tile + data-session so _synthSessionRecord / _removeSessionTile bind,
+// and the click hook is the SAME laneTileClick → openPanel path. A FINISHED tile
+// is greyed (.done) and carries data-light='grey' so openPanel synthesizes a
+// read-only historical panel (it is NOT in MANAGED). A LIVE tile carries
+// data-live='1' + its status color.
+function _buildBarTile(s, finished) {
+  var sid = s.session_id;
+  var chip = document.createElement('span');
+  var light = finished ? 'grey' : _statusColor(s.status);
+  chip.className = 'tile lane-tile live-chip' + (finished ? ' done' : '');
+  chip.setAttribute('data-session', sid);
+  chip.setAttribute('data-lane', s.lane || '');
+  chip.setAttribute('data-light', light);
+  if (finished) { chip.setAttribute('data-finished', '1'); }
+  else { chip.setAttribute('data-live', '1'); }
+  chip.onclick = (function (theId) {
+    return function (ev) { laneTileClick(ev, theId); };
+  })(sid);
+  var dot = document.createElement('span');
+  dot.className = 'lt ' + light;
+  var lbl = document.createElement('span');
+  lbl.className = 'ttl';
+  lbl.textContent = (s.label ? s.label : (s.lane + ' ' + (s.idx || '')));
+  chip.appendChild(dot);
+  chip.appendChild(lbl);
+  if (finished) {
+    var ck = document.createElement('span');
+    ck.className = 'ck';
+    ck.textContent = '✓';
+    chip.appendChild(ck);
+  }
+  return chip;
 }
 
 // laneTileClick: a Paradigm-2 lane tile was clicked → open its inline panel.
@@ -3483,6 +3767,12 @@ function openPanel(sessionId) {
   var meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
+  // v6 Wave 5: chain breadcrumb (R-1 → P-2 → …) — the lineage this session
+  // belongs to. Filled async from /api/rnd/chain; each node is clickable →
+  // openPanel(thatSession). Empty (hidden) for a session with no chain yet.
+  var crumb = document.createElement('span');
+  crumb.className = 'chaincrumb';
+  crumb.setAttribute('data-session', sessionId);
   var sp = document.createElement('span');
   sp.className = 'sp';
   // Per-session engine toggle (◆ Claude / ✦ Gemini). Chosen once; flipping POSTs
@@ -3508,6 +3798,14 @@ function openPanel(sessionId) {
   minBtn.title = 'Minimize (keeps the session running)';
   minBtn.textContent = '–';
   minBtn.onclick = function (e) { e.stopPropagation(); minimizePanel(sessionId); };
+  // v6 Wave 3: maximize (▢) — toggle the panel to fill the cockpit viewport
+  // (.panel.maxd) and back to its prior size. Either way the xterm terminal is
+  // re-fit so cols/rows track the new area (no freeze / clip).
+  var maxBtn = document.createElement('button');
+  maxBtn.className = 'panelbtn max';
+  maxBtn.title = 'Maximize / restore (re-fits the terminal)';
+  maxBtn.textContent = '▢';
+  maxBtn.onclick = function (e) { e.stopPropagation(); maximizePanel(sessionId); };
   var closeBtn = document.createElement('button');
   closeBtn.className = 'panelbtn close';
   closeBtn.title = 'Close panel (keeps the session — reopen from its tile)';
@@ -3519,6 +3817,7 @@ function openPanel(sessionId) {
   killBtn.textContent = '🗑';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
+  bar.appendChild(crumb);
   bar.appendChild(sp);
   if (engEl) {
     var englbl = document.createElement('span');
@@ -3527,13 +3826,22 @@ function openPanel(sessionId) {
     bar.appendChild(englbl);
     bar.appendChild(engEl);
   }
-  bar.appendChild(minBtn); bar.appendChild(closeBtn); bar.appendChild(killBtn);
+  bar.appendChild(minBtn); bar.appendChild(maxBtn);
+  bar.appendChild(closeBtn); bar.appendChild(killBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
   // full-width, vertically-resizable terminal pane BELOW.
   var pin = document.createElement('div');
   pin.className = 'pin';
+  // v6 Wave 3: the .pin body is the FREE-resize box (CSS resize:both). Restore
+  // this session's persisted panel rect (width + height) if the user resized it
+  // earlier this page load (_panelRects, keyed by session_id).
+  var _rect = _panelRects[sessionId];
+  if (_rect) {
+    if (_rect.w) pin.style.width = _rect.w;
+    if (_rect.h) pin.style.height = _rect.h;
+  }
 
   // (1) Split summary block — filled async from /api/rnd/session_summary +
   //     /api/rnd/session_doc_roles. Absent → just a thin loading note.
@@ -3555,7 +3863,7 @@ function openPanel(sessionId) {
   lab.textContent = (isLive ? (s.backend || 'terminal') : 'log') + ' · ' + s.session_id;
   var rz = document.createElement('span');
   rz.className = 'rzhint';
-  rz.textContent = '⇕ drag bottom edge to resize';
+  rz.textContent = '⤡ drag the panel corner to resize';
   tbar.appendChild(lab);
   tbar.appendChild(rz);
   var host = document.createElement('div');
@@ -3565,12 +3873,63 @@ function openPanel(sessionId) {
   tpane.appendChild(host);
   pin.appendChild(tpane);
 
+  // v6 Wave 5: a research session's panel gets an "Advance to Planning →" bar
+  // (mockup Step 3). One click starts a NEW linked planning tile seeded from this
+  // research (advanceSession → POST /api/rnd/advance_session). Shown ONLY for the
+  // research lane this wave (the plan→build auto path is Wave 6).
+  if ((s.lane || '') === 'research') {
+    var adv = document.createElement('div');
+    adv.className = 'advbar';
+    var advt = document.createElement('span');
+    advt.className = 'advt';
+    advt.innerHTML = 'When this research is done, advance it to a new linked '
+      + '<b>planning</b> session, seeded from this work:';
+    var advb = document.createElement('button');
+    advb.className = 'advbtn';
+    advb.type = 'button';
+    advb.textContent = 'Advance to Planning →';
+    advb.onclick = function (e) {
+      e.stopPropagation();
+      advanceSession(sessionId, 'planning');
+    };
+    adv.appendChild(advt);
+    adv.appendChild(advb);
+    pin.appendChild(adv);
+  }
+
+  // v6 Wave 9 (polish 1): a PLANNING session's panel gets an explicit, friendly
+  // "Finish → Build" bar (mirrors the research advance bar style). One click POSTs
+  // /api/rnd/finish_to_build → captures the plan set, marks THIS planning session
+  // done (non-destructive — its worktree is kept, the tile stays reopenable), and
+  // auto-opens ONE linked build session. Honest when there is no plan set yet
+  // (shows a small note, opens no build). Shown ONLY for the plan/planning lane.
+  if ((s.lane || '') === 'plan' || (s.lane || '') === 'planning') {
+    var fbb = document.createElement('div');
+    fbb.className = 'fbbar';
+    var fbt = document.createElement('span');
+    fbt.className = 'fbt';
+    fbt.innerHTML = 'When this plan is ready, finish it and advance to a new '
+      + 'linked <b>build</b> session that executes on it:';
+    var fbbtn = document.createElement('button');
+    fbbtn.className = 'fbbtn';
+    fbbtn.type = 'button';
+    fbbtn.textContent = 'Finish → Build →';
+    fbbtn.onclick = function (e) {
+      e.stopPropagation();
+      finishToBuild(sessionId);
+    };
+    fbb.appendChild(fbt);
+    fbb.appendChild(fbbtn);
+    pin.appendChild(fbb);
+  }
+
   panel.appendChild(bar);
   panel.appendChild(pin);
   stack.appendChild(panel);
 
   PANELS[sessionId] = {el: panel, body: host, term: null, transport: null,
-                       tpane: tpane, fit: null, ro: null};
+                       tpane: tpane, pin: pin, fit: null, ro: null, pinRo: null,
+                       maxd: false};
   if (isLive) {
     // LIVE managed terminal: mount xterm over the v3 transport (UNCHANGED).
     _mountTerminal(sessionId, host);
@@ -3581,9 +3940,51 @@ function openPanel(sessionId) {
     _mountReadOnlyBody(sessionId, host, s);
   }
   _loadPanelSummary(sessionId, summ);
+  _loadChainBreadcrumb(sessionId, crumb);
   _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
+}
+
+// _CHAIN_ABBR: lane → the breadcrumb node prefix (research→R, planning/plan→P,
+// build→B). Mirrors the mockup's R-/P-/B- labels.
+var _CHAIN_ABBR = {research: 'R', planning: 'P', plan: 'P', build: 'B'};
+
+// _loadChainBreadcrumb(sessionId, host): fetch this session's lineage chain and
+// render a clickable breadcrumb (R-1 → P-2 → …) into the panel header. Read-only
+// (GET /api/rnd/chain, ?token=); each node opens that session's panel. A chain of
+// one (no lineage) renders nothing. Best-effort — any error leaves the crumb empty.
+function _loadChainBreadcrumb(sessionId, host) {
+  if (!host) return;
+  var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
+    + '&session=' + encodeURIComponent(sessionId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var members = (d && d.ok && d.members) ? d.members : [];
+      host.innerHTML = '';
+      if (members.length < 2) return;   // a lone session has no chain to show
+      members.forEach(function (m, i) {
+        if (i > 0) {
+          var sep = document.createElement('span');
+          sep.className = 'cc-sep';
+          sep.textContent = '→';
+          host.appendChild(sep);
+        }
+        var node = document.createElement('span');
+        var lane = m.lane || '';
+        var abbr = _CHAIN_ABBR[lane] || (lane ? lane.charAt(0).toUpperCase() : '?');
+        node.className = 'cc-node' + (m.session_id === sessionId ? ' cur' : '');
+        node.setAttribute('data-session', m.session_id);
+        node.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.title = lane + ' · ' + (m.status || '');
+        node.onclick = (function (theId) {
+          return function (ev) { ev.stopPropagation(); openPanel(theId); };
+        })(m.session_id);
+        host.appendChild(node);
+      });
+    })
+    .catch(function () {});
 }
 
 // _synthSessionRecord(sessionId): build a MANAGED-shaped record for a NON-live
@@ -3788,9 +4189,125 @@ async function continueSession(sessionId, lane) {
   setTimeout(repopulate, 600);
 }
 
+// advanceSession(sourceId, toLane): v6 Wave 5 — MANUAL advance research →
+// planning. POST /api/rnd/advance_session (token-authed) to start a NEW LINKED
+// session in toLane (defaults 'planning'), seeded with the SOURCE session's
+// grounded summary/report; the SOURCE record is never mutated (server reuses the
+// read-only continue-seed builder). On success the new session is added to
+// MANAGED and its panel opened (reusing the continueSession success path); the
+// new tile lands in the SAME chain as the source.
+async function advanceSession(sourceId, toLane) {
+  toLane = toLane || 'planning';
+  var payload = {project_id: PROJECT_ID, source_session: sourceId, to_lane: toLane};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/advance_session', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/advance_session', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[advance error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[advance refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {
+    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || '',
+    chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || sourceId,
+    idx: (_laneCounters[rec.lane || toLane] = (_laneCounters[rec.lane || toLane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  setTimeout(repopulate, 600);
+}
+
+// finishToBuild(planningId): v6 Wave 9 (polish 1) — the explicit, NON-destructive
+// plan→build advance. POSTs /api/rnd/finish_to_build (token-gated): the server
+// captures the plan set, marks THIS planning session done WITHOUT reaping its
+// worktree (it stays a reopenable finished tile — close-to-tile philosophy), then
+// auto-advances to ONE linked build (idempotent server-side). On success we mint
+// the build tile (_addAutoBuildTile + note, the SAME path the hard-kill auto-build
+// uses) and move the planning session to a greyed FINISHED tile (reusing the
+// Wave-4 finished-tile path). With NO plan set the server honestly returns
+// auto_build:null + a reason → we show a small note and create no build.
+async function finishToBuild(planningId) {
+  var payload = {project_id: PROJECT_ID, session: planningId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/finish_to_build', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/finish_to_build', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[finish→build error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[finish→build refused] '
+      + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  if (data.auto_build && data.auto_build.session_id) {
+    // Move the planning session to a finished (greyed, reopenable) tile — it is
+    // DONE but its worktree/record persist (non-destructive). Then mint the build.
+    _finishPlanningTile(planningId);
+    _addAutoBuildTile(data.auto_build);
+  } else {
+    // Honest: no plan set yet → nothing to build. Surface a small inline note on
+    // the planning panel's finish bar (no tile is created, the session stays live).
+    _flashNoPlanNote(planningId, (data.reason || 'no plan set yet'));
+  }
+  setTimeout(repopulate, 600);
+}
+
+// _finishPlanningTile(sessionId): move a now-DONE planning session from the LIVE
+// (MANAGED) map to the FINISHED map (greyed, reopenable tile — Wave-4 path) and
+// close its open panel. The registry record + worktree are KEPT server-side (the
+// finish was non-destructive); repopulate() will re-confirm it as a terminal tile.
+function _finishPlanningTile(sessionId) {
+  var s = MANAGED[sessionId];
+  if (s) {
+    FINISHED[sessionId] = {
+      session_id: sessionId, lane: s.lane || 'planning',
+      backend: s.backend || '', status: 'done', label: s.label || '',
+      created_at: s.created_at || 0, chain_id: s.chain_id || '',
+      parent_session_id: s.parent_session_id || '', idx: s.idx || 0
+    };
+    delete MANAGED[sessionId];
+  }
+  _closePanel(sessionId);
+  renderSessionBar();
+}
+
+// _flashNoPlanNote(sessionId, reason): when finish→build finds no plan set, show
+// a brief honest note in the planning panel's finish bar (no build fabricated).
+function _flashNoPlanNote(sessionId, reason) {
+  try {
+    var p = PANELS[sessionId];
+    var bar = p && p.el ? p.el.querySelector('.fbbar') : null;
+    if (!bar) return;
+    var old = bar.querySelector('.fbnote');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var note = document.createElement('span');
+    note.className = 'fbnote';
+    note.textContent = 'No plan set yet — nothing to build (' + reason + ')';
+    bar.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 6000);
+  } catch (e) { /* advisory only */ }
+}
+
 // Per-session terminal-pane height (in-memory persistence across minimize /
 // re-open within this page load). Keyed by session_id → CSS height string.
 var _panelHeights = {};
+// v6 Wave 3: per-session PANEL rect (the freely-resized .pin body's CSS width +
+// height). Keyed by session_id → {w, h}. Restored on re-open; NOT applied while
+// the panel is maximized (maxd) so restore returns to the pre-maximize size.
+var _panelRects = {};
 
 // _loadPanelSummary(sessionId, host): fill the split summary — materials LEFT
 // (.smat: goal / North-Star / what-was-asked / effort) from the cached session
@@ -3922,10 +4439,13 @@ var _DOC_ROLE_GROUPS = {
          two: ['northstar', 'plan']}
 };
 
-// _wirePanelResize(sessionId, tpane): the tpane has CSS `resize:vertical`, so the
-// browser draws the drag handle. We watch its size with a ResizeObserver and on
-// each change (a) persist the height for this session and (b) re-fit the xterm +
-// term_resize so cols/rows track the new pane size. Falls back to no-op if
+// _wirePanelResize(sessionId, tpane): v6 Wave 3 — the WHOLE panel is freely
+// resizable: the .pin body carries CSS `resize:both`, so the browser draws a
+// corner drag handle and the user can resize the panel to any width+height
+// (the inner .tpane also still has its own bottom-edge handle). We watch BOTH
+// boxes with ResizeObservers: on a .pin change persist the panel rect (w+h) in
+// _panelRects (skipping while maximized) and re-fit the terminal; on a .tpane
+// change persist the terminal height and re-fit. Falls back to no-op if
 // ResizeObserver is unavailable (the CSS resize still works visually).
 function _wirePanelResize(sessionId, tpane) {
   var p = PANELS[sessionId];
@@ -3936,6 +4456,58 @@ function _wirePanelResize(sessionId, tpane) {
   });
   ro.observe(tpane);
   p.ro = ro;
+  // The .pin free-resize box → persist the panel rect + re-fit on every change.
+  if (p.pin) {
+    var pro = new ResizeObserver(function () {
+      if (!p.maxd) {
+        _panelRects[sessionId] = {
+          w: p.pin.style.width || (p.pin.offsetWidth + 'px'),
+          h: p.pin.style.height || (p.pin.offsetHeight + 'px')
+        };
+      }
+      _fitPanelTerminal(sessionId);
+    });
+    pro.observe(p.pin);
+    p.pinRo = pro;
+  }
+}
+
+// maximizePanel(sessionId): v6 Wave 3 — toggle the panel to fill the cockpit
+// viewport (.panel.maxd: a fixed full-screen overlay) and back to its prior
+// freely-resized rect. On BOTH the maximize and the restore we re-fit the xterm
+// terminal (twice — immediately + after the layout settles) so cols/rows track
+// the new area and the terminal never freezes or clips. The session keeps
+// running throughout — this only changes the panel's geometry.
+function maximizePanel(sessionId) {
+  var p = PANELS[sessionId];
+  if (!p || !p.el) return;
+  // A maximize on a minimized panel first re-expands it (so there's something
+  // to fill the screen with).
+  if (p.el.classList.contains('minimized')) p.el.classList.remove('minimized');
+  if (!p.maxd) {
+    // Remember the freely-resized rect so restore returns to it exactly, then
+    // clear the inline size so .panel.maxd's fixed fill takes over.
+    if (p.pin) {
+      p._restoreRect = {w: p.pin.style.width, h: p.pin.style.height};
+      p.pin.style.width = '';
+      p.pin.style.height = '';
+    }
+    p.el.classList.add('maxd');
+    p.maxd = true;
+  } else {
+    p.el.classList.remove('maxd');
+    p.maxd = false;
+    // Restore the pre-maximize rect (if any).
+    if (p.pin && p._restoreRect) {
+      if (p._restoreRect.w) p.pin.style.width = p._restoreRect.w;
+      if (p._restoreRect.h) p.pin.style.height = p._restoreRect.h;
+    }
+  }
+  // Re-fit now and again after the geometry change paints (xterm needs the new
+  // host size to recompute cols/rows; the ResizeObserver also fires, but we call
+  // explicitly so the fit happens even on browsers that batch RO callbacks).
+  _fitPanelTerminal(sessionId);
+  setTimeout(function () { _fitPanelTerminal(sessionId); }, 60);
 }
 
 // _fitPanelTerminal(sessionId): re-fit the xterm to its host then push the new
@@ -3993,6 +4565,7 @@ function _closePanel(sessionId) {
   var p = PANELS[sessionId];
   if (!p) return;
   try { if (p.ro && p.ro.disconnect) p.ro.disconnect(); } catch (e) {}
+  try { if (p.pinRo && p.pinRo.disconnect) p.pinRo.disconnect(); } catch (e) {}
   try { if (p.transport && p.transport.close) p.transport.close(); } catch (e) {}
   try { if (p.term && p.term.dispose) p.term.dispose(); } catch (e) {}
   if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
@@ -4032,6 +4605,7 @@ async function killPanel(sessionId) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
   if (!confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
+  var autoBuild = null;
   try {
     var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
     var data = await r.json();
@@ -4041,12 +4615,58 @@ async function killPanel(sessionId) {
     }
     // A 404 unknown-session (historical tile with no live PTY) is NOT an error
     // for kill — there is simply no process to reap; we still drop the tile.
+    // v6 Wave 6: killing a PLANNING session that produced a real plan set
+    // auto-opens a linked BUILD session (server-side). Surface its new tile.
+    if (data && data.auto_build) autoBuild = data.auto_build;
   } catch (e) { alert('[kill error] ' + e.message); }
+  _KILLED[sessionId] = 1;       // v6 Wave 4: suppress this id from future repopulate
   _closePanel(sessionId);
   delete MANAGED[sessionId];
+  delete FINISHED[sessionId];   // v6 Wave 4: also evict a finished tile if killed
   _removeSessionTile(sessionId);
   renderSessionBar();
+  // v6 Wave 6: mint the auto-opened build tile (new MANAGED entry + bar) and
+  // open its panel, with a tiny "auto-opened from this plan" note.
+  if (autoBuild && autoBuild.session_id) {
+    _addAutoBuildTile(autoBuild);
+  }
   setTimeout(repopulate, 400);
+}
+
+// _addAutoBuildTile(rec): v6 Wave 6 — register the server-started auto-advance
+// build session as a LIVE managed tile (same shape advanceSession uses), render
+// the bar, open its panel, and flash a tiny "→ auto-opened Build from this plan"
+// note so the user sees the planning→build hand-off happen.
+function _addAutoBuildTile(rec) {
+  var sid = rec.session_id;
+  var lane = rec.lane || 'build';
+  MANAGED[sid] = {
+    session_id: sid, lane: lane, backend: rec.backend || 'claude',
+    status: rec.status || 'running', label: rec.label || 'auto · from plan',
+    chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || '',
+    auto_from_plan: true,
+    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
+  };
+  renderSessionBar();
+  openPanel(sid);
+  _flashAutoBuildNote(rec);
+}
+
+// _flashAutoBuildNote(rec): a small, transient banner above the panel stack.
+function _flashAutoBuildNote(rec) {
+  try {
+    var host = document.getElementById('panelStack') || document.body;
+    var note = document.createElement('div');
+    note.className = 'autobuild-note';
+    note.setAttribute('data-session', rec.session_id);
+    var which = 'Build ' + (rec.session_id || '').slice(0, 6);
+    note.textContent = '→ auto-opened ' + which + ' from this plan';
+    if (host.firstChild) host.insertBefore(note, host.firstChild);
+    else host.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 6000);
+  } catch (e) { /* the tile already landed; the note is advisory */ }
 }
 
 // Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
@@ -5745,8 +6365,20 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-dot.rnd-dot-running {{ background: var(--success); box-shadow: 0 0 5px var(--success); }}
 .rnd-dot.rnd-dot-idle {{ background: var(--text-dim); }}
 .rnd-row .rnd-name {{ flex: 0 0 auto; white-space: nowrap; }}
-.rnd-row-summary {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
+.rnd-row-summary {{ flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }}
 .rnd-row-summary.rnd-dim {{ color: var(--text-dim); opacity: .6; font-style: italic; }}
+/* v6 Wave 7 — timely activity reflection: running indicator + "what's happening". */
+.rnd-row-activity {{ flex: 3 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); overflow: hidden; }}
+.rnd-act-running {{ flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-weight: 600; }}
+.rnd-act-pulse {{ width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 5px var(--success); animation: rndActPulse 1.4s ease-in-out infinite; }}
+@keyframes rndActPulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: .35; }} }}
+.rnd-act-latest {{ flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+.rnd-act-lane {{ text-transform: capitalize; color: var(--text); opacity: .85; }}
+.rnd-act-title {{ color: var(--text); opacity: .9; }}
+.rnd-act-status.rnd-act-green {{ color: var(--success); }}
+.rnd-act-status.rnd-act-amber {{ color: #e0a02a; }}
+.rnd-act-status.rnd-act-red {{ color: var(--danger, #e06c6c); }}
+.rnd-act-status.rnd-act-grey {{ color: var(--text-dim); }}
 .rnd-row-counts {{ flex: 0 0 auto; }}
 .rnd-row-counts .rnd-status-line {{ gap: 5px; }}
 .rnd-row-counts .rnd-lane {{ padding: 2px 7px; font-size: 11px; }}
@@ -7685,14 +8317,37 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
             elif self.path.startswith("/api/rnd/term_sessions"):
-                # Read-only (Wave 4): live managed terminal sessions for a
-                # project — the repopulate-from-registry hook the window-manager
-                # button bar paints from on load. Returns a SAFE projection of
-                # each registry record (NO absolute worktree_path — the UI has
-                # no need for it). Consistent with /api/rnd/projects (GET, no
-                # mutation, no auth gate).
+                # Read-only: managed terminal sessions for a project — the
+                # repopulate-from-registry hook the cockpit tiles row paints from
+                # on load. Returns a SAFE projection of each registry record (NO
+                # absolute worktree_path / branch — the UI has no need for them,
+                # and they MUST NOT leak). Consistent with /api/rnd/projects
+                # (GET, no mutation, no auth gate).
+                #
+                # v6 Wave 4: this projection now INCLUDES terminal-status
+                # (done/failed) sessions too — finished tiles stay in the row as
+                # greyed, reopenable tiles (newest-prominent + "previously done").
+                # It also carries the Wave-2 lineage fields
+                # (parent_session_id / chain_id) so the front end can group a
+                # chain. Still SAFE: worktree_path / branch are NEVER included.
                 q = parse_qs(urlparse(self.path).query)
                 pid = (q.get("project_id", [""])[0] or "").strip()
+                # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
+                # project-window refresh/poll path. Before listing, reconcile the
+                # registry against the LIVE PTY set: a managed planning session
+                # whose process is gone is re-statused DONE and (idempotently)
+                # auto-advanced to ONE linked build — so a planning session that
+                # DIED (not just an explicit hard-kill) advances on the next
+                # refresh. Idempotent on parent_session_id → repeated polls are
+                # no-ops. Best-effort + fully guarded: an error here NEVER breaks
+                # the (read-only) session list response. live_session_ids MUST be
+                # passed (the function default treats NO session as live, which
+                # would wrongly mark live ones stale).
+                try:
+                    live = list(_termsess._pty.live_sessions())
+                    _termsess.reconcile_and_advance(live_session_ids=live)
+                except Exception:
+                    pass
                 try:
                     recs = _termsess.list_sessions(project_id=pid or None)
                 except Exception:
@@ -7703,13 +8358,55 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         continue
                     safe.append({
                         "session_id": r.get("session_id"),
+                        "project_id": r.get("project_id", ""),
                         "lane": r.get("lane", ""),
                         "backend": r.get("backend", ""),
                         "status": r.get("status", ""),
                         "label": r.get("label", ""),
                         "created_at": r.get("created_at"),
+                        "parent_session_id": r.get("parent_session_id", ""),
+                        "chain_id": r.get("chain_id", ""),
                     })
                 self._send_json({"ok": True, "sessions": safe})
+            elif self.path.startswith("/api/rnd/chain"):
+                # Read-only (v6 Wave 5): the ordered lineage chain a session
+                # belongs to, for the panel-header breadcrumb (R-1 → P-2 → …).
+                # Resolves chain_for(session) → chain_members(chain_id) and emits
+                # a SAFE projection of each member (session_id / lane / label /
+                # status / parent_session_id / chain_id — NEVER worktree_path or
+                # branch). AUTH: ``?token=`` (read-only GET; back-compat when no
+                # token configured). /api/rnd/chain?project_id=<id>&session=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                sid = (q.get("session", [""])[0]
+                       or q.get("session_id", [""])[0] or "").strip()
+                if not sid:
+                    self._send_json({"ok": False,
+                                     "error": "session required"}, 400)
+                else:
+                    try:
+                        chain_id = _sessreg.chain_for(sid)
+                        members = (_sessreg.chain_members(chain_id)
+                                   if chain_id else [])
+                    except Exception:
+                        chain_id = None
+                        members = []
+                    safe = []
+                    for r in members:
+                        if not isinstance(r, dict):
+                            continue
+                        safe.append({
+                            "session_id": r.get("session_id"),
+                            "lane": r.get("lane", ""),
+                            "label": r.get("label", ""),
+                            "status": r.get("status", ""),
+                            "parent_session_id": r.get("parent_session_id", ""),
+                            "chain_id": r.get("chain_id", ""),
+                        })
+                    self._send_json({"ok": True, "chain_id": chain_id or "",
+                                     "members": safe})
             elif self.path.startswith("/api/rnd/projects_html"):
                 # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
                 # already-open main dashboard can poll for changes (new session,
@@ -8390,8 +9087,33 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "error": f"unknown session: {session}",
                                  "reason": "unknown-session"}, 404)
             else:
+                # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
+                # DONE transition that may auto-advance to build. Capture the plan
+                # set BEFORE kill() reaps the planning worktree (prime-before-reap),
+                # then kill (sets STATUS_DONE), then auto-advance (idempotent on
+                # parent_session_id; no plan ⇒ no advance). Best-effort: an
+                # auto-advance failure never breaks the kill.
+                rec = _termsess.get_session(session)
+                pid_for_advance = rec.get("project_id") if rec else None
+                planning_kill = (
+                    rec is not None
+                    and rec.get("lane") in _termsess._PLANNING_LANES
+                    and pid_for_advance)
+                pre_plan_set = None
+                if planning_kill:
+                    pre_plan_set = _termsess.capture_plan_set(
+                        pid_for_advance, session)
                 out = _termsess.kill(session)
-                self._send_json({"ok": True, "result": out})
+                auto_build = None
+                if planning_kill:
+                    try:
+                        auto_build = _termsess.auto_advance_planning_to_build(
+                            pid_for_advance, session,
+                            plan_set=pre_plan_set)
+                    except Exception:
+                        auto_build = None
+                self._send_json({"ok": True, "result": out,
+                                 "auto_build": auto_build})
 
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
@@ -8712,6 +9434,130 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     else:
                         self._send_json({"ok": True, "session": rec,
                                          "seeded_from": source})
+
+        elif self.path == "/api/rnd/advance_session":
+            # v6 Wave 5: MANUAL advance research → planning. Starts a NEW live
+            # session in ``to_lane`` (defaults 'planning' for a research source),
+            # LINKED to the source via ``parent_session_id`` (so it inherits the
+            # source's ``chain_id`` — see session_registry.start_session / Wave 2),
+            # and SEEDED with the source session's grounded summary/report context.
+            # The seed is built by the SAME read-only _build_continue_seed helper
+            # (its cached summary, else a member digest), so the SOURCE session /
+            # registry record is NEVER mutated — we only READ it. Returns the new
+            # session record in the same JSON shape as continue_session. Auth is
+            # enforced by the do_POST token middleware above (mutating/terminal).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            source = (body.get("source_session", "")
+                      or body.get("session", "") or "").strip()
+            to_lane = (body.get("to_lane", "") or "").strip() or "planning"
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not source:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and source_session required"},
+                    400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    # Resolve the SOURCE session's lane for the seed lookup. The
+                    # seed reads the source's CACHED summary in ITS lane; default
+                    # to 'research' (the only source this wave advances).
+                    src_lane = "research"
+                    try:
+                        for r in _termsess.list_sessions(project_id=pid):
+                            if r.get("session_id") == source:
+                                src_lane = r.get("lane") or src_lane
+                                break
+                    except Exception:
+                        pass
+                    seed_context = _build_continue_seed(
+                        folder, pid, src_lane, source)
+                    try:
+                        if backend:
+                            rec = _termsess.start_session(
+                                pid, to_lane, backend=backend,
+                                seed_context=seed_context,
+                                parent_session_id=source)
+                        else:
+                            rec = _termsess.start_session(
+                                pid, to_lane, seed_context=seed_context,
+                                parent_session_id=source)
+                    except _termsess.TerminalSessionError as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 400)
+                    else:
+                        self._send_json({"ok": True, "session": rec,
+                                         "advanced_from": source,
+                                         "to_lane": to_lane})
+
+        elif self.path == "/api/rnd/finish_to_build":
+            # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
+            # Mirrors the term_kill auto-advance trigger, but WITHOUT reaping the
+            # planning session's worktree: it stays a reopenable, finished tile
+            # (close-to-tile philosophy). Steps:
+            #   1. capture the plan set NOW (before any reap) via capture_plan_set;
+            #   2. mark THIS planning session DONE via session_registry
+            #      .update_session(status=STATUS_DONE) — NOT kill() (worktree kept);
+            #   3. auto_advance_planning_to_build(..., plan_set=…) — idempotent on
+            #      parent_session_id, so a second call never duplicates the build.
+            # No plan set ⇒ {ok:true, auto_build:null, reason:"no plan set yet"} so
+            # the UI can be honest (never a fabricated build). Auth is enforced by
+            # the do_POST token middleware above (mutating).
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            session = (body.get("session", "")
+                       or body.get("source_session", "") or "").strip()
+            if not pid or not session:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and session required"}, 400)
+            else:
+                rec = _termsess.get_session(session)
+                if rec is None:
+                    self._send_json({"ok": False,
+                                     "error": f"unknown session: {session}",
+                                     "reason": "unknown-session"}, 404)
+                elif rec.get("lane") not in _termsess._PLANNING_LANES:
+                    self._send_json(
+                        {"ok": False,
+                         "error": "finish→build applies only to a planning "
+                                  "session",
+                         "reason": "not-planning"}, 400)
+                else:
+                    # 1) Capture the plan set BEFORE marking done (no reap here, so
+                    #    the worktree survives — but capture-first mirrors the
+                    #    kill path and is robust either way).
+                    plan_set = _termsess.capture_plan_set(pid, session)
+                    if not plan_set:
+                        # Honest: no plan set yet ⇒ no build (worktree untouched;
+                        # the session stays exactly as it was — we do NOT mark it
+                        # done if there is nothing to advance to).
+                        self._send_json({"ok": True, "auto_build": None,
+                                         "reason": "no plan set yet"})
+                    else:
+                        # 2) Mark the planning session DONE WITHOUT reaping its
+                        #    worktree (non-destructive — reopenable finished tile).
+                        try:
+                            _sessreg.update_session(
+                                session, status=_sessreg.STATUS_DONE)
+                        except KeyError:
+                            pass
+                        # 3) Auto-advance to ONE linked build (idempotent).
+                        try:
+                            auto_build = _termsess.auto_advance_planning_to_build(
+                                pid, session, plan_set=plan_set)
+                        except Exception:
+                            auto_build = None
+                        if auto_build is None:
+                            self._send_json(
+                                {"ok": True, "auto_build": None,
+                                 "reason": "no build (already advanced or "
+                                           "discovery failed)"})
+                        else:
+                            self._send_json({"ok": True,
+                                             "auto_build": auto_build})
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart

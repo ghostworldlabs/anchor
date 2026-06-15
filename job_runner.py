@@ -732,6 +732,67 @@ def all_lines(job_id: str) -> list:
     return _lines_from_log(job_id)
 
 
+def extract_assistant_text(lines) -> list:
+    """Extract the model's ACTUAL text from a job's captured stdout lines.
+
+    Production runs ``claude -p --output-format stream-json``, whose stdout is
+    NDJSON envelopes — the model's text is NOT emitted as bare lines. It lives in
+    ``{"type":"assistant","message":{"content":[{"type":"text","text":...}]}}``
+    frames, and the complete final answer is in the terminal
+    ``{"type":"result","result":"<final text>"}`` envelope (the ``-p`` print
+    result). A naive "skip every ``{...}`` line with a ``type``" parser therefore
+    discards 100% of the model output in production (the summarizer bug).
+
+    This returns the model's text as a list of non-empty, newline-split lines,
+    preferring the canonical ``result`` envelope text, then concatenated
+    ``assistant`` text blocks. **Back-compat:** a line that is NOT a stream-json
+    envelope (e.g. a bare claim line from a test stub / non-stream output) is
+    taken verbatim as text, so existing stub-driven callers keep working.
+
+    Stdlib only; never raises (an unparseable line is treated as bare text).
+    """
+    result_text = None
+    assistant_parts = []
+    bare_parts = []
+    for raw in (lines or []):
+        s = (raw or "").strip()
+        if not s:
+            continue
+        obj = None
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                obj = json.loads(s)
+            except (json.JSONDecodeError, ValueError):
+                obj = None
+        if isinstance(obj, dict) and obj.get("type"):
+            t = obj.get("type")
+            if t == "result":
+                r = obj.get("result")
+                if isinstance(r, str) and r.strip():
+                    result_text = r  # last terminal result wins
+            elif t == "assistant":
+                msg = obj.get("message") or {}
+                for block in (msg.get("content") or []):
+                    if (isinstance(block, dict)
+                            and block.get("type") == "text"
+                            and isinstance(block.get("text"), str)
+                            and block["text"].strip()):
+                        assistant_parts.append(block["text"])
+            # Other envelope types (system/user/tool_use/...) carry no answer text.
+            continue
+        # Not a recognized envelope → a bare text line (test stub / plain output).
+        bare_parts.append(s)
+
+    if result_text is not None:
+        text = result_text
+    elif assistant_parts:
+        text = "\n".join(assistant_parts)
+    else:
+        text = "\n".join(bare_parts)
+
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
 def tail(job_id: str, since: int = 0) -> dict:
     """Return captured lines *after* index ``since``.
 

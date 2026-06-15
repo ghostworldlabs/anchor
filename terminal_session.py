@@ -39,6 +39,8 @@ import pty_manager as _pty
 import session_registry as _reg
 import worktrees as _wt
 import rnd_registry as _rnd
+import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
+#                            neither terminal_session nor session_registry)
 
 try:
     import lanes as _lanes
@@ -271,7 +273,8 @@ def _check_engine_allowed(lane, backend):
 _UNSET = object()
 
 
-def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None):
+def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
+                  parent_session_id=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -291,6 +294,13 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
     carries an extra payload — e.g. a Grass Catcher idea promoted into this
     Research/Plan session — as the thing to work on. It is recorded in
     ``seed_text`` and, like the base seed, is written exactly once.
+
+    v6 Wave 2: ``parent_session_id`` (optional) links this session into an
+    existing lineage. When given, the new session JOINS the parent's chain
+    (``chain_id`` = the parent's chain_id, resolved via
+    :func:`session_registry.chain_for`) and records ``parent_session_id``. When
+    omitted, the new session starts its OWN chain (chain_id == its own id). The
+    parent record is never mutated.
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -315,6 +325,17 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
     _check_engine_allowed(lane, backend)
 
     sid = _new_id()
+
+    # v6 Wave 2: resolve the chain this session joins. A parent links the new
+    # session into the parent's chain; with no parent the session starts its own
+    # singleton chain (chain_id defaults to its own sid in register_session). An
+    # unknown parent id is ignored (the session simply starts its own chain).
+    parent_id = parent_session_id or ""
+    chain_id = None
+    if parent_id:
+        chain_id = _reg.chain_for(parent_id)
+        if not chain_id:
+            parent_id = ""  # unknown parent → start a fresh chain
 
     # 1) Isolated worktree first — if this fails we never start a PTY.
     wt = _wt.create_worktree(project_id, sid)
@@ -359,6 +380,8 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None)
             status=_reg.STATUS_RUNNING,
             label=label,
             session_id=sid,
+            parent_session_id=parent_id,
+            chain_id=chain_id,
         )
     except Exception as exc:
         try:
@@ -614,6 +637,206 @@ def kill(session_id, project_id=None):
         "pty_killed": pty_killed,
         "worktree": wt_out,
     }
+
+
+# ── Auto advance planning → build (v6 Wave 6) ────────────────────────────────
+#
+# When a PLANNING session reaches a terminal/DONE state via a DELIBERATE
+# hard-kill or a RECONCILE-DEAD transition (NOT a keep-alive close, NOT process
+# self-exit), and a real MASTER+IMPL plan set is discoverable, the cockpit
+# AUTOMATICALLY opens exactly ONE linked build session that executes on that plan.
+#
+# Trigger semantics are LOCKED (MASTER-PLAN Risks R1/R2):
+#   - fires ONLY for a planning-lane session that is TERMINAL/DONE;
+#   - exactly ONE build per planning session — IDEMPOTENT on
+#     ``parent_session_id`` (a second reconcile/restart never duplicates);
+#   - no plan set ⇒ no advance;
+#   - the build worktree is PRIMED (HANDOFF.md → the plan docs) and the stage
+#     edge is recorded, captured from the discovered plan set BEFORE the planning
+#     worktree is reaped (callers pre-capture and pass ``plan_set`` to be safe).
+#
+# This lives here (not in ``session_registry``) so the registry stays free of a
+# terminal_session/handoff import — no import cycle. ``handoff`` imports neither
+# module, so importing it here is safe.
+
+#: Planning lane aliases that qualify for the plan→build auto-advance (the trio
+#: key ``plan`` and the on-disk dir name ``planning`` both map to a plan stage).
+_PLANNING_LANES = frozenset(("plan", "planning"))
+
+
+def _build_seed_for_plan(plan_set):
+    """A short build seed referencing the plan the build should execute on."""
+    title = (plan_set.get("title") or plan_set.get("plan_dir")
+             or "the planning session's plan set")
+    impl = plan_set.get("impl_plan_rel") or plan_set.get("master_plan_rel") or ""
+    ref = (" See `%s`." % impl) if impl else ""
+    return ("Execute on the plan produced by the upstream planning session: "
+            "%s.%s The plan docs are referenced in HANDOFF.md in this worktree."
+            % (title, ref))
+
+
+def auto_advance_planning_to_build(project_id, planning_session_id,
+                                   planning_worktree_path=None, plan_set=None):
+    """Auto-open one linked, primed build session from a DONE planning session.
+
+    Fires only when ``planning_session_id`` is a planning-lane session in a
+    terminal/DONE status (the deliberate hard-kill or reconcile-dead transition).
+    Returns ``None`` (a clean no-op) in every gated-out case:
+
+      - the session is unknown, not a planning lane, or not terminal/DONE;
+      - a build session with ``parent_session_id == planning_session_id`` already
+        exists (**idempotent** — survives reconcile/restart, never duplicates);
+      - no MASTER+IMPL plan set is discoverable (``no plan ⇒ no advance``).
+
+    Otherwise it:
+      1. discovers the plan set (or uses the pre-captured ``plan_set`` passed by a
+         caller that captured it BEFORE the planning worktree was reaped);
+      2. starts a NEW linked build session (``start_session(lane='build',
+         parent_session_id=planning_session_id, seed_context=<plan seed>)``) — it
+         inherits the planning session's ``chain_id``;
+      3. primes the build worktree via :func:`handoff.prime_worktree`
+         (HANDOFF.md → the plan docs, which already exist in the checkout);
+      4. records the generic stage edge ``plan->build`` via
+         :func:`handoff.record_stage_link`.
+
+    Returns the new build registry record on success. Never raises — any failure
+    (no project, discovery error, start failure) returns ``None`` so it can be
+    called best-effort from the kill / reconcile transition without breaking it.
+    """
+    try:
+        record = _reg.get_session(planning_session_id)
+        if record is None:
+            return None
+        lane = record.get("lane", "")
+        if lane not in _PLANNING_LANES:
+            return None
+        # Only a TERMINAL/DONE planning session advances (the hard-kill /
+        # reconcile-dead transition the cockpit owns — never a keep-alive close,
+        # never a live/idle session).
+        if record.get("status") != _reg.STATUS_DONE:
+            return None
+
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return None
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return None
+
+        # IDEMPOTENCY: one build per planning session. If a build already links to
+        # this planning session as its parent, do nothing (a second reconcile /
+        # restart re-running this must NOT create a duplicate).
+        for s in _reg.list_sessions(project_id=project_id):
+            if (s.get("lane") == "build"
+                    and s.get("parent_session_id") == planning_session_id):
+                return None
+
+        # Discover the plan set the build executes on. Prefer a pre-captured one
+        # (the caller captured it BEFORE reaping the planning worktree); else
+        # discover now (discovery reads the project folder, not the worktree).
+        if not plan_set:
+            try:
+                plan_set = _handoff.discover_recent_plan_set(
+                    folder, project_id, source_session_id=planning_session_id)
+            except Exception:
+                plan_set = None
+        if not plan_set:
+            return None  # no plan ⇒ no advance
+
+        # Start the linked, seeded build session.
+        try:
+            build_rec = start_session(
+                project_id, "build",
+                seed_context=_build_seed_for_plan(plan_set),
+                parent_session_id=planning_session_id,
+                label="auto · from plan")
+        except TerminalSessionError:
+            return None
+
+        build_sid = build_rec.get("session_id", "")
+        build_wt = build_rec.get("worktree_path", "")
+
+        # Prime the (fresh, never-reaped) build worktree with the plan reference
+        # BEFORE anyone reaps anything — captured from the discovered plan set.
+        if build_wt:
+            try:
+                _handoff.prime_worktree(build_wt, plan_set, project_id=project_id)
+            except Exception:
+                pass
+        # Record the generic plan→build stage edge (Wave 2; rescan-durable).
+        try:
+            _handoff.record_stage_link(
+                folder, project_id, planning_session_id, build_sid,
+                kind="plan->build")
+        except Exception:
+            pass
+        # Also append the v3 handoff record (parallel list) for the inspection
+        # surfaces — best-effort, never blocks the advance.
+        try:
+            _handoff.record_handoff(folder, project_id, build_sid, plan_set)
+        except Exception:
+            pass
+        return build_rec
+    except Exception:
+        return None
+
+
+def reconcile_and_advance(live_session_ids=None, worktree_exists=None,
+                          mark_stale_status=_reg.STATUS_DONE):
+    """Reconcile the registry, then auto-advance any newly-DONE planning session.
+
+    The cockpit's reconcile-dead path (a managed session whose process is gone):
+    re-status the stale sessions, then for each one that was a **planning** session
+    just marked terminal/DONE, attempt :func:`auto_advance_planning_to_build`
+    (idempotent on ``parent_session_id``, so re-running reconcile never
+    duplicates; ``no plan ⇒ no advance``). Best-effort — an advance failure for
+    one session never breaks the reconcile or the others.
+
+    Reconcile here defaults ``mark_stale_status`` to ``STATUS_DONE`` (not the
+    registry default ``STATUS_IDLE``) because a reconcile-dead transition for the
+    cockpit IS the "this session finished" signal that gates the advance. Returns
+    ``{"reconcile": <report>, "auto_builds": [<build_record>, ...]}``.
+    """
+    report = _reg.reconcile(
+        live_session_ids=live_session_ids, worktree_exists=worktree_exists,
+        mark_stale_status=mark_stale_status, apply=True)
+    auto_builds = []
+    if mark_stale_status == _reg.STATUS_DONE:
+        for sid in report.get("marked", []):
+            rec = _reg.get_session(sid)
+            if rec is None or rec.get("lane") not in _PLANNING_LANES:
+                continue
+            pid = rec.get("project_id") or None
+            if not pid:
+                continue
+            try:
+                build = auto_advance_planning_to_build(pid, sid)
+            except Exception:
+                build = None
+            if build is not None:
+                auto_builds.append(build)
+    return {"reconcile": report, "auto_builds": auto_builds}
+
+
+def capture_plan_set(project_id, planning_session_id):
+    """Discover the planning session's plan set NOW (before any reap). or ``None``.
+
+    Helper for the kill path: capture the plan set from the still-intact project
+    state BEFORE :func:`kill` reaps the planning worktree, so the subsequent
+    :func:`auto_advance_planning_to_build` primes from a known-good plan set even
+    if discovery were ever to depend on the worktree. Never raises.
+    """
+    try:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return None
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return None
+        return _handoff.discover_recent_plan_set(
+            folder, project_id, source_session_id=planning_session_id)
+    except Exception:
+        return None
 
 
 def list_sessions(project_id=None, status=None):

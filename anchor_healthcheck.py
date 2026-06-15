@@ -561,6 +561,21 @@ def _fake_runner_cmd() -> "str | None":
     return None
 
 
+def _streamjson_runner_cmd() -> "str | None":
+    """Path to the STREAM-JSON stub runner (``tests/stub_streamjson.py``).
+
+    Unlike ``fake_claude.py`` (bare text lines), this stub emits production
+    ``claude -p --output-format stream-json`` NDJSON envelopes — the shape the
+    summarizer's parser must extract real text from (the v6 Wave-1 regression
+    guard). Returns a ``python <abs path>`` command string, or ``None`` if absent
+    (the v6 check then degrades gracefully instead of risking a live CLI).
+    """
+    stub = ANCHOR_DIR / "tests" / "stub_streamjson.py"
+    if stub.is_file():
+        return f"{sys.executable} {stub}"
+    return None
+
+
 def check_rnd_v2_surface(report: Report, server_proc, rnd_env: dict):
     """Exercise the v2 R&D surface on the throwaway server (stubbed runner).
 
@@ -1485,6 +1500,286 @@ def check_rnd_v5_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v6_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v6 "Linked Pipeline" R&D surface — FULLY STUBBED.
+
+    Walks the new v6 seams in a throwaway temp project + temp git repo, never
+    touching real data, never a live claude / real PTY / real worktree off the
+    build repo. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (the
+    STREAM-JSON stub ``tests/stub_streamjson.py``) + a temp ``ANCHOR_WORKTREE_BASE``
+    keep every model/PTY interaction off the real engine; nothing binds ``:8777``.
+
+      (Wave 1) summaries-through-stream-json — ``summarizer.summarize_session``
+          + ``summarize_project`` driven through the PRODUCTION stream-json
+          envelope stub yield grounded NON-EMPTY content (session skill/prompts/
+          actions; project objective); a SCHEMA_VERSION-stale empty project cache
+          is treated as a MISS and HEALS on regenerate.
+      (Wave 2 + 6) the CHAIN — start a research session → advance to a LINKED
+          planning session (``start_session(parent_session_id=…)``; assert ordered
+          ``chain_members`` + parent set) → finish the planning session WITH a
+          real MASTER+IMPL plan set → ``auto_advance_planning_to_build`` yields
+          exactly ONE linked build (idempotent on a second call) → assert
+          ``chain_members`` is [research, planning, build] ordered.
+      (Wave 4) the ``term_sessions`` projection (via ``session_registry``)
+          INCLUDES terminal-status sessions and stays SAFE (no worktree_path /
+          branch leak).
+
+    Every stub PTY + synthetic session row is reaped, all forced env is restored,
+    and the temp dirs are torn down (here + by ``_cleanup_synthetic_rnd``). The
+    summarizer runner is restored to ``rnd_env['runner_cmd']`` (fake_claude) on
+    exit so later checks are unaffected. Asserts nothing bound ``:8777``.
+    """
+    name = "R&D v6 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_claims = os.environ.get("STUB_STREAMJSON_CLAIMS")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v6-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_TERMINAL_SEED"] = "HC-V6-SEED-LOAD-SKILL"
+    # Drive the summarizer through the PRODUCTION stream-json stub for this walk.
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import pty_manager as _pty
+        import session_registry as _sreg
+        import effort_history as _eh
+        import summarizer as _summarizer
+        import sessions as _sessions
+        import brownfield_scan as _bf
+        import handoff as _handoff
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v6-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v6 probe\n\n## What this project is\n"
+            "Anchor is a productivity system that manages markdown task files "
+            "for a researcher, tracking projects and deadlines. This probe "
+            "exercises the v6 linked pipeline surface.\n",
+            encoding="utf-8")
+        (proj_folder / "README.md").write_text("# hc v6 probe\n",
+                                               encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v6", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v6 project", bool(pid), str(pid)))
+
+        # ── (Wave 1) summaries through the PRODUCTION stream-json stub ────────
+        try:
+            # A discovered planning session with two real member docs so a
+            # grounded claim has a corpus.
+            bd = proj_folder / "planning" / "hc-v6-plan"
+            bd.mkdir(parents=True, exist_ok=True)
+            (bd / "MASTER-PLAN.md").write_text(
+                "# Master Plan\n\n## North Star\nCache validated summaries for "
+                "each session of trio work.\n", encoding="utf-8")
+            (bd / "IMPLEMENTATION-PLAN.md").write_text(
+                "# Implementation Plan\n\n## Goal\nRender the most-recent session "
+                "with an expander.\n", encoding="utf-8")
+            scan = _bf.scan(str(proj_folder))
+            _eh.adopt_discovered(proj_folder, pid, scan)
+            psess = _sessions.list_sessions(str(proj_folder), pid, "planning")
+            sess_ok = False
+            if psess:
+                os.environ["STUB_STREAMJSON_CLAIMS"] = (
+                    "North Star: cache validated summaries for each session.")
+                ssum = _summarizer.summarize_session(
+                    str(proj_folder), pid, "planning", psess[0])
+                claims = (ssum.get("claims") or []) if isinstance(ssum, dict) \
+                    else []
+                shape = (isinstance(ssum, dict) and "skill" in ssum
+                         and "prompts" in ssum and "actions" in ssum)
+                grounded = any("validated summaries" in str(c).lower()
+                               for c in claims)
+                sess_ok = bool(claims) and shape and grounded
+            steps.append(("session summary grounded via stream-json",
+                          sess_ok,
+                          f"present={bool(psess)} ok={sess_ok}"))
+
+            # Project objective through the same production envelope path.
+            objective = ("Anchor is a productivity system that manages markdown "
+                         "task files for a researcher, tracking projects and "
+                         "deadlines.")
+            os.environ["STUB_STREAMJSON_CLAIMS"] = objective
+            pout = _summarizer.summarize_project(str(proj_folder), pid)
+            ptext = (pout.get("summary_text") or "") if isinstance(pout, dict) \
+                else ""
+            proj_ok = (isinstance(pout, dict) and bool(pout.get("claims"))
+                       and not pout.get("no_grounded_claims")
+                       and "productivity system" in ptext.lower())
+            steps.append(("project objective grounded via stream-json",
+                          proj_ok, f"text_len={len(ptext)}"))
+
+            # SCHEMA-VERSION heal: a pre-fix empty cache (no schema_version) is a
+            # MISS; a force-regenerate heals it into a grounded objective.
+            d = _summarizer._project_store_dir(str(proj_folder), pid)
+            d.mkdir(parents=True, exist_ok=True)
+            (d / _summarizer.PROJECT_SUMMARY_JSON).write_text(
+                json.dumps({"project_id": pid, "kind": "project",
+                            "claims": [], "summary_text": "",
+                            "no_grounded_claims": True}),
+                encoding="utf-8")
+            miss = _summarizer.load_cached_project(str(proj_folder), pid) is None
+            os.environ["STUB_STREAMJSON_CLAIMS"] = objective
+            healed = _summarizer.summarize_project(str(proj_folder), pid,
+                                                   force=True)
+            healed_ok = (isinstance(healed, dict) and bool(healed.get("claims")))
+            cached_after = _summarizer.load_cached_project(str(proj_folder), pid)
+            cache_ver_ok = (isinstance(cached_after, dict)
+                            and cached_after.get("schema_version")
+                            == _summarizer.SUMMARY_SCHEMA_VERSION)
+            steps.append(("schema-stale cache heals on regenerate",
+                          miss and healed_ok and cache_ver_ok,
+                          f"miss={miss} healed={healed_ok} ver={cache_ver_ok}"))
+        except Exception as e:
+            steps.append(("summaries via stream-json", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (Wave 2 + 6) the linked research → planning → build chain ─────────
+        if git_ok:
+            try:
+                # A real MASTER+IMPL plan set committed so discovery finds it
+                # (the planning lane the auto-advance executes on).
+                # The MASTER+IMPL plan docs were already written under
+                # planning/hc-v6-plan above (Wave-1 step); discovery reads the
+                # project folder (not git), so no extra commit is needed.
+
+                # Research session = chain root.
+                rrec = _ts.start_session(pid, "research", label="hc v6 research")
+                rsid = rrec["session_id"]
+                root_chain_ok = (rrec.get("parent_session_id", "") == ""
+                                 and rrec.get("chain_id") == rsid)
+
+                # Advance to a LINKED planning session (parent = research).
+                prec = _ts.start_session(pid, "planning",
+                                         label="hc v6 planning",
+                                         parent_session_id=rsid,
+                                         seed_context="advance from research")
+                psid = prec["session_id"]
+                link_ok = (prec.get("parent_session_id") == rsid
+                           and prec.get("chain_id") == rrec.get("chain_id"))
+                members_rp = _sreg.chain_members(rrec.get("chain_id"))
+                rp_order_ok = ([m.get("session_id") for m in members_rp]
+                               == [rsid, psid])
+
+                # Finish the planning session (hard-kill → DONE) then auto-advance.
+                pre_plan = _ts.capture_plan_set(pid, psid)
+                _ts.kill(psid, project_id=pid)
+                build = _ts.auto_advance_planning_to_build(
+                    pid, psid, plan_set=pre_plan)
+                build_ok = (isinstance(build, dict)
+                            and build.get("parent_session_id") == psid
+                            and build.get("chain_id") == rrec.get("chain_id"))
+                bsid = (build or {}).get("session_id")
+
+                # Idempotent: a second advance must NOT create a duplicate build.
+                dup = _ts.auto_advance_planning_to_build(pid, psid)
+                builds = [s for s in _sreg.list_sessions(project_id=pid)
+                          if s.get("lane") == "build"]
+                idem_ok = dup is None and len(builds) == 1
+
+                # The full chain is ordered [research, planning, build].
+                members = _sreg.chain_members(rrec.get("chain_id"))
+                lanes_order = [m.get("lane") for m in members]
+                chain_ok = lanes_order == ["research", "planning", "build"]
+
+                steps.append(("linked research→planning→build chain",
+                              root_chain_ok and link_ok and rp_order_ok
+                              and build_ok and idem_ok and chain_ok,
+                              f"root={root_chain_ok} link={link_ok} "
+                              f"rp_order={rp_order_ok} build={build_ok} "
+                              f"idem={idem_ok} order={lanes_order}"))
+
+                # ── (Wave 4) term_sessions projection: includes terminal + SAFE ─
+                projection = _sreg.list_sessions(project_id=pid)
+                has_terminal = any(s.get("status")
+                                   in _sreg.TERMINAL_STATUSES
+                                   for s in projection)
+                # The SERVER projection (anchor_gui) strips worktree_path/branch;
+                # assert the SAFE field set we ship has the lineage fields and
+                # that a SAFE copy never carries worktree_path/branch.
+                safe_copy = [{
+                    "session_id": s.get("session_id"),
+                    "lane": s.get("lane", ""),
+                    "status": s.get("status", ""),
+                    "parent_session_id": s.get("parent_session_id", ""),
+                    "chain_id": s.get("chain_id", ""),
+                } for s in projection]
+                safe_ok = all("worktree_path" not in s and "branch" not in s
+                              for s in safe_copy)
+                steps.append(("term_sessions projection terminal+SAFE",
+                              has_terminal and safe_ok,
+                              f"terminal={has_terminal} safe={safe_ok}"))
+
+                # Reap the live chain sessions we left running.
+                for sid in (rsid, bsid):
+                    if sid:
+                        try:
+                            _ts.kill(sid, project_id=pid)
+                        except Exception:
+                            pass
+            except Exception as e:
+                steps.append(("linked chain", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("linked chain", True, "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk (incl. the runner, which
+        # we swapped to the stream-json stub — later checks must see fake_claude).
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("STUB_STREAMJSON_CLAIMS", prev_claims)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -1737,6 +2032,7 @@ def main():
         check_rnd_v3_surface(report, server_proc, rnd_env)
         check_rnd_v4_surface(report, server_proc, rnd_env)
         check_rnd_v5_surface(report, server_proc, rnd_env)
+        check_rnd_v6_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
