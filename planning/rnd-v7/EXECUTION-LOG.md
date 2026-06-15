@@ -114,4 +114,41 @@ allow Gemini, that's a one-line policy tweak — say the word.
 Commit: scoped.
 
 <!-- WAVE 4 done -->
-<!-- WAVE 5 — CLI mirror + healthcheck v7 + distro + docs (PROJECT DONE) -->
+### Wave 5 — CLI mirror + healthcheck v7 + distro + docs — GREEN (2026-06-15) — PROJECT DONE
+
+**Built:** `anchor.py` `rnd blurb <pid> --lane --session` → `summarizer.session_blurb`
+(read-only, cache-only, honest "(no summary yet)"). `anchor_healthcheck.check_rnd_v7_surface`
+(fully stubbed: stub PTY + stream-json stub runner + temp worktree base + temp git project):
+walks (a) the normalizer (glyph/markdown stripped + clean-unchanged); (b) summarize-on-finish
+(kill → cached summary + clean `session_blurb`); (c) the board bridge (live registry session
+deduped into its lane column; `general` excluded from trio columns); (d) the bare `general`
+lane (no seed, never advances) — reaps PTYs + temp dirs, restores all env, never `:8777`.
+`distro.py` unchanged (scan already clean). `CLAUDE.md` gains a full v7 "Integrated Board"
+section (module block + API rows + `rnd blurb` CLI + general-lane note). Avoided the
+secrets-scanner trip (benign test token).
+
+**Orchestrator verification:** distro re-run → **clean (138 files; sole pywinpty exception;
+no Playwright in product code)**; `rnd blurb` in the CLI usage; CLAUDE.md v7 section present.
+21 new tests (cli 8 + healthcheck 7 + distro 6).
+
+**FINAL GATE:** `ANCHOR_PTY_BACKEND=stub python -m pytest -q` → **879 passed, 1 skipped**
+(+21; +63 over the 816 v6 baseline). Commit: scoped.
+
+---
+
+## PROJECT DONE (2026-06-15) — pending John's UI sign-off + deploy
+
+All 5 waves GREEN. Branch `foreman/rnd-surface-v7` (off master `5ae3c2e`). Full suite **879
+passed, 1 skipped**. **NOT merged, service NOT restarted** — UI waves (3–4) await John's
+sign-off (screenshots under `_devtest/`), then: merge → `nssm restart anchor` (elevated) →
+rescan to heal summaries.
+
+**Wave tally:** W1 short-clean summaries (831) · W2 summarize-on-finish (840) · W3 live
+sessions in lane columns (848) · W4 "Open terminal" general session (858) · W5 CLI/healthcheck/
+distro/docs (879).
+
+**Open items flagged for John:** (1) Wave 3 — the lane-column tile appears on next render
+(reload/rescan); the top strip is the instant view; a board-fragment refresh from
+`newTermSession` would make it instant-in-column (offered, not built). (2) Wave 4 — Gemini is
+research-only by policy, so toggling a general session to Gemini surfaces a clean refusal; a
+one-line policy tweak would allow it. (3) #1 summaries only fully heal after a rescan post-deploy.

@@ -47,6 +47,10 @@ have NO CLI form):
 R&D v6 "Linked Pipeline" inspection mirror (read-only DATA seam; advance/continue
 are interactive and have NO CLI form):
     python3 anchor.py rnd chain <project_id> --session <id>   # the ordered lineage chain (research -> planning -> build)
+
+R&D v7 "Integrated Board" inspection mirror (read-only DATA seam; the board/general
+terminal are interactive and have NO CLI form):
+    python3 anchor.py rnd blurb <project_id> --lane <lane> --session <id>  # the short, clean one-line session blurb (cache-only)
 """
 
 import json, os, re, sys
@@ -923,6 +927,19 @@ def rnd_session_summary(project_id, lane, session_id):
     return cached
 
 
+def rnd_blurb(project_id, lane, session_id):
+    """CLI mirror of ``summarizer.session_blurb`` — the short, clean one-liner (v7).
+
+    READ-ONLY cache lookup: returns the short, glyph/markdown-stripped one-line
+    blurb derived from the session's CACHED summary (the same data source the
+    board tile uses), or an empty string when no usable cache exists — it NEVER
+    runs the model synchronously. Raises ``KeyError`` for an unknown project.
+    """
+    import summarizer as _summarizer
+    _proj, folder = _rnd_resolve(project_id)
+    return _summarizer.session_blurb(folder, project_id, lane, session_id)
+
+
 def rnd_grass(project_id):
     """CLI mirror of ``effort_history.grass_workbench_data`` — the idea board.
 
@@ -1130,7 +1147,7 @@ def _rnd_cli(args):
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
-              "build-deliverable|chain> ...")
+              "build-deliverable|chain|blurb> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1396,6 +1413,20 @@ def _rnd_cli(args):
                 print(f"    - {str(a).strip()[:100]}")
             claims = summary.get("claims", []) or []
             print(f"  claims:   {len(claims)} grounded")
+
+        elif sub == "blurb":
+            pos = _positionals()
+            lane = _opt("--lane")
+            session_id = _opt("--session")
+            if not pos or not lane or not session_id:
+                print("Usage: anchor.py rnd blurb <project_id> "
+                      "--lane <lane> --session <session_id>")
+                return
+            blurb = rnd_blurb(pos[0], lane, session_id)
+            if not (blurb or "").strip():
+                print(f"Session {session_id} (lane '{lane}'): (no summary yet)")
+                return
+            print(f"Session {session_id} (lane '{lane}'): {blurb}")
 
         elif sub == "grass":
             pos = _positionals()

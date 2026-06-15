@@ -1780,6 +1780,287 @@ def check_rnd_v6_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v7_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v7 "Integrated Board" R&D surface — FULLY STUBBED.
+
+    Walks the new v7 seams in a throwaway temp project + temp git repo, never
+    touching real data, never a live claude / real PTY / real worktree off the
+    build repo. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (the
+    STREAM-JSON stub ``tests/stub_streamjson.py``) + a temp ``ANCHOR_WORKTREE_BASE``
+    keep every model/PTY interaction off the real engine; nothing binds ``:8777``.
+
+      (Wave 1) normalizer — ``summarizer.short_summary_text`` /
+          ``summarizer.tile_blurb`` strip a glyph/markdown-laden input to clean,
+          capped text AND leave an already-clean sentence unchanged.
+      (Wave 2) summarize-on-finish — start a research session → hard-kill it →
+          drive the proactive ``_trigger_session_summary_on_finish`` hook → a
+          session summary is generated + cached, and ``summarizer.session_blurb``
+          returns a short clean one-liner from it.
+      (Wave 3) board bridge — a LIVE ``session_registry`` session is INCLUDED in
+          the ``anchor_gui._gather_project_sessions`` lane merge and DEDUPED (one
+          entry per session_id), while a ``general`` session is EXCLUDED from the
+          trio columns.
+      (Wave 4) general lane — ``terminal_session.start_session(lane='general')``
+          is bare (no seed) and never auto-advances (``general`` is not a planning
+          lane).
+
+    Every stub PTY + synthetic session row is reaped, all forced env is restored,
+    and the temp dirs are torn down (here + by ``_cleanup_synthetic_rnd``). The
+    summarizer runner is restored to ``rnd_env['runner_cmd']`` (fake_claude) on
+    exit so later checks are unaffected. Asserts nothing bound ``:8777``.
+    """
+    name = "R&D v7 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_claims = os.environ.get("STUB_STREAMJSON_CLAIMS")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v7-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_TERMINAL_SEED"] = "HC-V7-SEED-LOAD-SKILL"
+    # Drive the summarizer through the PRODUCTION stream-json stub for this walk.
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    pid = None
+    gui = None
+    prev_gui_flag = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import pty_manager as _pty
+        import session_registry as _sreg
+        import effort_history as _eh
+        import summarizer as _summarizer
+        import sessions as _sessions
+        import brownfield_scan as _bf
+        # anchor_gui carries the board bridge + the summarize-on-finish hook.
+        import anchor_gui as gui
+
+        # ── (Wave 1) the short/clean normalizer ───────────────────────────────
+        try:
+            dirty = "**Goal:** ship X — handle ## edge `cases` ✓ → done ☢"
+            short = _summarizer.short_summary_text(dirty)
+            tile = _summarizer.tile_blurb(dirty, max_chars=40)
+            # No markdown control chars or decorative glyphs survive.
+            bad = ("**", "##", "`", "✓", "→", "☢", "—")
+            clean_ok = all(g not in short for g in bad) and bool(short.strip())
+            # A clean sentence within the cap is returned unchanged.
+            plain = "Ship X and handle the edge cases"
+            unchanged = _summarizer.short_summary_text(plain) == plain
+            tile_capped = len(tile) <= 41  # 40 + ellipsis
+            steps.append(("normalizer strips + caps + clean-unchanged",
+                          clean_ok and unchanged and tile_capped,
+                          f"short={short!r}"))
+        except Exception as e:
+            steps.append(("normalizer", False, f"{type(e).__name__}: {e}"))
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v7-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v7 probe\n\n## What this project is\n"
+            "Anchor is a productivity system; this probe exercises the v7 "
+            "integrated-board surface.\n", encoding="utf-8")
+        (proj_folder / "README.md").write_text("# hc v7 probe\n",
+                                               encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v7", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v7 project", bool(pid), str(pid)))
+
+        # Enable the proactive summary path so the finish hook actually runs
+        # (the live server enables it; in this walk we opt in, then restore).
+        prev_gui_flag = gui._PROACTIVE_SUMMARY_ENABLED
+        gui._PROACTIVE_SUMMARY_ENABLED = True
+        os.environ["ANCHOR_PROACTIVE_SUMMARY"] = "1"
+
+        # ── (Wave 2) summarize-on-finish + session_blurb ──────────────────────
+        if git_ok:
+            try:
+                # A discovered research session so the summarizer has member docs
+                # to ground a session summary against.
+                rd = proj_folder / "research" / "hc-v7-research"
+                rd.mkdir(parents=True, exist_ok=True)
+                (rd / "REPORT.md").write_text(
+                    "# Report\n\n## Findings\nThe v7 board integrates live "
+                    "sessions into the lane columns.\n", encoding="utf-8")
+                scan = _bf.scan(str(proj_folder))
+                _eh.adopt_discovered(proj_folder, pid, scan)
+
+                rec = _ts.start_session(pid, "research", label="hc v7 finish")
+                rsid = rec["session_id"]
+                # Hard-kill = the deliberate finish transition.
+                _ts.kill(rsid, project_id=pid)
+                # Resolve the discovered session id for the cache assert + blurb.
+                rsess = _sessions.list_sessions(str(proj_folder), pid,
+                                                "research")
+                disc_sid = rsess[0]["session_id"] if rsess else rsid
+                os.environ["STUB_STREAMJSON_CLAIMS"] = (
+                    "The v7 board integrates live sessions into lane columns.")
+                # Drive the proactive finish hook for the discovered session
+                # (non-blocking daemon thread) then poll the cache.
+                gui._trigger_session_summary_on_finish(pid, "research", disc_sid)
+                store_lane = _eh._resolve_subdir("research")
+                cached = None
+                for _ in range(60):
+                    cached = _summarizer.load_cached(
+                        str(proj_folder), pid, store_lane, disc_sid)
+                    if cached is not None:
+                        break
+                    time.sleep(0.1)
+                blurb = _summarizer.session_blurb(
+                    str(proj_folder), pid, "research", disc_sid)
+                glyph_free = all(g not in blurb
+                                 for g in ("**", "##", "`", "✓", "→", "☢"))
+                steps.append(("summarize-on-finish caches + blurb",
+                              cached is not None and bool(blurb.strip())
+                              and glyph_free,
+                              f"cached={cached is not None} "
+                              f"blurb_len={len(blurb)}"))
+            except Exception as e:
+                steps.append(("summarize-on-finish", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("summarize-on-finish", True,
+                          "skipped (git unavailable)"))
+
+        # ── (Wave 3) board bridge: live registry session merged + deduped ─────
+        try:
+            # A LIVE managed research session registered directly (no PTY/git
+            # needed for the merge seam).
+            lrec = _sreg.register_session(pid, "research",
+                                          status=_sreg.STATUS_RUNNING,
+                                          session_id="hc-v7-live-research",
+                                          label="hc v7 live")
+            lsid = lrec["session_id"]
+            # A general session must NOT reach any trio column.
+            _sreg.register_session(pid, "general",
+                                   status=_sreg.STATUS_RUNNING,
+                                   session_id="hc-v7-general",
+                                   label="hc v7 general")
+            merged = gui._gather_project_sessions(str(proj_folder), pid)
+            research_sessions = merged.get("research", [])
+            # The live session appears exactly once in its lane column.
+            live_count = sum(
+                1 for sv in research_sessions
+                if sv.get("session_id") == lsid
+                or gui._strip_session_prefix(sv.get("session_id", "")) == lsid)
+            included = live_count == 1
+            # The general session is excluded from EVERY trio column.
+            all_sids = [sv.get("session_id", "")
+                        for col in ("research", "plan", "build",
+                                    "deliverables")
+                        for sv in merged.get(col, [])]
+            general_excluded = all("hc-v7-general" not in s for s in all_sids)
+            steps.append(("board bridge live merged+deduped, general excluded",
+                          included and general_excluded,
+                          f"live_count={live_count} "
+                          f"general_excluded={general_excluded}"))
+            # Clean the directly-registered rows.
+            for _sid in (lsid, "hc-v7-general"):
+                try:
+                    _sreg.remove_session(_sid)
+                except Exception:
+                    pass
+        except Exception as e:
+            steps.append(("board bridge", False, f"{type(e).__name__}: {e}"))
+
+        # ── (Wave 4) bare general lane: no seed + never auto-advances ──────────
+        if git_ok:
+            # The global ANCHOR_TERMINAL_SEED override (forced above for the
+            # summarizer round-trip) would otherwise leak a seed into the bare
+            # general lane — clear it just for this sub-step so "bare" is honest.
+            _seed_save = os.environ.pop("ANCHOR_TERMINAL_SEED", None)
+            try:
+                grec = _ts.start_session(pid, "general", backend="claude",
+                                         label="hc v7 general bare")
+                gsid = grec["session_id"]
+                bare_ok = (grec.get("seeded") is False
+                           and (grec.get("seed_text") or "") == ""
+                           and _ts.seed_for_lane("general") is None
+                           and "general" in _ts._valid_lanes()
+                           and "general" not in _ts.LANE_SKILL)
+                # A general session never advances to build, even given a plan set.
+                adv = _ts.auto_advance_planning_to_build(
+                    pid, gsid, plan_set={"master": "x", "impl": "y"})
+                builds = [s for s in _sreg.list_sessions(project_id=pid)
+                          if s.get("lane") == "build"]
+                no_advance = adv is None and builds == []
+                steps.append(("general lane bare + never advances",
+                              bare_ok and no_advance,
+                              f"bare={bare_ok} no_advance={no_advance}"))
+                try:
+                    _ts.kill(gsid, project_id=pid)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("general lane", False,
+                              f"{type(e).__name__}: {e}"))
+            finally:
+                if _seed_save is not None:
+                    os.environ["ANCHOR_TERMINAL_SEED"] = _seed_save
+        else:
+            steps.append(("general lane", True, "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Restore the gui proactive-summary flag we toggled.
+        try:
+            if gui is not None and prev_gui_flag is not None:
+                gui._PROACTIVE_SUMMARY_ENABLED = prev_gui_flag
+        except Exception:
+            pass
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk (incl. the runner, which
+        # we swapped to the stream-json stub — later checks must see fake_claude).
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("STUB_STREAMJSON_CLAIMS", prev_claims),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -2033,6 +2314,7 @@ def main():
         check_rnd_v4_surface(report, server_proc, rnd_env)
         check_rnd_v5_surface(report, server_proc, rnd_env)
         check_rnd_v6_surface(report, server_proc, rnd_env)
+        check_rnd_v7_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
