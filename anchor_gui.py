@@ -988,6 +988,62 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+def _trigger_session_summary_on_finish(project_id, lane, session_id):
+    """Best-effort: schedule a BACKGROUND session-summary for a session that just
+    reached a terminal state (v7 Wave 2 — kill / finish→build / reconcile-dead).
+
+    Resolves the project folder + the effort-history ``session`` dict (the shape
+    ``_trigger_session_summary`` needs) from ``session_id`` and kicks off the
+    existing background generator. NON-BLOCKING and IDEMPOTENT:
+
+      - returns immediately (the generation runs on a daemon thread);
+      - skips when the session already has a CACHED summary (so a second finish /
+        a repeated reconcile poll never re-runs the model);
+      - a failed generation never poisons the cache (the summarizer surfaces
+        ``error`` WITHOUT writing, per FIX 2).
+
+    No-op unless ``_PROACTIVE_SUMMARY_ENABLED`` (the live server enables it; tests
+    opt in). Never raises — any resolution failure is swallowed so it can never
+    delay or break the finish (kill / finish→build / reconcile) response.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return
+    try:
+        if not project_id or not lane or not session_id:
+            return
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return
+        store_lane = _eh._resolve_subdir(lane)
+        # Idempotent: a session that already has a cache is left alone (the
+        # summarizer would no-op it too, but skip the thread spin-up entirely).
+        try:
+            if _summarizer.load_cached(folder, project_id, store_lane,
+                                       session_id) is not None:
+                return
+        except Exception:
+            pass
+        session = None
+        try:
+            for s in _sessions.list_sessions(folder, project_id, lane):
+                if s.get("session_id") == session_id:
+                    session = s
+                    break
+        except Exception:
+            session = None
+        if session is None:
+            # The session has no effort-history members yet (e.g. nothing was
+            # produced) — seed a minimal record off the registry so the summarizer
+            # still has a session_id/title to key the (honest) cache to.
+            session = {"session_id": session_id}
+        _trigger_session_summary(folder, project_id, lane, session)
+    except Exception:
+        pass
+
+
 #: Max chars of prior-session context folded into a continue-live seed (bounded).
 _MAX_CONTINUE_SEED_CHARS = 4000
 
@@ -1153,7 +1209,9 @@ def _project_summary_text(entry: dict) -> tuple:
             if cached:
                 txt = (cached.get("summary_text") or "").strip()
                 if txt:
-                    return txt, "summary"
+                    # v7 Wave 1: normalize the cached summary to a clean, capped
+                    # plain-text short line for the row (strip markdown/glyphs).
+                    return _summarizer.short_summary_text(txt), "summary"
         except Exception:
             pass
     # 2. Fall back to the blurb (seed once if empty).
@@ -1684,6 +1742,175 @@ def _render_effort_card(ev, store_lane, project_id):
     return f"<div class='{cls}'{data}>{inner}</div>"
 
 
+# v7 Wave 3 — bridge LIVE managed sessions (session_registry) into the board.
+#
+# The board's trio columns are keyed by the trio-lane values in _KANBAN_COLUMNS
+# (research / plan / build / deliverables / grass). A registry record's ``lane``
+# may use the store form (``planning``) or the trio form (``plan``); both map to
+# the ``plan`` board column. ``general`` (Wave 4) + ``grass`` are NOT trio board
+# columns and are EXCLUDED here.
+_REGISTRY_LANE_TO_COLUMN = {
+    "research": "research",
+    "plan": "plan",
+    "planning": "plan",
+    "build": "build",
+    "deliverables": "deliverables",
+}
+
+#: session_registry status → the locked light-color bucket (mirrors
+#: :func:`_session_light_class`; running=green, needs-attention=amber,
+#: done=amber, failed=red, idle/unknown=grey).
+_REG_STATUS_LIGHT = {
+    _sessreg.STATUS_RUNNING: "green",
+    _sessreg.STATUS_NEEDS_ATTENTION: "amber",
+    _sessreg.STATUS_DONE: "amber",
+    _sessreg.STATUS_FAILED: "red",
+    _sessreg.STATUS_IDLE: "grey",
+}
+
+
+def _registry_session_view(rec):
+    """Build a single board ``effort_view``-shaped dict from a LIVE managed
+    session record (``session_registry``), so a started session can render as a
+    lane tile BEFORE it has any effort-history rows (v7 Wave 3).
+
+    SAFE: reads only the projection-safe fields (session_id, lane, status,
+    label, created_at) — NEVER ``worktree_path`` / ``branch`` (those must not
+    leak into the page). The shape carries the same keys ``_render_lane_tile`` /
+    ``_session_state_text`` / ``_session_light_class`` read off a representative
+    effort view, plus the registry ``status`` and a ``from_registry`` marker so
+    the merge can keep the live status when deduping against an effort view.
+    """
+    status = (rec.get("status") or "").strip()
+    is_live = status == _sessreg.STATUS_RUNNING
+    needs_input = status == _sessreg.STATUS_NEEDS_ATTENTION
+    is_done = status in _sessreg.TERMINAL_STATUSES
+    if status == _sessreg.STATUS_RUNNING:
+        pill_cls, pill_lbl = "run", "running"
+    elif status == _sessreg.STATUS_NEEDS_ATTENTION:
+        pill_cls, pill_lbl = "input", "needs input"
+    elif status == _sessreg.STATUS_DONE:
+        pill_cls, pill_lbl = "done", "done"
+    elif status == _sessreg.STATUS_FAILED:
+        pill_cls, pill_lbl = "fail", "failed"
+    else:
+        pill_cls, pill_lbl = "", (status or "idle")
+    label = (rec.get("label") or "").strip()
+    return {
+        "job_id": "",
+        "trio_lane": _REGISTRY_LANE_TO_COLUMN.get(
+            (rec.get("lane") or "").strip(), ""),
+        "ver": "",
+        "status": status,
+        "pill_cls": pill_cls,
+        "pill_lbl": pill_lbl,
+        "is_live": is_live,
+        "needs_input": needs_input,
+        "is_done": is_done,
+        "age": _fmt_age(rec.get("created_at")),
+        "skill": "",
+        "sub": label,
+        "cost_usd": 0.0,
+        "discovered": False,
+        "artifact_path": "",
+        "title": label,
+        "kind": "",
+        # v7 Wave 3 merge markers (consumed only by _gather_project_sessions):
+        "from_registry": True,
+        "_reg_session_id": rec.get("session_id") or "",
+        "_reg_created_at": rec.get("created_at") or 0.0,
+        "_reg_status": status,
+        "_reg_light": _REG_STATUS_LIGHT.get(status, "grey"),
+    }
+
+
+def _strip_session_prefix(sid: str) -> str:
+    """Strip the effort session_id namespacing prefix (``run::`` / ``loose::`` /
+    ``discovered::`` …) to recover the bare id, for cross-form dedupe with a
+    managed registry session id (v7 Wave 3)."""
+    s = str(sid or "")
+    idx = s.find("::")
+    return s[idx + 2:] if idx >= 0 else s
+
+
+def _merge_registry_sessions(session_views, trio_lane, reg_by_column):
+    """Merge the LIVE managed sessions for ``trio_lane`` into the effort-derived
+    ``session_views`` (v7 Wave 3), deduped by session_id and ordered newest-first.
+
+    - A registry session whose id ALREADY appears as an effort session keeps the
+      richer effort view but adopts the LIVE registry status (so a just-started
+      run shows running even before its effort rows land).
+    - A registry session with no effort counterpart becomes a synthetic
+      single-member session_view.
+    - Ordered newest-first by created_at (registry ``created_at`` for synthetic
+      rows; the effort rep's already-newest order is preserved by sort-stability).
+
+    Returns the merged, newest-first list. ``general`` / ``grass`` never reach
+    here (not in ``_REGISTRY_LANE_TO_COLUMN`` values for the trio columns).
+    """
+    reg_rows = reg_by_column.get(trio_lane, [])
+    if not reg_rows:
+        return session_views
+    # Index existing effort session_views by id for dedupe + live-status adoption.
+    # An effort session derived from a run job is keyed ``run::<job_id>`` (and a
+    # defensive loose view ``loose::<job_id>``), while a managed registry session
+    # is keyed by the BARE session id — which equals that job_id when the session
+    # was adopted (terminal_session reuses the pty/session id as the job id). So
+    # we index BOTH the full key AND the prefix-stripped tail to dedupe across
+    # those two forms.
+    by_sid = {}
+    for sv in session_views:
+        sid = sv.get("session_id") or ""
+        by_sid.setdefault(sid, sv)
+        tail = _strip_session_prefix(sid)
+        if tail and tail != sid:
+            by_sid.setdefault(tail, sv)
+    merged = list(session_views)
+    # Stamp created_at onto each existing view for the newest-first sort (the
+    # rep member carries the effort age, not an epoch; fall back to 0 → sorts
+    # after timestamped registry rows of equal recency, which is fine).
+    order = {id(sv): i for i, sv in enumerate(merged)}
+    sort_ts = {id(sv): _sv_created_at(sv) for sv in merged}
+    for rv in reg_rows:
+        sid = rv.get("_reg_session_id") or ""
+        existing = by_sid.get(sid)
+        if existing is not None:
+            # DEDUPE: keep the richer effort view, adopt the live registry status
+            # onto its representative member so the tile light/state is current.
+            rep = (existing.get("members") or [None])[0]
+            if isinstance(rep, dict):
+                rep["is_live"] = rv["is_live"]
+                rep["needs_input"] = rv["needs_input"]
+                rep["is_done"] = rep.get("is_done") or rv["is_done"]
+                if rv["status"]:
+                    rep["status"] = rv["status"]
+                rep["pill_cls"] = rv["pill_cls"]
+                rep["pill_lbl"] = rv["pill_lbl"]
+            sort_ts[id(existing)] = max(
+                sort_ts.get(id(existing), 0.0), rv.get("_reg_created_at") or 0.0)
+            continue
+        sv = {"session_id": sid, "members": [rv]}
+        merged.append(sv)
+        by_sid[sid] = sv
+        order[id(sv)] = len(order)
+        sort_ts[id(sv)] = rv.get("_reg_created_at") or 0.0
+    # Newest-first by created_at; stable on ties (preserves original ordering).
+    merged.sort(key=lambda sv: (-(sort_ts.get(id(sv), 0.0)), order.get(id(sv), 0)))
+    return merged
+
+
+def _sv_created_at(sv):
+    """Best-effort epoch created_at for a session_view (for the merge sort).
+
+    A registry-sourced view carries ``_reg_created_at``; an effort view does not
+    carry an epoch on the rep (it carries a compact age), so it returns 0.0 and
+    relies on the stable secondary key to preserve effort order."""
+    rep = (sv.get("members") or [None])[0]
+    if isinstance(rep, dict) and rep.get("_reg_created_at"):
+        return float(rep.get("_reg_created_at") or 0.0)
+    return 0.0
+
+
 def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     """Group each lane's effort views into SESSIONS (v2 Wave 4, MASTER-PLAN §A).
 
@@ -1699,6 +1926,19 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     """
     if efforts_by_lane is None:
         efforts_by_lane = _gather_project_efforts(folder_path, project_id)
+    # v7 Wave 3 — pull the project's LIVE managed sessions ONCE and bucket them
+    # by board column (research/plan/build/deliverables). ``general``/``grass``
+    # are excluded (not in _REGISTRY_LANE_TO_COLUMN). Registry-only (no model
+    # call); never leaks worktree_path/branch (see _registry_session_view).
+    reg_by_column = {}
+    try:
+        for rec in _sessreg.list_sessions(project_id=project_id):
+            col = _REGISTRY_LANE_TO_COLUMN.get((rec.get("lane") or "").strip())
+            if not col:
+                continue
+            reg_by_column.setdefault(col, []).append(_registry_session_view(rec))
+    except Exception:
+        reg_by_column = {}
     out = {}
     for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
         views = efforts_by_lane.get(trio_lane, [])
@@ -1739,6 +1979,11 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
                     "session_id": f"loose::{jid}",
                     "members": [v],
                 })
+        # v7 Wave 3 — bridge in the LIVE managed sessions for this column,
+        # deduped by session_id + ordered newest-first (the most-recent becomes
+        # the prominent tile, older ones the expander).
+        session_views = _merge_registry_sessions(
+            session_views, trio_lane, reg_by_column)
         out[trio_lane] = session_views
     return out
 
@@ -1934,7 +2179,7 @@ def _render_kanban_html(folder_path, project_id):
             cards = _render_deliverable_lane_tiles(folder_path, project_id)
         else:
             cards = _render_lane_sessions(
-                session_views, store_lane, project_id, trio_lane)
+                session_views, store_lane, project_id, trio_lane, folder_path)
         # The "+ new <lane>" launcher. Research offers an engine choice (Claude
         # default + Gemini); plan/build are Claude-only via the seeded ConPTY path
         # (newTermSession → term_start → terminal_session.start_session);
@@ -2018,7 +2263,48 @@ def _session_state_text(rep):
     return ("done", rep.get("pill_lbl") or rep.get("status") or "idle")
 
 
-def _render_lane_tile(sv, trio_lane, project_id):
+def _session_tile_blurb(sv, folder_path, project_id, store_lane):
+    """The short, clean blurb line for a lane tile (v7 Wave 3).
+
+    Cache/registry-only — NEVER a synchronous model call on the render path:
+
+    - A FINISHED session prefers its CACHED session summary blurb
+      (:func:`summarizer.session_blurb`, a cache read; ``""`` when uncached).
+    - A RUNNING session (or a finished one with no cache yet) falls back to its
+      own short intent — the rep's ``sub`` (skill · prompt hint) or its
+      ``title``/``label`` — run through :func:`summarizer.tile_blurb` so it is
+      clean + capped (the Wave-1 normalizer).
+    - Honest empty (``""``) when there is neither; the caller renders nothing.
+
+    Stdlib only; never raises (degrades to ``""``).
+    """
+    rep = (sv.get("members") or [None])[0]
+    if not isinstance(rep, dict):
+        return ""
+    sid = (sv.get("session_id") or "").strip()
+    blurb = ""
+    # Prefer a cached SESSION summary blurb (cache read; no model call). Skip the
+    # synthetic "loose::<jid>" ids (no real cached summary keyed on them).
+    if sid and not sid.startswith("loose::"):
+        try:
+            blurb = _summarizer.session_blurb(
+                folder_path, project_id, store_lane, sid) or ""
+        except Exception:
+            blurb = ""
+    if blurb:
+        return blurb
+    # Fall back to the session's own short intent (running or uncached).
+    intent = (rep.get("sub") or rep.get("title") or "").strip()
+    if not intent:
+        return ""
+    try:
+        return _summarizer.tile_blurb(intent) or ""
+    except Exception:
+        return ""
+
+
+def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
+                      store_lane=""):
     """Render ONE session as a GENUINE Paradigm-2 ``.tile`` (v4.1 cockpit-render).
 
     Schema (per the mockup): ``.tr1`` (lane + version + status light ``.lt``),
@@ -2056,6 +2342,14 @@ def _render_lane_tile(sv, trio_lane, project_id):
     counts = ""
     if n_members > 1:
         counts = (f"<div class='counts'>{n_members} files</div>")
+    # v7 Wave 3 — a short, clean blurb line (cache/registry-only; no model call).
+    # Cached session-summary blurb for a finished session, else the session's own
+    # short intent for a running/uncached one; honest-empty renders nothing.
+    blurb_html = ""
+    if folder_path is not None:
+        blurb = _session_tile_blurb(sv, folder_path, project_id, store_lane)
+        if blurb:
+            blurb_html = f"<div class='blurb'>{html_lib.escape(blurb)}</div>"
     # Live-job data hooks: a live/needs-input representative carries its job_id +
     # live flag as data-* attributes (used by tests + any future re-adoption of a
     # background job). The cockpit opens such a tile through laneTileClick →
@@ -2075,13 +2369,15 @@ def _render_lane_tile(sv, trio_lane, project_id):
         f"<span class='ver'></span>"
         f"<span class='lt {light}' aria-hidden='true'></span></div>"
         f"<div class='ttl'>{title}</div>"
+        f"{blurb_html}"
         f"<div class='st'>{''.join(st_bits)}</div>"
         f"{counts}"
         f"</div>"
     )
 
 
-def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
+def _render_lane_sessions(session_views, store_lane, project_id, trio_lane="",
+                          folder_path=None):
     """Render a lane's sessions as Paradigm-2 tiles: most-recent visible +
     a "previous sessions (N)" expander holding the rest, ALSO as tiles
     (v4.1 cockpit-render — replaces the old effort-card lane content).
@@ -2096,12 +2392,14 @@ def _render_lane_sessions(session_views, store_lane, project_id, trio_lane=""):
     """
     if not session_views:
         return ""
-    recent = _render_lane_tile(session_views[0], trio_lane, project_id)
+    recent = _render_lane_tile(
+        session_views[0], trio_lane, project_id, folder_path, store_lane)
     older = session_views[1:]
     if not older:
         return recent
     older_tiles = "".join(
-        _render_lane_tile(sv, trio_lane, project_id) for sv in older)
+        _render_lane_tile(sv, trio_lane, project_id, folder_path, store_lane)
+        for sv in older)
     return (
         f"{recent}"
         f"<details class='prev-sessions'>"
@@ -2262,7 +2560,10 @@ def render_project_window_html(project_id: str) -> str:
     try:
         cached = _summarizer.load_cached_project(folder_raw, project_id)
         if cached:
-            objective_raw = (cached.get("summary_text") or "").strip()
+            # v7 Wave 1: clean, capped plain-text objective line (strip
+            # markdown/decorative glyphs) for the project-window header.
+            objective_raw = _summarizer.short_summary_text(
+                (cached.get("summary_text") or "").strip())
     except Exception:
         objective_raw = ""
     objective_esc = html_lib.escape(objective_raw)
@@ -2500,6 +2801,9 @@ def render_project_window_html(project_id: str) -> str:
         ".tile .ver{margin-left:auto;font-size:11px;color:var(--text-dim)}"
         ".tile .ttl{font-size:13px;font-weight:600;margin-top:6px;line-height:1.35;"
         "word-break:break-word}"
+        # v7 Wave 3 — the short session blurb line under the tile title.
+        ".tile .blurb{font-size:11px;color:var(--text-dim);margin-top:3px;"
+        "line-height:1.35;word-break:break-word}"
         ".tile .st{font-size:11px;color:var(--text-dim);margin-top:5px;"
         "display:flex;align-items:center;gap:6px;flex-wrap:wrap}"
         ".tile .st .state{font-weight:600}"
@@ -2749,6 +3053,14 @@ def render_project_window_html(project_id: str) -> str:
         "<div class='right'>"
         f"<span class='pri p{pr}'>P{pr}</span>"
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
+        # v7 Wave 4 (#4): "Open terminal" — start a BARE general session (no trio
+        # skill seed) via the existing newTermSession path. It opens an inline
+        # panel + a top-strip chip like any live session and carries the per-panel
+        # Claude/Gemini engine toggle. It is NOT a board lane column (John's choice
+        # B) and never auto-advances. Defaults to Claude; the panel toggle switches.
+        "<button class='rnd-mini rnd-accent' id='openTermBtn' "
+        "onclick=\"newTermSession('general','claude')\">"
+        "&#9000; Open terminal</button>"
         f"{lifecycle}"
         "</div></div>"
         # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
@@ -2769,7 +3081,10 @@ def render_project_window_html(project_id: str) -> str:
         # ── 4-state status line (consistent with the dashboard tiles) ──
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
         # ── Paradigm-2 lane board (.p2lanes → 5 .p2col tile columns) ──
-        f"{kanban}"
+        # v7 Wave 6: wrap in a stable #kanbanBoard container so refreshBoard()
+        # can swap the server-rendered board fragment in place (instant-in-column
+        # tile after a session-lifecycle mutation) without a full page reload.
+        f"<div id='kanbanBoard'>{kanban}</div>"
         # ── Paradigm-2 inline PANEL STACK ──
         # Clicking ANY lane tile (live OR historical) expands a full-width inline
         # panel here, stacking down the page (NOT a floating window, NOT page nav).
@@ -2931,6 +3246,10 @@ async function promoteGrass(ideaId, lane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: re-fetch the server-rendered board so the just-started session's
+  // lane-column tile appears INSTANTLY (no page reload). The board is the single
+  // source of truth — re-fetch, don't JS-inject — so dedupe stays correct.
+  refreshBoard();
   // Re-sync indices/labels from the registry shortly after.
   setTimeout(repopulate, 600);
 }
@@ -3184,6 +3503,8 @@ async function developGrass(ideaId, lane) {
   _grassDevSession = sid;
   var sv = work ? work.querySelector('.gsave') : null;
   if (sv) sv.disabled = false;
+  // v7 Wave 6: instant-in-column tile for the new develop session.
+  refreshBoard();
 }
 
 // saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
@@ -3546,6 +3867,12 @@ async function repopulate() {
     if (!seenDone[dsid]) delete FINISHED[dsid];
   }
   renderSessionBar();
+  // v7 Wave 6: after re-syncing the live/finished maps from the registry, also
+  // re-fetch the server-rendered board so the lane-column tiles reflect the
+  // current set (a session that finished / advanced / reconciled-dead between
+  // polls). The board is the single source of truth for the columns — re-fetch,
+  // don't JS-inject — so a session shows EXACTLY ONE tile in its lane.
+  refreshBoard();
 }
 // Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
@@ -3717,6 +4044,10 @@ async function newTermSession(lane, backend, opts) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: re-fetch the server-rendered board so the just-started session's
+  // lane-column tile appears INSTANTLY (no page reload). The board is the single
+  // source of truth — re-fetch, don't JS-inject — so dedupe stays correct.
+  refreshBoard();
   // Re-sync indices/labels from the registry shortly after.
   setTimeout(repopulate, 600);
 }
@@ -4222,6 +4553,8 @@ async function advanceSession(sourceId, toLane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v7 Wave 6: instant-in-column tile for the advanced (build) session.
+  refreshBoard();
   setTimeout(repopulate, 600);
 }
 
@@ -4260,6 +4593,9 @@ async function finishToBuild(planningId) {
     // the planning panel's finish bar (no tile is created, the session stays live).
     _flashNoPlanNote(planningId, (data.reason || 'no plan set yet'));
   }
+  // v7 Wave 6: refresh the board so the planning→finished + new build tiles
+  // (the lane-column tiles) update instantly without a page reload.
+  refreshBoard();
   setTimeout(repopulate, 600);
 }
 
@@ -4548,6 +4884,30 @@ function _tokenQ() {
 var _ACCEPT_JSON = {Accept: 'application/json'};
 function _jsonHdrs() { return {headers: _ACCEPT_JSON}; }
 
+// ── refreshBoard (v7 Wave 6) ────────────────────────────────────────────────
+// Instant-in-column board refresh. After a session-lifecycle mutation (start /
+// finish / advance / promote / develop) the SERVER-rendered 5-lane board is the
+// single source of truth for the lane-column tiles, so we just re-fetch the
+// board fragment (GET /api/rnd/board_html, ?token=) and swap #kanbanBoard's
+// innerHTML in place — no full page reload. Because the tile comes from the
+// server render (NOT JS-injected), dedupe stays correct: a started session
+// shows EXACTLY ONE tile in its lane column. Guarded so it never throws into
+// the UI (a failed refresh just leaves the prior board until the next refresh /
+// reload). The top live strip (renderSessionBar) is unaffected — it stays the
+// instant chip view for live managed sessions; this only refreshes the columns.
+async function refreshBoard() {
+  try {
+    var url = '/api/rnd/board_html?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ();
+    var r = await fetch(url, Object.assign({cache: 'no-store'}, _jsonHdrs()));
+    if (!r || !r.ok) return;
+    var data = await r.json();
+    if (!data || !data.ok || typeof data.html !== 'string') return;
+    var board = document.getElementById('kanbanBoard');
+    if (!board) return;                    // guard: container absent
+    board.innerHTML = data.html;
+  } catch (e) { /* never throw into the UI */ }
+}
+
 // minimizePanel: collapse the panel back to a header-only strip. The session and
 // its terminal transport keep RUNNING — this only hides the panel body.
 function minimizePanel(sessionId) {
@@ -4630,6 +4990,9 @@ async function killPanel(sessionId) {
   if (autoBuild && autoBuild.session_id) {
     _addAutoBuildTile(autoBuild);
   }
+  // v7 Wave 6: re-fetch the server-rendered board so the killed session's tile
+  // is dropped (and any auto-opened build tile appears) instantly, no reload.
+  refreshBoard();
   setTimeout(repopulate, 400);
 }
 
@@ -8345,7 +8708,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # would wrongly mark live ones stale).
                 try:
                     live = list(_termsess._pty.live_sessions())
-                    _termsess.reconcile_and_advance(live_session_ids=live)
+                    _rec_out = _termsess.reconcile_and_advance(
+                        live_session_ids=live)
+                    # v7 Wave 2: any session newly re-statused DONE by the
+                    # reconcile-dead path gets a background session-summary
+                    # scheduled (best-effort, non-blocking, idempotent — a cached
+                    # one is skipped, so repeated polls don't re-run the model).
+                    # Never breaks the read-only session-list response.
+                    try:
+                        marked = ((_rec_out or {}).get("reconcile", {})
+                                  or {}).get("marked", []) or []
+                        for _sid in marked:
+                            _r = _termsess.get_session(_sid)
+                            if _r is None:
+                                continue
+                            _trigger_session_summary_on_finish(
+                                _r.get("project_id"), _r.get("lane"), _sid)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 try:
@@ -8407,6 +8787,37 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         })
                     self._send_json({"ok": True, "chain_id": chain_id or "",
                                      "members": safe})
+            elif self.path.startswith("/api/rnd/board_html"):
+                # Read-only (v7 Wave 6): the project's rendered 5-lane board
+                # FRAGMENT, so an already-open project window can refresh the
+                # board IN PLACE after a session-lifecycle mutation (start /
+                # finish / advance / promote / develop) and the lane-column
+                # tile appears WITHOUT a full page reload. REUSES
+                # _render_kanban_html (the SAME server render the page used) —
+                # the board is the single source of truth, so the JS just
+                # re-fetches it (no duplicate JS-injected tile; dedupe stays
+                # correct = exactly one tile per session in its lane). SAFE: the
+                # kanban render already emits SAFE tiles (no absolute
+                # worktree_path / branch). AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token configured), consistent with the
+                # other ?token= GET seams. /api/rnd/board_html?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0] or "").strip()
+                entry = _rnd.get_project(pid) if pid else None
+                if not pid or entry is None:
+                    self._send_json({"ok": False,
+                                     "error": "unknown project"}, 404)
+                    return
+                folder_raw = entry.get("folder_path", "")
+                try:
+                    frag = _render_kanban_html(folder_raw, pid)
+                except Exception:
+                    frag = ("<div class='p2lanes'><p class='rnd-empty'>"
+                            "Board unavailable.</p></div>")
+                self._send_json({"ok": True, "html": frag})
             elif self.path.startswith("/api/rnd/projects_html"):
                 # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
                 # already-open main dashboard can poll for changes (new session,
@@ -9104,6 +9515,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     pre_plan_set = _termsess.capture_plan_set(
                         pid_for_advance, session)
                 out = _termsess.kill(session)
+                # v7 Wave 2: a killed session is DONE — schedule a background
+                # session-summary so the finished tile opens to a real summary
+                # (and so it's restartable). Best-effort + non-blocking +
+                # idempotent (skips a cached one); never delays the kill response.
+                try:
+                    _trigger_session_summary_on_finish(
+                        pid_for_advance or (rec.get("project_id") if rec else None),
+                        rec.get("lane") if rec else None, session)
+                except Exception:
+                    pass
                 auto_build = None
                 if planning_kill:
                     try:
@@ -9543,6 +9964,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             _sessreg.update_session(
                                 session, status=_sessreg.STATUS_DONE)
                         except KeyError:
+                            pass
+                        # v7 Wave 2: the finished planning session is DONE —
+                        # schedule a background session-summary (best-effort,
+                        # non-blocking, idempotent). Never delays this response.
+                        try:
+                            _trigger_session_summary_on_finish(
+                                pid, rec.get("lane"), session)
+                        except Exception:
                             pass
                         # 3) Auto-advance to ONE linked build (idempotent).
                         try:
