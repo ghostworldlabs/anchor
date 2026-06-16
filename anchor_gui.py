@@ -3175,8 +3175,20 @@ def render_project_window_html(project_id: str) -> str:
         "flex-wrap:wrap;font-size:11px}"
         ".panel .pbar .chaincrumb .cc-sep{color:var(--accent);font-weight:700}"
         ".panel .pbar .chaincrumb .cc-node{color:var(--accent);cursor:pointer;"
+        "display:inline-flex;align-items:center;gap:4px;"
         "padding:1px 6px;border-radius:5px;border:1px solid transparent}"
         ".panel .pbar .chaincrumb .cc-node:hover{border-color:var(--accent)}"
+        # v8 Wave 7: a per-node status light (locked color map) — live=green,
+        # done=amber, failed=red, idle/historical=grey — so each chain node's
+        # state is visible at a glance, not only on hover.
+        ".panel .pbar .chaincrumb .cc-node .cc-light{width:7px;height:7px;"
+        "border-radius:50%;display:inline-block;flex-shrink:0;"
+        "background:var(--text-dim)}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.green{background:#22c55e}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.amber{background:#fbbf24}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.red{background:#f87171}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.grey{background:#8b8f9a;"
+        "opacity:.6}"
         ".panel .pbar .chaincrumb .cc-node.cur{color:var(--text);"
         "border-color:var(--border);background:var(--surface)}"
         "</style></head><body>"
@@ -4652,6 +4664,21 @@ var _CHAIN_ABBR = {research: 'R', planning: 'P', plan: 'P', build: 'B'};
 // render a clickable breadcrumb (R-1 → P-2 → …) into the panel header. Read-only
 // (GET /api/rnd/chain, ?token=); each node opens that session's panel. A chain of
 // one (no lineage) renders nothing. Best-effort — any error leaves the crumb empty.
+//
+// v8 Wave 7 — full chain navigation on the now-DURABLE artifacts (W2/W5):
+//   - Renders for EVERY panel — live AND done/historical (openPanel calls this
+//     unconditionally; a done/historical tile resolves via _synthSessionRecord),
+//     so you can navigate the chain from a finished build the same as from a live
+//     research session.
+//   - Each node shows a status LIGHT (green/amber/red/grey) + the lane + a short
+//     label, so a node's state is visible at a glance (not only on hover).
+//   - Click a sibling node → openPanel(thatId): if it is LIVE it focuses/attaches
+//     its terminal; if DONE/historical it opens that session's DETAIL view (the W5
+//     read-only body — summary + produced docs + "Continue the dialog"). So you can
+//     move research→plan→build AND back build→plan→research, landing on real content.
+//   - HONEST partial chains: members.length < 2 → render nothing (a lone session
+//     with no siblings shows no misleading breadcrumb; no fabricated nodes — the
+//     server only emits the records that actually exist for this chain).
 function _loadChainBreadcrumb(sessionId, host) {
   if (!host) return;
   var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
@@ -4674,7 +4701,16 @@ function _loadChainBreadcrumb(sessionId, host) {
         var abbr = _CHAIN_ABBR[lane] || (lane ? lane.charAt(0).toUpperCase() : '?');
         node.className = 'cc-node' + (m.session_id === sessionId ? ' cur' : '');
         node.setAttribute('data-session', m.session_id);
-        node.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.setAttribute('data-lane', lane);
+        // A small status light (locked color map) makes each node's state visible
+        // at a glance — a done sibling reads amber, a live one green, etc.
+        var lt = document.createElement('span');
+        lt.className = 'cc-light ' + _statusColor(m.status || '');
+        node.appendChild(lt);
+        var txt = document.createElement('span');
+        txt.className = 'cc-txt';
+        txt.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.appendChild(txt);
         node.title = lane + ' · ' + (m.status || '');
         node.onclick = (function (theId) {
           return function (ev) { ev.stopPropagation(); openPanel(theId); };

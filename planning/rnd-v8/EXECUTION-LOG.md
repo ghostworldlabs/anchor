@@ -194,5 +194,27 @@ persistence behavior; live develop sessions stay contained — the locked requir
 Commit: scoped.
 
 <!-- WAVE 6 done -->
-<!-- WAVE 7 — Full chain navigation -->
+### Wave 7 — Full chain navigation — GREEN (2026-06-16)
+
+**Built (UI):** enhanced the v6 breadcrumb (no fork) — `openPanel` already calls
+`_loadChainBreadcrumb` UNCONDITIONALLY (live + done/historical, via `_synthSessionRecord`),
+so a finished tile gets the same chain row. Each node now shows a **status light**
+(`_statusColor(m.status)`) next to lane+label. Clicking a node → `openPanel(sibling)`: LIVE →
+focus/attach; DONE → the W5 detail (summary + produced docs + Continue). Honest partial
+chains via the `members.length < 2` guard (singleton renders no breadcrumb; nodes built only
+from the server's `members` — no client synthesis). No backend change needed (durable W2/W5
+records make the chain point at real artifacts).
+
+**Orchestrator verification:** `tests/test_chain_nav_v8.py` (7) — `chain_members` ordered
+research→plan→build; chain GET carries lane+label+status, SAFE (no worktree/branch),
+token-gated; partial chains return only existing nodes; DOM (breadcrumb wired + unconditional
+load + no-fabrication guard); Playwright (build panel → 3 nodes w/ lights → click research
+[back-nav] → click build [forward-nav], no console errors). **Screenshot reviewed** —
+`_devtest/wave7_chain.png`: `● R research → ● P planning → ● B build` with green lights, build
+current.
+
+**Gate:** **955 passed, 1 skipped** (+7). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 7 done -->
 <!-- WAVE 8 — CLI mirror + healthcheck v8 + distro scan + docs (PROJECT DONE) -->
