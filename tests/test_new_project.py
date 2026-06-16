@@ -43,15 +43,19 @@ def test_create_new_folder(gui, tmp_path):
         assert (store / lane).is_dir()
 
 
-def test_create_new_folder_git_init_optional(gui, tmp_path):
-    # git_init defaults off; the folder is still created without a repo.
+def test_create_new_folder_always_git_repo(gui, tmp_path):
+    # v8 Wave 1: every project is bootstrapped — a starter CLAUDE.md always, and a
+    # git repo when git is available — so Research/Plan never errors not-a-git-repo
+    # (the legacy git_init flag no longer gates whether a repo exists).
+    import shutil
     parent = tmp_path / "dev2"
     parent.mkdir()
     res = gui.create_new_folder_project("NoGit", str(parent), git_init=False)
     folder = parent / "NoGit"
     assert folder.is_dir()
-    assert not (folder / ".git").exists()
-    assert res["git_initialized"] is False
+    assert (folder / "CLAUDE.md").exists()
+    if shutil.which("git"):
+        assert (folder / ".git").exists()
 
 
 def test_select_existing_registers(gui, tmp_path):

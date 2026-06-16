@@ -437,6 +437,7 @@ import terminal_session as _termsess
 import session_registry as _sessreg
 import handoff as _handoff
 import preview_server as _preview
+import project_bootstrap as _bootstrap
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -790,6 +791,34 @@ def _maybe_git_init(folder: Path) -> bool:
         return False
 
 
+def _bootstrap_project_best_effort(folder, project_name) -> None:
+    """Best-effort v8 bootstrap: starter CLAUDE.md + git-init the folder.
+
+    Wired into the register / open / rescan paths so a non-git project doesn't
+    dead-end a session start with ``not-a-git-repo`` and the keystone (Wave 2
+    doc persistence) has a repo to commit to. NEVER breaks registration/rescan
+    if bootstrap fails (try/except → log + skip). Idempotent (an existing repo /
+    CLAUDE.md is a no-op).
+    """
+    try:
+        if not folder:
+            return
+        f = Path(folder)
+        if not f.is_dir():
+            return
+        res = _bootstrap.bootstrap_project(folder, project_name)
+        git = res.get("git", {})
+        cm = res.get("claude_md", {})
+        if git.get("initialized"):
+            log_change(f"R&D: bootstrap git-init {folder}")
+        elif not git.get("ok") and git.get("reason") == "git-unavailable":
+            log_change(f"R&D: bootstrap skipped git-init (git unavailable) {folder}")
+        if cm.get("created"):
+            log_change(f"R&D: bootstrap wrote starter CLAUDE.md {folder}")
+    except Exception:
+        pass  # bootstrap is best-effort; never block registration/open/rescan
+
+
 def create_new_folder_project(name: str, parent_path, priority: int = 2,
                               git_init: bool = False) -> dict:
     """+ New Project / create-new-folder mode.
@@ -803,6 +832,10 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
         folder = parent / name
         folder.mkdir(parents=True, exist_ok=True)
         git_done = _maybe_git_init(folder) if git_init else False
+        # v8 Wave 1: always bootstrap (starter CLAUDE.md + git-init if absent) so
+        # a session start never dead-ends on not-a-git-repo. Idempotent + best-
+        # effort; honors the explicit git_init above (a no-op if already a repo).
+        _bootstrap_project_best_effort(folder, name)
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=True)
         log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
@@ -825,6 +858,12 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
     with WRITE_LOCK:
         folder = Path(folder_path).expanduser()
         exists = folder.exists()
+        # v8 Wave 1: bootstrap an existing folder on register — starter CLAUDE.md
+        # + git-init if it isn't a repo — so a research/build session start on it
+        # no longer returns not-a-git-repo. Best-effort + idempotent; skipped for
+        # a missing path (nothing to bootstrap).
+        if exists:
+            _bootstrap_project_best_effort(folder, name)
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=exists)
         if not exists:
@@ -868,6 +907,12 @@ def discover_and_adopt(project_id: str) -> dict:
             return {"ok": False, "reason": "path-missing"}
     except OSError:
         return {"ok": False, "reason": "path-missing"}
+
+    # v8 Wave 1: bootstrap on open/rescan (this is the rescan path AND the open
+    # path via GET /project/<id>) — starter CLAUDE.md + git-init if the folder
+    # isn't a repo. Best-effort + idempotent; heals a non-git project so a later
+    # session start succeeds.
+    _bootstrap_project_best_effort(folder, (proj or {}).get("name", ""))
 
     scan = _bscan.scan(folder)
     adopt = _eh.adopt_discovered(folder, project_id, scan)
