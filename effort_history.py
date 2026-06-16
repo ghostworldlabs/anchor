@@ -388,6 +388,25 @@ def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
 #: starting lanes — a Research run or a Plan run — make sense as a seeded launch.
 PROMOTE_LANES = ("research", "plan")
 
+#: v8 Wave 6 — a develop session started from the grass workbench is CONTAINED:
+#: it lives only in the workbench pane, never in the top live-strip or a board
+#: lane column. Its registry record's ``label`` carries this stable prefix so the
+#: board bridge (``anchor_gui._gather_project_sessions``) can recognize and
+#: EXCLUDE it even though its lane is ``research``/``plan`` (it must keep that
+#: lane so the trio skill seeds correctly). ``is_grass_dev_label`` is the
+#: predicate the bridge uses.
+GRASS_DEV_LABEL_PREFIX = "[grass-dev] "
+
+
+def is_grass_dev_label(label) -> bool:
+    """True iff ``label`` marks a CONTAINED grass-workbench develop session (W6).
+
+    A develop session keeps lane ``research``/``plan`` (so its trio skill seeds),
+    but is contained — it must NOT render as a top-strip chip or a board lane
+    tile. The board bridge calls this on each managed session's label to skip it.
+    """
+    return str(label or "").startswith(GRASS_DEV_LABEL_PREFIX)
+
 
 def get_grass_idea(folder_path, project_id: str, idea_id: str):
     """Return ONE grass idea pointer-record by its ``job_id``, or ``None``.
@@ -608,19 +627,62 @@ def _grass_develop_seed(idea: dict, refinements) -> str:
     return "\n".join(bits)
 
 
+def _grass_dev_sessions(idea: dict) -> dict:
+    """The idea record's ``(lane -> session_id)`` develop-session map (W6).
+
+    Stored on the idea pointer-record under ``dev_sessions`` so a re-click can
+    RESOLVE and FOCUS the existing contained develop session instead of starting
+    a new one. Best-effort: a missing/garbled value yields ``{}``.
+    """
+    m = (idea or {}).get("dev_sessions")
+    return dict(m) if isinstance(m, dict) else {}
+
+
+def _live_grass_dev_session(session_id: str):
+    """Return the registry record for ``session_id`` iff it is a LIVE (running)
+    contained develop session, else ``None`` (W6 dedupe gate).
+
+    A develop session is "live" while its registry status is RUNNING — a killed/
+    done/failed one is reaped and a re-click must start fresh. Lazy import keeps
+    ``effort_history`` free of a hard ``session_registry`` dependency.
+    """
+    if not session_id:
+        return None
+    try:
+        import session_registry as _sr
+        rec = _sr.get_session(session_id)
+        if rec is None:
+            return None
+        return rec if rec.get("status") == _sr.STATUS_RUNNING else None
+    except Exception:
+        return None
+
+
 def develop_grass_idea(project_id: str, idea_id: str, lane: str,
                        folder_path=None, backend=None) -> dict:
-    """DEVELOP a grass idea in a seeded workbench session (v5 Wave 5).
+    """DEVELOP a grass idea in ONE contained, seeded workbench session (W6).
 
-    Starts a NEW live terminal session in the target lane (``research`` | ``plan``)
-    SEEDED (``seed_context``) with the idea text PLUS its latest refinements
-    (reuses the Wave-1 seed path via ``terminal_session.start_session`` — never
-    forks seed logic). The idea STAYS in grass (copy, never destroy). Returns the
-    NEW session's registry record (the workbench terminal attaches to it).
+    v8 Wave 6 — one contained session per ``(idea, lane)``:
 
-    Unlike :func:`promote_grass_to_lane` (which marks the idea PROMOTED), develop
-    keeps the idea available for further iteration; the *saved refinement* (via
-    :func:`save_grass_refinement`) is what marks it REFINED.
+      * **Dedupe / focus.** Before starting, RESOLVE an existing develop session
+        for this ``(idea_id, lane)`` from the idea record's ``dev_sessions`` map.
+        If one is still LIVE (registry status RUNNING) its record is RETURNED
+        (the workbench re-focuses it) — a re-click NEVER starts a second session.
+        Only when none is live is a NEW session started and the map updated.
+      * **Contained.** The new session keeps lane ``research``/``plan`` (so its
+        trio skill seeds correctly) but its registry ``label`` is stamped with
+        :data:`GRASS_DEV_LABEL_PREFIX`, so the board bridge EXCLUDES it from the
+        top strip and the lane columns (see :func:`is_grass_dev_label`). It lives
+        only in the workbench pane.
+
+    Seeds (``seed_context``) the idea text PLUS its latest refinements (reuses the
+    Wave-1 seed path via ``terminal_session.start_session`` — never forks seed
+    logic). The idea STAYS in grass (copy, never destroy). Returns the develop
+    session's registry record (the workbench terminal attaches to it).
+
+    Unlike :func:`promote_grass_to_lane`, develop keeps the idea available for
+    further iteration; a *saved refinement* (via :func:`save_grass_refinement`) is
+    what marks it REFINED.
 
     Raises ``ValueError`` for an invalid lane or an unknown idea.
     """
@@ -637,17 +699,37 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     idea = get_grass_idea(folder_path, project_id, idea_id)
     if idea is None:
         raise ValueError("grass idea not found: %s" % (idea_id,))
-    refinements = list_grass_refinements(folder_path, project_id,
-                                         idea.get("job_id", idea_id))
+    jid = idea.get("job_id", idea_id)
+
+    # ── Dedupe / focus: a live (idea, lane) develop session is REUSED ──────────
+    dev_map = _grass_dev_sessions(idea)
+    existing_sid = dev_map.get(lane)
+    live = _live_grass_dev_session(existing_sid)
+    if live is not None:
+        return live
+
+    refinements = list_grass_refinements(folder_path, project_id, jid)
     seed = _grass_develop_seed(idea, refinements)
     if not seed.strip():
         raise ValueError("grass idea has no text: %s" % (idea_id,))
     import terminal_session as _ts
-    label = "develop: " + ((idea.get("title") or "")[:40])
+    # CONTAINED: the label marker keeps this session out of the board/top-strip.
+    label = GRASS_DEV_LABEL_PREFIX + ("develop: " + ((idea.get("title") or "")[:40]))
     kwargs = {"label": label, "seed_context": seed}
     if backend is not None:
         kwargs["backend"] = backend
-    return _ts.start_session(project_id, lane, **kwargs)
+    record = _ts.start_session(project_id, lane, **kwargs)
+
+    # Persist the (idea, lane) -> session_id map on the idea record so a re-click
+    # focuses THIS session. Best-effort: a failed annotation never tears down a
+    # live, seeded session. The idea's identity/title/status are untouched.
+    try:
+        dev_map[lane] = record.get("session_id")
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"dev_sessions": dev_map})
+    except Exception:
+        pass
+    return record
 
 
 def pull_grass_refinement(project_id: str, idea_id: str, refinement_id: str,
@@ -731,9 +813,129 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
             "source": source,
             "promoted_to_session": eff.get("promoted_to_session", ""),
             "promoted_to_lane": eff.get("promoted_to_lane", ""),
+            # v8 Wave 6: the contained develop sessions ((lane -> session_id)) and
+            # the Export-to-project link (the real lane sessions this idea's work
+            # became). Both empty until the idea is developed / exported.
+            "dev_sessions": _grass_dev_sessions(eff),
+            "exported_to": list((eff.get("exported_to") or [])),
             "refinements": refs,
         })
     return out
+
+
+# ── Grass → project export (v8 Wave 6, Option B: copy up, idea stays) ────────
+
+def export_grass_to_project(project_id: str, idea_id: str,
+                            folder_path=None) -> dict:
+    """Export an idea's research/plan WORK up into REAL lane tiles (W6, Option B).
+
+    The locked "Export to project" behavior: the idea's contained develop work is
+    COPIED up into the real Research/Plan lane columns as durable, board-visible
+    sessions — AND the idea STAYS in grass, marked ``promoted`` with a link to the
+    new project sessions (copy, never destroy).
+
+    For each lane (research/plan) in which this idea has a develop session
+    (``dev_sessions``), this:
+
+      1. PERSISTS that develop session's produced docs into the main project (so
+         the work survives), reusing the Wave-2 keystone
+         :func:`persist_session_docs` (best-effort; a still-live session whose
+         docs aren't yet written simply persists nothing).
+      2. Records a REAL (run-source) lane effort — a board-visible session — that
+         CARRIES the develop session's persisted docs (``artifacts``, resolved via
+         the Wave-5 :func:`efforts_for_session_id` join) and LINKS back to the
+         idea (``from_grass_idea``).
+      3. Collects ``{lane, session_id, export_effort_id}`` link records.
+
+    Then it marks the idea PROMOTED (via :func:`set_grass_status`) with a link to
+    the first exported session, and stores the full ``exported_to`` link list on
+    the idea record. The idea is never destroyed.
+
+    Returns ``{"ok": bool, "exported": [{lane, session_id, export_effort_id,
+    docs:[rel,...]}, ...], "reason": str}``. Raises ``ValueError`` for an unknown
+    project or idea. Idempotent per (idea, develop-session): a content-addressed
+    export effort id means re-exporting the same develop work does not duplicate.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+    title = (idea.get("title") or "").strip()
+
+    dev_map = _grass_dev_sessions(idea)
+    exported = []
+    for lane in PROMOTE_LANES:
+        sid = dev_map.get(lane)
+        if not sid:
+            continue
+        # 1) Persist the develop session's produced docs into the main project
+        #    (Wave-2 keystone) so the exported tile carries durable artifacts.
+        #    Resolve the develop session's worktree from the registry when live.
+        try:
+            import session_registry as _sr
+            rec = _sr.get_session(sid)
+        except Exception:
+            rec = None
+        if rec is not None and rec.get("worktree_path"):
+            try:
+                persist_session_docs(folder_path, project_id, lane, sid,
+                                     rec.get("worktree_path"))
+            except Exception:
+                pass
+
+        # 2) The develop session's persisted docs in this lane (Wave-5 join).
+        doc_efforts = efforts_for_session_id(folder_path, project_id, lane, sid)
+        artifacts = [e.get("artifact_path", "") for e in doc_efforts
+                     if e.get("artifact_path")]
+
+        # 3) Record a REAL (run-source) board-visible lane session carrying those
+        #    docs + a link back to the idea. Content-addressed id → idempotent.
+        export_eid = "export-" + hashlib.sha1(
+            ("%s|%s|%s" % (jid, lane, sid)).encode("utf-8")).hexdigest()[:16]
+        extra = {
+            "source": SOURCE_RUN,
+            "kind": "export",
+            "title": ("Exported from grass: " + title) if title else "Exported idea",
+            "from_grass_idea": jid,
+            "from_dev_session": sid,
+            "artifacts": list(artifacts),
+            "status": "imported",
+        }
+        try:
+            record_effort(folder_path, project_id, lane, export_eid, extra=extra)
+        except Exception:
+            continue
+        exported.append({
+            "lane": lane,
+            "session_id": sid,
+            "export_effort_id": export_eid,
+            "docs": list(artifacts),
+        })
+
+    if not exported:
+        return {"ok": False, "exported": [], "reason": "no-develop-work"}
+
+    # Mark the idea PROMOTED + store the export links on the idea record. The idea
+    # stays in grass (copy, never destroy). Best-effort status set (a refined idea
+    # → promoted is legal; an already-promoted one stays promoted).
+    first = exported[0]
+    try:
+        set_grass_status(folder_path, project_id, jid, GRASS_PROMOTED,
+                         promoted_to_session=first["session_id"],
+                         promoted_to_lane=first["lane"])
+    except Exception:
+        pass
+    try:
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"exported_to": exported})
+    except Exception:
+        pass
+    return {"ok": True, "exported": exported, "reason": "ok"}
 
 
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────

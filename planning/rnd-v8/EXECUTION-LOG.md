@@ -161,6 +161,38 @@ v7 board bridge); candidate cleanup.
 Commit: scoped.
 
 <!-- WAVE 5 done -->
-<!-- WAVE 6 — Grass: self-contained, cumulative, exportable -->
+### Wave 6 — Grass: self-contained, cumulative, exportable — GREEN (2026-06-16)
+
+**Built (backend + UI):** (1) **dedup/focus** — `develop_grass_idea` persists a `dev_sessions`
+`{lane: session_id}` map on the idea record; re-click resolves the mapped LIVE session and
+FOCUSES it (only starts new when none live; dead → fresh). (2) **contained, both layers** —
+JS `developGrass` no longer writes `MANAGED`/calls `renderSessionBar`/`refreshBoard` (mounts
+only in the workbench `[data-grass-term]` pane); backend stamps the develop session's registry
+label `[grass-dev] ` and the v7 board bridge (`_gather_project_sessions`) skips it → no
+top-strip chip, no board tile. (3) **cumulative** — `grass_workbench_data` surfaces
+`dev_sessions`+`exported_to`; develop seed carries idea+refinements (resume). (4) **no build**
+(research/plan only; build raises). (5) **Export (Option B)** — `export_grass_to_project` +
+token-gated `POST /api/rnd/grass_export` + a workbench "⇪ Export to project" button: persists
+each develop session's docs (Wave-2 keystone), records REAL linked lane efforts carrying the
+docs, marks the idea **promoted** (+ `exported_to` link) and LEAVES it in grass; content-
+addressed → idempotent; honest no-work.
+
+**Orchestrator verification:** `tests/test_grass_contained_v8.py` (14) — dedupe→one session;
+board+JS containment; cumulative+resume; no-build; export carries docs + idea stays promoted+
+linked; endpoint auth; Playwright (develop twice → one contained session, no chip/board tile →
+export → promoted research tile + idea promoted). **Behavior change** (intended): updated
+`test_tile_lifecycle_v6` — dropped `developGrass` from the mints-a-tile loop + added
+`test_grass_develop_is_contained_no_top_strip_chip`. **Screenshot reviewed** —
+`_devtest/wave6_grass.png`: contained workbench terminal (empty top strip), promoted idea
+chip, "Export to project", and the exported Research lane tile.
+
+**Honest notes (for John):** the "promoted N" filter-tab counter lags the "1 promoted" idea
+summary (cosmetic). A KILLED develop session's docs would surface as board efforts (Wave-2
+persistence behavior; live develop sessions stay contained — the locked requirement holds).
+
+**Gate:** **948 passed, 1 skipped** (+15). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 6 done -->
 <!-- WAVE 7 — Full chain navigation -->
 <!-- WAVE 8 — CLI mirror + healthcheck v8 + distro scan + docs (PROJECT DONE) -->

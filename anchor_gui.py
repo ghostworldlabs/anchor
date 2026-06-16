@@ -2055,6 +2055,12 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     reg_by_column = {}
     try:
         for rec in _sessreg.list_sessions(project_id=project_id):
+            # v8 Wave 6: a CONTAINED grass-workbench develop session keeps its
+            # research/plan lane (so its trio skill seeds) but must NOT render as
+            # a board tile — it lives only in the workbench pane. Its label marker
+            # excludes it here (and the JS never adds it to MANAGED/the top strip).
+            if _eh.is_grass_dev_label(rec.get("label")):
+                continue
             col = _REGISTRY_LANE_TO_COLUMN.get((rec.get("lane") or "").strip())
             if not col:
                 continue
@@ -3706,7 +3712,8 @@ function selectGrassIdea(ideaId) {
     + '<span class="sp"></span>'
     + '<span class="lbl">Engine</span>'
     + '<button class="mini gengtog">◆ Claude</button>'
-    + '<button class="mini gpromote">→ Promote to a lane</button></div>'
+    + '<button class="mini gexport" title="Copy this idea’s research/plan work up '
+    + 'into real lane tiles; the idea stays here marked promoted">⇪ Export to project</button></div>'
     + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
     + '· select Develop to start</span><span class="sp"></span>'
     + '<button class="mini gsave" disabled title="Save the develop session\'s '
@@ -3727,14 +3734,8 @@ function selectGrassIdea(ideaId) {
     _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
     eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
   };
-  var prom = work.querySelector('.gpromote');
-  if (prom) prom.onclick = function () {
-    var lane = window.prompt('Promote into which lane? (research / plan)', 'research');
-    if (!lane) return;
-    lane = lane.trim();
-    if (lane !== 'research' && lane !== 'plan') { alert('lane must be research or plan'); return; }
-    promoteGrass(ideaId, lane);
-  };
+  var exp = work.querySelector('.gexport');
+  if (exp) exp.onclick = function () { exportGrass(ideaId); };
   // The Save-refinement button is enabled only once a Develop session is live for
   // THIS idea (set in developGrass); switching ideas starts disabled.
   _grassDevSession = null;
@@ -3789,28 +3790,29 @@ async function developGrass(ideaId, lane) {
   } catch (e) { alert('[develop error] ' + e.message); return; }
   if (!data.ok || !data.session) { alert('[develop refused] ' + (data.error || 'unknown')); return; }
   var sid = data.session.session_id;
-  MANAGED[sid] = {
-    session_id: sid, lane: data.session.lane || lane,
-    backend: data.session.backend || _grassEngine,
-    status: data.session.status || 'running', label: data.session.label || '',
-    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
-  };
-  renderSessionBar();
-  // Mount the live terminal into the workbench term-host (reuse _mountTerminal).
+  // v8 Wave 6: a develop session is CONTAINED. It is DELIBERATELY NOT added to
+  // MANAGED / renderSessionBar (no top-strip chip) and NOT pushed to the board
+  // (refreshBoard) — it lives ONLY in the workbench pane below, keyed by
+  // (idea, lane). Re-clicking Develop focuses this same session (the backend
+  // dedupes on the live (idea, lane) session and returns it). The board bridge
+  // also excludes it server-side via the [grass-dev] label marker.
   var host = work ? work.querySelector('[data-grass-term]') : null;
   var lab = work ? work.querySelector('.tpane .lab') : null;
   if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
   if (host) {
-    host.setAttribute('data-session', sid);
-    PANELS[sid] = {el: panel, body: host, term: null, transport: null};
-    _mountTerminal(sid, host);
+    // Re-focus: if THIS session's terminal is already mounted, just bring it up.
+    if (host.getAttribute('data-session') === sid && PANELS[sid]) {
+      host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } else {
+      host.setAttribute('data-session', sid);
+      PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+      _mountTerminal(sid, host);
+    }
   }
   // A develop session is now live for this idea → enable "Save refinement".
   _grassDevSession = sid;
   var sv = work ? work.querySelector('.gsave') : null;
   if (sv) sv.disabled = false;
-  // v7 Wave 6: instant-in-column tile for the new develop session.
-  refreshBoard();
 }
 
 // saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
@@ -3847,6 +3849,42 @@ async function saveGrassRefinement(ideaId) {
   if (chip) { chip.className = 'stchip refined'; chip.textContent = 'refined'; }
   var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
   if (lrow) lrow.setAttribute('data-status', 'refined');
+}
+
+// exportGrass(ideaId): EXPORT the idea's research/plan develop work UP into REAL
+// lane tiles (Option B). POST /api/rnd/grass_export → the backend copies the
+// develop docs up as board-visible lane sessions AND marks the idea "promoted"
+// (linked) — the idea STAYS in grass. We then refresh the board so the new lane
+// tiles appear, and flip the workbench + list chip to "promoted". Token-aware.
+async function exportGrass(ideaId) {
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_export', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_export', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[export error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[export refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  // The idea is now PROMOTED — reflect it on the workbench chip + the list row.
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  if (work) {
+    var chip = work.querySelector('h3 .stchip');
+    if (chip) { chip.className = 'stchip promoted'; chip.textContent = 'promoted'; }
+  }
+  var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (lrow) { lrow.setAttribute('data-status', 'promoted'); lrow.classList.add('p'); }
+  // Re-fetch the server-rendered board so the exported research/plan lane tiles
+  // appear INSTANTLY (the board is the single source of truth — re-fetch, never
+  // JS-inject — so dedupe stays correct).
+  refreshBoard();
 }
 
 // pullGrass(ideaId, refinementId, lane): pull a refinement version into a NEW
@@ -10198,6 +10236,26 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(ve)}, 400)
                 except _termsess.TerminalSessionError as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_export":
+            # v8 Wave 6: EXPORT an idea's research/plan develop WORK up into REAL
+            # lane tiles (Option B): copy the develop docs up as board-visible
+            # lane sessions AND mark the idea "promoted" with a link. The idea
+            # STAYS in grass (copy, never destroy). Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.export_grass_to_project(pid, idea_id)
+                    code = 200 if res.get("ok") else 400
+                    self._send_json(res, code)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
 
         elif self.path == "/api/rnd/link_github":
             # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
