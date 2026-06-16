@@ -89,6 +89,47 @@ network/gh/github.com. **Screenshot reviewed** — `_devtest/wave3_github.png`: 
 Commit: scoped.
 
 <!-- WAVE 3 done -->
+### Wave 4 — Handoff that carries the documents — GREEN (2026-06-16)
+
+**Built (backend + UI):** (1) **Generated handoff seed with real doc paths.**
+`terminal_session._build_seed_for_plan` rewritten (+ new `_doc_paths_for_seed`
+helper) to name `LANE_SKILL['build']` (**Foreman**), list the ACTUAL persisted
+`planning/.../IMPLEMENTATION-PLAN.md` + `MASTER-PLAN.md` (+ supporting) paths, and
+a "Read these documents first, then proceed" instruction; new
+`_build_seed_for_research` (research→plan analog → **Crucible** + the real research
+report path) with `research_set_for_session` + `build_research_to_plan_seed`
+(resolves the report from the persisted research efforts tagged with the originating
+`session_id`). Wired as `seed_context` into `auto_advance_planning_to_build` (plan→build)
+and the `advance_session` endpoint (research→plan: prepends the generated Crucible
+doc-seed before the continue summary). `prime_worktree`'s HANDOFF.md already lists the
+same paths — they now EXIST in the build checkout (Wave-2 commit-to-main).
+
+(2) **term_kill ordering fix.** The handler captured the plan set BEFORE `kill()`, but
+Wave-2's persist runs INSIDE `kill()` — so the pre-capture saw no freshly-produced
+docs and the auto-build got a stale/empty plan. Reordered: `kill()` (persists docs +
+DONE + reaps) → `capture_plan_set` (now reads the persisted main folder) → auto-advance.
+
+(3) **Skill clarity.** Verified `LANE_SKILL` (build→Foreman, plan/planning→Crucible,
+research→researchPrime) — **build never loads Crucible anywhere** (no bug found). Added
+a JS `_skillForLane` map mirroring it + a `.skl` panel-header chip ("planning · Crucible"
+/ "build · Foreman") so the loaded skill is unambiguous (the user's confusion).
+
+**Orchestrator verification:** `tests/test_handoff_docs_v8.py` (6) — plan→build seed
+CONTAINS the real IMPL+MASTER paths + read-first + Foreman (never Crucible) and HANDOFF.md
+references files that EXIST in the build checkout; research→plan seed contains the real
+report path + Crucible; **term_kill persist-then-advance** (docs not discoverable BEFORE
+the kill → auto_build appears AFTER, referencing the now-persisted docs); LANE_SKILL
+mapping asserted; the header skill chip wired (DOM positive+negative); Playwright kill
+planning→build asserts header "planning · Crucible" then "build · Foreman" + backend
+seed/HANDOFF reference real docs, no JS console errors. Screenshot `_devtest/wave4_handoff.png`
+(reviewed — build panel shows the green **BUILD · FOREMAN** chip).
+
+**Gate (scoped run):** `test_handoff_docs_v8` + `test_auto_advance_plan_to_build` +
+`test_doc_persistence_v8` + `test_advance_research_to_plan` = **31 passed**. Touched
+`terminal_session.py`, `anchor_gui.py`, the new test + `_devtest/`. ⚠️ **Pending John's
+UI sign-off before merge.** Commit: scoped.
+
+<!-- WAVE 4 done -->
 <!-- WAVE 4 — Handoff that carries the documents -->
 <!-- WAVE 5 — No-loss lifecycle: summary+docs on kill, promote to big tiles, detail view -->
 <!-- WAVE 6 — Grass: self-contained, cumulative, exportable -->

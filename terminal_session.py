@@ -725,15 +725,78 @@ def capture_session_docs(session_id, project_id=None, record=None):
 _PLANNING_LANES = frozenset(("plan", "planning"))
 
 
+def _doc_paths_for_seed(doc_set):
+    """Ordered, de-duplicated list of the REAL persisted doc paths in a set.
+
+    Pulls the main-folder-relative POSIX paths a plan/research set carries —
+    master + impl first (when present), then the rest of ``doc_rels`` — so the
+    generated seed can name the ACTUAL documents the upstream session produced
+    (which, after v8 Wave 2 persistence, physically exist in this checkout).
+    """
+    if not doc_set:
+        return []
+    primary = []
+    for key in ("master_plan_rel", "impl_plan_rel", "report_rel"):
+        v = (doc_set.get(key) or "").strip()
+        if v and v not in primary:
+            primary.append(v)
+    ordered = list(primary)
+    for r in (doc_set.get("doc_rels") or []):
+        r = (r or "").strip()
+        if r and r not in ordered:
+            ordered.append(r)
+    return ordered
+
+
 def _build_seed_for_plan(plan_set):
-    """A short build seed referencing the plan the build should execute on."""
+    """A build seed listing the REAL plan-doc paths the build executes on.
+
+    Generated from the persisted plan set (v8 Wave 2 — the docs now genuinely
+    exist in the build checkout): names :data:`LANE_SKILL['build']` (Foreman),
+    lists the actual ``planning/.../IMPLEMENTATION-PLAN.md`` + ``MASTER-PLAN.md``
+    (and supporting doc) paths, and a short read-first instruction. ``prime_worktree``
+    writes the same paths into HANDOFF.md, which is also referenced here.
+    """
+    skill = LANE_SKILL.get("build", "Foreman")
     title = (plan_set.get("title") or plan_set.get("plan_dir")
              or "the planning session's plan set")
-    impl = plan_set.get("impl_plan_rel") or plan_set.get("master_plan_rel") or ""
-    ref = (" See `%s`." % impl) if impl else ""
-    return ("Execute on the plan produced by the upstream planning session: "
-            "%s.%s The plan docs are referenced in HANDOFF.md in this worktree."
-            % (title, ref))
+    docs = _doc_paths_for_seed(plan_set)
+    if docs:
+        doc_lines = "\n".join("- " + d for d in docs)
+        read_first = (
+            "Read these documents first, then proceed to execute on them:\n"
+            "%s" % doc_lines)
+    else:
+        read_first = ("The plan docs are referenced in HANDOFF.md in this "
+                      "worktree.")
+    return (
+        "Load the %s skill. You are executing on the plan produced by the "
+        "upstream planning session: %s.\n%s\nHANDOFF.md in this worktree also "
+        "lists these plan documents." % (skill, title, read_first))
+
+
+def _build_seed_for_research(research_set):
+    """A planning seed listing the REAL research-doc paths the plan builds on.
+
+    The research→plan analog of :func:`_build_seed_for_plan`: names
+    :data:`LANE_SKILL['plan']` (Crucible), lists the actual persisted research
+    report path(s), and a short read-first instruction. ``research_set`` is a
+    plan-set-shaped dict (``doc_rels`` / ``report_rel`` / ``master_plan_rel``)
+    or ``None``; with no docs it degrades to a bare Crucible seed reference.
+    """
+    skill = LANE_SKILL.get("plan", "Crucible")
+    docs = _doc_paths_for_seed(research_set)
+    if docs:
+        doc_lines = "\n".join("- " + d for d in docs)
+        read_first = (
+            "Read these research documents first, then plan from them:\n%s"
+            % doc_lines)
+    else:
+        read_first = ("The upstream research report is in this worktree "
+                      "checkout.")
+    return (
+        "Load the %s skill. Plan from the upstream research session's findings."
+        "\n%s" % (skill, read_first))
 
 
 def auto_advance_planning_to_build(project_id, planning_session_id,
@@ -898,6 +961,74 @@ def capture_plan_set(project_id, planning_session_id):
             folder, project_id, source_session_id=planning_session_id)
     except Exception:
         return None
+
+
+def research_set_for_session(project_id, research_session_id):
+    """Build a research-doc set (plan-set-shaped) for a research session, or None.
+
+    The research→plan analog of :func:`capture_plan_set`: resolves the research
+    session's persisted member docs (via ``sessions.list_sessions`` over the
+    research lane) into a ``{report_rel, doc_rels, plan_dir, title}`` dict so
+    :func:`_build_seed_for_research` can name the REAL report path(s). Prefers a
+    member whose basename looks like a report; otherwise carries every member
+    doc. Returns ``None`` when the session has no resolvable docs. Never raises.
+    """
+    try:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return None
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return None
+        from pathlib import PurePosixPath
+        # Prefer the docs this exact session persisted (the effort pointer-records
+        # carry the originating ``session_id`` in their ``extra``); fall back to
+        # ALL research docs when no session-tagged ones resolve (e.g. brownfield).
+        efforts = _eh.list_efforts(folder, project_id, "research")
+        tagged = [e for e in efforts
+                  if e.get("session_id") == research_session_id
+                  and (e.get("artifact_path") or "").strip()]
+        pool = tagged or [e for e in efforts
+                          if (e.get("artifact_path") or "").strip()]
+        doc_rels = []
+        report_rel = ""
+        for e in pool:
+            rel = (e.get("artifact_path") or "").strip().replace("\\", "/")
+            if not rel or rel in doc_rels:
+                continue
+            doc_rels.append(rel)
+            name = PurePosixPath(rel).name.lower()
+            if not report_rel and ("report" in name or rel.startswith("research/")):
+                report_rel = rel
+        if not doc_rels:
+            return None
+        if not report_rel:
+            report_rel = doc_rels[0]
+        plan_dir = PurePosixPath(report_rel).parent.as_posix()
+        if plan_dir in (".", "/"):
+            plan_dir = ""
+        return {
+            "research_session_id": research_session_id,
+            "report_rel": report_rel,
+            "doc_rels": doc_rels,
+            "plan_dir": plan_dir,
+            "title": "research findings",
+        }
+    except Exception:
+        return None
+
+
+def build_research_to_plan_seed(project_id, research_session_id):
+    """The generated research→plan seed (Crucible + real report paths), or None.
+
+    Wraps :func:`research_set_for_session` + :func:`_build_seed_for_research`.
+    Returns ``None`` when no research docs resolve, so a caller can fall back to
+    a summary-only seed. Never raises.
+    """
+    rset = research_set_for_session(project_id, research_session_id)
+    if not rset:
+        return None
+    return _build_seed_for_research(rset)
 
 
 def list_sessions(project_id=None, status=None):

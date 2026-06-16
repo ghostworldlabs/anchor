@@ -2925,6 +2925,11 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .pbar .ti{font-size:13px;font-weight:700;white-space:nowrap;"
         "overflow:hidden;text-overflow:ellipsis}"
         ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
+        # v8 Wave 4 — the loaded-skill chip ("planning · Crucible", etc.).
+        ".panel .pbar .skl{font-size:10px;color:var(--accent);"
+        "background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);"
+        "border-radius:10px;padding:1px 8px;white-space:nowrap;"
+        "text-transform:uppercase;letter-spacing:.4px}"
         ".panel .pbar .sp{flex:1}"
         # Panel body STACKS: split summary on top, full-width terminal below.
         # v6 Wave 3: the body is the FREE-resize box (resize:both) so dragging the
@@ -4030,6 +4035,20 @@ function _statusColor(status) {
   return 'grey';
 }
 
+// v8 Wave 4 — skill clarity. Mirror terminal_session.LANE_SKILL so the panel
+// header can show WHICH trio skill a session loaded (the user's "loads Crucible"
+// confusion): research→researchPrime, plan/planning→Crucible, build→Foreman.
+// A lane with no mapped skill (grass/general/deliverables) returns '' (no chip).
+function _skillForLane(lane) {
+  switch (lane) {
+    case 'research': return 'researchPrime';
+    case 'plan':
+    case 'planning': return 'Crucible';
+    case 'build': return 'Foreman';
+    default: return '';
+  }
+}
+
 // _isTerminalStatus: mirror session_registry.TERMINAL_STATUSES ({done, failed}).
 // The live-session bar is the reopen vector for LIVE (non-terminal) sessions
 // ONLY; a terminal session (a hard-killed one is marked 'done', a crashed one
@@ -4339,6 +4358,14 @@ function openPanel(sessionId) {
   var title = document.createElement('span');
   title.className = 'ti';
   title.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+  // v8 Wave 4 — surface the LOADED trio skill (e.g. "build · Foreman" /
+  // "planning · Crucible" / "research · researchPrime") so it is unambiguous
+  // which skill this session is running. Omitted for skill-less lanes.
+  var skillEl = document.createElement('span');
+  skillEl.className = 'skl';
+  var _skl = _skillForLane(s.lane || '');
+  skillEl.textContent = _skl ? (s.lane + ' · ' + _skl) : (s.lane || '');
+  skillEl.setAttribute('data-skill', _skl);
   var meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
@@ -4391,7 +4418,8 @@ function openPanel(sessionId) {
   killBtn.title = 'Kill this session (terminate + remove its tile)';
   killBtn.textContent = '🗑';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
-  bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
+  bar.appendChild(dot); bar.appendChild(title);
+  bar.appendChild(skillEl); bar.appendChild(meta);
   bar.appendChild(crumb);
   bar.appendChild(sp);
   if (engEl) {
@@ -9768,21 +9796,23 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "reason": "unknown-session"}, 404)
             else:
                 # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
-                # DONE transition that may auto-advance to build. Capture the plan
-                # set BEFORE kill() reaps the planning worktree (prime-before-reap),
-                # then kill (sets STATUS_DONE), then auto-advance (idempotent on
-                # parent_session_id; no plan ⇒ no advance). Best-effort: an
-                # auto-advance failure never breaks the kill.
+                # DONE transition that may auto-advance to build.
+                #
+                # v8 Wave 4 (ordering fix): kill() PERSISTS the session's
+                # freshly-produced docs into the MAIN folder (Wave 2,
+                # capture-before-reap) BEFORE the worktree is reaped. The plan-set
+                # capture (discover_recent_plan_set) reads the MAIN folder, so it
+                # must run AFTER kill() — otherwise it sees the project as it was
+                # before this session and the auto-opened build gets a stale (or no)
+                # plan. So: kill (persists docs + sets STATUS_DONE + reaps), THEN
+                # capture the now-persisted plan set, THEN auto-advance (idempotent
+                # on parent_session_id; no plan ⇒ no advance). Best-effort.
                 rec = _termsess.get_session(session)
                 pid_for_advance = rec.get("project_id") if rec else None
                 planning_kill = (
                     rec is not None
                     and rec.get("lane") in _termsess._PLANNING_LANES
                     and pid_for_advance)
-                pre_plan_set = None
-                if planning_kill:
-                    pre_plan_set = _termsess.capture_plan_set(
-                        pid_for_advance, session)
                 out = _termsess.kill(session)
                 # v7 Wave 2: a killed session is DONE — schedule a background
                 # session-summary so the finished tile opens to a real summary
@@ -9806,10 +9836,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     pass
                 auto_build = None
                 if planning_kill:
+                    # Capture the plan set AFTER kill() persisted this session's
+                    # produced docs into the main folder (the ordering fix above).
+                    try:
+                        post_plan_set = _termsess.capture_plan_set(
+                            pid_for_advance, session)
+                    except Exception:
+                        post_plan_set = None
                     try:
                         auto_build = _termsess.auto_advance_planning_to_build(
                             pid_for_advance, session,
-                            plan_set=pre_plan_set)
+                            plan_set=post_plan_set)
                     except Exception:
                         auto_build = None
                 self._send_json({"ok": True, "result": out,
@@ -10235,6 +10272,21 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         pass
                     seed_context = _build_continue_seed(
                         folder, pid, src_lane, source)
+                    # v8 Wave 4: for a research→plan advance, prepend the GENERATED
+                    # handoff seed naming the correct skill (Crucible) + the REAL
+                    # persisted research-doc paths ("read these first"), then the
+                    # summary context. Best-effort — degrades to the summary seed.
+                    if (src_lane == "research"
+                            and to_lane in ("plan", "planning")):
+                        try:
+                            doc_seed = _termsess.build_research_to_plan_seed(
+                                pid, source)
+                        except Exception:
+                            doc_seed = None
+                        if doc_seed:
+                            seed_context = (
+                                doc_seed + ("\n\n" + seed_context
+                                            if seed_context else ""))
                     try:
                         if backend:
                             rec = _termsess.start_session(
