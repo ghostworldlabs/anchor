@@ -33,7 +33,33 @@ post-bootstrap ok). **Behavior change** (intended): updated `test_new_project.py
 **Gate:** **897 passed, 1 skipped** (+9). Backend-only. Commit: scoped.
 
 <!-- WAVE 1 done -->
-<!-- WAVE 2 — Trio document persistence (KEYSTONE) -->
+### Wave 2 — Trio document persistence (THE KEYSTONE) — GREEN (2026-06-16)
+
+**Built (backend):** `effort_history.persist_session_docs(folder, pid, lane, session, worktree)`
+— detects produced docs via `git status --porcelain -uall` ∪ `git diff --name-only HEAD` in
+the worktree, filtered to `.md`/`.pdf` under planning/research/build/deliverables + bare trio
+doc names (excludes `.anchor`/`.git`/node_modules/etc.); COPIES them into the main folder
+(skips byte-identical); records DISCOVERED efforts with main-folder `artifact_path`s (so
+`list_efforts`/`discover_recent_plan_set` resolve them); COMMITS scoped (`git add --` only the
+produced docs + pointer/index, never `-A`; refuses the Anchor repo; message `anchor: <lane>
+session <id8> docs`). Idempotent (re-persist → no commit), scoped (user's unrelated files
+untouched), never raises. `terminal_session.capture_session_docs` (generalizes v6
+`capture_plan_set`) wired into `kill` BEFORE `remove_worktree` (reap PTY → mark DONE →
+persist → remove).
+
+**Orchestrator verification:** `tests/test_doc_persistence_v8.py` (7) — copied+scoped-commit;
+user's unrelated file never staged; **survive-reap** (kill → worktree gone, docs remain);
+**build-worktree-contains** the plan docs; **discover-finds** them from main; idempotent;
+no-docs honest no-op. v6 auto-advance/chain stay green (stub session → no worktree docs →
+`no-docs` no-op).
+
+**Handoff note (for Wave 4):** the gui `term_kill` captures the plan_set BEFORE kill, but
+persistence now runs inside kill — Wave 4 must reorder so persistence precedes the plan-set
+capture (or capture after kill) for the auto-advance to see freshly-produced docs.
+
+**Gate:** **904 passed, 1 skipped** (+7). Backend-only. Commit: scoped.
+
+<!-- WAVE 2 done -->
 <!-- WAVE 3 — Link GitHub + Option-A auto-push -->
 <!-- WAVE 4 — Handoff that carries the documents -->
 <!-- WAVE 5 — No-loss lifecycle: summary+docs on kill, promote to big tiles, detail view -->

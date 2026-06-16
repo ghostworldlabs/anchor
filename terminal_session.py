@@ -39,6 +39,9 @@ import pty_manager as _pty
 import session_registry as _reg
 import worktrees as _wt
 import rnd_registry as _rnd
+import effort_history as _eh  # v8 Wave 2 keystone: persist_session_docs (no
+#                              cycle: effort_history imports neither this module
+#                              nor session_registry — only paths + rnd_registry)
 import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
 #                            neither terminal_session nor session_registry)
 
@@ -609,14 +612,22 @@ def read_since(session_id, cursor=0):
 
 
 def kill(session_id, project_id=None):
-    """Kill a session: reap the PTY, mark the registry terminal, remove worktree.
+    """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
     Tolerant: an unknown/already-dead PTY still proceeds to re-status the registry
     record (``STATUS_DONE``) and remove the worktree. ``project_id`` is resolved
     from the registry record when not supplied so the worktree's owning repo can
     be located for a clean ``git worktree remove``. Other sessions are untouched.
 
-    Returns ``{"ok": True, "session_id", "pty_killed", "worktree": {...}}``.
+    v8 Wave 2 (THE KEYSTONE): BEFORE the worktree is reaped, the session's
+    produced documents are persisted into the MAIN project (copied + committed
+    via :func:`capture_session_docs` → ``effort_history.persist_session_docs``)
+    so they survive the kill, are discoverable from the main folder, and ride
+    into later worktrees (which are checked out off main HEAD). This is
+    best-effort — a persistence failure never blocks the kill.
+
+    Returns ``{"ok": True, "session_id", "pty_killed", "docs": {...},
+    "worktree": {...}}``.
     """
     record = _reg.get_session(session_id)
     if project_id is None and record:
@@ -635,6 +646,11 @@ def kill(session_id, project_id=None):
     except KeyError:
         pass
 
+    # v8 KEYSTONE: capture + persist the session's produced docs into the MAIN
+    # project BEFORE the worktree is reaped (after which they'd be gone forever).
+    docs_out = capture_session_docs(session_id, project_id=project_id,
+                                    record=record)
+
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)
 
@@ -642,8 +658,46 @@ def kill(session_id, project_id=None):
         "ok": True,
         "session_id": session_id,
         "pty_killed": pty_killed,
+        "docs": docs_out,
         "worktree": wt_out,
     }
+
+
+def capture_session_docs(session_id, project_id=None, record=None):
+    """Persist a session's produced docs into the MAIN project (before any reap).
+
+    Generalizes the v6 ``capture_plan_set`` capture-before-reap discipline to ALL
+    trio docs: resolves the session's registry record (its lane + worktree_path),
+    then delegates to :func:`effort_history.persist_session_docs`, which copies
+    the produced documents into the main folder, records per-doc efforts so they
+    are discoverable, and commits them scoped to the project repo.
+
+    Best-effort and never raises — returns the ``persist_session_docs`` result, or
+    a ``{"ok": False, "reason": ...}`` dict when the session/worktree/project
+    cannot be resolved (so a missing record can't break the kill path).
+    """
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if rec is None:
+            return {"ok": False, "reason": "unknown-session", "persisted": []}
+        if project_id is None:
+            project_id = rec.get("project_id") or None
+        if not project_id:
+            return {"ok": False, "reason": "no-project", "persisted": []}
+        worktree_path = rec.get("worktree_path", "")
+        if not worktree_path:
+            return {"ok": False, "reason": "no-worktree", "persisted": []}
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return {"ok": False, "reason": "unknown-project", "persisted": []}
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return {"ok": False, "reason": "no-folder", "persisted": []}
+        lane = rec.get("lane", "") or ""
+        return _eh.persist_session_docs(
+            folder, project_id, lane, session_id, worktree_path)
+    except Exception:
+        return {"ok": False, "reason": "error", "persisted": []}
 
 
 # ── Auto advance planning → build (v6 Wave 6) ────────────────────────────────

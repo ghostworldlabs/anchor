@@ -35,9 +35,11 @@ subprocess is allowed; it is a system tool, not a Python dependency).
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import paths as _paths
 import rnd_registry as _rnd
@@ -1403,3 +1405,319 @@ def finalize_effort(folder_path, project_id: str, lane: str, job_id: str,
         commit = auto_commit_effort(folder_path, project_id, lane, job_id,
                                     allow_init=allow_init)
     return {"effort": effort, "commit": commit}
+
+
+# ── Session document persistence (v8 Wave 2 — THE KEYSTONE) ──────────────────
+#
+# Trio sessions run in a throwaway git WORKTREE; Anchor historically committed
+# only the tiny ``.pointer.json`` metadata, so the actual documents a session
+# produced (MASTER-PLAN.md, the research report, EXECUTION-LOG, …) were DELETED
+# when the worktree was reaped on kill — the build worktree (off main HEAD)
+# couldn't find the plan, ``discover_recent_plan_set`` (reads the main folder)
+# came up empty, and killing a session lost the work.
+#
+# ``persist_session_docs`` closes that gap: BEFORE the worktree is reaped it
+# collects the documents the session produced in its worktree, COPIES them into
+# the MAIN project folder at the same relative paths, COMMITS them (scoped — only
+# the produced docs + the effort pointer/index, NEVER ``git add -A`` and never the
+# user's unrelated changes) in the project's OWN repo, and records a per-doc
+# DISCOVERED effort whose ``artifact_path`` is the main-folder-relative path so
+# ``list_efforts`` / ``sessions.list_sessions`` / ``discover_recent_plan_set``
+# resolve them in the main folder. Idempotent (content-addressed effort ids +
+# git's "nothing staged" no-op) and best-effort (never raises into the kill path).
+
+#: Top-level worktree directories whose produced docs we persist into the main
+#: project. The trio writes its docs under these lane output dirs.
+_DOC_DIRS = ("planning", "research", "build", "deliverables")
+
+#: Directories we NEVER sweep, even if git reports changes under them — Anchor's
+#: own per-project store, git internals, dependency trees, and managed worktrees.
+_DOC_EXCLUDE_DIRS = (".anchor", ".git", "node_modules", "__pycache__",
+                     ".venv", "venv", "rnd_jobs")
+
+#: Bare trio doc filenames we persist even when they sit at the project root (not
+#: under a lane dir) — the canonical plan/report/log artifacts.
+_DOC_ROOT_NAMES = ("master-plan.md", "implementation-plan.md",
+                   "execution-log.md", "report.md", "handoff.md")
+
+#: Document extensions we consider persistable produced artifacts.
+_DOC_EXTS = (".md", ".pdf")
+
+
+def _is_document_rel(rel: str) -> bool:
+    """True iff ``rel`` (a forward-slash repo-relative path) is a produced doc.
+
+    Inclusive of the lane output dirs (``planning/**``, ``research/**``,
+    ``build/**``, ``deliverables/**``) AND the bare trio doc names at the root,
+    restricted to ``.md`` / ``.pdf`` — but it NEVER sweeps ``.anchor/``,
+    ``.git/``, ``node_modules``, ``__pycache__``, ``rnd_jobs`` or unrelated files.
+    """
+    rel = (rel or "").strip().replace("\\", "/").lstrip("/")
+    if not rel:
+        return False
+    parts = PurePosixPath(rel).parts
+    if not parts:
+        return False
+    # Hard exclusions: anything whose first segment (or any segment) is excluded.
+    for seg in parts:
+        if seg in _DOC_EXCLUDE_DIRS:
+            return False
+    ext = PurePosixPath(rel).suffix.lower()
+    if ext not in _DOC_EXTS:
+        return False
+    top = parts[0]
+    if top in _DOC_DIRS:
+        return True
+    # A bare trio doc at the project root is also persistable.
+    if len(parts) == 1 and PurePosixPath(rel).name.lower() in _DOC_ROOT_NAMES:
+        return True
+    return False
+
+
+def _produced_doc_rels(worktree_path) -> list:
+    """Repo-relative POSIX paths of the document-like files the session produced.
+
+    Asks git in the worktree for new/changed files two ways and unions them:
+      - ``git status --porcelain`` → untracked + modified (uncommitted work);
+      - ``git diff --name-only HEAD`` → files changed vs the worktree's HEAD
+        (committed-in-worktree work).
+    The union is filtered through :func:`_is_document_rel`. Best-effort: a git
+    failure or a non-repo worktree yields ``[]`` (never raises).
+    """
+    wt = Path(worktree_path)
+    if not worktree_path or not wt.is_dir():
+        return []
+    rels = set()
+    # Untracked + modified (porcelain v1: 'XY <path>', rename 'R  old -> new').
+    # ``-uall`` so untracked DIRECTORIES are expanded to their individual files
+    # (the default collapses a new dir to just ``dir/``, losing the doc names).
+    try:
+        r = _git(wt, "status", "--porcelain", "-uall")
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                path = line[3:]
+                if " -> " in path:          # rename → take the destination
+                    path = path.split(" -> ", 1)[1]
+                path = path.strip().strip('"')
+                if path:
+                    rels.add(path.replace("\\", "/"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # Tracked changes vs HEAD (anything committed inside the worktree).
+    try:
+        r = _git(wt, "diff", "--name-only", "HEAD")
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                p = line.strip().strip('"')
+                if p:
+                    rels.add(p.replace("\\", "/"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(r for r in rels if _is_document_rel(r))
+
+
+def _doc_kind_title(rel: str):
+    """Classify a produced doc by filename → ``(kind, title)`` for grouping.
+
+    The ``kind``/``title`` carry the master/impl signal ``sessions`` and
+    ``handoff`` look for (so a persisted MASTER-PLAN.md is recognized as a plan
+    set's master doc), with a sensible humanized fallback title otherwise.
+    """
+    name = PurePosixPath(rel).name
+    low = name.lower()
+    if "master-plan" in low or "master plan" in low or "masterplan" in low:
+        return "master-plan", "Master Plan"
+    if ("implementation-plan" in low or "implementation plan" in low
+            or "impl-plan" in low):
+        return "impl-plan", "Implementation Plan"
+    if "execution-log" in low or "exec-log" in low or "execution log" in low:
+        return "exec-log", "Execution Log"
+    if low.startswith("report"):
+        return "report", "Report"
+    # Humanize the stem for an honest fallback title.
+    stem = PurePosixPath(rel).stem.replace("-", " ").replace("_", " ").strip()
+    return "doc", (stem.title() if stem else name)
+
+
+def persist_session_docs(folder_path, project_id: str, lane: str,
+                         session_id: str, worktree_path) -> dict:
+    """Persist a session's produced documents into the MAIN project (the keystone).
+
+    Called on session finish/kill **BEFORE the worktree is reaped**. Steps:
+
+      1. Detect the documents the session PRODUCED in its worktree — the
+         new/changed document-like files (lane output dirs + the trio doc names),
+         via git in the worktree (:func:`_produced_doc_rels`).
+      2. COPY each into the MAIN project folder at the SAME relative path
+         (creating parent dirs), skipping a copy that is already byte-identical.
+      3. Record a per-doc DISCOVERED effort in the lane whose ``artifact_path`` is
+         the MAIN-folder-relative path (content-addressed id → idempotent), so the
+         doc resolves in the main folder for ``list_efforts`` /
+         ``sessions.list_sessions`` / ``handoff.discover_recent_plan_set``.
+      4. COMMIT in the MAIN project repo, staging ONLY those produced doc paths +
+         their effort pointer-records + the lane index — never ``git add -A``,
+         never the user's unrelated changes. Idempotent: re-persisting unchanged
+         docs stages nothing → no empty commit.
+
+    Returns ``{"ok": bool, "persisted": [rel, ...], "committed": bool,
+    "commit": <sha|None>, "reason": str}``. **Best-effort — never raises** so a
+    persistence failure can never break the kill path.
+    """
+    out = {"ok": False, "persisted": [], "committed": False, "commit": None,
+           "reason": "ok"}
+    try:
+        main = Path(folder_path)
+        if not folder_path or not main.exists():
+            out["reason"] = "folder-missing"
+            return out
+
+        doc_rels = _produced_doc_rels(worktree_path)
+        if not doc_rels:
+            out["ok"] = True
+            out["reason"] = "no-docs"
+            return out
+
+        wt = Path(worktree_path)
+        persisted = []
+        for rel in doc_rels:
+            src = wt / rel
+            if not src.is_file():
+                continue
+            dst = main / rel
+            try:
+                # Skip an identical re-copy so a re-persist is a true no-op.
+                if dst.is_file():
+                    try:
+                        if (src.read_bytes() == dst.read_bytes()):
+                            persisted.append(rel)
+                            continue
+                    except OSError:
+                        pass
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(dst))
+                persisted.append(rel)
+            except OSError:
+                continue
+
+        if not persisted:
+            out["ok"] = True
+            out["reason"] = "nothing-copied"
+            return out
+
+        # Record a per-doc DISCOVERED effort so the persisted docs are visible in
+        # the MAIN folder's lane history (content-addressed → idempotent re-runs).
+        # ``created_at`` is left to ``record_effort``'s first-write default so a
+        # re-persist does NOT rewrite the pointer-record (otherwise an ever-moving
+        # timestamp would re-stage the pointer and break idempotency). The doc's
+        # mtime is the honest creation marker we stamp once on first record.
+        pointer_rels = []
+        for rel in persisted:
+            kind, title = _doc_kind_title(rel)
+            jid = discovered_job_id(lane, rel)
+            try:
+                existing = load_effort(main, project_id, lane, jid)
+                extra = {"source": SOURCE_DISCOVERED, "kind": kind,
+                         "title": title, "artifact_path": rel,
+                         "status": "imported", "session_id": session_id}
+                if existing is None:
+                    # First record: stamp created_at from the doc's on-disk mtime.
+                    try:
+                        extra["created_at"] = (main / rel).stat().st_mtime
+                    except OSError:
+                        pass
+                    record_effort(main, project_id, lane, jid, skill=None,
+                                  extra=extra)
+                # else: already recorded with this exact content-addressed id —
+                # leave the pointer-record untouched (idempotent; no re-stage).
+                pp = _pointer_path(main, project_id, lane, jid)
+                if pp.exists():
+                    pointer_rels.append(_rel_to_folder(main, pp))
+            except (OSError, ValueError):
+                continue
+        ipath = _index_path(main, project_id, lane)
+        if ipath.exists():
+            pointer_rels.append(_rel_to_folder(main, ipath))
+
+        out["persisted"] = persisted
+        commit = _commit_session_docs(main, project_id, lane, session_id,
+                                      persisted, pointer_rels)
+        out["committed"] = bool(commit.get("committed"))
+        out["commit"] = commit.get("commit")
+        out["reason"] = commit.get("reason", "ok")
+        out["ok"] = True
+        return out
+    except Exception:  # keystone is best-effort: NEVER raise into the kill path
+        out["reason"] = "error"
+        return out
+
+
+def _rel_to_folder(folder: Path, p: Path) -> str:
+    """Folder-relative POSIX path of ``p`` (or its str() if not under folder)."""
+    try:
+        return str(p.relative_to(folder)).replace("\\", "/")
+    except ValueError:
+        return str(p)
+
+
+def _commit_session_docs(folder: Path, project_id: str, lane: str,
+                         session_id: str, doc_rels, pointer_rels) -> dict:
+    """Commit ONLY the produced docs (+ pointer/index) in the MAIN project repo.
+
+    Scoped + safe: refuses the Anchor code repo, requires an existing git repo
+    (never inits here — Wave 1 bootstrap owns that), stages ONLY the explicit
+    paths (no ``git add -A``), and produces no empty commit (a re-persist of
+    unchanged docs stages nothing → ``no-staged-changes``). Returns the same
+    shape as :func:`auto_commit_effort`.
+    """
+    if not folder.exists():
+        return {"committed": False, "reason": "folder-missing", "commit": None}
+    code = _paths.CODE_DIR.resolve()
+    if _is_anchor_repo(folder, code):
+        return {"committed": False, "reason": "refused-anchor-repo",
+                "commit": None}
+    if not _is_git_repo(folder):
+        return {"committed": False, "reason": "not-a-git-repo", "commit": None}
+
+    # The explicit, scoped set of paths to stage: the produced docs + their
+    # pointer-records + the lane index. NEVER ``git add -A``.
+    rel_targets = []
+    for rel in list(doc_rels) + list(pointer_rels):
+        if rel and rel not in rel_targets:
+            rel_targets.append(rel)
+    if not rel_targets:
+        return {"committed": False, "reason": "nothing-to-commit", "commit": None}
+
+    with _paths.WRITE_LOCK:
+        try:
+            _git(folder, "add", "--", *rel_targets, check=True)
+        except (OSError, subprocess.SubprocessError):
+            return {"committed": False, "reason": "add-failed", "commit": None}
+
+        diff = _git(folder, "diff", "--cached", "--name-only")
+        if not (diff.stdout or "").strip():
+            return {"committed": False, "reason": "no-staged-changes",
+                    "commit": None}
+
+        sid8 = (str(session_id) or "")[:8]
+        msg = f"anchor: {lane} session {sid8} docs ({project_id})"
+        env_args = [
+            "-c", "user.name=Anchor",
+            "-c", "user.email=anchor@localhost",
+            "-c", "commit.gpgsign=false",
+        ]
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(folder), *env_args, "commit",
+                 "--no-verify", "-m", msg, "--", *rel_targets],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {"committed": False, "reason": "commit-failed", "commit": None}
+        if r.returncode != 0:
+            return {"committed": False, "reason": "commit-nonzero",
+                    "commit": None, "stderr": r.stderr}
+        sha = _git(folder, "rev-parse", "HEAD")
+        return {"committed": True, "reason": "ok",
+                "commit": (sha.stdout or "").strip()}
