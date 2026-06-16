@@ -131,7 +131,36 @@ UI sign-off before merge.** Commit: scoped.
 
 <!-- WAVE 4 done -->
 <!-- WAVE 4 — Handoff that carries the documents -->
-<!-- WAVE 5 — No-loss lifecycle: summary+docs on kill, promote to big tiles, detail view -->
+### Wave 5 — No-loss lifecycle (summary+docs on kill, promote to big tiles, detail view) — GREEN (2026-06-16)
+
+**Built (backend + UI):** `effort_history.efforts_for_session_id` (joins a managed session id
+to the docs Wave-2 persisted under it). `anchor_gui._resolve_finished_session` synthesizes a
+session dict whose `member_files` are the efforts tagged with the killed session's managed id
+— closing the gap where persisted docs grouped under `dir::` (not the bare id) left the
+summary empty. Rewired `_trigger_session_summary_on_finish` + the `session_summary` GET
+fallback through it, so the kill schedules a summary keyed to the stable id carrying the real
+docs. `_fillPastSessionDetail` polls on `generating`. Net: kill → top chip removed (v6
+`_KILLED`) + a big done lane tile (registry record stays DONE → v7 board bridge) + a detail
+panel showing the produced docs/deliverable + summary + **"Continue in a live session"** (v6
+continue_session seeded from the durable summary/docs; original record untouched).
+
+**Orchestrator verification:** `tests/test_no_loss_lifecycle_v8.py` (6) — kill persists docs +
+a durable summary (stable id + refs) before reap, nothing lost after reap; promotion (big tile
+present + chip removed); detail view lists produced docs + summary + Continue seeds the durable
+context; Playwright (kill → chip gone + big tile + detail + Continue opens a new live panel).
+**Screenshot reviewed** — `_devtest/wave5_noloss.png`: promoted BUILD tile w/ summary, detail
+"Files produced" + "Continue in a live session", and a new live build from Continue.
+
+**Honest notes (flagged for John):** a hard-killed PTY session has no recorded skill/prompts,
+so the detail honestly shows "not recorded" while Files-produced lists the real docs (v6
+contract). Minor pre-existing UX wart: a killed session can show both its registry tile and a
+`dir::` discovered-docs tile in the same column (no dedup change made — would risk forking the
+v7 board bridge); candidate cleanup.
+
+**Gate:** **933 passed, 1 skipped** (+6). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 5 done -->
 <!-- WAVE 6 — Grass: self-contained, cumulative, exportable -->
 <!-- WAVE 7 — Full chain navigation -->
 <!-- WAVE 8 — CLI mirror + healthcheck v8 + distro scan + docs (PROJECT DONE) -->

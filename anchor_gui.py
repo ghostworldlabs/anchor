@@ -1034,6 +1034,66 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+def _resolve_finished_session(folder, project_id, lane, session_id):
+    """Resolve the durable SESSION dict for a finished managed session (v8 Wave 5).
+
+    A managed terminal session (the killed one) keys off a bare registry id, but
+    the documents it PRODUCED were persisted (Wave 2 ``persist_session_docs``) as
+    DISCOVERED efforts that group — in ``sessions.list_sessions`` — under their
+    common parent directory, NOT under the bare managed id. So a kill's durable
+    summary/detail must TIE the managed session to its produced docs explicitly:
+
+      1. Prefer an exact ``sessions.list_sessions`` match on the managed id (a RUN
+         session adopted under the same id, e.g. a discover→adopt flow).
+      2. Else SYNTHESIZE a session dict from the lane efforts tagged with this
+         managed ``session_id`` (``effort_history.efforts_for_session_id``) — the
+         persisted produced docs. This is the no-loss tie: the killed session now
+         resolves to a lane SESSION carrying {its id, its produced docs}, so the
+         summarizer seeds skill/prompts/actions off the REAL docs (not empty).
+
+    Returns a session dict (with ``member_files``) when the managed session has
+    resolvable produced docs, else ``None`` (honest — nothing was produced).
+    Never raises.
+    """
+    try:
+        for s in _sessions.list_sessions(folder, project_id, lane):
+            if s.get("session_id") == session_id:
+                return s
+    except Exception:
+        pass
+    try:
+        members = _eh.efforts_for_session_id(folder, project_id, lane,
+                                             session_id)
+    except Exception:
+        members = []
+    if not members:
+        return None
+    # Synthesize a session dict keyed to the MANAGED id so its cached summary
+    # (and the detail view, which fetches by that id) carries these exact docs.
+    discovered = all(_eh.is_discovered(m) for m in members)
+    try:
+        ts = max(float(m.get("created_at", 0.0) or 0.0) for m in members)
+    except (TypeError, ValueError):
+        ts = 0.0
+    skill = ""
+    title = ""
+    for m in members:
+        if not skill and m.get("skill"):
+            skill = m["skill"]
+        if not title and (m.get("title") or "").strip():
+            title = (m.get("title") or "").strip()
+    return {
+        "session_id": session_id,
+        "lane": _eh._resolve_subdir(lane),
+        "skill": skill,
+        "timestamp": ts,
+        "title": title,
+        "member_files": members,
+        "provenance": "imported" if discovered else "run",
+        "summary_ref": None,
+    }
+
+
 def _trigger_session_summary_on_finish(project_id, lane, session_id):
     """Best-effort: schedule a BACKGROUND session-summary for a session that just
     reached a terminal state (v7 Wave 2 — kill / finish→build / reconcile-dead).
@@ -1072,18 +1132,15 @@ def _trigger_session_summary_on_finish(project_id, lane, session_id):
                 return
         except Exception:
             pass
-        session = None
-        try:
-            for s in _sessions.list_sessions(folder, project_id, lane):
-                if s.get("session_id") == session_id:
-                    session = s
-                    break
-        except Exception:
-            session = None
+        # v8 Wave 5 — TIE the finished managed session to the docs it PRODUCED.
+        # The Wave-2 keystone persists those docs tagged with this session_id, so
+        # the durable summary keyed to the managed id seeds skill/prompts/actions
+        # off the REAL produced docs (no-loss), not an empty record.
+        session = _resolve_finished_session(folder, project_id, lane, session_id)
         if session is None:
-            # The session has no effort-history members yet (e.g. nothing was
-            # produced) — seed a minimal record off the registry so the summarizer
-            # still has a session_id/title to key the (honest) cache to.
+            # The session produced no resolvable docs (e.g. nothing was written)
+            # — seed a minimal record off the registry so the summarizer still has
+            # a session_id/title to key the (honest, empty) cache to.
             session = {"session_id": session_id}
         _trigger_session_summary(folder, project_id, lane, session)
     except Exception:
@@ -4704,8 +4761,14 @@ function _mountReadOnlyBody(sessionId, host, s) {
 // skill/prompts/produced-files (v5 Wave 2). Read-only; honest placeholders for
 // absent fields. The summary GET returns the full cached structured dict, so the
 // new skill/prompts/actions fields ride along.
-function _fillPastSessionDetail(sessionId, lane, detail) {
+function _fillPastSessionDetail(sessionId, lane, detail, _tries) {
   if (!detail) return;
+  // v8 Wave 5 — a just-killed session's durable summary is generated in the
+  // BACKGROUND (kill schedules it). The GET returns status:'generating' until it
+  // lands, so we poll a bounded number of times before painting the honest
+  // "being generated" placeholder — the detail then shows the REAL produced
+  // docs/summary as soon as it caches (no-loss close-out), not a dead-end.
+  _tries = _tries || 0;
   var sUrl = '/api/rnd/session_summary?pid=' + encodeURIComponent(PROJECT_ID)
     + '&lane=' + encodeURIComponent(lane)
     + '&session=' + encodeURIComponent(sessionId);
@@ -4713,6 +4776,12 @@ function _fillPastSessionDetail(sessionId, lane, detail) {
     .then(function (r) { return r.json(); })
     .then(function (d) {
       var summ = (d && d.status === 'ready' && d.summary) ? d.summary : null;
+      if (!summ && d && d.status === 'generating' && _tries < 20) {
+        setTimeout(function () {
+          _fillPastSessionDetail(sessionId, lane, detail, _tries + 1);
+        }, 500);
+        return;
+      }
       detail.innerHTML = _renderPastSession(summ);
     })
     .catch(function () {
@@ -8765,17 +8834,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         self._send_json({"ok": True, "status": "unknown"})
                     else:
                         # Not cached (or a prior failed/uncached run): resolve the
-                        # live session record so generation can seed from its
-                        # members. If the session id is not among the project's
-                        # sessions for this lane → TERMINAL "unknown" (the panel
-                        # stops polling). Otherwise kick off background
-                        # generation run-once and tell the panel to poll.
+                        # session so generation can seed from its members. v8 Wave
+                        # 5 — a killed managed session's produced docs are persisted
+                        # tagged with its id (they GROUP elsewhere in list_sessions),
+                        # so resolve via _resolve_finished_session which TIES the
+                        # managed id to those exact docs. Unresolvable → TERMINAL
+                        # "unknown" (the panel stops polling); else kick off
+                        # background generation run-once and tell the panel to poll.
                         session = None
                         try:
-                            for s in _sessions.list_sessions(folder, pid, lane):
-                                if s.get("session_id") == session_id:
-                                    session = s
-                                    break
+                            session = _resolve_finished_session(
+                                folder, pid, lane, session_id)
                         except Exception:
                             session = None
                         if session is None:

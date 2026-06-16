@@ -217,6 +217,29 @@ def latest_effort(folder_path, project_id: str, lane: str):
     return efforts[0] if efforts else None
 
 
+def efforts_for_session_id(folder_path, project_id: str, lane: str,
+                           session_id: str) -> list:
+    """Return the lane's effort pointer-records tagged with ``session_id``.
+
+    The v8 Wave 2 ``persist_session_docs`` keystone stamps each persisted
+    DISCOVERED doc effort with the originating managed terminal ``session_id``
+    (in ``extra``). Those docs group (in ``sessions.list_sessions``) under their
+    common parent directory — NOT under the bare managed session id — so a kill's
+    durable summary/detail (which keys to the managed session id) needs a way to
+    recover the EXACT docs THIS session produced. This is that join: every lane
+    effort whose stored ``session_id`` equals ``session_id``, newest-first.
+
+    Returns ``[]`` for an empty/unmatched lane. Never raises.
+    """
+    if not session_id:
+        return []
+    try:
+        return [e for e in list_efforts(folder_path, project_id, lane)
+                if (e.get("session_id") or "") == session_id]
+    except Exception:
+        return []
+
+
 # ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
 
 #: job_id prefix for an Anchor-CREATED grass idea (manual add / inbox promote).
