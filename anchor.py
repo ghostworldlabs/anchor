@@ -51,6 +51,11 @@ are interactive and have NO CLI form):
 R&D v7 "Integrated Board" inspection mirror (read-only DATA seam; the board/general
 terminal are interactive and have NO CLI form):
     python3 anchor.py rnd blurb <project_id> --lane <lane> --session <id>  # the short, clean one-line session blurb (cache-only)
+
+R&D v8 "Durable Artifacts" inspection mirror (read-only DATA seams; link/push,
+grass develop/export, continue-live are interactive and have NO CLI form):
+    python3 anchor.py rnd remote <project_id>                 # GitHub remote link + auto-push opt-in state (no network)
+    python3 anchor.py rnd docs <project_id> --session <id> [--lane <lane>]  # documents the session persisted into the project
 """
 
 import json, os, re, sys
@@ -1009,6 +1014,53 @@ def rnd_chain(project_id, session_id):
     return {"chain_id": chain_id, "members": members}
 
 
+def rnd_remote(project_id):
+    """CLI mirror of ``project_remote.remote_status`` — the offsite link state (v8).
+
+    READ-ONLY: returns the project's GitHub remote link + auto-push opt-in state
+    (``{linked, remote_url, auto_push}``) from the persisted registry record —
+    NEVER touches the network / real ``gh`` / real github.com, and never pushes
+    (linking / pushing / toggling are interactive mutating ops with no CLI form).
+    Honest-absent: an unlinked project returns ``linked=False`` + an empty url.
+    Raises ``KeyError`` for an unknown project.
+    """
+    import project_remote as _remote
+    # Validate the id (remote_status is best-effort and returns the unlinked
+    # default for an unknown id; keep the clean unknown-project error like the
+    # other mirrors).
+    _rnd_resolve(project_id)
+    return _remote.remote_status(project_id)
+
+
+def rnd_docs(project_id, lane, session_id):
+    """CLI mirror of ``effort_history.efforts_for_session_id`` — persisted docs (v8).
+
+    READ-ONLY: returns the list of documents a session PERSISTED into the main
+    project (the v8 Wave-2 keystone stamps each persisted doc effort with the
+    originating managed ``session_id``). Each item is a SAFE projection
+    ``{title, kind, path, status}`` resolved from the lane's pointer-records —
+    honest-absent (``[]``) when the session produced/persisted nothing. No spawn,
+    no model call. Raises ``KeyError`` for an unknown project.
+    """
+    import effort_history as _eh
+    _proj, folder = _rnd_resolve(project_id)
+    store_lane = _eh._resolve_subdir(lane)
+    efforts = _eh.efforts_for_session_id(folder, project_id, store_lane,
+                                         session_id)
+    docs = []
+    for e in efforts:
+        rel = e.get("artifact_path", "") or ""
+        if not rel:
+            continue
+        docs.append({
+            "title": e.get("title", "") or "",
+            "kind": e.get("kind", "") or "",
+            "path": rel,
+            "status": e.get("status", "") or "",
+        })
+    return docs
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1147,7 +1199,7 @@ def _rnd_cli(args):
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
-              "build-deliverable|chain|blurb> ...")
+              "build-deliverable|chain|blurb|remote|docs> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1488,6 +1540,40 @@ def _rnd_cli(args):
                       f"status={m.get('status','')} "
                       f"parent={parent} "
                       f"id={m.get('session_id','')}{marker}")
+
+        elif sub == "remote":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd remote <project_id>")
+                return
+            st = rnd_remote(pos[0])
+            if st.get("linked"):
+                print(f"Remote for {pos[0]}: LINKED")
+                print(f"  remote_url: {st.get('remote_url','')}")
+                print(f"  auto_push:  {'on' if st.get('auto_push') else 'off'}")
+            else:
+                print(f"Remote for {pos[0]}: NOT LINKED")
+                print(f"  auto_push:  {'on' if st.get('auto_push') else 'off'}")
+
+        elif sub == "docs":
+            pos = _positionals()
+            lane = _opt("--lane", "build")
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd docs <project_id> "
+                      "--session <session_id> [--lane <lane>]")
+                return
+            docs = rnd_docs(pos[0], lane, session_id)
+            if not docs:
+                print(f"No persisted documents for session {session_id} "
+                      f"(lane '{lane}').")
+                return
+            print(f"{len(docs)} persisted document(s) for session {session_id} "
+                  f"(lane '{lane}'):")
+            for d in docs:
+                kind = d.get("kind", "") or "doc"
+                print(f"  - [{kind}] {d.get('title','') or d.get('path','')} "
+                      f"-> {d.get('path','')}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

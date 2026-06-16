@@ -217,4 +217,39 @@ current.
 Commit: scoped.
 
 <!-- WAVE 7 done -->
-<!-- WAVE 8 — CLI mirror + healthcheck v8 + distro scan + docs (PROJECT DONE) -->
+### Wave 8 — CLI mirror + healthcheck v8 + distro scan + docs — GREEN (2026-06-16) — PROJECT DONE
+
+**Built:** `anchor.py` `rnd remote <pid>` (link/opt-in status via `project_remote.remote_status`)
++ `rnd docs <pid> --session` (persisted-doc list via `efforts_for_session_id`). `anchor_healthcheck.check_rnd_v8_surface`
+(fully stubbed: stub PTY + stream-json stub runner + temp worktree base + temp git project +
+`ANCHOR_GH_CMD`→`tests/stub_gh.py` + LOCAL BARE remote — NO network): walks bootstrap +
+keystone doc-persistence + handoff seed + no-loss + grass contained/export + remote link/opt-in/
+push; reaps PTYs + temp dirs, restores env, never `:8777`/real network. `dist_manifest.txt`
+ships the two new stdlib-only modules; `distro` scan clean. `CLAUDE.md` gains the full v8
+"Durable Artifacts" section.
+
+**Orchestrator verification:** distro re-run → **clean (151 files; sole pywinpty exception; no
+Playwright in product)**; `rnd remote`/`rnd docs` in the CLI; CLAUDE.md v8 section present. 27
+new tests (cli 16 + healthcheck 6 + distro 7... net +27 incl. fixtures).
+
+**FINAL GATE:** `ANCHOR_PTY_BACKEND=stub python -m pytest -q` → **982 passed, 1 skipped** (+94
+over the 888 v7 baseline). Commit: scoped.
+
+---
+
+## PROJECT DONE (2026-06-16) — pending John's UI sign-off + deploy
+
+All 8 waves GREEN. Branch `foreman/rnd-surface-v8` (off master `80ead40`). Full suite **982
+passed, 1 skipped**. **NOT merged, service NOT restarted** — UI waves (3–7) await John's sign-off
+(screenshots under `_devtest/`), then: merge → `nssm restart anchor` (elevated) → rescan (which
+now also bootstraps git + CLAUDE.md per project).
+
+**Wave tally:** W1 bootstrap (897) · W2 KEYSTONE doc persistence (904) · W3 GitHub link+push
+(921) · W4 handoff carries docs (927) · W5 no-loss kill (933) · W6 grass contained+export (948)
+· W7 chain nav (955) · W8 CLI/healthcheck/distro/docs (982).
+
+**Open items flagged for John:** (1) the "promoted N" grass filter-tab counter lags the idea
+summary (cosmetic). (2) A killed session can show both its registry tile and a `dir::`
+discovered-docs tile in the same lane column (dedup candidate; live sessions stay contained).
+(3) A killed grass-develop session's docs surface as board efforts (Wave-2 persistence;
+contained only while live). None block merge.

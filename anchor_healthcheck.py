@@ -2061,6 +2061,363 @@ def check_rnd_v7_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def _stub_gh_cmd() -> "str | None":
+    """Path to the hermetic ``gh`` stub (``tests/stub_gh.py``) for the v8 walk.
+
+    The v8 link-GitHub seam (``project_remote.link_github(mode='create')``) routes
+    through ``ANCHOR_GH_CMD``; pointing it at this stub means the walk NEVER hits
+    the network / real ``gh`` / real github.com. Returns a ``python <abs path>``
+    command string, or ``None`` if the stub is absent (the remote sub-step then
+    degrades gracefully instead of risking a real ``gh``).
+    """
+    stub = ANCHOR_DIR / "tests" / "stub_gh.py"
+    if stub.is_file():
+        # Use a forward-slash POSIX path + bare ``python`` so the ``shlex.split``
+        # the gh seam (``project_remote._gh_base_cmd``) applies — POSIX mode, which
+        # treats Windows backslashes as escapes — does not mangle the path (the
+        # same reason ``tests/test_github_link_v8.py`` uses ``python <posix>``).
+        return f"python {stub.as_posix()}"
+    return None
+
+
+def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v8 "Durable Artifacts" R&D surface — FULLY STUBBED.
+
+    Walks the new v8 seams in throwaway temp folders + temp git repos, never
+    touching real data, never a live claude / real PTY / real worktree off the
+    build repo, and — critically — **never a real ``git push`` / real ``gh`` /
+    network / github.com**. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD``
+    (the STREAM-JSON stub ``tests/stub_streamjson.py``) + a temp
+    ``ANCHOR_WORKTREE_BASE`` + ``ANCHOR_GH_CMD`` → ``tests/stub_gh.py`` (a fake gh
+    that prints a deterministic URL) + a LOCAL BARE git remote (a ``file://``
+    path) keep every model / PTY / git-remote interaction off the real world.
+    Nothing binds ``:8777``.
+
+      (a) bootstrap — a NON-git temp folder → ``project_bootstrap.ensure_git_repo``
+          + ``ensure_claude_md`` makes it a repo with a starter CLAUDE.md, and a
+          SECOND call is an idempotent no-op (nothing clobbered).
+      (b) doc persistence (THE KEYSTONE) — a session writes plan docs in its
+          worktree → ``terminal_session.kill`` persists them into the MAIN project
+          (present + committed) BEFORE the worktree is reaped; a build worktree
+          created afterward CONTAINS them; ``handoff.discover_recent_plan_set``
+          finds the plan set from the main folder.
+      (c) handoff seed — the build seed carries the REAL persisted doc paths +
+          names the correct skill (Foreman for build; Crucible for research→plan).
+      (d) no-loss — the killed session's persisted docs + summary record (stable
+          managed id) are recoverable via ``efforts_for_session_id`` and the
+          session resolves in ``sessions.list_sessions`` after reap.
+      (e) grass — ``develop_grass_idea`` is contained+deduped (a dev session, NOT
+          on the board) and ``export_grass_to_project`` carries docs up + marks the
+          idea ``promoted`` (idea stays in grass).
+      (f) remote — ``link_github(mode='create')`` via the stub gh → a PRIVATE,
+          persisted remote; opt-in persists; ``auto_push_if_opted`` pushes to the
+          LOCAL BARE remote ONLY when linked AND opted (a non-opted/non-linked
+          project NEVER pushes).
+
+    Every stub PTY + synthetic session row is reaped, all forced env (incl. the
+    runner + the gh seam) is restored, and the temp dirs are torn down (here +
+    by ``_cleanup_synthetic_rnd``). Asserts nothing bound ``:8777`` and no real
+    network / gh / github.com was reached.
+    """
+    name = "R&D v8 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    gh_cmd = _stub_gh_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_gh = os.environ.get("ANCHOR_GH_CMD")
+    prev_gh_fail = os.environ.get("ANCHOR_GH_STUB_FAIL")
+    prev_gh_remote = os.environ.get("ANCHOR_GH_STUB_REMOTE")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v8-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    if gh_cmd:
+        os.environ["ANCHOR_GH_CMD"] = gh_cmd
+    os.environ.pop("ANCHOR_GH_STUB_FAIL", None)
+    os.environ.pop("ANCHOR_GH_STUB_REMOTE", None)
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import sessions as _sessions
+        import handoff as _handoff
+        import project_bootstrap as _boot
+        import project_remote as _remote
+
+        # ── (a) bootstrap: non-git temp → git repo + starter CLAUDE.md (idempotent)
+        try:
+            boot_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v8-boot-"))
+            rnd_env["v3_temp_dirs"].append(boot_folder)
+            (boot_folder / "notes.txt").write_text("hello\n", encoding="utf-8")
+            cm = _boot.ensure_claude_md(str(boot_folder), "HC v8 probe")
+            g1 = _boot.ensure_git_repo(str(boot_folder))
+            import worktrees as _wt
+            is_repo = _wt._is_git_repo(boot_folder)
+            cm_exists = (boot_folder / "CLAUDE.md").is_file()
+            # Idempotent: a second pass is a no-op (no clobber, not re-initialized).
+            g2 = _boot.ensure_git_repo(str(boot_folder))
+            cm2 = _boot.ensure_claude_md(str(boot_folder), "HC v8 probe")
+            boot_ok = (cm.get("created") is True and cm_exists
+                       and g1.get("ok") and is_repo
+                       and g2.get("ok") and g2.get("initialized") is False
+                       and cm2.get("created") is False)
+            steps.append(("bootstrap git-init + CLAUDE.md idempotent",
+                          boot_ok,
+                          f"init={g1.get('initialized')} "
+                          f"reinit={g2.get('initialized')} "
+                          f"cm={cm.get('created')}/{cm2.get('created')}"))
+        except Exception as e:
+            steps.append(("bootstrap", False, f"{type(e).__name__}: {e}"))
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v8-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v8 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v8", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v8 project", bool(pid), str(pid)))
+
+        # ── (b) doc persistence (THE KEYSTONE) + (c) handoff + (d) no-loss ────
+        if git_ok:
+            try:
+                # A planning session that writes a plan set in its worktree, then
+                # is killed → persist_session_docs lands the docs in the main repo.
+                prec = _ts.start_session(pid, "plan", backend="claude",
+                                         label="hc v8 plan")
+                psid = prec["session_id"]
+                wt = prec.get("worktree_path", "")
+                plan_dir = Path(wt) / "planning" / "rnd-hc-v8"
+                plan_dir.mkdir(parents=True, exist_ok=True)
+                (plan_dir / "MASTER-PLAN.md").write_text(
+                    "# Master Plan\n\nThe durable-artifacts probe master plan.\n",
+                    encoding="utf-8")
+                (plan_dir / "IMPLEMENTATION-PLAN.md").write_text(
+                    "# Implementation Plan\n\nWave 1 ... Wave 8 (probe).\n",
+                    encoding="utf-8")
+                kill_out = _ts.kill(psid, project_id=pid)
+                # Keystone: the docs are now in the MAIN folder + committed, and
+                # the worktree is gone.
+                main_master = (proj_folder / "planning" / "rnd-hc-v8"
+                               / "MASTER-PLAN.md")
+                main_impl = (proj_folder / "planning" / "rnd-hc-v8"
+                             / "IMPLEMENTATION-PLAN.md")
+                wt_gone = not Path(wt).exists()
+                docs_persisted = bool(kill_out.get("docs", {}).get("persisted"))
+                persisted_ok = (main_master.is_file() and main_impl.is_file()
+                                and wt_gone and docs_persisted)
+                steps.append(("keystone: docs persisted to main + worktree reaped",
+                              persisted_ok,
+                              f"master={main_master.is_file()} "
+                              f"impl={main_impl.is_file()} wt_gone={wt_gone}"))
+
+                # (d) no-loss: the killed session's persisted docs are recoverable
+                # by managed-session id, and the session resolves after reap.
+                store_lane = _eh._resolve_subdir("plan")
+                joined = _eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, psid)
+                psess = _sessions.list_sessions(str(proj_folder), pid, "plan")
+                no_loss = (len(joined) >= 2 and len(psess) >= 1)
+                steps.append(("no-loss: persisted docs recoverable by session id",
+                              no_loss,
+                              f"joined_docs={len(joined)} sessions={len(psess)}"))
+
+                # (b cont.) discover_recent_plan_set finds the plan set from main.
+                ps = _handoff.discover_recent_plan_set(str(proj_folder), pid)
+                disc_ok = bool(ps) and bool(ps.get("master_plan_rel")) \
+                    and bool(ps.get("impl_plan_rel"))
+                steps.append(("discover_recent_plan_set finds the persisted set",
+                              disc_ok, f"plan_set={bool(ps)}"))
+
+                # (c) handoff seed carries REAL paths + the correct skill.
+                seed = _ts._build_seed_for_plan(ps or {})
+                seed_ok = ("Foreman" in seed
+                           and "IMPLEMENTATION-PLAN" in seed)
+                rseed = _ts._build_seed_for_research(None)
+                rseed_ok = "Crucible" in rseed
+                steps.append(("handoff seed: real paths + correct skill",
+                              seed_ok and rseed_ok,
+                              f"build_skill_ok={seed_ok} plan_skill_ok={rseed_ok}"))
+
+                # (c cont.) a build worktree created afterward CONTAINS the docs
+                # (it is checked out off main HEAD, which the keystone committed).
+                brec = _ts.start_session(pid, "build", backend="claude",
+                                         label="hc v8 build")
+                bsid = brec["session_id"]
+                bwt = brec.get("worktree_path", "")
+                build_has = (Path(bwt) / "planning" / "rnd-hc-v8"
+                             / "IMPLEMENTATION-PLAN.md").is_file()
+                steps.append(("build worktree contains the persisted docs",
+                              build_has, f"contains={build_has}"))
+                try:
+                    _ts.kill(bsid, project_id=pid)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("keystone/handoff/no-loss", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("keystone/handoff/no-loss", True,
+                          "skipped (git unavailable)"))
+
+        # ── (e) grass: develop contained+deduped → export carries docs ────────
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid,
+                                    "A durable-artifacts grass idea")
+                iid = idea.get("job_id", "")
+                d1 = _eh.develop_grass_idea(pid, iid, "research",
+                                            folder_path=str(proj_folder),
+                                            backend="claude")
+                d1sid = d1.get("session_id", "")
+                # Contained: the dev session is NOT on the board (its label is
+                # stamped grass-dev so the board bridge excludes it).
+                contained = _eh.is_grass_dev_label(d1.get("label", ""))
+                # Dedupe/focus: a second develop returns the SAME live session.
+                d2 = _eh.develop_grass_idea(pid, iid, "research",
+                                            folder_path=str(proj_folder),
+                                            backend="claude")
+                deduped = (d2.get("session_id", "") == d1sid)
+                # Write a doc in the dev session's worktree so export carries it.
+                d1wt = d1.get("worktree_path", "")
+                if d1wt:
+                    rdir = Path(d1wt) / "research" / "grass-dev"
+                    rdir.mkdir(parents=True, exist_ok=True)
+                    (rdir / "REPORT.md").write_text(
+                        "# Report\n\nGrass idea research findings.\n",
+                        encoding="utf-8")
+                exp = _eh.export_grass_to_project(pid, iid,
+                                                  folder_path=str(proj_folder))
+                exported = exp.get("exported", []) or []
+                carries_docs = any(e.get("docs") for e in exported)
+                # The idea stays in grass, marked promoted.
+                board = _eh.grass_workbench_data(str(proj_folder), pid)
+                still_there = any(
+                    (it.get("idea_id") == iid or it.get("job_id") == iid)
+                    and it.get("status") == _eh.GRASS_PROMOTED
+                    for it in board)
+                grass_ok = (contained and deduped and bool(exported)
+                            and carries_docs and still_there)
+                steps.append(("grass contained+deduped + export carries docs",
+                              grass_ok,
+                              f"contained={contained} deduped={deduped} "
+                              f"exported={len(exported)} promoted={still_there}"))
+                # Reap the contained dev PTY.
+                try:
+                    _ts.kill(d1sid, project_id=pid)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("grass", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass", True, "skipped (git unavailable)"))
+
+        # ── (f) remote: link (stub gh, private, persisted) + opt-in + push ────
+        if git_ok and gh_cmd:
+            try:
+                import subprocess as _sp
+                # A LOCAL BARE repo stands in for github.com (file:// → no network).
+                bare = Path(_tf.mkdtemp(prefix="anchor-hc-v8-bare-")) / "bare.git"
+                _sp.run(["git", "init", "--bare", str(bare)],
+                        capture_output=True, text=True, timeout=30)
+                rnd_env["v3_temp_dirs"].append(bare.parent)
+                bare_url = bare.resolve().as_uri()
+
+                # link via the gh CREATE seam → PRIVATE + persisted on the record.
+                link = _remote.link_github(str(proj_folder), "create",
+                                           "hc-v8-proj", project_id=pid)
+                link_ok = (link.get("ok") and link.get("private") is True
+                           and bool(link.get("remote_url"))
+                           and _remote.is_linked(pid))
+
+                # Re-point origin at the LOCAL BARE remote so the push is
+                # network-free (the stub gh invented a github.com URL).
+                _remote.link_github(str(proj_folder), "existing", bare_url,
+                                    project_id=pid)
+
+                # Non-opted → NEVER pushes.
+                no_opt = _remote.auto_push_if_opted(pid)
+                not_pushed = no_opt.get("pushed") is False \
+                    and no_opt.get("reason") == "not-opted"
+
+                # Opt-in persists, THEN linked+opted pushes to the LOCAL BARE only.
+                _remote.set_auto_push(pid, True)
+                pushed = _remote.auto_push_if_opted(pid)
+                bare_has = _sp.run(
+                    ["git", "-C", str(bare), "rev-parse", "--verify",
+                     "--quiet", "HEAD"],
+                    capture_output=True, text=True).returncode == 0
+                remote_ok = (link_ok and not_pushed
+                             and pushed.get("pushed") is True and bare_has)
+                steps.append(("remote: create(private)+opt-in gates push (local bare)",
+                              remote_ok,
+                              f"link_ok={link_ok} not_pushed={not_pushed} "
+                              f"pushed={pushed.get('pushed')} bare_has={bare_has}"))
+            except Exception as e:
+                steps.append(("remote", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("remote", True,
+                          "skipped (git or stub gh unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk (incl. the runner +
+        # the gh seam — later checks must see fake_claude / no gh seam).
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_GH_CMD", prev_gh),
+                          ("ANCHOR_GH_STUB_FAIL", prev_gh_fail),
+                          ("ANCHOR_GH_STUB_REMOTE", prev_gh_remote)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -2315,6 +2672,7 @@ def main():
         check_rnd_v5_surface(report, server_proc, rnd_env)
         check_rnd_v6_surface(report, server_proc, rnd_env)
         check_rnd_v7_surface(report, server_proc, rnd_env)
+        check_rnd_v8_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

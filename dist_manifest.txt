@@ -47,6 +47,13 @@ terminal_session.py
 handoff.py
 preview_server.py
 
+# ── R&D control surface v8 "Durable Artifacts" modules ─────────────────────
+# Both stdlib-only: project_bootstrap (auto git-init + starter CLAUDE.md) and
+# project_remote (link GitHub + auto-push) shell out to git/gh as external CLIs
+# via subprocess through an injectable seam — never importing them as deps.
+project_bootstrap.py
+project_remote.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 
