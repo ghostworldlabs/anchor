@@ -116,6 +116,9 @@ def _normalize(entry: dict) -> dict:
         "state": state,
         "notes": (entry.get("notes") or ""),
         "blurb": (entry.get("blurb") or ""),
+        # v8 Wave 3 — GitHub remote linking + auto-push opt-in (offsite layer).
+        "remote_url": (entry.get("remote_url") or ""),
+        "auto_push": bool(entry.get("auto_push")),
     }
 
 
@@ -250,7 +253,8 @@ def update_project(project_id: str, **fields) -> dict:
 
     Raises ``KeyError`` if the id is unknown.
     """
-    allowed = {"name", "folder_path", "priority", "state", "notes", "blurb"}
+    allowed = {"name", "folder_path", "priority", "state", "notes", "blurb",
+               "remote_url", "auto_push"}
     with _paths.WRITE_LOCK:
         reg = load_registry()
         if project_id not in reg:
@@ -294,6 +298,19 @@ def reactivate_project(project_id: str) -> dict:
 def set_notes(project_id: str, notes: str) -> dict:
     """Set the free-text notes for a project (like a task's Notes field)."""
     return update_project(project_id, notes=("" if notes is None else str(notes)))
+
+
+# ── GitHub remote linking + auto-push opt-in (v8 Wave 3) ─────────────────
+
+def set_remote(project_id: str, remote_url: str) -> dict:
+    """Persist a project's linked GitHub remote url (offsite layer)."""
+    return update_project(
+        project_id, remote_url=("" if remote_url is None else str(remote_url)))
+
+
+def set_auto_push(project_id: str, enabled: bool) -> dict:
+    """Persist a project's auto-push-on-finish opt-in flag (default off)."""
+    return update_project(project_id, auto_push=bool(enabled))
 
 
 # ── Project blurb ("what this project is") — Wave 3 ──────────────────────

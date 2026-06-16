@@ -60,7 +60,35 @@ capture (or capture after kill) for the auto-advance to see freshly-produced doc
 **Gate:** **904 passed, 1 skipped** (+7). Backend-only. Commit: scoped.
 
 <!-- WAVE 2 done -->
-<!-- WAVE 3 — Link GitHub + Option-A auto-push -->
+### Wave 3 — Link GitHub + Option-A auto-push — GREEN (2026-06-16)
+
+**Built (UI + backend):** new `project_remote.py` (reuses `worktrees._git`): `link_github`
+(mode=create → `gh repo create --private` THROUGH the `ANCHOR_GH_CMD` seam; mode=existing →
+`git remote add`; degrades to paste-URL when gh absent), `set_auto_push`/`get_auto_push`
+(per-project opt-in on the rnd_registry record), `push_project`, `auto_push_if_opted`,
+`remote_status`. Endpoints (token-gated): POST `link_github`/`set_auto_push`/`push_now`,
+GET `remote_status`. Header UI: "Link GitHub" → inline Create-new-private / paste-existing /
+not-now prompt; once linked → `owner/repo` label + auto-push opt-in checkbox + "Push now".
+`_auto_push_on_finish` wired into the kill/finish path — pushes ONLY when linked + opted.
+
+**Build note:** the first execute agent hit a transient classifier/500 mid-wave (backend
+landed, UI/tests cut off). Verified the partial tree was SAFE (this repo's remote unchanged,
+no stray commits, gh/push all behind the `ANCHOR_GH_CMD` seam) and a continuation agent
+finished the UI + tests + screenshot. The continuation **found+fixed a real bug**: the prior
+agent referenced `_auto_push_on_finish` without defining it (NameError swallowed by try/except
+→ auto-push silently never fired); now defined.
+
+**Orchestrator verification:** `tests/test_github_link_v8.py` (+ `tests/stub_gh.py`) — link
+create (seam stub → private, persisted) / existing (LOCAL BARE remote, no network) / opt-in /
+auto-push-on-finish ONLY when linked+opted (push lands in the local bare remote; non-opted
+never pushes) / manual push / gh-absent paste-only / all endpoints token-gated. NEVER real
+network/gh/github.com. **Screenshot reviewed** — `_devtest/wave3_github.png`: header shows
+`🔗 johncliechty/repo · ☑ auto-push · ↑ Push now`.
+
+**Gate:** **921 passed, 1 skipped** (+17). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 3 done -->
 <!-- WAVE 4 — Handoff that carries the documents -->
 <!-- WAVE 5 — No-loss lifecycle: summary+docs on kill, promote to big tiles, detail view -->
 <!-- WAVE 6 — Grass: self-contained, cumulative, exportable -->

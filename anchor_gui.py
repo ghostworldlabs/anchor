@@ -438,6 +438,7 @@ import session_registry as _sessreg
 import handoff as _handoff
 import preview_server as _preview
 import project_bootstrap as _bootstrap
+import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -1085,6 +1086,25 @@ def _trigger_session_summary_on_finish(project_id, lane, session_id):
             # still has a session_id/title to key the (honest) cache to.
             session = {"session_id": session_id}
         _trigger_session_summary(folder, project_id, lane, session)
+    except Exception:
+        pass
+
+
+def _auto_push_on_finish(project_id):
+    """Best-effort: auto-push the project's repo when a session reaches a terminal
+    state (v8 Wave 3 — wired into the kill/finish path AFTER the produced docs are
+    persisted/committed by Wave 2's capture-before-reap).
+
+    Delegates to :func:`project_remote.auto_push_if_opted`, which pushes ONLY when
+    the project is BOTH linked to a remote AND opted-in to auto-push. A non-linked
+    or non-opted project never pushes. NON-BLOCKING + never raises — any failure is
+    swallowed so it can never delay or break the finish response. In tests the
+    configured ``origin`` is a LOCAL BARE repo (``file://``) so there is NO network.
+    """
+    try:
+        if not project_id:
+            return
+        _remote.auto_push_if_opted(project_id)
     except Exception:
         pass
 
@@ -2708,6 +2728,12 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-mini.rnd-pr-on{border-color:var(--accent);color:var(--accent)}"
         ".rnd-mini.rnd-danger:hover{border-color:var(--danger);color:var(--danger)}"
         ".rnd-mini.rnd-accent{border-color:var(--accent);color:var(--accent)}"
+        # v8 Wave 3 — GitHub link / auto-push header controls (#ghRemote span).
+        ".gh-remote{display:inline-flex;align-items:center;gap:7px}"
+        ".gh-linked{font-size:11px;color:var(--accent);"
+        "max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".gh-autopush{font-size:11px;color:var(--text);display:inline-flex;"
+        "align-items:center;gap:3px;cursor:pointer;user-select:none}"
         # v4.1 cockpit-render — Paradigm-2 lane board (.p2lanes / .p2col), the
         # mockup's "Inline expanding panels" column layout (replaces .kan/.col).
         ".p2lanes{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;"
@@ -3106,6 +3132,12 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini rnd-accent' id='openTermBtn' "
         "onclick=\"newTermSession('general','claude')\">"
         "&#9000; Open terminal</button>"
+        # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
+        # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
+        # (a token-gated read). Unlinked → a "Link GitHub" button (linkGithub());
+        # linked → the remote shown + an auto-push opt-in toggle (set_auto_push) +
+        # a "Push now" button (push_now). Default new repos are PRIVATE.
+        "<span class='gh-remote' id='ghRemote'></span>"
         f"{lifecycle}"
         "</div></div>"
         # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
@@ -3210,6 +3242,9 @@ function setAnchorToken() {
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   repopulate();
+  // v8 Wave 3: render the GitHub link / auto-push header controls from the
+  // current remote_status (read-only GET; never a model call / network).
+  try { renderRemoteControls(); } catch (e) {}
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -3218,6 +3253,170 @@ function _postJson(url, payload) {
   return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
 }
 function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
+
+// ── v8 Wave 3 — GitHub link + Option-A auto-push (header controls) ───────────
+// renderRemoteControls(): fetch the project's current remote_status (read-only,
+// token-gated GET) and paint the #ghRemote header span. Unlinked → a single
+// "Link GitHub" button. Linked → the remote host/name + an auto-push opt-in
+// checkbox (set_auto_push) + a "Push now" button (push_now). NO network here —
+// this is a pure registry read. Never throws into the page (best-effort).
+async function renderRemoteControls() {
+  var host = document.getElementById('ghRemote');
+  if (!host) return;
+  var st = null;
+  try {
+    var url = '/api/rnd/remote_status?project_id=' +
+      encodeURIComponent(PROJECT_ID) + _tokenQ();
+    var r = await fetch(url, _jsonHdrs());
+    st = await r.json();
+  } catch (e) { st = null; }
+  if (!st || !st.ok) {
+    // Unknown state → still offer the link control (best-effort).
+    host.innerHTML = "<button class='rnd-mini' id='ghLinkBtn' " +
+      "onclick='linkGithub()'>&#128279; Link GitHub</button>";
+    return;
+  }
+  if (!st.linked) {
+    host.innerHTML = "<button class='rnd-mini' id='ghLinkBtn' " +
+      "onclick='linkGithub()'>&#128279; Link GitHub</button>";
+    return;
+  }
+  // Linked: show a short remote label + the auto-push toggle + Push now.
+  var label = _ghShortRemote(st.remote_url);
+  var checked = st.auto_push ? ' checked' : '';
+  host.innerHTML =
+    "<span class='gh-linked' id='ghLinkedLabel' title='" + _esc(st.remote_url) +
+      "'>&#128279; " + _esc(label) + "</span>" +
+    "<label class='gh-autopush' title='Auto-push this project when a session " +
+      "finishes'><input type='checkbox' id='ghAutoPush'" + checked +
+      " onchange='toggleAutoPush(this.checked)'> auto-push</label>" +
+    "<button class='rnd-mini' id='ghPushNowBtn' onclick='pushNow()'>" +
+      "&#8593; Push now</button>";
+}
+
+// Trim a remote URL to a compact "owner/name" (or host/name) for the header.
+function _ghShortRemote(u) {
+  u = String(u || '');
+  if (!u) return 'linked';
+  var s = u.replace(/^https?:\/\//, '').replace(/^git@/, '')
+           .replace(/\.git$/, '').replace(/:/g, '/');
+  var parts = s.split('/').filter(function (p) { return p; });
+  if (parts.length >= 2) return parts.slice(-2).join('/');
+  return s;
+}
+
+// linkGithub(): inline prompt to link a GitHub remote. If gh is available we
+// offer "Create new private repo" (mode=create) vs "Paste an existing URL"
+// (mode=existing); when gh is unavailable we offer paste-only (the server also
+// degrades create → {reason:'gh-unavailable', suggest:'paste-url'}).
+async function linkGithub() {
+  // Probe current state so we can decide whether to offer "create".
+  var ghAvailable = true;
+  try {
+    var sr = await fetch('/api/rnd/remote_status?project_id=' +
+      encodeURIComponent(PROJECT_ID) + _tokenQ(), _jsonHdrs());
+    var sd = await sr.json();
+    if (sd && typeof sd.gh_available === 'boolean') ghAvailable = sd.gh_available;
+  } catch (e) {}
+  var mode, value;
+  if (ghAvailable) {
+    var pick = window.prompt(
+      'Link GitHub — type:\n  C = Create a new PRIVATE repo\n' +
+      '  (or paste an existing repo URL)\n  (Cancel = not now)', 'C');
+    if (pick === null) return;            // not now
+    pick = (pick || '').trim();
+    if (pick.toUpperCase() === 'C' || pick === '') {
+      mode = 'create';
+      var nm = window.prompt('New private repo name (blank = folder name):', '');
+      if (nm === null) return;
+      value = (nm || '').trim();
+    } else {
+      mode = 'existing';
+      value = pick;
+    }
+  } else {
+    // gh unavailable → paste-only.
+    var url = window.prompt(
+      'gh is unavailable — paste an existing GitHub repo URL to link:', '');
+    if (url === null) return;
+    url = (url || '').trim();
+    if (!url) return;
+    mode = 'existing';
+    value = url;
+  }
+  var payload = {project_id: PROJECT_ID, mode: mode, value: value};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/link_github', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/link_github', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[link GitHub error] ' + e.message); return; }
+  if (!data.ok) {
+    if (data.reason === 'gh-unavailable') {
+      // Fall back to paste-only on the spot.
+      var url2 = window.prompt(
+        'gh is unavailable — paste an existing GitHub repo URL to link:', '');
+      if (url2 === null) return;
+      url2 = (url2 || '').trim();
+      if (!url2) return;
+      var p2 = {project_id: PROJECT_ID, mode: 'existing', value: url2};
+      var r2 = await _postJson('/api/rnd/link_github', p2);
+      var d2 = await r2.json();
+      if (!d2.ok) { alert('[link GitHub refused] ' + (d2.error || d2.reason || 'unknown')); return; }
+    } else {
+      alert('[link GitHub refused] ' + (data.error || data.reason || 'unknown'));
+      return;
+    }
+  }
+  renderRemoteControls();
+}
+
+// toggleAutoPush(on): persist the per-project auto-push opt-in (set_auto_push).
+async function toggleAutoPush(on) {
+  var payload = {project_id: PROJECT_ID, enabled: !!on};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/set_auto_push', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/set_auto_push', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[auto-push error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[auto-push refused] ' + (data.error || 'unknown'));
+    renderRemoteControls();             // re-sync the checkbox to truth
+  }
+}
+
+// pushNow(): manual "Push now" — git push -u origin <branch>. In tests origin is
+// a LOCAL BARE repo (file://) so there is NO network. Reports the outcome.
+async function pushNow() {
+  var btn = document.getElementById('ghPushNowBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
+  var payload = {project_id: PROJECT_ID};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/push_now', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/push_now', payload);
+      data = await r.json();
+    }
+  } catch (e) {
+    alert('[push error] ' + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#8593; Push now'; }
+    return;
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = '&#8593; Push now'; }
+  if (!data.ok || !data.pushed) {
+    alert('[push refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+}
 
 // ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
 // Manual add: prompt for idea text, POST /api/rnd/add_idea, then refresh so the
@@ -8658,6 +8857,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
+            elif self.path.startswith("/api/rnd/remote_status"):
+                # Read-only (v8 Wave 3): the project's GitHub link state for the
+                # header control — {linked, remote_url, auto_push}. NO mutation,
+                # NO network. AUTH: ``?token=`` (read-only GET; back-compat when
+                # no token set). /api/rnd/remote_status?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _rnd.get_project(pid) is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    st = _remote.remote_status(pid)
+                    self._send_json({"ok": True, "linked": st["linked"],
+                                     "remote_url": st["remote_url"],
+                                     "auto_push": st["auto_push"]})
             elif self.path.startswith("/api/rnd/project_rollup"):
                 # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
                 # (effort_history.project_effort_rollup, Wave 3) for the header's
@@ -9570,6 +9794,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         rec.get("lane") if rec else None, session)
                 except Exception:
                     pass
+                # v8 Wave 3: auto-push the project AFTER kill() persisted the
+                # produced docs (Wave 2, capture-before-reap) — but ONLY when the
+                # project is linked to a remote AND has opted in. A non-linked or
+                # non-opted project never pushes. Best-effort + never blocks the
+                # kill response; in tests origin is a LOCAL BARE repo (no network).
+                try:
+                    _auto_push_on_finish(
+                        pid_for_advance or (rec.get("project_id") if rec else None))
+                except Exception:
+                    pass
                 auto_build = None
                 if planning_kill:
                     try:
@@ -9858,6 +10092,65 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(ve)}, 400)
                 except _termsess.TerminalSessionError as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/link_github":
+            # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
+            # → gh repo create <name> --private (through the ANCHOR_GH_CMD seam —
+            # NEVER real github.com in tests); mode=existing → git remote add
+            # origin <url> (local). Persists the remote on the project record.
+            # Default repos are PRIVATE. Auth enforced by the middleware above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            mode = (body.get("mode", "") or "").strip().lower()
+            value = (body.get("value", "") or "").strip()
+            if not pid or not mode:
+                self._send_json(
+                    {"ok": False, "error": "project_id and mode required"}, 400)
+            elif mode not in ("create", "existing"):
+                self._send_json(
+                    {"ok": False,
+                     "error": "mode must be 'create' or 'existing'"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    res = _remote.link_github(folder, mode, value,
+                                              project_id=pid)
+                    code = 200 if res.get("ok") else 400
+                    self._send_json(res, code)
+
+        elif self.path == "/api/rnd/set_auto_push":
+            # v8 Wave 3: persist the per-project auto-push-on-finish opt-in flag.
+            # Auth enforced above. A non-opted project never pushes.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                enabled = bool(body.get("enabled"))
+                _remote.set_auto_push(pid, enabled)
+                self._send_json({"ok": True, "auto_push": enabled})
+
+        elif self.path == "/api/rnd/push_now":
+            # v8 Wave 3: manual "Push now" — git push -u origin <branch>. In tests
+            # origin is a LOCAL BARE repo (file://) so there is NO network. Auth
+            # enforced above. 400 when not linked (no origin). Never raises.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                proj = _rnd.get_project(pid)
+                folder = proj.get("folder_path", "")
+                res = _remote.push_project(folder, pid)
+                code = 200 if res.get("ok") else 400
+                self._send_json(res, code)
 
         elif self.path == "/api/rnd/continue_session":
             # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
