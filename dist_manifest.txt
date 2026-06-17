@@ -54,6 +54,11 @@ preview_server.py
 project_bootstrap.py
 project_remote.py
 
+# ── R&D control surface v9 "Tidy" modules ──────────────────────────────────
+# Stdlib-only: project_move (the guarded atomic on-disk folder move) uses only
+# shutil / pathlib / re + the existing worktrees seam — no third-party imports.
+project_move.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 

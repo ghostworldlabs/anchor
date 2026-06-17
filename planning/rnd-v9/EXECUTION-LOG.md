@@ -115,4 +115,39 @@ reviewed** — `_devtest/wave4_move.png`: the dialog (Move-on-disk / Just-group 
 ⚠️ **Pending John's UI sign-off before merge.** Commit: scoped.
 
 <!-- WAVE 4 done -->
-<!-- WAVE 5 — CLI mirror + healthcheck v9 + distro scan + docs (PROJECT DONE) -->
+### Wave 5 — CLI mirror + healthcheck v9 + distro scan + docs — GREEN (2026-06-16) — PROJECT DONE
+
+**Built:** `anchor.py` `rnd folders` (groups + members via `group_by_group`) + `rnd ghost-sessions
+<pid>` (empty/ghost sessions, read-only, SAFE). `anchor_healthcheck.check_rnd_v9_surface` (fully
+stubbed: stub PTY + stream-json stub runner + temp git projects + TEMP projects_root + TEMP
+registry): walks session delete (record+efforts+summary cleared, survives reload, docs kept) +
+ghost cleanup + grass idea delete + set_group/group_by_group + the guarded move (re-point +
+post-move worktree works, Anchor-repo refusal via a TEMP CODE_DIR then restored, live-session
+refusal, rollback). NEVER moves the real repo/registry/binds :8777. `dist_manifest.txt` ships
+`project_move.py`; distro scan clean. `CLAUDE.md` gains the v9 "Tidy" section + the dashboard
+perf-fix note.
+
+**Orchestrator verification:** distro re-run → **clean (159 files; sole pywinpty exception; no
+Playwright in product)**; `rnd folders`/`rnd ghost-sessions` in the CLI; CLAUDE.md v9 + perf-fix
+present. 28 new tests (cli 18 + healthcheck 6 + distro 7... +28 net).
+
+**FINAL GATE:** `ANCHOR_PTY_BACKEND=stub python -m pytest -q` → **1068 passed, 1 skipped** (+86
+over the 982 v8+perf-fix baseline). Commit: scoped.
+
+---
+
+## PROJECT DONE (2026-06-16) — pending John's UI sign-off + deploy
+
+All 5 waves GREEN. Branch `foreman/rnd-surface-v9` (off `d09ec8d` = v8 + the dashboard perf fix).
+Full suite **1068 passed, 1 skipped**. **NOT merged, service NOT restarted** — UI waves (1–4)
+await John's sign-off (screenshots `_devtest/wave{1..4}_*.png`), then: restart to deploy → the
+red banner clears on the next clean health-check run.
+
+**Wave tally:** W1 session delete (994) · W2 grass delete (1004) · W3 folders grouping (1021) ·
+W4 guarded on-disk move (1040) · W5 CLI/healthcheck/distro/docs (1068).
+
+**Open items flagged for John:** the on-disk move is opt-in per drag (Option C); it hard-refuses
+the Anchor repo + live-session projects + rolls back — verified on temp dirs only. A pre-existing
+flaky concurrency test (`test_lanes_concurrency::test_ac5_reattach…`) intermittently fails and
+passes on re-run (unrelated to v9). Stacked-but-unmerged branches v8→v9 should be merged down to
+master when convenient (master is behind what's deployed).

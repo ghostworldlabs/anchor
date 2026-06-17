@@ -2418,6 +2418,360 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v9_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v9 "Tidy" R&D surface — FULLY STUBBED.
+
+    Walks the new v9 delete / group / guarded-move seams in throwaway temp
+    folders + temp git repos + a TEMP projects_root, never touching real data,
+    the live registry, the REAL Anchor repo, a live claude / real PTY, or
+    ``:8777``. ``ANCHOR_PTY_BACKEND=stub`` + ``ANCHOR_RUNNER_CMD`` (the STREAM-JSON
+    stub) + a temp ``ANCHOR_WORKTREE_BASE`` keep every model / PTY interaction
+    off the real world.
+
+      (a) session delete (Option A) — a planning session writes + persists docs,
+          then ``terminal_session.delete_session`` clears its registry record +
+          effort pointer-records + cached summary; after a reload the session is
+          GONE from ``list_sessions`` / the registry, but the PRODUCED DOCS stay
+          on disk.
+      (b) ghost cleanup — an empty DONE registry record (no efforts) is swept by
+          ``cleanup_ghost_sessions``; a record WITH efforts is left untouched.
+      (c) grass idea delete — ``delete_grass_idea`` clears the idea pointer +
+          index entry + refinements dir; a sibling idea is untouched.
+      (d) group — ``set_group`` + ``group_by_group`` bucket the project under a
+          named folder (default Ungrouped), no disk move.
+      (e) guarded on-disk MOVE on a TEMP project (NEVER the real repo): the dir
+          moves into the group subfolder, the registry ``folder_path`` re-points,
+          a post-move worktree works; the **Anchor-repo refusal** (CODE_DIR
+          pointed at a temp dir for the duration), the **live-session refusal**
+          (an injected RUNNING registry row), and **rollback** on an injected
+          mid-move failure are all proven on TEMP dirs.
+
+    Every stub PTY + synthetic session row is reaped, all forced env is restored,
+    the temp dirs are torn down, and ``paths.CODE_DIR`` is restored. Asserts
+    nothing bound ``:8777`` and the REAL Anchor repo / registry was never moved.
+    """
+    name = "R&D v9 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v9-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    # Snapshot CODE_DIR so the anchor-repo-refusal probe (which points CODE_DIR at
+    # a TEMP dir to PROVE the guard) can never leave it pointed off the real repo.
+    prev_code_dir = _paths.CODE_DIR
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import sessions as _sessions
+        import project_move as _move
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v9-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v9 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v9 project", bool(pid), str(pid)))
+
+        # ── (a) session delete (Option A: keep produced docs) ─────────────────
+        if git_ok:
+            try:
+                prec = _ts.start_session(pid, "plan", backend="claude",
+                                         label="hc v9 plan")
+                psid = prec["session_id"]
+                wt = prec.get("worktree_path", "")
+                plan_dir = Path(wt) / "planning" / "rnd-hc-v9"
+                plan_dir.mkdir(parents=True, exist_ok=True)
+                (plan_dir / "MASTER-PLAN.md").write_text(
+                    "# Master Plan\n\nThe tidy probe master plan.\n",
+                    encoding="utf-8")
+                # Kill persists the doc into the main folder (committed) + reaps.
+                _ts.kill(psid, project_id=pid)
+                main_master = (proj_folder / "planning" / "rnd-hc-v9"
+                               / "MASTER-PLAN.md")
+                doc_before = main_master.is_file()
+
+                # Delete the session: record + efforts + summary gone, doc KEPT.
+                out = _ts.delete_session(psid, project_id=pid)
+                gone_from_reg = _sreg.get_session(psid) is None
+                # Reload: the session must STAY gone from list_sessions.
+                psess = _sessions.list_sessions(str(proj_folder), pid, "plan")
+                still_listed = any(
+                    s.get("session_id") == psid for s in psess)
+                doc_after = main_master.is_file()  # Option A: doc survives delete
+                del_ok = (out.get("ok") and gone_from_reg
+                          and not still_listed
+                          and doc_before and doc_after)
+                steps.append(("session delete clears record+efforts+summary, "
+                              "keeps docs (Option A)",
+                              del_ok,
+                              f"reg_gone={gone_from_reg} relist={not still_listed} "
+                              f"doc_kept={doc_after}"))
+            except Exception as e:
+                steps.append(("session delete", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("session delete", True, "skipped (git unavailable)"))
+
+        # ── (b) ghost cleanup: empty DONE record swept; one WITH efforts kept ──
+        try:
+            ghost = _sreg.register_session(pid, "research", label="hc v9 ghost",
+                                           status=_sreg.STATUS_DONE)
+            ghost_id = ghost["session_id"]
+            # A record WITH an effort tied to it must NOT be swept.
+            keeper = _sreg.register_session(pid, "research", label="hc v9 keeper",
+                                            status=_sreg.STATUS_DONE)
+            keeper_id = keeper["session_id"]
+            _eh.record_effort(str(proj_folder), pid, "research",
+                              "hc-v9-keeper-effort",
+                              extra={"source": _eh.SOURCE_RUN,
+                                     "session_id": keeper_id,
+                                     "title": "keeper effort"})
+            swept = _ts.cleanup_ghost_sessions(pid)
+            removed = set(swept.get("removed", []))
+            ghost_swept = (ghost_id in removed
+                           and _sreg.get_session(ghost_id) is None)
+            keeper_kept = (keeper_id not in removed
+                           and _sreg.get_session(keeper_id) is not None)
+            steps.append(("ghost cleanup sweeps empty record, keeps one w/ efforts",
+                          ghost_swept and keeper_kept,
+                          f"swept={ghost_swept} kept={keeper_kept}"))
+            # Tidy the keeper row so teardown is clean.
+            try:
+                _sreg.remove_session(keeper_id)
+            except Exception:
+                pass
+        except Exception as e:
+            steps.append(("ghost cleanup", False, f"{type(e).__name__}: {e}"))
+
+        # ── (c) grass idea delete: pointer+index+refinements gone; sibling kept ─
+        try:
+            idea = _eh.add_idea(str(proj_folder), pid, "A tidy grass idea")
+            iid = idea.get("job_id", "")
+            sibling = _eh.add_idea(str(proj_folder), pid, "A sibling grass idea")
+            sib_id = sibling.get("job_id", "")
+            _eh.save_grass_refinement(str(proj_folder), pid, iid,
+                                      "a refinement note")
+            before = {it.get("idea_id") or it.get("job_id")
+                      for it in _eh.grass_workbench_data(str(proj_folder), pid)}
+            dres = _eh.delete_grass_idea(str(proj_folder), pid, iid)
+            after = {it.get("idea_id") or it.get("job_id")
+                     for it in _eh.grass_workbench_data(str(proj_folder), pid)}
+            idea_gone = iid not in after
+            sibling_kept = sib_id in after
+            grass_del_ok = (dres.get("ok") and dres.get("deleted")
+                            and idea_gone and sibling_kept
+                            and iid in before)
+            steps.append(("grass idea delete clears pointer+index+refinements; "
+                          "sibling kept",
+                          grass_del_ok,
+                          f"deleted={dres.get('deleted')} gone={idea_gone} "
+                          f"sibling_kept={sibling_kept}"))
+        except Exception as e:
+            steps.append(("grass idea delete", False, f"{type(e).__name__}: {e}"))
+
+        # ── (d) group: set_group + group_by_group (no disk move) ──────────────
+        try:
+            _rnd.set_group(pid, "HC-Research")
+            groups = _rnd.group_by_group()
+            in_named = any(
+                e.get("id") == pid for e in groups.get("HC-Research", []))
+            ungrouped_last = list(groups.keys())[-1] == _rnd.UNGROUPED_LABEL
+            # The on-disk folder is unchanged by grouping.
+            still_here = Path(proj_folder).is_dir()
+            grp_ok = in_named and ungrouped_last and still_here
+            steps.append(("set_group + group_by_group (no disk move)",
+                          grp_ok,
+                          f"grouped={in_named} ungrouped_last={ungrouped_last} "
+                          f"dir_unchanged={still_here}"))
+            _rnd.set_group(pid, "")  # back to Ungrouped for the move probe
+        except Exception as e:
+            steps.append(("group", False, f"{type(e).__name__}: {e}"))
+
+        # ── (e) guarded on-disk MOVE on a TEMP project (never the real repo) ──
+        # Make a SEPARATE temp project + temp projects_root so the move never
+        # touches the real Anchor repo / live registry.
+        try:
+            move_root = Path(_tf.mkdtemp(prefix="anchor-hc-v9-root-"))
+            rnd_env["v3_temp_dirs"].append(move_root)
+            mv_folder = move_root / "tidy-proj"
+            mv_folder.mkdir(parents=True, exist_ok=True)
+            (mv_folder / "CLAUDE.md").write_text(
+                "# hc v9 move probe\n", encoding="utf-8")
+            _git_init_repo(mv_folder)
+            mproj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9 move",
+                                     str(mv_folder), scaffold=False)
+            mpid = mproj["id"]
+            rnd_env["created_ids"].append(mpid)
+
+            # (e1) the happy move: dir → <root>/research/tidy-proj, re-pointed.
+            mres = _move.move_to_group(mpid, "research",
+                                       projects_root=str(move_root))
+            dest = move_root / "research" / "tidy-proj"
+            moved_ok = (mres.get("ok") and dest.is_dir()
+                        and not mv_folder.exists())
+            repointed = (_rnd.get_project(mpid) or {}).get(
+                "folder_path", "") == str(dest)
+            # A post-move worktree on the moved project works (create_worktree
+            # resolves the repo from the registry folder_path the move re-pointed).
+            post_wt_ok = False
+            if git_ok:
+                try:
+                    import worktrees as _wt2
+                    rec = _wt2.create_worktree(mpid, "hc-v9-postmove")
+                    wtp = rec.get("path", "") if rec else ""
+                    post_wt_ok = bool(rec.get("ok")) and bool(wtp) \
+                        and Path(wtp).exists()
+                    if wtp:
+                        _wt2.remove_worktree("hc-v9-postmove", project_id=mpid)
+                except Exception:
+                    post_wt_ok = False
+            else:
+                post_wt_ok = True  # can't exercise worktrees without git
+            steps.append(("guarded move re-points registry + post-move worktree",
+                          moved_ok and repointed and post_wt_ok,
+                          f"moved={moved_ok} repointed={repointed} "
+                          f"post_wt={post_wt_ok}"))
+
+            # (e2) Anchor-repo refusal — point CODE_DIR at a temp dir to PROVE
+            # the guard, then RESTORE it (never leave it off the real repo).
+            anchor_clone = move_root / "as-anchor"
+            anchor_clone.mkdir(parents=True, exist_ok=True)
+            aproj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9 anchor",
+                                     str(anchor_clone), scaffold=False)
+            apid = aproj["id"]
+            rnd_env["created_ids"].append(apid)
+            _paths.CODE_DIR = anchor_clone  # temporary, restored in finally
+            refusal = _move.move_to_group(apid, "research",
+                                          projects_root=str(move_root))
+            anchor_refused = (not refusal.get("ok")
+                              and refusal.get("reason") == "refused-anchor-repo"
+                              and anchor_clone.is_dir())  # no fs change
+            _paths.CODE_DIR = prev_code_dir  # restore immediately
+            steps.append(("move REFUSES the Anchor repo (no fs change)",
+                          anchor_refused,
+                          f"reason={refusal.get('reason')}"))
+
+            # (e3) live-session refusal — inject a RUNNING registry row.
+            live_folder = move_root / "live-proj"
+            live_folder.mkdir(parents=True, exist_ok=True)
+            lproj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9 live",
+                                     str(live_folder), scaffold=False)
+            lpid = lproj["id"]
+            rnd_env["created_ids"].append(lpid)
+            live_rec = _sreg.register_session(lpid, "build",
+                                              label="hc v9 live",
+                                              status=_sreg.STATUS_RUNNING)
+            live_ref = _move.move_to_group(lpid, "research",
+                                           projects_root=str(move_root))
+            live_refused = (not live_ref.get("ok")
+                            and live_ref.get("reason") == "refused-live-sessions"
+                            and live_folder.is_dir())
+            steps.append(("move REFUSES a live-session project (no fs change)",
+                          live_refused, f"reason={live_ref.get('reason')}"))
+            try:
+                _sreg.remove_session(live_rec["session_id"])
+            except Exception:
+                pass
+
+            # (e4) rollback on an injected mid-move failure: monkeypatch the
+            # rescan seam (post dir-move) to raise → the dir + folder_path are
+            # restored.
+            rb_folder = move_root / "rb-proj"
+            rb_folder.mkdir(parents=True, exist_ok=True)
+            (rb_folder / "CLAUDE.md").write_text("# rb\n", encoding="utf-8")
+            rproj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9 rb",
+                                     str(rb_folder), scaffold=False)
+            rpid = rproj["id"]
+            rnd_env["created_ids"].append(rpid)
+            orig_rescan = _move._rescan
+
+            def _boom(_pid):
+                raise RuntimeError("injected rescan failure")
+
+            _move._rescan = _boom
+            try:
+                rb = _move.move_to_group(rpid, "research",
+                                         projects_root=str(move_root))
+            finally:
+                _move._rescan = orig_rescan
+            rb_restored = (not rb.get("ok")
+                           and rb.get("reason") == "move-failed"
+                           and rb.get("rolled_back") is True
+                           and rb_folder.is_dir()
+                           and not (move_root / "research" / "rb-proj").exists()
+                           and (_rnd.get_project(rpid) or {}).get(
+                               "folder_path", "") == str(rb_folder))
+            steps.append(("move ROLLS BACK on an injected mid-move failure",
+                          rb_restored,
+                          f"reason={rb.get('reason')} "
+                          f"rolled_back={rb.get('rolled_back')}"))
+        except Exception as e:
+            steps.append(("guarded move", False, f"{type(e).__name__}: {e}"))
+        finally:
+            _paths.CODE_DIR = prev_code_dir  # belt-and-suspenders restore
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Always restore CODE_DIR (never leave it pointed off the real repo).
+        _paths.CODE_DIR = prev_code_dir
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -2673,6 +3027,7 @@ def main():
         check_rnd_v6_surface(report, server_proc, rnd_env)
         check_rnd_v7_surface(report, server_proc, rnd_env)
         check_rnd_v8_surface(report, server_proc, rnd_env)
+        check_rnd_v9_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
