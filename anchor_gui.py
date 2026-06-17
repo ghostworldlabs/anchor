@@ -1547,11 +1547,22 @@ def render_project_tile_html(entry: dict) -> str:
         f'</div>'
         f'</div>'
     )
+    # v9 Wave 3 — drag-to-group: the row is draggable and carries its current
+    # group so the drag handlers can call /api/rnd/set_group (dashboard-only; NO
+    # disk move). The ⋮⋮ grip is the drag affordance. The on-disk folder path is
+    # deliberately NOT stamped on the row (it lives on the project-window header;
+    # the v8 no-path-on-dashboard invariant holds — the Wave-4 move dialog reads
+    # the path server-side, not from the row).
+    group = entry.get("group", "") or ""
+    group_attr = html_lib.escape(group, quote=True)
     return (
         f'<div class="rnd-row" data-project-id="{pid}" data-notes="{notes_attr}" '
-        f'data-blurb="{blurb_attr}" tabindex="0" role="button" '
+        f'data-blurb="{blurb_attr}" data-group="{group_attr}" '
+        f'draggable="true" tabindex="0" role="button" '
         f'onclick="openProjectWindow(\'{pid}\')" '
         f'title="Open {name}">'
+        f'<span class="rnd-grip" aria-hidden="true" '
+        f'title="Drag into a folder">&#8942;&#8942;</span>'
         f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
@@ -1566,14 +1577,12 @@ def render_project_tile_html(entry: dict) -> str:
 
 
 def _render_folder_groups(groups: dict) -> str:
-    """Render a FLAT one-line ROW list for the dashboard (v4 Wave 8).
+    """Render a FLAT one-line ROW list for the dashboard (v4 Wave 8 — archive view).
 
-    The old per-folder directory header (``<summary class="rnd-folder-head">``
-    with the folder path) is GONE: the folder path now lives on the
-    PROJECT-WINDOW header (Wave 5, :func:`render_project_window_html`), not on the
-    main dashboard. Projects render as a single flat list of thin rows; this is
-    the locked "Dashboard rows" mockup, not a weakening. Shared by the active +
-    archive views.
+    The per-folder directory header is GONE on the FLAT path; projects render as
+    a single flat list of thin rows. Still used by the Archive view, which has no
+    group concept. The ACTIVE home dashboard now uses
+    :func:`_render_group_folders` (v9 Wave 3 collapsible folders) instead.
     """
     rows = []
     for folder in sorted(groups):
@@ -1581,6 +1590,74 @@ def _render_folder_groups(groups: dict) -> str:
     return ('<div class="rnd-projects">'
             '<div class="rnd-folder-rows">' + "".join(rows) + '</div>'
             '</div>')
+
+
+def _group_folder_path(entries: list) -> str:
+    """If every project in a group shares one on-disk parent/path, return it.
+
+    The mockup shows a folder's real on-disk path in the header only when it is
+    uniform across the group's projects. Returns "" when the group is empty or
+    its projects live in different folders (heterogeneous → no path shown).
+    """
+    paths = {(e.get("folder_path") or "") for e in entries if e.get("folder_path")}
+    if len(paths) == 1:
+        return next(iter(paths))
+    return ""
+
+
+def _render_group_folders(groups: dict) -> str:
+    """Render the home dashboard's COLLAPSIBLE FOLDERS (v9 Wave 3).
+
+    ``groups`` is keyed by GROUP NAME (from ``rnd_registry.group_by_group``) →
+    list of project entries; the empty-group bucket is keyed ``Ungrouped`` and
+    always renders last (it is the drop target for "remove from a folder").
+
+    Each folder is a header (▸/▾ twisty · name · count · uniform on-disk path)
+    over a body of the group's thin project rows. Folders are a drop target for
+    drag-to-group; collapse state is persisted client-side (localStorage) by the
+    home dashboard JS (``rndFolderInit``). Organization ONLY — no disk move.
+    """
+    ungrouped_label = getattr(_rnd, "UNGROUPED_LABEL", "Ungrouped")
+    # Order: named groups as given (group_by_group already sorts them), with
+    # Ungrouped last regardless of dict order.
+    names = [g for g in groups if g != ungrouped_label]
+    if ungrouped_label in groups:
+        names.append(ungrouped_label)
+
+    folders = []
+    for gname in names:
+        entries = groups.get(gname, [])
+        rows = "".join(render_project_tile_html(e) for e in entries)
+        name_esc = html_lib.escape(gname)
+        name_attr = html_lib.escape(gname, quote=True)
+        is_ungrouped = (gname == ungrouped_label)
+        # The Ungrouped bucket is a catch-all, not a real on-disk folder → never
+        # stamp a path on it (even if its members happen to share a dir).
+        fpath = "" if is_ungrouped else _group_folder_path(entries)
+        path_block = (f'<span class="rnd-fpath">{html_lib.escape(fpath)}</span>'
+                      if fpath else '')
+        drop_hint = ('<span class="rnd-fdrop-hint">drop here to remove '
+                     'from a folder</span>' if is_ungrouped else '')
+        folders.append(
+            f'<div class="rnd-folder" data-group="{name_attr}" '
+            f'data-ungrouped="{"1" if is_ungrouped else "0"}">'
+            f'<div class="rnd-folder-head" '
+            f'onclick="rndToggleFolder(this)" role="button" tabindex="0" '
+            f'title="Collapse / expand folder">'
+            f'<span class="rnd-tw" aria-hidden="true">▾</span>'
+            f'<span class="rnd-fname">{name_esc}</span>'
+            f'<span class="rnd-fcount">({len(entries)})</span>'
+            f'{path_block}'
+            f'<span class="rnd-fsp"></span>'
+            f'{drop_hint}'
+            f'</div>'
+            f'<div class="rnd-folder-body">{rows}</div>'
+            f'</div>'
+        )
+    return ('<div class="rnd-projects">'
+            '<div class="rnd-folder-list" id="rndFolderList">'
+            + "".join(folders) +
+            '</div></div>')
 
 
 def render_projects_view_html(include_archived: bool = False,
@@ -1591,13 +1668,37 @@ def render_projects_view_html(include_archived: bool = False,
     Defaults to active-only; inactive projects (archived/future/retired) live on
     the separate Archive view (:func:`render_archive_view_html`).
     """
-    groups = _rnd.group_by_folder(include_archived=include_archived,
-                                  include_future=include_future,
-                                  include_retired=include_retired)
-    if not groups:
+    groups = _rnd.group_by_group(include_archived=include_archived,
+                                 include_future=include_future,
+                                 include_retired=include_retired)
+    # group_by_group always returns the Ungrouped bucket; "empty" = only an
+    # empty Ungrouped bucket and no named (extra) groups.
+    ungrouped_label = getattr(_rnd, "UNGROUPED_LABEL", "Ungrouped")
+    has_any = any(groups.get(g) for g in groups)
+    extra_groups = sorted(g for g in groups if g != ungrouped_label)
+    if not has_any and not extra_groups:
         return ('<div class="rnd-projects"><p class="rnd-empty">'
                 'No active R&D projects. Use "+ New Project" to add one.</p></div>')
-    return _render_rows_rollup_toggle() + _render_folder_groups(groups)
+    return (_render_folder_toolbar()
+            + _render_rows_rollup_toggle()
+            + _render_group_folders(groups))
+
+
+def _render_folder_toolbar() -> str:
+    """The "+ New folder" control row above the collapsible folders (v9 W3).
+
+    "+ New folder" prompts for a name and creates an empty group; you then drag
+    a project row into it (NO disk move). Purely additive — a no-JS view still
+    renders the existing folders below."""
+    return (
+        '<div class="rnd-folder-toolbar">'
+        '<button class="rnd-newfolder-btn" type="button" '
+        'onclick="rndNewFolder()" title="Create a new project folder (group)">'
+        '+ New folder</button>'
+        '<span class="rnd-folder-hint">drag any project row (⋮⋮) '
+        'into a folder header to group it</span>'
+        '</div>'
+    )
 
 
 def _render_rows_rollup_toggle() -> str:
@@ -7298,6 +7399,28 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-mini.rnd-pr-on {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-open-btn {{ background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-accent {{ border-color: var(--accent); color: var(--accent); }}
+/* v9 Wave 3 — collapsible project FOLDERS (group field; drag-to-group). */
+.rnd-folder-toolbar {{ display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }}
+.rnd-newfolder-btn {{ font-size: 12px; padding: 6px 12px; border-radius: 7px; border: 1px solid rgba(108,156,252,.5); background: var(--surface2, #232733); color: var(--accent); cursor: pointer; }}
+.rnd-newfolder-btn:hover {{ border-color: var(--accent); }}
+.rnd-folder-hint {{ font-size: 11.5px; color: var(--text-dim); }}
+.rnd-folder-list {{ display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }}
+.rnd-folder {{ border-bottom: 1px solid var(--border); }}
+.rnd-folder:last-child {{ border-bottom: none; }}
+.rnd-folder-head {{ display: flex; align-items: center; gap: 8px; padding: 11px 14px; cursor: pointer; background: var(--surface2, #232733); }}
+.rnd-folder-head:hover {{ background: var(--surface3, #2a2f3d); }}
+.rnd-tw {{ font-size: 11px; color: var(--text-dim); width: 12px; flex: 0 0 auto; }}
+.rnd-fname {{ font-size: 13.5px; font-weight: 600; }}
+.rnd-fcount {{ font-size: 11px; color: var(--text-dim); }}
+.rnd-fpath {{ font-size: 10.5px; color: var(--text-dim); font-family: ui-monospace, Consolas, monospace; margin-left: 6px; }}
+.rnd-fsp {{ flex: 1; }}
+.rnd-fdrop-hint {{ font-size: 11px; color: var(--accent); }}
+.rnd-folder-body {{ display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }}
+.rnd-folder.rnd-collapsed .rnd-folder-body {{ display: none; }}
+.rnd-folder.rnd-droptarget .rnd-folder-head {{ outline: 2px dashed var(--accent); outline-offset: -2px; }}
+.rnd-grip {{ flex: 0 0 auto; color: var(--text-dim); font-size: 13px; cursor: grab; letter-spacing: -2px; }}
+.rnd-row[draggable="true"] {{ cursor: grab; }}
+.rnd-row.rnd-dragging {{ opacity: .5; }}
 /* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
 .rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
 .rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
@@ -7966,6 +8089,9 @@ function rndRowsRefresh() {{
                       '.rnd-rows-rolltog b[data-window="' + savedWin + '"]');
                   if (reBtn) rndRowsRollupWindow(savedWin, reBtn);
               }}
+              // v9 Wave 3 — re-wire folder drag/drop + restore collapse state on
+              // the freshly-swapped rows.
+              if (typeof rndFolderInit === 'function') rndFolderInit();
           }})
           .catch(function () {{}});                       // silent no-op
     }} catch (e) {{}}
@@ -8364,6 +8490,164 @@ function rndBlurb(pid) {{
     if (n === null) return;
     apiCall('/api/rnd/set_blurb', {{id: pid, blurb: n}});
 }}
+
+// ── v9 Wave 3 — project FOLDERS (group field; collapsible; drag-to-group) ──
+// Organization only — NOTHING moves on disk this wave (that's Wave 4). Dragging
+// a row into a folder header just sets the project's `group` via set_group.
+var RND_FOLDER_LS = 'anchor_rnd_folder_collapsed';
+function _rndCollapsedSet() {{
+    try {{ return JSON.parse(localStorage.getItem(RND_FOLDER_LS) || '[]') || []; }}
+    catch (e) {{ return []; }}
+}}
+function _rndSaveCollapsed(arr) {{
+    try {{ localStorage.setItem(RND_FOLDER_LS, JSON.stringify(arr || [])); }} catch (e) {{}}
+}}
+// Collapse / expand one folder, persisting the state by group name.
+function rndToggleFolder(headEl) {{
+    var folder = headEl && headEl.closest ? headEl.closest('.rnd-folder') : null;
+    if (!folder) return;
+    var collapsed = folder.classList.toggle('rnd-collapsed');
+    var tw = folder.querySelector('.rnd-tw');
+    if (tw) tw.textContent = collapsed ? '\\u25B8' : '\\u25BE';  // ▸ / ▾
+    var g = folder.getAttribute('data-group') || '';
+    var set = _rndCollapsedSet();
+    var i = set.indexOf(g);
+    if (collapsed && i < 0) set.push(g);
+    else if (!collapsed && i >= 0) set.splice(i, 1);
+    _rndSaveCollapsed(set);
+}}
+// "+ New folder" — name a group and assign the FIRST ungrouped project to it,
+// OR (if there is none) create an empty folder by re-rendering a placeholder.
+// Simplest persistence model: a folder "exists" once >=1 project carries that
+// group. We create it by re-grouping the first ungrouped project; if none are
+// ungrouped, we still surface an empty folder via localStorage so the user can
+// drag into it (it persists once a project lands there).
+var RND_PENDING_FOLDERS = 'anchor_rnd_pending_folders';
+function _rndPendingFolders() {{
+    try {{ return JSON.parse(localStorage.getItem(RND_PENDING_FOLDERS) || '[]') || []; }}
+    catch (e) {{ return []; }}
+}}
+function _rndSavePending(arr) {{
+    try {{ localStorage.setItem(RND_PENDING_FOLDERS, JSON.stringify(arr || [])); }} catch (e) {{}}
+}}
+function rndNewFolder() {{
+    var name = window.prompt('New folder name:', '');
+    if (name === null) return;
+    name = (name || '').trim();
+    if (!name) return;
+    // Render an empty folder immediately so the user can drag into it. It only
+    // truly persists once a project is dropped in (set_group), but we keep the
+    // pending name in localStorage so a reload still shows the empty folder.
+    var pend = _rndPendingFolders();
+    if (pend.indexOf(name) < 0) {{ pend.push(name); _rndSavePending(pend); }}
+    // The home page renders the folder list in two places — create in each.
+    var lists = document.querySelectorAll('.rnd-folder-list');
+    for (var i = 0; i < lists.length; i++) _rndEnsureFolderIn(lists[i], name);
+}}
+// Ensure a folder header with the given group name exists in ONE list (create
+// an empty one before that list's Ungrouped folder if absent). Returns the el.
+function _rndEnsureFolderIn(list, name) {{
+    if (!list) return null;
+    var sel = (window.CSS && CSS.escape) ? CSS.escape(name) : name;
+    var existing = list.querySelector('.rnd-folder[data-group="' + sel + '"]');
+    if (existing) return existing;
+    var folder = document.createElement('div');
+    folder.className = 'rnd-folder';
+    folder.setAttribute('data-group', name);
+    folder.setAttribute('data-ungrouped', '0');
+    folder.innerHTML =
+        '<div class="rnd-folder-head" role="button" tabindex="0" '
+        + 'title="Collapse / expand folder">'
+        + '<span class="rnd-tw" aria-hidden="true">\\u25BE</span>'
+        + '<span class="rnd-fname"></span>'
+        + '<span class="rnd-fcount">(0)</span>'
+        + '<span class="rnd-fsp"></span>'
+        + '</div><div class="rnd-folder-body"></div>';
+    folder.querySelector('.rnd-fname').textContent = name;
+    var head = folder.querySelector('.rnd-folder-head');
+    head.addEventListener('click', function () {{ rndToggleFolder(head); }});
+    // Insert before this list's Ungrouped folder so Ungrouped stays last.
+    var ung = list.querySelector('.rnd-folder[data-ungrouped="1"]');
+    if (ung) list.insertBefore(folder, ung); else list.appendChild(folder);
+    _rndWireFolderDrop(folder);
+    return folder;
+}}
+// Wire one folder header as a drop target. Dropping a dragged project row here
+// calls set_group with this folder's group ("" for the Ungrouped folder).
+function _rndWireFolderDrop(folder) {{
+    var head = folder.querySelector('.rnd-folder-head');
+    if (!head) return;
+    head.addEventListener('dragover', function (ev) {{
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        folder.classList.add('rnd-droptarget');
+    }});
+    head.addEventListener('dragleave', function () {{
+        folder.classList.remove('rnd-droptarget');
+    }});
+    head.addEventListener('drop', function (ev) {{
+        ev.preventDefault();
+        folder.classList.remove('rnd-droptarget');
+        var pid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+        if (!pid) return;
+        var isUng = folder.getAttribute('data-ungrouped') === '1';
+        var grp = isUng ? '' : (folder.getAttribute('data-group') || '');
+        // set_group is dashboard-only — NO disk move (Wave 4 adds that). The
+        // page reloads on success; the row then renders under the new folder.
+        apiCall('/api/rnd/set_group', {{project_id: pid, group: grp}});
+    }});
+}}
+// Make project rows draggable and wire every folder as a drop target. Also
+// restore the persisted collapse state. The home page renders the folder list
+// in TWO places (the dashboard section + the #rndProjectsRows view), so we wire
+// EVERY .rnd-folder-list. Runs on DOMContentLoaded + after an in-place refresh.
+function rndFolderInit() {{
+    var lists = document.querySelectorAll('.rnd-folder-list');
+    for (var L = 0; L < lists.length; L++) {{
+        var list = lists[L];
+        if (list.getAttribute('data-rnd-wired') === '1') continue;
+        list.setAttribute('data-rnd-wired', '1');
+        // Draggable rows.
+        var rows = list.querySelectorAll('.rnd-row[draggable="true"]');
+        for (var i = 0; i < rows.length; i++) {{
+            (function (row) {{
+                row.addEventListener('dragstart', function (ev) {{
+                    var pid = row.getAttribute('data-project-id') || '';
+                    if (ev.dataTransfer) {{
+                        ev.dataTransfer.setData('text/plain', pid);
+                        ev.dataTransfer.effectAllowed = 'move';
+                    }}
+                    row.classList.add('rnd-dragging');
+                }});
+                row.addEventListener('dragend', function () {{
+                    row.classList.remove('rnd-dragging');
+                }});
+            }})(rows[i]);
+        }}
+        // Drop targets + restore collapse state.
+        var folders = list.querySelectorAll('.rnd-folder');
+        var collapsed = _rndCollapsedSet();
+        for (var j = 0; j < folders.length; j++) {{
+            _rndWireFolderDrop(folders[j]);
+            var g = folders[j].getAttribute('data-group') || '';
+            if (collapsed.indexOf(g) >= 0) {{
+                folders[j].classList.add('rnd-collapsed');
+                var tw = folders[j].querySelector('.rnd-tw');
+                if (tw) tw.textContent = '\\u25B8';  // ▸
+            }}
+        }}
+        // Re-surface any pending (empty, not-yet-populated) folders from a prior
+        // "+ New folder" that has no project yet.
+        var pend = _rndPendingFolders();
+        for (var k = 0; k < pend.length; k++) {{
+            if (!list.querySelector('.rnd-folder[data-group="'
+                + (window.CSS && CSS.escape ? CSS.escape(pend[k]) : pend[k]) + '"]')) {{
+                _rndEnsureFolderIn(list, pend[k]);
+            }}
+        }}
+    }}
+}}
+window.addEventListener('DOMContentLoaded', rndFolderInit);
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
 
@@ -9708,6 +9992,24 @@ class AnchorHandler(BaseHTTPRequestHandler):
             try:
                 self._send_json({"ok": True,
                                  "entry": _rnd.set_blurb(pid, body.get("blurb", ""))})
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/set_group":
+            # v9 Wave 3 — reassign a project's dashboard FOLDER (group) only.
+            # Organization-only: this NEVER moves anything on disk (that is the
+            # v9 Wave 4 guarded on-disk move). Token-gated by the do_POST middleware.
+            pid = body.get("project_id", "") or body.get("id", "")
+            group = body.get("group", "")
+            try:
+                entry = _rnd.set_group(pid, group)
+                self._send_json({
+                    "ok": True,
+                    "entry": entry,
+                    "message": (f"Grouped under '{entry.get('group')}'"
+                                if entry.get("group")
+                                else "Moved to Ungrouped"),
+                })
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
 

@@ -119,6 +119,10 @@ def _normalize(entry: dict) -> dict:
         # v8 Wave 3 — GitHub remote linking + auto-push opt-in (offsite layer).
         "remote_url": (entry.get("remote_url") or ""),
         "auto_push": bool(entry.get("auto_push")),
+        # v9 Wave 3 — dashboard folder/group field (organization-only; NO disk
+        # move this wave). "" means Ungrouped (back-compat: a record without a
+        # "group" field reads as "").
+        "group": (entry.get("group") or ""),
     }
 
 
@@ -254,7 +258,7 @@ def update_project(project_id: str, **fields) -> dict:
     Raises ``KeyError`` if the id is unknown.
     """
     allowed = {"name", "folder_path", "priority", "state", "notes", "blurb",
-               "remote_url", "auto_push"}
+               "remote_url", "auto_push", "group"}
     with _paths.WRITE_LOCK:
         reg = load_registry()
         if project_id not in reg:
@@ -298,6 +302,23 @@ def reactivate_project(project_id: str) -> dict:
 def set_notes(project_id: str, notes: str) -> dict:
     """Set the free-text notes for a project (like a task's Notes field)."""
     return update_project(project_id, notes=("" if notes is None else str(notes)))
+
+
+# ── Dashboard folder/group (v9 Wave 3 — organization-only, NO disk move) ──
+
+#: The display name for the empty-group ("") bucket on the dashboard.
+UNGROUPED_LABEL = "Ungrouped"
+
+
+def set_group(project_id: str, group: str) -> dict:
+    """Set a project's dashboard ``group`` (folder) — organization only.
+
+    ``""`` means Ungrouped. This does NOT move anything on disk (that is the
+    v9 Wave 4 guarded on-disk move); it only re-labels which collapsible
+    folder the project renders under on the home dashboard. Returns the entry.
+    """
+    return update_project(
+        project_id, group=("" if group is None else str(group).strip()))
 
 
 # ── GitHub remote linking + auto-push opt-in (v8 Wave 3) ─────────────────
@@ -474,6 +495,35 @@ def group_by_folder(include_archived: bool = True,
                            include_retired=include_retired):
         groups.setdefault(e["folder_path"], []).append(e)
     return groups
+
+
+def group_by_group(include_archived: bool = True,
+                   include_future: bool = True,
+                   include_retired: bool = True) -> dict:
+    """Group projects by their dashboard ``group`` → list of entries (v9 W3).
+
+    The home dashboard renders this as collapsible folders. Projects whose
+    ``group`` is ``""`` (or absent — back-compat) bucket under the
+    ``UNGROUPED_LABEL`` ("Ungrouped") key. Within a group, entries keep the
+    ``list_projects`` ordering (priority, then name). The returned dict is
+    ordered: named groups (alphabetical, case-insensitive) first, with
+    ``Ungrouped`` always last.
+    """
+    named = {}
+    ungrouped = []
+    for e in list_projects(include_archived=include_archived,
+                           include_future=include_future,
+                           include_retired=include_retired):
+        g = (e.get("group") or "").strip()
+        if g:
+            named.setdefault(g, []).append(e)
+        else:
+            ungrouped.append(e)
+    out = {}
+    for g in sorted(named, key=lambda s: s.lower()):
+        out[g] = named[g]
+    out[UNGROUPED_LABEL] = ungrouped  # always present, always last
+    return out
 
 
 #: Legacy lane-state strings (kept as named constants for back-compat; the

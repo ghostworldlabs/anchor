@@ -41,8 +41,9 @@ def env(tmp_path, monkeypatch):
 # ── (a) flat rows, NO directory/path header line ─────────────────────────────
 
 def test_view_renders_flat_rows_no_folder_header(env, tmp_path):
-    """Three projects each in their own folder → flat rows, no folder-path
-    grouping header. The OLD ``rnd-folder``/``rnd-folder-head`` markup is gone."""
+    """v9 Wave 3: three UNGROUPED projects render as thin rows nested under the
+    single collapsible "Ungrouped" folder (the v9 folders replace the v8 flat
+    list, but each row keeps its thin one-line form)."""
     gui, rnd, eh, _sess = env
     for i in range(3):
         folder = tmp_path / f"proj{i}"
@@ -50,22 +51,24 @@ def test_view_renders_flat_rows_no_folder_header(env, tmp_path):
         rnd.add_project(f"P{i}", str(folder))
 
     view = gui.render_projects_view_html()
-    # Flat thin rows present.
+    # Thin rows still present, one per project.
     assert "rnd-row" in view
     assert view.count('data-project-id="') == 3
-    # The OLD per-folder directory grouping is GONE.
-    assert "rnd-folder-head" not in view
-    assert 'class="rnd-folder"' not in view
+    # v9: ungrouped projects live under a single "Ungrouped" collapsible folder
+    # (NOT a per-on-disk-folder header — three distinct folders, but one group).
+    assert 'class="rnd-folder"' in view
+    assert "rnd-folder-head" in view
+    assert "Ungrouped" in view
+    # Exactly ONE folder (Ungrouped) — distinct on-disk dirs do NOT split groups.
+    assert view.count('class="rnd-folder"') == 1
+    # The old per-folder COUNT-class header is still gone.
     assert "rnd-folder-count" not in view
-    assert "<summary class=\"rnd-folder-head\"" not in view
-    # And the folder PATHS themselves are not rendered on the dashboard rows
-    # (the path moved to the project-window header, Wave 5).
-    for i in range(3):
-        assert str(tmp_path / f"proj{i}") not in view
 
 
 def test_no_directory_text_on_rows(env, tmp_path):
-    """The folder path string must NOT appear anywhere in the rendered rows."""
+    """A single ungrouped project's on-disk dir is NOT shown anywhere: not on the
+    thin project ROW, and not on the Ungrouped folder header (the catch-all
+    bucket suppresses its path block)."""
     gui, rnd, eh, _sess = env
     folder = tmp_path / "a-distinctive-folder-name"
     folder.mkdir()

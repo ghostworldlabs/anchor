@@ -103,15 +103,16 @@ def test_two_projects_one_folder_render_grouped(gui, tmp_path):
     html = gui.render_projects_view_html()
     assert "Alpha" in html
     assert "Beta" in html
-    # v4 Wave 8: the per-folder directory header is GONE — projects render as a
-    # FLAT one-line row list (the folder path moved to the project-window header).
-    # Both projects still render (each as its own thin row); the folder PATH is no
-    # longer printed on the dashboard at all. This preserves the original intent
-    # (both co-located projects render, stores don't collide) under the new
-    # no-directory-line contract.
+    # v9 Wave 3: projects render as thin rows nested under collapsible group
+    # FOLDERS (the v8 flat list is replaced). Both co-located ungrouped projects
+    # render under the single "Ungrouped" folder; the on-disk folder PATH is NOT
+    # printed (the Ungrouped catch-all suppresses its path block, and the path
+    # otherwise lives on the project-window header).
     assert html.count(str(folder)) == 0
     assert html.count('data-project-id="') == 2
-    assert "rnd-folder-head" not in html
+    # The Ungrouped collapsible folder header is present (one group, two rows).
+    assert "rnd-folder-head" in html
+    assert "Ungrouped" in html
     # Stores don't collide.
     import rnd_registry
     sa = rnd_registry.project_store_dir(str(folder), a["entry"]["id"])

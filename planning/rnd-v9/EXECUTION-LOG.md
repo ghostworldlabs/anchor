@@ -62,6 +62,31 @@ rows show a red ✕.
 Commit: scoped.
 
 <!-- WAVE 2 done -->
-<!-- WAVE 3 — Project folders: group field + collapsible UI + drag-to-group -->
+### Wave 3 — Project folders: group field + collapsible UI + drag-to-group — GREEN (2026-06-16)
+
+**Built (backend + UI):** `rnd_registry` gains a `group` field (default `""`, `_normalize` +
+`update_project` allow-list; back-compat: no-field → Ungrouped) + `set_group(pid, group)`
+(persists; never touches disk — `folder_path` unchanged) + `group_by_group()` (named groups
+alpha, Ungrouped always last). `POST /api/rnd/set_group` (token-gated). UI: the home R&D view
+renders `group_by_group` → collapsible folders (▸/▾ + name + count + uniform path; collapse
+state in localStorage), a **"+ New folder"** toolbar (empty groups persist client-side until a
+project lands), and **draggable** project rows (⋮⋮ grip) that drop on a folder header → set_group
+(NO disk move). Ungrouped catch-all always present. `rndFolderInit` re-wires after the 15s
+in-place refresh.
+
+**Orchestrator verification:** `tests/test_project_folders_v9.py` (18) — set_group/group_by_group/
+back-compat/Ungrouped-last; **folder_path unchanged on set_group** (no disk move); endpoint auth;
+DOM (collapsible scaffold + New-folder + draggable rows; positive+negative vs the v8 flat list);
+Playwright (create Research → drop a project → under Research, **persists across reload**,
+**folder_path UNCHANGED**, collapse toggles). Updated the v8 flat-list assertions in
+`test_dashboard_rows`/`test_new_project` to the new folder structure (legitimate change).
+**Screenshot reviewed** — `_devtest/wave3_folders.png`: "+ New folder", an empty "Research (0)",
+and "Ungrouped (2)" with two draggable rows — matches the mockup.
+
+**Gate:** **1021 passed, 1 skipped** + 1 PRE-EXISTING FLAKY (`test_lanes_concurrency::test_ac5_
+reattach…` — unrelated to Wave 3; passes 3/3 on re-run). ⚠️ **Pending John's UI sign-off.**
+Commit: scoped.
+
+<!-- WAVE 3 done -->
 <!-- WAVE 4 — Project folders: guarded on-disk move -->
 <!-- WAVE 5 — CLI mirror + healthcheck v9 + distro scan + docs (PROJECT DONE) -->
