@@ -1712,19 +1712,36 @@ def _gather_project_efforts(folder_path, project_id):
     ``effort_view`` carries everything the board needs (already HTML-escaped
     where it lands in attributes/text) plus the live status/gate.
     """
-    # Index job records by job_id for the live-status join (newest job wins on
-    # duplicate ids, which never happens, but be defensive).
-    jobs_by_id = {}
-    for jr in _jr.list_records():
-        jid = jr.get("job_id")
-        if jid:
-            jobs_by_id[jid] = jr
-    out = {}
+    # Gather each lane's efforts ONCE, then load ONLY the job records those
+    # efforts actually reference (targeted load_record per job_id) — instead of
+    # scanning the entire global rnd_jobs/ dir via list_records() for every
+    # project-lane. That full scan made the dashboard O(projects x lanes x
+    # all-jobs); once rnd_jobs/ grew to ~1k records it pushed GET / past the
+    # health check's 5s timeout (the red banner). The lookup only ever needs the
+    # records for THIS project's efforts, so load exactly those.
+    efforts_by_lane = {}
+    needed_jids = set()
     for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
         try:
-            efforts = _eh.list_efforts(folder_path, project_id, trio_lane)
+            lane_efforts = _eh.list_efforts(folder_path, project_id, trio_lane)
         except Exception:
-            efforts = []
+            lane_efforts = []
+        efforts_by_lane[trio_lane] = lane_efforts
+        for _e in lane_efforts:
+            _jid = _e.get("job_id")
+            if _jid:
+                needed_jids.add(_jid)
+    jobs_by_id = {}
+    for _jid in needed_jids:
+        try:
+            _rec = _jr.load_record(_jid)
+        except Exception:
+            _rec = None
+        if _rec:
+            jobs_by_id[_jid] = _rec
+    out = {}
+    for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
+        efforts = efforts_by_lane.get(trio_lane, [])
         views = []
         # Version numbering (vN) is computed over NON-DISCOVERED (real) efforts
         # ONLY (honesty contract): a discovered card gets NO vN. So the newest

@@ -526,15 +526,32 @@ def status_line(project_id: str) -> dict:
         import sessions as _sessions
     except Exception:
         return out
+    # Resolve "running" from ONLY this project's session jobs, via targeted
+    # load_record lookups — NOT a full scan of the global rnd_jobs/ dir.
+    # status_line is rendered for EVERY project on the dashboard; the old
+    # list_records() full scan made GET / O(projects x all-jobs) and, once
+    # rnd_jobs/ grew to ~1k records, pushed the dashboard past the health check's
+    # 5s timeout (the red banner). We only ever need the status of the handful of
+    # jobs this project's sessions reference.
     try:
         import job_runner as _jr
-        running_job_ids = {
-            r.get("job_id")
-            for r in _jr.list_records()
-            if r.get("status") == _jr.STATUS_RUNNING and r.get("job_id")
-        }
     except Exception:
-        running_job_ids = set()
+        _jr = None
+
+    _running_cache = {}
+
+    def _job_is_running(job_id):
+        if not job_id or _jr is None:
+            return False
+        if job_id in _running_cache:
+            return _running_cache[job_id]
+        try:
+            rec = _jr.load_record(job_id)
+            running = bool(rec) and rec.get("status") == _jr.STATUS_RUNNING
+        except Exception:
+            running = False
+        _running_cache[job_id] = running
+        return running
 
     for lane in STATUS_LANES:
         try:
@@ -547,9 +564,7 @@ def status_line(project_id: str) -> dict:
             if s.get("provenance") == _sessions.PROV_IMPORTED:
                 counts["imported"] += 1
             members = s.get("member_files") or []
-            if running_job_ids and any(
-                (m.get("job_id") or "") in running_job_ids for m in members
-            ):
+            if any(_job_is_running(m.get("job_id") or "") for m in members):
                 counts["running"] += 1
         out[lane] = counts
     return out
