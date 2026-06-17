@@ -2655,21 +2655,22 @@ def check_rnd_v9_surface(report: Report, server_proc, rnd_env: dict):
                           f"moved={moved_ok} repointed={repointed} "
                           f"post_wt={post_wt_ok}"))
 
-            # (e2) Anchor-repo refusal — point CODE_DIR at a temp dir to PROVE
-            # the guard, then RESTORE it (never leave it off the real repo).
-            anchor_clone = move_root / "as-anchor"
-            anchor_clone.mkdir(parents=True, exist_ok=True)
+            # (e2) Anchor-repo refusal — register a probe project whose
+            # folder_path IS the real running CODE_DIR, so the guard fires WITHOUT
+            # swapping CODE_DIR. (Swapping CODE_DIR also redirects data_dir()/the
+            # registry when ANCHOR_DATA_DIR is unset — as in the live 5 AM run — so
+            # move_to_group read an EMPTY registry and wrongly returned
+            # 'unknown-project'. The move is refused BEFORE any fs op, so pointing
+            # the probe at the real repo path is safe; the synthetic entry is reaped
+            # via created_ids at teardown.)
             aproj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9 anchor",
-                                     str(anchor_clone), scaffold=False)
+                                     str(_paths.CODE_DIR), scaffold=False)
             apid = aproj["id"]
             rnd_env["created_ids"].append(apid)
-            _paths.CODE_DIR = anchor_clone  # temporary, restored in finally
             refusal = _move.move_to_group(apid, "research",
                                           projects_root=str(move_root))
             anchor_refused = (not refusal.get("ok")
-                              and refusal.get("reason") == "refused-anchor-repo"
-                              and anchor_clone.is_dir())  # no fs change
-            _paths.CODE_DIR = prev_code_dir  # restore immediately
+                              and refusal.get("reason") == "refused-anchor-repo")
             steps.append(("move REFUSES the Anchor repo (no fs change)",
                           anchor_refused,
                           f"reason={refusal.get('reason')}"))
