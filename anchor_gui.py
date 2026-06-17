@@ -2206,7 +2206,14 @@ def _render_grass_idea_li(idea) -> str:
         f"<div class='m'><span class='dot'></span>"
         f"<span class='idchip'>{short}</span>"
         f"<span class='stchip {html_lib.escape(status)}'>{st_lbl}</span>"
-        f"<span class='srcchip'>{src}</span></div></div>"
+        f"<span class='srcchip'>{src}</span>"
+        # v9 Wave 2 — a red ✕ DELETE control on the idea row. event.stopPropagation
+        # so clicking ✕ does NOT also select the idea; deleteGrassIdea is
+        # confirm()-gated then POSTs grass_delete {confirm:true}.
+        f"<span class='gli-del' title='Delete this idea' "
+        f"onclick=\"event.stopPropagation();deleteGrassIdea('{idea_attr}')\">"
+        f"&#10005;</span>"
+        f"</div></div>"
     )
 
 
@@ -2883,6 +2890,12 @@ def render_project_window_html(project_id: str) -> str:
         ".gli .dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim)}"
         ".gli.r .dot{background:var(--success)}.gli.p .dot{background:var(--accent)}"
         ".gli-empty{padding:14px 13px;color:var(--text-dim);font-size:12px}"
+        # v9 Wave 2 — the red ✕ DELETE control on an idea row (pushed to the right).
+        ".gli-del{margin-left:auto;color:#ef4444;font-size:12px;line-height:1;"
+        "cursor:pointer;padding:1px 5px;border-radius:5px;opacity:.55;"
+        "border:1px solid transparent}"
+        ".gli-del:hover{opacity:1;background:rgba(239,68,68,.12);"
+        "border-color:rgba(239,68,68,.4)}"
         ".idchip{font-family:ui-monospace,Consolas,monospace;font-size:10px;"
         "color:var(--text-dim);background:var(--surface);border:1px solid var(--border);"
         "border-radius:5px;padding:1px 6px}"
@@ -3949,6 +3962,41 @@ async function pullGrass(ideaId, refinementId, lane) {
   renderSessionBar();
   openPanel(sid);
   setTimeout(repopulate, 600);
+}
+
+// deleteGrassIdea(ideaId): permanently DELETE a grass idea (v9 Wave 2). confirm()-
+// gated (an irreversible removal), then POST /api/rnd/grass_delete {confirm:true}.
+// On success the idea row is removed from the workbench list AND — if it was the
+// selected idea — the right workbench pane is cleared. The idea does not return
+// (grass_workbench_data no longer lists it). Token-aware (retries once on 401).
+async function deleteGrassIdea(ideaId) {
+  if (!confirm('Delete this idea? This permanently removes it and its refinements.')) return;
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, confirm: true};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_delete', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_delete', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[delete error] ' + e.message); return; }
+  if (!data.ok) { alert('[delete refused] ' + (data.error || data.reason || 'unknown')); return; }
+  var panel = document.getElementById('grassPanel');
+  if (panel) {
+    var lrow = panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]');
+    if (lrow) lrow.remove();
+    // If the deleted idea was the selected one, clear the right workbench pane.
+    var work = panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]')
+            || panel.querySelector('.gwork');
+    if (work && work.getAttribute('data-idea') === ideaId) {
+      work.removeAttribute('data-idea');
+      work.setAttribute('data-empty', '1');
+      work.innerHTML = '<div class="gwork-empty">Select an idea to develop it.</div>';
+    }
+  }
+  // Drop it from the cached grass data too, so a later select can't resurrect it.
+  if (_grassData && _grassData[ideaId]) { try { delete _grassData[ideaId]; } catch (e) {} }
 }
 
 // ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────
@@ -10455,6 +10503,38 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json(res, code)
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_delete":
+            # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side
+            # stores (pointer-record + index entry + refinements dir + the
+            # contained dev_sessions). Token-gated by the do_POST middleware above
+            # AND requires an explicit confirm:true (a deliberate, irreversible
+            # removal). Project-scoped — never touches another project's grass.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "delete requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        out = _eh.delete_grass_idea(folder, pid, idea_id)
+                    except Exception as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 500)
+                    else:
+                        self._send_json({"ok": True,
+                                         "deleted": bool(out.get("deleted")),
+                                         "result": out})
 
         elif self.path == "/api/rnd/link_github":
             # v8 Wave 3: link the project's repo to a GitHub remote. mode=create

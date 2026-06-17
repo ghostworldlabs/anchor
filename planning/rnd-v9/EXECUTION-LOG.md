@@ -40,7 +40,28 @@ panel header, distinct from the 🗑 kill.
 Commit: scoped.
 
 <!-- WAVE 1 done -->
-<!-- WAVE 2 — Grass idea delete -->
+### Wave 2 — Grass idea delete — GREEN (2026-06-16)
+
+**Built (backend + UI):** `effort_history.delete_grass_idea(folder, pid, idea_id)` — removes the
+idea pointer-record + grass index.json entry (W1 `_delete_effort_record` pattern) + the
+refinements dir (`shutil.rmtree`) + cleans the `dev_sessions` map (best-effort
+`terminal_session.delete_session` per contained develop session, fallback `remove_session`);
+idempotent, never raises, project-scoped. `POST /api/rnd/grass_delete` (token + explicit
+`confirm`). UI: a red **✕** (`.gli-del`) on each idea row (`_render_grass_idea_li`) →
+`deleteGrassIdea` (confirm-gated, `stopPropagation` so it doesn't select the row) → removes the
+row + clears the workbench pane if it was selected; `grass_workbench_data` no longer lists it.
+
+**Orchestrator verification:** `tests/test_grass_delete_v9.py` (12) — clears pointer+index+
+refinements+dev_sessions; gone from `grass_workbench_data`; **siblings + other projects
+untouched**; idempotent + unknown-id no-raise; endpoint auth + confirm-required; DOM (one
+`.gli-del` wired to deleteGrassIdea, ✕ glyph not 🗑; positive+negative); Playwright (delete victim
+→ gone, sibling stays). **Screenshot reviewed** — `_devtest/wave2_grass_delete.png`: both idea
+rows show a red ✕.
+
+**Gate:** **1004 passed, 1 skipped** (+10). ⚠️ **Pending John's UI sign-off before merge.**
+Commit: scoped.
+
+<!-- WAVE 2 done -->
 <!-- WAVE 3 — Project folders: group field + collapsible UI + drag-to-group -->
 <!-- WAVE 4 — Project folders: guarded on-disk move -->
 <!-- WAVE 5 — CLI mirror + healthcheck v9 + distro scan + docs (PROJECT DONE) -->

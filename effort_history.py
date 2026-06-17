@@ -823,6 +823,82 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
     return out
 
 
+def delete_grass_idea(folder_path, project_id: str, idea_id: str) -> dict:
+    """Permanently delete ONE grass idea + all its grass-side stores (v9 Wave 2).
+
+    Project-scoped, BEST-EFFORT, IDEMPOTENT, never raises. For ``idea_id`` in the
+    project's grass lane this removes:
+
+      1. the idea **pointer-record** + its **grass index.json** entry (reuses the
+         :func:`_delete_effort_record` pointer+index removal pattern);
+      2. the idea's **refinements dir** (``refinements/<id>/`` with all its
+         ``dev-N.json`` versions) — recursive remove;
+      3. its **dev_sessions** map — the CONTAINED develop sessions are best-effort
+         deleted/forgotten (``terminal_session.delete_session`` if available, else
+         the registry record is dropped via ``session_registry.remove_session``);
+         a failure here never raises and never blocks the idea removal.
+
+    Only this project's grass lane is touched — sibling ideas and other projects
+    are untouched (the pointer/index/refinements paths are all idea-id-scoped).
+    Returns ``{"ok": True, "deleted": bool, "idea_id", "refinements_removed":
+    bool, "dev_sessions_cleared": [session_id...]}`` where ``deleted`` is whether a
+    grass pointer-record was removed (False if the id was already unknown).
+    """
+    want = (idea_id or "").strip()
+    cleared_sessions = []
+    refinements_removed = False
+    deleted = False
+    if not want:
+        return {"ok": True, "deleted": False, "idea_id": want,
+                "refinements_removed": False, "dev_sessions_cleared": []}
+
+    # Resolve the idea (best-effort) so we can clean its contained dev sessions
+    # BEFORE we drop the pointer-record. An unknown id → a clean no-op.
+    idea = get_grass_idea(folder_path, project_id, want)
+    jid = (idea.get("job_id", want) if idea else want)
+
+    # 1) Best-effort clean the CONTAINED develop sessions (kill/forget, never raise).
+    if idea is not None:
+        for _lane, sid in _grass_dev_sessions(idea).items():
+            sid = (sid or "").strip()
+            if not sid:
+                continue
+            try:
+                import terminal_session as _ts
+                _ts.delete_session(sid, project_id=project_id)
+                cleared_sessions.append(sid)
+            except Exception:
+                try:
+                    import session_registry as _sr
+                    _sr.remove_session(sid)
+                    cleared_sessions.append(sid)
+                except Exception:
+                    pass
+
+    # 2) Drop the idea pointer-record + its grass index entry (reuse the W1 pattern).
+    try:
+        deleted = bool(_delete_effort_record(folder_path, project_id, "grass", jid))
+    except Exception:
+        deleted = False
+
+    # 3) Remove the refinements dir (the dev-N versions) — recursive, tolerant.
+    try:
+        rdir = _refinements_dir(folder_path, project_id, jid)
+        if rdir.is_dir():
+            shutil.rmtree(str(rdir), ignore_errors=True)
+            refinements_removed = not rdir.exists()
+    except Exception:
+        refinements_removed = False
+
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "idea_id": jid,
+        "refinements_removed": refinements_removed,
+        "dev_sessions_cleared": cleared_sessions,
+    }
+
+
 # ── Grass → project export (v8 Wave 6, Option B: copy up, idea stays) ────────
 
 def export_grass_to_project(project_id: str, idea_id: str,
