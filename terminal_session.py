@@ -700,6 +700,125 @@ def capture_session_docs(session_id, project_id=None, record=None):
         return {"ok": False, "reason": "error", "persisted": []}
 
 
+# ── True session delete (v9 Wave 1) ──────────────────────────────────────────
+#
+# DELETE is DISTINCT from KILL (v8). KILL ends a *running* session: it reaps the
+# PTY, persists the produced docs into the main folder, removes the worktree, and
+# marks the registry record DONE — the record (and its board tile) PERSIST so the
+# work is resumable. DELETE *removes the session from Anchor entirely*: the
+# registry record is hard-deleted (so it never re-surfaces on a reload), and the
+# session's effort pointer-records / index entries / cached summary are removed.
+#
+# Option A (LOCKED): the produced DOCUMENTS are KEPT on disk — only Anchor's
+# pointer-records + cache (which merely reference them) are dropped. So the
+# committed plan/research/build files stay in the project folder/git.
+
+def delete_session(session_id, project_id=None):
+    """Permanently delete a managed session from Anchor (v9 Wave 1).
+
+    Distinct from :func:`kill`: this REMOVES the registry record (so the tile is
+    gone and STAYS gone across a reload — ``term_sessions``/the board read the
+    registry, which no longer holds it) AND removes the session's lane effort
+    pointer-records / index entries / cached summary
+    (``effort_history.delete_session_efforts``). The produced DOCUMENTS are KEPT
+    on disk (Option A) — only the Anchor pointer-records + cache are dropped.
+
+    If the session is still LIVE it is :func:`kill`-ed first (reap PTY + persist
+    docs + remove worktree), so a running session can be deleted safely.
+
+    Best-effort, IDEMPOTENT (a second delete is a clean no-op), and never raises.
+    Returns ``{"ok": True, "deleted": bool, "session_id", "killed": bool,
+    "efforts": {...}}`` where ``deleted`` is whether a registry record was
+    removed (False if the id was already unknown).
+    """
+    rec = _reg.get_session(session_id)
+    if project_id is None and rec:
+        project_id = rec.get("project_id") or None
+    lane = (rec.get("lane") if rec else "") or ""
+
+    killed = False
+    # If the session is still live (a running PTY / RUNNING status), kill it first
+    # so the PTY + worktree are reaped and its docs are persisted before we drop
+    # the record. Tolerate any failure — delete must still proceed.
+    try:
+        if rec is not None and (
+                session_id in set(_pty.live_sessions())
+                or rec.get("status") == _reg.STATUS_RUNNING):
+            kill(session_id, project_id=project_id)
+            killed = True
+    except Exception:
+        killed = False
+
+    # Hard-delete the registry record (the durability of "stays gone": the board
+    # + term_sessions read the registry, so a removed record never re-surfaces).
+    try:
+        deleted = bool(_reg.remove_session(session_id))
+    except Exception:
+        deleted = False
+
+    # Remove the lane effort pointer-records / index entries / cached summary —
+    # but KEEP the produced documents on disk (Option A). Resolve the folder.
+    efforts_out = {"ok": False, "reason": "unresolved"}
+    try:
+        if project_id and lane:
+            proj = _rnd.get_project(project_id)
+            folder = (proj or {}).get("folder_path", "") if proj else ""
+            if folder:
+                efforts_out = _eh.delete_session_efforts(
+                    folder, project_id, lane, session_id)
+    except Exception:
+        efforts_out = {"ok": False, "reason": "error"}
+
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "session_id": session_id,
+        "killed": killed,
+        "efforts": efforts_out,
+    }
+
+
+def cleanup_ghost_sessions(project_id):
+    """Delete a project's empty GHOST sessions (v9 Wave 1).
+
+    A *ghost* is a registry session record in a terminal/non-running state
+    (DONE/FAILED/IDLE — never a live RUNNING one) that has NO effort pointer-
+    records tied to it in its lane (it produced nothing Anchor recorded). These
+    accumulate as phantom tiles. This sweeps them: for each candidate it confirms
+    ``efforts_for_session_id`` is empty in its lane, then :func:`delete_session`-s
+    it (record + any cache). RUNNING sessions and sessions WITH efforts are left
+    untouched.
+
+    Best-effort, never raises. Returns ``{"ok": True, "removed": [session_id...]}``.
+    """
+    removed = []
+    try:
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path", "") if proj else ""
+        for rec in _reg.list_sessions(project_id=project_id):
+            try:
+                if rec.get("status") == _reg.STATUS_RUNNING:
+                    continue  # never sweep a live session
+                sid = rec.get("session_id")
+                lane = (rec.get("lane") or "")
+                has_efforts = False
+                if folder and lane:
+                    try:
+                        has_efforts = bool(_eh.efforts_for_session_id(
+                            folder, project_id, lane, sid))
+                    except Exception:
+                        has_efforts = False
+                if has_efforts:
+                    continue  # not a ghost — it produced recorded work
+                delete_session(sid, project_id=project_id)
+                removed.append(sid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {"ok": True, "removed": removed}
+
+
 # ── Auto advance planning → build (v6 Wave 6) ────────────────────────────────
 #
 # When a PLANNING session reaches a terminal/DONE state via a DELIBERATE

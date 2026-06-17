@@ -980,6 +980,89 @@ def _delete_effort_record(folder_path, project_id: str, lane: str,
         return removed
 
 
+#: Subdir under a lane store dir holding per-session cached summaries. Mirrors
+#: ``summarizer.SUMMARIES_DIRNAME`` (kept here so :func:`delete_session_efforts`
+#: can remove the cached summary dir WITHOUT importing ``summarizer`` — which
+#: would create an import cycle, since summarizer imports this module).
+SUMMARIES_DIRNAME = "summaries"
+
+
+def _safe_session_segment(seg: str) -> str:
+    """Filesystem-safe form of a session_id for the summaries dir name.
+
+    MUST match ``summarizer._safe_segment`` so the summary dir this computes is
+    the SAME one summarizer writes (a managed session id can contain ``::``)."""
+    import re as _re
+    return _re.sub(r"[^A-Za-z0-9._-]+", "_", str(seg or "")) or "session"
+
+
+def session_summary_dir(folder_path, project_id: str, lane: str,
+                        session_id: str) -> Path:
+    """``<lane>/summaries/<safe-session-id>/`` — the cached-summary dir.
+
+    The same path ``summarizer.summary_dir`` resolves to; recomputed here to
+    avoid an import cycle (summarizer → effort_history)."""
+    return (lane_dir(folder_path, project_id, lane)
+            / SUMMARIES_DIRNAME / _safe_session_segment(session_id))
+
+
+def delete_session_efforts(folder_path, project_id: str, lane: str,
+                           session_id: str) -> dict:
+    """TRUE session delete (v9 Wave 1) — remove a session's Anchor-side stores.
+
+    For ``session_id`` in ``lane`` this removes, BEST-EFFORT + IDEMPOTENT:
+
+      1. every effort **pointer-record** tagged with this session_id (the v8
+         join, :func:`efforts_for_session_id`) AND its **index.json** entry
+         (via :func:`_delete_effort_record`);
+      2. the cached **summary dir** ``<lane>/summaries/<sid>/``.
+
+    It deliberately **does NOT remove the produced documents** (Option A): the
+    persisted plan/research/build files stay in the project folder/git — only the
+    Anchor effort *pointer-records* (which reference them) and the cached summary
+    are dropped. So ``list_efforts``/``sessions.list_sessions`` no longer surface
+    the session, but the committed work on disk is untouched.
+
+    Never raises. Returns ``{"ok", "removed_efforts": [job_id...],
+    "summary_removed": bool}``.
+    """
+    removed = []
+    summary_removed = False
+    try:
+        store_lane = _resolve_subdir(lane)
+        # 1) Drop every session-tagged effort pointer-record + its index entry.
+        try:
+            tagged = efforts_for_session_id(folder_path, project_id, store_lane,
+                                            session_id)
+        except Exception:
+            tagged = []
+        for eff in tagged:
+            jid = (eff.get("job_id") or "").strip()
+            if not jid:
+                continue
+            try:
+                if _delete_effort_record(folder_path, project_id, store_lane, jid):
+                    removed.append(jid)
+            except Exception:
+                pass
+        # 2) Remove the cached summary dir (best-effort; tolerate already-gone).
+        try:
+            sdir = session_summary_dir(folder_path, project_id, store_lane,
+                                       session_id)
+            if sdir.is_dir():
+                shutil.rmtree(str(sdir), ignore_errors=True)
+                summary_removed = not sdir.exists()
+        except Exception:
+            summary_removed = False
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "removed_efforts": removed,
+        "summary_removed": summary_removed,
+    }
+
+
 def adopt_discovered(folder_path, project_id: str, scan_result) -> dict:
     """Create/update DISCOVERED pointer-records for a folder's scanned artifacts.
 

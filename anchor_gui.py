@@ -3036,6 +3036,14 @@ def render_project_window_html(project_id: str) -> str:
         ".panelbtn.hardkill{color:var(--danger);border-color:var(--border)}"
         ".panelbtn.hardkill:hover{color:#fff;background:var(--danger);"
         "border-color:var(--danger)}"
+        # v9 Wave 1: the TRUE-DELETE control (red '✕'). Visually + behaviorally
+        # DISTINCT from .hardkill (🗑): delete removes the session record entirely
+        # (kill only ends a running session). Always-on danger border + bold red
+        # glyph, separated from the other controls, filling solid red on hover.
+        ".panelbtn.delete{color:#fff;background:var(--danger);"
+        "border-color:var(--danger);font-weight:700;margin-left:6px}"
+        ".panelbtn.delete:hover{color:var(--danger);background:transparent;"
+        "border-color:var(--danger)}"
         # Legacy alias retained so any old reference to .kill still styles as danger.
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
         # v5 Wave 1: the live-session bar (reopenable chips for LIVE managed
@@ -4146,6 +4154,15 @@ var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" label
 // hard-kill means GONE; we suppress these ids from both MANAGED and FINISHED.
 var _KILLED = {};
 
+// _DELETED (v9 Wave 1): session ids the user TRUE-DELETED this page load. Delete
+// (term_delete) HARD-REMOVES the registry record + the session's effort pointer-
+// records + cached summary — so unlike a kill (which leaves a 'done' record that
+// would otherwise re-enter as a greyed tile), a deleted session never comes back
+// from the registry. We still record the id here so any in-flight repopulate()
+// that raced the delete cannot momentarily re-add the tile. (The produced
+// documents are KEPT on disk — Option A — only the Anchor record/cache is gone.)
+var _DELETED = {};
+
 // Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E; this is
 // the SAME mapping the server's _session_light_class applies to the lane tiles):
 //   running              -> green  (working; ignore)
@@ -4208,6 +4225,9 @@ async function repopulate() {
     // (its registry record persists as 'done', which would otherwise re-enter it
     // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
     if (_KILLED[s.session_id]) continue;
+    // v9 Wave 1: a TRUE-DELETED session is GONE (registry record removed); never
+    // re-add it even if an in-flight fetch raced the delete and still saw it.
+    if (_DELETED[s.session_id]) continue;
     var lane = s.lane || 'session';
     if (_isTerminalStatus(s.status)) {
       // v6 Wave 4: a TERMINAL session (a deliberate hard-kill marks the registry
@@ -4542,6 +4562,18 @@ function openPanel(sessionId) {
   killBtn.title = 'Kill this session (terminate + remove its tile)';
   killBtn.textContent = '🗑';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
+  //   (d) '✕'  DELETE     — v9 Wave 1: TRUE delete, the red top-right control.
+  //        VISUALLY + behaviorally DISTINCT from KILL (🗑): kill ENDS a *running*
+  //        session (keeps the record so it's resumable); delete REMOVES the
+  //        record entirely (POST /api/rnd/term_delete) — the registry record +
+  //        effort pointer-records + cached summary are dropped, so the tile is
+  //        gone and STAYS gone across a reload. The produced DOCUMENTS are KEPT
+  //        on disk (Option A). Confirm-gated.
+  var delBtn = document.createElement('button');
+  delBtn.className = 'panelbtn delete';
+  delBtn.title = 'Delete this session from Anchor (removes the record; keeps its documents)';
+  delBtn.textContent = '✕';
+  delBtn.onclick = function (e) { e.stopPropagation(); deletePanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title);
   bar.appendChild(skillEl); bar.appendChild(meta);
   bar.appendChild(crumb);
@@ -4555,6 +4587,7 @@ function openPanel(sessionId) {
   }
   bar.appendChild(minBtn); bar.appendChild(maxBtn);
   bar.appendChild(closeBtn); bar.appendChild(killBtn);
+  bar.appendChild(delBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -5424,6 +5457,72 @@ async function killPanel(sessionId) {
   }
   // v7 Wave 6: re-fetch the server-rendered board so the killed session's tile
   // is dropped (and any auto-opened build tile appears) instantly, no reload.
+  refreshBoard();
+  setTimeout(repopulate, 400);
+}
+
+// deletePanel: the panel red "✕" = TRUE DELETE (v9 Wave 1), DISTINCT from kill.
+// Confirm-gated. On YES we POST /api/rnd/term_delete {confirm:true} — the server
+// hard-deletes the registry record + the session's effort pointer-records +
+// cached summary (the produced DOCUMENTS are KEPT on disk — Option A). Then we
+// tear down the panel, drop the MANAGED/FINISHED record, mark the id _DELETED
+// (so an in-flight repopulate can't re-add it) and remove the lane tile. Because
+// the registry record is GONE, term_sessions/the board no longer surface it — so
+// it STAYS gone across a reload (the v6 key bug for kills is moot for delete).
+async function deletePanel(sessionId) {
+  var s = MANAGED[sessionId] || FINISHED[sessionId];
+  var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
+  if (!confirm('Are you sure? This permanently removes the "' + name +
+               '" session from Anchor (its registry record, effort records and ' +
+               'cached summary). The produced documents are KEPT on disk. This ' +
+               'cannot be undone.')) return;
+  try {
+    var r = await _postJson('/api/rnd/term_delete', {session: sessionId, confirm: true});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_delete', {session: sessionId, confirm: true});
+      data = await r.json();
+    }
+  } catch (e) { alert('[delete error] ' + e.message); }
+  _DELETED[sessionId] = 1;       // suppress this id from any future repopulate
+  delete _KILLED[sessionId];
+  _closePanel(sessionId);
+  delete MANAGED[sessionId];
+  delete FINISHED[sessionId];
+  _removeSessionTile(sessionId);
+  renderSessionBar();
+  // Re-fetch the server-rendered board so the deleted session's tile is dropped
+  // instantly (the registry record is gone → the board no longer renders it).
+  refreshBoard();
+  setTimeout(repopulate, 400);
+}
+
+// cleanupGhostSessions: v9 Wave 1 small "clear empty sessions" action — sweep the
+// project's empty ghost (terminal/idle, no-effort) registry records. Confirm +
+// token gated; refreshes the board on success.
+async function cleanupGhostSessions() {
+  if (!confirm('Clear empty sessions? This removes session records that produced ' +
+               'nothing (no documents are affected).')) return;
+  try {
+    var r = await _postJson('/api/rnd/cleanup_ghost_sessions',
+                            {project_id: PROJECT_ID, confirm: true});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/cleanup_ghost_sessions',
+                          {project_id: PROJECT_ID, confirm: true});
+      data = await r.json();
+    }
+    if (data && data.removed) {
+      for (var i = 0; i < data.removed.length; i++) {
+        _DELETED[data.removed[i]] = 1;
+        _closePanel(data.removed[i]);
+        delete MANAGED[data.removed[i]];
+        delete FINISHED[data.removed[i]];
+        _removeSessionTile(data.removed[i]);
+      }
+    }
+  } catch (e) { alert('[cleanup error] ' + e.message); }
+  renderSessionBar();
   refreshBoard();
   setTimeout(repopulate, 400);
 }
@@ -10011,6 +10110,53 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         auto_build = None
                 self._send_json({"ok": True, "result": out,
                                  "auto_build": auto_build})
+
+        elif self.path == "/api/rnd/term_delete":
+            # v9 Wave 1 — TRUE session delete (DISTINCT from term_kill). Removes
+            # the session from Anchor entirely: hard-deletes the registry record
+            # (so the tile stays gone across a reload), drops its lane effort
+            # pointer-records / index entries / cached summary, and (if still
+            # live) kills it first. The produced DOCUMENTS are KEPT (Option A).
+            # Token-gated by the do_POST middleware above AND requires an explicit
+            # confirm:true in the body (a deliberate, irreversible removal).
+            session = (body.get("session", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "delete requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _termsess.delete_session(session)
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True,
+                                     "deleted": bool(out.get("deleted")),
+                                     "result": out})
+
+        elif self.path == "/api/rnd/cleanup_ghost_sessions":
+            # v9 Wave 1 — sweep a project's empty GHOST sessions (terminal/idle
+            # registry records with NO tied efforts). Token-gated + confirm-gated
+            # (it deletes records). Project-scoped.
+            pid = (body.get("project_id", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not pid:
+                self._send_json({"ok": False, "error": "project_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "cleanup requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _termsess.cleanup_ghost_sessions(pid)
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True,
+                                     "removed": out.get("removed", [])})
 
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
