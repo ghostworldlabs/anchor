@@ -7421,6 +7421,19 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-grip {{ flex: 0 0 auto; color: var(--text-dim); font-size: 13px; cursor: grab; letter-spacing: -2px; }}
 .rnd-row[draggable="true"] {{ cursor: grab; }}
 .rnd-row.rnd-dragging {{ opacity: .5; }}
+/* v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. */
+.rnd-move-overlay {{ position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; }}
+.rnd-move-dlg {{ max-width: 560px; width: calc(100% - 40px); border: 1px solid rgba(239,68,68,.4); border-radius: 12px; background: #160f12; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.6); }}
+.rnd-move-h {{ padding: 10px 14px; background: rgba(239,68,68,.1); font-size: 14px; font-weight: 600; border-bottom: 1px solid rgba(239,68,68,.3); color: var(--text); }}
+.rnd-move-b {{ padding: 13px 14px; font-size: 13px; color: var(--text); }}
+.rnd-move-mono {{ font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #cdd2dc; background: #05070c; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; margin: 9px 0; word-break: break-all; }}
+.rnd-move-mono .rnd-move-arr {{ color: var(--accent); }}
+.rnd-move-guard {{ font-size: 12px; color: var(--text-dim); margin-top: 8px; }}
+.rnd-move-guard b {{ color: #e9dca8; }}
+.rnd-move-acts {{ display: flex; flex-wrap: wrap; gap: 9px; padding: 11px 14px; border-top: 1px solid var(--border); }}
+.rnd-move-btn {{ font-size: 12.5px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface2, #232733); color: var(--text); cursor: pointer; }}
+.rnd-move-btn:hover {{ border-color: var(--accent); }}
+.rnd-move-btn.rnd-move-go {{ border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.14); color: #ffd2d2; }}
 /* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
 .rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
 .rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
@@ -7817,6 +7830,33 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. Hidden by
+     default; shown when a project row is dropped into a folder header. -->
+<div class="rnd-move-overlay" id="rndMoveOverlay" style="display:none"
+     onclick="if(event.target===this)rndMoveCancel()">
+  <div class="rnd-move-dlg" role="dialog" aria-modal="true"
+       aria-labelledby="rndMoveTitle">
+    <div class="rnd-move-h" id="rndMoveTitle">Move project into folder?</div>
+    <div class="rnd-move-b">
+      <span id="rndMoveLede">You dragged a project into a folder. Also move its
+      directory on disk to match?</span>
+      <div class="rnd-move-mono" id="rndMovePaths"></div>
+      <div class="rnd-move-guard">Safety: the move is <b>refused for the Anchor
+      app itself</b> and for any project with a <b>live session</b> (stop them
+      first). The move is atomic — folder moved, registry + git worktrees +
+      discovery re-pointed — and rolls back if anything fails.</div>
+    </div>
+    <div class="rnd-move-acts">
+      <button class="rnd-move-btn rnd-move-go" type="button"
+              id="rndMoveGo">Move on disk + group</button>
+      <button class="rnd-move-btn" type="button" id="rndMoveJust">Just group
+      (leave files where they are)</button>
+      <button class="rnd-move-btn" type="button"
+              onclick="rndMoveCancel()">Cancel</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // Heartbeat disabled — the server runs until explicitly stopped so the
@@ -8592,9 +8632,88 @@ function _rndWireFolderDrop(folder) {{
         if (!pid) return;
         var isUng = folder.getAttribute('data-ungrouped') === '1';
         var grp = isUng ? '' : (folder.getAttribute('data-group') || '');
-        // set_group is dashboard-only — NO disk move (Wave 4 adds that). The
-        // page reloads on success; the row then renders under the new folder.
-        apiCall('/api/rnd/set_group', {{project_id: pid, group: grp}});
+        // v9 Wave 4 — the Option-C choice. Dropping into the Ungrouped folder
+        // (remove from a folder) is dashboard-only — just set_group, no dialog.
+        // Dropping into a NAMED folder asks: "Move on disk + group" (the guarded
+        // move_project) vs "Just group" (set_group only) vs Cancel.
+        if (isUng) {{
+            apiCall('/api/rnd/set_group', {{project_id: pid, group: grp}});
+        }} else {{
+            rndMoveDialog(pid, grp, folder);
+        }}
+    }});
+}}
+// ── v9 Wave 4 — the Option-C "move on disk + group" dialog ─────────────────
+// On a drop into a NAMED folder, offer: (1) "Move on disk + group" → the guarded
+// POST /api/rnd/move_project {{confirm:true}} (refuses the Anchor app + any
+// live-session project; atomic + rolls back); (2) "Just group" → the Wave-3
+// set_group (dashboard-only, NO disk move); (3) Cancel.
+function rndMoveDialog(pid, group, folder) {{
+    var ov = document.getElementById('rndMoveOverlay');
+    if (!ov) {{  // dialog markup absent → fall back to the plain group path.
+        apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        return;
+    }}
+    var pname = '';
+    var row = document.querySelector('.rnd-row[data-project-id="'
+        + (window.CSS && CSS.escape ? CSS.escape(pid) : pid) + '"]');
+    if (row) {{
+        var n = row.querySelector('.rnd-name');
+        if (n) pname = n.textContent || '';
+    }}
+    var title = document.getElementById('rndMoveTitle');
+    if (title) title.textContent =
+        'Move "' + (pname || 'project') + '" into folder "' + group + '"?';
+    // The exact source→dest paths are resolved server-side (the row deliberately
+    // carries no on-disk path); show the destination group so the user knows
+    // what "move on disk" does.
+    var mono = document.getElementById('rndMovePaths');
+    if (mono) mono.textContent = 'Destination group: ' + group
+        + '  →  <projects-root>/' + group + '/<project-dir>';
+    var go = document.getElementById('rndMoveGo');
+    var just = document.getElementById('rndMoveJust');
+    if (go) go.onclick = function () {{ rndMoveConfirm(pid, group, true); }};
+    if (just) just.onclick = function () {{ rndMoveConfirm(pid, group, false); }};
+    ov.style.display = 'flex';
+}}
+function rndMoveCancel() {{
+    var ov = document.getElementById('rndMoveOverlay');
+    if (ov) ov.style.display = 'none';
+}}
+// onDisk=true → the guarded move_project; false → set_group (Wave-3 path). On a
+// refusal (Anchor repo / live session) we surface a clear toast (no reload).
+function rndMoveConfirm(pid, group, onDisk) {{
+    rndMoveCancel();
+    if (!onDisk) {{
+        apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        return;
+    }}
+    var headers = {{'Content-Type': 'application/json'}};
+    var tok = (typeof _anchorToken === 'function') ? _anchorToken() : '';
+    if (tok) headers['X-Anchor-Token'] = tok;
+    fetch('/api/rnd/move_project', {{
+        method: 'POST', headers: headers,
+        body: JSON.stringify({{project_id: pid, group: group, confirm: true}})
+    }}).then(function (r) {{ return r.json(); }}).then(function (data) {{
+        if (data && data.ok) {{
+            showToast('Moved on disk + grouped under "' + group + '"');
+            setTimeout(function () {{ window.location.reload(); }}, 700);
+        }} else {{
+            var reason = (data && data.reason) || (data && data.error) || 'unknown';
+            var msg;
+            if (reason === 'refused-anchor-repo')
+                msg = "Can't move the running Anchor app (it'd kill the server). Grouped only.";
+            else if (reason === 'refused-live-sessions')
+                msg = 'Refused: this project has a live session — stop it first. Grouped only.';
+            else
+                msg = 'Move refused (' + reason + '). Grouped only.';
+            showToast(msg);
+            // The dashboard grouping still applies even when the disk move is
+            // refused, so the row at least lands under the folder.
+            apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        }}
+    }}).catch(function (e) {{
+        showToast('Move error: ' + e.message);
     }});
 }}
 // Make project rows draggable and wire every folder as a drop target. Also
@@ -10012,6 +10131,34 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 })
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/move_project":
+            # v9 Wave 4 — GUARDED on-disk move: relocate a project's directory
+            # into a group subfolder and re-point registry+worktrees+discovery.
+            # Token-gated by the do_POST middleware above AND requires an
+            # explicit confirm:true (a real, irreversible filesystem move).
+            # REFUSES (no fs change) the running Anchor repo + any live-session
+            # project, surfacing the refusal reason. NEVER raises into here.
+            import project_move as _pmove
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            group = body.get("group", "")
+            confirm = bool(body.get("confirm"))
+            if not pid:
+                self._send_json(
+                    {"ok": False, "error": "project_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "move requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _pmove.move_to_group(pid, group)
+                except Exception as exc:  # defensive — move_to_group never raises
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    status = 200 if out.get("ok") else (
+                        404 if out.get("reason") == "unknown-project" else 400)
+                    self._send_json(out, status)
 
         # ── R&D control surface (Wave 9) ──────────────────────────────
         elif self.path == "/api/rnd/link_task":

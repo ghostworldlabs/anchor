@@ -88,5 +88,31 @@ reattach…` — unrelated to Wave 3; passes 3/3 on re-run). ⚠️ **Pending Jo
 Commit: scoped.
 
 <!-- WAVE 3 done -->
-<!-- WAVE 4 — Project folders: guarded on-disk move -->
+### Wave 4 — Project folders: guarded on-disk move — GREEN (2026-06-16)
+
+**Built (backend + UI; the high-risk wave):** new `project_move.move_to_group(pid, group,
+projects_root=None)` — guarded atomic move: REFUSE (no fs change) if the project is the running
+Anchor repo (`is_anchor_repo` compares folder_path normalized vs `paths.CODE_DIR`) or has a LIVE
+session (`session_registry.list_sessions(status=RUNNING)`); else dest = `<root or src.parent>/
+<slug(group)>/<dir>`; `shutil.move` → `update_project(folder_path=)` + `set_group` → `git worktree
+prune` → regenerate `discovery.json` (via `discover_and_adopt`); **ROLLBACK** (move back + restore
+folder_path/group) on ANY step 2–5 failure; never raises. `POST /api/rnd/move_project` (token +
+explicit `confirm`; refusals→400, unknown→404). UI: the **Option-C dialog** on a drop into a named
+folder — "Move on disk + group" (→ move_project) vs "Just group" (→ W3 set_group) vs Cancel,
+showing source→dest + the guard copy; refusal toast for Anchor/live-session; Ungrouped drop stays a
+direct set_group.
+
+**Orchestrator verification (ALL on TEMP dirs + temp registry + temp worktree base — never the
+real Anchor/registry/:8777):** `tests/test_project_move_v9.py` (18) — move re-points registry+
+worktrees+discovery + post-move `create_worktree` succeeds; **Anchor-repo refusal** (CODE_DIR
+monkeypatched, real repo never moved); **live-session refusal**; **rollback** on injected forward
+failure (dir back + folder_path restored); "Just group" no-fs-change; endpoint auth+confirm+refusal
+reasons; DOM + Playwright (drop → Option-C dialog → "Just group" groups without moving). **Screenshot
+reviewed** — `_devtest/wave4_move.png`: the dialog (Move-on-disk / Just-group / Cancel + source→dest
++ safety copy) matches the mockup.
+
+**Gate:** **1040 passed, 1 skipped** (+19; the prior flaky concurrency test passed this run).
+⚠️ **Pending John's UI sign-off before merge.** Commit: scoped.
+
+<!-- WAVE 4 done -->
 <!-- WAVE 5 — CLI mirror + healthcheck v9 + distro scan + docs (PROJECT DONE) -->

@@ -444,7 +444,7 @@ def test_playwright_create_folder_group_persist_no_disk_move(server):
 
         # Drive the drop handler that the UI wires: dispatch a synthetic 'drop'
         # with a DataTransfer carrying the project id onto the Research header.
-        # (This exercises the real _rndWireFolderDrop → apiCall(set_group) path.)
+        # (This exercises the real _rndWireFolderDrop path.)
         pg.evaluate(
             """(pid) => {
                 const head = document.querySelector(
@@ -454,6 +454,15 @@ def test_playwright_create_folder_group_persist_no_disk_move(server):
                 const ev = new DragEvent('drop', {bubbles: true, cancelable: true, dataTransfer: dt});
                 head.dispatchEvent(ev);
             }""", a)
+
+        # v9 Wave 4 — a drop into a NAMED folder now opens the Option-C dialog.
+        # The set_group (dashboard-only, NO disk move) path this test verifies is
+        # the "Just group" choice; click it to keep the W3 no-disk-move behavior.
+        pg.wait_for_function(
+            "() => { const o = document.getElementById('rndMoveOverlay');"
+            " return o && getComputedStyle(o).display !== 'none'; }",
+            timeout=5000)
+        pg.click("#rndMoveJust")
 
         # apiCall reloads the page on success; wait for the Mover row to land
         # under Research after the reload.
