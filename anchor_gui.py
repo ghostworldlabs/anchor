@@ -437,6 +437,8 @@ import terminal_session as _termsess
 import session_registry as _sessreg
 import handoff as _handoff
 import preview_server as _preview
+import project_bootstrap as _bootstrap
+import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -790,6 +792,34 @@ def _maybe_git_init(folder: Path) -> bool:
         return False
 
 
+def _bootstrap_project_best_effort(folder, project_name) -> None:
+    """Best-effort v8 bootstrap: starter CLAUDE.md + git-init the folder.
+
+    Wired into the register / open / rescan paths so a non-git project doesn't
+    dead-end a session start with ``not-a-git-repo`` and the keystone (Wave 2
+    doc persistence) has a repo to commit to. NEVER breaks registration/rescan
+    if bootstrap fails (try/except → log + skip). Idempotent (an existing repo /
+    CLAUDE.md is a no-op).
+    """
+    try:
+        if not folder:
+            return
+        f = Path(folder)
+        if not f.is_dir():
+            return
+        res = _bootstrap.bootstrap_project(folder, project_name)
+        git = res.get("git", {})
+        cm = res.get("claude_md", {})
+        if git.get("initialized"):
+            log_change(f"R&D: bootstrap git-init {folder}")
+        elif not git.get("ok") and git.get("reason") == "git-unavailable":
+            log_change(f"R&D: bootstrap skipped git-init (git unavailable) {folder}")
+        if cm.get("created"):
+            log_change(f"R&D: bootstrap wrote starter CLAUDE.md {folder}")
+    except Exception:
+        pass  # bootstrap is best-effort; never block registration/open/rescan
+
+
 def create_new_folder_project(name: str, parent_path, priority: int = 2,
                               git_init: bool = False) -> dict:
     """+ New Project / create-new-folder mode.
@@ -803,6 +833,10 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
         folder = parent / name
         folder.mkdir(parents=True, exist_ok=True)
         git_done = _maybe_git_init(folder) if git_init else False
+        # v8 Wave 1: always bootstrap (starter CLAUDE.md + git-init if absent) so
+        # a session start never dead-ends on not-a-git-repo. Idempotent + best-
+        # effort; honors the explicit git_init above (a no-op if already a repo).
+        _bootstrap_project_best_effort(folder, name)
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=True)
         log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
@@ -825,6 +859,12 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
     with WRITE_LOCK:
         folder = Path(folder_path).expanduser()
         exists = folder.exists()
+        # v8 Wave 1: bootstrap an existing folder on register — starter CLAUDE.md
+        # + git-init if it isn't a repo — so a research/build session start on it
+        # no longer returns not-a-git-repo. Best-effort + idempotent; skipped for
+        # a missing path (nothing to bootstrap).
+        if exists:
+            _bootstrap_project_best_effort(folder, name)
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=exists)
         if not exists:
@@ -868,6 +908,12 @@ def discover_and_adopt(project_id: str) -> dict:
             return {"ok": False, "reason": "path-missing"}
     except OSError:
         return {"ok": False, "reason": "path-missing"}
+
+    # v8 Wave 1: bootstrap on open/rescan (this is the rescan path AND the open
+    # path via GET /project/<id>) — starter CLAUDE.md + git-init if the folder
+    # isn't a repo. Best-effort + idempotent; heals a non-git project so a later
+    # session start succeeds.
+    _bootstrap_project_best_effort(folder, (proj or {}).get("name", ""))
 
     scan = _bscan.scan(folder)
     adopt = _eh.adopt_discovered(folder, project_id, scan)
@@ -988,6 +1034,66 @@ def _trigger_session_summary(folder_path, project_id, lane, session,
         pass
 
 
+def _resolve_finished_session(folder, project_id, lane, session_id):
+    """Resolve the durable SESSION dict for a finished managed session (v8 Wave 5).
+
+    A managed terminal session (the killed one) keys off a bare registry id, but
+    the documents it PRODUCED were persisted (Wave 2 ``persist_session_docs``) as
+    DISCOVERED efforts that group — in ``sessions.list_sessions`` — under their
+    common parent directory, NOT under the bare managed id. So a kill's durable
+    summary/detail must TIE the managed session to its produced docs explicitly:
+
+      1. Prefer an exact ``sessions.list_sessions`` match on the managed id (a RUN
+         session adopted under the same id, e.g. a discover→adopt flow).
+      2. Else SYNTHESIZE a session dict from the lane efforts tagged with this
+         managed ``session_id`` (``effort_history.efforts_for_session_id``) — the
+         persisted produced docs. This is the no-loss tie: the killed session now
+         resolves to a lane SESSION carrying {its id, its produced docs}, so the
+         summarizer seeds skill/prompts/actions off the REAL docs (not empty).
+
+    Returns a session dict (with ``member_files``) when the managed session has
+    resolvable produced docs, else ``None`` (honest — nothing was produced).
+    Never raises.
+    """
+    try:
+        for s in _sessions.list_sessions(folder, project_id, lane):
+            if s.get("session_id") == session_id:
+                return s
+    except Exception:
+        pass
+    try:
+        members = _eh.efforts_for_session_id(folder, project_id, lane,
+                                             session_id)
+    except Exception:
+        members = []
+    if not members:
+        return None
+    # Synthesize a session dict keyed to the MANAGED id so its cached summary
+    # (and the detail view, which fetches by that id) carries these exact docs.
+    discovered = all(_eh.is_discovered(m) for m in members)
+    try:
+        ts = max(float(m.get("created_at", 0.0) or 0.0) for m in members)
+    except (TypeError, ValueError):
+        ts = 0.0
+    skill = ""
+    title = ""
+    for m in members:
+        if not skill and m.get("skill"):
+            skill = m["skill"]
+        if not title and (m.get("title") or "").strip():
+            title = (m.get("title") or "").strip()
+    return {
+        "session_id": session_id,
+        "lane": _eh._resolve_subdir(lane),
+        "skill": skill,
+        "timestamp": ts,
+        "title": title,
+        "member_files": members,
+        "provenance": "imported" if discovered else "run",
+        "summary_ref": None,
+    }
+
+
 def _trigger_session_summary_on_finish(project_id, lane, session_id):
     """Best-effort: schedule a BACKGROUND session-summary for a session that just
     reached a terminal state (v7 Wave 2 — kill / finish→build / reconcile-dead).
@@ -1026,20 +1132,36 @@ def _trigger_session_summary_on_finish(project_id, lane, session_id):
                 return
         except Exception:
             pass
-        session = None
-        try:
-            for s in _sessions.list_sessions(folder, project_id, lane):
-                if s.get("session_id") == session_id:
-                    session = s
-                    break
-        except Exception:
-            session = None
+        # v8 Wave 5 — TIE the finished managed session to the docs it PRODUCED.
+        # The Wave-2 keystone persists those docs tagged with this session_id, so
+        # the durable summary keyed to the managed id seeds skill/prompts/actions
+        # off the REAL produced docs (no-loss), not an empty record.
+        session = _resolve_finished_session(folder, project_id, lane, session_id)
         if session is None:
-            # The session has no effort-history members yet (e.g. nothing was
-            # produced) — seed a minimal record off the registry so the summarizer
-            # still has a session_id/title to key the (honest) cache to.
+            # The session produced no resolvable docs (e.g. nothing was written)
+            # — seed a minimal record off the registry so the summarizer still has
+            # a session_id/title to key the (honest, empty) cache to.
             session = {"session_id": session_id}
         _trigger_session_summary(folder, project_id, lane, session)
+    except Exception:
+        pass
+
+
+def _auto_push_on_finish(project_id):
+    """Best-effort: auto-push the project's repo when a session reaches a terminal
+    state (v8 Wave 3 — wired into the kill/finish path AFTER the produced docs are
+    persisted/committed by Wave 2's capture-before-reap).
+
+    Delegates to :func:`project_remote.auto_push_if_opted`, which pushes ONLY when
+    the project is BOTH linked to a remote AND opted-in to auto-push. A non-linked
+    or non-opted project never pushes. NON-BLOCKING + never raises — any failure is
+    swallowed so it can never delay or break the finish response. In tests the
+    configured ``origin`` is a LOCAL BARE repo (``file://``) so there is NO network.
+    """
+    try:
+        if not project_id:
+            return
+        _remote.auto_push_if_opted(project_id)
     except Exception:
         pass
 
@@ -1425,11 +1547,22 @@ def render_project_tile_html(entry: dict) -> str:
         f'</div>'
         f'</div>'
     )
+    # v9 Wave 3 — drag-to-group: the row is draggable and carries its current
+    # group so the drag handlers can call /api/rnd/set_group (dashboard-only; NO
+    # disk move). The ⋮⋮ grip is the drag affordance. The on-disk folder path is
+    # deliberately NOT stamped on the row (it lives on the project-window header;
+    # the v8 no-path-on-dashboard invariant holds — the Wave-4 move dialog reads
+    # the path server-side, not from the row).
+    group = entry.get("group", "") or ""
+    group_attr = html_lib.escape(group, quote=True)
     return (
         f'<div class="rnd-row" data-project-id="{pid}" data-notes="{notes_attr}" '
-        f'data-blurb="{blurb_attr}" tabindex="0" role="button" '
+        f'data-blurb="{blurb_attr}" data-group="{group_attr}" '
+        f'draggable="true" tabindex="0" role="button" '
         f'onclick="openProjectWindow(\'{pid}\')" '
         f'title="Open {name}">'
+        f'<span class="rnd-grip" aria-hidden="true" '
+        f'title="Drag into a folder">&#8942;&#8942;</span>'
         f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
@@ -1444,14 +1577,12 @@ def render_project_tile_html(entry: dict) -> str:
 
 
 def _render_folder_groups(groups: dict) -> str:
-    """Render a FLAT one-line ROW list for the dashboard (v4 Wave 8).
+    """Render a FLAT one-line ROW list for the dashboard (v4 Wave 8 — archive view).
 
-    The old per-folder directory header (``<summary class="rnd-folder-head">``
-    with the folder path) is GONE: the folder path now lives on the
-    PROJECT-WINDOW header (Wave 5, :func:`render_project_window_html`), not on the
-    main dashboard. Projects render as a single flat list of thin rows; this is
-    the locked "Dashboard rows" mockup, not a weakening. Shared by the active +
-    archive views.
+    The per-folder directory header is GONE on the FLAT path; projects render as
+    a single flat list of thin rows. Still used by the Archive view, which has no
+    group concept. The ACTIVE home dashboard now uses
+    :func:`_render_group_folders` (v9 Wave 3 collapsible folders) instead.
     """
     rows = []
     for folder in sorted(groups):
@@ -1459,6 +1590,74 @@ def _render_folder_groups(groups: dict) -> str:
     return ('<div class="rnd-projects">'
             '<div class="rnd-folder-rows">' + "".join(rows) + '</div>'
             '</div>')
+
+
+def _group_folder_path(entries: list) -> str:
+    """If every project in a group shares one on-disk parent/path, return it.
+
+    The mockup shows a folder's real on-disk path in the header only when it is
+    uniform across the group's projects. Returns "" when the group is empty or
+    its projects live in different folders (heterogeneous → no path shown).
+    """
+    paths = {(e.get("folder_path") or "") for e in entries if e.get("folder_path")}
+    if len(paths) == 1:
+        return next(iter(paths))
+    return ""
+
+
+def _render_group_folders(groups: dict) -> str:
+    """Render the home dashboard's COLLAPSIBLE FOLDERS (v9 Wave 3).
+
+    ``groups`` is keyed by GROUP NAME (from ``rnd_registry.group_by_group``) →
+    list of project entries; the empty-group bucket is keyed ``Ungrouped`` and
+    always renders last (it is the drop target for "remove from a folder").
+
+    Each folder is a header (▸/▾ twisty · name · count · uniform on-disk path)
+    over a body of the group's thin project rows. Folders are a drop target for
+    drag-to-group; collapse state is persisted client-side (localStorage) by the
+    home dashboard JS (``rndFolderInit``). Organization ONLY — no disk move.
+    """
+    ungrouped_label = getattr(_rnd, "UNGROUPED_LABEL", "Ungrouped")
+    # Order: named groups as given (group_by_group already sorts them), with
+    # Ungrouped last regardless of dict order.
+    names = [g for g in groups if g != ungrouped_label]
+    if ungrouped_label in groups:
+        names.append(ungrouped_label)
+
+    folders = []
+    for gname in names:
+        entries = groups.get(gname, [])
+        rows = "".join(render_project_tile_html(e) for e in entries)
+        name_esc = html_lib.escape(gname)
+        name_attr = html_lib.escape(gname, quote=True)
+        is_ungrouped = (gname == ungrouped_label)
+        # The Ungrouped bucket is a catch-all, not a real on-disk folder → never
+        # stamp a path on it (even if its members happen to share a dir).
+        fpath = "" if is_ungrouped else _group_folder_path(entries)
+        path_block = (f'<span class="rnd-fpath">{html_lib.escape(fpath)}</span>'
+                      if fpath else '')
+        drop_hint = ('<span class="rnd-fdrop-hint">drop here to remove '
+                     'from a folder</span>' if is_ungrouped else '')
+        folders.append(
+            f'<div class="rnd-folder" data-group="{name_attr}" '
+            f'data-ungrouped="{"1" if is_ungrouped else "0"}">'
+            f'<div class="rnd-folder-head" '
+            f'onclick="rndToggleFolder(this)" role="button" tabindex="0" '
+            f'title="Collapse / expand folder">'
+            f'<span class="rnd-tw" aria-hidden="true">▾</span>'
+            f'<span class="rnd-fname">{name_esc}</span>'
+            f'<span class="rnd-fcount">({len(entries)})</span>'
+            f'{path_block}'
+            f'<span class="rnd-fsp"></span>'
+            f'{drop_hint}'
+            f'</div>'
+            f'<div class="rnd-folder-body">{rows}</div>'
+            f'</div>'
+        )
+    return ('<div class="rnd-projects">'
+            '<div class="rnd-folder-list" id="rndFolderList">'
+            + "".join(folders) +
+            '</div></div>')
 
 
 def render_projects_view_html(include_archived: bool = False,
@@ -1469,13 +1668,37 @@ def render_projects_view_html(include_archived: bool = False,
     Defaults to active-only; inactive projects (archived/future/retired) live on
     the separate Archive view (:func:`render_archive_view_html`).
     """
-    groups = _rnd.group_by_folder(include_archived=include_archived,
-                                  include_future=include_future,
-                                  include_retired=include_retired)
-    if not groups:
+    groups = _rnd.group_by_group(include_archived=include_archived,
+                                 include_future=include_future,
+                                 include_retired=include_retired)
+    # group_by_group always returns the Ungrouped bucket; "empty" = only an
+    # empty Ungrouped bucket and no named (extra) groups.
+    ungrouped_label = getattr(_rnd, "UNGROUPED_LABEL", "Ungrouped")
+    has_any = any(groups.get(g) for g in groups)
+    extra_groups = sorted(g for g in groups if g != ungrouped_label)
+    if not has_any and not extra_groups:
         return ('<div class="rnd-projects"><p class="rnd-empty">'
                 'No active R&D projects. Use "+ New Project" to add one.</p></div>')
-    return _render_rows_rollup_toggle() + _render_folder_groups(groups)
+    return (_render_folder_toolbar()
+            + _render_rows_rollup_toggle()
+            + _render_group_folders(groups))
+
+
+def _render_folder_toolbar() -> str:
+    """The "+ New folder" control row above the collapsible folders (v9 W3).
+
+    "+ New folder" prompts for a name and creates an empty group; you then drag
+    a project row into it (NO disk move). Purely additive — a no-JS view still
+    renders the existing folders below."""
+    return (
+        '<div class="rnd-folder-toolbar">'
+        '<button class="rnd-newfolder-btn" type="button" '
+        'onclick="rndNewFolder()" title="Create a new project folder (group)">'
+        '+ New folder</button>'
+        '<span class="rnd-folder-hint">drag any project row (⋮⋮) '
+        'into a folder header to group it</span>'
+        '</div>'
+    )
 
 
 def _render_rows_rollup_toggle() -> str:
@@ -1590,19 +1813,36 @@ def _gather_project_efforts(folder_path, project_id):
     ``effort_view`` carries everything the board needs (already HTML-escaped
     where it lands in attributes/text) plus the live status/gate.
     """
-    # Index job records by job_id for the live-status join (newest job wins on
-    # duplicate ids, which never happens, but be defensive).
-    jobs_by_id = {}
-    for jr in _jr.list_records():
-        jid = jr.get("job_id")
-        if jid:
-            jobs_by_id[jid] = jr
-    out = {}
+    # Gather each lane's efforts ONCE, then load ONLY the job records those
+    # efforts actually reference (targeted load_record per job_id) — instead of
+    # scanning the entire global rnd_jobs/ dir via list_records() for every
+    # project-lane. That full scan made the dashboard O(projects x lanes x
+    # all-jobs); once rnd_jobs/ grew to ~1k records it pushed GET / past the
+    # health check's 5s timeout (the red banner). The lookup only ever needs the
+    # records for THIS project's efforts, so load exactly those.
+    efforts_by_lane = {}
+    needed_jids = set()
     for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
         try:
-            efforts = _eh.list_efforts(folder_path, project_id, trio_lane)
+            lane_efforts = _eh.list_efforts(folder_path, project_id, trio_lane)
         except Exception:
-            efforts = []
+            lane_efforts = []
+        efforts_by_lane[trio_lane] = lane_efforts
+        for _e in lane_efforts:
+            _jid = _e.get("job_id")
+            if _jid:
+                needed_jids.add(_jid)
+    jobs_by_id = {}
+    for _jid in needed_jids:
+        try:
+            _rec = _jr.load_record(_jid)
+        except Exception:
+            _rec = None
+        if _rec:
+            jobs_by_id[_jid] = _rec
+    out = {}
+    for trio_lane, _subdir, _label, _glyph, _addlabel in _KANBAN_COLUMNS:
+        efforts = efforts_by_lane.get(trio_lane, [])
         views = []
         # Version numbering (vN) is computed over NON-DISCOVERED (real) efforts
         # ONLY (honesty contract): a discovered card gets NO vN. So the newest
@@ -1933,6 +2173,12 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     reg_by_column = {}
     try:
         for rec in _sessreg.list_sessions(project_id=project_id):
+            # v8 Wave 6: a CONTAINED grass-workbench develop session keeps its
+            # research/plan lane (so its trio skill seeds) but must NOT render as
+            # a board tile — it lives only in the workbench pane. Its label marker
+            # excludes it here (and the JS never adds it to MANAGED/the top strip).
+            if _eh.is_grass_dev_label(rec.get("label")):
+                continue
             col = _REGISTRY_LANE_TO_COLUMN.get((rec.get("lane") or "").strip())
             if not col:
                 continue
@@ -2061,7 +2307,14 @@ def _render_grass_idea_li(idea) -> str:
         f"<div class='m'><span class='dot'></span>"
         f"<span class='idchip'>{short}</span>"
         f"<span class='stchip {html_lib.escape(status)}'>{st_lbl}</span>"
-        f"<span class='srcchip'>{src}</span></div></div>"
+        f"<span class='srcchip'>{src}</span>"
+        # v9 Wave 2 — a red ✕ DELETE control on the idea row. event.stopPropagation
+        # so clicking ✕ does NOT also select the idea; deleteGrassIdea is
+        # confirm()-gated then POSTs grass_delete {confirm:true}.
+        f"<span class='gli-del' title='Delete this idea' "
+        f"onclick=\"event.stopPropagation();deleteGrassIdea('{idea_attr}')\">"
+        f"&#10005;</span>"
+        f"</div></div>"
     )
 
 
@@ -2663,6 +2916,12 @@ def render_project_window_html(project_id: str) -> str:
         ".rnd-mini.rnd-pr-on{border-color:var(--accent);color:var(--accent)}"
         ".rnd-mini.rnd-danger:hover{border-color:var(--danger);color:var(--danger)}"
         ".rnd-mini.rnd-accent{border-color:var(--accent);color:var(--accent)}"
+        # v8 Wave 3 — GitHub link / auto-push header controls (#ghRemote span).
+        ".gh-remote{display:inline-flex;align-items:center;gap:7px}"
+        ".gh-linked{font-size:11px;color:var(--accent);"
+        "max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".gh-autopush{font-size:11px;color:var(--text);display:inline-flex;"
+        "align-items:center;gap:3px;cursor:pointer;user-select:none}"
         # v4.1 cockpit-render — Paradigm-2 lane board (.p2lanes / .p2col), the
         # mockup's "Inline expanding panels" column layout (replaces .kan/.col).
         ".p2lanes{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;"
@@ -2732,6 +2991,12 @@ def render_project_window_html(project_id: str) -> str:
         ".gli .dot{width:6px;height:6px;border-radius:50%;background:var(--text-dim)}"
         ".gli.r .dot{background:var(--success)}.gli.p .dot{background:var(--accent)}"
         ".gli-empty{padding:14px 13px;color:var(--text-dim);font-size:12px}"
+        # v9 Wave 2 — the red ✕ DELETE control on an idea row (pushed to the right).
+        ".gli-del{margin-left:auto;color:#ef4444;font-size:12px;line-height:1;"
+        "cursor:pointer;padding:1px 5px;border-radius:5px;opacity:.55;"
+        "border:1px solid transparent}"
+        ".gli-del:hover{opacity:1;background:rgba(239,68,68,.12);"
+        "border-color:rgba(239,68,68,.4)}"
         ".idchip{font-family:ui-monospace,Consolas,monospace;font-size:10px;"
         "color:var(--text-dim);background:var(--surface);border:1px solid var(--border);"
         "border-radius:5px;padding:1px 6px}"
@@ -2854,6 +3119,11 @@ def render_project_window_html(project_id: str) -> str:
         ".panel .pbar .ti{font-size:13px;font-weight:700;white-space:nowrap;"
         "overflow:hidden;text-overflow:ellipsis}"
         ".panel .pbar .mt{color:var(--text-dim);font-size:11px}"
+        # v8 Wave 4 — the loaded-skill chip ("planning · Crucible", etc.).
+        ".panel .pbar .skl{font-size:10px;color:var(--accent);"
+        "background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);"
+        "border-radius:10px;padding:1px 8px;white-space:nowrap;"
+        "text-transform:uppercase;letter-spacing:.4px}"
         ".panel .pbar .sp{flex:1}"
         # Panel body STACKS: split summary on top, full-width terminal below.
         # v6 Wave 3: the body is the FREE-resize box (resize:both) so dragging the
@@ -2879,6 +3149,14 @@ def render_project_window_html(project_id: str) -> str:
         ".panelbtn.close:hover{color:var(--text);border-color:var(--accent)}"
         ".panelbtn.hardkill{color:var(--danger);border-color:var(--border)}"
         ".panelbtn.hardkill:hover{color:#fff;background:var(--danger);"
+        "border-color:var(--danger)}"
+        # v9 Wave 1: the TRUE-DELETE control (red '✕'). Visually + behaviorally
+        # DISTINCT from .hardkill (🗑): delete removes the session record entirely
+        # (kill only ends a running session). Always-on danger border + bold red
+        # glyph, separated from the other controls, filling solid red on hover.
+        ".panelbtn.delete{color:#fff;background:var(--danger);"
+        "border-color:var(--danger);font-weight:700;margin-left:6px}"
+        ".panelbtn.delete:hover{color:var(--danger);background:transparent;"
         "border-color:var(--danger)}"
         # Legacy alias retained so any old reference to .kill still styles as danger.
         ".panelbtn.kill:hover{color:var(--danger);border-color:var(--danger)}"
@@ -3036,8 +3314,20 @@ def render_project_window_html(project_id: str) -> str:
         "flex-wrap:wrap;font-size:11px}"
         ".panel .pbar .chaincrumb .cc-sep{color:var(--accent);font-weight:700}"
         ".panel .pbar .chaincrumb .cc-node{color:var(--accent);cursor:pointer;"
+        "display:inline-flex;align-items:center;gap:4px;"
         "padding:1px 6px;border-radius:5px;border:1px solid transparent}"
         ".panel .pbar .chaincrumb .cc-node:hover{border-color:var(--accent)}"
+        # v8 Wave 7: a per-node status light (locked color map) — live=green,
+        # done=amber, failed=red, idle/historical=grey — so each chain node's
+        # state is visible at a glance, not only on hover.
+        ".panel .pbar .chaincrumb .cc-node .cc-light{width:7px;height:7px;"
+        "border-radius:50%;display:inline-block;flex-shrink:0;"
+        "background:var(--text-dim)}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.green{background:#22c55e}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.amber{background:#fbbf24}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.red{background:#f87171}"
+        ".panel .pbar .chaincrumb .cc-node .cc-light.grey{background:#8b8f9a;"
+        "opacity:.6}"
         ".panel .pbar .chaincrumb .cc-node.cur{color:var(--text);"
         "border-color:var(--border);background:var(--surface)}"
         "</style></head><body>"
@@ -3061,6 +3351,12 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini rnd-accent' id='openTermBtn' "
         "onclick=\"newTermSession('general','claude')\">"
         "&#9000; Open terminal</button>"
+        # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
+        # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
+        # (a token-gated read). Unlinked → a "Link GitHub" button (linkGithub());
+        # linked → the remote shown + an auto-push opt-in toggle (set_auto_push) +
+        # a "Push now" button (push_now). Default new repos are PRIVATE.
+        "<span class='gh-remote' id='ghRemote'></span>"
         f"{lifecycle}"
         "</div></div>"
         # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
@@ -3165,6 +3461,9 @@ function setAnchorToken() {
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   repopulate();
+  // v8 Wave 3: render the GitHub link / auto-push header controls from the
+  // current remote_status (read-only GET; never a model call / network).
+  try { renderRemoteControls(); } catch (e) {}
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -3173,6 +3472,170 @@ function _postJson(url, payload) {
   return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
 }
 function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
+
+// ── v8 Wave 3 — GitHub link + Option-A auto-push (header controls) ───────────
+// renderRemoteControls(): fetch the project's current remote_status (read-only,
+// token-gated GET) and paint the #ghRemote header span. Unlinked → a single
+// "Link GitHub" button. Linked → the remote host/name + an auto-push opt-in
+// checkbox (set_auto_push) + a "Push now" button (push_now). NO network here —
+// this is a pure registry read. Never throws into the page (best-effort).
+async function renderRemoteControls() {
+  var host = document.getElementById('ghRemote');
+  if (!host) return;
+  var st = null;
+  try {
+    var url = '/api/rnd/remote_status?project_id=' +
+      encodeURIComponent(PROJECT_ID) + _tokenQ();
+    var r = await fetch(url, _jsonHdrs());
+    st = await r.json();
+  } catch (e) { st = null; }
+  if (!st || !st.ok) {
+    // Unknown state → still offer the link control (best-effort).
+    host.innerHTML = "<button class='rnd-mini' id='ghLinkBtn' " +
+      "onclick='linkGithub()'>&#128279; Link GitHub</button>";
+    return;
+  }
+  if (!st.linked) {
+    host.innerHTML = "<button class='rnd-mini' id='ghLinkBtn' " +
+      "onclick='linkGithub()'>&#128279; Link GitHub</button>";
+    return;
+  }
+  // Linked: show a short remote label + the auto-push toggle + Push now.
+  var label = _ghShortRemote(st.remote_url);
+  var checked = st.auto_push ? ' checked' : '';
+  host.innerHTML =
+    "<span class='gh-linked' id='ghLinkedLabel' title='" + _esc(st.remote_url) +
+      "'>&#128279; " + _esc(label) + "</span>" +
+    "<label class='gh-autopush' title='Auto-push this project when a session " +
+      "finishes'><input type='checkbox' id='ghAutoPush'" + checked +
+      " onchange='toggleAutoPush(this.checked)'> auto-push</label>" +
+    "<button class='rnd-mini' id='ghPushNowBtn' onclick='pushNow()'>" +
+      "&#8593; Push now</button>";
+}
+
+// Trim a remote URL to a compact "owner/name" (or host/name) for the header.
+function _ghShortRemote(u) {
+  u = String(u || '');
+  if (!u) return 'linked';
+  var s = u.replace(/^https?:\/\//, '').replace(/^git@/, '')
+           .replace(/\.git$/, '').replace(/:/g, '/');
+  var parts = s.split('/').filter(function (p) { return p; });
+  if (parts.length >= 2) return parts.slice(-2).join('/');
+  return s;
+}
+
+// linkGithub(): inline prompt to link a GitHub remote. If gh is available we
+// offer "Create new private repo" (mode=create) vs "Paste an existing URL"
+// (mode=existing); when gh is unavailable we offer paste-only (the server also
+// degrades create → {reason:'gh-unavailable', suggest:'paste-url'}).
+async function linkGithub() {
+  // Probe current state so we can decide whether to offer "create".
+  var ghAvailable = true;
+  try {
+    var sr = await fetch('/api/rnd/remote_status?project_id=' +
+      encodeURIComponent(PROJECT_ID) + _tokenQ(), _jsonHdrs());
+    var sd = await sr.json();
+    if (sd && typeof sd.gh_available === 'boolean') ghAvailable = sd.gh_available;
+  } catch (e) {}
+  var mode, value;
+  if (ghAvailable) {
+    var pick = window.prompt(
+      'Link GitHub — type:\n  C = Create a new PRIVATE repo\n' +
+      '  (or paste an existing repo URL)\n  (Cancel = not now)', 'C');
+    if (pick === null) return;            // not now
+    pick = (pick || '').trim();
+    if (pick.toUpperCase() === 'C' || pick === '') {
+      mode = 'create';
+      var nm = window.prompt('New private repo name (blank = folder name):', '');
+      if (nm === null) return;
+      value = (nm || '').trim();
+    } else {
+      mode = 'existing';
+      value = pick;
+    }
+  } else {
+    // gh unavailable → paste-only.
+    var url = window.prompt(
+      'gh is unavailable — paste an existing GitHub repo URL to link:', '');
+    if (url === null) return;
+    url = (url || '').trim();
+    if (!url) return;
+    mode = 'existing';
+    value = url;
+  }
+  var payload = {project_id: PROJECT_ID, mode: mode, value: value};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/link_github', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/link_github', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[link GitHub error] ' + e.message); return; }
+  if (!data.ok) {
+    if (data.reason === 'gh-unavailable') {
+      // Fall back to paste-only on the spot.
+      var url2 = window.prompt(
+        'gh is unavailable — paste an existing GitHub repo URL to link:', '');
+      if (url2 === null) return;
+      url2 = (url2 || '').trim();
+      if (!url2) return;
+      var p2 = {project_id: PROJECT_ID, mode: 'existing', value: url2};
+      var r2 = await _postJson('/api/rnd/link_github', p2);
+      var d2 = await r2.json();
+      if (!d2.ok) { alert('[link GitHub refused] ' + (d2.error || d2.reason || 'unknown')); return; }
+    } else {
+      alert('[link GitHub refused] ' + (data.error || data.reason || 'unknown'));
+      return;
+    }
+  }
+  renderRemoteControls();
+}
+
+// toggleAutoPush(on): persist the per-project auto-push opt-in (set_auto_push).
+async function toggleAutoPush(on) {
+  var payload = {project_id: PROJECT_ID, enabled: !!on};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/set_auto_push', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/set_auto_push', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[auto-push error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[auto-push refused] ' + (data.error || 'unknown'));
+    renderRemoteControls();             // re-sync the checkbox to truth
+  }
+}
+
+// pushNow(): manual "Push now" — git push -u origin <branch>. In tests origin is
+// a LOCAL BARE repo (file://) so there is NO network. Reports the outcome.
+async function pushNow() {
+  var btn = document.getElementById('ghPushNowBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Pushing…'; }
+  var payload = {project_id: PROJECT_ID};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/push_now', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/push_now', payload);
+      data = await r.json();
+    }
+  } catch (e) {
+    alert('[push error] ' + e.message);
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#8593; Push now'; }
+    return;
+  }
+  if (btn) { btn.disabled = false; btn.innerHTML = '&#8593; Push now'; }
+  if (!data.ok || !data.pushed) {
+    alert('[push refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+}
 
 // ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
 // Manual add: prompt for idea text, POST /api/rnd/add_idea, then refresh so the
@@ -3400,7 +3863,8 @@ function selectGrassIdea(ideaId) {
     + '<span class="sp"></span>'
     + '<span class="lbl">Engine</span>'
     + '<button class="mini gengtog">◆ Claude</button>'
-    + '<button class="mini gpromote">→ Promote to a lane</button></div>'
+    + '<button class="mini gexport" title="Copy this idea’s research/plan work up '
+    + 'into real lane tiles; the idea stays here marked promoted">⇪ Export to project</button></div>'
     + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
     + '· select Develop to start</span><span class="sp"></span>'
     + '<button class="mini gsave" disabled title="Save the develop session\'s '
@@ -3421,14 +3885,8 @@ function selectGrassIdea(ideaId) {
     _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
     eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
   };
-  var prom = work.querySelector('.gpromote');
-  if (prom) prom.onclick = function () {
-    var lane = window.prompt('Promote into which lane? (research / plan)', 'research');
-    if (!lane) return;
-    lane = lane.trim();
-    if (lane !== 'research' && lane !== 'plan') { alert('lane must be research or plan'); return; }
-    promoteGrass(ideaId, lane);
-  };
+  var exp = work.querySelector('.gexport');
+  if (exp) exp.onclick = function () { exportGrass(ideaId); };
   // The Save-refinement button is enabled only once a Develop session is live for
   // THIS idea (set in developGrass); switching ideas starts disabled.
   _grassDevSession = null;
@@ -3483,28 +3941,29 @@ async function developGrass(ideaId, lane) {
   } catch (e) { alert('[develop error] ' + e.message); return; }
   if (!data.ok || !data.session) { alert('[develop refused] ' + (data.error || 'unknown')); return; }
   var sid = data.session.session_id;
-  MANAGED[sid] = {
-    session_id: sid, lane: data.session.lane || lane,
-    backend: data.session.backend || _grassEngine,
-    status: data.session.status || 'running', label: data.session.label || '',
-    idx: (_laneCounters[lane] = (_laneCounters[lane] || 0) + 1)
-  };
-  renderSessionBar();
-  // Mount the live terminal into the workbench term-host (reuse _mountTerminal).
+  // v8 Wave 6: a develop session is CONTAINED. It is DELIBERATELY NOT added to
+  // MANAGED / renderSessionBar (no top-strip chip) and NOT pushed to the board
+  // (refreshBoard) — it lives ONLY in the workbench pane below, keyed by
+  // (idea, lane). Re-clicking Develop focuses this same session (the backend
+  // dedupes on the live (idea, lane) session and returns it). The board bridge
+  // also excludes it server-side via the [grass-dev] label marker.
   var host = work ? work.querySelector('[data-grass-term]') : null;
   var lab = work ? work.querySelector('.tpane .lab') : null;
   if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
   if (host) {
-    host.setAttribute('data-session', sid);
-    PANELS[sid] = {el: panel, body: host, term: null, transport: null};
-    _mountTerminal(sid, host);
+    // Re-focus: if THIS session's terminal is already mounted, just bring it up.
+    if (host.getAttribute('data-session') === sid && PANELS[sid]) {
+      host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } else {
+      host.setAttribute('data-session', sid);
+      PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+      _mountTerminal(sid, host);
+    }
   }
   // A develop session is now live for this idea → enable "Save refinement".
   _grassDevSession = sid;
   var sv = work ? work.querySelector('.gsave') : null;
   if (sv) sv.disabled = false;
-  // v7 Wave 6: instant-in-column tile for the new develop session.
-  refreshBoard();
 }
 
 // saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
@@ -3543,6 +4002,42 @@ async function saveGrassRefinement(ideaId) {
   if (lrow) lrow.setAttribute('data-status', 'refined');
 }
 
+// exportGrass(ideaId): EXPORT the idea's research/plan develop work UP into REAL
+// lane tiles (Option B). POST /api/rnd/grass_export → the backend copies the
+// develop docs up as board-visible lane sessions AND marks the idea "promoted"
+// (linked) — the idea STAYS in grass. We then refresh the board so the new lane
+// tiles appear, and flip the workbench + list chip to "promoted". Token-aware.
+async function exportGrass(ideaId) {
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_export', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_export', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[export error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[export refused] ' + (data.error || data.reason || 'unknown'));
+    return;
+  }
+  // The idea is now PROMOTED — reflect it on the workbench chip + the list row.
+  var panel = document.getElementById('grassPanel');
+  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  if (work) {
+    var chip = work.querySelector('h3 .stchip');
+    if (chip) { chip.className = 'stchip promoted'; chip.textContent = 'promoted'; }
+  }
+  var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
+  if (lrow) { lrow.setAttribute('data-status', 'promoted'); lrow.classList.add('p'); }
+  // Re-fetch the server-rendered board so the exported research/plan lane tiles
+  // appear INSTANTLY (the board is the single source of truth — re-fetch, never
+  // JS-inject — so dedupe stays correct).
+  refreshBoard();
+}
+
 // pullGrass(ideaId, refinementId, lane): pull a refinement version into a NEW
 // seeded session (research/plan) and open its inline panel. Token-aware.
 async function pullGrass(ideaId, refinementId, lane) {
@@ -3568,6 +4063,41 @@ async function pullGrass(ideaId, refinementId, lane) {
   renderSessionBar();
   openPanel(sid);
   setTimeout(repopulate, 600);
+}
+
+// deleteGrassIdea(ideaId): permanently DELETE a grass idea (v9 Wave 2). confirm()-
+// gated (an irreversible removal), then POST /api/rnd/grass_delete {confirm:true}.
+// On success the idea row is removed from the workbench list AND — if it was the
+// selected idea — the right workbench pane is cleared. The idea does not return
+// (grass_workbench_data no longer lists it). Token-aware (retries once on 401).
+async function deleteGrassIdea(ideaId) {
+  if (!confirm('Delete this idea? This permanently removes it and its refinements.')) return;
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, confirm: true};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_delete', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_delete', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[delete error] ' + e.message); return; }
+  if (!data.ok) { alert('[delete refused] ' + (data.error || data.reason || 'unknown')); return; }
+  var panel = document.getElementById('grassPanel');
+  if (panel) {
+    var lrow = panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]');
+    if (lrow) lrow.remove();
+    // If the deleted idea was the selected one, clear the right workbench pane.
+    var work = panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]')
+            || panel.querySelector('.gwork');
+    if (work && work.getAttribute('data-idea') === ideaId) {
+      work.removeAttribute('data-idea');
+      work.setAttribute('data-empty', '1');
+      work.innerHTML = '<div class="gwork-empty">Select an idea to develop it.</div>';
+    }
+  }
+  // Drop it from the cached grass data too, so a later select can't resurrect it.
+  if (_grassData && _grassData[ideaId]) { try { delete _grassData[ideaId]; } catch (e) {} }
 }
 
 // ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────
@@ -3773,6 +4303,15 @@ var _laneCounters = {};   // lane -> running index, for "plan 1", "plan 2" label
 // hard-kill means GONE; we suppress these ids from both MANAGED and FINISHED.
 var _KILLED = {};
 
+// _DELETED (v9 Wave 1): session ids the user TRUE-DELETED this page load. Delete
+// (term_delete) HARD-REMOVES the registry record + the session's effort pointer-
+// records + cached summary — so unlike a kill (which leaves a 'done' record that
+// would otherwise re-enter as a greyed tile), a deleted session never comes back
+// from the registry. We still record the id here so any in-flight repopulate()
+// that raced the delete cannot momentarily re-add the tile. (The produced
+// documents are KEPT on disk — Option A — only the Anchor record/cache is gone.)
+var _DELETED = {};
+
 // Map a session status to the LOCKED color bucket (MASTER-PLAN §D / §E; this is
 // the SAME mapping the server's _session_light_class applies to the lane tiles):
 //   running              -> green  (working; ignore)
@@ -3784,6 +4323,20 @@ function _statusColor(status) {
   if (status === 'needs-attention' || status === 'done') return 'amber';
   if (status === 'failed') return 'red';
   return 'grey';
+}
+
+// v8 Wave 4 — skill clarity. Mirror terminal_session.LANE_SKILL so the panel
+// header can show WHICH trio skill a session loaded (the user's "loads Crucible"
+// confusion): research→researchPrime, plan/planning→Crucible, build→Foreman.
+// A lane with no mapped skill (grass/general/deliverables) returns '' (no chip).
+function _skillForLane(lane) {
+  switch (lane) {
+    case 'research': return 'researchPrime';
+    case 'plan':
+    case 'planning': return 'Crucible';
+    case 'build': return 'Foreman';
+    default: return '';
+  }
 }
 
 // _isTerminalStatus: mirror session_registry.TERMINAL_STATUSES ({done, failed}).
@@ -3821,6 +4374,9 @@ async function repopulate() {
     // (its registry record persists as 'done', which would otherwise re-enter it
     // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
     if (_KILLED[s.session_id]) continue;
+    // v9 Wave 1: a TRUE-DELETED session is GONE (registry record removed); never
+    // re-add it even if an in-flight fetch raced the delete and still saw it.
+    if (_DELETED[s.session_id]) continue;
     var lane = s.lane || 'session';
     if (_isTerminalStatus(s.status)) {
       // v6 Wave 4: a TERMINAL session (a deliberate hard-kill marks the registry
@@ -4095,6 +4651,14 @@ function openPanel(sessionId) {
   var title = document.createElement('span');
   title.className = 'ti';
   title.textContent = (s.label ? s.label : (s.lane + ' ' + s.idx));
+  // v8 Wave 4 — surface the LOADED trio skill (e.g. "build · Foreman" /
+  // "planning · Crucible" / "research · researchPrime") so it is unambiguous
+  // which skill this session is running. Omitted for skill-less lanes.
+  var skillEl = document.createElement('span');
+  skillEl.className = 'skl';
+  var _skl = _skillForLane(s.lane || '');
+  skillEl.textContent = _skl ? (s.lane + ' · ' + _skl) : (s.lane || '');
+  skillEl.setAttribute('data-skill', _skl);
   var meta = document.createElement('span');
   meta.className = 'mt';
   meta.textContent = s.backend ? ('· ' + s.backend) : '';
@@ -4147,7 +4711,20 @@ function openPanel(sessionId) {
   killBtn.title = 'Kill this session (terminate + remove its tile)';
   killBtn.textContent = '🗑';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
-  bar.appendChild(dot); bar.appendChild(title); bar.appendChild(meta);
+  //   (d) '✕'  DELETE     — v9 Wave 1: TRUE delete, the red top-right control.
+  //        VISUALLY + behaviorally DISTINCT from KILL (🗑): kill ENDS a *running*
+  //        session (keeps the record so it's resumable); delete REMOVES the
+  //        record entirely (POST /api/rnd/term_delete) — the registry record +
+  //        effort pointer-records + cached summary are dropped, so the tile is
+  //        gone and STAYS gone across a reload. The produced DOCUMENTS are KEPT
+  //        on disk (Option A). Confirm-gated.
+  var delBtn = document.createElement('button');
+  delBtn.className = 'panelbtn delete';
+  delBtn.title = 'Delete this session from Anchor (removes the record; keeps its documents)';
+  delBtn.textContent = '✕';
+  delBtn.onclick = function (e) { e.stopPropagation(); deletePanel(sessionId); };
+  bar.appendChild(dot); bar.appendChild(title);
+  bar.appendChild(skillEl); bar.appendChild(meta);
   bar.appendChild(crumb);
   bar.appendChild(sp);
   if (engEl) {
@@ -4159,6 +4736,7 @@ function openPanel(sessionId) {
   }
   bar.appendChild(minBtn); bar.appendChild(maxBtn);
   bar.appendChild(closeBtn); bar.appendChild(killBtn);
+  bar.appendChild(delBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -4285,6 +4863,21 @@ var _CHAIN_ABBR = {research: 'R', planning: 'P', plan: 'P', build: 'B'};
 // render a clickable breadcrumb (R-1 → P-2 → …) into the panel header. Read-only
 // (GET /api/rnd/chain, ?token=); each node opens that session's panel. A chain of
 // one (no lineage) renders nothing. Best-effort — any error leaves the crumb empty.
+//
+// v8 Wave 7 — full chain navigation on the now-DURABLE artifacts (W2/W5):
+//   - Renders for EVERY panel — live AND done/historical (openPanel calls this
+//     unconditionally; a done/historical tile resolves via _synthSessionRecord),
+//     so you can navigate the chain from a finished build the same as from a live
+//     research session.
+//   - Each node shows a status LIGHT (green/amber/red/grey) + the lane + a short
+//     label, so a node's state is visible at a glance (not only on hover).
+//   - Click a sibling node → openPanel(thatId): if it is LIVE it focuses/attaches
+//     its terminal; if DONE/historical it opens that session's DETAIL view (the W5
+//     read-only body — summary + produced docs + "Continue the dialog"). So you can
+//     move research→plan→build AND back build→plan→research, landing on real content.
+//   - HONEST partial chains: members.length < 2 → render nothing (a lone session
+//     with no siblings shows no misleading breadcrumb; no fabricated nodes — the
+//     server only emits the records that actually exist for this chain).
 function _loadChainBreadcrumb(sessionId, host) {
   if (!host) return;
   var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
@@ -4307,7 +4900,16 @@ function _loadChainBreadcrumb(sessionId, host) {
         var abbr = _CHAIN_ABBR[lane] || (lane ? lane.charAt(0).toUpperCase() : '?');
         node.className = 'cc-node' + (m.session_id === sessionId ? ' cur' : '');
         node.setAttribute('data-session', m.session_id);
-        node.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.setAttribute('data-lane', lane);
+        // A small status light (locked color map) makes each node's state visible
+        // at a glance — a done sibling reads amber, a live one green, etc.
+        var lt = document.createElement('span');
+        lt.className = 'cc-light ' + _statusColor(m.status || '');
+        node.appendChild(lt);
+        var txt = document.createElement('span');
+        txt.className = 'cc-txt';
+        txt.textContent = m.label ? m.label : (abbr + ' ' + lane);
+        node.appendChild(txt);
         node.title = lane + ' · ' + (m.status || '');
         node.onclick = (function (theId) {
           return function (ev) { ev.stopPropagation(); openPanel(theId); };
@@ -4432,8 +5034,14 @@ function _mountReadOnlyBody(sessionId, host, s) {
 // skill/prompts/produced-files (v5 Wave 2). Read-only; honest placeholders for
 // absent fields. The summary GET returns the full cached structured dict, so the
 // new skill/prompts/actions fields ride along.
-function _fillPastSessionDetail(sessionId, lane, detail) {
+function _fillPastSessionDetail(sessionId, lane, detail, _tries) {
   if (!detail) return;
+  // v8 Wave 5 — a just-killed session's durable summary is generated in the
+  // BACKGROUND (kill schedules it). The GET returns status:'generating' until it
+  // lands, so we poll a bounded number of times before painting the honest
+  // "being generated" placeholder — the detail then shows the REAL produced
+  // docs/summary as soon as it caches (no-loss close-out), not a dead-end.
+  _tries = _tries || 0;
   var sUrl = '/api/rnd/session_summary?pid=' + encodeURIComponent(PROJECT_ID)
     + '&lane=' + encodeURIComponent(lane)
     + '&session=' + encodeURIComponent(sessionId);
@@ -4441,6 +5049,12 @@ function _fillPastSessionDetail(sessionId, lane, detail) {
     .then(function (r) { return r.json(); })
     .then(function (d) {
       var summ = (d && d.status === 'ready' && d.summary) ? d.summary : null;
+      if (!summ && d && d.status === 'generating' && _tries < 20) {
+        setTimeout(function () {
+          _fillPastSessionDetail(sessionId, lane, detail, _tries + 1);
+        }, 500);
+        return;
+      }
       detail.innerHTML = _renderPastSession(summ);
     })
     .catch(function () {
@@ -4992,6 +5606,72 @@ async function killPanel(sessionId) {
   }
   // v7 Wave 6: re-fetch the server-rendered board so the killed session's tile
   // is dropped (and any auto-opened build tile appears) instantly, no reload.
+  refreshBoard();
+  setTimeout(repopulate, 400);
+}
+
+// deletePanel: the panel red "✕" = TRUE DELETE (v9 Wave 1), DISTINCT from kill.
+// Confirm-gated. On YES we POST /api/rnd/term_delete {confirm:true} — the server
+// hard-deletes the registry record + the session's effort pointer-records +
+// cached summary (the produced DOCUMENTS are KEPT on disk — Option A). Then we
+// tear down the panel, drop the MANAGED/FINISHED record, mark the id _DELETED
+// (so an in-flight repopulate can't re-add it) and remove the lane tile. Because
+// the registry record is GONE, term_sessions/the board no longer surface it — so
+// it STAYS gone across a reload (the v6 key bug for kills is moot for delete).
+async function deletePanel(sessionId) {
+  var s = MANAGED[sessionId] || FINISHED[sessionId];
+  var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
+  if (!confirm('Are you sure? This permanently removes the "' + name +
+               '" session from Anchor (its registry record, effort records and ' +
+               'cached summary). The produced documents are KEPT on disk. This ' +
+               'cannot be undone.')) return;
+  try {
+    var r = await _postJson('/api/rnd/term_delete', {session: sessionId, confirm: true});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_delete', {session: sessionId, confirm: true});
+      data = await r.json();
+    }
+  } catch (e) { alert('[delete error] ' + e.message); }
+  _DELETED[sessionId] = 1;       // suppress this id from any future repopulate
+  delete _KILLED[sessionId];
+  _closePanel(sessionId);
+  delete MANAGED[sessionId];
+  delete FINISHED[sessionId];
+  _removeSessionTile(sessionId);
+  renderSessionBar();
+  // Re-fetch the server-rendered board so the deleted session's tile is dropped
+  // instantly (the registry record is gone → the board no longer renders it).
+  refreshBoard();
+  setTimeout(repopulate, 400);
+}
+
+// cleanupGhostSessions: v9 Wave 1 small "clear empty sessions" action — sweep the
+// project's empty ghost (terminal/idle, no-effort) registry records. Confirm +
+// token gated; refreshes the board on success.
+async function cleanupGhostSessions() {
+  if (!confirm('Clear empty sessions? This removes session records that produced ' +
+               'nothing (no documents are affected).')) return;
+  try {
+    var r = await _postJson('/api/rnd/cleanup_ghost_sessions',
+                            {project_id: PROJECT_ID, confirm: true});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/cleanup_ghost_sessions',
+                          {project_id: PROJECT_ID, confirm: true});
+      data = await r.json();
+    }
+    if (data && data.removed) {
+      for (var i = 0; i < data.removed.length; i++) {
+        _DELETED[data.removed[i]] = 1;
+        _closePanel(data.removed[i]);
+        delete MANAGED[data.removed[i]];
+        delete FINISHED[data.removed[i]];
+        _removeSessionTile(data.removed[i]);
+      }
+    }
+  } catch (e) { alert('[cleanup error] ' + e.message); }
+  renderSessionBar();
   refreshBoard();
   setTimeout(repopulate, 400);
 }
@@ -6719,6 +7399,41 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-mini.rnd-pr-on {{ border-color: var(--accent); color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-open-btn {{ background: var(--accent); color: #0b1020; border-color: var(--accent); font-weight: 600; }}
 .rnd-mini.rnd-accent {{ border-color: var(--accent); color: var(--accent); }}
+/* v9 Wave 3 — collapsible project FOLDERS (group field; drag-to-group). */
+.rnd-folder-toolbar {{ display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }}
+.rnd-newfolder-btn {{ font-size: 12px; padding: 6px 12px; border-radius: 7px; border: 1px solid rgba(108,156,252,.5); background: var(--surface2, #232733); color: var(--accent); cursor: pointer; }}
+.rnd-newfolder-btn:hover {{ border-color: var(--accent); }}
+.rnd-folder-hint {{ font-size: 11.5px; color: var(--text-dim); }}
+.rnd-folder-list {{ display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }}
+.rnd-folder {{ border-bottom: 1px solid var(--border); }}
+.rnd-folder:last-child {{ border-bottom: none; }}
+.rnd-folder-head {{ display: flex; align-items: center; gap: 8px; padding: 11px 14px; cursor: pointer; background: var(--surface2, #232733); }}
+.rnd-folder-head:hover {{ background: var(--surface3, #2a2f3d); }}
+.rnd-tw {{ font-size: 11px; color: var(--text-dim); width: 12px; flex: 0 0 auto; }}
+.rnd-fname {{ font-size: 13.5px; font-weight: 600; }}
+.rnd-fcount {{ font-size: 11px; color: var(--text-dim); }}
+.rnd-fpath {{ font-size: 10.5px; color: var(--text-dim); font-family: ui-monospace, Consolas, monospace; margin-left: 6px; }}
+.rnd-fsp {{ flex: 1; }}
+.rnd-fdrop-hint {{ font-size: 11px; color: var(--accent); }}
+.rnd-folder-body {{ display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }}
+.rnd-folder.rnd-collapsed .rnd-folder-body {{ display: none; }}
+.rnd-folder.rnd-droptarget .rnd-folder-head {{ outline: 2px dashed var(--accent); outline-offset: -2px; }}
+.rnd-grip {{ flex: 0 0 auto; color: var(--text-dim); font-size: 13px; cursor: grab; letter-spacing: -2px; }}
+.rnd-row[draggable="true"] {{ cursor: grab; }}
+.rnd-row.rnd-dragging {{ opacity: .5; }}
+/* v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. */
+.rnd-move-overlay {{ position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; }}
+.rnd-move-dlg {{ max-width: 560px; width: calc(100% - 40px); border: 1px solid rgba(239,68,68,.4); border-radius: 12px; background: #160f12; overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.6); }}
+.rnd-move-h {{ padding: 10px 14px; background: rgba(239,68,68,.1); font-size: 14px; font-weight: 600; border-bottom: 1px solid rgba(239,68,68,.3); color: var(--text); }}
+.rnd-move-b {{ padding: 13px 14px; font-size: 13px; color: var(--text); }}
+.rnd-move-mono {{ font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: #cdd2dc; background: #05070c; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; margin: 9px 0; word-break: break-all; }}
+.rnd-move-mono .rnd-move-arr {{ color: var(--accent); }}
+.rnd-move-guard {{ font-size: 12px; color: var(--text-dim); margin-top: 8px; }}
+.rnd-move-guard b {{ color: #e9dca8; }}
+.rnd-move-acts {{ display: flex; flex-wrap: wrap; gap: 9px; padding: 11px 14px; border-top: 1px solid var(--border); }}
+.rnd-move-btn {{ font-size: 12.5px; padding: 7px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface2, #232733); color: var(--text); cursor: pointer; }}
+.rnd-move-btn:hover {{ border-color: var(--accent); }}
+.rnd-move-btn.rnd-move-go {{ border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.14); color: #ffd2d2; }}
 /* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
 .rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
 .rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
@@ -7116,6 +7831,33 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 
 <div class="toast" id="toast"></div>
 
+<!-- v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. Hidden by
+     default; shown when a project row is dropped into a folder header. -->
+<div class="rnd-move-overlay" id="rndMoveOverlay" style="display:none"
+     onclick="if(event.target===this)rndMoveCancel()">
+  <div class="rnd-move-dlg" role="dialog" aria-modal="true"
+       aria-labelledby="rndMoveTitle">
+    <div class="rnd-move-h" id="rndMoveTitle">Move project into folder?</div>
+    <div class="rnd-move-b">
+      <span id="rndMoveLede">You dragged a project into a folder. Also move its
+      directory on disk to match?</span>
+      <div class="rnd-move-mono" id="rndMovePaths"></div>
+      <div class="rnd-move-guard">Safety: the move is <b>refused for the Anchor
+      app itself</b> and for any project with a <b>live session</b> (stop them
+      first). The move is atomic — folder moved, registry + git worktrees +
+      discovery re-pointed — and rolls back if anything fails.</div>
+    </div>
+    <div class="rnd-move-acts">
+      <button class="rnd-move-btn rnd-move-go" type="button"
+              id="rndMoveGo">Move on disk + group</button>
+      <button class="rnd-move-btn" type="button" id="rndMoveJust">Just group
+      (leave files where they are)</button>
+      <button class="rnd-move-btn" type="button"
+              onclick="rndMoveCancel()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // Heartbeat disabled — the server runs until explicitly stopped so the
 // dashboard is instantly available when you return to the tab later.
@@ -7387,6 +8129,9 @@ function rndRowsRefresh() {{
                       '.rnd-rows-rolltog b[data-window="' + savedWin + '"]');
                   if (reBtn) rndRowsRollupWindow(savedWin, reBtn);
               }}
+              // v9 Wave 3 — re-wire folder drag/drop + restore collapse state on
+              // the freshly-swapped rows.
+              if (typeof rndFolderInit === 'function') rndFolderInit();
           }})
           .catch(function () {{}});                       // silent no-op
     }} catch (e) {{}}
@@ -7785,6 +8530,243 @@ function rndBlurb(pid) {{
     if (n === null) return;
     apiCall('/api/rnd/set_blurb', {{id: pid, blurb: n}});
 }}
+
+// ── v9 Wave 3 — project FOLDERS (group field; collapsible; drag-to-group) ──
+// Organization only — NOTHING moves on disk this wave (that's Wave 4). Dragging
+// a row into a folder header just sets the project's `group` via set_group.
+var RND_FOLDER_LS = 'anchor_rnd_folder_collapsed';
+function _rndCollapsedSet() {{
+    try {{ return JSON.parse(localStorage.getItem(RND_FOLDER_LS) || '[]') || []; }}
+    catch (e) {{ return []; }}
+}}
+function _rndSaveCollapsed(arr) {{
+    try {{ localStorage.setItem(RND_FOLDER_LS, JSON.stringify(arr || [])); }} catch (e) {{}}
+}}
+// Collapse / expand one folder, persisting the state by group name.
+function rndToggleFolder(headEl) {{
+    var folder = headEl && headEl.closest ? headEl.closest('.rnd-folder') : null;
+    if (!folder) return;
+    var collapsed = folder.classList.toggle('rnd-collapsed');
+    var tw = folder.querySelector('.rnd-tw');
+    if (tw) tw.textContent = collapsed ? '\\u25B8' : '\\u25BE';  // ▸ / ▾
+    var g = folder.getAttribute('data-group') || '';
+    var set = _rndCollapsedSet();
+    var i = set.indexOf(g);
+    if (collapsed && i < 0) set.push(g);
+    else if (!collapsed && i >= 0) set.splice(i, 1);
+    _rndSaveCollapsed(set);
+}}
+// "+ New folder" — name a group and assign the FIRST ungrouped project to it,
+// OR (if there is none) create an empty folder by re-rendering a placeholder.
+// Simplest persistence model: a folder "exists" once >=1 project carries that
+// group. We create it by re-grouping the first ungrouped project; if none are
+// ungrouped, we still surface an empty folder via localStorage so the user can
+// drag into it (it persists once a project lands there).
+var RND_PENDING_FOLDERS = 'anchor_rnd_pending_folders';
+function _rndPendingFolders() {{
+    try {{ return JSON.parse(localStorage.getItem(RND_PENDING_FOLDERS) || '[]') || []; }}
+    catch (e) {{ return []; }}
+}}
+function _rndSavePending(arr) {{
+    try {{ localStorage.setItem(RND_PENDING_FOLDERS, JSON.stringify(arr || [])); }} catch (e) {{}}
+}}
+function rndNewFolder() {{
+    var name = window.prompt('New folder name:', '');
+    if (name === null) return;
+    name = (name || '').trim();
+    if (!name) return;
+    // Render an empty folder immediately so the user can drag into it. It only
+    // truly persists once a project is dropped in (set_group), but we keep the
+    // pending name in localStorage so a reload still shows the empty folder.
+    var pend = _rndPendingFolders();
+    if (pend.indexOf(name) < 0) {{ pend.push(name); _rndSavePending(pend); }}
+    // The home page renders the folder list in two places — create in each.
+    var lists = document.querySelectorAll('.rnd-folder-list');
+    for (var i = 0; i < lists.length; i++) _rndEnsureFolderIn(lists[i], name);
+}}
+// Ensure a folder header with the given group name exists in ONE list (create
+// an empty one before that list's Ungrouped folder if absent). Returns the el.
+function _rndEnsureFolderIn(list, name) {{
+    if (!list) return null;
+    var sel = (window.CSS && CSS.escape) ? CSS.escape(name) : name;
+    var existing = list.querySelector('.rnd-folder[data-group="' + sel + '"]');
+    if (existing) return existing;
+    var folder = document.createElement('div');
+    folder.className = 'rnd-folder';
+    folder.setAttribute('data-group', name);
+    folder.setAttribute('data-ungrouped', '0');
+    folder.innerHTML =
+        '<div class="rnd-folder-head" role="button" tabindex="0" '
+        + 'title="Collapse / expand folder">'
+        + '<span class="rnd-tw" aria-hidden="true">\\u25BE</span>'
+        + '<span class="rnd-fname"></span>'
+        + '<span class="rnd-fcount">(0)</span>'
+        + '<span class="rnd-fsp"></span>'
+        + '</div><div class="rnd-folder-body"></div>';
+    folder.querySelector('.rnd-fname').textContent = name;
+    var head = folder.querySelector('.rnd-folder-head');
+    head.addEventListener('click', function () {{ rndToggleFolder(head); }});
+    // Insert before this list's Ungrouped folder so Ungrouped stays last.
+    var ung = list.querySelector('.rnd-folder[data-ungrouped="1"]');
+    if (ung) list.insertBefore(folder, ung); else list.appendChild(folder);
+    _rndWireFolderDrop(folder);
+    return folder;
+}}
+// Wire one folder header as a drop target. Dropping a dragged project row here
+// calls set_group with this folder's group ("" for the Ungrouped folder).
+function _rndWireFolderDrop(folder) {{
+    var head = folder.querySelector('.rnd-folder-head');
+    if (!head) return;
+    head.addEventListener('dragover', function (ev) {{
+        ev.preventDefault();
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+        folder.classList.add('rnd-droptarget');
+    }});
+    head.addEventListener('dragleave', function () {{
+        folder.classList.remove('rnd-droptarget');
+    }});
+    head.addEventListener('drop', function (ev) {{
+        ev.preventDefault();
+        folder.classList.remove('rnd-droptarget');
+        var pid = ev.dataTransfer ? ev.dataTransfer.getData('text/plain') : '';
+        if (!pid) return;
+        var isUng = folder.getAttribute('data-ungrouped') === '1';
+        var grp = isUng ? '' : (folder.getAttribute('data-group') || '');
+        // v9 Wave 4 — the Option-C choice. Dropping into the Ungrouped folder
+        // (remove from a folder) is dashboard-only — just set_group, no dialog.
+        // Dropping into a NAMED folder asks: "Move on disk + group" (the guarded
+        // move_project) vs "Just group" (set_group only) vs Cancel.
+        if (isUng) {{
+            apiCall('/api/rnd/set_group', {{project_id: pid, group: grp}});
+        }} else {{
+            rndMoveDialog(pid, grp, folder);
+        }}
+    }});
+}}
+// ── v9 Wave 4 — the Option-C "move on disk + group" dialog ─────────────────
+// On a drop into a NAMED folder, offer: (1) "Move on disk + group" → the guarded
+// POST /api/rnd/move_project {{confirm:true}} (refuses the Anchor app + any
+// live-session project; atomic + rolls back); (2) "Just group" → the Wave-3
+// set_group (dashboard-only, NO disk move); (3) Cancel.
+function rndMoveDialog(pid, group, folder) {{
+    var ov = document.getElementById('rndMoveOverlay');
+    if (!ov) {{  // dialog markup absent → fall back to the plain group path.
+        apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        return;
+    }}
+    var pname = '';
+    var row = document.querySelector('.rnd-row[data-project-id="'
+        + (window.CSS && CSS.escape ? CSS.escape(pid) : pid) + '"]');
+    if (row) {{
+        var n = row.querySelector('.rnd-name');
+        if (n) pname = n.textContent || '';
+    }}
+    var title = document.getElementById('rndMoveTitle');
+    if (title) title.textContent =
+        'Move "' + (pname || 'project') + '" into folder "' + group + '"?';
+    // The exact source→dest paths are resolved server-side (the row deliberately
+    // carries no on-disk path); show the destination group so the user knows
+    // what "move on disk" does.
+    var mono = document.getElementById('rndMovePaths');
+    if (mono) mono.textContent = 'Destination group: ' + group
+        + '  →  <projects-root>/' + group + '/<project-dir>';
+    var go = document.getElementById('rndMoveGo');
+    var just = document.getElementById('rndMoveJust');
+    if (go) go.onclick = function () {{ rndMoveConfirm(pid, group, true); }};
+    if (just) just.onclick = function () {{ rndMoveConfirm(pid, group, false); }};
+    ov.style.display = 'flex';
+}}
+function rndMoveCancel() {{
+    var ov = document.getElementById('rndMoveOverlay');
+    if (ov) ov.style.display = 'none';
+}}
+// onDisk=true → the guarded move_project; false → set_group (Wave-3 path). On a
+// refusal (Anchor repo / live session) we surface a clear toast (no reload).
+function rndMoveConfirm(pid, group, onDisk) {{
+    rndMoveCancel();
+    if (!onDisk) {{
+        apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        return;
+    }}
+    var headers = {{'Content-Type': 'application/json'}};
+    var tok = (typeof _anchorToken === 'function') ? _anchorToken() : '';
+    if (tok) headers['X-Anchor-Token'] = tok;
+    fetch('/api/rnd/move_project', {{
+        method: 'POST', headers: headers,
+        body: JSON.stringify({{project_id: pid, group: group, confirm: true}})
+    }}).then(function (r) {{ return r.json(); }}).then(function (data) {{
+        if (data && data.ok) {{
+            showToast('Moved on disk + grouped under "' + group + '"');
+            setTimeout(function () {{ window.location.reload(); }}, 700);
+        }} else {{
+            var reason = (data && data.reason) || (data && data.error) || 'unknown';
+            var msg;
+            if (reason === 'refused-anchor-repo')
+                msg = "Can't move the running Anchor app (it'd kill the server). Grouped only.";
+            else if (reason === 'refused-live-sessions')
+                msg = 'Refused: this project has a live session — stop it first. Grouped only.';
+            else
+                msg = 'Move refused (' + reason + '). Grouped only.';
+            showToast(msg);
+            // The dashboard grouping still applies even when the disk move is
+            // refused, so the row at least lands under the folder.
+            apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
+        }}
+    }}).catch(function (e) {{
+        showToast('Move error: ' + e.message);
+    }});
+}}
+// Make project rows draggable and wire every folder as a drop target. Also
+// restore the persisted collapse state. The home page renders the folder list
+// in TWO places (the dashboard section + the #rndProjectsRows view), so we wire
+// EVERY .rnd-folder-list. Runs on DOMContentLoaded + after an in-place refresh.
+function rndFolderInit() {{
+    var lists = document.querySelectorAll('.rnd-folder-list');
+    for (var L = 0; L < lists.length; L++) {{
+        var list = lists[L];
+        if (list.getAttribute('data-rnd-wired') === '1') continue;
+        list.setAttribute('data-rnd-wired', '1');
+        // Draggable rows.
+        var rows = list.querySelectorAll('.rnd-row[draggable="true"]');
+        for (var i = 0; i < rows.length; i++) {{
+            (function (row) {{
+                row.addEventListener('dragstart', function (ev) {{
+                    var pid = row.getAttribute('data-project-id') || '';
+                    if (ev.dataTransfer) {{
+                        ev.dataTransfer.setData('text/plain', pid);
+                        ev.dataTransfer.effectAllowed = 'move';
+                    }}
+                    row.classList.add('rnd-dragging');
+                }});
+                row.addEventListener('dragend', function () {{
+                    row.classList.remove('rnd-dragging');
+                }});
+            }})(rows[i]);
+        }}
+        // Drop targets + restore collapse state.
+        var folders = list.querySelectorAll('.rnd-folder');
+        var collapsed = _rndCollapsedSet();
+        for (var j = 0; j < folders.length; j++) {{
+            _rndWireFolderDrop(folders[j]);
+            var g = folders[j].getAttribute('data-group') || '';
+            if (collapsed.indexOf(g) >= 0) {{
+                folders[j].classList.add('rnd-collapsed');
+                var tw = folders[j].querySelector('.rnd-tw');
+                if (tw) tw.textContent = '\\u25B8';  // ▸
+            }}
+        }}
+        // Re-surface any pending (empty, not-yet-populated) folders from a prior
+        // "+ New folder" that has no project yet.
+        var pend = _rndPendingFolders();
+        for (var k = 0; k < pend.length; k++) {{
+            if (!list.querySelector('.rnd-folder[data-group="'
+                + (window.CSS && CSS.escape ? CSS.escape(pend[k]) : pend[k]) + '"]')) {{
+                _rndEnsureFolderIn(list, pend[k]);
+            }}
+        }}
+    }}
+}}
+window.addEventListener('DOMContentLoaded', rndFolderInit);
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
 
@@ -8493,17 +9475,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         self._send_json({"ok": True, "status": "unknown"})
                     else:
                         # Not cached (or a prior failed/uncached run): resolve the
-                        # live session record so generation can seed from its
-                        # members. If the session id is not among the project's
-                        # sessions for this lane → TERMINAL "unknown" (the panel
-                        # stops polling). Otherwise kick off background
-                        # generation run-once and tell the panel to poll.
+                        # session so generation can seed from its members. v8 Wave
+                        # 5 — a killed managed session's produced docs are persisted
+                        # tagged with its id (they GROUP elsewhere in list_sessions),
+                        # so resolve via _resolve_finished_session which TIES the
+                        # managed id to those exact docs. Unresolvable → TERMINAL
+                        # "unknown" (the panel stops polling); else kick off
+                        # background generation run-once and tell the panel to poll.
                         session = None
                         try:
-                            for s in _sessions.list_sessions(folder, pid, lane):
-                                if s.get("session_id") == session_id:
-                                    session = s
-                                    break
+                            session = _resolve_finished_session(
+                                folder, pid, lane, session_id)
                         except Exception:
                             session = None
                         if session is None:
@@ -8613,6 +9595,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
+            elif self.path.startswith("/api/rnd/remote_status"):
+                # Read-only (v8 Wave 3): the project's GitHub link state for the
+                # header control — {linked, remote_url, auto_push}. NO mutation,
+                # NO network. AUTH: ``?token=`` (read-only GET; back-compat when
+                # no token set). /api/rnd/remote_status?project_id=<id>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                elif _rnd.get_project(pid) is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    st = _remote.remote_status(pid)
+                    self._send_json({"ok": True, "linked": st["linked"],
+                                     "remote_url": st["remote_url"],
+                                     "auto_push": st["auto_push"]})
             elif self.path.startswith("/api/rnd/project_rollup"):
                 # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
                 # (effort_history.project_effort_rollup, Wave 3) for the header's
@@ -9107,6 +10114,52 @@ class AnchorHandler(BaseHTTPRequestHandler):
             except KeyError:
                 self._send_json({"ok": False, "error": "Not found"}, 404)
 
+        elif self.path == "/api/rnd/set_group":
+            # v9 Wave 3 — reassign a project's dashboard FOLDER (group) only.
+            # Organization-only: this NEVER moves anything on disk (that is the
+            # v9 Wave 4 guarded on-disk move). Token-gated by the do_POST middleware.
+            pid = body.get("project_id", "") or body.get("id", "")
+            group = body.get("group", "")
+            try:
+                entry = _rnd.set_group(pid, group)
+                self._send_json({
+                    "ok": True,
+                    "entry": entry,
+                    "message": (f"Grouped under '{entry.get('group')}'"
+                                if entry.get("group")
+                                else "Moved to Ungrouped"),
+                })
+            except KeyError:
+                self._send_json({"ok": False, "error": "Not found"}, 404)
+
+        elif self.path == "/api/rnd/move_project":
+            # v9 Wave 4 — GUARDED on-disk move: relocate a project's directory
+            # into a group subfolder and re-point registry+worktrees+discovery.
+            # Token-gated by the do_POST middleware above AND requires an
+            # explicit confirm:true (a real, irreversible filesystem move).
+            # REFUSES (no fs change) the running Anchor repo + any live-session
+            # project, surfacing the refusal reason. NEVER raises into here.
+            import project_move as _pmove
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            group = body.get("group", "")
+            confirm = bool(body.get("confirm"))
+            if not pid:
+                self._send_json(
+                    {"ok": False, "error": "project_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "move requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _pmove.move_to_group(pid, group)
+                except Exception as exc:  # defensive — move_to_group never raises
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    status = 200 if out.get("ok") else (
+                        404 if out.get("reason") == "unknown-project" else 400)
+                    self._send_json(out, status)
+
         # ── R&D control surface (Wave 9) ──────────────────────────────
         elif self.path == "/api/rnd/link_task":
             # Link/unlink a task ↔ R&D project (activates the Project: field).
@@ -9499,21 +10552,23 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "reason": "unknown-session"}, 404)
             else:
                 # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
-                # DONE transition that may auto-advance to build. Capture the plan
-                # set BEFORE kill() reaps the planning worktree (prime-before-reap),
-                # then kill (sets STATUS_DONE), then auto-advance (idempotent on
-                # parent_session_id; no plan ⇒ no advance). Best-effort: an
-                # auto-advance failure never breaks the kill.
+                # DONE transition that may auto-advance to build.
+                #
+                # v8 Wave 4 (ordering fix): kill() PERSISTS the session's
+                # freshly-produced docs into the MAIN folder (Wave 2,
+                # capture-before-reap) BEFORE the worktree is reaped. The plan-set
+                # capture (discover_recent_plan_set) reads the MAIN folder, so it
+                # must run AFTER kill() — otherwise it sees the project as it was
+                # before this session and the auto-opened build gets a stale (or no)
+                # plan. So: kill (persists docs + sets STATUS_DONE + reaps), THEN
+                # capture the now-persisted plan set, THEN auto-advance (idempotent
+                # on parent_session_id; no plan ⇒ no advance). Best-effort.
                 rec = _termsess.get_session(session)
                 pid_for_advance = rec.get("project_id") if rec else None
                 planning_kill = (
                     rec is not None
                     and rec.get("lane") in _termsess._PLANNING_LANES
                     and pid_for_advance)
-                pre_plan_set = None
-                if planning_kill:
-                    pre_plan_set = _termsess.capture_plan_set(
-                        pid_for_advance, session)
                 out = _termsess.kill(session)
                 # v7 Wave 2: a killed session is DONE — schedule a background
                 # session-summary so the finished tile opens to a real summary
@@ -9525,16 +10580,80 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         rec.get("lane") if rec else None, session)
                 except Exception:
                     pass
+                # v8 Wave 3: auto-push the project AFTER kill() persisted the
+                # produced docs (Wave 2, capture-before-reap) — but ONLY when the
+                # project is linked to a remote AND has opted in. A non-linked or
+                # non-opted project never pushes. Best-effort + never blocks the
+                # kill response; in tests origin is a LOCAL BARE repo (no network).
+                try:
+                    _auto_push_on_finish(
+                        pid_for_advance or (rec.get("project_id") if rec else None))
+                except Exception:
+                    pass
                 auto_build = None
                 if planning_kill:
+                    # Capture the plan set AFTER kill() persisted this session's
+                    # produced docs into the main folder (the ordering fix above).
+                    try:
+                        post_plan_set = _termsess.capture_plan_set(
+                            pid_for_advance, session)
+                    except Exception:
+                        post_plan_set = None
                     try:
                         auto_build = _termsess.auto_advance_planning_to_build(
                             pid_for_advance, session,
-                            plan_set=pre_plan_set)
+                            plan_set=post_plan_set)
                     except Exception:
                         auto_build = None
                 self._send_json({"ok": True, "result": out,
                                  "auto_build": auto_build})
+
+        elif self.path == "/api/rnd/term_delete":
+            # v9 Wave 1 — TRUE session delete (DISTINCT from term_kill). Removes
+            # the session from Anchor entirely: hard-deletes the registry record
+            # (so the tile stays gone across a reload), drops its lane effort
+            # pointer-records / index entries / cached summary, and (if still
+            # live) kills it first. The produced DOCUMENTS are KEPT (Option A).
+            # Token-gated by the do_POST middleware above AND requires an explicit
+            # confirm:true in the body (a deliberate, irreversible removal).
+            session = (body.get("session", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "delete requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _termsess.delete_session(session)
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True,
+                                     "deleted": bool(out.get("deleted")),
+                                     "result": out})
+
+        elif self.path == "/api/rnd/cleanup_ghost_sessions":
+            # v9 Wave 1 — sweep a project's empty GHOST sessions (terminal/idle
+            # registry records with NO tied efforts). Token-gated + confirm-gated
+            # (it deletes records). Project-scoped.
+            pid = (body.get("project_id", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not pid:
+                self._send_json({"ok": False, "error": "project_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "cleanup requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                try:
+                    out = _termsess.cleanup_ghost_sessions(pid)
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True,
+                                     "removed": out.get("removed", [])})
 
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
@@ -9814,6 +10933,117 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except _termsess.TerminalSessionError as exc:
                     self._send_json({"ok": False, "error": str(exc)}, 400)
 
+        elif self.path == "/api/rnd/grass_export":
+            # v8 Wave 6: EXPORT an idea's research/plan develop WORK up into REAL
+            # lane tiles (Option B): copy the develop docs up as board-visible
+            # lane sessions AND mark the idea "promoted" with a link. The idea
+            # STAYS in grass (copy, never destroy). Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.export_grass_to_project(pid, idea_id)
+                    code = 200 if res.get("ok") else 400
+                    self._send_json(res, code)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_delete":
+            # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side
+            # stores (pointer-record + index entry + refinements dir + the
+            # contained dev_sessions). Token-gated by the do_POST middleware above
+            # AND requires an explicit confirm:true (a deliberate, irreversible
+            # removal). Project-scoped — never touches another project's grass.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            confirm = bool(body.get("confirm"))
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif not confirm:
+                self._send_json({"ok": False,
+                                 "error": "delete requires confirm:true",
+                                 "reason": "confirm-required"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        out = _eh.delete_grass_idea(folder, pid, idea_id)
+                    except Exception as exc:
+                        self._send_json({"ok": False, "error": str(exc)}, 500)
+                    else:
+                        self._send_json({"ok": True,
+                                         "deleted": bool(out.get("deleted")),
+                                         "result": out})
+
+        elif self.path == "/api/rnd/link_github":
+            # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
+            # → gh repo create <name> --private (through the ANCHOR_GH_CMD seam —
+            # NEVER real github.com in tests); mode=existing → git remote add
+            # origin <url> (local). Persists the remote on the project record.
+            # Default repos are PRIVATE. Auth enforced by the middleware above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            mode = (body.get("mode", "") or "").strip().lower()
+            value = (body.get("value", "") or "").strip()
+            if not pid or not mode:
+                self._send_json(
+                    {"ok": False, "error": "project_id and mode required"}, 400)
+            elif mode not in ("create", "existing"):
+                self._send_json(
+                    {"ok": False,
+                     "error": "mode must be 'create' or 'existing'"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    res = _remote.link_github(folder, mode, value,
+                                              project_id=pid)
+                    code = 200 if res.get("ok") else 400
+                    self._send_json(res, code)
+
+        elif self.path == "/api/rnd/set_auto_push":
+            # v8 Wave 3: persist the per-project auto-push-on-finish opt-in flag.
+            # Auth enforced above. A non-opted project never pushes.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                enabled = bool(body.get("enabled"))
+                _remote.set_auto_push(pid, enabled)
+                self._send_json({"ok": True, "auto_push": enabled})
+
+        elif self.path == "/api/rnd/push_now":
+            # v8 Wave 3: manual "Push now" — git push -u origin <branch>. In tests
+            # origin is a LOCAL BARE repo (file://) so there is NO network. Auth
+            # enforced above. 400 when not linked (no origin). Never raises.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                proj = _rnd.get_project(pid)
+                folder = proj.get("folder_path", "")
+                res = _remote.push_project(folder, pid)
+                code = 200 if res.get("ok") else 400
+                self._send_json(res, code)
+
         elif self.path == "/api/rnd/continue_session":
             # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
             # historical session, SEEDED with that prior session's context (its
@@ -9897,6 +11127,21 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         pass
                     seed_context = _build_continue_seed(
                         folder, pid, src_lane, source)
+                    # v8 Wave 4: for a research→plan advance, prepend the GENERATED
+                    # handoff seed naming the correct skill (Crucible) + the REAL
+                    # persisted research-doc paths ("read these first"), then the
+                    # summary context. Best-effort — degrades to the summary seed.
+                    if (src_lane == "research"
+                            and to_lane in ("plan", "planning")):
+                        try:
+                            doc_seed = _termsess.build_research_to_plan_seed(
+                                pid, source)
+                        except Exception:
+                            doc_seed = None
+                        if doc_seed:
+                            seed_context = (
+                                doc_seed + ("\n\n" + seed_context
+                                            if seed_context else ""))
                     try:
                         if backend:
                             rec = _termsess.start_session(

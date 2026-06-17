@@ -116,6 +116,13 @@ def _normalize(entry: dict) -> dict:
         "state": state,
         "notes": (entry.get("notes") or ""),
         "blurb": (entry.get("blurb") or ""),
+        # v8 Wave 3 — GitHub remote linking + auto-push opt-in (offsite layer).
+        "remote_url": (entry.get("remote_url") or ""),
+        "auto_push": bool(entry.get("auto_push")),
+        # v9 Wave 3 — dashboard folder/group field (organization-only; NO disk
+        # move this wave). "" means Ungrouped (back-compat: a record without a
+        # "group" field reads as "").
+        "group": (entry.get("group") or ""),
     }
 
 
@@ -250,7 +257,8 @@ def update_project(project_id: str, **fields) -> dict:
 
     Raises ``KeyError`` if the id is unknown.
     """
-    allowed = {"name", "folder_path", "priority", "state", "notes", "blurb"}
+    allowed = {"name", "folder_path", "priority", "state", "notes", "blurb",
+               "remote_url", "auto_push", "group"}
     with _paths.WRITE_LOCK:
         reg = load_registry()
         if project_id not in reg:
@@ -294,6 +302,36 @@ def reactivate_project(project_id: str) -> dict:
 def set_notes(project_id: str, notes: str) -> dict:
     """Set the free-text notes for a project (like a task's Notes field)."""
     return update_project(project_id, notes=("" if notes is None else str(notes)))
+
+
+# ── Dashboard folder/group (v9 Wave 3 — organization-only, NO disk move) ──
+
+#: The display name for the empty-group ("") bucket on the dashboard.
+UNGROUPED_LABEL = "Ungrouped"
+
+
+def set_group(project_id: str, group: str) -> dict:
+    """Set a project's dashboard ``group`` (folder) — organization only.
+
+    ``""`` means Ungrouped. This does NOT move anything on disk (that is the
+    v9 Wave 4 guarded on-disk move); it only re-labels which collapsible
+    folder the project renders under on the home dashboard. Returns the entry.
+    """
+    return update_project(
+        project_id, group=("" if group is None else str(group).strip()))
+
+
+# ── GitHub remote linking + auto-push opt-in (v8 Wave 3) ─────────────────
+
+def set_remote(project_id: str, remote_url: str) -> dict:
+    """Persist a project's linked GitHub remote url (offsite layer)."""
+    return update_project(
+        project_id, remote_url=("" if remote_url is None else str(remote_url)))
+
+
+def set_auto_push(project_id: str, enabled: bool) -> dict:
+    """Persist a project's auto-push-on-finish opt-in flag (default off)."""
+    return update_project(project_id, auto_push=bool(enabled))
 
 
 # ── Project blurb ("what this project is") — Wave 3 ──────────────────────
@@ -459,6 +497,35 @@ def group_by_folder(include_archived: bool = True,
     return groups
 
 
+def group_by_group(include_archived: bool = True,
+                   include_future: bool = True,
+                   include_retired: bool = True) -> dict:
+    """Group projects by their dashboard ``group`` → list of entries (v9 W3).
+
+    The home dashboard renders this as collapsible folders. Projects whose
+    ``group`` is ``""`` (or absent — back-compat) bucket under the
+    ``UNGROUPED_LABEL`` ("Ungrouped") key. Within a group, entries keep the
+    ``list_projects`` ordering (priority, then name). The returned dict is
+    ordered: named groups (alphabetical, case-insensitive) first, with
+    ``Ungrouped`` always last.
+    """
+    named = {}
+    ungrouped = []
+    for e in list_projects(include_archived=include_archived,
+                           include_future=include_future,
+                           include_retired=include_retired):
+        g = (e.get("group") or "").strip()
+        if g:
+            named.setdefault(g, []).append(e)
+        else:
+            ungrouped.append(e)
+    out = {}
+    for g in sorted(named, key=lambda s: s.lower()):
+        out[g] = named[g]
+    out[UNGROUPED_LABEL] = ungrouped  # always present, always last
+    return out
+
+
 #: Legacy lane-state strings (kept as named constants for back-compat; the
 #: Wave 3 ``status_line`` no longer returns these — see ``lane_counts`` below).
 STATUS_IMPORTED = "imported"   # a session whose members are discovered (brownfield)
@@ -509,15 +576,32 @@ def status_line(project_id: str) -> dict:
         import sessions as _sessions
     except Exception:
         return out
+    # Resolve "running" from ONLY this project's session jobs, via targeted
+    # load_record lookups — NOT a full scan of the global rnd_jobs/ dir.
+    # status_line is rendered for EVERY project on the dashboard; the old
+    # list_records() full scan made GET / O(projects x all-jobs) and, once
+    # rnd_jobs/ grew to ~1k records, pushed the dashboard past the health check's
+    # 5s timeout (the red banner). We only ever need the status of the handful of
+    # jobs this project's sessions reference.
     try:
         import job_runner as _jr
-        running_job_ids = {
-            r.get("job_id")
-            for r in _jr.list_records()
-            if r.get("status") == _jr.STATUS_RUNNING and r.get("job_id")
-        }
     except Exception:
-        running_job_ids = set()
+        _jr = None
+
+    _running_cache = {}
+
+    def _job_is_running(job_id):
+        if not job_id or _jr is None:
+            return False
+        if job_id in _running_cache:
+            return _running_cache[job_id]
+        try:
+            rec = _jr.load_record(job_id)
+            running = bool(rec) and rec.get("status") == _jr.STATUS_RUNNING
+        except Exception:
+            running = False
+        _running_cache[job_id] = running
+        return running
 
     for lane in STATUS_LANES:
         try:
@@ -530,9 +614,7 @@ def status_line(project_id: str) -> dict:
             if s.get("provenance") == _sessions.PROV_IMPORTED:
                 counts["imported"] += 1
             members = s.get("member_files") or []
-            if running_job_ids and any(
-                (m.get("job_id") or "") in running_job_ids for m in members
-            ):
+            if any(_job_is_running(m.get("job_id") or "") for m in members):
                 counts["running"] += 1
         out[lane] = counts
     return out

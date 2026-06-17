@@ -39,6 +39,9 @@ import pty_manager as _pty
 import session_registry as _reg
 import worktrees as _wt
 import rnd_registry as _rnd
+import effort_history as _eh  # v8 Wave 2 keystone: persist_session_docs (no
+#                              cycle: effort_history imports neither this module
+#                              nor session_registry — only paths + rnd_registry)
 import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
 #                            neither terminal_session nor session_registry)
 
@@ -609,14 +612,22 @@ def read_since(session_id, cursor=0):
 
 
 def kill(session_id, project_id=None):
-    """Kill a session: reap the PTY, mark the registry terminal, remove worktree.
+    """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
     Tolerant: an unknown/already-dead PTY still proceeds to re-status the registry
     record (``STATUS_DONE``) and remove the worktree. ``project_id`` is resolved
     from the registry record when not supplied so the worktree's owning repo can
     be located for a clean ``git worktree remove``. Other sessions are untouched.
 
-    Returns ``{"ok": True, "session_id", "pty_killed", "worktree": {...}}``.
+    v8 Wave 2 (THE KEYSTONE): BEFORE the worktree is reaped, the session's
+    produced documents are persisted into the MAIN project (copied + committed
+    via :func:`capture_session_docs` → ``effort_history.persist_session_docs``)
+    so they survive the kill, are discoverable from the main folder, and ride
+    into later worktrees (which are checked out off main HEAD). This is
+    best-effort — a persistence failure never blocks the kill.
+
+    Returns ``{"ok": True, "session_id", "pty_killed", "docs": {...},
+    "worktree": {...}}``.
     """
     record = _reg.get_session(session_id)
     if project_id is None and record:
@@ -635,6 +646,11 @@ def kill(session_id, project_id=None):
     except KeyError:
         pass
 
+    # v8 KEYSTONE: capture + persist the session's produced docs into the MAIN
+    # project BEFORE the worktree is reaped (after which they'd be gone forever).
+    docs_out = capture_session_docs(session_id, project_id=project_id,
+                                    record=record)
+
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)
 
@@ -642,8 +658,165 @@ def kill(session_id, project_id=None):
         "ok": True,
         "session_id": session_id,
         "pty_killed": pty_killed,
+        "docs": docs_out,
         "worktree": wt_out,
     }
+
+
+def capture_session_docs(session_id, project_id=None, record=None):
+    """Persist a session's produced docs into the MAIN project (before any reap).
+
+    Generalizes the v6 ``capture_plan_set`` capture-before-reap discipline to ALL
+    trio docs: resolves the session's registry record (its lane + worktree_path),
+    then delegates to :func:`effort_history.persist_session_docs`, which copies
+    the produced documents into the main folder, records per-doc efforts so they
+    are discoverable, and commits them scoped to the project repo.
+
+    Best-effort and never raises — returns the ``persist_session_docs`` result, or
+    a ``{"ok": False, "reason": ...}`` dict when the session/worktree/project
+    cannot be resolved (so a missing record can't break the kill path).
+    """
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if rec is None:
+            return {"ok": False, "reason": "unknown-session", "persisted": []}
+        if project_id is None:
+            project_id = rec.get("project_id") or None
+        if not project_id:
+            return {"ok": False, "reason": "no-project", "persisted": []}
+        worktree_path = rec.get("worktree_path", "")
+        if not worktree_path:
+            return {"ok": False, "reason": "no-worktree", "persisted": []}
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return {"ok": False, "reason": "unknown-project", "persisted": []}
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return {"ok": False, "reason": "no-folder", "persisted": []}
+        lane = rec.get("lane", "") or ""
+        return _eh.persist_session_docs(
+            folder, project_id, lane, session_id, worktree_path)
+    except Exception:
+        return {"ok": False, "reason": "error", "persisted": []}
+
+
+# ── True session delete (v9 Wave 1) ──────────────────────────────────────────
+#
+# DELETE is DISTINCT from KILL (v8). KILL ends a *running* session: it reaps the
+# PTY, persists the produced docs into the main folder, removes the worktree, and
+# marks the registry record DONE — the record (and its board tile) PERSIST so the
+# work is resumable. DELETE *removes the session from Anchor entirely*: the
+# registry record is hard-deleted (so it never re-surfaces on a reload), and the
+# session's effort pointer-records / index entries / cached summary are removed.
+#
+# Option A (LOCKED): the produced DOCUMENTS are KEPT on disk — only Anchor's
+# pointer-records + cache (which merely reference them) are dropped. So the
+# committed plan/research/build files stay in the project folder/git.
+
+def delete_session(session_id, project_id=None):
+    """Permanently delete a managed session from Anchor (v9 Wave 1).
+
+    Distinct from :func:`kill`: this REMOVES the registry record (so the tile is
+    gone and STAYS gone across a reload — ``term_sessions``/the board read the
+    registry, which no longer holds it) AND removes the session's lane effort
+    pointer-records / index entries / cached summary
+    (``effort_history.delete_session_efforts``). The produced DOCUMENTS are KEPT
+    on disk (Option A) — only the Anchor pointer-records + cache are dropped.
+
+    If the session is still LIVE it is :func:`kill`-ed first (reap PTY + persist
+    docs + remove worktree), so a running session can be deleted safely.
+
+    Best-effort, IDEMPOTENT (a second delete is a clean no-op), and never raises.
+    Returns ``{"ok": True, "deleted": bool, "session_id", "killed": bool,
+    "efforts": {...}}`` where ``deleted`` is whether a registry record was
+    removed (False if the id was already unknown).
+    """
+    rec = _reg.get_session(session_id)
+    if project_id is None and rec:
+        project_id = rec.get("project_id") or None
+    lane = (rec.get("lane") if rec else "") or ""
+
+    killed = False
+    # If the session is still live (a running PTY / RUNNING status), kill it first
+    # so the PTY + worktree are reaped and its docs are persisted before we drop
+    # the record. Tolerate any failure — delete must still proceed.
+    try:
+        if rec is not None and (
+                session_id in set(_pty.live_sessions())
+                or rec.get("status") == _reg.STATUS_RUNNING):
+            kill(session_id, project_id=project_id)
+            killed = True
+    except Exception:
+        killed = False
+
+    # Hard-delete the registry record (the durability of "stays gone": the board
+    # + term_sessions read the registry, so a removed record never re-surfaces).
+    try:
+        deleted = bool(_reg.remove_session(session_id))
+    except Exception:
+        deleted = False
+
+    # Remove the lane effort pointer-records / index entries / cached summary —
+    # but KEEP the produced documents on disk (Option A). Resolve the folder.
+    efforts_out = {"ok": False, "reason": "unresolved"}
+    try:
+        if project_id and lane:
+            proj = _rnd.get_project(project_id)
+            folder = (proj or {}).get("folder_path", "") if proj else ""
+            if folder:
+                efforts_out = _eh.delete_session_efforts(
+                    folder, project_id, lane, session_id)
+    except Exception:
+        efforts_out = {"ok": False, "reason": "error"}
+
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "session_id": session_id,
+        "killed": killed,
+        "efforts": efforts_out,
+    }
+
+
+def cleanup_ghost_sessions(project_id):
+    """Delete a project's empty GHOST sessions (v9 Wave 1).
+
+    A *ghost* is a registry session record in a terminal/non-running state
+    (DONE/FAILED/IDLE — never a live RUNNING one) that has NO effort pointer-
+    records tied to it in its lane (it produced nothing Anchor recorded). These
+    accumulate as phantom tiles. This sweeps them: for each candidate it confirms
+    ``efforts_for_session_id`` is empty in its lane, then :func:`delete_session`-s
+    it (record + any cache). RUNNING sessions and sessions WITH efforts are left
+    untouched.
+
+    Best-effort, never raises. Returns ``{"ok": True, "removed": [session_id...]}``.
+    """
+    removed = []
+    try:
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path", "") if proj else ""
+        for rec in _reg.list_sessions(project_id=project_id):
+            try:
+                if rec.get("status") == _reg.STATUS_RUNNING:
+                    continue  # never sweep a live session
+                sid = rec.get("session_id")
+                lane = (rec.get("lane") or "")
+                has_efforts = False
+                if folder and lane:
+                    try:
+                        has_efforts = bool(_eh.efforts_for_session_id(
+                            folder, project_id, lane, sid))
+                    except Exception:
+                        has_efforts = False
+                if has_efforts:
+                    continue  # not a ghost — it produced recorded work
+                delete_session(sid, project_id=project_id)
+                removed.append(sid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {"ok": True, "removed": removed}
 
 
 # ── Auto advance planning → build (v6 Wave 6) ────────────────────────────────
@@ -671,15 +844,78 @@ def kill(session_id, project_id=None):
 _PLANNING_LANES = frozenset(("plan", "planning"))
 
 
+def _doc_paths_for_seed(doc_set):
+    """Ordered, de-duplicated list of the REAL persisted doc paths in a set.
+
+    Pulls the main-folder-relative POSIX paths a plan/research set carries —
+    master + impl first (when present), then the rest of ``doc_rels`` — so the
+    generated seed can name the ACTUAL documents the upstream session produced
+    (which, after v8 Wave 2 persistence, physically exist in this checkout).
+    """
+    if not doc_set:
+        return []
+    primary = []
+    for key in ("master_plan_rel", "impl_plan_rel", "report_rel"):
+        v = (doc_set.get(key) or "").strip()
+        if v and v not in primary:
+            primary.append(v)
+    ordered = list(primary)
+    for r in (doc_set.get("doc_rels") or []):
+        r = (r or "").strip()
+        if r and r not in ordered:
+            ordered.append(r)
+    return ordered
+
+
 def _build_seed_for_plan(plan_set):
-    """A short build seed referencing the plan the build should execute on."""
+    """A build seed listing the REAL plan-doc paths the build executes on.
+
+    Generated from the persisted plan set (v8 Wave 2 — the docs now genuinely
+    exist in the build checkout): names :data:`LANE_SKILL['build']` (Foreman),
+    lists the actual ``planning/.../IMPLEMENTATION-PLAN.md`` + ``MASTER-PLAN.md``
+    (and supporting doc) paths, and a short read-first instruction. ``prime_worktree``
+    writes the same paths into HANDOFF.md, which is also referenced here.
+    """
+    skill = LANE_SKILL.get("build", "Foreman")
     title = (plan_set.get("title") or plan_set.get("plan_dir")
              or "the planning session's plan set")
-    impl = plan_set.get("impl_plan_rel") or plan_set.get("master_plan_rel") or ""
-    ref = (" See `%s`." % impl) if impl else ""
-    return ("Execute on the plan produced by the upstream planning session: "
-            "%s.%s The plan docs are referenced in HANDOFF.md in this worktree."
-            % (title, ref))
+    docs = _doc_paths_for_seed(plan_set)
+    if docs:
+        doc_lines = "\n".join("- " + d for d in docs)
+        read_first = (
+            "Read these documents first, then proceed to execute on them:\n"
+            "%s" % doc_lines)
+    else:
+        read_first = ("The plan docs are referenced in HANDOFF.md in this "
+                      "worktree.")
+    return (
+        "Load the %s skill. You are executing on the plan produced by the "
+        "upstream planning session: %s.\n%s\nHANDOFF.md in this worktree also "
+        "lists these plan documents." % (skill, title, read_first))
+
+
+def _build_seed_for_research(research_set):
+    """A planning seed listing the REAL research-doc paths the plan builds on.
+
+    The research→plan analog of :func:`_build_seed_for_plan`: names
+    :data:`LANE_SKILL['plan']` (Crucible), lists the actual persisted research
+    report path(s), and a short read-first instruction. ``research_set`` is a
+    plan-set-shaped dict (``doc_rels`` / ``report_rel`` / ``master_plan_rel``)
+    or ``None``; with no docs it degrades to a bare Crucible seed reference.
+    """
+    skill = LANE_SKILL.get("plan", "Crucible")
+    docs = _doc_paths_for_seed(research_set)
+    if docs:
+        doc_lines = "\n".join("- " + d for d in docs)
+        read_first = (
+            "Read these research documents first, then plan from them:\n%s"
+            % doc_lines)
+    else:
+        read_first = ("The upstream research report is in this worktree "
+                      "checkout.")
+    return (
+        "Load the %s skill. Plan from the upstream research session's findings."
+        "\n%s" % (skill, read_first))
 
 
 def auto_advance_planning_to_build(project_id, planning_session_id,
@@ -844,6 +1080,74 @@ def capture_plan_set(project_id, planning_session_id):
             folder, project_id, source_session_id=planning_session_id)
     except Exception:
         return None
+
+
+def research_set_for_session(project_id, research_session_id):
+    """Build a research-doc set (plan-set-shaped) for a research session, or None.
+
+    The research→plan analog of :func:`capture_plan_set`: resolves the research
+    session's persisted member docs (via ``sessions.list_sessions`` over the
+    research lane) into a ``{report_rel, doc_rels, plan_dir, title}`` dict so
+    :func:`_build_seed_for_research` can name the REAL report path(s). Prefers a
+    member whose basename looks like a report; otherwise carries every member
+    doc. Returns ``None`` when the session has no resolvable docs. Never raises.
+    """
+    try:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return None
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return None
+        from pathlib import PurePosixPath
+        # Prefer the docs this exact session persisted (the effort pointer-records
+        # carry the originating ``session_id`` in their ``extra``); fall back to
+        # ALL research docs when no session-tagged ones resolve (e.g. brownfield).
+        efforts = _eh.list_efforts(folder, project_id, "research")
+        tagged = [e for e in efforts
+                  if e.get("session_id") == research_session_id
+                  and (e.get("artifact_path") or "").strip()]
+        pool = tagged or [e for e in efforts
+                          if (e.get("artifact_path") or "").strip()]
+        doc_rels = []
+        report_rel = ""
+        for e in pool:
+            rel = (e.get("artifact_path") or "").strip().replace("\\", "/")
+            if not rel or rel in doc_rels:
+                continue
+            doc_rels.append(rel)
+            name = PurePosixPath(rel).name.lower()
+            if not report_rel and ("report" in name or rel.startswith("research/")):
+                report_rel = rel
+        if not doc_rels:
+            return None
+        if not report_rel:
+            report_rel = doc_rels[0]
+        plan_dir = PurePosixPath(report_rel).parent.as_posix()
+        if plan_dir in (".", "/"):
+            plan_dir = ""
+        return {
+            "research_session_id": research_session_id,
+            "report_rel": report_rel,
+            "doc_rels": doc_rels,
+            "plan_dir": plan_dir,
+            "title": "research findings",
+        }
+    except Exception:
+        return None
+
+
+def build_research_to_plan_seed(project_id, research_session_id):
+    """The generated research→plan seed (Crucible + real report paths), or None.
+
+    Wraps :func:`research_set_for_session` + :func:`_build_seed_for_research`.
+    Returns ``None`` when no research docs resolve, so a caller can fall back to
+    a summary-only seed. Never raises.
+    """
+    rset = research_set_for_session(project_id, research_session_id)
+    if not rset:
+        return None
+    return _build_seed_for_research(rset)
 
 
 def list_sessions(project_id=None, status=None):

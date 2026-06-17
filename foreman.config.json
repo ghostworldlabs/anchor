@@ -1,26 +1,26 @@
 {
-  "project": "anchor-rnd-surface-v7",
+  "project": "anchor-rnd-surface-v9",
   "docs": {
-    "description": "planning/rnd-v7/MASTER-PLAN.md",
-    "plan": "planning/rnd-v7/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/rnd-v7/EXECUTION-LOG.md"
+    "description": "planning/rnd-v9/MASTER-PLAN.md",
+    "plan": "planning/rnd-v9/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/rnd-v9/EXECUTION-LOG.md"
   },
   "test_command": "python -m pytest -v",
-  "notes": "Build cwd = repo root C:\\dev\\Anchor, branch foreman/rnd-surface-v7 (off master, v6 merged). v7 = 'Integrated Board' from John's v6-review (4 points). 5 waves: (1) short+clean summaries — a plain-text normalizer that strips markdown (** __ ## ` list-markers links) + decorative glyphs (checkmark/arrows/bullets/em-dash/box-drawing/emoji) and caps length for the DISPLAYED short forms (objective ~1 sentence; tile blurb ~8-12 words, word-boundary truncation); full markdown stays only on the /summary page; backend. (2) summarize each session on FINISH — wire the existing background _trigger_session_summary into the kill/finish_to_build/reconcile-dead transitions (best-effort, non-blocking, idempotent, no cache-poison on failure) + summarizer.session_blurb (short clean one-liner, honest when absent) as the tile-blurb + restart-seed source; backend. (3) live sessions integrated into the LANE COLUMNS (the big one) — merge live session_registry sessions into the board lane render (_gather_project_sessions feeding _render_kanban_html), deduped by session_id, newest prominent + older under the openable 'previous sessions' expander, each with a short blurb from session_blurb; the top active strip (renderSessionBar) stays unchanged for live sessions; board render stays cache/registry-only (no model call); UI. (4) a top 'Open terminal' button (NOT a board lane, John's choice B) that starts a BARE 'general' session (no LANE_SKILL -> no seed) with the Claude/Gemini engine toggle, a window, and the top strip; 'general' validates in _valid_lanes but is EXCLUDED from the trio board columns and the auto-advance chain; general sessions get summary-on-finish too; UI+backend. (5) CLI mirror (rnd blurb) + check_rnd_v7_surface healthcheck (fully stubbed) + distro scan clean + CLAUDE.md (PROJECT DONE). LOCKED user decisions: #1 short+clean; #2 = option B (lane-column tiles AND the top active strip; newest-prominent + previously-done expander; short blurb); #3 summarize-on-finish; #4 = option B ('Open terminal' button, not a 6th lane, bare general session). OUT OF SCOPE: calendar, app-builder, floating windows, a general board lane. MANDATORY UI verification per the v4 lesson on Waves 3-4: rendered-DOM (positive+negative) + a real Playwright/Chromium interaction test + an orchestrator screenshot-vs-mockup (_mockups/rnd-v7/board_integration.html) + user sign-off before merge; a string-grep gate is an automatic HALT. Playwright is DEV-ONLY (pytest.importorskip), NEVER in product code; distro import scan must stay green. All model/PTY via tests/fake_claude.py + tests/stub_streamjson.py + stub PTY (ANCHOR_PTY_BACKEND=stub) through ANCHOR_RUNNER_CMD; never live claude/gemini/real-PTY/:8777/real data in the gate. pywinpty is the only native-dep waiver (lazy, pty_manager.py only). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string. NO merge to master and NO nssm restart until John signs off; then merge + nssm restart anchor (elevated) + rescan each project to heal summaries.",
-  "prior_config_rnd_v6": {
-    "project": "anchor-rnd-surface-v6",
+  "notes": "Build cwd = repo root C:\\dev\\Anchor, branch foreman/rnd-surface-v9 (off foreman/rnd-surface-v8 HEAD d09ec8d = v8 + the dashboard perf fix). v9 = 'Tidy' from John's live-use feedback: remove clutter + organize. 5 waves: (1) TRUE session delete (red X on a tile -> confirm -> completely gone surviving refresh: session_registry.remove_session [exists-but-unused] + lane effort pointer-records/index + cached summary; KEEP produced documents [Option A]; + ghost/empty-session cleanup sweep; distinct from v8 kill); POST term_delete (token+confirm); UI+backend. (2) GRASS idea delete (red X on the idea row _render_grass_idea_li -> confirm -> remove pointer + index entry + refinements dir grass-<id>/dev-N + dev_sessions map); POST grass_delete; UI+backend. (3) PROJECT FOLDERS: a group field on the project record (rnd_registry _normalize default '' + update_project allow-list + set_group + group_by_group), collapsible dashboard folders (+ New folder, drag a project into a folder = group instantly, persisted, NO disk move); POST set_group; UI+backend. (4) PROJECT FOLDERS guarded ON-DISK MOVE (the high-risk wave): project_move.move_to_group does an atomic guarded move -- REFUSE the running Anchor repo (folder_path == live CODE_DIR) + any project with a live session; shutil.move the dir into <projects_root>/<group>/<dir>; update registry folder_path; git worktree prune + reconcile; regenerate discovery.json root; ROLLBACK on any failure; Option-C dialog 'Move on disk + group' vs 'Just group'; POST move_project (token+confirm); all git/fs via an injectable seam stubbed on TEMP dirs -- NEVER move real data/the real Anchor repo/real registry; UI+backend. (5) CLI mirror (rnd folders / rnd ghost-sessions) + check_rnd_v9_surface healthcheck (fully stubbed, TEMP projects_root + TEMP registry, never the real Anchor/:8777) + distro scan clean + CLAUDE.md (PROJECT DONE). LOCKED user decisions: session delete = Option A (keep documents); grass delete = full (all scratch); folders = Option C (drag groups instantly + ask-to-move-on-disk, guards always on). OUT OF SCOPE: calendar, app-builder, floating windows, deleting produced docs, moving the Anchor repo / live-session projects, nested folders, auto-move-on-drag. MANDATORY UI verification per the v4 lesson on Waves 1-4: rendered-DOM (positive+negative) + a real Playwright/Chromium interaction test + an orchestrator screenshot-vs-mockup (_mockups/rnd-v9/project_folders.html) + user sign-off before merge; a string-grep gate is an automatic HALT. Playwright DEV-ONLY (pytest.importorskip), NEVER in product code; distro import scan must stay green. All model/PTY via tests/fake_claude.py + tests/stub_streamjson.py + stub PTY (ANCHOR_PTY_BACKEND=stub); git/gh/fs-move via injectable seams on TEMP dirs; NEVER real network/move/:8777/real data. pywinpty is the only native-dep waiver (lazy, pty_manager.py only). anchor_gui.py HTML is f-string-generated (double braces); _PROJECT_WINDOW_JS is a RAW single-brace string. NO merge to master and NO nssm restart until John signs off.",
+  "prior_config_rnd_v8": {
+    "project": "anchor-rnd-surface-v8",
     "docs": {
-      "description": "planning/rnd-v6/MASTER-PLAN.md",
-      "plan": "planning/rnd-v6/IMPLEMENTATION-PLAN.md",
-      "execution_log": "planning/rnd-v6/EXECUTION-LOG.md"
+      "description": "planning/rnd-v8/MASTER-PLAN.md",
+      "plan": "planning/rnd-v8/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v8/EXECUTION-LOG.md"
     }
   },
-  "prior_config_rnd_v5": {
-    "project": "anchor-rnd-surface-v5",
+  "prior_config_rnd_v7": {
+    "project": "anchor-rnd-surface-v7",
     "docs": {
-      "description": "planning/rnd-v5/MASTER-PLAN.md",
-      "plan": "planning/rnd-v5/IMPLEMENTATION-PLAN.md",
-      "execution_log": "planning/rnd-v5/EXECUTION-LOG.md"
+      "description": "planning/rnd-v7/MASTER-PLAN.md",
+      "plan": "planning/rnd-v7/IMPLEMENTATION-PLAN.md",
+      "execution_log": "planning/rnd-v7/EXECUTION-LOG.md"
     }
   }
 }

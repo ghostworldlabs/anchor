@@ -51,6 +51,16 @@ are interactive and have NO CLI form):
 R&D v7 "Integrated Board" inspection mirror (read-only DATA seam; the board/general
 terminal are interactive and have NO CLI form):
     python3 anchor.py rnd blurb <project_id> --lane <lane> --session <id>  # the short, clean one-line session blurb (cache-only)
+
+R&D v8 "Durable Artifacts" inspection mirror (read-only DATA seams; link/push,
+grass develop/export, continue-live are interactive and have NO CLI form):
+    python3 anchor.py rnd remote <project_id>                 # GitHub remote link + auto-push opt-in state (no network)
+    python3 anchor.py rnd docs <project_id> --session <id> [--lane <lane>]  # documents the session persisted into the project
+
+R&D v9 "Tidy" inspection mirror (read-only DATA seams; session/grass delete + the
+guarded on-disk move are interactive mutating ops with NO one-shot CLI form):
+    python3 anchor.py rnd folders                             # project folders (groups) + members (Ungrouped last)
+    python3 anchor.py rnd ghost-sessions <project_id>         # empty/ghost sessions cleanup_ghost_sessions would remove
 """
 
 import json, os, re, sys
@@ -1009,6 +1019,108 @@ def rnd_chain(project_id, session_id):
     return {"chain_id": chain_id, "members": members}
 
 
+def rnd_remote(project_id):
+    """CLI mirror of ``project_remote.remote_status`` — the offsite link state (v8).
+
+    READ-ONLY: returns the project's GitHub remote link + auto-push opt-in state
+    (``{linked, remote_url, auto_push}``) from the persisted registry record —
+    NEVER touches the network / real ``gh`` / real github.com, and never pushes
+    (linking / pushing / toggling are interactive mutating ops with no CLI form).
+    Honest-absent: an unlinked project returns ``linked=False`` + an empty url.
+    Raises ``KeyError`` for an unknown project.
+    """
+    import project_remote as _remote
+    # Validate the id (remote_status is best-effort and returns the unlinked
+    # default for an unknown id; keep the clean unknown-project error like the
+    # other mirrors).
+    _rnd_resolve(project_id)
+    return _remote.remote_status(project_id)
+
+
+def rnd_docs(project_id, lane, session_id):
+    """CLI mirror of ``effort_history.efforts_for_session_id`` — persisted docs (v8).
+
+    READ-ONLY: returns the list of documents a session PERSISTED into the main
+    project (the v8 Wave-2 keystone stamps each persisted doc effort with the
+    originating managed ``session_id``). Each item is a SAFE projection
+    ``{title, kind, path, status}`` resolved from the lane's pointer-records —
+    honest-absent (``[]``) when the session produced/persisted nothing. No spawn,
+    no model call. Raises ``KeyError`` for an unknown project.
+    """
+    import effort_history as _eh
+    _proj, folder = _rnd_resolve(project_id)
+    store_lane = _eh._resolve_subdir(lane)
+    efforts = _eh.efforts_for_session_id(folder, project_id, store_lane,
+                                         session_id)
+    docs = []
+    for e in efforts:
+        rel = e.get("artifact_path", "") or ""
+        if not rel:
+            continue
+        docs.append({
+            "title": e.get("title", "") or "",
+            "kind": e.get("kind", "") or "",
+            "path": rel,
+            "status": e.get("status", "") or "",
+        })
+    return docs
+
+
+def rnd_folders():
+    """CLI mirror of ``rnd_registry.group_by_group`` — the project folders (v9).
+
+    READ-ONLY: returns the project organization as an ordered dict
+    ``{group_name: [project_entry, ...]}`` — named groups (alphabetical) first,
+    with ``Ungrouped`` always last. The ``group`` field is dashboard-only
+    organization; this NEVER moves anything on disk (the guarded on-disk move is
+    an interactive mutating op with no CLI form). Honest-absent: a project with
+    no ``group`` buckets under ``Ungrouped``. No project arg — lists every
+    project grouped.
+    """
+    import rnd_registry as _rnd
+    return _rnd.group_by_group()
+
+
+def rnd_ghost_sessions(project_id):
+    """CLI mirror — list a project's empty/ghost managed sessions (v9).
+
+    READ-ONLY: returns the managed session records that
+    ``terminal_session.cleanup_ghost_sessions`` WOULD remove — a *ghost* is a
+    non-running (DONE/FAILED/IDLE) registry session with NO effort pointer-records
+    tied to it in its lane (a phantom tile that produced nothing Anchor recorded).
+    This is a pure listing: it NEVER deletes/kills anything (delete is an
+    interactive mutating op with no one-shot CLI form). A live RUNNING session is
+    never a ghost and is excluded. Each item is a SAFE projection
+    ``{session_id, lane, status, label}``. Honest-absent: ``[]`` when there are no
+    ghosts. Raises ``KeyError`` for an unknown project.
+    """
+    import session_registry as _sreg
+    import effort_history as _eh
+    _proj, folder = _rnd_resolve(project_id)
+    ghosts = []
+    for rec in _sreg.list_sessions(project_id=project_id):
+        if rec.get("status") == _sreg.STATUS_RUNNING:
+            continue  # a live session is never a ghost
+        sid = rec.get("session_id", "")
+        lane = rec.get("lane", "") or ""
+        has_efforts = False
+        if folder and lane:
+            try:
+                has_efforts = bool(_eh.efforts_for_session_id(
+                    folder, project_id, lane, sid))
+            except Exception:
+                has_efforts = False
+        if has_efforts:
+            continue  # produced recorded work — not a ghost
+        ghosts.append({
+            "session_id": sid,
+            "lane": lane,
+            "status": rec.get("status", "") or "",
+            "label": rec.get("label", "") or "",
+        })
+    return ghosts
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1147,7 +1259,8 @@ def _rnd_cli(args):
               "promote-inbox|pin-deliverable|set-blurb|regenerate-summary|"
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
-              "build-deliverable|chain|blurb> ...")
+              "build-deliverable|chain|blurb|remote|docs|"
+              "folders|ghost-sessions> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1488,6 +1601,73 @@ def _rnd_cli(args):
                       f"status={m.get('status','')} "
                       f"parent={parent} "
                       f"id={m.get('session_id','')}{marker}")
+
+        elif sub == "remote":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd remote <project_id>")
+                return
+            st = rnd_remote(pos[0])
+            if st.get("linked"):
+                print(f"Remote for {pos[0]}: LINKED")
+                print(f"  remote_url: {st.get('remote_url','')}")
+                print(f"  auto_push:  {'on' if st.get('auto_push') else 'off'}")
+            else:
+                print(f"Remote for {pos[0]}: NOT LINKED")
+                print(f"  auto_push:  {'on' if st.get('auto_push') else 'off'}")
+
+        elif sub == "docs":
+            pos = _positionals()
+            lane = _opt("--lane", "build")
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd docs <project_id> "
+                      "--session <session_id> [--lane <lane>]")
+                return
+            docs = rnd_docs(pos[0], lane, session_id)
+            if not docs:
+                print(f"No persisted documents for session {session_id} "
+                      f"(lane '{lane}').")
+                return
+            print(f"{len(docs)} persisted document(s) for session {session_id} "
+                  f"(lane '{lane}'):")
+            for d in docs:
+                kind = d.get("kind", "") or "doc"
+                print(f"  - [{kind}] {d.get('title','') or d.get('path','')} "
+                      f"-> {d.get('path','')}")
+
+        elif sub == "folders":
+            groups = rnd_folders()
+            # Count only the named (non-empty) groups for the header line.
+            named = [g for g in groups if g != "Ungrouped"]
+            print(f"{len(named)} folder(s) + Ungrouped:")
+            for group, members in groups.items():
+                members = members or []
+                if group == "Ungrouped" and not members and len(groups) > 1:
+                    continue  # don't print an empty Ungrouped when there ARE groups
+                print(f"  [{group}] ({len(members)} project(s)):")
+                for e in members:
+                    print(f"    - {e.get('name','')} "
+                          f"(prio={e.get('priority','')}) "
+                          f"path={e.get('folder_path','')} "
+                          f"id={e.get('id','')}")
+
+        elif sub == "ghost-sessions":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd ghost-sessions <project_id>")
+                return
+            ghosts = rnd_ghost_sessions(pos[0])
+            if not ghosts:
+                print(f"No ghost (empty) sessions for {pos[0]}.")
+                return
+            print(f"{len(ghosts)} ghost (empty) session(s) for {pos[0]} "
+                  f"(cleanup_ghost_sessions would remove these):")
+            for g in ghosts:
+                print(f"  - [{g.get('lane','')}] "
+                      f"{g.get('label','') or '(no label)'} "
+                      f"status={g.get('status','')} "
+                      f"id={g.get('session_id','')}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

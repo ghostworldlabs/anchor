@@ -130,17 +130,20 @@ def _parse(body):
 # ── (1) JS-source / DOM structure assertions (positive + negative) ───────────
 
 def test_every_start_path_mints_a_distinct_tile(gui_env, tmp_path):
-    """POSITIVE: each session-start front-end path appends a new MANAGED entry
-    keyed on the server's fresh session_id and re-renders the bar — so each start
-    mints a DISTINCT tile, never reusing/replacing one. We assert each function
-    sets MANAGED[<new id>] = {...} and calls renderSessionBar()."""
+    """POSITIVE: each PROJECT-level session-start front-end path appends a new
+    MANAGED entry keyed on the server's fresh session_id and re-renders the bar —
+    so each start mints a DISTINCT tile, never reusing/replacing one. We assert each
+    function sets MANAGED[<new id>] = {...} and calls renderSessionBar().
+
+    NOTE (v8 Wave 6): ``developGrass`` is intentionally EXCLUDED — a grass-idea
+    develop session is CONTAINED in the workbench pane and must NOT mint a top-strip
+    chip; it is asserted separately below."""
     gui = gui_env["gui"]
     js = _js(gui.render_project_window_html(gui_env["pid"]))
     for fn, sidvar in (
         ("newTermSession", "sid"),
         ("continueSession", "sid"),
         ("promoteGrass", "sid"),
-        ("developGrass", "sid"),
         ("pullGrass", "sid"),
     ):
         m = re.search(
@@ -154,6 +157,21 @@ def test_every_start_path_mints_a_distinct_tile(gui_env, tmp_path):
             "%s does not register a new MANAGED tile" % fn
         assert "renderSessionBar()" in body, \
             "%s does not re-render the tiles row" % fn
+
+
+def test_grass_develop_is_contained_no_top_strip_chip(gui_env, tmp_path):
+    """NEGATIVE (v8 Wave 6): a grass-idea develop session is CONTAINED in the
+    workbench pane — it must NOT mint a top-strip chip, so ``developGrass`` does NOT
+    call renderSessionBar(); it mounts the terminal into the workbench host instead."""
+    gui = gui_env["gui"]
+    js = _js(gui.render_project_window_html(gui_env["pid"]))
+    m = re.search(r"(?:async )?function developGrass\([^)]*\)\s*\{([\s\S]*?)\n\}", js)
+    assert m, "developGrass not found in panel JS"
+    body = m.group(1)
+    assert "renderSessionBar()" not in body, \
+        "developGrass must NOT re-render the top strip (it is contained)"
+    assert "data-grass-term" in body, \
+        "developGrass must mount the terminal in the workbench pane"
 
 
 def test_finished_sessions_no_longer_excluded_from_bar(gui_env, tmp_path):

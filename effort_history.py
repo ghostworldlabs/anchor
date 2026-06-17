@@ -35,9 +35,11 @@ subprocess is allowed; it is a system tool, not a Python dependency).
 
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import paths as _paths
 import rnd_registry as _rnd
@@ -215,6 +217,29 @@ def latest_effort(folder_path, project_id: str, lane: str):
     return efforts[0] if efforts else None
 
 
+def efforts_for_session_id(folder_path, project_id: str, lane: str,
+                           session_id: str) -> list:
+    """Return the lane's effort pointer-records tagged with ``session_id``.
+
+    The v8 Wave 2 ``persist_session_docs`` keystone stamps each persisted
+    DISCOVERED doc effort with the originating managed terminal ``session_id``
+    (in ``extra``). Those docs group (in ``sessions.list_sessions``) under their
+    common parent directory — NOT under the bare managed session id — so a kill's
+    durable summary/detail (which keys to the managed session id) needs a way to
+    recover the EXACT docs THIS session produced. This is that join: every lane
+    effort whose stored ``session_id`` equals ``session_id``, newest-first.
+
+    Returns ``[]`` for an empty/unmatched lane. Never raises.
+    """
+    if not session_id:
+        return []
+    try:
+        return [e for e in list_efforts(folder_path, project_id, lane)
+                if (e.get("session_id") or "") == session_id]
+    except Exception:
+        return []
+
+
 # ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
 
 #: job_id prefix for an Anchor-CREATED grass idea (manual add / inbox promote).
@@ -362,6 +387,25 @@ def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
 #: The lanes a grass idea may be promoted into (v4 Wave 6). Only the two TRIO
 #: starting lanes — a Research run or a Plan run — make sense as a seeded launch.
 PROMOTE_LANES = ("research", "plan")
+
+#: v8 Wave 6 — a develop session started from the grass workbench is CONTAINED:
+#: it lives only in the workbench pane, never in the top live-strip or a board
+#: lane column. Its registry record's ``label`` carries this stable prefix so the
+#: board bridge (``anchor_gui._gather_project_sessions``) can recognize and
+#: EXCLUDE it even though its lane is ``research``/``plan`` (it must keep that
+#: lane so the trio skill seeds correctly). ``is_grass_dev_label`` is the
+#: predicate the bridge uses.
+GRASS_DEV_LABEL_PREFIX = "[grass-dev] "
+
+
+def is_grass_dev_label(label) -> bool:
+    """True iff ``label`` marks a CONTAINED grass-workbench develop session (W6).
+
+    A develop session keeps lane ``research``/``plan`` (so its trio skill seeds),
+    but is contained — it must NOT render as a top-strip chip or a board lane
+    tile. The board bridge calls this on each managed session's label to skip it.
+    """
+    return str(label or "").startswith(GRASS_DEV_LABEL_PREFIX)
 
 
 def get_grass_idea(folder_path, project_id: str, idea_id: str):
@@ -583,19 +627,62 @@ def _grass_develop_seed(idea: dict, refinements) -> str:
     return "\n".join(bits)
 
 
+def _grass_dev_sessions(idea: dict) -> dict:
+    """The idea record's ``(lane -> session_id)`` develop-session map (W6).
+
+    Stored on the idea pointer-record under ``dev_sessions`` so a re-click can
+    RESOLVE and FOCUS the existing contained develop session instead of starting
+    a new one. Best-effort: a missing/garbled value yields ``{}``.
+    """
+    m = (idea or {}).get("dev_sessions")
+    return dict(m) if isinstance(m, dict) else {}
+
+
+def _live_grass_dev_session(session_id: str):
+    """Return the registry record for ``session_id`` iff it is a LIVE (running)
+    contained develop session, else ``None`` (W6 dedupe gate).
+
+    A develop session is "live" while its registry status is RUNNING — a killed/
+    done/failed one is reaped and a re-click must start fresh. Lazy import keeps
+    ``effort_history`` free of a hard ``session_registry`` dependency.
+    """
+    if not session_id:
+        return None
+    try:
+        import session_registry as _sr
+        rec = _sr.get_session(session_id)
+        if rec is None:
+            return None
+        return rec if rec.get("status") == _sr.STATUS_RUNNING else None
+    except Exception:
+        return None
+
+
 def develop_grass_idea(project_id: str, idea_id: str, lane: str,
                        folder_path=None, backend=None) -> dict:
-    """DEVELOP a grass idea in a seeded workbench session (v5 Wave 5).
+    """DEVELOP a grass idea in ONE contained, seeded workbench session (W6).
 
-    Starts a NEW live terminal session in the target lane (``research`` | ``plan``)
-    SEEDED (``seed_context``) with the idea text PLUS its latest refinements
-    (reuses the Wave-1 seed path via ``terminal_session.start_session`` — never
-    forks seed logic). The idea STAYS in grass (copy, never destroy). Returns the
-    NEW session's registry record (the workbench terminal attaches to it).
+    v8 Wave 6 — one contained session per ``(idea, lane)``:
 
-    Unlike :func:`promote_grass_to_lane` (which marks the idea PROMOTED), develop
-    keeps the idea available for further iteration; the *saved refinement* (via
-    :func:`save_grass_refinement`) is what marks it REFINED.
+      * **Dedupe / focus.** Before starting, RESOLVE an existing develop session
+        for this ``(idea_id, lane)`` from the idea record's ``dev_sessions`` map.
+        If one is still LIVE (registry status RUNNING) its record is RETURNED
+        (the workbench re-focuses it) — a re-click NEVER starts a second session.
+        Only when none is live is a NEW session started and the map updated.
+      * **Contained.** The new session keeps lane ``research``/``plan`` (so its
+        trio skill seeds correctly) but its registry ``label`` is stamped with
+        :data:`GRASS_DEV_LABEL_PREFIX`, so the board bridge EXCLUDES it from the
+        top strip and the lane columns (see :func:`is_grass_dev_label`). It lives
+        only in the workbench pane.
+
+    Seeds (``seed_context``) the idea text PLUS its latest refinements (reuses the
+    Wave-1 seed path via ``terminal_session.start_session`` — never forks seed
+    logic). The idea STAYS in grass (copy, never destroy). Returns the develop
+    session's registry record (the workbench terminal attaches to it).
+
+    Unlike :func:`promote_grass_to_lane`, develop keeps the idea available for
+    further iteration; a *saved refinement* (via :func:`save_grass_refinement`) is
+    what marks it REFINED.
 
     Raises ``ValueError`` for an invalid lane or an unknown idea.
     """
@@ -612,17 +699,37 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     idea = get_grass_idea(folder_path, project_id, idea_id)
     if idea is None:
         raise ValueError("grass idea not found: %s" % (idea_id,))
-    refinements = list_grass_refinements(folder_path, project_id,
-                                         idea.get("job_id", idea_id))
+    jid = idea.get("job_id", idea_id)
+
+    # ── Dedupe / focus: a live (idea, lane) develop session is REUSED ──────────
+    dev_map = _grass_dev_sessions(idea)
+    existing_sid = dev_map.get(lane)
+    live = _live_grass_dev_session(existing_sid)
+    if live is not None:
+        return live
+
+    refinements = list_grass_refinements(folder_path, project_id, jid)
     seed = _grass_develop_seed(idea, refinements)
     if not seed.strip():
         raise ValueError("grass idea has no text: %s" % (idea_id,))
     import terminal_session as _ts
-    label = "develop: " + ((idea.get("title") or "")[:40])
+    # CONTAINED: the label marker keeps this session out of the board/top-strip.
+    label = GRASS_DEV_LABEL_PREFIX + ("develop: " + ((idea.get("title") or "")[:40]))
     kwargs = {"label": label, "seed_context": seed}
     if backend is not None:
         kwargs["backend"] = backend
-    return _ts.start_session(project_id, lane, **kwargs)
+    record = _ts.start_session(project_id, lane, **kwargs)
+
+    # Persist the (idea, lane) -> session_id map on the idea record so a re-click
+    # focuses THIS session. Best-effort: a failed annotation never tears down a
+    # live, seeded session. The idea's identity/title/status are untouched.
+    try:
+        dev_map[lane] = record.get("session_id")
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"dev_sessions": dev_map})
+    except Exception:
+        pass
+    return record
 
 
 def pull_grass_refinement(project_id: str, idea_id: str, refinement_id: str,
@@ -706,9 +813,205 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
             "source": source,
             "promoted_to_session": eff.get("promoted_to_session", ""),
             "promoted_to_lane": eff.get("promoted_to_lane", ""),
+            # v8 Wave 6: the contained develop sessions ((lane -> session_id)) and
+            # the Export-to-project link (the real lane sessions this idea's work
+            # became). Both empty until the idea is developed / exported.
+            "dev_sessions": _grass_dev_sessions(eff),
+            "exported_to": list((eff.get("exported_to") or [])),
             "refinements": refs,
         })
     return out
+
+
+def delete_grass_idea(folder_path, project_id: str, idea_id: str) -> dict:
+    """Permanently delete ONE grass idea + all its grass-side stores (v9 Wave 2).
+
+    Project-scoped, BEST-EFFORT, IDEMPOTENT, never raises. For ``idea_id`` in the
+    project's grass lane this removes:
+
+      1. the idea **pointer-record** + its **grass index.json** entry (reuses the
+         :func:`_delete_effort_record` pointer+index removal pattern);
+      2. the idea's **refinements dir** (``refinements/<id>/`` with all its
+         ``dev-N.json`` versions) — recursive remove;
+      3. its **dev_sessions** map — the CONTAINED develop sessions are best-effort
+         deleted/forgotten (``terminal_session.delete_session`` if available, else
+         the registry record is dropped via ``session_registry.remove_session``);
+         a failure here never raises and never blocks the idea removal.
+
+    Only this project's grass lane is touched — sibling ideas and other projects
+    are untouched (the pointer/index/refinements paths are all idea-id-scoped).
+    Returns ``{"ok": True, "deleted": bool, "idea_id", "refinements_removed":
+    bool, "dev_sessions_cleared": [session_id...]}`` where ``deleted`` is whether a
+    grass pointer-record was removed (False if the id was already unknown).
+    """
+    want = (idea_id or "").strip()
+    cleared_sessions = []
+    refinements_removed = False
+    deleted = False
+    if not want:
+        return {"ok": True, "deleted": False, "idea_id": want,
+                "refinements_removed": False, "dev_sessions_cleared": []}
+
+    # Resolve the idea (best-effort) so we can clean its contained dev sessions
+    # BEFORE we drop the pointer-record. An unknown id → a clean no-op.
+    idea = get_grass_idea(folder_path, project_id, want)
+    jid = (idea.get("job_id", want) if idea else want)
+
+    # 1) Best-effort clean the CONTAINED develop sessions (kill/forget, never raise).
+    if idea is not None:
+        for _lane, sid in _grass_dev_sessions(idea).items():
+            sid = (sid or "").strip()
+            if not sid:
+                continue
+            try:
+                import terminal_session as _ts
+                _ts.delete_session(sid, project_id=project_id)
+                cleared_sessions.append(sid)
+            except Exception:
+                try:
+                    import session_registry as _sr
+                    _sr.remove_session(sid)
+                    cleared_sessions.append(sid)
+                except Exception:
+                    pass
+
+    # 2) Drop the idea pointer-record + its grass index entry (reuse the W1 pattern).
+    try:
+        deleted = bool(_delete_effort_record(folder_path, project_id, "grass", jid))
+    except Exception:
+        deleted = False
+
+    # 3) Remove the refinements dir (the dev-N versions) — recursive, tolerant.
+    try:
+        rdir = _refinements_dir(folder_path, project_id, jid)
+        if rdir.is_dir():
+            shutil.rmtree(str(rdir), ignore_errors=True)
+            refinements_removed = not rdir.exists()
+    except Exception:
+        refinements_removed = False
+
+    return {
+        "ok": True,
+        "deleted": deleted,
+        "idea_id": jid,
+        "refinements_removed": refinements_removed,
+        "dev_sessions_cleared": cleared_sessions,
+    }
+
+
+# ── Grass → project export (v8 Wave 6, Option B: copy up, idea stays) ────────
+
+def export_grass_to_project(project_id: str, idea_id: str,
+                            folder_path=None) -> dict:
+    """Export an idea's research/plan WORK up into REAL lane tiles (W6, Option B).
+
+    The locked "Export to project" behavior: the idea's contained develop work is
+    COPIED up into the real Research/Plan lane columns as durable, board-visible
+    sessions — AND the idea STAYS in grass, marked ``promoted`` with a link to the
+    new project sessions (copy, never destroy).
+
+    For each lane (research/plan) in which this idea has a develop session
+    (``dev_sessions``), this:
+
+      1. PERSISTS that develop session's produced docs into the main project (so
+         the work survives), reusing the Wave-2 keystone
+         :func:`persist_session_docs` (best-effort; a still-live session whose
+         docs aren't yet written simply persists nothing).
+      2. Records a REAL (run-source) lane effort — a board-visible session — that
+         CARRIES the develop session's persisted docs (``artifacts``, resolved via
+         the Wave-5 :func:`efforts_for_session_id` join) and LINKS back to the
+         idea (``from_grass_idea``).
+      3. Collects ``{lane, session_id, export_effort_id}`` link records.
+
+    Then it marks the idea PROMOTED (via :func:`set_grass_status`) with a link to
+    the first exported session, and stores the full ``exported_to`` link list on
+    the idea record. The idea is never destroyed.
+
+    Returns ``{"ok": bool, "exported": [{lane, session_id, export_effort_id,
+    docs:[rel,...]}, ...], "reason": str}``. Raises ``ValueError`` for an unknown
+    project or idea. Idempotent per (idea, develop-session): a content-addressed
+    export effort id means re-exporting the same develop work does not duplicate.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+    title = (idea.get("title") or "").strip()
+
+    dev_map = _grass_dev_sessions(idea)
+    exported = []
+    for lane in PROMOTE_LANES:
+        sid = dev_map.get(lane)
+        if not sid:
+            continue
+        # 1) Persist the develop session's produced docs into the main project
+        #    (Wave-2 keystone) so the exported tile carries durable artifacts.
+        #    Resolve the develop session's worktree from the registry when live.
+        try:
+            import session_registry as _sr
+            rec = _sr.get_session(sid)
+        except Exception:
+            rec = None
+        if rec is not None and rec.get("worktree_path"):
+            try:
+                persist_session_docs(folder_path, project_id, lane, sid,
+                                     rec.get("worktree_path"))
+            except Exception:
+                pass
+
+        # 2) The develop session's persisted docs in this lane (Wave-5 join).
+        doc_efforts = efforts_for_session_id(folder_path, project_id, lane, sid)
+        artifacts = [e.get("artifact_path", "") for e in doc_efforts
+                     if e.get("artifact_path")]
+
+        # 3) Record a REAL (run-source) board-visible lane session carrying those
+        #    docs + a link back to the idea. Content-addressed id → idempotent.
+        export_eid = "export-" + hashlib.sha1(
+            ("%s|%s|%s" % (jid, lane, sid)).encode("utf-8")).hexdigest()[:16]
+        extra = {
+            "source": SOURCE_RUN,
+            "kind": "export",
+            "title": ("Exported from grass: " + title) if title else "Exported idea",
+            "from_grass_idea": jid,
+            "from_dev_session": sid,
+            "artifacts": list(artifacts),
+            "status": "imported",
+        }
+        try:
+            record_effort(folder_path, project_id, lane, export_eid, extra=extra)
+        except Exception:
+            continue
+        exported.append({
+            "lane": lane,
+            "session_id": sid,
+            "export_effort_id": export_eid,
+            "docs": list(artifacts),
+        })
+
+    if not exported:
+        return {"ok": False, "exported": [], "reason": "no-develop-work"}
+
+    # Mark the idea PROMOTED + store the export links on the idea record. The idea
+    # stays in grass (copy, never destroy). Best-effort status set (a refined idea
+    # → promoted is legal; an already-promoted one stays promoted).
+    first = exported[0]
+    try:
+        set_grass_status(folder_path, project_id, jid, GRASS_PROMOTED,
+                         promoted_to_session=first["session_id"],
+                         promoted_to_lane=first["lane"])
+    except Exception:
+        pass
+    try:
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"exported_to": exported})
+    except Exception:
+        pass
+    return {"ok": True, "exported": exported, "reason": "ok"}
 
 
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────
@@ -751,6 +1054,89 @@ def _delete_effort_record(folder_path, project_id: str, lane: str,
             _save_index(folder_path, project_id, lane, order)
             removed = True
         return removed
+
+
+#: Subdir under a lane store dir holding per-session cached summaries. Mirrors
+#: ``summarizer.SUMMARIES_DIRNAME`` (kept here so :func:`delete_session_efforts`
+#: can remove the cached summary dir WITHOUT importing ``summarizer`` — which
+#: would create an import cycle, since summarizer imports this module).
+SUMMARIES_DIRNAME = "summaries"
+
+
+def _safe_session_segment(seg: str) -> str:
+    """Filesystem-safe form of a session_id for the summaries dir name.
+
+    MUST match ``summarizer._safe_segment`` so the summary dir this computes is
+    the SAME one summarizer writes (a managed session id can contain ``::``)."""
+    import re as _re
+    return _re.sub(r"[^A-Za-z0-9._-]+", "_", str(seg or "")) or "session"
+
+
+def session_summary_dir(folder_path, project_id: str, lane: str,
+                        session_id: str) -> Path:
+    """``<lane>/summaries/<safe-session-id>/`` — the cached-summary dir.
+
+    The same path ``summarizer.summary_dir`` resolves to; recomputed here to
+    avoid an import cycle (summarizer → effort_history)."""
+    return (lane_dir(folder_path, project_id, lane)
+            / SUMMARIES_DIRNAME / _safe_session_segment(session_id))
+
+
+def delete_session_efforts(folder_path, project_id: str, lane: str,
+                           session_id: str) -> dict:
+    """TRUE session delete (v9 Wave 1) — remove a session's Anchor-side stores.
+
+    For ``session_id`` in ``lane`` this removes, BEST-EFFORT + IDEMPOTENT:
+
+      1. every effort **pointer-record** tagged with this session_id (the v8
+         join, :func:`efforts_for_session_id`) AND its **index.json** entry
+         (via :func:`_delete_effort_record`);
+      2. the cached **summary dir** ``<lane>/summaries/<sid>/``.
+
+    It deliberately **does NOT remove the produced documents** (Option A): the
+    persisted plan/research/build files stay in the project folder/git — only the
+    Anchor effort *pointer-records* (which reference them) and the cached summary
+    are dropped. So ``list_efforts``/``sessions.list_sessions`` no longer surface
+    the session, but the committed work on disk is untouched.
+
+    Never raises. Returns ``{"ok", "removed_efforts": [job_id...],
+    "summary_removed": bool}``.
+    """
+    removed = []
+    summary_removed = False
+    try:
+        store_lane = _resolve_subdir(lane)
+        # 1) Drop every session-tagged effort pointer-record + its index entry.
+        try:
+            tagged = efforts_for_session_id(folder_path, project_id, store_lane,
+                                            session_id)
+        except Exception:
+            tagged = []
+        for eff in tagged:
+            jid = (eff.get("job_id") or "").strip()
+            if not jid:
+                continue
+            try:
+                if _delete_effort_record(folder_path, project_id, store_lane, jid):
+                    removed.append(jid)
+            except Exception:
+                pass
+        # 2) Remove the cached summary dir (best-effort; tolerate already-gone).
+        try:
+            sdir = session_summary_dir(folder_path, project_id, store_lane,
+                                       session_id)
+            if sdir.is_dir():
+                shutil.rmtree(str(sdir), ignore_errors=True)
+                summary_removed = not sdir.exists()
+        except Exception:
+            summary_removed = False
+    except Exception:
+        pass
+    return {
+        "ok": True,
+        "removed_efforts": removed,
+        "summary_removed": summary_removed,
+    }
 
 
 def adopt_discovered(folder_path, project_id: str, scan_result) -> dict:
@@ -1403,3 +1789,319 @@ def finalize_effort(folder_path, project_id: str, lane: str, job_id: str,
         commit = auto_commit_effort(folder_path, project_id, lane, job_id,
                                     allow_init=allow_init)
     return {"effort": effort, "commit": commit}
+
+
+# ── Session document persistence (v8 Wave 2 — THE KEYSTONE) ──────────────────
+#
+# Trio sessions run in a throwaway git WORKTREE; Anchor historically committed
+# only the tiny ``.pointer.json`` metadata, so the actual documents a session
+# produced (MASTER-PLAN.md, the research report, EXECUTION-LOG, …) were DELETED
+# when the worktree was reaped on kill — the build worktree (off main HEAD)
+# couldn't find the plan, ``discover_recent_plan_set`` (reads the main folder)
+# came up empty, and killing a session lost the work.
+#
+# ``persist_session_docs`` closes that gap: BEFORE the worktree is reaped it
+# collects the documents the session produced in its worktree, COPIES them into
+# the MAIN project folder at the same relative paths, COMMITS them (scoped — only
+# the produced docs + the effort pointer/index, NEVER ``git add -A`` and never the
+# user's unrelated changes) in the project's OWN repo, and records a per-doc
+# DISCOVERED effort whose ``artifact_path`` is the main-folder-relative path so
+# ``list_efforts`` / ``sessions.list_sessions`` / ``discover_recent_plan_set``
+# resolve them in the main folder. Idempotent (content-addressed effort ids +
+# git's "nothing staged" no-op) and best-effort (never raises into the kill path).
+
+#: Top-level worktree directories whose produced docs we persist into the main
+#: project. The trio writes its docs under these lane output dirs.
+_DOC_DIRS = ("planning", "research", "build", "deliverables")
+
+#: Directories we NEVER sweep, even if git reports changes under them — Anchor's
+#: own per-project store, git internals, dependency trees, and managed worktrees.
+_DOC_EXCLUDE_DIRS = (".anchor", ".git", "node_modules", "__pycache__",
+                     ".venv", "venv", "rnd_jobs")
+
+#: Bare trio doc filenames we persist even when they sit at the project root (not
+#: under a lane dir) — the canonical plan/report/log artifacts.
+_DOC_ROOT_NAMES = ("master-plan.md", "implementation-plan.md",
+                   "execution-log.md", "report.md", "handoff.md")
+
+#: Document extensions we consider persistable produced artifacts.
+_DOC_EXTS = (".md", ".pdf")
+
+
+def _is_document_rel(rel: str) -> bool:
+    """True iff ``rel`` (a forward-slash repo-relative path) is a produced doc.
+
+    Inclusive of the lane output dirs (``planning/**``, ``research/**``,
+    ``build/**``, ``deliverables/**``) AND the bare trio doc names at the root,
+    restricted to ``.md`` / ``.pdf`` — but it NEVER sweeps ``.anchor/``,
+    ``.git/``, ``node_modules``, ``__pycache__``, ``rnd_jobs`` or unrelated files.
+    """
+    rel = (rel or "").strip().replace("\\", "/").lstrip("/")
+    if not rel:
+        return False
+    parts = PurePosixPath(rel).parts
+    if not parts:
+        return False
+    # Hard exclusions: anything whose first segment (or any segment) is excluded.
+    for seg in parts:
+        if seg in _DOC_EXCLUDE_DIRS:
+            return False
+    ext = PurePosixPath(rel).suffix.lower()
+    if ext not in _DOC_EXTS:
+        return False
+    top = parts[0]
+    if top in _DOC_DIRS:
+        return True
+    # A bare trio doc at the project root is also persistable.
+    if len(parts) == 1 and PurePosixPath(rel).name.lower() in _DOC_ROOT_NAMES:
+        return True
+    return False
+
+
+def _produced_doc_rels(worktree_path) -> list:
+    """Repo-relative POSIX paths of the document-like files the session produced.
+
+    Asks git in the worktree for new/changed files two ways and unions them:
+      - ``git status --porcelain`` → untracked + modified (uncommitted work);
+      - ``git diff --name-only HEAD`` → files changed vs the worktree's HEAD
+        (committed-in-worktree work).
+    The union is filtered through :func:`_is_document_rel`. Best-effort: a git
+    failure or a non-repo worktree yields ``[]`` (never raises).
+    """
+    wt = Path(worktree_path)
+    if not worktree_path or not wt.is_dir():
+        return []
+    rels = set()
+    # Untracked + modified (porcelain v1: 'XY <path>', rename 'R  old -> new').
+    # ``-uall`` so untracked DIRECTORIES are expanded to their individual files
+    # (the default collapses a new dir to just ``dir/``, losing the doc names).
+    try:
+        r = _git(wt, "status", "--porcelain", "-uall")
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                path = line[3:]
+                if " -> " in path:          # rename → take the destination
+                    path = path.split(" -> ", 1)[1]
+                path = path.strip().strip('"')
+                if path:
+                    rels.add(path.replace("\\", "/"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    # Tracked changes vs HEAD (anything committed inside the worktree).
+    try:
+        r = _git(wt, "diff", "--name-only", "HEAD")
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                p = line.strip().strip('"')
+                if p:
+                    rels.add(p.replace("\\", "/"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return sorted(r for r in rels if _is_document_rel(r))
+
+
+def _doc_kind_title(rel: str):
+    """Classify a produced doc by filename → ``(kind, title)`` for grouping.
+
+    The ``kind``/``title`` carry the master/impl signal ``sessions`` and
+    ``handoff`` look for (so a persisted MASTER-PLAN.md is recognized as a plan
+    set's master doc), with a sensible humanized fallback title otherwise.
+    """
+    name = PurePosixPath(rel).name
+    low = name.lower()
+    if "master-plan" in low or "master plan" in low or "masterplan" in low:
+        return "master-plan", "Master Plan"
+    if ("implementation-plan" in low or "implementation plan" in low
+            or "impl-plan" in low):
+        return "impl-plan", "Implementation Plan"
+    if "execution-log" in low or "exec-log" in low or "execution log" in low:
+        return "exec-log", "Execution Log"
+    if low.startswith("report"):
+        return "report", "Report"
+    # Humanize the stem for an honest fallback title.
+    stem = PurePosixPath(rel).stem.replace("-", " ").replace("_", " ").strip()
+    return "doc", (stem.title() if stem else name)
+
+
+def persist_session_docs(folder_path, project_id: str, lane: str,
+                         session_id: str, worktree_path) -> dict:
+    """Persist a session's produced documents into the MAIN project (the keystone).
+
+    Called on session finish/kill **BEFORE the worktree is reaped**. Steps:
+
+      1. Detect the documents the session PRODUCED in its worktree — the
+         new/changed document-like files (lane output dirs + the trio doc names),
+         via git in the worktree (:func:`_produced_doc_rels`).
+      2. COPY each into the MAIN project folder at the SAME relative path
+         (creating parent dirs), skipping a copy that is already byte-identical.
+      3. Record a per-doc DISCOVERED effort in the lane whose ``artifact_path`` is
+         the MAIN-folder-relative path (content-addressed id → idempotent), so the
+         doc resolves in the main folder for ``list_efforts`` /
+         ``sessions.list_sessions`` / ``handoff.discover_recent_plan_set``.
+      4. COMMIT in the MAIN project repo, staging ONLY those produced doc paths +
+         their effort pointer-records + the lane index — never ``git add -A``,
+         never the user's unrelated changes. Idempotent: re-persisting unchanged
+         docs stages nothing → no empty commit.
+
+    Returns ``{"ok": bool, "persisted": [rel, ...], "committed": bool,
+    "commit": <sha|None>, "reason": str}``. **Best-effort — never raises** so a
+    persistence failure can never break the kill path.
+    """
+    out = {"ok": False, "persisted": [], "committed": False, "commit": None,
+           "reason": "ok"}
+    try:
+        main = Path(folder_path)
+        if not folder_path or not main.exists():
+            out["reason"] = "folder-missing"
+            return out
+
+        doc_rels = _produced_doc_rels(worktree_path)
+        if not doc_rels:
+            out["ok"] = True
+            out["reason"] = "no-docs"
+            return out
+
+        wt = Path(worktree_path)
+        persisted = []
+        for rel in doc_rels:
+            src = wt / rel
+            if not src.is_file():
+                continue
+            dst = main / rel
+            try:
+                # Skip an identical re-copy so a re-persist is a true no-op.
+                if dst.is_file():
+                    try:
+                        if (src.read_bytes() == dst.read_bytes()):
+                            persisted.append(rel)
+                            continue
+                    except OSError:
+                        pass
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(dst))
+                persisted.append(rel)
+            except OSError:
+                continue
+
+        if not persisted:
+            out["ok"] = True
+            out["reason"] = "nothing-copied"
+            return out
+
+        # Record a per-doc DISCOVERED effort so the persisted docs are visible in
+        # the MAIN folder's lane history (content-addressed → idempotent re-runs).
+        # ``created_at`` is left to ``record_effort``'s first-write default so a
+        # re-persist does NOT rewrite the pointer-record (otherwise an ever-moving
+        # timestamp would re-stage the pointer and break idempotency). The doc's
+        # mtime is the honest creation marker we stamp once on first record.
+        pointer_rels = []
+        for rel in persisted:
+            kind, title = _doc_kind_title(rel)
+            jid = discovered_job_id(lane, rel)
+            try:
+                existing = load_effort(main, project_id, lane, jid)
+                extra = {"source": SOURCE_DISCOVERED, "kind": kind,
+                         "title": title, "artifact_path": rel,
+                         "status": "imported", "session_id": session_id}
+                if existing is None:
+                    # First record: stamp created_at from the doc's on-disk mtime.
+                    try:
+                        extra["created_at"] = (main / rel).stat().st_mtime
+                    except OSError:
+                        pass
+                    record_effort(main, project_id, lane, jid, skill=None,
+                                  extra=extra)
+                # else: already recorded with this exact content-addressed id —
+                # leave the pointer-record untouched (idempotent; no re-stage).
+                pp = _pointer_path(main, project_id, lane, jid)
+                if pp.exists():
+                    pointer_rels.append(_rel_to_folder(main, pp))
+            except (OSError, ValueError):
+                continue
+        ipath = _index_path(main, project_id, lane)
+        if ipath.exists():
+            pointer_rels.append(_rel_to_folder(main, ipath))
+
+        out["persisted"] = persisted
+        commit = _commit_session_docs(main, project_id, lane, session_id,
+                                      persisted, pointer_rels)
+        out["committed"] = bool(commit.get("committed"))
+        out["commit"] = commit.get("commit")
+        out["reason"] = commit.get("reason", "ok")
+        out["ok"] = True
+        return out
+    except Exception:  # keystone is best-effort: NEVER raise into the kill path
+        out["reason"] = "error"
+        return out
+
+
+def _rel_to_folder(folder: Path, p: Path) -> str:
+    """Folder-relative POSIX path of ``p`` (or its str() if not under folder)."""
+    try:
+        return str(p.relative_to(folder)).replace("\\", "/")
+    except ValueError:
+        return str(p)
+
+
+def _commit_session_docs(folder: Path, project_id: str, lane: str,
+                         session_id: str, doc_rels, pointer_rels) -> dict:
+    """Commit ONLY the produced docs (+ pointer/index) in the MAIN project repo.
+
+    Scoped + safe: refuses the Anchor code repo, requires an existing git repo
+    (never inits here — Wave 1 bootstrap owns that), stages ONLY the explicit
+    paths (no ``git add -A``), and produces no empty commit (a re-persist of
+    unchanged docs stages nothing → ``no-staged-changes``). Returns the same
+    shape as :func:`auto_commit_effort`.
+    """
+    if not folder.exists():
+        return {"committed": False, "reason": "folder-missing", "commit": None}
+    code = _paths.CODE_DIR.resolve()
+    if _is_anchor_repo(folder, code):
+        return {"committed": False, "reason": "refused-anchor-repo",
+                "commit": None}
+    if not _is_git_repo(folder):
+        return {"committed": False, "reason": "not-a-git-repo", "commit": None}
+
+    # The explicit, scoped set of paths to stage: the produced docs + their
+    # pointer-records + the lane index. NEVER ``git add -A``.
+    rel_targets = []
+    for rel in list(doc_rels) + list(pointer_rels):
+        if rel and rel not in rel_targets:
+            rel_targets.append(rel)
+    if not rel_targets:
+        return {"committed": False, "reason": "nothing-to-commit", "commit": None}
+
+    with _paths.WRITE_LOCK:
+        try:
+            _git(folder, "add", "--", *rel_targets, check=True)
+        except (OSError, subprocess.SubprocessError):
+            return {"committed": False, "reason": "add-failed", "commit": None}
+
+        diff = _git(folder, "diff", "--cached", "--name-only")
+        if not (diff.stdout or "").strip():
+            return {"committed": False, "reason": "no-staged-changes",
+                    "commit": None}
+
+        sid8 = (str(session_id) or "")[:8]
+        msg = f"anchor: {lane} session {sid8} docs ({project_id})"
+        env_args = [
+            "-c", "user.name=Anchor",
+            "-c", "user.email=anchor@localhost",
+            "-c", "commit.gpgsign=false",
+        ]
+        try:
+            r = subprocess.run(
+                ["git", "-C", str(folder), *env_args, "commit",
+                 "--no-verify", "-m", msg, "--", *rel_targets],
+                capture_output=True, text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {"committed": False, "reason": "commit-failed", "commit": None}
+        if r.returncode != 0:
+            return {"committed": False, "reason": "commit-nonzero",
+                    "commit": None, "stderr": r.stderr}
+        sha = _git(folder, "rev-parse", "HEAD")
+        return {"committed": True, "reason": "ok",
+                "commit": (sha.stdout or "").strip()}
