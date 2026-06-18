@@ -818,6 +818,10 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
             # became). Both empty until the idea is developed / exported.
             "dev_sessions": _grass_dev_sessions(eff),
             "exported_to": list((eff.get("exported_to") or [])),
+            # v10 Wave 4: per-idea ARCHIVE bundles (persisted dev docs + summary
+            # ref tied to this idea), newest-first. Empty until the idea is
+            # archived. Distinct from ``refinements`` (text snapshots).
+            "archives": list_grass_archives(folder_path, project_id, jid),
             "refinements": refs,
         })
     return out
@@ -979,6 +983,11 @@ def export_grass_to_project(project_id: str, idea_id: str,
             "title": ("Exported from grass: " + title) if title else "Exported idea",
             "from_grass_idea": jid,
             "from_dev_session": sid,
+            # v10 Wave 4 lineage (D8): stamp the originating grass idea on the
+            # exported lane effort so every downstream project session in this
+            # chain can trace back to the idea (the chain inheritance is wired in
+            # terminal_session.start_session via grass_origin).
+            "grass_origin": jid,
             "artifacts": list(artifacts),
             "status": "imported",
         }
@@ -986,6 +995,17 @@ def export_grass_to_project(project_id: str, idea_id: str,
             record_effort(folder_path, project_id, lane, export_eid, extra=extra)
         except Exception:
             continue
+        # v10 Wave 4 (D8): stamp ``grass_origin`` on the dev session's registry
+        # record so that any session started LATER with this session as its
+        # ``parent_session_id`` INHERITS the origin (terminal_session.start_session
+        # propagates a parent's grass_origin onto the child). Best-effort — a
+        # failed stamp never blocks the export.
+        try:
+            import session_registry as _sr2
+            if _sr2.get_session(sid) is not None:
+                _sr2.update_session(sid, grass_origin=jid)
+        except Exception:
+            pass
         exported.append({
             "lane": lane,
             "session_id": sid,
@@ -1012,6 +1032,164 @@ def export_grass_to_project(project_id: str, idea_id: str,
     except Exception:
         pass
     return {"ok": True, "exported": exported, "reason": "ok"}
+
+
+# ── Grass ARCHIVE: persist a dev session's docs + summary per-idea (v10 W4) ──
+#
+# D7 (locked): "archive" is a NEW VERB, DISTINCT from ``save_grass_refinement``
+# (a versioned TEXT snapshot). Archiving a grass research/plan dev session:
+#   1. PERSISTS the dev session's produced docs into the MAIN project (the v8
+#      keystone :func:`persist_session_docs` — copy + commit), so the work
+#      SURVIVES a session kill and is on disk + git;
+#   2. captures/attaches the dev session's CACHED summary reference (read-only —
+#      it never BLOCKS on a model run; a missing cache simply records no summary);
+#   3. records a per-idea ARCHIVE BUNDLE on the idea record under ``archives``
+#      (``[{lane, session_id, docs:[rel...], summary_ref, when}, ...]``; append,
+#      newest-first on read), keyed to THAT idea.
+# The idea STAYS in grass (copy, never destroy).
+
+
+def list_grass_archives(folder_path, project_id: str, idea_id: str) -> list:
+    """Return an idea's ARCHIVE bundles, **NEWEST-FIRST** (v10 Wave 4).
+
+    Each bundle is ``{lane, session_id, docs:[rel...], summary_ref, when}``.
+    Read off the idea pointer-record's ``archives`` list. Best-effort: a missing
+    idea / field yields ``[]``. Never raises.
+    """
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        return []
+    arr = idea.get("archives")
+    if not isinstance(arr, list):
+        return []
+    out = [a for a in arr if isinstance(a, dict)]
+    out.sort(key=lambda a: float(a.get("when", 0) or 0), reverse=True)
+    return out
+
+
+def archive_grass_session(project_id: str, idea_id: str, lane: str,
+                          folder_path=None) -> dict:
+    """Archive a grass dev session's produced docs + summary into a per-idea bundle.
+
+    The v10 Wave 4 "archive" verb (D7). For the idea's live/most-recent
+    ``(idea, lane)`` develop session (from ``dev_sessions``) this:
+
+      1. PERSISTS its produced docs into the MAIN project via
+         :func:`persist_session_docs` (the v8 keystone: copy + commit — survives a
+         later session kill) when the session's worktree is resolvable;
+      2. resolves the session's now-persisted docs in this lane (the Wave-5
+         :func:`efforts_for_session_id` join);
+      3. attaches the session's CACHED summary reference if present (READ-ONLY —
+         it does NOT block on a model run; a background summary may be triggered by
+         the caller). The bundle records ``summary_ref`` =
+         ``{"lane", "session_id"}`` so the UI can link
+         ``/summary/<pid>/<lane>/<sid>``; ``has_summary`` reflects whether a cache
+         exists right now;
+      4. APPENDS a per-idea archive bundle (``{lane, session_id, docs, summary_ref,
+         has_summary, when}``) to the idea record's ``archives`` list.
+
+    The idea STAYS in grass (copy, never destroy). HONEST: when there is no dev
+    session for this lane, or it produced no docs, returns
+    ``{"ok": False, "reason": ...}`` and records nothing (no fabrication).
+
+    Returns ``{"ok": bool, "archive": {...}|None, "reason": str}``. Raises
+    ``ValueError`` for an unknown project, idea, or invalid lane.
+    """
+    lane = (lane or "").strip()
+    if lane not in PROMOTE_LANES:
+        raise ValueError(
+            "archive lane must be one of %s, got %r"
+            % (", ".join(PROMOTE_LANES), lane))
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+
+    sid = _grass_dev_sessions(idea).get(lane)
+    if not sid:
+        return {"ok": False, "archive": None, "reason": "no-dev-session"}
+
+    # 1) Persist the dev session's produced docs into the main project (keystone).
+    #    Resolve its worktree from the registry when live.
+    try:
+        import session_registry as _sr
+        rec = _sr.get_session(sid)
+    except Exception:
+        rec = None
+    if rec is not None and rec.get("worktree_path"):
+        try:
+            persist_session_docs(folder_path, project_id, lane, sid,
+                                 rec.get("worktree_path"))
+        except Exception:
+            pass
+
+    # 2) The session's now-persisted docs in this lane (the Wave-5 join).
+    doc_efforts = efforts_for_session_id(folder_path, project_id, lane, sid)
+    docs = [e.get("artifact_path", "") for e in doc_efforts
+            if e.get("artifact_path")]
+    if not docs:
+        # Honest: nothing produced to archive — record nothing, no fabrication.
+        return {"ok": False, "archive": None, "reason": "no-docs"}
+
+    # 3) Attach the cached summary reference (read-only; never blocks on a model
+    #    run). ``has_summary`` reflects whether a cache exists right now.
+    has_summary = False
+    try:
+        import summarizer as _summ
+        has_summary = (_summ.load_cached(folder_path, project_id, lane, sid)
+                       is not None)
+    except Exception:
+        has_summary = False
+    summary_ref = {"lane": _resolve_subdir(lane), "session_id": sid}
+
+    archive = {
+        "lane": _resolve_subdir(lane),
+        "session_id": sid,
+        "docs": list(docs),
+        "summary_ref": summary_ref,
+        "has_summary": bool(has_summary),
+        "when": time.time(),
+    }
+
+    # 4) UPSERT the bundle on the idea record's ``archives`` list. v10 Wave 4
+    #    FIX 4 — IDEMPOTENT on identical content: an archive is content-addressed
+    #    by (lane, session_id, sorted(docs)). If a bundle with the SAME key already
+    #    exists, we UPDATE it in place (refresh ``when`` + ``has_summary``) instead
+    #    of appending a duplicate — so clicking Archive twice on the same unchanged
+    #    session leaves exactly ONE bundle. A genuinely-different doc set (the
+    #    session produced more docs) is a NEW key → appended (append-only history of
+    #    distinct archives is preserved). The idea STAYS in grass.
+    arch_key = (archive["lane"], archive["session_id"], tuple(sorted(docs)))
+    try:
+        existing = idea.get("archives")
+        bundles = list(existing) if isinstance(existing, list) else []
+        replaced = False
+        for i, b in enumerate(bundles):
+            if not isinstance(b, dict):
+                continue
+            bkey = (b.get("lane"), b.get("session_id"),
+                    tuple(sorted(b.get("docs") or [])))
+            if bkey == arch_key:
+                # Same content → update in place (refresh when/summary), no dup.
+                merged = dict(b)
+                merged.update(archive)
+                bundles[i] = merged
+                archive = merged
+                replaced = True
+                break
+        if not replaced:
+            bundles.append(archive)
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"archives": bundles})
+    except Exception:
+        return {"ok": False, "archive": None, "reason": "record-failed"}
+
+    return {"ok": True, "archive": archive, "reason": "ok"}
 
 
 # ── Honest brownfield discovery: adopt + reconcile (Wave 2) ─────────────────

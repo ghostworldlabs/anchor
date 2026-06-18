@@ -247,6 +247,23 @@ def _free_server(gui):
     return srv, port, t
 
 
+def _close_server(srv, t):
+    """Race-proof teardown (matches the hardened v10 fixtures): give in-flight
+    stream threads a beat, then shut down + close, each guarded so a benign
+    client-disconnect teardown race can never fail the test."""
+    import time
+    time.sleep(0.1)
+    try:
+        srv.shutdown()
+    except Exception:
+        pass
+    try:
+        srv.server_close()
+    except Exception:
+        pass
+    t.join(timeout=5)
+
+
 def test_term_kill_persists_then_advances_on_fresh_docs(env):
     """POST /api/rnd/term_kill on a planning session that just produced its plan
     docs (NOT previously persisted) auto-opens a build whose seed/HANDOFF
@@ -309,7 +326,7 @@ def test_term_kill_persists_then_advances_on_fresh_docs(env):
                 ts.kill(bsid)
             except Exception:
                 pass
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        _close_server(srv, t)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -442,5 +459,5 @@ def test_playwright_kill_planning_build_header_shows_foreman(env):
             except Exception:
                 pass
     finally:
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        _close_server(srv, t)
     assert shot.exists(), "screenshot not written"

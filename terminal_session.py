@@ -285,13 +285,41 @@ def _check_engine_allowed(lane, backend):
             raise TerminalSessionError(str(exc)) from exc
 
 
+def _resolve_grass_origin_from_chain(parent_id, parent_rec):
+    """Return the grass_origin a child should inherit from the chain it joins.
+
+    v10 Wave 4 FIX 1 (D8): the stamp must reach the CHAIN ROOT, not just the
+    direct parent. Prefer the direct parent's own stamp (cheapest, common case);
+    otherwise walk the chain members ONCE (a single bounded ``chain_members``
+    read — no parent-pointer recursion, so it is inherently cycle-safe) and adopt
+    any non-empty ``grass_origin`` found among them. Returns ``""`` when no member
+    carries one. Best-effort: any registry error degrades to ``""``.
+    """
+    direct = (parent_rec.get("grass_origin", "") or "") if parent_rec else ""
+    if direct:
+        return direct
+    if not parent_id:
+        return ""
+    try:
+        chain_id = _reg.chain_for(parent_id)
+        if not chain_id:
+            return ""
+        for m in _reg.chain_members(chain_id):
+            go = (m.get("grass_origin", "") or "") if isinstance(m, dict) else ""
+            if go:
+                return go
+    except Exception:
+        return ""
+    return ""
+
+
 #: Sentinel: ``backend`` not explicitly passed → default to the project's
 #: last-used engine (v4 Wave 2).
 _UNSET = object()
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
-                  parent_session_id=None, paste_prompt=None):
+                  parent_session_id=None, paste_prompt=None, grass_origin=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -331,6 +359,15 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     back-compat path) — ``seed_context`` continues to fold onto the seed and is
     auto-submitted as today.
 
+    v10 Wave 4: ``grass_origin`` (optional) is the originating grass idea id for a
+    grass→project lineage chain (D8). When passed it is stamped on the new
+    session's registry record; when omitted it is INHERITED from the parent's
+    record (so once a chain is grass-stamped — e.g. by ``export_grass_to_project``
+    on the dev session — every downstream session in that chain carries the
+    origin and can trace back to the idea). Empty for any non-grass chain (the
+    default). It is just an idea id — SAFE to carry into the board / chain
+    projections (never worktree_path/branch).
+
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
     On a worktree-creation failure it raises with the git reason (nothing is left
@@ -361,10 +398,24 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # unknown parent id is ignored (the session simply starts its own chain).
     parent_id = parent_session_id or ""
     chain_id = None
+    parent_rec = None
     if parent_id:
+        parent_rec = _reg.get_session(parent_id)
         chain_id = _reg.chain_for(parent_id)
         if not chain_id:
             parent_id = ""  # unknown parent → start a fresh chain
+            parent_rec = None
+
+    # v10 Wave 4 (D8): grass→project lineage. The new session's ``grass_origin``
+    # is the explicit value if passed, ELSE INHERITED from anywhere in the chain
+    # it is joining (so once an exported/promoted grass chain is stamped, EVERY
+    # downstream session in it traces back to the idea — even when the direct
+    # parent's own record happens to carry an empty stamp but a chain ancestor
+    # carries it). Empty for any non-grass chain. Cheap + cycle-safe: a single
+    # bounded read of the chain members (no parent-pointer recursion).
+    origin = (grass_origin or "")
+    if not origin and parent_rec is not None:
+        origin = _resolve_grass_origin_from_chain(parent_id, parent_rec)
 
     # 1) Isolated worktree first — if this fails we never start a PTY.
     wt = _wt.create_worktree(project_id, sid)
@@ -411,6 +462,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             session_id=sid,
             parent_session_id=parent_id,
             chain_id=chain_id,
+            grass_origin=origin,
         )
     except Exception as exc:
         try:

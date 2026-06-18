@@ -2055,6 +2055,10 @@ def _registry_session_view(rec):
         "artifact_path": "",
         "title": label,
         "kind": "",
+        # v10 Wave 4: grass→project lineage stamp. Just an idea id — SAFE (never
+        # worktree_path/branch). Lets a board tile show the "from grass: <idea>"
+        # back-link chip when this session's chain traces back to a grass idea.
+        "grass_origin": (rec.get("grass_origin") or ""),
         # v7 Wave 3 merge markers (consumed only by _gather_project_sessions):
         "from_registry": True,
         "_reg_session_id": rec.get("session_id") or "",
@@ -2684,6 +2688,26 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
             f"<span class='tiechip' title='Open the planning session this build "
             f"executed on' onclick=\"openLinkedPlanning(event,'{lp_sid}')\">"
             f"&#9741; Planning: {lp_lbl} &#9656;</span>")
+    # v10 Wave 4 FIX 2 (D8): the board-tile "from grass" lineage chip. When this
+    # session's record carries a ``grass_origin`` (set on the dev session at
+    # export, or INHERITED down the chain by start_session FIX 1), render a chip
+    # on the plan/build board tile that links back to the originating grass idea
+    # — satisfying D8 VISIBLY on the board (not only in the opened panel). The
+    # chip reads ONLY the SAFE projection field ``grass_origin`` (an idea id —
+    # never worktree_path/branch). Its label + dead-state ("idea removed") are
+    # resolved client-side by ``_resolveGrassOriginChips`` against the loaded
+    # grass data, so the server render stays cheap and the panel + tile chips
+    # share one dead-chip code path. Only plan/build columns carry it (the lanes
+    # the mockup depicts); research is the chain root, never "from" itself.
+    grass_chip = ""
+    origin = (rep.get("grass_origin") or "").strip()
+    if origin and trio_lane in ("plan", "planning", "build"):
+        origin_attr = html_lib.escape(origin, quote=True)
+        grass_chip = (
+            f"<span class='grassorigin' data-grass-origin=\"{origin_attr}\" "
+            f"data-grass-pending=\"1\" "
+            f"title='This work traces back to a grass idea — click to open it'>"
+            f"&#127793; from grass</span>")
     return (
         f"<div class='tile lane-tile{extra}' data-session=\"{sid_attr}\" "
         f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{live_data}{tie_data} "
@@ -2696,6 +2720,7 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
         f"<div class='st'>{''.join(st_bits)}</div>"
         f"{counts}"
         f"{tie_chip}"
+        f"{grass_chip}"
         f"</div>"
     )
 
@@ -3114,6 +3139,10 @@ def render_project_window_html(project_id: str) -> str:
         "width:14px;text-align:center}"
         ".grass-workbench .gterm .tbar .gsave{font-size:10.5px;padding:2px 7px;cursor:pointer}"
         ".grass-workbench .gterm .tbar .gsave:disabled{opacity:.4;cursor:default}"
+        # v10 Wave 4 — per-lane Archive control (distinct from Save).
+        ".grass-workbench .gterm .tbar .garchive{font-size:10.5px;padding:2px 7px;"
+        "cursor:pointer}"
+        ".grass-workbench .gterm .tbar .garchive:disabled{opacity:.4;cursor:default}"
         ".grass-workbench .gterm .term-host{flex:1;overflow:auto;min-height:120px}"
         ".grass-workbench .gterm.collapsed{resize:none;min-height:0}"
         ".grass-workbench .gterm.collapsed .term-host{display:none}"
@@ -3128,6 +3157,29 @@ def render_project_window_html(project_id: str) -> str:
         ".ghist .hr a{color:var(--accent);text-decoration:none}"
         ".ghist .hr .sp{flex:1}"
         ".ghist-empty{font-size:11.5px;color:var(--text-dim)}"
+        # v10 Wave 4 — Archived material list (per-idea bundles: docs + summary).
+        ".garch{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
+        ".garch .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:7px}"
+        ".garch .ar{font-size:12px;color:var(--text);padding:6px 0;"
+        "border-bottom:1px solid var(--border);display:flex;gap:9px;"
+        "align-items:center;flex-wrap:wrap}"
+        ".garch .ar .lnchip{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:.5px;background:#1b2030;padding:1px 6px;border-radius:5px;"
+        "color:var(--text-dim)}"
+        ".garch .ar .alink{color:var(--accent);text-decoration:none}"
+        ".garch .ar .sp{flex:1}"
+        ".garch .ar .garch-nodoc,.garch .ar .garch-nosum{color:var(--text-dim);"
+        "font-style:italic;font-size:11px}"
+        ".garch-empty{font-size:11.5px;color:var(--text-dim)}"
+        # v10 Wave 4 — panel-header "from grass: <idea>" lineage back-link chip.
+        ".grassorigin{font-size:10.5px;background:#15301c;color:#7be0a0;"
+        "border:1px solid #2a5a3a;padding:1px 8px;border-radius:9px;cursor:pointer;"
+        "margin-left:6px;white-space:nowrap}"
+        ".grassorigin:hover{background:#1c3d26}"
+        ".grassorigin.removed{background:#1b1e26;color:#6b7280;"
+        "border-color:#33384a;cursor:default;opacity:.7}"
+        ".grassorigin.removed:hover{background:#1b1e26}"
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
@@ -3570,6 +3622,13 @@ window.addEventListener('DOMContentLoaded', function () {
   // v8 Wave 3: render the GitHub link / auto-push header controls from the
   // current remote_status (read-only GET; never a model call / network).
   try { renderRemoteControls(); } catch (e) {}
+  // v10 Wave 4 FIX 2/3: resolve the board-tile "from grass" chips (label +
+  // dead-state) once the grass data is loaded (read-only GET). Best-effort.
+  try {
+    _loadGrassData().then(function () {
+      try { _resolveGrassOriginChips(document); } catch (e) {}
+    });
+  } catch (e) {}
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -3914,6 +3973,9 @@ async function _loadGrassData() {
       for (var i = 0; i < data.ideas.length; i++) _grassData[data.ideas[i].idea_id] = data.ideas[i];
     }
   } catch (e) { /* read-only; workbench still works from row data */ }
+  // v10 Wave 4 FIX 2/3: now that grass data is current, resolve any pending
+  // board-tile "from grass" chips (label/dead-state). Idempotent.
+  try { _resolveGrassOriginChips(document); } catch (e) {}
 }
 function _grassTokenQ() {
   var t = _anchorToken();
@@ -3986,6 +4048,12 @@ function selectGrassIdea(ideaId) {
     + '<div class="tbar"><span class="ic">🔬</span>'
     + '<span class="lab"><b>Research terminal</b> · not started</span>'
     + '<span class="sp"></span>'
+    // v10 Wave 4 — Archive (D7): persist THIS session produced docs + summary
+    // into a per-idea bundle that survives kill. DISTINCT from Save (a text
+    // snapshot). Disabled until this lane Develop session is live.
+    + '<button class="mini garchive" data-archive-lane="research" disabled '
+    + 'title="Archive THIS research session\'s produced docs + summary into a '
+    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
     + '<button class="mini gsave" data-save-lane="research" disabled '
     + 'title="Save THIS research session\'s output as a new '
     + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
@@ -3995,12 +4063,19 @@ function selectGrassIdea(ideaId) {
     + '<div class="tbar"><span class="ic">📐</span>'
     + '<span class="lab"><b>Plan terminal</b> · not started</span>'
     + '<span class="sp"></span>'
+    + '<button class="mini garchive" data-archive-lane="plan" disabled '
+    + 'title="Archive THIS plan session\'s produced docs + summary into a '
+    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
     + '<button class="mini gsave" data-save-lane="plan" disabled '
     + 'title="Save THIS plan session\'s output as a new '
     + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
     + '<span class="car">▸</span></div>'
     + '<div class="term-host" data-grass-term="plan"></div></div>'
     + '</div>'
+    // v10 Wave 4 — Archived material: the per-idea archive bundles (persisted
+    // docs + summary), newest-first. Empty until the idea is archived.
+    + '<div class="garch"><div class="h">Archived material · saved docs + '
+    + 'summary tied to this idea</div><div class="garch-rows"></div></div>'
     + '<div class="ghist"><div class="h">Refinement history · pull any version '
     + 'into another effort</div><div class="ghist-rows"></div></div>';
   work.innerHTML = html;
@@ -4041,11 +4116,65 @@ function selectGrassIdea(ideaId) {
       };
     })(svbtns[si].getAttribute('data-save-lane'));
   }
+  // v10 Wave 4 — PER-LANE Archive: each .gterm bar carries its OWN Archive button
+  // that archives THAT lane's bound (idea, lane) session's docs + summary into the
+  // idea bundle. Lives inside the bar → stopPropagation so it does not also
+  // collapse/expand. Disabled until its lane's Develop session is live.
+  var arbtns = work.querySelectorAll('button[data-archive-lane]');
+  for (var ai = 0; ai < arbtns.length; ai++) {
+    arbtns[ai].disabled = true;
+    arbtns[ai].onclick = (function (lane) {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        archiveGrassSession(ideaId, lane);
+      };
+    })(arbtns[ai].getAttribute('data-archive-lane'));
+  }
   // Both terminal hosts render COLLAPSED + unbound for a freshly selected idea.
   _grassDevSession = null;
   _grassLaneSession[ideaId + '::research'] = null;
   _grassLaneSession[ideaId + '::plan'] = null;
+  _renderGrassArchives(work, rec.archives || []);
   _renderGrassHistory(work, rec.refinements || []);
+}
+
+// _renderGrassArchives(work, archives): render the per-idea Archived-material list
+// (persisted docs + a summary link), newest-first. Each archive's docs link via
+// /artifact/<pid>?path=<rel>; its summary via /summary/<pid>/<lane>/<sid>. Honest
+// empty state when none. (v10 Wave 4.)
+function _renderGrassArchives(work, archives) {
+  var box = work.querySelector('.garch-rows');
+  if (!box) return;
+  if (!archives || !archives.length) {
+    box.innerHTML = '<div class="garch-empty">No archived material yet — Archive '
+      + 'a Research or Plan session to save its docs + summary here.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < archives.length; i++) {
+    var a = archives[i];
+    var lane = a.lane || '';
+    var sid = a.session_id || '';
+    var docs = a.docs || [];
+    var doclinks = '';
+    for (var d = 0; d < docs.length; d++) {
+      var rel = docs[d];
+      var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(rel);
+      var nm = rel.split('/').pop();
+      doclinks += '<a class="alink" target="_blank" href="' + _esc(href) + '">'
+        + _esc(nm) + '</a>';
+    }
+    if (!doclinks) doclinks = '<span class="garch-nodoc">(no docs)</span>';
+    var sumhref = '/summary/' + encodeURIComponent(PROJECT_ID) + '/'
+      + encodeURIComponent(lane) + '/' + encodeURIComponent(sid);
+    var sumlink = (a.has_summary)
+      ? '<a class="alink" target="_blank" href="' + _esc(sumhref) + '">summary</a>'
+      : '<span class="garch-nosum">summary pending</span>';
+    html += '<div class="ar"><span class="lnchip">' + _esc(lane) + '</span> '
+      + doclinks + '<span class="sp"></span>' + sumlink + '</div>';
+  }
+  box.innerHTML = html;
 }
 
 function _renderGrassHistory(work, refs) {
@@ -4188,6 +4317,41 @@ async function developGrass(ideaId, lane) {
   // Enable THIS lane's own Save-refinement button (the other lane's stays as-is).
   var sv = box ? box.querySelector('button[data-save-lane="' + _cssEsc(lane) + '"]') : null;
   if (sv) sv.disabled = false;
+  // v10 Wave 4 — enable THIS lane's own Archive button too (the other stays as-is).
+  var ar = box ? box.querySelector('button[data-archive-lane="' + _cssEsc(lane) + '"]') : null;
+  if (ar) ar.disabled = false;
+}
+
+// archiveGrassSession(ideaId, lane): v10 Wave 4 (D7). Archive THIS LANE's live
+// Develop session's PRODUCED docs + summary into a per-idea bundle that survives a
+// kill — DISTINCT from Save (a text snapshot). POST /api/rnd/grass_archive →
+// effort_history.archive_grass_session. The idea STAYS in grass. Re-renders the
+// Archived-material list with the new bundle. Honest: if nothing was produced the
+// server returns ok:false with a reason (surfaced, not faked). Token-aware.
+async function archiveGrassSession(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var sid = _grassLaneSession[ideaId + '::' + lane] || null;
+  if (!sid) { alert('[archive] open this lane’s Develop session first'); return; }
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_archive', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_archive', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[archive error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[nothing to archive] ' + (data.reason || data.error || 'no docs produced yet'));
+    return;
+  }
+  // Re-fetch the grass data so the idea record's archives ride the next render,
+  // then re-render THIS idea's Archived-material list with the new bundle.
+  await _loadGrassData();
+  var rec = _grassData[ideaId] || {};
+  _renderGrassArchives(work, rec.archives || []);
 }
 
 // saveGrassRefinement(ideaId, lane): persist THIS LANE's live Develop session's
@@ -5098,6 +5262,7 @@ function openPanel(sessionId) {
   }
   _loadPanelSummary(sessionId, summ);
   _loadChainBreadcrumb(sessionId, crumb);
+  _loadGrassOriginChip(sessionId, crumb);
   _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
@@ -5173,6 +5338,106 @@ function _loadChainBreadcrumb(sessionId, host) {
       });
     })
     .catch(function () {});
+}
+
+// _loadGrassOriginChip(sessionId, host): v10 Wave 4 (D8). If this session's chain
+// carries a grass_origin (it was exported/promoted from a grass idea, OR is a
+// downstream plan/build that inherited the stamp), render a "from grass: <idea>"
+// back-link chip into the panel header. Clicking it opens the Grass workbench
+// focused on that idea (openGrassWorkbench → selectGrassIdea). HONEST: no
+// grass_origin in the chain → no chip (no fabricated back-link). Read-only
+// (GET /api/rnd/chain, ?token=); best-effort (any error leaves no chip).
+function _loadGrassOriginChip(sessionId, host) {
+  if (!host) return;
+  var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
+    + '&session=' + encodeURIComponent(sessionId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var members = (d && d.ok && d.members) ? d.members : [];
+      // Find a grass_origin anywhere in the chain (this session or a sibling).
+      var origin = '';
+      for (var i = 0; i < members.length; i++) {
+        var go = (members[i] && members[i].grass_origin) || '';
+        if (go) { origin = go; break; }
+      }
+      // HONEST: empty origin → no chip (no fabricated back-link).
+      if (!origin) return;
+      // Ensure the grass data is loaded so we can resolve the idea title AND
+      // detect a DELETED origin (FIX 3 dead-chip). _loadGrassData is idempotent.
+      var done = function () {
+        var rec = (_grassData && _grassData[origin]) ? _grassData[origin] : null;
+        var chip = document.createElement('span');
+        chip.className = 'grassorigin';
+        chip.setAttribute('data-grass-origin', origin);
+        if (!rec) {
+          // DEAD CHIP: the originating idea no longer exists — render greyed/
+          // disabled, no live link (FIX 3). Keep the stamp; be honest in the UI.
+          chip.classList.add('removed');
+          chip.setAttribute('data-grass-removed', '1');
+          chip.title = 'The originating grass idea was removed';
+          chip.textContent = '🌱 from grass (idea removed)';
+          host.appendChild(chip);
+          return;
+        }
+        var label = (rec.title || rec.short_id || origin);
+        chip.title = 'This work traces back to a grass idea — click to open it';
+        chip.textContent = '🌱 from grass: ' + (label.length > 40
+          ? label.slice(0, 40) + '…' : label);
+        chip.onclick = function (ev) {
+          ev.stopPropagation();
+          if (typeof openGrassWorkbench === 'function') openGrassWorkbench();
+          // Focus the originating idea once the workbench list has rendered.
+          setTimeout(function () {
+            try { selectGrassIdea(origin); } catch (e) {}
+          }, 250);
+        };
+        host.appendChild(chip);
+      };
+      if (_grassData && Object.keys(_grassData).length) { done(); return; }
+      try { _loadGrassData().then(done).catch(done); } catch (e) { done(); }
+    })
+    .catch(function () {});
+}
+
+// _resolveGrassOriginChips(root): resolve every server-rendered board-tile
+// "from grass" chip placeholder (v10 Wave 4 FIX 2/3). The server emits a chip
+// stub carrying ONLY data-grass-origin (the SAFE idea id) + data-grass-pending;
+// here we resolve its label, dead-state, and click handler against the loaded
+// _grassData — exactly like the panel chip (shared dead-chip path). Idempotent:
+// a chip is processed once (its pending marker is cleared). Best-effort.
+function _resolveGrassOriginChips(root) {
+  root = root || document;
+  var pend = root.querySelectorAll('.grassorigin[data-grass-pending]');
+  for (var i = 0; i < pend.length; i++) {
+    var el = pend[i];
+    var origin = el.getAttribute('data-grass-origin') || '';
+    el.removeAttribute('data-grass-pending');
+    if (!origin) { el.style.display = 'none'; continue; }
+    var rec = (_grassData && _grassData[origin]) ? _grassData[origin] : null;
+    if (!rec) {
+      // DEAD CHIP on the tile: greyed/disabled, no live link (FIX 3).
+      el.classList.add('removed');
+      el.setAttribute('data-grass-removed', '1');
+      el.title = 'The originating grass idea was removed';
+      el.textContent = '🌱 from grass (idea removed)';
+      el.onclick = null;
+      continue;
+    }
+    var label = (rec.title || rec.short_id || origin);
+    el.title = 'This work traces back to a grass idea — click to open it';
+    el.textContent = '🌱 from grass: ' + (label.length > 40
+      ? label.slice(0, 40) + '…' : label);
+    (function (oid) {
+      el.onclick = function (ev) {
+        ev.stopPropagation();
+        if (typeof openGrassWorkbench === 'function') openGrassWorkbench();
+        setTimeout(function () {
+          try { selectGrassIdea(oid); } catch (e) {}
+        }, 250);
+      };
+    })(origin);
+  }
 }
 
 // _renderStaticTieCrumb(sessionId, host): the DISCOVERED build→planning fallback
@@ -5814,6 +6079,16 @@ async function refreshBoard() {
     var board = document.getElementById('kanbanBoard');
     if (!board) return;                    // guard: container absent
     board.innerHTML = data.html;
+    // v10 Wave 4 FIX 2/3: the swapped-in board re-emits "from grass" chip stubs;
+    // resolve them (label/dead-state) against the loaded grass data. If grass
+    // data isn't loaded yet, fetch it (which itself re-resolves on completion).
+    try {
+      if (_grassData && Object.keys(_grassData).length) {
+        _resolveGrassOriginChips(board);
+      } else {
+        _loadGrassData();
+      }
+    } catch (e) {}
   } catch (e) { /* never throw into the UI */ }
 }
 
@@ -9203,11 +9478,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
         Frame shape (per the SSE spec): an ``event:`` line, one ``data:`` line
         carrying a JSON payload, then a BLANK line terminating the event. Flushed
         immediately so a streaming client observes events as they arrive.
+
+        Teardown hardening: writing/flushing onto a ``wfile`` whose underlying
+        socket was already closed (client gone, or the request thread torn down
+        out from under a leaked pump) raises ``ValueError("I/O operation on
+        closed file")`` — which is a benign client-gone condition, not a server
+        bug, but it is NOT in the OSError family the stream loops guard on. We
+        normalize it to a ``BrokenPipeError`` so the existing
+        ``except (BrokenPipeError, ConnectionResetError, OSError)`` guards end
+        the stream CLEANLY (the daemon thread never raises a stray ValueError on
+        teardown). The benign socket-teardown OSErrors propagate unchanged for
+        those same guards; any non-benign error is re-raised untouched.
         """
         payload = json.dumps(data_obj, ensure_ascii=False)
         frame = f"event: {event}\ndata: {payload}\n\n"
-        self.wfile.write(frame.encode("utf-8"))
-        self.wfile.flush()
+        try:
+            self.wfile.write(frame.encode("utf-8"))
+            self.wfile.flush()
+        except ValueError as exc:
+            # I/O on a closed file (wfile closed under us) == client/connection
+            # gone. Re-raise as BrokenPipeError so the OSError-family guards
+            # catch it; never swallow a different ValueError.
+            if "closed file" in str(exc):
+                raise BrokenPipeError(str(exc)) from exc
+            raise
 
     def _serve_term_sse(self):
         """Stream a terminal session's output as Server-Sent Events.
@@ -10122,6 +10416,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "created_at": r.get("created_at"),
                         "parent_session_id": r.get("parent_session_id", ""),
                         "chain_id": r.get("chain_id", ""),
+                        # v10 Wave 4: grass→project lineage (SAFE — idea id only,
+                        # never worktree_path/branch).
+                        "grass_origin": r.get("grass_origin", ""),
                     })
                 self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/chain"):
@@ -10160,6 +10457,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             "status": r.get("status", ""),
                             "parent_session_id": r.get("parent_session_id", ""),
                             "chain_id": r.get("chain_id", ""),
+                            # v10 Wave 4: grass→project lineage (SAFE — idea id only).
+                            "grass_origin": r.get("grass_origin", ""),
                         })
                     self._send_json({"ok": True, "chain_id": chain_id or "",
                                      "members": safe})
@@ -11324,6 +11623,34 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     res = _eh.export_grass_to_project(pid, idea_id)
                     code = 200 if res.get("ok") else 400
                     self._send_json(res, code)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_archive":
+            # v10 Wave 4 (D7): ARCHIVE a grass dev session's produced docs +
+            # summary into a per-idea bundle (survives kill; available at
+            # promotion). Distinct from grass_save_refinement (a text snapshot).
+            # Token-gated by the do_POST middleware above. The idea STAYS in grass.
+            # HONEST: ok:false + reason when there is no dev session / no docs.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            if not pid or not idea_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and lane required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.archive_grass_session(pid, idea_id, lane)
+                    # ok:false is an honest "nothing to archive" (200, not an
+                    # error) — the bundle is None + a reason; never fabricated.
+                    self._send_json(res, 200)
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
 
