@@ -2378,11 +2378,13 @@ def _render_grass_workbench(folder_path, project_id) -> str:
         with ``.idchip``/``.stchip``/``.srcchip``) · ``.gwork`` (the selected
         idea's workbench: title + id + status, ``.desc``, ``.devbar`` with
         Develop 🔬 Research / 📐 Plan + engine toggle + → Promote to a lane, a
-        ``.tpane`` workbench terminal, and ``.ghist`` refinement history with
-        per-version pull buttons).
+        ``.gterms`` block of TWO independent, collapsible ``.gterm`` workbench
+        terminals (v10 Wave 3 — one per lane: research, plan), and ``.ghist``
+        refinement history with per-version pull buttons).
 
     The JS (``openGrassWorkbench`` / ``selectGrassIdea`` / ``filterGrass`` /
-    ``developGrass`` / ``pullGrass``) wires interactivity; this server render
+    ``toggleGrassTerminal`` / ``developGrass`` / ``pullGrass``) wires interactivity;
+    this server render
     provides the data-bearing DOM (so the rendered-DOM assertions are real).
     """
     try:
@@ -3087,13 +3089,36 @@ def render_project_window_html(project_id: str) -> str:
         "margin-bottom:4px}"
         ".devbar .lbl{font-size:11px;color:var(--text-dim)}.devbar .sp{flex:1}"
         ".mini.go{border-color:rgba(34,197,94,.5)}"
-        ".grass-workbench .tpane{background:#05070c;border:1px solid var(--border);"
-        "border-radius:8px;overflow:hidden;margin-top:11px;resize:vertical;"
-        "min-height:150px;display:flex;flex-direction:column}"
-        ".grass-workbench .tpane .tbar{display:flex;align-items:center;gap:8px;"
-        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
-        ".grass-workbench .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
-        ".grass-workbench .tpane .term-host{flex:1;overflow:auto;min-height:120px}"
+        # v10 Wave 3 — TWO independent, labeled, collapsible terminal hosts
+        # (research + plan). Each is a .gterm with its own bar + toggle caret; a
+        # collapsed one HIDES its term-host (the session stays LIVE underneath).
+        ".devbar .mini.go.on{background:rgba(34,197,94,.13);"
+        "border-color:var(--success);color:#d8ffe6}"
+        ".devbar .mini.go .car{display:inline-block;width:11px;font-size:10px;"
+        "color:var(--text-dim);margin-left:4px}"
+        ".devbar .mini.go.on .car{color:var(--success)}"
+        ".grass-workbench .gterms{margin-top:11px;display:flex;"
+        "flex-direction:column;gap:11px}"
+        ".grass-workbench .gterm{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden;display:flex;flex-direction:column;"
+        "resize:vertical;min-height:150px}"
+        ".grass-workbench .gterm[data-lane='research']{border-left:3px solid var(--success)}"
+        ".grass-workbench .gterm[data-lane='plan']{border-left:3px solid var(--accent)}"
+        ".grass-workbench .gterm .tbar{display:flex;align-items:center;gap:8px;"
+        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border);"
+        "cursor:pointer}"
+        ".grass-workbench .gterm .tbar .lab{font-size:11px;color:var(--text-dim)}"
+        ".grass-workbench .gterm .tbar .lab b{color:var(--text)}"
+        ".grass-workbench .gterm .tbar .sp{flex:1}"
+        ".grass-workbench .gterm .tbar .car{font-size:11px;color:var(--text-dim);"
+        "width:14px;text-align:center}"
+        ".grass-workbench .gterm .tbar .gsave{font-size:10.5px;padding:2px 7px;cursor:pointer}"
+        ".grass-workbench .gterm .tbar .gsave:disabled{opacity:.4;cursor:default}"
+        ".grass-workbench .gterm .term-host{flex:1;overflow:auto;min-height:120px}"
+        ".grass-workbench .gterm.collapsed{resize:none;min-height:0}"
+        ".grass-workbench .gterm.collapsed .term-host{display:none}"
+        ".grass-workbench .gterm.collapsed{border-style:dashed;opacity:.92}"
+        ".grass-workbench .gterm .stale{color:var(--text-dim);font-size:10px}"
         ".ghist{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
         ".ghist .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
         "color:var(--text-dim);margin-bottom:7px}"
@@ -3808,6 +3833,11 @@ async function promoteGrass(ideaId, lane) {
 var _grassEngine = 'claude';   // workbench engine toggle (research can use gemini)
 var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
 var _grassDevSession = null;    // the active Develop session id (for Save refinement)
+// v10 Wave 3 — per-(idea,lane) develop session id, so each of the TWO terminal
+// hosts (research, plan) remembers its own LIVE session across collapse/expand.
+// Key: ideaId + '::' + lane → session_id. A collapse never clears this (the
+// session stays live); only switching ideas resets via selectGrassIdea.
+var _grassLaneSession = {};
 
 function openGrassWorkbench() {
   var stack = document.getElementById('panelStack');
@@ -3939,27 +3969,55 @@ function selectGrassIdea(ideaId) {
     + 'idea’s text + any refinements. Output is saved here with a new id and '
     + 'is pullable into a Research or Plan run.</div>'
     + '<div class="devbar"><span class="lbl">Develop:</span>'
-    + '<button class="mini go" data-dev="research">🔬 Research</button>'
-    + '<button class="mini go" data-dev="plan">📐 Plan</button>'
+    + '<button class="mini go" data-dev="research">🔬 Research<span class="car">▸</span></button>'
+    + '<button class="mini go" data-dev="plan">📐 Plan<span class="car">▸</span></button>'
     + '<span class="sp"></span>'
     + '<span class="lbl">Engine</span>'
     + '<button class="mini gengtog">◆ Claude</button>'
     + '<button class="mini gexport" title="Copy this idea’s research/plan work up '
     + 'into real lane tiles; the idea stays here marked promoted">⇪ Export to project</button></div>'
-    + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
-    + '· select Develop to start</span><span class="sp"></span>'
-    + '<button class="mini gsave" disabled title="Save the develop session\'s '
-    + 'output as a new grass-&lt;id&gt;/dev-N refinement">💾 Save refinement</button></div>'
-    + '<div class="term-host" data-grass-term="1"></div></div>'
+    // v10 Wave 3 — TWO independent, labeled, collapsible terminal hosts
+    // (research, plan). Each renders COLLAPSED until its Develop button starts/
+    // focuses its (idea, lane) session; collapsing hides the host, never kills.
+    // Each terminal owns its OWN Save-refinement control (.gsave) so a save
+    // targets the bound session for THAT lane — never the last-focused global one.
+    + '<div class="gterms">'
+    + '<div class="gterm collapsed" data-lane="research">'
+    + '<div class="tbar"><span class="ic">🔬</span>'
+    + '<span class="lab"><b>Research terminal</b> · not started</span>'
+    + '<span class="sp"></span>'
+    + '<button class="mini gsave" data-save-lane="research" disabled '
+    + 'title="Save THIS research session\'s output as a new '
+    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
+    + '<span class="car">▸</span></div>'
+    + '<div class="term-host" data-grass-term="research"></div></div>'
+    + '<div class="gterm collapsed" data-lane="plan">'
+    + '<div class="tbar"><span class="ic">📐</span>'
+    + '<span class="lab"><b>Plan terminal</b> · not started</span>'
+    + '<span class="sp"></span>'
+    + '<button class="mini gsave" data-save-lane="plan" disabled '
+    + 'title="Save THIS plan session\'s output as a new '
+    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
+    + '<span class="car">▸</span></div>'
+    + '<div class="term-host" data-grass-term="plan"></div></div>'
+    + '</div>'
     + '<div class="ghist"><div class="h">Refinement history · pull any version '
     + 'into another effort</div><div class="ghist-rows"></div></div>';
   work.innerHTML = html;
-  // Wire the devbar.
+  // Wire the devbar — each Develop button TOGGLES its lane's terminal.
   var dbtns = work.querySelectorAll('button[data-dev]');
   for (var d = 0; d < dbtns.length; d++) {
     dbtns[d].onclick = (function (lane) {
-      return function () { developGrass(ideaId, lane); };
+      return function () { toggleGrassTerminal(ideaId, lane); };
     })(dbtns[d].getAttribute('data-dev'));
+  }
+  // Clicking a terminal's bar toggles that same terminal (collapse/expand) —
+  // independent of the other; never kills the session.
+  var bars = work.querySelectorAll('.gterm .tbar');
+  for (var bi = 0; bi < bars.length; bi++) {
+    bars[bi].onclick = (function (lane) {
+      return function () { toggleGrassTerminal(ideaId, lane); };
+    })(bars[bi].parentNode.getAttribute('data-lane'));
   }
   var eng = work.querySelector('.gengtog');
   if (eng) eng.onclick = function () {
@@ -3968,11 +4026,25 @@ function selectGrassIdea(ideaId) {
   };
   var exp = work.querySelector('.gexport');
   if (exp) exp.onclick = function () { exportGrass(ideaId); };
-  // The Save-refinement button is enabled only once a Develop session is live for
-  // THIS idea (set in developGrass); switching ideas starts disabled.
+  // PER-LANE Save-refinement: each .gterm bar carries its OWN Save button that
+  // saves THAT lane's bound (idea, lane) session — never the last-focused global.
+  // The button lives inside the bar, so stop propagation so a Save click does not
+  // also collapse/expand the terminal. Each starts disabled until its lane's
+  // Develop session is live (enabled in developGrass), and switching ideas resets.
+  var svbtns = work.querySelectorAll('button[data-save-lane]');
+  for (var si = 0; si < svbtns.length; si++) {
+    svbtns[si].disabled = true;
+    svbtns[si].onclick = (function (lane) {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        saveGrassRefinement(ideaId, lane);
+      };
+    })(svbtns[si].getAttribute('data-save-lane'));
+  }
+  // Both terminal hosts render COLLAPSED + unbound for a freshly selected idea.
   _grassDevSession = null;
-  var sv = work.querySelector('.gsave');
-  if (sv) { sv.disabled = true; sv.onclick = function () { saveGrassRefinement(ideaId); }; }
+  _grassLaneSession[ideaId + '::research'] = null;
+  _grassLaneSession[ideaId + '::plan'] = null;
   _renderGrassHistory(work, rec.refinements || []);
 }
 
@@ -4004,12 +4076,75 @@ function _renderGrassHistory(work, refs) {
   }
 }
 
-// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
-// refinements) and mount its terminal in the right pane's .term-host. Token-aware.
-async function developGrass(ideaId, lane) {
+// _grassWork(ideaId): the .gwork pane for THIS idea (fallback to the visible one).
+function _grassWork(ideaId) {
   var panel = document.getElementById('grassPanel');
-  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
-  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  if (!panel) return null;
+  return panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]')
+      || panel.querySelector('.gwork');
+}
+
+// _grassTermBox(work, lane): the .gterm container for one lane (research|plan).
+function _grassTermBox(work, lane) {
+  return work ? work.querySelector('.gterm[data-lane="' + _cssEsc(lane) + '"]') : null;
+}
+
+// toggleGrassTerminal(ideaId, lane): v10 Wave 3. Research and Plan each own a
+// SEPARATE, independently-collapsible terminal. Clicking a Develop button (or the
+// terminal's own bar):
+//   • if that lane's terminal is COLLAPSED → EXPAND it. If no session is bound
+//     yet, start/focus the (idea, lane) develop session (developGrass) and mount
+//     its xterm in THIS lane's host; if already mounted, just reveal it.
+//   • if that lane's terminal is EXPANDED → COLLAPSE (minimize) it. The session
+//     stays LIVE (the PTY + transport are untouched) — only the host is hidden.
+// The two lanes are fully independent: toggling one never touches the other.
+function toggleGrassTerminal(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var box = _grassTermBox(work, lane);
+  if (!box) return;
+  if (box.classList.contains('collapsed')) {
+    box.classList.remove('collapsed');
+    _setGrassToggle(work, lane, true);
+    // Bind a session the first time this lane is opened (or re-focus its terminal).
+    if (!_grassLaneSession[ideaId + '::' + lane]) {
+      developGrass(ideaId, lane);
+    } else {
+      var host = box.querySelector('[data-grass-term]');
+      if (host) host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      _grassDevSession = _grassLaneSession[ideaId + '::' + lane];
+    }
+  } else {
+    // COLLAPSE only — session stays live (do NOT unmount/kill the PTY).
+    box.classList.add('collapsed');
+    _setGrassToggle(work, lane, false);
+  }
+}
+
+// _setGrassToggle(work, lane, open): reflect the open/collapsed state on the
+// Develop button (active cue + ▾/▸ caret) and the terminal bar's caret.
+function _setGrassToggle(work, lane, open) {
+  if (!work) return;
+  var btn = work.querySelector('button[data-dev="' + _cssEsc(lane) + '"]');
+  if (btn) {
+    btn.classList.toggle('on', !!open);
+    var bc = btn.querySelector('.car');
+    if (bc) bc.textContent = open ? '▾' : '▸';
+  }
+  var box = _grassTermBox(work, lane);
+  if (box) {
+    var tc = box.querySelector('.tbar .car');
+    if (tc) tc.textContent = open ? '▾' : '▸';
+  }
+}
+
+// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
+// refinements) and mount its terminal in THIS lane's own .gterm host. Token-aware.
+// Called by toggleGrassTerminal when a lane is first opened. The backend dedupes
+// on the live (idea, lane) session — research and plan are two DIFFERENT lanes, so
+// both can be live at once (two concurrent dev sessions per idea).
+async function developGrass(ideaId, lane) {
+  var work = _grassWork(ideaId);
   var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane, backend: _grassEngine};
   var r, data;
   try {
@@ -4028,39 +4163,58 @@ async function developGrass(ideaId, lane) {
   // (idea, lane). Re-clicking Develop focuses this same session (the backend
   // dedupes on the live (idea, lane) session and returns it). The board bridge
   // also excludes it server-side via the [grass-dev] label marker.
-  var host = work ? work.querySelector('[data-grass-term]') : null;
-  var lab = work ? work.querySelector('.tpane .lab') : null;
-  if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
+  var box = _grassTermBox(work, lane);
+  var host = box ? box.querySelector('[data-grass-term]') : null;
+  var lab = box ? box.querySelector('.tbar .lab') : null;
+  var icon = (lane === 'plan') ? '📐' : '🔬';
+  var name = (lane === 'plan') ? 'Plan terminal' : 'Research terminal';
+  if (lab) lab.innerHTML = '<b>' + _esc(name) + '</b> · ' + _esc(_grassEngine)
+    + ' · grass-dev · ' + _esc(sid);
   if (host) {
     // Re-focus: if THIS session's terminal is already mounted, just bring it up.
     if (host.getAttribute('data-session') === sid && PANELS[sid]) {
       host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     } else {
       host.setAttribute('data-session', sid);
-      PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+      PANELS[sid] = {el: document.getElementById('grassPanel'), body: host, term: null, transport: null};
       _mountTerminal(sid, host);
     }
   }
-  // A develop session is now live for this idea → enable "Save refinement".
+  // Bind this session to THIS (idea, lane) so a later expand re-focuses it AND so
+  // Save-refinement targets the right host. Mark this lane's toggle OPEN.
+  _grassLaneSession[ideaId + '::' + lane] = sid;
   _grassDevSession = sid;
-  var sv = work ? work.querySelector('.gsave') : null;
+  _setGrassToggle(work, lane, true);
+  // Enable THIS lane's own Save-refinement button (the other lane's stays as-is).
+  var sv = box ? box.querySelector('button[data-save-lane="' + _cssEsc(lane) + '"]') : null;
   if (sv) sv.disabled = false;
 }
 
-// saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
-// versioned refinement (grass-<id>/dev-N) and re-render the history so it appears
-// with a pull control. Closes the develop→save→appears loop end to end. The
-// session's visible terminal text is captured best-effort as the refinement text;
-// the session_id links the refinement to the run. Token-aware.
-async function saveGrassRefinement(ideaId) {
-  var panel = document.getElementById('grassPanel');
-  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
-  if (!work) work = panel ? panel.querySelector('.gwork') : null;
-  var host = work ? work.querySelector('[data-grass-term]') : null;
+// saveGrassRefinement(ideaId, lane): persist THIS LANE's live Develop session's
+// output as a NEW versioned refinement (grass-<id>/dev-N) and re-render the history
+// so it appears with a pull control. Closes the develop→save→appears loop end to
+// end. v10 Wave 3 — research and plan are INDEPENDENT lanes, each with its OWN Save
+// control, so the save targets THAT lane's bound (idea, lane) session (NOT the
+// last-focused global one). The session's visible terminal text is captured
+// best-effort as the refinement text; the session_id links the refinement to the
+// run. Saving requires that lane's terminal be open (its Develop session live).
+// Token-aware.
+async function saveGrassRefinement(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  // THIS lane's bound develop session (set in developGrass). No session ⇒ nothing
+  // to save (the per-lane Save button is disabled until its lane is live anyway).
+  var sid = _grassLaneSession[ideaId + '::' + lane] || null;
+  if (!sid) { alert('[save] open this lane’s Develop session first'); return; }
+  // Capture THIS lane's own terminal host text (its [data-grass-term="<lane>"]).
+  var box = _grassTermBox(work, lane);
+  var host = box ? box.querySelector('[data-grass-term][data-session="'
+                                     + _cssEsc(sid) + '"]') : null;
+  if (!host && box) host = box.querySelector('[data-grass-term]');
   var text = host ? ((host.innerText || '').trim().slice(-4000)) : '';
   var payload = {project_id: PROJECT_ID, idea_id: ideaId,
-                 session_id: _grassDevSession || null,
-                 label: 'Refinement from workbench session', text: text};
+                 session_id: sid,
+                 label: 'Refinement from ' + lane + ' workbench session', text: text};
   var r, data;
   try {
     r = await _postJson('/api/rnd/grass_save_refinement', payload);
@@ -4079,6 +4233,9 @@ async function saveGrassRefinement(ideaId) {
   // The idea is now REFINED — reflect it on the workbench chip + the list row.
   var chip = work.querySelector('h3 .stchip');
   if (chip) { chip.className = 'stchip refined'; chip.textContent = 'refined'; }
+  // The .gli list rows live under #grassPanel (the left list) — look the row up
+  // there (the prior code read an undeclared `panel`, throwing a ReferenceError).
+  var panel = document.getElementById('grassPanel');
   var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
   if (lrow) lrow.setAttribute('data-status', 'refined');
 }
@@ -8954,37 +9111,90 @@ function addTaskDomain(domain) {{
 
 # ── HTTP Server ────────────────────────────────────────────────────────
 
+# WinError codes for the benign "the client went away" socket conditions.
+# 10053 = WSAECONNABORTED (an established connection aborted by the host/software),
+# 10054 = WSAECONNRESET (connection reset by peer). These ride in on a generic
+# OSError on Windows (BufferedWriter.write → sock.sendall) rather than as the
+# typed ConnectionAbortedError / ConnectionResetError, so we sniff .winerror too.
+_BENIGN_DISCONNECT_WINERRORS = (10053, 10054)
+
+
+def _is_benign_disconnect(exc):
+    """True for a socket-teardown error that means the CLIENT closed the
+    connection mid-response — not a server bug. A browser closing a terminal
+    tab (or Playwright tearing down a page) makes the in-flight SSE/WS/HTTP
+    write raise one of these; treating them as a normal client-gone condition
+    is correct production behavior, never an error to surface or log loudly.
+
+    Catches the typed connection-teardown exceptions AND a Windows OSError whose
+    ``winerror`` is 10053/10054 (which is how the abort actually arrives on the
+    BufferedWriter.write → sock.sendall path). Deliberately TIGHT — it never
+    swallows a generic OSError/Exception that could hide a real defect.
+    """
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError,
+                        ConnectionAbortedError)):
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "winerror", None) \
+            in _BENIGN_DISCONNECT_WINERRORS:
+        return True
+    return False
+
+
 class AnchorHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"  [{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
 
+    def log_error(self, format, *args):
+        # Quiet the benign client-disconnect noise the base class would log to
+        # stderr (it routes BrokenPipe/ConnectionReset/timeout messages here).
+        # Real protocol errors still surface via the normal response paths.
+        return
+
     def _send_json(self, data, code=200):
         body = json.dumps(data).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            # Client closed mid-response (browser tab close / Playwright
+            # teardown). Nothing left to send — swallow ONLY the benign
+            # disconnect; re-raise anything else.
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     def _send_html(self, html_text):
         body = html_text.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     def _send_bytes(self, data, content_type, cache="no-cache"):
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", cache)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", cache)
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as exc:
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     # ── SSE for the interactive terminal (Wave 7) ────────────────────────────
     def _sse_event(self, event, data_obj):
@@ -10073,6 +10283,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
         except Exception as e:
+            if _is_benign_disconnect(e):
+                # Client closed the connection mid-GET (browser tab close /
+                # Playwright teardown). Not a server error — stop silently;
+                # the socket is gone so there's nothing to write back.
+                return
             _logger.error(f"GET {self.path} failed: {e}\n{traceback.format_exc()}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
@@ -11435,6 +11650,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"ok": False, "error": "Unknown endpoint"}, 404)
       except Exception as e:
+            if _is_benign_disconnect(e):
+                # Client closed the connection mid-POST. Not a server error.
+                return
             _logger.error(f"POST {self.path} failed: {e}\n{traceback.format_exc()}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
@@ -11455,7 +11673,29 @@ def _heartbeat_watchdog():
     return
 
 
-class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+class _QuietDisconnectMixin:
+    """Server mixin that quiets BENIGN client-disconnect errors.
+
+    socketserver calls ``handle_error(request, client_address)`` when a request
+    handler raises an unhandled exception, and by default it prints a full
+    traceback to stderr. A browser closing a terminal tab (or Playwright tearing
+    a page down) makes an in-flight SSE/WS/HTTP write raise
+    ``ConnectionAbortedError``/``ConnectionResetError``/``BrokenPipeError`` (on
+    Windows often a bare ``OSError`` with ``winerror`` 10053/10054). That is the
+    client going away, not a server bug — so we swallow it silently here as a
+    last line of defense (the handlers already break out of their stream loops
+    on these). Any OTHER exception still gets the normal noisy traceback so real
+    defects are never hidden.
+    """
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if _is_benign_disconnect(exc):
+            return
+        super().handle_error(request, client_address)
+
+
+class _ExclusiveThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
     """ThreadingHTTPServer that claims EXCLUSIVE ownership of its port.
 
     On Windows, ``socket.SO_EXCLUSIVEADDRUSE`` guarantees only ONE process can
@@ -11484,6 +11724,14 @@ class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
         super().server_bind()
 
 
+class _QuietThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
+    """Plain ThreadingHTTPServer for the ephemeral ``port=0`` path (tests /
+    health check) that also quiets benign client-disconnect errors — so a
+    Playwright teardown racing an in-flight stream can't print a traceback or
+    flake the gate."""
+    daemon_threads = True
+
+
 def make_server(host="127.0.0.1", port=8777):
     """Construct + bind the threading HTTP server.
 
@@ -11504,7 +11752,7 @@ def make_server(host="127.0.0.1", port=8777):
     if _paths.use_exclusive_bind(host, port):
         server_cls = _ExclusiveThreadingHTTPServer
     else:
-        server_cls = ThreadingHTTPServer
+        server_cls = _QuietThreadingHTTPServer
     return _paths.bind_with_retry(
         lambda: server_cls((host, port), AnchorHandler)
     )

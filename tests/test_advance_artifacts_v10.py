@@ -329,6 +329,7 @@ def test_advance_endpoint_research_to_plan_end_to_end(env):
     to a linked planning session with pending_paste + both artifacts written."""
     import json as _json
     import threading
+    import time
     import urllib.request as _req
     ts, eh, reg, repo, pid, gui, ho = (
         env["ts"], env["eh"], env["reg"], env["repo"], env["pid"],
@@ -376,7 +377,16 @@ def test_advance_endpoint_research_to_plan_end_to_end(env):
             except Exception:
                 pass
         ts.kill(rsid)
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        time.sleep(0.05)
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        t.join(timeout=5)
 
 
 def _write_plan_docs_in_worktree(worktree_path, plan_dir="planning/rnd-x"):
@@ -407,6 +417,7 @@ def test_finish_to_build_persists_planning_docs_so_build_can_read_them(env):
     """
     import json as _json
     import threading
+    import time
     import urllib.request as _req
     ts, reg, repo, pid, gui, ho = (env["ts"], env["reg"], env["repo"], env["pid"],
                                    env["gui"], env["handoff"])
@@ -468,7 +479,16 @@ def test_finish_to_build_persists_planning_docs_so_build_can_read_them(env):
             except Exception:
                 pass
         ts.kill(psid)
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        time.sleep(0.05)
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        t.join(timeout=5)
 
 
 def test_finish_to_build_opens_linked_build_with_both_artifacts_and_pending(env):

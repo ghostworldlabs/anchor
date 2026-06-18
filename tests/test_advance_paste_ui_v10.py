@@ -118,7 +118,21 @@ def server(gui_env):
     try:
         yield gui_env, f"http://127.0.0.1:{port}", port
     finally:
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        # Robust teardown: the Playwright browser/page (and thus its WS/SSE
+        # client sockets) is already closed by the test's ``with
+        # sync_playwright()`` block exiting BEFORE this finalizer runs. Give any
+        # still-draining stream handler thread a brief grace, then shut the
+        # server down GUARDED so a benign teardown race can't fail the test.
+        time.sleep(0.1)
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        t.join(timeout=5)
 
 
 def test_advance_shows_prompt_pasted_unsent_in_browser(server):
