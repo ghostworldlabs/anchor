@@ -84,7 +84,7 @@ sessions.py             ← Session model — one trio run = one session (list_s
 summarizer.py           ← Validated, cached SESSION + PROJECT summaries (generate-twice + grounding filter; v3 added the project-summary path)
 rnd_terminal.py         ← v2 interactive terminal substrate (persistent stream-json REPL over SSE; not ConPTY)
 deliverables.py         ← Deliverable declare/pin + per-type run contract
-brownfield_scan.py      ← Discovery of on-disk trio artifacts + idea-docs (grass)
+brownfield_scan.py      ← Discovery of on-disk trio artifacts + idea-docs (grass). NOTE (2026-06-17): the Foreman `*EXECUTION-LOG*.md` now classifies as **build** (not planning), even when it lives under `planning/<ver>/`, so every build session — including builds run OUTSIDE Anchor (e.g. on a branch) — appears in the Build lane, tied back to its planning session (shared source dir → `linked_planning` chip + panel breadcrumb). MASTER-PLAN/IMPLEMENTATION-PLAN/DECISION-LOG stay planning. Discovered BUILD session ids are lane-qualified (`build::…`) so they never collide with the same-dir planning session's id.
 lanes.py / job_runner.py / gate_adapter.py ← Lane→skill mapping, durable job runner, gate stdin wiring
 report_viewer.py        ← Markdown→HTML report/summary rendering (vendored KaTeX)
 paths.py                ← Shared path/data-dir constants, WRITE_LOCK, auth + bind helpers (imported everywhere)

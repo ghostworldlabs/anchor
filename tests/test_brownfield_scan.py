@@ -63,17 +63,23 @@ def test_full_scan_result_and_counts(tmp_path):
     root = _plant(tmp_path / "brown")
     res = bscan.scan(str(root))
 
-    # ── Build lane: both foreman files ──
+    # ── Build lane: both foreman files PLUS the Foreman EXECUTION-LOG (the build
+    #    trio doc), even though it lives under planning/ next to the plan docs. ──
     build_rels = {a["rel"] for a in res.by_lane["build"]}
-    assert build_rels == {"foreman-checkpoint.json", "foreman.config.json"}
+    assert build_rels == {"foreman-checkpoint.json", "foreman.config.json",
+                          "planning/EXECUTION-LOG.md"}
     kinds = {a["kind"] for a in res.by_lane["build"]}
     assert "foreman-checkpoint" in kinds and "foreman-config" in kinds
+    assert "execlog" in kinds
+    execlog = [a for a in res.by_lane["build"]
+               if a["rel"] == "planning/EXECUTION-LOG.md"][0]
+    assert execlog["kind"] == "execlog"
 
-    # ── Planning lane: the three named trio docs ──
+    # ── Planning lane: the named PLANNING trio docs (NOT the EXECUTION-LOG) ──
     plan_rels = {a["rel"] for a in res.by_lane["planning"]}
     assert plan_rels == {"planning/MASTER-PLAN.md",
-                         "planning/IMPLEMENTATION-PLAN.md",
-                         "planning/EXECUTION-LOG.md"}
+                         "planning/IMPLEMENTATION-PLAN.md"}
+    assert "planning/EXECUTION-LOG.md" not in plan_rels
     # Title pulled from the first markdown heading.
     mp = [a for a in res.by_lane["planning"]
           if a["rel"] == "planning/MASTER-PLAN.md"][0]
@@ -103,13 +109,14 @@ def test_full_scan_result_and_counts(tmp_path):
         for skip in (".git", "node_modules", "_archive", ".anchor"):
             assert not art["rel"].startswith(skip + "/")
 
-    # ── Numeric counts match exactly ──
-    assert res.counts["build"] == 2
-    assert res.counts["planning"] == 3
+    # ── Numeric counts match exactly (EXECUTION-LOG now counts as BUILD, not
+    #    planning: build 2→3, planning 3→2; total unchanged) ──
+    assert res.counts["build"] == 3
+    assert res.counts["planning"] == 2
     assert res.counts["research"] == 2
     assert res.counts["deliverables"] == 1
     assert res.counts["docs"] == 2
-    assert res.counts["total"] == 2 + 3 + 2 + 1 + 2
+    assert res.counts["total"] == 3 + 2 + 2 + 1 + 2
 
 
 @pytest.mark.parametrize("classify_case", [

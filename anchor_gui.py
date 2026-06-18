@@ -2231,7 +2231,56 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
         session_views = _merge_registry_sessions(
             session_views, trio_lane, reg_by_column)
         out[trio_lane] = session_views
+    # Build→Planning tie: a BUILD session whose source directory equals a PLANNING
+    # session's source directory (the Foreman EXECUTION-LOG lives under
+    # planning/<version>/ next to the plan docs) is the SAME trio run's build
+    # stage — tie them so the build tile can link back to the plan it executed.
+    # Honest: only an unambiguous (single-planning-session-per-dir) match links;
+    # no match → no link (nothing fabricated). Discovered/effort sessions only —
+    # live managed sessions carry their own v6 parent/chain lineage.
+    _attach_build_planning_tie(out)
     return out
+
+
+def _sv_source_dir(sv) -> str:
+    """The folder-relative POSIX source directory of a discovered session view,
+    from its representative member's ``artifact_path`` (``""`` if none/loose)."""
+    for m in sv.get("members", []) or []:
+        ap = (m.get("artifact_path") or "").strip().replace("\\", "/")
+        if ap and "/" in ap:
+            return ap.rsplit("/", 1)[0]
+    return ""
+
+
+def _attach_build_planning_tie(out) -> None:
+    """Attach ``linked_planning`` = ``{"session_id", "label"}`` to each BUILD
+    session that shares a source directory with exactly one PLANNING session.
+
+    Mutates ``out`` in place. The planning ``session_id`` is the real
+    (un-qualified) ``dir::…`` id whose tile lives in the Planning column, so a
+    chip/breadcrumb click resolves to that tile via ``openPanel``. ``label`` is
+    the version dir basename (e.g. ``rnd-v4``).
+    """
+    planning_by_dir = {}        # source_dir -> session_id (None marks ambiguous)
+    # NB: the planning column's key in ``out`` is the trio-lane "plan" (its
+    # store-lane is "planning"); see _KANBAN_COLUMNS.
+    for sv in out.get("plan", []) or []:
+        d = _sv_source_dir(sv)
+        if not d:
+            continue
+        sid = sv.get("session_id") or ""
+        if not sid:
+            continue
+        planning_by_dir[d] = None if d in planning_by_dir else sid
+    for sv in out.get("build", []) or []:
+        d = _sv_source_dir(sv)
+        if not d:
+            continue
+        sid = planning_by_dir.get(d)
+        if not sid:
+            continue   # no match, or ambiguous (>1 planning session in that dir)
+        label = d.rsplit("/", 1)[-1] or d
+        sv["linked_planning"] = {"session_id": sid, "label": label}
 
 
 def _idea_source_label(eff) -> str:
@@ -2614,9 +2663,28 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
             f" data-job-id=\"{html_lib.escape(jid, quote=True)}\""
             f" data-trio-lane=\"{lane_attr}\""
             f" data-ver=\"{ver}\" data-live=\"1\"")
+    # Build→Planning tie (Option A): a clickable chip on the build tile linking to
+    # the planning session this build executed on (set by _attach_build_planning_tie
+    # only when there is a clear single-planning match). The matched planning
+    # session_id rides as data-* so the opened panel's chain breadcrumb can render
+    # the same tie (see _loadChainBreadcrumb's static fallback). Clicking the chip
+    # opens that planning session's panel without also opening this tile's panel.
+    tie = sv.get("linked_planning") or {}
+    tie_data = ""
+    tie_chip = ""
+    if tie.get("session_id"):
+        lp_sid = html_lib.escape(tie["session_id"], quote=True)
+        lp_lbl = html_lib.escape(tie.get("label") or "planning")
+        lp_lbl_attr = html_lib.escape(tie.get("label") or "planning", quote=True)
+        tie_data = (f" data-linked-planning=\"{lp_sid}\""
+                    f" data-linked-planning-label=\"{lp_lbl_attr}\"")
+        tie_chip = (
+            f"<span class='tiechip' title='Open the planning session this build "
+            f"executed on' onclick=\"openLinkedPlanning(event,'{lp_sid}')\">"
+            f"&#9741; Planning: {lp_lbl} &#9656;</span>")
     return (
         f"<div class='tile lane-tile{extra}' data-session=\"{sid_attr}\" "
-        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{live_data} "
+        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{live_data}{tie_data} "
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='tr1'><span class='lane'>{ver or lane_attr}</span>"
         f"<span class='ver'></span>"
@@ -2625,6 +2693,7 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
         f"{blurb_html}"
         f"<div class='st'>{''.join(st_bits)}</div>"
         f"{counts}"
+        f"{tie_chip}"
         f"</div>"
     )
 
@@ -3078,6 +3147,13 @@ def render_project_window_html(project_id: str) -> str:
         ".tile .st .state.done{color:var(--text-dim)}"
         ".tile .st .age{color:var(--text-dim)}"
         ".tile .counts{font-size:10.5px;color:var(--text-dim);margin-top:6px}"
+        # Build→Planning tie chip (Option A): a small clickable pill on a build
+        # tile linking back to the planning session it executed on.
+        ".tile .tiechip{display:inline-flex;align-items:center;gap:4px;"
+        "font-size:10.5px;margin-top:7px;padding:1px 7px;border-radius:9px;"
+        "font-weight:600;cursor:pointer;color:var(--accent);"
+        "background:rgba(108,156,252,.13);border:1px solid rgba(108,156,252,.35)}"
+        ".tile .tiechip:hover{background:rgba(108,156,252,.25)}"
         ".tile .deliv-stop{font-size:11px;margin-top:6px;padding:2px 8px;"
         "border-radius:6px;border:1px solid var(--border);"
         "background:var(--surface);color:var(--text);cursor:pointer}"
@@ -4546,6 +4622,16 @@ function laneTileClick(ev, sessionId) {
   openPanel(sessionId);
 }
 
+// openLinkedPlanning(ev, planningSid): from a BUILD tile's "⛓ Planning: …" chip,
+// open the matched planning session's panel WITHOUT also opening this build tile's
+// panel (stopPropagation keeps the click off the tile's laneTileClick). The
+// planning session's tile lives in the Planning column with data-session ==
+// planningSid, so openPanel resolves it via _synthSessionRecord.
+function openLinkedPlanning(ev, planningSid) {
+  if (ev) ev.stopPropagation();
+  if (planningSid) openPanel(planningSid);
+}
+
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
 // then refresh the bar and open its inline panel. backend defaults to claude.
 async function newTermSession(lane, backend, opts) {
@@ -4887,7 +4973,14 @@ function _loadChainBreadcrumb(sessionId, host) {
     .then(function (d) {
       var members = (d && d.ok && d.members) ? d.members : [];
       host.innerHTML = '';
-      if (members.length < 2) return;   // a lone session has no chain to show
+      if (members.length < 2) {
+        // No managed/registry chain (e.g. a DISCOVERED build session). Fall back
+        // to the static Build→Planning tie carried on the tile (Option A): render
+        // a 2-node breadcrumb (P <label> → B <label>) so the imported build still
+        // shows — and can navigate to — the plan it executed on.
+        _renderStaticTieCrumb(sessionId, host);
+        return;
+      }
       members.forEach(function (m, i) {
         if (i > 0) {
           var sep = document.createElement('span');
@@ -4918,6 +5011,42 @@ function _loadChainBreadcrumb(sessionId, host) {
       });
     })
     .catch(function () {});
+}
+
+// _renderStaticTieCrumb(sessionId, host): the DISCOVERED build→planning fallback
+// breadcrumb (Option A). When a session has no managed/registry chain, read the
+// session's tile for data-linked-planning (+ label) and, if present, render a
+// 2-node breadcrumb "P <label> → B <label>" into the panel header. The P node
+// opens the matched planning session's panel; the B node is the current one.
+// No tie on the tile → nothing rendered (honest; no fabricated chain).
+function _renderStaticTieCrumb(sessionId, host) {
+  if (!host) return;
+  var tile = document.querySelector('.tile[data-session="' + _cssEsc(sessionId) + '"]');
+  if (!tile) return;
+  var planSid = tile.getAttribute('data-linked-planning');
+  if (!planSid) return;
+  var label = tile.getAttribute('data-linked-planning-label') || '';
+  function _node(abbr, lab, isCur, openSid) {
+    var node = document.createElement('span');
+    node.className = 'cc-node' + (isCur ? ' cur' : '');
+    var lt = document.createElement('span');
+    lt.className = 'cc-light grey';
+    node.appendChild(lt);
+    var txt = document.createElement('span');
+    txt.className = 'cc-txt';
+    txt.textContent = lab ? (abbr + ' ' + lab) : abbr;
+    node.appendChild(txt);
+    if (openSid) {
+      node.onclick = function (ev) { ev.stopPropagation(); openPanel(openSid); };
+    }
+    return node;
+  }
+  host.appendChild(_node('P', label, false, planSid));
+  var sep = document.createElement('span');
+  sep.className = 'cc-sep';
+  sep.textContent = '→';
+  host.appendChild(sep);
+  host.appendChild(_node('B', label, true, null));
 }
 
 // _synthSessionRecord(sessionId): build a MANAGED-shaped record for a NON-live

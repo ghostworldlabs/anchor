@@ -15,10 +15,15 @@ The scan is deliberately conservative + bounded:
     empty :class:`ScanResult` instead.
 
 Classification (provenance signals, in priority order):
-  - ``build``        — ``foreman-checkpoint.json`` / ``foreman.config.json``.
-  - ``planning``     — trio planning docs under ``planning/**`` (and at the root):
+  - ``build``        — ``foreman-checkpoint.json`` / ``foreman.config.json`` AND
+                       the Foreman BUILD record ``*EXECUTION-LOG*.md`` (the build
+                       lane's trio doc), regardless of where it lives — including
+                       under ``planning/<version>/`` where Foreman writes its log.
+                       This is what makes a build session appear in the Build lane
+                       even when the build ran outside Anchor (e.g. on a branch).
+  - ``planning``     — trio PLANNING docs under ``planning/**`` (and at the root):
                        ``*MASTER-PLAN*`` / ``*IMPLEMENTATION-PLAN*`` /
-                       ``*EXECUTION-LOG*`` / ``*DECISION-LOG*``.
+                       ``*DECISION-LOG*`` (the Crucible Shark-Tank record).
   - ``research``     — ``report.md`` / ``report.pdf`` under a research store
                        (a dir named ``research`` or a researchPrime store).
   - ``deliverables`` — declared output dir (``deliverables/**``).
@@ -60,9 +65,15 @@ LANES = (LANE_RESEARCH, LANE_PLANNING, LANE_BUILD, LANE_DELIVERABLES, LANE_GRASS
 # Build-provenance filenames (exact, case-insensitive).
 _BUILD_FILES = frozenset({"foreman-checkpoint.json", "foreman.config.json"})
 
+# Build-provenance markdown name fragments (case-insensitive substring of the
+# stem). The Foreman EXECUTION-LOG is the build lane's trio doc; it is classified
+# BUILD even though Foreman writes it into the planning/<version>/ folder. This is
+# checked BEFORE the planning rule so the log is never demoted to planning.
+_BUILD_DOC_FRAGMENTS = ("execution-log",)
+
 # Planning-provenance name fragments (case-insensitive substring of the stem).
-_PLANNING_FRAGMENTS = ("master-plan", "implementation-plan", "execution-log",
-                       "decision-log")
+# NOTE: ``execution-log`` is intentionally NOT here — it is a BUILD doc (above).
+_PLANNING_FRAGMENTS = ("master-plan", "implementation-plan", "decision-log")
 
 # Research store dir names.
 _RESEARCH_DIRS = frozenset({"research"})
@@ -177,6 +188,15 @@ def _is_planning_doc(stem_lower: str) -> bool:
     return any(frag in stem_lower for frag in _PLANNING_FRAGMENTS)
 
 
+def _is_build_doc(stem_lower: str) -> bool:
+    """True iff a markdown stem is a BUILD trio doc (the Foreman EXECUTION-LOG).
+
+    Checked BEFORE :func:`_is_planning_doc` so the build log that lives under a
+    ``planning/<version>/`` folder is classified BUILD, not planning.
+    """
+    return any(frag in stem_lower for frag in _BUILD_DOC_FRAGMENTS)
+
+
 def _is_grass_doc(stem_lower: str) -> bool:
     """True iff a markdown stem is an idea-doc (Grass Catchers) signal.
 
@@ -208,9 +228,16 @@ def _classify(path: Path, rel_posix: str, rel_parts):
         return (LANE_BUILD, "foreman-checkpoint"
                 if "checkpoint" in name_lower else "foreman-config")
 
+    # 1b. Build provenance — the Foreman EXECUTION-LOG (the build lane's trio
+    #     doc). Checked BEFORE the planning rule so the log that Foreman writes
+    #     into planning/<version>/ is classified BUILD, surfacing the build
+    #     session in the Build lane even when the build ran outside Anchor.
+    if suffix == ".md" and _is_build_doc(stem_lower):
+        return (LANE_BUILD, "execlog")
+
     # 2. Planning provenance — trio planning docs (named), under planning/ or
-    #    at the root. EXECUTION-LOG.md etc. This runs BEFORE the grass rule so a
-    #    real master-plan / implementation-plan is NEVER demoted to grass.
+    #    at the root (MASTER-PLAN / IMPLEMENTATION-PLAN / DECISION-LOG). This runs
+    #    BEFORE the grass rule so a real master-plan is NEVER demoted to grass.
     if suffix == ".md" and _is_planning_doc(stem_lower):
         return (LANE_PLANNING, "plan-doc")
 

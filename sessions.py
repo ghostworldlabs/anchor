@@ -269,6 +269,22 @@ def list_sessions(folder_path, project_id, lane, cluster_window_s=None):
     if not efforts:
         return []
 
+    # The store-lane this call resolves to (research/planning/build/...). The
+    # BUILD lane's session_ids are LANE-QUALIFIED (a ``build::`` prefix on the
+    # keystr) so a discovered build session never collides with the planning
+    # session that shares its source directory — the Foreman EXECUTION-LOG lives
+    # under ``planning/<version>/`` alongside the plan docs, so both lanes group
+    # by the SAME parent dir and would otherwise mint the IDENTICAL ``dir::…`` id
+    # (a duplicate DOM ``data-session`` → the wrong tile/panel opens). A session
+    # is per-lane anyway, so qualifying is the correct, stable identity. Only
+    # build is qualified (it is the sole cross-lane same-dir case + has no
+    # pre-existing cached summaries to orphan); other lanes are unchanged.
+    store_lane = _eh._resolve_subdir(lane)
+    _id_prefix = f"{store_lane}::" if store_lane == "build" else ""
+
+    def _keystr(group_key):
+        return _id_prefix + _group_keystr(group_key)
+
     # 1. Compute natural group keys. Defer parent-dir-less discovered efforts to
     #    the fallback clusterer.
     groups = {}        # keystr -> {"key": group_key, "members": [...]}
@@ -278,21 +294,20 @@ def list_sessions(folder_path, project_id, lane, cluster_window_s=None):
         if gk[0] == "fallback":
             fallback_pool.append(rec)
             continue
-        ks = _group_keystr(gk)
+        ks = _keystr(gk)
         groups.setdefault(ks, {"key": gk, "members": []})["members"].append(rec)
 
     # 2. Fallback clustering for parent-dir-less discovered efforts.
     for cluster_key, members in _cluster_fallback(fallback_pool, cluster_window_s):
         gk = ("fallback", cluster_key)
-        ks = _group_keystr(gk)
+        ks = _keystr(gk)
         groups.setdefault(ks, {"key": gk, "members": []})["members"].extend(members)
 
     # 3. Apply manual overrides (merge/split escape hatch).
     overrides = _load_overrides(folder_path, project_id, lane)
     groups = _apply_overrides(groups, overrides)
 
-    # 4. Materialize session records.
-    store_lane = _eh._resolve_subdir(lane)
+    # 4. Materialize session records. (``store_lane`` resolved above.)
     sessions = []
     for ks, info in groups.items():
         members = info["members"]

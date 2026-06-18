@@ -260,8 +260,11 @@ def test_breadcrumb_nav_wired_in_js(gui_env):
 
 
 def test_partial_chain_renders_no_fabricated_nodes_in_js(gui_env):
-    """NEGATIVE: a chain of fewer than 2 members renders NOTHING (no misleading
-    breadcrumb / no fabricated siblings) — the guard is `members.length < 2`."""
+    """NEGATIVE: a registry chain of fewer than 2 members renders NO fabricated
+    sibling nodes — the guard `members.length < 2` short-circuits BEFORE the
+    server-members loop. (The short-circuit branch now falls back to the
+    build→planning *static tie*, which is a real, doc-grounded link read off the
+    tile — not a synthesized registry sibling; its honesty is asserted below.)"""
     gui = gui_env["gui"]
     pid = gui_env["pid"]
     js = _js(gui.render_project_window_html(pid))
@@ -269,11 +272,25 @@ def test_partial_chain_renders_no_fabricated_nodes_in_js(gui_env):
                    r"([\s\S]*?)\n}\n", js)
     assert fn, "_loadChainBreadcrumb not found"
     body = fn.group(1)
-    assert "if (members.length < 2) return;" in body, \
-        "a lone/partial chain must render no nodes (no fabricated siblings)"
-    # The nodes are built ONLY from the server's `members` list (no client-side
-    # synthesis of sibling nodes that don't exist).
+    # The < 2 guard still exists and short-circuits to a return (no server nodes).
+    assert "if (members.length < 2)" in body, \
+        "a lone/partial registry chain must not build server sibling nodes"
+    guard = re.search(r"if \(members\.length < 2\) \{([\s\S]*?)\}", body)
+    assert guard and "return;" in guard.group(1), \
+        "the < 2 branch must return before the members loop"
+    # The ONLY thing the short-circuit branch renders is the static tie helper.
+    assert "_renderStaticTieCrumb(sessionId, host)" in guard.group(1)
+    # The registry nodes are built ONLY from the server's `members` list.
     assert "members.forEach" in body
+
+    # HONESTY of the static-tie fallback: it renders nothing unless the tile
+    # actually carries a data-linked-planning target (no fabricated tie).
+    tie = re.search(r"function _renderStaticTieCrumb\(sessionId, host\)\s*\{"
+                    r"([\s\S]*?)\n}\n", js)
+    assert tie, "_renderStaticTieCrumb not found"
+    assert "data-linked-planning" in tie.group(1)
+    assert "if (!planSid) return;" in tie.group(1), \
+        "no tie on the tile → render nothing"
 
 
 # ════════════════════════════════════════════════════════════════════════════
