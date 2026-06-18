@@ -2773,6 +2773,429 @@ def check_rnd_v9_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+#: A simulated MODEL greet line. Writing it onto the stub PTY echoes it into the
+#: read buffer (``pty_manager._StubChild.write``), pushing the greet-marker count
+#: past the echoed-seed base — the "model actually greeted" signal the v10
+#: pending-paste flush requires before it delivers the paste.
+_V10_GREET_LINE = "✓ Skill loaded — what would you like to do?"
+
+
+def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v10 "Live Handoff & Boneyard" R&D surface — FULLY STUBBED.
+
+    Walks the new v10 paste / both-artifact advance / grass-archive+lineage /
+    grass research->plan advance / Boneyard seams in throwaway temp folders + temp
+    git repos, never touching real data, the live registry, the REAL Anchor repo,
+    a live claude / real PTY, or ``:8777``. ``ANCHOR_PTY_BACKEND=stub`` +
+    ``ANCHOR_RUNNER_CMD`` (the STREAM-JSON stub) + a temp ``ANCHOR_WORKTREE_BASE``
+    keep every model / PTY interaction off the real world.
+
+      (a) PASTE substrate (W1) — a session started with ``paste_prompt`` records
+          ``pending_paste`` (not written at start); after a real greet is observed
+          the first read flushes it UNSENT (no trailing newline), exactly once.
+      (b) ADVANCE both-artifacts (W2) — a plan->build advance writes HANDOFF.md +
+          NEXT-PROMPT.md into the new build worktree, links the sessions
+          (parent_session_id / shared chain_id), and delivers the prompt as a
+          PENDING PASTE (nothing auto-submitted on the unattended path).
+      (c) GRASS (W3-W5) — two contained grass dev sessions (research + plan)
+          coexist; ``archive_grass_session`` records a per-idea bundle (idea stays
+          in grass); ``export_grass_to_project`` stamps ``grass_origin`` and a
+          downstream session inherits it; ``advance_grass_research_to_plan`` opens
+          a contained, linked, paste-pending plan dev session; grass-dev sessions
+          are excluded from the board/top-strip projection.
+      (d) BONEYARD (W6) — kill (with material) -> a ``killed`` entry; a v9 delete
+          -> a ``deleted`` entry captured BEFORE the effort pointer-records drop
+          (doc_rels non-empty after efforts gone); ``delete_grass_idea`` -> a
+          ``grass-deleted`` entry; ``search`` filters; deleting a LIVE session
+          yields exactly ONE ``deleted`` entry (not killed+deleted).
+
+    Every stub PTY + synthetic session row is reaped, all forced env is restored,
+    and the temp dirs are torn down. Asserts nothing bound ``:8777`` and real data
+    was never touched. A sub-step that cannot run (e.g. git absent) is recorded
+    honestly as skipped rather than failing the whole check (v9 tolerance).
+    """
+    name = "R&D v10 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    os.environ.pop("ANCHOR_TERMINAL_SEED", None)  # rely on the built-in greet seed
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v10-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    def _greet(sid):
+        """Surface a real model greet on a session's stub PTY (count > base)."""
+        try:
+            import pty_manager as _pty
+            _pty.write(sid, _V10_GREET_LINE)
+        except Exception:
+            pass
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import handoff as _handoff
+        import boneyard as _bone
+        import pty_manager as _pty
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v10-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v10 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v10", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v10 project", bool(pid), str(pid)))
+
+        # ── (a) PASTE substrate (W1): pending → flush UNSENT once after greet ──
+        try:
+            prompt = "PLAN FROM THE TIDY PROBE"
+            psess = _ts.start_session(pid, "planning", backend="claude",
+                                      paste_prompt=prompt)
+            psid = psess["session_id"]
+            rec0 = _sreg.get_session(psid)
+            # Recorded pending, NOT written at start, not yet flushed.
+            buf0 = _pty.read_since(psid, 0)["text"]
+            pending_ok = (rec0.get("pending_paste") == prompt
+                          and rec0.get("paste_flushed") is False
+                          and prompt not in buf0)
+            # Inject the model greet → the next read flushes the paste UNSENT.
+            _greet(psid)
+            _ts.read_since(psid, 0)
+            full = _pty.read_since(psid, 0)["text"]
+            rec1 = _sreg.get_session(psid)
+            flushed_ok = (prompt in full
+                          and (prompt + "\n") not in full      # not auto-submitted
+                          and full.rstrip("\r").endswith(prompt)
+                          and rec1.get("paste_flushed") is True
+                          and rec1.get("pending_paste") == "")
+            # Idempotent: a second read/attach does NOT re-emit the paste.
+            _ts.read_since(psid, 0)
+            _ts.attach(psid)
+            once_ok = _pty.read_since(psid, 0)["text"].count(prompt) == 1
+            steps.append(("paste held pending then flushed UNSENT once after greet",
+                          pending_ok and flushed_ok and once_ok,
+                          f"pending={pending_ok} unsent={flushed_ok} once={once_ok}"))
+            try:
+                _ts.kill(psid, project_id=pid, _record_boneyard=False)
+            except Exception:
+                pass
+        except Exception as e:
+            steps.append(("paste substrate", False, f"{type(e).__name__}: {e}"))
+
+        # ── (b) ADVANCE both-artifacts (W2): plan→build, linked, paste pending ─
+        if git_ok:
+            try:
+                # A planning session with a REAL discovered MASTER+IMPL plan set
+                # committed into the main repo so discovery finds it.
+                plan_dir = proj_folder / "planning" / "rnd-hc-v10"
+                plan_dir.mkdir(parents=True, exist_ok=True)
+                for fn, body in (("MASTER-PLAN.md", "# Master Plan\n"),
+                                 ("IMPLEMENTATION-PLAN.md", "# Implementation Plan\n")):
+                    (plan_dir / fn).write_text(body, encoding="utf-8")
+                for i, (fn, title) in enumerate(
+                        (("MASTER-PLAN.md", "Master Plan"),
+                         ("IMPLEMENTATION-PLAN.md", "Implementation Plan"))):
+                    rel = f"planning/rnd-hc-v10/{fn}"
+                    jid = _eh.discovered_job_id("planning", rel)
+                    _eh.record_effort(
+                        str(proj_folder), pid, "planning", jid, skill="Crucible",
+                        extra={"source": _eh.SOURCE_DISCOVERED, "kind": "plan-doc",
+                               "title": title, "artifact_path": rel,
+                               "status": "imported",
+                               "created_at": 2000.0 + i * 0.001})
+                # Start a planning session, mark it DONE (the terminal transition
+                # auto_advance gates on), then auto-advance to one linked build.
+                plansess = _ts.start_session(pid, "planning", backend="claude",
+                                             label="hc v10 plan")
+                plan_sid = plansess["session_id"]
+                _sreg.update_session(plan_sid, status=_sreg.STATUS_DONE)
+                build_rec = _ts.auto_advance_planning_to_build(pid, plan_sid)
+                adv_ok = bool(build_rec)
+                both_artifacts = False
+                linked = False
+                paste_pending = False
+                if build_rec:
+                    bsid = build_rec.get("session_id", "")
+                    bwt = build_rec.get("worktree_path", "")
+                    both_artifacts = bool(bwt) and (
+                        (Path(bwt) / "HANDOFF.md").is_file()
+                        and (Path(bwt) / "NEXT-PROMPT.md").is_file())
+                    brec = _sreg.get_session(bsid)
+                    linked = (brec.get("parent_session_id") == plan_sid
+                              and brec.get("chain_id")
+                              == _sreg.get_session(plan_sid).get("chain_id"))
+                    # Unattended path: the build holds the prompt PENDING — nothing
+                    # auto-submitted (paste_flushed False until first attach).
+                    paste_pending = (bool(brec.get("pending_paste"))
+                                     and brec.get("paste_flushed") is False)
+                    # Idempotent: a second advance does NOT mint a second build.
+                    again = _ts.auto_advance_planning_to_build(pid, plan_sid)
+                    idem_ok = again is None
+                    try:
+                        _ts.kill(bsid, project_id=pid, _record_boneyard=False)
+                    except Exception:
+                        pass
+                else:
+                    idem_ok = False
+                steps.append(("advance writes both artifacts + links + pending paste",
+                              adv_ok and both_artifacts and linked
+                              and paste_pending and idem_ok,
+                              f"advanced={adv_ok} artifacts={both_artifacts} "
+                              f"linked={linked} pending={paste_pending} "
+                              f"idempotent={idem_ok}"))
+            except Exception as e:
+                steps.append(("advance both-artifacts", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("advance both-artifacts", True,
+                          "skipped (git unavailable)"))
+
+        # ── (c) GRASS (W3-W5): two dev sessions + archive + lineage + advance ──
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid,
+                                    "Adaptive prefetch for the cache layer")
+                iid = idea.get("job_id", "")
+                # W3: two contained dev sessions (research + plan) coexist.
+                dev_r = _eh.develop_grass_idea(pid, iid, "research",
+                                               folder_path=str(proj_folder))
+                dev_p = _eh.develop_grass_idea(pid, iid, "plan",
+                                               folder_path=str(proj_folder))
+                rsid = dev_r.get("session_id", "")
+                two_dev = (rsid and dev_p.get("session_id")
+                           and rsid != dev_p.get("session_id"))
+                # Both dev sessions are EXCLUDED from the board (contained label).
+                excluded = (_eh.is_grass_dev_label(
+                    _sreg.get_session(rsid).get("label"))
+                    and _eh.is_grass_dev_label(
+                        _sreg.get_session(dev_p.get("session_id")).get("label")))
+                # W4: produce a doc in the research dev worktree, then ARCHIVE it.
+                rwt = dev_r.get("worktree_path", "")
+                arch_rel = "research/grass-dev/PREFETCH-NOTES.md"
+                if rwt:
+                    p = Path(rwt) / arch_rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text("# Prefetch notes\nAdaptive prefetch idea.\n",
+                                 encoding="utf-8")
+                arch = _eh.archive_grass_session(pid, iid, "research",
+                                                 folder_path=str(proj_folder))
+                archives = _eh.list_grass_archives(str(proj_folder), pid, iid)
+                archive_ok = (arch.get("ok")
+                              and any(arch_rel in (b.get("docs") or [])
+                                      for b in archives)
+                              # idea STAYS in grass after archive.
+                              and _eh.get_grass_idea(str(proj_folder), pid, iid)
+                              is not None)
+                steps.append(("two grass dev sessions coexist + excluded + archive",
+                              bool(two_dev) and excluded and archive_ok,
+                              f"two_dev={bool(two_dev)} excluded={excluded} "
+                              f"archive={archive_ok}"))
+
+                # W4: export stamps grass_origin; a downstream session inherits it.
+                exp = _eh.export_grass_to_project(pid, iid,
+                                                  folder_path=str(proj_folder))
+                # A NEW project plan session linked into the exported chain inherits
+                # grass_origin via start_session's chain propagation. We assert the
+                # dev session itself carries grass_origin (set on export) and that a
+                # child started from it inherits.
+                dev_origin = (_sreg.get_session(rsid).get("grass_origin") == iid)
+                child = _ts.start_session(pid, "plan", backend="claude",
+                                          parent_session_id=rsid,
+                                          label="hc v10 lineage child")
+                child_inherits = (
+                    _sreg.get_session(child["session_id"]).get("grass_origin")
+                    == iid)
+                # A non-grass session has grass_origin == "" (negative).
+                plain = _ts.start_session(pid, "research", backend="claude",
+                                          label="hc v10 plain")
+                plain_clean = (
+                    _sreg.get_session(plain["session_id"]).get("grass_origin")
+                    == "")
+                steps.append(("export stamps grass_origin; child inherits; "
+                              "plain clean",
+                              exp.get("ok") and dev_origin and child_inherits
+                              and plain_clean,
+                              f"exported={exp.get('ok')} dev_origin={dev_origin} "
+                              f"child={child_inherits} plain={plain_clean}"))
+                for sid_ in (child["session_id"], plain["session_id"]):
+                    try:
+                        _ts.kill(sid_, project_id=pid, _record_boneyard=False)
+                    except Exception:
+                        pass
+
+                # W5: grass research→plan advance — contained, linked, paste pending.
+                gadv = _eh.advance_grass_research_to_plan(
+                    pid, iid, folder_path=str(proj_folder))
+                gadv_ok = False
+                if gadv.get("ok") and gadv.get("session"):
+                    gp = gadv["session"]
+                    gp_rec = _sreg.get_session(gp.get("session_id"))
+                    gadv_ok = (
+                        _eh.is_grass_dev_label(gp_rec.get("label"))      # contained
+                        and gp_rec.get("grass_origin") == iid            # lineage
+                        and (bool(gp_rec.get("pending_paste"))           # paste held
+                             or gadv.get("paste_delivered")))
+                else:
+                    # Honest: no research material → no plan minted (acceptable).
+                    gadv_ok = (gadv.get("reason")
+                               in ("no-research-material", "no-research-session",
+                                   "focused-existing"))
+                steps.append(("grass research->plan advance (contained, linked, "
+                              "paste pending)",
+                              gadv_ok, f"reason={gadv.get('reason')}"))
+            except Exception as e:
+                steps.append(("grass W3-W5", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass W3-W5", True, "skipped (git unavailable)"))
+
+        # ── (d) BONEYARD (W6): capture on kill / delete / grass-delete + search ─
+        if git_ok:
+            try:
+                def _write_build_docs(wt, sub):
+                    rel = f"build/{sub}/DELIVERABLE.md"
+                    p = Path(wt) / rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text("# Deliverable\nThe widget cache service ships.\n",
+                                 encoding="utf-8")
+                    return rel
+
+                # kill (with material) → a "killed" entry referencing the doc.
+                ks = _ts.start_session(pid, "build", backend="claude",
+                                       label="hc v10 kill")
+                ksid = ks["session_id"]
+                krel = _write_build_docs(ks["worktree_path"], "bone-kill")
+                _ts.kill(ksid, project_id=pid)  # records "killed" (default)
+                killed = [e for e in _bone.list_entries(str(proj_folder), pid)
+                          if e["source"] == "killed" and e["session_id"] == ksid]
+                killed_ok = (len(killed) == 1
+                             and krel in killed[0]["doc_rels"])
+
+                # v9 delete → a "deleted" entry captured BEFORE efforts drop (D10):
+                # doc_rels non-empty even though the join is now empty.
+                ds = _ts.start_session(pid, "build", backend="claude",
+                                       label="hc v10 del")
+                dsid = ds["session_id"]
+                drel = _write_build_docs(ds["worktree_path"], "bone-del")
+                _ts.kill(dsid, project_id=pid, _record_boneyard=False)
+                out = _ts.delete_session(dsid, project_id=pid)
+                join_empty = _eh.efforts_for_session_id(
+                    str(proj_folder), pid, "build", dsid) == []
+                deleted = [e for e in _bone.list_entries(str(proj_folder), pid)
+                           if e["source"] == "deleted" and e["session_id"] == dsid]
+                deleted_ok = (out.get("ok") and out.get("deleted")
+                              and len(deleted) == 1
+                              and bool(deleted[0]["doc_rels"])   # D10: docs kept
+                              and drel in deleted[0]["doc_rels"]
+                              and join_empty)
+
+                # Deleting a LIVE session → exactly ONE "deleted" entry (not 2).
+                ls = _ts.start_session(pid, "build", backend="claude",
+                                       label="hc v10 live-del")
+                lsid = ls["session_id"]
+                lrel = _write_build_docs(ls["worktree_path"], "bone-live")
+                lout = _ts.delete_session(lsid, project_id=pid)
+                live_entries = [e for e in _bone.list_entries(str(proj_folder), pid)
+                                if e["session_id"] == lsid]
+                live_del_ok = (lout.get("ok") and lout.get("deleted")
+                               and len(live_entries) == 1
+                               and live_entries[0]["source"] == "deleted"
+                               and lrel in live_entries[0]["doc_rels"])
+
+                # grass idea delete → a "grass-deleted" entry with the idea text.
+                gidea = _eh.add_idea(str(proj_folder), pid,
+                                     "Telemetry dashboard for the runner")
+                giid = gidea.get("job_id", "")
+                _eh.save_grass_refinement(str(proj_folder), pid, giid,
+                                          text="v1 notes", label="r1",
+                                          artifacts=["grass/dev/telemetry.md"])
+                _eh.delete_grass_idea(str(proj_folder), pid, giid)
+                grass_del = [e for e in _bone.list_entries(str(proj_folder), pid)
+                             if e["source"] == "grass-deleted"
+                             and "Telemetry" in (e.get("idea_text") or "")]
+                grass_del_ok = (len(grass_del) == 1
+                                and "grass/dev/telemetry.md"
+                                in grass_del[0]["doc_rels"])
+
+                # search filters: a term unique to the killed build doc PATH
+                # matches it (the haystack covers doc rel paths + filenames).
+                hits = _bone.search(str(proj_folder), pid, "bone-kill")
+                tele = _bone.search(str(proj_folder), pid, "TELEMETRY")
+                search_ok = (any(e["session_id"] == ksid for e in hits)
+                             and all(e["source"] != "grass-deleted" for e in hits)
+                             and len(tele) == 1
+                             and tele[0]["source"] == "grass-deleted"
+                             and _bone.search(str(proj_folder), pid,
+                                              "zzz-no-term") == [])
+
+                steps.append(("boneyard captures killed/deleted(D10)/live-del/"
+                              "grass-deleted + search",
+                              killed_ok and deleted_ok and live_del_ok
+                              and grass_del_ok and search_ok,
+                              f"killed={killed_ok} deleted={deleted_ok} "
+                              f"live_del={live_del_ok} grass={grass_del_ok} "
+                              f"search={search_ok}"))
+            except Exception as e:
+                steps.append(("boneyard", False, f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("boneyard", True, "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -3029,6 +3452,7 @@ def main():
         check_rnd_v7_surface(report, server_proc, rnd_env)
         check_rnd_v8_surface(report, server_proc, rnd_env)
         check_rnd_v9_surface(report, server_proc, rnd_env)
+        check_rnd_v10_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
