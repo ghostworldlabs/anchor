@@ -439,6 +439,7 @@ import handoff as _handoff
 import preview_server as _preview
 import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
+import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -2308,6 +2309,167 @@ _GRASS_STATUS_LABEL = {
 }
 
 
+# v10 Wave 7 — Boneyard: human label for each locked source (D3).
+_BONEYARD_SOURCE_LABEL = {
+    _boneyard.SOURCE_KILLED: "killed",
+    _boneyard.SOURCE_DELETED: "deleted",
+    _boneyard.SOURCE_GRASS_DELETED: "grass-deleted",
+}
+
+
+def _boneyard_entry_view(project_id, entry) -> dict:
+    """SAFE projection of a Boneyard entry + server-built traversal-safe doc links.
+
+    The entry comes from ``boneyard.list_entries`` / ``boneyard.search``, already a
+    SAFE projection (only the public ``_SAFE_KEYS`` — never an absolute path /
+    worktree / branch). We add ``doc_links`` (``[{name, href}]``) by routing EVERY
+    ``doc_rel`` through the existing traversal-safe ``/artifact?path=<rel>`` route
+    (W7 routing decision: the produced docs survive on disk by their main-folder
+    rel path under Option A regardless of source — killed/deleted/grass-deleted —
+    so /artifact is ALWAYS resolvable and consistent; no fragile /report job_id
+    resolution from a content-addressed effort id). The href is path+query escaped;
+    the route itself rejects ``..``/absolute/symlink-escape. No absolute path /
+    worktree / branch is ever emitted.
+    """
+    e = entry or {}
+    pid_q = url_quote(str(project_id), safe="")
+    links = []
+    for rel in (e.get("doc_rels", []) or []):
+        rel = str(rel or "").strip()
+        if not rel:
+            continue
+        name = rel.replace("\\", "/").rsplit("/", 1)[-1] or rel
+        href = f"/artifact/{pid_q}?path={url_quote(rel, safe='')}"
+        links.append({"name": name, "href": href})
+    # ``when_display`` is the formatted, LOCAL-tz timestamp string computed ONCE on
+    # the server (v10 Wave 7 fix). BOTH the server initial render
+    # (_render_boneyard_entry_html) AND the client live-search render
+    # (_boneyardEntryHtml) use it verbatim, so the displayed time is byte-identical
+    # across the initial paint and a post-search re-render (the client used to
+    # re-format ``when`` in UTC, causing a ~tz-offset jump on the first search).
+    # ``when`` (raw epoch) is kept too for any ordering/raw use. SAFE: a formatted
+    # string only — no path / worktree / branch.
+    when_raw = e.get("when", 0)
+    when_display = ""
+    try:
+        if when_raw:
+            when_display = datetime.fromtimestamp(
+                float(when_raw)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        when_display = ""
+    return {
+        "entry_id": e.get("entry_id", ""),
+        "source": e.get("source", ""),
+        "source_label": _BONEYARD_SOURCE_LABEL.get(e.get("source", ""),
+                                                   e.get("source", "")),
+        "session_id": e.get("session_id", ""),
+        "lane": e.get("lane", ""),
+        "title": e.get("title", ""),
+        "summary_excerpt": e.get("summary_excerpt", ""),
+        "idea_text": e.get("idea_text", ""),
+        "when": when_raw,
+        "when_display": when_display,
+        "doc_links": links,
+    }
+
+
+def _render_boneyard_entry_html(view) -> str:
+    """Render ONE Boneyard entry as a ``.byentry`` (collapsed; expands to summary +
+    doc links). All engine/user content HTML-escaped. ``view`` is the
+    ``_boneyard_entry_view`` shape (SAFE projection + ``doc_links``)."""
+    src = view.get("source", "")
+    src_lbl = html_lib.escape(view.get("source_label", src) or src)
+    src_cls = html_lib.escape(src, quote=True)
+    # RAW title escaped EXACTLY ONCE (quote-safe). ``title`` here is the escaped
+    # string reused below; we must NOT re-escape it (the v10-W7 double-escape bug
+    # turned ``A & B`` into ``A &amp;amp; B`` because the already-escaped value was
+    # passed back through html.escape on the data-title attribute).
+    title_raw = view.get("title", "") or "(untitled)"
+    title = html_lib.escape(title_raw, quote=True)
+    lane = (view.get("lane", "") or "").strip()
+    lane_chip = (f"<span class='bylanechip'>{html_lib.escape(lane)}</span>"
+                 if lane else "")
+    # The displayed timestamp is the server-computed, LOCAL-tz ``when_display`` from
+    # the SAFE projection — the SAME string the client live-search render uses, so
+    # the initial paint and a post-search re-render are byte-identical (no tz jump).
+    when_txt = view.get("when_display", "") or ""
+    when_chip = (f"<span class='bywhen'>{html_lib.escape(when_txt)}</span>"
+                 if when_txt else "")
+    # The expand body: full summary/idea text + doc links.
+    summary = (view.get("summary_excerpt", "") or "").strip()
+    idea = (view.get("idea_text", "") or "").strip()
+    body_text = summary or idea
+    if body_text:
+        sum_html = (f"<div class='bysum'>{html_lib.escape(body_text)}</div>")
+    else:
+        sum_html = ("<div class='bysum dim'>No summary captured.</div>")
+    # A short collapsed excerpt (the first line of whatever body we have).
+    excerpt = body_text.splitlines()[0] if body_text else ""
+    exc_html = (f"<div class='byexc'>{html_lib.escape(excerpt)}</div>"
+                if excerpt else "")
+    links = view.get("doc_links", []) or []
+    if links:
+        rows = "".join(
+            f"<a class='bydoc' href='{html_lib.escape(l['href'], quote=True)}' "
+            f"target='_blank' rel='noopener'>{html_lib.escape(l['name'])}</a>"
+            for l in links)
+        docs_html = (f"<div class='bydocs'><div class='h'>Documents</div>"
+                     f"{rows}</div>")
+    else:
+        docs_html = ("<div class='bydocs'><div class='h'>Documents</div>"
+                     "<span class='none'>No documents.</span></div>")
+    eid = html_lib.escape(view.get("entry_id", ""), quote=True)
+    return (
+        f"<div class='byentry' data-byentry=\"{eid}\" data-source='{src_cls}' "
+        f"data-title=\"{title}\" "
+        f"onclick='toggleBoneyardEntry(this)'>"
+        f"<div class='byhd'>"
+        f"<span class='bybadge {src_cls}'>{src_lbl}</span>"
+        f"<div class='bymeta'><div class='bytitle'>{title}</div>{exc_html}</div>"
+        f"{lane_chip}{when_chip}<span class='bycar'>&#9656;</span>"
+        f"</div>"
+        f"<div class='bybody' onclick='event.stopPropagation()'>"
+        f"{sum_html}{docs_html}"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _render_boneyard_panel(project_id) -> str:
+    """Render the Boneyard panel template (hidden; cloned into ``#panelStack`` by
+    ``openBoneyard()``): a search box over a newest-first entry list. The initial
+    entries are server-rendered (so the DOM positive/negative assertions are real);
+    live search re-fetches ``/api/rnd/boneyard?q=`` and re-renders the list. An
+    honest empty state when the project has no discarded material."""
+    entry = _rnd.get_project(project_id)
+    folder = (entry or {}).get("folder_path", "")
+    try:
+        raw = _boneyard.list_entries(folder, project_id)
+    except Exception:
+        raw = []
+    views = [_boneyard_entry_view(project_id, e) for e in raw]
+    if views:
+        rows = "".join(_render_boneyard_entry_html(v) for v in views)
+        list_html = rows
+    else:
+        # Honest empty state — NO fabricated entries (Wave-7 negative).
+        list_html = ("<div class='byempty' data-byempty='1'>"
+                     "Nothing discarded yet. Killed sessions with material, "
+                     "deleted sessions, and deleted grass ideas land here.</div>")
+    return (
+        "<div class='boneyard' id='boneyardView'>"
+        "<div class='bytop'>"
+        "<span class='ic'>&#9760;</span>"
+        "<span class='lbl'>Discarded material</span>"
+        "<span class='sp'></span>"
+        "<input class='bysearch' id='boneyardSearch' type='search' "
+        "placeholder='search discarded&hellip;' oninput='searchBoneyard()'>"
+        "</div>"
+        f"<div class='bylist' id='boneyardList'>{list_html}</div>"
+        "</div>"
+    )
+
+
 def _render_grass_column_tile(folder_path, project_id) -> str:
     """Render the Grass LANE column content: a single tile that OPENS the
     full-width two-pane idea workbench panel (v5 Wave 5).
@@ -2963,6 +3125,14 @@ def render_project_window_html(project_id: str) -> str:
     status = render_status_line_html(project_id)
     header_rollup = render_header_rollup_html(project_id)
     tasks_html = render_project_tasks_html(project_id)
+    # v10 Wave 7: the Boneyard panel, rendered ONCE as a hidden template the panel
+    # manager (openBoneyard) clones into #panelStack — same idiom as the grass
+    # workbench template.
+    boneyard_tpl = (
+        "<div id='boneyardTpl' style='display:none'>"
+        + _render_boneyard_panel(project_id)
+        + "</div>"
+    )
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -3183,6 +3353,63 @@ def render_project_window_html(project_id: str) -> str:
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
+        # ── v10 Wave 7 — Boneyard panel (per-project discarded material) ──────
+        # A search box over a newest-first list of discard entries; each entry has
+        # a source badge (killed/deleted/grass-deleted), title, when, lane, a short
+        # excerpt/idea text, and (expanded) the full text + doc links (open via the
+        # safe /artifact route in a new tab). Honest empty state when nothing was
+        # discarded. Matches the cockpit dark-slate styling.
+        ".boneyard{display:flex;flex-direction:column;min-width:0}"
+        ".bytop{display:flex;align-items:center;gap:9px;padding:10px 14px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex-wrap:wrap}"
+        ".bytop .ic{font-size:15px;margin-right:2px}"
+        ".bytop .lbl{font-size:11px;color:var(--text-dim)}"
+        ".bytop .sp{flex:1}"
+        ".bysearch{font-size:12px;padding:5px 10px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);color:var(--text);"
+        "min-width:200px}"
+        ".bylist{padding:8px 12px;overflow:auto;max-height:560px;"
+        "display:flex;flex-direction:column;gap:8px}"
+        ".byentry{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden}"
+        ".byentry .byhd{display:flex;align-items:center;gap:9px;padding:9px 12px;"
+        "cursor:pointer;flex-wrap:wrap}"
+        ".byentry .byhd:hover{background:#20242f}"
+        ".byentry .bytitle{font-size:12.5px;color:var(--text);font-weight:500;"
+        "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        "max-width:100%}"
+        ".byentry .byexc{font-size:11px;color:var(--text-dim);margin-top:2px;"
+        "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".byentry .bymeta{min-width:0;flex:1}"
+        ".bybadge{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;"
+        "padding:2px 8px;border-radius:20px;border:1px solid var(--border);"
+        "color:var(--text-dim);white-space:nowrap}"
+        ".bybadge.killed{color:var(--warning);border-color:rgba(251,191,36,.4);"
+        "background:rgba(251,191,36,.08)}"
+        ".bybadge.deleted{color:var(--danger);border-color:rgba(248,113,113,.4);"
+        "background:rgba(248,113,113,.08)}"
+        ".bybadge.grass-deleted{color:var(--success);"
+        "border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)}"
+        ".bylanechip{font-size:10px;color:var(--text-dim);"
+        "border:1px solid var(--border);border-radius:5px;padding:1px 6px}"
+        ".bywhen{font-size:10px;color:var(--text-dim);white-space:nowrap}"
+        ".bycar{font-size:11px;color:var(--text-dim);width:14px;text-align:center}"
+        ".byentry .bybody{display:none;padding:0 13px 12px;"
+        "border-top:1px solid var(--border)}"
+        ".byentry.open .bybody{display:block}"
+        ".byentry .bysum{font-size:12px;color:var(--text);margin:11px 0 8px;"
+        "white-space:pre-wrap;line-height:1.45}"
+        ".byentry .bysum.dim{color:var(--text-dim);font-style:italic}"
+        ".bydocs{display:flex;flex-direction:column;gap:5px}"
+        ".bydocs .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:2px}"
+        ".bydoc{font-size:12px;color:var(--accent);text-decoration:none;"
+        "font-family:ui-monospace,Consolas,monospace}"
+        ".bydoc:hover{text-decoration:underline}"
+        ".bydocs .none{font-size:11px;color:var(--text-dim);font-style:italic}"
+        ".byempty{padding:26px 14px;color:var(--text-dim);font-size:13px;"
+        "text-align:center}"
         ".taskstrip{border-top:1px solid var(--border);padding:11px 16px}"
         ".rnd-status-line{margin:0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
@@ -3509,6 +3736,13 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini rnd-accent' id='openTermBtn' "
         "onclick=\"newTermSession('general','claude')\">"
         "&#9000; Open terminal</button>"
+        # v10 Wave 7 (#3): "Boneyard" — open the per-project searchable list of
+        # DISCARDED material (hard-killed-w/-material + v9-deleted + deleted-grass
+        # ideas). Opens an inline panel in #panelStack (like the grass workbench);
+        # read-only (GET /api/rnd/boneyard); docs open via the safe /artifact route.
+        "<button class='rnd-mini' id='openBoneyardBtn' "
+        "onclick=\"openBoneyard()\" title='Discarded material (searchable)'>"
+        "&#9760; Boneyard</button>"
         # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
         # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
         # (a token-gated read). Unlinked → a "Link GitHub" button (linkGithub());
@@ -3556,6 +3790,9 @@ def render_project_window_html(project_id: str) -> str:
         # empty when there are no live sessions; populated by renderSessionBar.)
         "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
+        # v10 Wave 7: the Boneyard panel template (hidden; cloned into #panelStack
+        # by openBoneyard()).
+        + boneyard_tpl +
         # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
         "</div>"
@@ -3599,8 +3836,17 @@ _PROJECT_WINDOW_JS = r"""
 // ════════════════════════════════════════════════════════════════════════════
 
 function _esc(s) {
+  // FULL HTML escaping (defense-in-depth). Escapes &, <, > AND BOTH quote chars
+  // (" -> &quot;, ' -> &#39;) so output is safe inside double- OR single-quoted
+  // attributes — not just text nodes. (Pre-v10-W7-fix this escaped only & < >,
+  // which let a title/value containing a double-quote break out of a
+  // data-title="..." attribute → stored DOM XSS in the Boneyard live search.)
+  // Verified safe for every _esc(...) caller in _PROJECT_WINDOW_JS: each puts the
+  // result into HTML text content or a quoted attribute, never a JS-string/URL
+  // context where &quot;/&#39; would render literally wrong.
   return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ── Access token (D4) ──────────────────────────────────────────────────────
@@ -3884,6 +4130,136 @@ async function promoteGrass(ideaId, lane) {
   refreshBoard();
   // Re-sync indices/labels from the registry shortly after.
   setTimeout(repopulate, 600);
+}
+
+// ── v10 Wave 7 — Boneyard (per-project searchable discard list) ─────────────
+// The header "Boneyard" button opens a FULL-WIDTH panel in #panelStack (cloned
+// from #boneyardTpl, the server-rendered search box + entry list). Live search
+// re-fetches GET /api/rnd/boneyard?q=<term> (so it exercises boneyard.search) and
+// re-renders the list; each entry expands to its summary + doc links (opened via
+// the safe /artifact route). Read-only — no mutation, no model call.
+function _boneyardTokenQ() {
+  var t = _anchorToken();
+  return t ? ('&token=' + encodeURIComponent(t)) : '';
+}
+
+function openBoneyard() {
+  var stack = document.getElementById('panelStack');
+  var tpl = document.getElementById('boneyardTpl');
+  if (!stack || !tpl) return;
+  var existing = document.getElementById('boneyardPanel');
+  if (existing) {
+    if (existing.classList.contains('minimized')) existing.classList.remove('minimized');
+    existing.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'boneyardPanel';
+  var bar = document.createElement('div');
+  bar.className = 'pbar';
+  var title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = '☠ Boneyard — discarded material';
+  var sp = document.createElement('span');
+  sp.className = 'sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'panelbtn min';
+  minBtn.title = 'Minimize';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); panel.classList.add('minimized'); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); panel.remove(); };
+  bar.appendChild(title); bar.appendChild(sp);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn);
+  var pin = document.createElement('div');
+  pin.className = 'pin';
+  pin.innerHTML = tpl.innerHTML;        // clone the rendered boneyard markup
+  panel.appendChild(bar); panel.appendChild(pin);
+  stack.appendChild(panel);
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// Build ONE entry's DOM from a server entry view (the SAFE projection + doc_links).
+function _boneyardEntryHtml(e) {
+  var src = e.source || '';
+  var srcLbl = e.source_label || src || '';
+  var title = e.title || '(untitled)';
+  var body = ((e.summary_excerpt || '').trim()) || ((e.idea_text || '').trim());
+  var excerpt = body ? body.split('\n')[0] : '';
+  // Use the server-computed, LOCAL-tz when_display verbatim (the SAME string the
+  // server initial render emits) so the displayed time is byte-identical across
+  // the initial paint and this live-search re-render. (Pre-fix this re-formatted
+  // e.when in UTC via toISOString → a ~tz-offset jump the instant a user searched.)
+  var whenTxt = e.when_display || '';
+
+  var laneChip = e.lane ? ('<span class="bylanechip">' + _esc(e.lane) + '</span>') : '';
+  var whenChip = whenTxt ? ('<span class="bywhen">' + _esc(whenTxt) + '</span>') : '';
+  var excHtml = excerpt ? ('<div class="byexc">' + _esc(excerpt) + '</div>') : '';
+  var sumHtml = body
+    ? ('<div class="bysum">' + _esc(body) + '</div>')
+    : ('<div class="bysum dim">No summary captured.</div>');
+  var docsInner = '';
+  var links = e.doc_links || [];
+  if (links.length) {
+    for (var i = 0; i < links.length; i++) {
+      docsInner += '<a class="bydoc" href="' + _esc(links[i].href)
+        + '" target="_blank" rel="noopener">' + _esc(links[i].name) + '</a>';
+    }
+  } else {
+    docsInner = '<span class="none">No documents.</span>';
+  }
+  var docsHtml = '<div class="bydocs"><div class="h">Documents</div>' + docsInner + '</div>';
+  return '<div class="byentry" data-byentry="' + _esc(e.entry_id || '')
+    + '" data-source="' + _esc(src) + '" data-title="' + _esc(title)
+    + '" onclick="toggleBoneyardEntry(this)">'
+    + '<div class="byhd"><span class="bybadge ' + _esc(src) + '">' + _esc(srcLbl)
+    + '</span><div class="bymeta"><div class="bytitle">' + _esc(title) + '</div>'
+    + excHtml + '</div>' + laneChip + whenChip + '<span class="bycar">&#9656;</span></div>'
+    + '<div class="bybody" onclick="event.stopPropagation()">' + sumHtml + docsHtml + '</div>'
+    + '</div>';
+}
+
+// Toggle one entry's expanded (summary + doc links) state.
+function toggleBoneyardEntry(el) {
+  if (!el) return;
+  el.classList.toggle('open');
+}
+
+// Live search: re-fetch GET /api/rnd/boneyard?q=<term> (exercises boneyard.search)
+// and re-render the list newest-first. Debounced lightly. An empty result shows
+// the honest empty state (no fabricated rows).
+var _boneyardSearchTimer = null;
+function searchBoneyard() {
+  if (_boneyardSearchTimer) clearTimeout(_boneyardSearchTimer);
+  _boneyardSearchTimer = setTimeout(_doBoneyardSearch, 120);
+}
+async function _doBoneyardSearch() {
+  var panel = document.getElementById('boneyardPanel');
+  if (!panel) return;
+  var box = panel.querySelector('#boneyardSearch');
+  var list = panel.querySelector('#boneyardList');
+  if (!list) return;
+  var q = box ? (box.value || '').trim() : '';
+  try {
+    var r = await fetch('/api/rnd/boneyard?project_id=' + encodeURIComponent(PROJECT_ID)
+                        + '&q=' + encodeURIComponent(q) + _boneyardTokenQ());
+    var data = await r.json();
+    if (!data || !data.ok) return;
+    var entries = data.entries || [];
+    if (!entries.length) {
+      list.innerHTML = '<div class="byempty" data-byempty="1">'
+        + (q ? 'No discarded material matches &ldquo;' + _esc(q) + '&rdquo;.'
+             : 'Nothing discarded yet.') + '</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < entries.length; i++) html += _boneyardEntryHtml(entries[i]);
+    list.innerHTML = html;
+  } catch (e) { /* read-only; leave the current list on a transient error */ }
 }
 
 // ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
@@ -10382,6 +10758,49 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
+            elif self.path.startswith("/api/rnd/boneyard"):
+                # Read-only (v10 Wave 7): the project's per-project Boneyard — a
+                # searchable list of DISCARDED material (hard-killed sessions w/
+                # material, v9-deleted sessions, deleted grass ideas). NO mutation,
+                # NO model call. AUTH: ``?token=`` (read-only GET; back-compat when
+                # no token set), mirroring /api/rnd/grass. Project-scoped (D4 —
+                # never a cross-project view).
+                #   /api/rnd/boneyard?project_id=<id>&q=<query>
+                # Empty ``q`` → ALL entries (newest-first); else boneyard.search.
+                # Each entry is the SAFE projection (boneyard._SAFE_KEYS — never an
+                # absolute path / worktree / branch) PLUS server-built, traversal-
+                # safe ``doc_links`` (href via the existing /artifact route — the
+                # file survives on disk by rel path regardless of source, Option A,
+                # so /artifact is ALWAYS resolvable and consistent across sources).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                query = (q.get("q", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            if query:
+                                entries = _boneyard.search(folder, pid, query)
+                            else:
+                                entries = _boneyard.list_entries(folder, pid)
+                        except Exception:
+                            entries = []
+                        out = [_boneyard_entry_view(pid, e) for e in entries]
+                        self._send_json({"ok": True, "entries": out, "q": query})
             elif self.path.startswith("/api/rnd/remote_status"):
                 # Read-only (v8 Wave 3): the project's GitHub link state for the
                 # header control — {linked, remote_url, auto_push}. NO mutation,
