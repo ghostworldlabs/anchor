@@ -159,6 +159,13 @@ LANE_SKILL = {
 SEED_ENV_GLOBAL = "ANCHOR_TERMINAL_SEED"
 SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
 
+#: The marker substring the greet line ends with (see :func:`_default_seed_text`:
+#: ``✓ <Skill> loaded — what would you like to do?``). The v10 pending-paste flush
+#: waits until this appears in the PTY output buffer before pasting the task
+#: prompt — that is the "the skill loaded and greeted" signal. Matched
+#: case-insensitively on the stable, skill-independent tail of the greet line.
+GREET_MARKER = "what would you like to do?"
+
 
 def _default_seed_text(skill):
     """The one-time opening instruction: load the skill, confirm, greet once.
@@ -284,7 +291,7 @@ _UNSET = object()
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
-                  parent_session_id=None):
+                  parent_session_id=None, paste_prompt=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -311,6 +318,18 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     :func:`session_registry.chain_for`) and records ``parent_session_id``. When
     omitted, the new session starts its OWN chain (chain_id == its own id). The
     parent record is never mutated.
+
+    v10 Wave 1: ``paste_prompt`` (optional) is the task prompt for a handoff that
+    must be DELIVERED BUT NOT SUBMITTED. When provided, phase-1 (the lane
+    load+greet seed, ending ``\\n``) is still written so the skill auto-loads and
+    greets, but the ``paste_prompt`` is NOT written to the PTY at start — it is
+    recorded on the session record as ``pending_paste`` (with
+    ``paste_flushed=False``) and later written to the PTY input WITHOUT a trailing
+    newline exactly once, after the greet is observed, by
+    :func:`_flush_pending_paste` (wired into the first ``read_since``/``attach``).
+    With no ``paste_prompt`` the behavior is exactly as v9 (the regression-guarded
+    back-compat path) — ``seed_context`` continues to fold onto the seed and is
+    auto-submitted as today.
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -426,10 +445,149 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             except Exception:
                 pass
 
+    # v10 Wave 1: record the task prompt as a PENDING PASTE — held UNSENT in the
+    # PTY input until the user presses Enter. It is NOT written here; it is
+    # delivered exactly once, after the greet, by :func:`_flush_pending_paste`
+    # (wired into the first read_since/attach). Recorded with paste_flushed=False
+    # so the flush guard knows it is still pending. With no paste_prompt this is
+    # skipped entirely (the v9 back-compat path is untouched).
+    pending = (paste_prompt or "")
+    if pending:
+        try:
+            record = _reg.update_session(
+                sid, pending_paste=pending, paste_flushed=False)
+        except Exception:
+            pass
+
     # v4 Wave 2: remember the engine this session chose so the NEXT session for
     # this project defaults to it. Best-effort (never fails a live session).
     set_last_engine_for_project(project_id, backend)
     return record
+
+
+def _flush_pending_paste(session_id):
+    """Write a session's PENDING task prompt to the PTY input, UNSENT, once (v10 W1).
+
+    The v10 "paste-NOT-submit" handoff: a session started with ``paste_prompt``
+    holds that prompt on its record as ``pending_paste`` (``paste_flushed=False``)
+    without writing it. THIS function delivers it — exactly once, after the greet
+    is observed — by writing it to the PTY **without a trailing newline** so it
+    sits in the input line UNSENT until the user presses Enter.
+
+    Trigger ("greet observed") — the SOUND test (fixes the premature-flush bug):
+    the greet line ``✓ <Skill> loaded — what would you like to do?`` is quoted
+    VERBATIM inside the seed text Anchor writes at start (see
+    :func:`_default_seed_text`), and the PTY echoes stdin — so :data:`GREET_MARKER`
+    is already in the buffer from the moment the seed is ECHOED, BEFORE the model
+    loads the skill or actually greets. A plain substring/`in` test therefore
+    flushes prematurely (Master-Plan R1). Instead we count marker OCCURRENCES and
+    require MORE than the seed text itself contains:
+
+      base    = number of marker occurrences in the recorded ``seed_text`` (the
+                exact bytes written at start; the echo contributes exactly ``base``)
+      greeted = the buffer's marker count is STRICTLY GREATER than ``base``
+                (the MODEL's real greet adds at least one more occurrence)
+
+    There is intentionally NO ``len(text) > len(seed_text)`` fallback — that fired
+    on almost any output and was the second half of the premature-flush defect.
+    If the seed was env-overridden (``ANCHOR_TERMINAL_SEED``) to a text with ZERO
+    marker occurrences, then ``base == 0`` and any appearance of the marker (from a
+    model greet) triggers — acceptable. If such an overridden seed ALSO omits the
+    marker AND the model greet won't contain it, the paste simply STAYS pending
+    (honest: we never fabricate a greet we didn't observe).
+
+    Real-ConPTY caveat: stdin echo may carry interleaved ANSI control codes, so
+    counting the stable, skill-independent marker SUBSTRING tolerates that far
+    better than positional/line matching.
+
+    IDEMPOTENT + cheap to call on every read/attach:
+      - no record / no ``pending_paste`` / already ``paste_flushed`` → no-op;
+      - the greet has NOT been observed yet → no-op (left pending for a later read);
+      - on a successful CLAIM it sets ``paste_flushed=True`` and clears
+        ``pending_paste`` (so a second call never re-emits).
+
+    Concurrency (Defect 2 — TOCTOU): under ``ThreadingHTTPServer`` two concurrent
+    ``read_since``/``attach`` calls could both pass the guard and both write a
+    double paste. The check-and-claim is therefore done as a compare-and-set under
+    the process-wide :data:`paths.WRITE_LOCK` (a reentrant ``RLock`` — the SAME
+    lock ``session_registry.update_session`` takes, so re-acquiring it for the
+    persist can't self-deadlock). The winning thread CLAIMS the paste (sets
+    ``paste_flushed=True`` + clears ``pending_paste`` + persists) BEFORE releasing
+    the lock and BEFORE writing the bytes to the PTY; a losing/late thread sees
+    ``paste_flushed`` already True and no-ops. (Rare tradeoff: if the PTY write
+    fails AFTER the claim, the paste is lost rather than re-emitted — once-only
+    dominates; we log a best-effort warning.)
+
+    Never raises — a missing/dead PTY or a persist failure simply leaves the paste
+    pending (it can be retried on the next read) without disturbing the caller.
+    Returns ``True`` iff the paste was claimed+written on THIS call, else ``False``.
+    """
+    try:
+        rec = _reg.get_session(session_id)
+    except Exception:
+        return False
+    if rec is None:
+        return False
+    if not (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
+        return False
+
+    # Has the greet been observed? Read the live PTY output buffer (cursor 0).
+    try:
+        out = _pty.read_since(session_id, 0)
+    except _pty.UnknownSession:
+        return False  # no live PTY (e.g. after a restart) — leave it pending
+    except Exception:
+        return False
+    text = (out.get("text") or "") if isinstance(out, dict) else ""
+
+    # Distinguish the ECHOED seed from a REAL model greet by counting marker
+    # occurrences beyond what the seed text itself contributes (see docstring).
+    marker = GREET_MARKER.lower()
+    seed_text = rec.get("seed_text") or ""
+    base = seed_text.lower().count(marker)
+    if text.lower().count(marker) <= base:
+        return False  # still waiting on the model's actual greet — stay pending
+
+    # Compare-and-set the claim under WRITE_LOCK (reentrant; same lock
+    # update_session takes). Re-load + re-check inside the lock so exactly ONE
+    # concurrent thread wins; claim (persist paste_flushed=True + clear pending)
+    # BEFORE releasing the lock and BEFORE the PTY write, so only the winner
+    # proceeds to write.
+    with _paths.WRITE_LOCK:
+        try:
+            rec = _reg.get_session(session_id)
+        except Exception:
+            return False
+        if rec is None:
+            return False
+        pending = rec.get("pending_paste") or ""
+        if not pending or rec.get("paste_flushed"):
+            return False  # a concurrent thread already claimed it
+        try:
+            _reg.update_session(
+                session_id, paste_flushed=True, pending_paste="")
+        except Exception:
+            return False  # couldn't claim → leave it for a later read
+
+    # Strip a trailing newline so a prompt that itself ends in "\n"/"\r\n" (e.g. a
+    # Wave-2 NEXT-PROMPT.md body) can NEVER auto-submit — the paste must land in
+    # the input line UNSENT.
+    pending = pending.rstrip("\r\n")
+
+    # Deliver the prompt to the PTY input WITHOUT a trailing newline (UNSENT).
+    # We have already claimed the paste, so a write failure here loses this paste
+    # (accepted tradeoff: once-only dominates double-paste). Log best-effort.
+    try:
+        _pty.write(session_id, pending)
+    except Exception as exc:
+        try:
+            import sys as _sys
+            print("warning: pending-paste claimed but PTY write failed for "
+                  "%s: %s" % (session_id, exc), file=_sys.stderr)
+        except Exception:
+            pass
+        return False
+    return True
 
 
 def switch_engine(session_id, engine):
@@ -544,6 +702,11 @@ def attach(session_id):
     For an unknown session returns ``{"ok": False, "reason": "unknown-session"}``
     (never raises).
     """
+    # v10 Wave 1: if a task prompt is pending for this session and the greet has
+    # been observed, paste it (unsent) before replaying the buffer so the
+    # reattaching client sees the prompt sitting in the input line. Idempotent +
+    # cheap; a no-op when nothing is pending or the greet hasn't appeared yet.
+    _flush_pending_paste(session_id)
     record = _reg.get_session(session_id)
     try:
         out = _pty.read_since(session_id, 0)
@@ -605,6 +768,11 @@ def read_since(session_id, cursor=0):
     Returns the manager's ``{"text", "next", "status"}`` on success, or
     ``{"ok": False, "reason": "unknown-session"}`` for an unknown id.
     """
+    # v10 Wave 1: the first read that observes the greet flushes a pending task
+    # prompt to the PTY input (unsent). Idempotent + cheap; a no-op when nothing
+    # is pending. Done BEFORE the read so the freshly-pasted bytes (which the
+    # stub echoes) surface in THIS read's output.
+    _flush_pending_paste(session_id)
     try:
         return _pty.read_since(session_id, cursor)
     except _pty.UnknownSession:

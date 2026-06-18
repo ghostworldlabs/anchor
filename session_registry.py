@@ -179,6 +179,15 @@ def _normalize(record: dict) -> dict:
         # v6 Wave 2: durable lineage (see above).
         "parent_session_id": parent_session_id,
         "chain_id": chain_id,
+        # v10 Wave 1: paste-NOT-submit handoff. ``pending_paste`` is the task
+        # prompt that is held UNSENT in the PTY input (no trailing newline)
+        # until the user presses Enter; it is delivered exactly ONCE, after the
+        # greet, by :func:`terminal_session._flush_pending_paste`, which then
+        # sets ``paste_flushed=True`` and clears ``pending_paste``. Both fields
+        # back-compat to ""/False on every pre-v10 record. SAFE to include in
+        # board projections (no worktree_path/branch leak).
+        "pending_paste": record.get("pending_paste", "") or "",
+        "paste_flushed": bool(record.get("paste_flushed", False)),
     }
 
 
@@ -323,7 +332,9 @@ def update_session(session_id: str, **fields) -> dict:
     """
     allowed = {"project_id", "lane", "backend", "worktree_path", "branch",
                "status", "label", "seeded", "seed_text",
-               "parent_session_id", "chain_id"}
+               "parent_session_id", "chain_id",
+               # v10 Wave 1: paste-NOT-submit handoff bookkeeping.
+               "pending_paste", "paste_flushed"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
