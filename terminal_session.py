@@ -1103,10 +1103,13 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
       1. discovers the plan set (or uses the pre-captured ``plan_set`` passed by a
          caller that captured it BEFORE the planning worktree was reaped);
       2. starts a NEW linked build session (``start_session(lane='build',
-         parent_session_id=planning_session_id, seed_context=<plan seed>)``) — it
-         inherits the planning session's ``chain_id``;
-      3. primes the build worktree via :func:`handoff.prime_worktree`
-         (HANDOFF.md → the plan docs, which already exist in the checkout);
+         parent_session_id=planning_session_id, paste_prompt=<plan prompt>)``) — it
+         inherits the planning session's ``chain_id``; the build prompt is delivered
+         as a v10 PENDING PASTE (held unsent until the user looks), never
+         auto-submitted, on this unattended path too;
+      3. primes the build worktree with BOTH artifacts via
+         :func:`handoff.prime_worktree` (HANDOFF.md → the plan docs) AND
+         :func:`handoff.write_next_prompt` (NEXT-PROMPT.md → the reviewable prompt);
       4. records the generic stage edge ``plan->build`` via
          :func:`handoff.record_stage_link`.
 
@@ -1154,11 +1157,24 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         if not plan_set:
             return None  # no plan ⇒ no advance
 
-        # Start the linked, seeded build session.
+        # v10 Wave 2: the task prompt is delivered as a PENDING PASTE (held in the
+        # build PTY input UNSENT until the user presses Enter) — NOT folded into the
+        # auto-submitted seed. The phase-1 load+greet seed still fires (Foreman
+        # auto-loads + greets); the build prompt sits pending. This holds for the
+        # UNATTENDED reconcile-dead path too: the build greets and waits — nothing
+        # auto-submits — until the first attach flushes the paste unsent.
+        # FIX 3: clean the redundant "Load the Foreman skill." opener (phase-1 has
+        # already loaded+greeted Foreman) — same paste-prompt cleaner the attended
+        # advance_session path applies. The skill NAME + real plan-doc paths +
+        # "read these …" stay in the body.
+        next_prompt = _handoff.clean_paste_opener(_build_seed_for_plan(plan_set))
+
+        # Start the linked build session: skill auto-loads/greets (phase-1), the
+        # build prompt is recorded as pending_paste (delivered unsent after greet).
         try:
             build_rec = start_session(
                 project_id, "build",
-                seed_context=_build_seed_for_plan(plan_set),
+                paste_prompt=next_prompt,
                 parent_session_id=planning_session_id,
                 label="auto · from plan")
         except TerminalSessionError:
@@ -1167,11 +1183,17 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         build_sid = build_rec.get("session_id", "")
         build_wt = build_rec.get("worktree_path", "")
 
-        # Prime the (fresh, never-reaped) build worktree with the plan reference
-        # BEFORE anyone reaps anything — captured from the discovered plan set.
+        # Prime the (fresh, never-reaped) build worktree with BOTH artifacts BEFORE
+        # anyone reaps anything: the structural HANDOFF.md (plan doc paths) and the
+        # reviewable NEXT-PROMPT.md (the exact pending-paste prompt). Captured from
+        # the discovered plan set.
         if build_wt:
             try:
                 _handoff.prime_worktree(build_wt, plan_set, project_id=project_id)
+            except Exception:
+                pass
+            try:
+                _handoff.write_next_prompt(build_wt, next_prompt)
             except Exception:
                 pass
         # Record the generic plan→build stage edge (Wave 2; rescan-durable).

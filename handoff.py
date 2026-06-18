@@ -35,6 +35,7 @@ never forks their storage.
 """
 
 import json
+import re
 import time
 from pathlib import Path, PurePosixPath
 
@@ -519,3 +520,163 @@ def list_stage_links(folder_path, project_id):
     out = [e for e in links if isinstance(e, dict)]
     out.sort(key=lambda e: (e.get("when") is None, -(e.get("when") or 0.0)))
     return out
+
+
+# ── Both-artifact handoff: NEXT-PROMPT.md (v10 Wave 2) ───────────────────────
+#
+# v8 already writes the structural ``HANDOFF.md`` (``prime_worktree``). v10 adds a
+# second, durable, reviewable artifact: ``NEXT-PROMPT.md`` — the ready-to-run task
+# prompt the user reviews before pressing Enter. The prompt is the SAME text that
+# is delivered to the next-stage PTY as a *pending paste* (Wave 1) — never
+# auto-submitted. Its body lists the REAL persisted upstream doc paths (honest —
+# no fabricated paths when none resolve) and names the correct trio skill, reusing
+# the ``terminal_session`` doc-path/seed-body logic (imported lazily to avoid the
+# ``terminal_session → handoff`` module cycle).
+
+#: The reviewable next-stage prompt file written into the next worktree root.
+NEXT_PROMPT_FILENAME = "NEXT-PROMPT.md"
+
+#: Matches a redundant leading "Load the <Skill> skill[ now]." sentence in a seed
+#: body. Phase-1 (the auto-submitted load+greet seed) ALREADY loaded+greeted the
+#: skill, so a reviewable PASTE prompt that re-instructs "Load the … skill." reads
+#: redundantly. ``clean_paste_opener`` rewrites it to "With <Skill> loaded, …" —
+#: the skill NAME is preserved (the v8 "names the skill" guarantee holds) but the
+#: stale re-load instruction is gone. Only the PASTE-prompt builders use this; the
+#: actual phase-1 seed (``_default_seed_text``) is untouched.
+_LOAD_OPENER_RE = re.compile(
+    r"^\s*Load the (?P<skill>\S+) skill(?: now)?\.\s+(?P<rest>\S)")
+
+
+def clean_paste_opener(text):
+    """Rewrite a redundant leading "Load the <Skill> skill[ now]." opener.
+
+    The phase-1 seed already loaded+greeted the lane skill, so a reviewable paste
+    prompt should NOT re-instruct loading it. This turns
+
+        "Load the Foreman skill. You are executing on the plan …"
+        "Load the Crucible skill. Plan from the upstream research …"
+
+    into
+
+        "With Foreman loaded, you are executing on the plan …"
+        "With Crucible loaded, plan from the upstream research …"
+
+    The skill NAME is retained (once) so the v8 "the paste names the skill"
+    guarantee + the relocated assertions still hold; only the stale re-load verb
+    is removed. The real document paths + the "read these …" instruction are
+    untouched (they live in the body, after the opener). No-op when the text does
+    not begin with such an opener. Never raises.
+    """
+    if not text:
+        return text
+    m = _LOAD_OPENER_RE.match(text)
+    if not m:
+        return text
+    skill = m.group("skill")
+    first = m.group("rest")
+    # Lowercase the first letter of the remainder so "With X loaded, You are …"
+    # reads as "With X loaded, you are …" (proper nouns are rare here; the trio
+    # bodies all start with a normal verb/pronoun).
+    rest = first.lower() + text[m.end():]
+    return "With %s loaded, %s" % (skill, rest)
+
+
+def build_next_stage_prompt(folder_path, project_id, from_session_id, to_lane):
+    """Build the reviewable next-stage prompt TEXT for an advance, or a minimal one.
+
+    The returned string is the **task instruction** the user reviews and runs in
+    the next stage — NOT the phase-1 load+greet seed (that still fires separately
+    so the skill auto-loads). It references the REAL persisted upstream documents:
+
+      - ``to_lane`` in {``plan``, ``planning``}: reuse the research→plan seed body
+        (the persisted research report doc paths + "read these first, then plan" +
+        load Crucible) via ``terminal_session.build_research_to_plan_seed``.
+      - ``to_lane == 'build'``: reuse ``_build_seed_for_plan``'s body (the persisted
+        plan-set doc paths + "read these first, then execute" + load Foreman),
+        discovering the most-recent plan set for ``from_session_id``.
+
+    Honest: when no real docs resolve it returns a minimal, skill-correct prompt
+    that references no fabricated paths (HANDOFF.md in the worktree is the pointer).
+    The text never ends with a trailing newline (a paste must not auto-submit).
+    Never raises — any failure degrades to the minimal prompt.
+    """
+    import terminal_session as _ts  # lazy: avoid the ts→handoff module cycle
+    lane = (to_lane or "").strip().lower()
+    text = ""
+    try:
+        if lane in ("plan", "planning"):
+            text = _ts.build_research_to_plan_seed(project_id, from_session_id) or ""
+            if not text:
+                # Honest minimal plan prompt (no fabricated paths). Names the skill
+                # WITHOUT re-instructing the load (phase-1 already loaded it).
+                skill = _ts.LANE_SKILL.get("plan", "Crucible")
+                text = (
+                    "With %s loaded, plan from the upstream research session's "
+                    "findings (the research report is in this worktree checkout; "
+                    "see HANDOFF.md)." % skill)
+        elif lane == "build":
+            plan_set = None
+            try:
+                plan_set = discover_recent_plan_set(
+                    folder_path, project_id, source_session_id=from_session_id)
+            except Exception:
+                plan_set = None
+            if plan_set:
+                text = _ts._build_seed_for_plan(plan_set)
+            else:
+                skill = _ts.LANE_SKILL.get("build", "Foreman")
+                text = (
+                    "With %s loaded, execute on the plan documents referenced "
+                    "in HANDOFF.md in this worktree." % skill)
+        else:
+            # Unknown target lane → a generic honest prompt (no fabrication).
+            text = ("Continue this work in the next stage; see HANDOFF.md in this "
+                    "worktree for context.")
+    except Exception:
+        text = ("Continue this work in the next stage; see HANDOFF.md in this "
+                "worktree for context.")
+    # FIX 3: the paste prompt is the reviewable handoff text. Phase-1 already
+    # loaded+greeted the skill, so strip a redundant leading "Load the <Skill>
+    # skill." opener (the skill name is retained once via clean_paste_opener) so
+    # the pasted prompt reads cleanly. The body (real doc paths + "read these …")
+    # is untouched.
+    text = clean_paste_opener(text or "")
+    # A reviewable prompt must never carry a trailing newline meaning-to-submit.
+    return (text or "").rstrip("\r\n")
+
+
+def write_next_prompt(worktree_path, text):
+    """Write ``NEXT-PROMPT.md`` into the worktree root (alongside HANDOFF.md).
+
+    Best-effort, traversal-safe (fixed filename, containment-verified). Returns
+    ``{ok, path}`` (``ok=False`` + ``reason`` on a missing worktree / write
+    failure). Never raises.
+    """
+    try:
+        wt = Path(worktree_path)
+        if not wt.is_dir():
+            return {"ok": False, "reason": "worktree-missing", "path": ""}
+    except OSError:
+        return {"ok": False, "reason": "worktree-error", "path": ""}
+
+    target = wt / NEXT_PROMPT_FILENAME
+    if not _within(wt, target):  # defensive — fixed filename, can't escape
+        return {"ok": False, "reason": "unsafe-path", "path": ""}
+
+    body = (text or "").rstrip("\r\n")
+    doc = (
+        "# Next-stage prompt — review, then run\n"
+        "\n"
+        "> Auto-generated by Anchor when this stage was launched. This is the "
+        "ready-to-run prompt the model was handed as a **pending paste** — it is "
+        "sitting in the terminal input line UNSENT. Review/edit it, then press "
+        "**Enter** to run. Nothing has been submitted on your behalf.\n"
+        "\n"
+        "```\n"
+        "%s\n"
+        "```\n" % body)
+    try:
+        target.write_text(doc, encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "reason": f"write-failed: {exc}", "path": ""}
+    return {"ok": True, "path": str(target)}

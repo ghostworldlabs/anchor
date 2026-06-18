@@ -3177,6 +3177,11 @@ def render_project_window_html(project_id: str) -> str:
         ".autobuild-note{margin:6px 0;padding:6px 10px;border-radius:6px;"
         "background:#0f291b;border:1px solid #22c55e;color:#86efac;"
         "font-size:12px;font-weight:600}"
+        # v10 Wave 2: a subtle hint shown when a handoff opens the next stage with
+        # the prompt PASTED-but-UNSENT in the input — "review & press Enter to run".
+        ".pendpaste-hint{margin:6px 0;padding:6px 10px;border-radius:6px;"
+        "background:#1a1530;border:1px solid #7c6cf0;color:#cbc4ff;"
+        "font-size:12px;font-weight:600}"
         ".panel{border-top:1px solid var(--border);background:var(--surface);"
         "position:relative}"
         ".panel.minimized .pin{display:none}"
@@ -5296,6 +5301,10 @@ async function advanceSession(sourceId, toLane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v10 Wave 2: the next-stage prompt is delivered PASTED-but-UNSENT (pending
+  // paste, flushed by the terminal transport after the skill greets). Hint the
+  // user that it is sitting in the input line for review — nothing was submitted.
+  _flashPendingPasteHint(sid);
   // v7 Wave 6: instant-in-column tile for the advanced (build) session.
   refreshBoard();
   setTimeout(repopulate, 600);
@@ -5822,6 +5831,8 @@ function _addAutoBuildTile(rec) {
   renderSessionBar();
   openPanel(sid);
   _flashAutoBuildNote(rec);
+  // v10 Wave 2: the build prompt is a PENDING PASTE (unsent) — hint the user.
+  _flashPendingPasteHint(sid);
 }
 
 // _flashAutoBuildNote(rec): a small, transient banner above the panel stack.
@@ -5839,6 +5850,25 @@ function _flashAutoBuildNote(rec) {
       if (note && note.parentNode) note.parentNode.removeChild(note);
     }, 6000);
   } catch (e) { /* the tile already landed; the note is advisory */ }
+}
+
+// _flashPendingPasteHint(sessionId): v10 Wave 2 — a subtle, transient hint above
+// the panel stack telling the user the next-stage prompt is PASTED but UNSENT in
+// the terminal input ("review & press Enter to run"). Nothing auto-submits; the
+// prompt is the v10 pending paste, flushed UNSENT by the terminal transport read.
+function _flashPendingPasteHint(sessionId) {
+  try {
+    var host = document.getElementById('panelStack') || document.body;
+    var note = document.createElement('div');
+    note.className = 'pendpaste-hint';
+    note.setAttribute('data-session', sessionId || '');
+    note.textContent = 'prompt ready — review & press Enter to run (nothing was submitted)';
+    if (host.firstChild) host.insertBefore(note, host.firstChild);
+    else host.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 8000);
+  } catch (e) { /* advisory only */ }
 }
 
 // Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
@@ -11254,36 +11284,56 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                 break
                     except Exception:
                         pass
+                    # v10 Wave 2: split delivery. The reviewable TASK PROMPT (the
+                    # NEXT-PROMPT.md body — the real persisted upstream doc paths +
+                    # "read these first, then plan" + load Crucible) is delivered as
+                    # a PENDING PASTE (held in the new PTY input UNSENT until the
+                    # user presses Enter), NOT folded into the auto-submitted seed.
+                    # The grounded summary context still seeds phase-1 (load+greet)
+                    # so the model has the prior context when it greets. Best-effort:
+                    # an empty prompt → falls back to today's seed-context path.
                     seed_context = _build_continue_seed(
                         folder, pid, src_lane, source)
-                    # v8 Wave 4: for a research→plan advance, prepend the GENERATED
-                    # handoff seed naming the correct skill (Crucible) + the REAL
-                    # persisted research-doc paths ("read these first"), then the
-                    # summary context. Best-effort — degrades to the summary seed.
-                    if (src_lane == "research"
-                            and to_lane in ("plan", "planning")):
-                        try:
-                            doc_seed = _termsess.build_research_to_plan_seed(
-                                pid, source)
-                        except Exception:
-                            doc_seed = None
-                        if doc_seed:
-                            seed_context = (
-                                doc_seed + ("\n\n" + seed_context
-                                            if seed_context else ""))
+                    try:
+                        next_prompt = _handoff.build_next_stage_prompt(
+                            folder, pid, source, to_lane)
+                    except Exception:
+                        next_prompt = ""
+                    paste = (next_prompt or "").strip() or None
                     try:
                         if backend:
                             rec = _termsess.start_session(
                                 pid, to_lane, backend=backend,
                                 seed_context=seed_context,
+                                paste_prompt=paste,
                                 parent_session_id=source)
                         else:
                             rec = _termsess.start_session(
                                 pid, to_lane, seed_context=seed_context,
+                                paste_prompt=paste,
                                 parent_session_id=source)
                     except _termsess.TerminalSessionError as exc:
                         self._send_json({"ok": False, "error": str(exc)}, 400)
                     else:
+                        # Write BOTH durable artifacts into the new planning
+                        # worktree: NEXT-PROMPT.md (the reviewable prompt) always,
+                        # and HANDOFF.md when a plan-set context applies (here the
+                        # upstream is research, so prime_worktree is a no-op unless
+                        # a plan set is discoverable — best-effort either way). Then
+                        # record the research->plan stage edge.
+                        new_wt = rec.get("worktree_path", "")
+                        new_sid = rec.get("session_id", "")
+                        if new_wt and paste:
+                            try:
+                                _handoff.write_next_prompt(new_wt, paste)
+                            except Exception:
+                                pass
+                        try:
+                            _handoff.record_stage_link(
+                                folder, pid, source, new_sid,
+                                kind="research->plan")
+                        except Exception:
+                            pass
                         self._send_json({"ok": True, "session": rec,
                                          "advanced_from": source,
                                          "to_lane": to_lane})
@@ -11321,9 +11371,25 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                   "session",
                          "reason": "not-planning"}, 400)
                 else:
-                    # 1) Capture the plan set BEFORE marking done (no reap here, so
-                    #    the worktree survives — but capture-first mirrors the
-                    #    kill path and is robust either way).
+                    # 0) FIX 2 — North-Star hole: PERSIST the planning session's
+                    #    produced docs into the MAIN project (copy + commit to main
+                    #    HEAD) BEFORE we capture the plan set or open the build. The
+                    #    finish→build path marks the session DONE via update_session
+                    #    WITHOUT kill(), so persist_session_docs is NOT otherwise
+                    #    run — the plan docs authored in the planning worktree would
+                    #    never reach main, and the build worktree (created off main
+                    #    HEAD by auto_advance) would lack NEXT-PROMPT.md/HANDOFF.md's
+                    #    referenced paths. capture_session_docs COPIES + COMMITS the
+                    #    docs WITHOUT reaping the worktree, so the planning session
+                    #    stays a reopenable finished tile (v6 non-destructive finish
+                    #    semantics preserved). Best-effort — never blocks the finish.
+                    try:
+                        _termsess.capture_session_docs(session, project_id=pid)
+                    except Exception:
+                        pass
+                    # 1) Capture the plan set AFTER persisting (so the just-authored
+                    #    plan docs are now on main HEAD and discoverable). No reap
+                    #    here, so the worktree survives either way.
                     plan_set = _termsess.capture_plan_set(pid, session)
                     if not plan_set:
                         # Honest: no plan set yet ⇒ no build (worktree untouched;
