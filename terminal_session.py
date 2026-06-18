@@ -44,6 +44,12 @@ import effort_history as _eh  # v8 Wave 2 keystone: persist_session_docs (no
 #                              nor session_registry — only paths + rnd_registry)
 import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
 #                            neither terminal_session nor session_registry)
+try:
+    import boneyard as _boneyard  # v10 Wave 6 Boneyard capture (stdlib-only; no
+    #                              cycle: boneyard imports only paths +
+    #                              rnd_registry, lazily summarizer/effort_history)
+except Exception:  # pragma: no cover - boneyard is always importable, defensive
+    _boneyard = None
 
 try:
     import lanes as _lanes
@@ -875,7 +881,7 @@ def read_since(session_id, cursor=0):
         return {"ok": False, "reason": "unknown-session"}
 
 
-def kill(session_id, project_id=None):
+def kill(session_id, project_id=None, _record_boneyard=True):
     """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
     Tolerant: an unknown/already-dead PTY still proceeds to re-status the registry
@@ -889,6 +895,14 @@ def kill(session_id, project_id=None):
     so they survive the kill, are discoverable from the main folder, and ride
     into later worktrees (which are checked out off main HEAD). This is
     best-effort — a persistence failure never blocks the kill.
+
+    ``_record_boneyard`` (PRIVATE, default ``True``): when ``False`` the v10 W6
+    ``killed`` Boneyard capture is SUPPRESSED. :func:`delete_session` passes
+    ``False`` when it kills a still-live session as part of a delete — the
+    ``deleted`` entry is the canonical record for a delete, so a kill-driven
+    ``killed`` entry would be a spurious DUPLICATE. Doc PERSISTENCE
+    (``capture_session_docs``) still runs regardless — only the Boneyard record is
+    suppressed, so the subsequent ``deleted`` entry's ``doc_rels`` are populated.
 
     Returns ``{"ok": True, "session_id", "pty_killed", "docs": {...},
     "worktree": {...}}``.
@@ -918,6 +932,16 @@ def kill(session_id, project_id=None):
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)
 
+    # v10 Wave 6 — Boneyard capture (D3 source "killed"). A hard-kill is the
+    # deliberate "I'm done / discarding" action; if this session PRODUCED material
+    # (persisted docs), index it in the project's Boneyard. This is purely ADDITIVE
+    # — the session's normal finished tile/record is unaffected — and BEST-EFFORT:
+    # a Boneyard failure must NEVER break the kill path. SUPPRESSED when this kill
+    # is part of a delete_session (the canonical "deleted" entry is recorded there;
+    # a "killed" entry too would be a spurious duplicate for ONE delete).
+    if _record_boneyard:
+        _capture_killed_to_boneyard(session_id, project_id, record, docs_out)
+
     return {
         "ok": True,
         "session_id": session_id,
@@ -925,6 +949,40 @@ def kill(session_id, project_id=None):
         "docs": docs_out,
         "worktree": wt_out,
     }
+
+
+def _capture_killed_to_boneyard(session_id, project_id, record, docs_out):
+    """Index a killed session in the Boneyard iff it produced material (W6).
+
+    BEST-EFFORT — swallows every error so a Boneyard failure can never break the
+    kill path. References the docs the v8 keystone just persisted (no copy).
+    """
+    if _boneyard is None:
+        return
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if rec is None:
+            return
+        if project_id is None:
+            project_id = rec.get("project_id") or None
+        if not project_id:
+            return
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path", "") if proj else ""
+        if not folder:
+            return
+        lane = rec.get("lane", "") or ""
+        # Prefer the docs THIS kill just persisted; fall back to the v8 join.
+        doc_rels = list((docs_out or {}).get("persisted", []) or [])
+        entry = _boneyard.build_session_entry(
+            folder, project_id, lane, session_id,
+            source=_boneyard.SOURCE_KILLED, record=rec,
+            doc_rels=(doc_rels or None))
+        # Only record a killed entry when the session actually produced material.
+        if entry.get("doc_rels"):
+            _boneyard.record_entry(folder, project_id, entry)
+    except Exception:
+        return
 
 
 def capture_session_docs(session_id, project_id=None, record=None):
@@ -1003,12 +1061,16 @@ def delete_session(session_id, project_id=None):
     killed = False
     # If the session is still live (a running PTY / RUNNING status), kill it first
     # so the PTY + worktree are reaped and its docs are persisted before we drop
-    # the record. Tolerate any failure — delete must still proceed.
+    # the record. Tolerate any failure — delete must still proceed. We SUPPRESS the
+    # kill's "killed" Boneyard capture (``_record_boneyard=False``): a delete of a
+    # live session must yield exactly ONE Boneyard entry — the canonical "deleted"
+    # entry recorded below — not a "killed" + "deleted" pair. Doc PERSISTENCE still
+    # runs in kill, so the "deleted" entry's doc_rels are populated.
     try:
         if rec is not None and (
                 session_id in set(_pty.live_sessions())
                 or rec.get("status") == _reg.STATUS_RUNNING):
-            kill(session_id, project_id=project_id)
+            kill(session_id, project_id=project_id, _record_boneyard=False)
             killed = True
     except Exception:
         killed = False
@@ -1028,6 +1090,15 @@ def delete_session(session_id, project_id=None):
             proj = _rnd.get_project(project_id)
             folder = (proj or {}).get("folder_path", "") if proj else ""
             if folder:
+                # v10 Wave 6 (D10) — CAPTURE the Boneyard entry BEFORE
+                # delete_session_efforts drops the pointer-records: the entry is
+                # built from efforts_for_session_id (the docs the session
+                # produced) + the cached summary, which only exist WHILE the
+                # pointer-records are still present. After this call the efforts
+                # are gone — the Boneyard is the deleted session's ONLY remaining
+                # home (the docs stay on disk, Option A). BEST-EFFORT.
+                _capture_deleted_to_boneyard(folder, project_id, lane,
+                                             session_id, rec)
                 efforts_out = _eh.delete_session_efforts(
                     folder, project_id, lane, session_id)
     except Exception:
@@ -1040,6 +1111,28 @@ def delete_session(session_id, project_id=None):
         "killed": killed,
         "efforts": efforts_out,
     }
+
+
+def _capture_deleted_to_boneyard(folder, project_id, lane, session_id, record):
+    """Index a v9-DELETED session in the Boneyard (D3 source "deleted") — W6.
+
+    MUST be called BEFORE ``effort_history.delete_session_efforts`` drops the
+    pointer-records (D10): the entry's ``doc_rels`` are resolved from
+    ``efforts_for_session_id`` (which only returns docs WHILE the pointer-records
+    exist). Unlike a kill, the deleted session's tile + efforts are about to be
+    gone, so the Boneyard is its ONLY remaining home — we record it even if the
+    docs list is empty (the entry still preserves the session's identity/summary).
+    BEST-EFFORT — swallows every error so it can never break the delete path.
+    """
+    if _boneyard is None:
+        return
+    try:
+        entry = _boneyard.build_session_entry(
+            folder, project_id, lane, session_id,
+            source=_boneyard.SOURCE_DELETED, record=record)
+        _boneyard.record_entry(folder, project_id, entry)
+    except Exception:
+        return
 
 
 def cleanup_ghost_sessions(project_id):

@@ -193,9 +193,42 @@ def test_advance_shows_prompt_pasted_unsent_in_browser(server):
         # The pending-paste hint banner appeared.
         pg.wait_for_selector(".pendpaste-hint", timeout=6000)
 
+        # DETERMINISM (flake fix): the pending-paste flush only fires on the panel
+        # transport's NEXT read_since/attach AFTER the greet is in the buffer. So we
+        # must inject the greet ONLY ONCE the new panel's transport (WS/SSE) is
+        # actually ATTACHED and pumping reads — otherwise the greet can land before
+        # any read loop exists and the flush is left to chance/timeout. The stub PTY
+        # ECHOES the one-time skill-load seed ("Load the Crucible skill now…"), so the
+        # seed appearing in THIS panel's xterm host proves the transport has attached
+        # and completed at least one read cycle. Wait for that BEFORE the greet.
+        pg.wait_for_function(
+            "document.querySelector('#panelStack .panel[data-session=\"%s\"] "
+            ".term-host') && document.querySelector('#panelStack .panel"
+            "[data-session=\"%s\"] .term-host').textContent.indexOf("
+            "'Load the Crucible') >= 0"
+            % (new_sid, new_sid),
+            timeout=10000)
+
         # Inject the MODEL greet onto the new planning PTY so the transport's next
         # read flushes the pending paste UNSENT (production: the real greet does it).
         pty_manager.write(new_sid, GREET_LINE)
+
+        # DETERMINISM (flake fix): wait for the flush to complete at the SOURCE OF
+        # TRUTH first. _flush_pending_paste CLAIMS the paste (sets paste_flushed=True
+        # + clears pending_paste under WRITE_LOCK) BEFORE writing the bytes to the
+        # PTY, and it only fires on a transport read cycle that observes the greet —
+        # which is several poll ticks out. Poll the registry until the claim lands
+        # (generous timeout, fast cadence) so the subsequent DOM/xterm assertions run
+        # AGAINST a guaranteed-flushed session, never a pre-flush snapshot. This
+        # orders greet → flush-confirmed → render-confirmed.
+        flushed = False
+        for _ in range(160):  # ~8s at 50ms
+            r = reg.get_session(new_sid)
+            if r and r.get("paste_flushed") is True:
+                flushed = True
+                break
+            time.sleep(0.05)
+        assert flushed, "pending paste was not flushed (paste_flushed never True)"
 
         # POSITIVE — DISCRIMINATING token. We assert a token that appears ONLY in
         # the PASTE body and NOT in the phase-1 load+greet seed the stub PTY echoes:

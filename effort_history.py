@@ -1018,6 +1018,18 @@ def delete_grass_idea(folder_path, project_id: str, idea_id: str) -> dict:
     idea = get_grass_idea(folder_path, project_id, want)
     jid = (idea.get("job_id", want) if idea else want)
 
+    # v10 Wave 6 (D3 source "grass-deleted") — CAPTURE the idea text + any dev/
+    # refinement doc rels into the project's Boneyard BEFORE we purge the idea
+    # (after which the pointer/index/refinements are gone forever). BEST-EFFORT —
+    # a Boneyard failure must NEVER block the idea removal.
+    if idea is not None:
+        try:
+            import boneyard as _boneyard
+            entry = _boneyard.build_grass_entry(folder_path, project_id, idea)
+            _boneyard.record_entry(folder_path, project_id, entry)
+        except Exception:
+            pass
+
     # 1) Best-effort clean the CONTAINED develop sessions (kill/forget, never raise).
     if idea is not None:
         for _lane, sid in _grass_dev_sessions(idea).items():

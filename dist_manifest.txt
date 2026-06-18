@@ -59,6 +59,13 @@ project_remote.py
 # shutil / pathlib / re + the existing worktrees seam — no third-party imports.
 project_move.py
 
+# ── R&D control surface v10 "Live Handoff & Boneyard" modules ──────────────
+# Stdlib-only: boneyard (the per-project searchable index over discarded
+# session/idea material) uses only hashlib / json / os / time / pathlib + the
+# existing rnd_registry seam — no third-party imports. It is an INDEX over the
+# already-persisted docs (v8 keystone), not a second copy.
+boneyard.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 
