@@ -3569,6 +3569,10 @@ def render_project_window_html(project_id: str) -> str:
         f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
+        # v10 Wave 5 (DEFECT-2 fix): the [grass-dev] label marker, injected from
+        # the single Python constant so the JS top-strip filter can't drift from
+        # ``effort_history.is_grass_dev_label``.
+        f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
@@ -4054,6 +4058,14 @@ function selectGrassIdea(ideaId) {
     + '<button class="mini garchive" data-archive-lane="research" disabled '
     + 'title="Archive THIS research session\'s produced docs + summary into a '
     + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
+    // v10 Wave 5 — Advance to Plan: push THIS research dev session → a linked
+    // grass PLAN dev session using the SAME paste-NOT-submit seeded handoff as
+    // the project-level advance. Only the research lane carries this control.
+    // Disabled until this research Develop session is live.
+    + '<button class="mini gadvance" data-advance="research" disabled '
+    + 'title="Advance this research to a linked Plan session in the workbench — '
+    + 'the Crucible prompt is pasted UNSENT for you to review and press Enter">'
+    + '➜ Advance to Plan</button>'
     + '<button class="mini gsave" data-save-lane="research" disabled '
     + 'title="Save THIS research session\'s output as a new '
     + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
@@ -4129,6 +4141,20 @@ function selectGrassIdea(ideaId) {
         archiveGrassSession(ideaId, lane);
       };
     })(arbtns[ai].getAttribute('data-archive-lane'));
+  }
+  // v10 Wave 5 — Advance to Plan: the research lane's own control pushes its dev
+  // session → a linked grass PLAN dev session. Lives inside the research bar →
+  // stopPropagation so it does not also collapse/expand. Disabled until the
+  // research Develop session is live (enabled in developGrass).
+  var advbtns = work.querySelectorAll('button[data-advance]');
+  for (var avi = 0; avi < advbtns.length; avi++) {
+    advbtns[avi].disabled = true;
+    advbtns[avi].onclick = (function () {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        advanceGrassToPlan(ideaId);
+      };
+    })();
   }
   // Both terminal hosts render COLLAPSED + unbound for a freshly selected idea.
   _grassDevSession = null;
@@ -4320,6 +4346,12 @@ async function developGrass(ideaId, lane) {
   // v10 Wave 4 — enable THIS lane's own Archive button too (the other stays as-is).
   var ar = box ? box.querySelector('button[data-archive-lane="' + _cssEsc(lane) + '"]') : null;
   if (ar) ar.disabled = false;
+  // v10 Wave 5 — enable the research lane's own Advance-to-Plan control once its
+  // dev session is live (only the research bar carries it).
+  if (lane === 'research') {
+    var adv = box ? box.querySelector('button[data-advance="research"]') : null;
+    if (adv) adv.disabled = false;
+  }
 }
 
 // archiveGrassSession(ideaId, lane): v10 Wave 4 (D7). Archive THIS LANE's live
@@ -4352,6 +4384,81 @@ async function archiveGrassSession(ideaId, lane) {
   await _loadGrassData();
   var rec = _grassData[ideaId] || {};
   _renderGrassArchives(work, rec.archives || []);
+}
+
+// advanceGrassToPlan(ideaId): v10 Wave 5 (Pillar 2 #2). From THIS idea's RESEARCH
+// dev session, push research → plan using the SAME paste-NOT-submit seeded handoff
+// as the project-level advance — staying INSIDE the grass workbench, linked. POST
+// /api/rnd/grass_advance → effort_history.advance_grass_research_to_plan builds the
+// Crucible prompt from the research dev session's persisted docs, starts (or
+// focuses) the CONTAINED (idea, 'plan') dev session with the prompt delivered
+// PASTED-but-UNSENT, links it to the research session (parent_session_id +
+// grass_origin), and records the stage edge. On success we ENSURE the grass PLAN
+// terminal is OPEN and mounts the returned plan dev session (reusing the Wave-3
+// toggle/mount path), so the pasted-unsent prompt becomes visible in the plan
+// terminal input for the user to review and press Enter. The research dev session
+// must be live first (the control is disabled until then). Honest: if there's no
+// research material the server returns ok:false + a reason (surfaced, not faked).
+// Token-aware. No auto-submit (the prompt is the v10 pending paste).
+async function advanceGrassToPlan(ideaId) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var rsid = _grassLaneSession[ideaId + '::research'] || null;
+  if (!rsid) { alert('[advance] open this idea’s Research session first'); return; }
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_advance', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_advance', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[advance error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    // Honest note: no research material to advance from (no fabricated prompt).
+    alert('[nothing to advance] ' + ((data && (data.reason || data.error))
+      || 'no research material yet — develop the research session first'));
+    return;
+  }
+  var rec = data.session;
+  var psid = rec.session_id;
+  // Mount the returned grass PLAN dev session into the plan lane's OWN host, then
+  // ensure the plan terminal toggles OPEN (reuse the Wave-3 mount/toggle path). We
+  // bind the (idea, 'plan') session id BEFORE toggling so toggleGrassTerminal
+  // re-focuses THIS session instead of starting a second develop session.
+  var box = _grassTermBox(work, 'plan');
+  var host = box ? box.querySelector('[data-grass-term]') : null;
+  var lab = box ? box.querySelector('.tbar .lab') : null;
+  if (lab) lab.innerHTML = '<b>Plan terminal</b> · ' + _esc(_grassEngine)
+    + ' · grass-dev · ' + _esc(psid);
+  if (host && host.getAttribute('data-session') !== psid) {
+    host.setAttribute('data-session', psid);
+    PANELS[psid] = {el: document.getElementById('grassPanel'), body: host, term: null, transport: null};
+    _mountTerminal(psid, host);
+  }
+  _grassLaneSession[ideaId + '::plan'] = psid;
+  _grassDevSession = psid;
+  // Reveal the plan terminal (it may be collapsed) + reflect the open state.
+  if (box) box.classList.remove('collapsed');
+  _setGrassToggle(work, 'plan', true);
+  // Enable the plan lane's own Save + Archive controls (its dev session is live).
+  var sv = box ? box.querySelector('button[data-save-lane="plan"]') : null;
+  if (sv) sv.disabled = false;
+  var ar = box ? box.querySelector('button[data-archive-lane="plan"]') : null;
+  if (ar) ar.disabled = false;
+  // The Crucible prompt is delivered PASTED-but-UNSENT (pending paste, flushed by
+  // the terminal transport after the skill greets). Hint the user it is sitting in
+  // the input line for review — nothing was submitted.
+  // v10 Wave 5 (DEFECT-1 fix): only flash the "prompt ready" hint when the server
+  // actually delivered/queued a fresh paste on THIS advance (data.paste_delivered).
+  // A focus of an ALREADY-handed-off plan session (re-advance, or one the user is
+  // mid-typing in) delivers nothing → we must NOT flash a misleading hint over an
+  // input we didn't write to. (On a fresh mint AND on the develop-plan-first focus
+  // that just queued the handoff, paste_delivered is true.)
+  if (data.paste_delivered) {
+    _flashPendingPasteHint(psid);
+  }
 }
 
 // saveGrassRefinement(ideaId, lane): persist THIS LANE's live Develop session's
@@ -4749,6 +4856,18 @@ function _isTerminalStatus(status) {
   return status === 'done' || status === 'failed';
 }
 
+// v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench develop session keeps
+// its research/plan lane (so its trio skill seeds) but its registry label is
+// stamped with the [grass-dev] prefix — it must NEVER appear on the top strip
+// (#sessionBar) or in MANAGED/FINISHED. It lives ONLY in the workbench pane,
+// where it is mounted by session id directly (developGrass → _mountTerminal),
+// not via repopulate(). Mirrors effort_history.is_grass_dev_label; the prefix is
+// injected from the Python constant (GRASS_DEV_LABEL_PREFIX) so they can't drift.
+function _isGrassDevLabel(label) {
+  var p = (typeof GRASS_DEV_LABEL_PREFIX !== 'undefined') ? GRASS_DEV_LABEL_PREFIX : '[grass-dev] ';
+  return typeof label === 'string' && label.indexOf(p) === 0;
+}
+
 // repopulate(): fetch the project's live managed sessions from the registry and
 // re-sync the MANAGED map (so a tile / re-open keys on a real, stable record).
 // Kept under the historical name loadSessions too (callers use it).
@@ -4772,6 +4891,11 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
+    // v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench develop session
+    // (research OR plan) is excluded from the top strip + MANAGED/FINISHED. It is
+    // mounted by session id directly in the workbench pane (developGrass), never
+    // via this path. Skip BEFORE it enters either map or renderSessionBar.
+    if (_isGrassDevLabel(s.label)) continue;
     // v6 Wave 4: a DELIBERATELY hard-killed session is GONE — never re-add it
     // (its registry record persists as 'done', which would otherwise re-enter it
     // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
@@ -10406,6 +10530,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 for r in recs:
                     if not isinstance(r, dict):
                         continue
+                    # v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench
+                    # develop session (research/plan, [grass-dev] label) must NOT
+                    # surface on the top strip. It is mounted by session id
+                    # directly in the workbench pane (developGrass), not via this
+                    # projection, so dropping it here keeps the contained promise
+                    # at the source (the JS top-strip guard is the belt-and-braces
+                    # second line). Nothing else consumes this projection for
+                    # grass-dev sessions (the chain breadcrumb uses chain_members).
+                    if _eh.is_grass_dev_label(r.get("label")):
+                        continue
                     safe.append({
                         "session_id": r.get("session_id"),
                         "project_id": r.get("project_id", ""),
@@ -11653,6 +11787,38 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json(res, 200)
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_advance":
+            # v10 Wave 5 (Pillar 2 #2): ADVANCE a grass idea's RESEARCH dev session
+            # → a linked grass PLAN dev session, staying INSIDE the workbench, using
+            # the SAME paste-NOT-submit seeded handoff as the project-level advance
+            # (Wave 1/2). effort_history.advance_grass_research_to_plan builds the
+            # research→plan prompt from the research dev session's persisted docs,
+            # starts (or focuses) the CONTAINED (idea, 'plan') dev session with
+            # paste_prompt (held UNSENT) + parent_session_id (links the chain) +
+            # grass_origin, and records the stage edge. Token-gated by the do_POST
+            # middleware above. HONEST: ok:false + reason when there is no research
+            # session / no research material (no plan session minted, no fabricated
+            # prompt). The idea STAYS in grass.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.advance_grass_research_to_plan(
+                        pid, idea_id, backend=backend)
+                    # ok:false is an honest "nothing to advance" (200, not an
+                    # error) — session is None + a reason; never fabricated.
+                    self._send_json(res, 200)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
 
         elif self.path == "/api/rnd/grass_delete":
             # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side

@@ -642,6 +642,50 @@ def _flush_pending_paste(session_id):
     return True
 
 
+def queue_paste(session_id, text):
+    """Queue a PENDING task prompt onto an ALREADY-LIVE session (v10 W5).
+
+    The v10 "paste-NOT-submit" handoff normally records ``pending_paste`` at
+    :func:`start_session`. But when a *bare* develop session already exists (e.g.
+    the user clicked "Plan"/Develop on a grass idea FIRST, minting a plan dev
+    session with NO handoff), a later research→plan *advance* must still deliver
+    the generated handoff prompt onto that existing session — WITHOUT re-starting
+    it. This sets ``pending_paste=<text>`` + ``paste_flushed=False`` on the record
+    (reusing the Wave-1 plumbing) so the SAME :func:`_flush_pending_paste` path
+    delivers it UNSENT on the next read/attach. The session has already greeted, so
+    the greet-marker-count guard is already satisfied → it flushes immediately,
+    unsent.
+
+    SAFETY (no double-paste): the CALLER must only invoke this on a session that
+    has NEITHER a pending paste NOR an already-flushed one (``not pending_paste and
+    not paste_flushed``) — a session that already carries a handoff (pending,
+    pre-flush) or already received one (flushed) must NOT get a second. This helper
+    re-checks that guard under the registry semantics and refuses otherwise.
+
+    Returns ``True`` iff the paste was queued on THIS call, else ``False`` (unknown
+    session, empty text, or the guard refused). Never raises.
+    """
+    text = (text or "")
+    if not text.strip():
+        return False
+    try:
+        rec = _reg.get_session(session_id)
+    except Exception:
+        return False
+    if rec is None:
+        return False
+    # Guard against double-paste / re-advance: refuse if a handoff is already
+    # pending (pre-flush) or already delivered (flushed).
+    if (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
+        return False
+    try:
+        _reg.update_session(
+            session_id, pending_paste=text, paste_flushed=False)
+    except Exception:
+        return False
+    return True
+
+
 def switch_engine(session_id, engine):
     """Toggle a live session to the other engine, keeping its identity.
 

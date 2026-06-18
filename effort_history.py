@@ -732,6 +732,163 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     return record
 
 
+def advance_grass_research_to_plan(project_id: str, idea_id: str,
+                                   folder_path=None, backend=None) -> dict:
+    """Push a grass idea's RESEARCH dev session → a linked grass PLAN dev session.
+
+    v10 Wave 5 (Pillar 2 #2). The grass-workbench analog of the project-level
+    research→plan advance (``/api/rnd/advance_session``): it reuses the SAME
+    paste-NOT-submit seeded handoff (Wave 1/2) but stays INSIDE the grass
+    workbench, linked. Steps:
+
+      1. Resolve the idea's RESEARCH dev session from the idea record's
+         ``dev_sessions`` map (the contained ``(idea, 'research')`` session
+         started by :func:`develop_grass_idea`). HONEST: with no research dev
+         session → ``{"ok": False, "reason": "no-research-session"}`` (nothing
+         minted).
+      2. PERSIST that research session's produced docs into the main project (the
+         v8 keystone, best-effort) so :func:`handoff.build_next_stage_prompt`
+         resolves the REAL research doc paths.
+      3. Build the reviewable next-stage prompt via
+         ``handoff.build_next_stage_prompt(folder, pid, research_dev_sid,
+         to_lane='planning')`` — the research→plan body (real research doc paths +
+         "read these first, then plan" + Crucible). HONEST: when the research dev
+         session produced NO material, the prompt would be the minimal skill-only
+         fallback (no real doc paths). To keep this advance honest (D: "no
+         fabricated prompt"), we REQUIRE that the prompt actually reference a
+         persisted research doc; otherwise → ``{"ok": False,
+         "reason": "no-research-material"}`` and NO plan session is minted.
+      4. Start (or FOCUS — dedupe like :func:`develop_grass_idea`) the idea's
+         CONTAINED ``(idea, 'plan')`` dev session (GRASS_DEV_LABEL_PREFIX label →
+         excluded from the board + top strip; keyed in ``dev_sessions``) with
+         ``paste_prompt=<prompt>`` (held UNSENT until the user presses Enter),
+         ``parent_session_id=<research_dev_sid>`` (so the chain links
+         research-dev → plan-dev and shares the chain id), and
+         ``grass_origin=idea_id`` (so the lineage traces back to the idea).
+      5. Record the ``research->plan`` stage edge
+         (:func:`handoff.record_stage_link`, rescan-durable).
+
+    The idea STAYS in grass (copy, never destroy). Returns
+    ``{"ok": bool, "session": <plan record>|None, "reason": str,
+    "research_session_id": str}``. Raises ``ValueError`` for an unknown project or
+    idea.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+
+    # 1) Resolve the contained RESEARCH dev session. Honest if absent.
+    dev_map = _grass_dev_sessions(idea)
+    rsid = dev_map.get("research") or ""
+    if not rsid:
+        return {"ok": False, "session": None, "research_session_id": "",
+                "reason": "no-research-session"}
+
+    # 2) Persist the research dev session's produced docs (best-effort keystone)
+    #    so the prompt builder resolves the REAL research doc paths. Resolve the
+    #    session's worktree from the registry when live.
+    try:
+        import session_registry as _sr
+        rrec = _sr.get_session(rsid)
+    except Exception:
+        rrec = None
+    if rrec is not None and rrec.get("worktree_path"):
+        try:
+            persist_session_docs(folder_path, project_id, "research", rsid,
+                                 rrec.get("worktree_path"))
+        except Exception:
+            pass
+
+    # 3) Build the reviewable next-stage (research→plan) prompt. Require it to name
+    #    a REAL persisted research doc — otherwise this is a fabricated/empty
+    #    handoff and we refuse (no plan session minted).
+    import handoff as _handoff
+    try:
+        prompt = _handoff.build_next_stage_prompt(
+            folder_path, project_id, rsid, "planning") or ""
+    except Exception:
+        prompt = ""
+    research_docs = efforts_for_session_id(folder_path, project_id,
+                                           "research", rsid)
+    research_doc_rels = [e.get("artifact_path", "") for e in research_docs
+                         if e.get("artifact_path")]
+    has_material = bool(prompt.strip()) and any(
+        rel and rel in prompt for rel in research_doc_rels)
+    if not has_material:
+        return {"ok": False, "session": None,
+                "research_session_id": rsid,
+                "reason": "no-research-material"}
+
+    # 4) Start (or FOCUS) the contained (idea, 'plan') dev session, seeded with the
+    #    pending paste, linked to the research dev session, carrying grass_origin.
+    import terminal_session as _ts
+    existing_psid = dev_map.get("plan") or ""
+    live_plan = _live_grass_dev_session(existing_psid)
+    if live_plan is not None:
+        # Dedupe: a live (idea, 'plan') dev session already exists → FOCUS it (no
+        # second plan session minted). Record/refresh the stage edge so the link
+        # is durable even on a re-advance.
+        try:
+            _handoff.record_stage_link(folder_path, project_id, rsid,
+                                       existing_psid, kind="research->plan")
+        except Exception:
+            pass
+        # DEFECT-1 FIX (develop-plan-first → advance must still deliver the
+        # handoff). If the user clicked "Plan"/Develop FIRST, the existing plan
+        # dev session is BARE — seeded with only the idea text, carrying NO
+        # handoff (``pending_paste == ''`` AND ``paste_flushed`` False). In that
+        # case DELIVER the generated research→plan prompt onto it as a fresh
+        # pending paste (``terminal_session.queue_paste``); the session already
+        # greeted, so the greet-marker-count guard is satisfied → it flushes
+        # UNSENT on the next read. The guard in ``queue_paste`` refuses to deliver
+        # a SECOND paste, so advance→advance (re-advance) NEVER double-delivers and
+        # a session the user is mid-handoff on is left untouched.
+        delivered = False
+        if (not (live_plan.get("pending_paste") or "")
+                and not live_plan.get("paste_flushed")):
+            try:
+                delivered = _ts.queue_paste(existing_psid, prompt)
+            except Exception:
+                delivered = False
+        return {"ok": True, "session": live_plan,
+                "research_session_id": rsid, "reason": "focused-existing",
+                "paste_delivered": delivered}
+
+    label = GRASS_DEV_LABEL_PREFIX + (
+        "advance→plan: " + ((idea.get("title") or "")[:34]))
+    kwargs = {"label": label, "paste_prompt": prompt,
+              "parent_session_id": rsid, "grass_origin": jid}
+    if backend is not None:
+        kwargs["backend"] = backend
+    record = _ts.start_session(project_id, "plan", **kwargs)
+    psid = record.get("session_id", "")
+
+    # Persist the (idea, 'plan') -> session_id map so a re-click focuses THIS
+    # session (best-effort; a failed annotation never tears down a live session).
+    try:
+        dev_map["plan"] = psid
+        record_effort(folder_path, project_id, "grass", jid,
+                      extra={"dev_sessions": dev_map})
+    except Exception:
+        pass
+
+    # 5) Record the research->plan stage edge (rescan-durable).
+    try:
+        _handoff.record_stage_link(folder_path, project_id, rsid, psid,
+                                   kind="research->plan")
+    except Exception:
+        pass
+
+    return {"ok": True, "session": record, "research_session_id": rsid,
+            "reason": "advanced", "paste_delivered": True}
+
+
 def pull_grass_refinement(project_id: str, idea_id: str, refinement_id: str,
                           lane: str, folder_path=None, backend=None) -> dict:
     """PULL a chosen refinement version into a NEW seeded session (v5 Wave 5).
