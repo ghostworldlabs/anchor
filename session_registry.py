@@ -179,6 +179,22 @@ def _normalize(record: dict) -> dict:
         # v6 Wave 2: durable lineage (see above).
         "parent_session_id": parent_session_id,
         "chain_id": chain_id,
+        # v10 Wave 1: paste-NOT-submit handoff. ``pending_paste`` is the task
+        # prompt that is held UNSENT in the PTY input (no trailing newline)
+        # until the user presses Enter; it is delivered exactly ONCE, after the
+        # greet, by :func:`terminal_session._flush_pending_paste`, which then
+        # sets ``paste_flushed=True`` and clears ``pending_paste``. Both fields
+        # back-compat to ""/False on every pre-v10 record. SAFE to include in
+        # board projections (no worktree_path/branch leak).
+        "pending_paste": record.get("pending_paste", "") or "",
+        "paste_flushed": bool(record.get("paste_flushed", False)),
+        # v10 Wave 4: grass→project lineage (D8). ``grass_origin`` is the
+        # originating grass idea id (``idea-…``) stamped on the chain when an idea
+        # is exported/promoted to the project level, so every downstream project
+        # plan/build session can trace back to that idea. Empty for any non-grass
+        # session (back-compat default ""). It is just an idea id — SAFE to carry
+        # in the board / chain projections (NEVER worktree_path/branch).
+        "grass_origin": record.get("grass_origin", "") or "",
     }
 
 
@@ -207,7 +223,7 @@ def _save_sessions(reg: dict) -> None:
 def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      worktree_path="", branch="", status=STATUS_IDLE,
                      label="", session_id=None, parent_session_id="",
-                     chain_id=None) -> dict:
+                     chain_id=None, grass_origin="") -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
@@ -237,6 +253,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "label": label,
             "parent_session_id": parent_session_id or "",
             "chain_id": chain_id or sid,
+            "grass_origin": grass_origin or "",
         })
         reg[sid] = record
         _save_sessions(reg)
@@ -323,7 +340,11 @@ def update_session(session_id: str, **fields) -> dict:
     """
     allowed = {"project_id", "lane", "backend", "worktree_path", "branch",
                "status", "label", "seeded", "seed_text",
-               "parent_session_id", "chain_id"}
+               "parent_session_id", "chain_id",
+               # v10 Wave 1: paste-NOT-submit handoff bookkeeping.
+               "pending_paste", "paste_flushed",
+               # v10 Wave 4: grass→project lineage stamp.
+               "grass_origin"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:

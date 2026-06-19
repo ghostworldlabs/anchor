@@ -135,12 +135,20 @@ def _js(html):
 # (A) BACKEND — generated seed lists REAL persisted paths + correct skill
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_plan_to_build_seed_contains_real_paths_and_names_foreman(env):
+def test_plan_to_build_paste_contains_real_paths_and_names_foreman(env):
     """A finished planning session whose docs are PERSISTED (W2), advanced to
-    build, yields a build session whose seed_context CONTAINS the real
+    build, yields a build session whose handoff TASK PROMPT CONTAINS the real
     planning/.../IMPLEMENTATION-PLAN.md path + MASTER-PLAN.md + a read-first
-    instruction + names Foreman; the build's HANDOFF.md references files that
-    EXIST in the build checkout."""
+    instruction + names Foreman.
+
+    v10 Wave 2 moved that task prompt OUT of the auto-submitted phase-1 seed
+    (which now only loads+greets the Foreman skill, no doc paths) and INTO the
+    PENDING PASTE channel — ``pending_paste`` on the record AND the durable,
+    reviewable ``NEXT-PROMPT.md`` written into the build worktree (delivered
+    UNSENT). This test asserts the SAME guarantee in that new location: the real
+    plan-doc paths + Foreman + a read-first instruction are delivered to the
+    build via the paste, and HANDOFF.md still references files that EXIST in the
+    build checkout."""
     ts, reg, repo, pid, ho = (env["ts"], env["reg"], env["repo"], env["pid"],
                               env["handoff"])
 
@@ -164,17 +172,36 @@ def test_plan_to_build_seed_contains_real_paths_and_names_foreman(env):
     assert build is not None
     bsid = build["session_id"]
 
-    # The build's seed_context names Foreman + the REAL doc paths + read-first.
+    # v10 Wave 2: the TASK PROMPT (real doc paths + read-first) is the PENDING
+    # PASTE, not the auto-submitted seed. The phase-1 seed still NAMES Foreman
+    # (load+greet), but the doc paths now live in the paste.
+    paste = build.get("pending_paste", "") or ""
+    assert "Foreman" in paste, paste
+    assert docs["impl"] in paste, "paste missing the real IMPLEMENTATION-PLAN path"
+    assert docs["master"] in paste, "paste missing the real MASTER-PLAN path"
+    assert re.search(r"[Rr]ead these", paste), "no read-first instruction in paste"
+    # The build NEVER loads Crucible (the user's confusion).
+    assert "Crucible" not in paste
+    # The phase-1 seed loads+greets Foreman (names the skill, no doc paths there).
     seed = build.get("seed_text", "") or ""
     assert "Foreman" in seed, seed
-    assert docs["impl"] in seed, "seed missing the real IMPLEMENTATION-PLAN path"
-    assert docs["master"] in seed, "seed missing the real MASTER-PLAN path"
-    assert re.search(r"[Rr]ead these", seed), "no read-first instruction in seed"
-    # The build NEVER loads Crucible (the user's confusion).
     assert "Crucible" not in seed
 
-    # HANDOFF.md exists in the build checkout AND references files that EXIST.
+    # The PENDING PASTE is held UNSENT (not yet flushed) — delivered, not submitted.
+    assert build.get("paste_flushed") is not True
+
+    # The build worktree carries the durable, reviewable NEXT-PROMPT.md, and it
+    # references the real IMPL + MASTER paths + Foreman + read-first.
     bwt = Path(build["worktree_path"])
+    npf = bwt / ho.NEXT_PROMPT_FILENAME
+    assert npf.exists(), "build worktree not primed with NEXT-PROMPT.md"
+    nptext = npf.read_text(encoding="utf-8")
+    assert docs["impl"] in nptext, "NEXT-PROMPT.md missing the real IMPL path"
+    assert docs["master"] in nptext, "NEXT-PROMPT.md missing the real MASTER path"
+    assert "Foreman" in nptext
+    assert re.search(r"[Rr]ead these", nptext)
+
+    # HANDOFF.md exists in the build checkout AND references files that EXIST.
     hf = bwt / ho.HANDOFF_FILENAME
     assert hf.exists(), "build worktree not primed with HANDOFF.md"
     htext = hf.read_text(encoding="utf-8")
@@ -220,6 +247,23 @@ def _free_server(gui):
     return srv, port, t
 
 
+def _close_server(srv, t):
+    """Race-proof teardown (matches the hardened v10 fixtures): give in-flight
+    stream threads a beat, then shut down + close, each guarded so a benign
+    client-disconnect teardown race can never fail the test."""
+    import time
+    time.sleep(0.1)
+    try:
+        srv.shutdown()
+    except Exception:
+        pass
+    try:
+        srv.server_close()
+    except Exception:
+        pass
+    t.join(timeout=5)
+
+
 def test_term_kill_persists_then_advances_on_fresh_docs(env):
     """POST /api/rnd/term_kill on a planning session that just produced its plan
     docs (NOT previously persisted) auto-opens a build whose seed/HANDOFF
@@ -255,10 +299,19 @@ def test_term_kill_persists_then_advances_on_fresh_docs(env):
         assert ab["lane"] == "build"
         assert ab["parent_session_id"] == psid
 
-        # The build's seed + HANDOFF reference EXISTING persisted docs.
+        # The build's PENDING PASTE + NEXT-PROMPT.md + HANDOFF reference the
+        # EXISTING persisted docs. v10 Wave 2: the real doc paths live in the
+        # pending paste (delivered unsent), NOT the auto-submitted phase-1 seed;
+        # the seed still NAMES Foreman (load+greet).
+        paste = ab.get("pending_paste", "") or ""
+        assert docs["impl"] in paste and "Foreman" in paste
+        assert ab.get("paste_flushed") is not True
         seed = ab.get("seed_text", "") or ""
-        assert docs["impl"] in seed and "Foreman" in seed
+        assert "Foreman" in seed
         bwt = Path(ab["worktree_path"])
+        npf = bwt / ho.NEXT_PROMPT_FILENAME
+        assert npf.exists()
+        assert docs["impl"] in npf.read_text(encoding="utf-8")
         hf = bwt / ho.HANDOFF_FILENAME
         assert hf.exists()
         assert docs["impl"] in hf.read_text(encoding="utf-8")
@@ -273,7 +326,7 @@ def test_term_kill_persists_then_advances_on_fresh_docs(env):
                 ts.kill(bsid)
             except Exception:
                 pass
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        _close_server(srv, t)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -382,11 +435,20 @@ def test_playwright_kill_planning_build_header_shows_foreman(env):
             pg.screenshot(path=str(shot), full_page=True)
             assert not errors, f"JS console errors: {errors}"
 
-            # Backend truth: the build seed + HANDOFF reference the real docs.
+            # Backend truth: the header shows Foreman because the phase-1 seed
+            # loads+greets Foreman; v10 Wave 2 puts the real doc paths in the
+            # PENDING PASTE + NEXT-PROMPT.md (delivered UNSENT), not the
+            # auto-submitted seed. HANDOFF.md still references the real docs.
             brec = reg.get_session(bsid)
             seed = brec.get("seed_text", "") or ""
-            assert "Foreman" in seed and docs["impl"] in seed
+            assert "Foreman" in seed
+            paste = brec.get("pending_paste", "") or ""
+            assert "Foreman" in paste and docs["impl"] in paste
+            assert brec.get("paste_flushed") is not True
             bwt = Path(brec["worktree_path"])
+            assert (bwt / ho.NEXT_PROMPT_FILENAME).exists()
+            assert docs["impl"] in (bwt / ho.NEXT_PROMPT_FILENAME).read_text(
+                encoding="utf-8")
             assert (bwt / ho.HANDOFF_FILENAME).exists()
             assert docs["impl"] in (bwt / ho.HANDOFF_FILENAME).read_text(
                 encoding="utf-8")
@@ -397,5 +459,5 @@ def test_playwright_kill_planning_build_header_shows_foreman(env):
             except Exception:
                 pass
     finally:
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+        _close_server(srv, t)
     assert shot.exists(), "screenshot not written"

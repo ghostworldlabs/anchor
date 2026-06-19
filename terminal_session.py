@@ -44,6 +44,12 @@ import effort_history as _eh  # v8 Wave 2 keystone: persist_session_docs (no
 #                              nor session_registry — only paths + rnd_registry)
 import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
 #                            neither terminal_session nor session_registry)
+try:
+    import boneyard as _boneyard  # v10 Wave 6 Boneyard capture (stdlib-only; no
+    #                              cycle: boneyard imports only paths +
+    #                              rnd_registry, lazily summarizer/effort_history)
+except Exception:  # pragma: no cover - boneyard is always importable, defensive
+    _boneyard = None
 
 try:
     import lanes as _lanes
@@ -158,6 +164,13 @@ LANE_SKILL = {
 #: ``ANCHOR_SEED_PROMPT_<LANE-UPPER>`` and win over the global one for that lane.
 SEED_ENV_GLOBAL = "ANCHOR_TERMINAL_SEED"
 SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
+
+#: The marker substring the greet line ends with (see :func:`_default_seed_text`:
+#: ``✓ <Skill> loaded — what would you like to do?``). The v10 pending-paste flush
+#: waits until this appears in the PTY output buffer before pasting the task
+#: prompt — that is the "the skill loaded and greeted" signal. Matched
+#: case-insensitively on the stable, skill-independent tail of the greet line.
+GREET_MARKER = "what would you like to do?"
 
 
 def _default_seed_text(skill):
@@ -278,13 +291,41 @@ def _check_engine_allowed(lane, backend):
             raise TerminalSessionError(str(exc)) from exc
 
 
+def _resolve_grass_origin_from_chain(parent_id, parent_rec):
+    """Return the grass_origin a child should inherit from the chain it joins.
+
+    v10 Wave 4 FIX 1 (D8): the stamp must reach the CHAIN ROOT, not just the
+    direct parent. Prefer the direct parent's own stamp (cheapest, common case);
+    otherwise walk the chain members ONCE (a single bounded ``chain_members``
+    read — no parent-pointer recursion, so it is inherently cycle-safe) and adopt
+    any non-empty ``grass_origin`` found among them. Returns ``""`` when no member
+    carries one. Best-effort: any registry error degrades to ``""``.
+    """
+    direct = (parent_rec.get("grass_origin", "") or "") if parent_rec else ""
+    if direct:
+        return direct
+    if not parent_id:
+        return ""
+    try:
+        chain_id = _reg.chain_for(parent_id)
+        if not chain_id:
+            return ""
+        for m in _reg.chain_members(chain_id):
+            go = (m.get("grass_origin", "") or "") if isinstance(m, dict) else ""
+            if go:
+                return go
+    except Exception:
+        return ""
+    return ""
+
+
 #: Sentinel: ``backend`` not explicitly passed → default to the project's
 #: last-used engine (v4 Wave 2).
 _UNSET = object()
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
-                  parent_session_id=None):
+                  parent_session_id=None, paste_prompt=None, grass_origin=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -311,6 +352,27 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     :func:`session_registry.chain_for`) and records ``parent_session_id``. When
     omitted, the new session starts its OWN chain (chain_id == its own id). The
     parent record is never mutated.
+
+    v10 Wave 1: ``paste_prompt`` (optional) is the task prompt for a handoff that
+    must be DELIVERED BUT NOT SUBMITTED. When provided, phase-1 (the lane
+    load+greet seed, ending ``\\n``) is still written so the skill auto-loads and
+    greets, but the ``paste_prompt`` is NOT written to the PTY at start — it is
+    recorded on the session record as ``pending_paste`` (with
+    ``paste_flushed=False``) and later written to the PTY input WITHOUT a trailing
+    newline exactly once, after the greet is observed, by
+    :func:`_flush_pending_paste` (wired into the first ``read_since``/``attach``).
+    With no ``paste_prompt`` the behavior is exactly as v9 (the regression-guarded
+    back-compat path) — ``seed_context`` continues to fold onto the seed and is
+    auto-submitted as today.
+
+    v10 Wave 4: ``grass_origin`` (optional) is the originating grass idea id for a
+    grass→project lineage chain (D8). When passed it is stamped on the new
+    session's registry record; when omitted it is INHERITED from the parent's
+    record (so once a chain is grass-stamped — e.g. by ``export_grass_to_project``
+    on the dev session — every downstream session in that chain carries the
+    origin and can trace back to the idea). Empty for any non-grass chain (the
+    default). It is just an idea id — SAFE to carry into the board / chain
+    projections (never worktree_path/branch).
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -342,10 +404,24 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # unknown parent id is ignored (the session simply starts its own chain).
     parent_id = parent_session_id or ""
     chain_id = None
+    parent_rec = None
     if parent_id:
+        parent_rec = _reg.get_session(parent_id)
         chain_id = _reg.chain_for(parent_id)
         if not chain_id:
             parent_id = ""  # unknown parent → start a fresh chain
+            parent_rec = None
+
+    # v10 Wave 4 (D8): grass→project lineage. The new session's ``grass_origin``
+    # is the explicit value if passed, ELSE INHERITED from anywhere in the chain
+    # it is joining (so once an exported/promoted grass chain is stamped, EVERY
+    # downstream session in it traces back to the idea — even when the direct
+    # parent's own record happens to carry an empty stamp but a chain ancestor
+    # carries it). Empty for any non-grass chain. Cheap + cycle-safe: a single
+    # bounded read of the chain members (no parent-pointer recursion).
+    origin = (grass_origin or "")
+    if not origin and parent_rec is not None:
+        origin = _resolve_grass_origin_from_chain(parent_id, parent_rec)
 
     # 1) Isolated worktree first — if this fails we never start a PTY.
     wt = _wt.create_worktree(project_id, sid)
@@ -392,6 +468,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             session_id=sid,
             parent_session_id=parent_id,
             chain_id=chain_id,
+            grass_origin=origin,
         )
     except Exception as exc:
         try:
@@ -426,10 +503,193 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             except Exception:
                 pass
 
+    # v10 Wave 1: record the task prompt as a PENDING PASTE — held UNSENT in the
+    # PTY input until the user presses Enter. It is NOT written here; it is
+    # delivered exactly once, after the greet, by :func:`_flush_pending_paste`
+    # (wired into the first read_since/attach). Recorded with paste_flushed=False
+    # so the flush guard knows it is still pending. With no paste_prompt this is
+    # skipped entirely (the v9 back-compat path is untouched).
+    pending = (paste_prompt or "")
+    if pending:
+        try:
+            record = _reg.update_session(
+                sid, pending_paste=pending, paste_flushed=False)
+        except Exception:
+            pass
+
     # v4 Wave 2: remember the engine this session chose so the NEXT session for
     # this project defaults to it. Best-effort (never fails a live session).
     set_last_engine_for_project(project_id, backend)
     return record
+
+
+def _flush_pending_paste(session_id):
+    """Write a session's PENDING task prompt to the PTY input, UNSENT, once (v10 W1).
+
+    The v10 "paste-NOT-submit" handoff: a session started with ``paste_prompt``
+    holds that prompt on its record as ``pending_paste`` (``paste_flushed=False``)
+    without writing it. THIS function delivers it — exactly once, after the greet
+    is observed — by writing it to the PTY **without a trailing newline** so it
+    sits in the input line UNSENT until the user presses Enter.
+
+    Trigger ("greet observed") — the SOUND test (fixes the premature-flush bug):
+    the greet line ``✓ <Skill> loaded — what would you like to do?`` is quoted
+    VERBATIM inside the seed text Anchor writes at start (see
+    :func:`_default_seed_text`), and the PTY echoes stdin — so :data:`GREET_MARKER`
+    is already in the buffer from the moment the seed is ECHOED, BEFORE the model
+    loads the skill or actually greets. A plain substring/`in` test therefore
+    flushes prematurely (Master-Plan R1). Instead we count marker OCCURRENCES and
+    require MORE than the seed text itself contains:
+
+      base    = number of marker occurrences in the recorded ``seed_text`` (the
+                exact bytes written at start; the echo contributes exactly ``base``)
+      greeted = the buffer's marker count is STRICTLY GREATER than ``base``
+                (the MODEL's real greet adds at least one more occurrence)
+
+    There is intentionally NO ``len(text) > len(seed_text)`` fallback — that fired
+    on almost any output and was the second half of the premature-flush defect.
+    If the seed was env-overridden (``ANCHOR_TERMINAL_SEED``) to a text with ZERO
+    marker occurrences, then ``base == 0`` and any appearance of the marker (from a
+    model greet) triggers — acceptable. If such an overridden seed ALSO omits the
+    marker AND the model greet won't contain it, the paste simply STAYS pending
+    (honest: we never fabricate a greet we didn't observe).
+
+    Real-ConPTY caveat: stdin echo may carry interleaved ANSI control codes, so
+    counting the stable, skill-independent marker SUBSTRING tolerates that far
+    better than positional/line matching.
+
+    IDEMPOTENT + cheap to call on every read/attach:
+      - no record / no ``pending_paste`` / already ``paste_flushed`` → no-op;
+      - the greet has NOT been observed yet → no-op (left pending for a later read);
+      - on a successful CLAIM it sets ``paste_flushed=True`` and clears
+        ``pending_paste`` (so a second call never re-emits).
+
+    Concurrency (Defect 2 — TOCTOU): under ``ThreadingHTTPServer`` two concurrent
+    ``read_since``/``attach`` calls could both pass the guard and both write a
+    double paste. The check-and-claim is therefore done as a compare-and-set under
+    the process-wide :data:`paths.WRITE_LOCK` (a reentrant ``RLock`` — the SAME
+    lock ``session_registry.update_session`` takes, so re-acquiring it for the
+    persist can't self-deadlock). The winning thread CLAIMS the paste (sets
+    ``paste_flushed=True`` + clears ``pending_paste`` + persists) BEFORE releasing
+    the lock and BEFORE writing the bytes to the PTY; a losing/late thread sees
+    ``paste_flushed`` already True and no-ops. (Rare tradeoff: if the PTY write
+    fails AFTER the claim, the paste is lost rather than re-emitted — once-only
+    dominates; we log a best-effort warning.)
+
+    Never raises — a missing/dead PTY or a persist failure simply leaves the paste
+    pending (it can be retried on the next read) without disturbing the caller.
+    Returns ``True`` iff the paste was claimed+written on THIS call, else ``False``.
+    """
+    try:
+        rec = _reg.get_session(session_id)
+    except Exception:
+        return False
+    if rec is None:
+        return False
+    if not (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
+        return False
+
+    # Has the greet been observed? Read the live PTY output buffer (cursor 0).
+    try:
+        out = _pty.read_since(session_id, 0)
+    except _pty.UnknownSession:
+        return False  # no live PTY (e.g. after a restart) — leave it pending
+    except Exception:
+        return False
+    text = (out.get("text") or "") if isinstance(out, dict) else ""
+
+    # Distinguish the ECHOED seed from a REAL model greet by counting marker
+    # occurrences beyond what the seed text itself contributes (see docstring).
+    marker = GREET_MARKER.lower()
+    seed_text = rec.get("seed_text") or ""
+    base = seed_text.lower().count(marker)
+    if text.lower().count(marker) <= base:
+        return False  # still waiting on the model's actual greet — stay pending
+
+    # Compare-and-set the claim under WRITE_LOCK (reentrant; same lock
+    # update_session takes). Re-load + re-check inside the lock so exactly ONE
+    # concurrent thread wins; claim (persist paste_flushed=True + clear pending)
+    # BEFORE releasing the lock and BEFORE the PTY write, so only the winner
+    # proceeds to write.
+    with _paths.WRITE_LOCK:
+        try:
+            rec = _reg.get_session(session_id)
+        except Exception:
+            return False
+        if rec is None:
+            return False
+        pending = rec.get("pending_paste") or ""
+        if not pending or rec.get("paste_flushed"):
+            return False  # a concurrent thread already claimed it
+        try:
+            _reg.update_session(
+                session_id, paste_flushed=True, pending_paste="")
+        except Exception:
+            return False  # couldn't claim → leave it for a later read
+
+    # Strip a trailing newline so a prompt that itself ends in "\n"/"\r\n" (e.g. a
+    # Wave-2 NEXT-PROMPT.md body) can NEVER auto-submit — the paste must land in
+    # the input line UNSENT.
+    pending = pending.rstrip("\r\n")
+
+    # Deliver the prompt to the PTY input WITHOUT a trailing newline (UNSENT).
+    # We have already claimed the paste, so a write failure here loses this paste
+    # (accepted tradeoff: once-only dominates double-paste). Log best-effort.
+    try:
+        _pty.write(session_id, pending)
+    except Exception as exc:
+        try:
+            import sys as _sys
+            print("warning: pending-paste claimed but PTY write failed for "
+                  "%s: %s" % (session_id, exc), file=_sys.stderr)
+        except Exception:
+            pass
+        return False
+    return True
+
+
+def queue_paste(session_id, text):
+    """Queue a PENDING task prompt onto an ALREADY-LIVE session (v10 W5).
+
+    The v10 "paste-NOT-submit" handoff normally records ``pending_paste`` at
+    :func:`start_session`. But when a *bare* develop session already exists (e.g.
+    the user clicked "Plan"/Develop on a grass idea FIRST, minting a plan dev
+    session with NO handoff), a later research→plan *advance* must still deliver
+    the generated handoff prompt onto that existing session — WITHOUT re-starting
+    it. This sets ``pending_paste=<text>`` + ``paste_flushed=False`` on the record
+    (reusing the Wave-1 plumbing) so the SAME :func:`_flush_pending_paste` path
+    delivers it UNSENT on the next read/attach. The session has already greeted, so
+    the greet-marker-count guard is already satisfied → it flushes immediately,
+    unsent.
+
+    SAFETY (no double-paste): the CALLER must only invoke this on a session that
+    has NEITHER a pending paste NOR an already-flushed one (``not pending_paste and
+    not paste_flushed``) — a session that already carries a handoff (pending,
+    pre-flush) or already received one (flushed) must NOT get a second. This helper
+    re-checks that guard under the registry semantics and refuses otherwise.
+
+    Returns ``True`` iff the paste was queued on THIS call, else ``False`` (unknown
+    session, empty text, or the guard refused). Never raises.
+    """
+    text = (text or "")
+    if not text.strip():
+        return False
+    try:
+        rec = _reg.get_session(session_id)
+    except Exception:
+        return False
+    if rec is None:
+        return False
+    # Guard against double-paste / re-advance: refuse if a handoff is already
+    # pending (pre-flush) or already delivered (flushed).
+    if (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
+        return False
+    try:
+        _reg.update_session(
+            session_id, pending_paste=text, paste_flushed=False)
+    except Exception:
+        return False
+    return True
 
 
 def switch_engine(session_id, engine):
@@ -544,6 +804,11 @@ def attach(session_id):
     For an unknown session returns ``{"ok": False, "reason": "unknown-session"}``
     (never raises).
     """
+    # v10 Wave 1: if a task prompt is pending for this session and the greet has
+    # been observed, paste it (unsent) before replaying the buffer so the
+    # reattaching client sees the prompt sitting in the input line. Idempotent +
+    # cheap; a no-op when nothing is pending or the greet hasn't appeared yet.
+    _flush_pending_paste(session_id)
     record = _reg.get_session(session_id)
     try:
         out = _pty.read_since(session_id, 0)
@@ -605,13 +870,18 @@ def read_since(session_id, cursor=0):
     Returns the manager's ``{"text", "next", "status"}`` on success, or
     ``{"ok": False, "reason": "unknown-session"}`` for an unknown id.
     """
+    # v10 Wave 1: the first read that observes the greet flushes a pending task
+    # prompt to the PTY input (unsent). Idempotent + cheap; a no-op when nothing
+    # is pending. Done BEFORE the read so the freshly-pasted bytes (which the
+    # stub echoes) surface in THIS read's output.
+    _flush_pending_paste(session_id)
     try:
         return _pty.read_since(session_id, cursor)
     except _pty.UnknownSession:
         return {"ok": False, "reason": "unknown-session"}
 
 
-def kill(session_id, project_id=None):
+def kill(session_id, project_id=None, _record_boneyard=True):
     """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
     Tolerant: an unknown/already-dead PTY still proceeds to re-status the registry
@@ -625,6 +895,14 @@ def kill(session_id, project_id=None):
     so they survive the kill, are discoverable from the main folder, and ride
     into later worktrees (which are checked out off main HEAD). This is
     best-effort — a persistence failure never blocks the kill.
+
+    ``_record_boneyard`` (PRIVATE, default ``True``): when ``False`` the v10 W6
+    ``killed`` Boneyard capture is SUPPRESSED. :func:`delete_session` passes
+    ``False`` when it kills a still-live session as part of a delete — the
+    ``deleted`` entry is the canonical record for a delete, so a kill-driven
+    ``killed`` entry would be a spurious DUPLICATE. Doc PERSISTENCE
+    (``capture_session_docs``) still runs regardless — only the Boneyard record is
+    suppressed, so the subsequent ``deleted`` entry's ``doc_rels`` are populated.
 
     Returns ``{"ok": True, "session_id", "pty_killed", "docs": {...},
     "worktree": {...}}``.
@@ -654,6 +932,16 @@ def kill(session_id, project_id=None):
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)
 
+    # v10 Wave 6 — Boneyard capture (D3 source "killed"). A hard-kill is the
+    # deliberate "I'm done / discarding" action; if this session PRODUCED material
+    # (persisted docs), index it in the project's Boneyard. This is purely ADDITIVE
+    # — the session's normal finished tile/record is unaffected — and BEST-EFFORT:
+    # a Boneyard failure must NEVER break the kill path. SUPPRESSED when this kill
+    # is part of a delete_session (the canonical "deleted" entry is recorded there;
+    # a "killed" entry too would be a spurious duplicate for ONE delete).
+    if _record_boneyard:
+        _capture_killed_to_boneyard(session_id, project_id, record, docs_out)
+
     return {
         "ok": True,
         "session_id": session_id,
@@ -661,6 +949,40 @@ def kill(session_id, project_id=None):
         "docs": docs_out,
         "worktree": wt_out,
     }
+
+
+def _capture_killed_to_boneyard(session_id, project_id, record, docs_out):
+    """Index a killed session in the Boneyard iff it produced material (W6).
+
+    BEST-EFFORT — swallows every error so a Boneyard failure can never break the
+    kill path. References the docs the v8 keystone just persisted (no copy).
+    """
+    if _boneyard is None:
+        return
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if rec is None:
+            return
+        if project_id is None:
+            project_id = rec.get("project_id") or None
+        if not project_id:
+            return
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path", "") if proj else ""
+        if not folder:
+            return
+        lane = rec.get("lane", "") or ""
+        # Prefer the docs THIS kill just persisted; fall back to the v8 join.
+        doc_rels = list((docs_out or {}).get("persisted", []) or [])
+        entry = _boneyard.build_session_entry(
+            folder, project_id, lane, session_id,
+            source=_boneyard.SOURCE_KILLED, record=rec,
+            doc_rels=(doc_rels or None))
+        # Only record a killed entry when the session actually produced material.
+        if entry.get("doc_rels"):
+            _boneyard.record_entry(folder, project_id, entry)
+    except Exception:
+        return
 
 
 def capture_session_docs(session_id, project_id=None, record=None):
@@ -739,12 +1061,16 @@ def delete_session(session_id, project_id=None):
     killed = False
     # If the session is still live (a running PTY / RUNNING status), kill it first
     # so the PTY + worktree are reaped and its docs are persisted before we drop
-    # the record. Tolerate any failure — delete must still proceed.
+    # the record. Tolerate any failure — delete must still proceed. We SUPPRESS the
+    # kill's "killed" Boneyard capture (``_record_boneyard=False``): a delete of a
+    # live session must yield exactly ONE Boneyard entry — the canonical "deleted"
+    # entry recorded below — not a "killed" + "deleted" pair. Doc PERSISTENCE still
+    # runs in kill, so the "deleted" entry's doc_rels are populated.
     try:
         if rec is not None and (
                 session_id in set(_pty.live_sessions())
                 or rec.get("status") == _reg.STATUS_RUNNING):
-            kill(session_id, project_id=project_id)
+            kill(session_id, project_id=project_id, _record_boneyard=False)
             killed = True
     except Exception:
         killed = False
@@ -764,6 +1090,15 @@ def delete_session(session_id, project_id=None):
             proj = _rnd.get_project(project_id)
             folder = (proj or {}).get("folder_path", "") if proj else ""
             if folder:
+                # v10 Wave 6 (D10) — CAPTURE the Boneyard entry BEFORE
+                # delete_session_efforts drops the pointer-records: the entry is
+                # built from efforts_for_session_id (the docs the session
+                # produced) + the cached summary, which only exist WHILE the
+                # pointer-records are still present. After this call the efforts
+                # are gone — the Boneyard is the deleted session's ONLY remaining
+                # home (the docs stay on disk, Option A). BEST-EFFORT.
+                _capture_deleted_to_boneyard(folder, project_id, lane,
+                                             session_id, rec)
                 efforts_out = _eh.delete_session_efforts(
                     folder, project_id, lane, session_id)
     except Exception:
@@ -776,6 +1111,28 @@ def delete_session(session_id, project_id=None):
         "killed": killed,
         "efforts": efforts_out,
     }
+
+
+def _capture_deleted_to_boneyard(folder, project_id, lane, session_id, record):
+    """Index a v9-DELETED session in the Boneyard (D3 source "deleted") — W6.
+
+    MUST be called BEFORE ``effort_history.delete_session_efforts`` drops the
+    pointer-records (D10): the entry's ``doc_rels`` are resolved from
+    ``efforts_for_session_id`` (which only returns docs WHILE the pointer-records
+    exist). Unlike a kill, the deleted session's tile + efforts are about to be
+    gone, so the Boneyard is its ONLY remaining home — we record it even if the
+    docs list is empty (the entry still preserves the session's identity/summary).
+    BEST-EFFORT — swallows every error so it can never break the delete path.
+    """
+    if _boneyard is None:
+        return
+    try:
+        entry = _boneyard.build_session_entry(
+            folder, project_id, lane, session_id,
+            source=_boneyard.SOURCE_DELETED, record=record)
+        _boneyard.record_entry(folder, project_id, entry)
+    except Exception:
+        return
 
 
 def cleanup_ghost_sessions(project_id):
@@ -935,10 +1292,13 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
       1. discovers the plan set (or uses the pre-captured ``plan_set`` passed by a
          caller that captured it BEFORE the planning worktree was reaped);
       2. starts a NEW linked build session (``start_session(lane='build',
-         parent_session_id=planning_session_id, seed_context=<plan seed>)``) — it
-         inherits the planning session's ``chain_id``;
-      3. primes the build worktree via :func:`handoff.prime_worktree`
-         (HANDOFF.md → the plan docs, which already exist in the checkout);
+         parent_session_id=planning_session_id, paste_prompt=<plan prompt>)``) — it
+         inherits the planning session's ``chain_id``; the build prompt is delivered
+         as a v10 PENDING PASTE (held unsent until the user looks), never
+         auto-submitted, on this unattended path too;
+      3. primes the build worktree with BOTH artifacts via
+         :func:`handoff.prime_worktree` (HANDOFF.md → the plan docs) AND
+         :func:`handoff.write_next_prompt` (NEXT-PROMPT.md → the reviewable prompt);
       4. records the generic stage edge ``plan->build`` via
          :func:`handoff.record_stage_link`.
 
@@ -986,11 +1346,24 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         if not plan_set:
             return None  # no plan ⇒ no advance
 
-        # Start the linked, seeded build session.
+        # v10 Wave 2: the task prompt is delivered as a PENDING PASTE (held in the
+        # build PTY input UNSENT until the user presses Enter) — NOT folded into the
+        # auto-submitted seed. The phase-1 load+greet seed still fires (Foreman
+        # auto-loads + greets); the build prompt sits pending. This holds for the
+        # UNATTENDED reconcile-dead path too: the build greets and waits — nothing
+        # auto-submits — until the first attach flushes the paste unsent.
+        # FIX 3: clean the redundant "Load the Foreman skill." opener (phase-1 has
+        # already loaded+greeted Foreman) — same paste-prompt cleaner the attended
+        # advance_session path applies. The skill NAME + real plan-doc paths +
+        # "read these …" stay in the body.
+        next_prompt = _handoff.clean_paste_opener(_build_seed_for_plan(plan_set))
+
+        # Start the linked build session: skill auto-loads/greets (phase-1), the
+        # build prompt is recorded as pending_paste (delivered unsent after greet).
         try:
             build_rec = start_session(
                 project_id, "build",
-                seed_context=_build_seed_for_plan(plan_set),
+                paste_prompt=next_prompt,
                 parent_session_id=planning_session_id,
                 label="auto · from plan")
         except TerminalSessionError:
@@ -999,11 +1372,17 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         build_sid = build_rec.get("session_id", "")
         build_wt = build_rec.get("worktree_path", "")
 
-        # Prime the (fresh, never-reaped) build worktree with the plan reference
-        # BEFORE anyone reaps anything — captured from the discovered plan set.
+        # Prime the (fresh, never-reaped) build worktree with BOTH artifacts BEFORE
+        # anyone reaps anything: the structural HANDOFF.md (plan doc paths) and the
+        # reviewable NEXT-PROMPT.md (the exact pending-paste prompt). Captured from
+        # the discovered plan set.
         if build_wt:
             try:
                 _handoff.prime_worktree(build_wt, plan_set, project_id=project_id)
+            except Exception:
+                pass
+            try:
+                _handoff.write_next_prompt(build_wt, next_prompt)
             except Exception:
                 pass
         # Record the generic plan→build stage edge (Wave 2; rescan-durable).

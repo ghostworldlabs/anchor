@@ -61,6 +61,12 @@ R&D v9 "Tidy" inspection mirror (read-only DATA seams; session/grass delete + th
 guarded on-disk move are interactive mutating ops with NO one-shot CLI form):
     python3 anchor.py rnd folders                             # project folders (groups) + members (Ungrouped last)
     python3 anchor.py rnd ghost-sessions <project_id>         # empty/ghost sessions cleanup_ghost_sessions would remove
+
+R&D v10 "Live Handoff & Boneyard" inspection mirror (read-only DATA seams;
+session/grass delete, the guarded move, live paste/advance are interactive and
+have NO one-shot CLI form):
+    python3 anchor.py rnd boneyard <project_id> [--search <q>]  # discarded material (killed/deleted/grass-deleted), newest-first
+    python3 anchor.py rnd next-prompt <project_id> --session <id>  # the generated next-stage handoff prompt (pending paste / NEXT-PROMPT.md)
 """
 
 import json, os, re, sys
@@ -1121,6 +1127,83 @@ def rnd_ghost_sessions(project_id):
     return ghosts
 
 
+def rnd_boneyard(project_id, search=None):
+    """CLI mirror of ``boneyard.list_entries`` / ``boneyard.search`` (v10).
+
+    READ-ONLY: returns the project's Boneyard — the per-project, searchable INDEX
+    over DISCARDED material (a hard-KILLED session that produced docs, a v9-DELETED
+    session, or a DELETED grass idea), NEWEST-FIRST, as SAFE projections (never an
+    absolute path / worktree / branch — only the ``boneyard._SAFE_KEYS``). With
+    ``search`` given it delegates to the stdlib token/substring search over the
+    title + summary excerpt + idea text + doc paths; otherwise it lists every
+    entry. This NEVER deletes/removes anything (the Boneyard is purely additive;
+    pruning is an interactive op with no CLI form). Honest-absent: ``[]`` when the
+    project has discarded nothing. Raises ``KeyError`` for an unknown project.
+    """
+    import boneyard as _bone
+    _proj, folder = _rnd_resolve(project_id)
+    q = (search or "").strip()
+    if q:
+        return _bone.search(folder, project_id, q)
+    return _bone.list_entries(folder, project_id)
+
+
+def rnd_next_prompt(project_id, session_id):
+    """CLI mirror — the generated next-stage handoff prompt for a session (v10).
+
+    READ-ONLY: returns the reviewable next-stage prompt (the ``NEXT-PROMPT.md``
+    body) that a v10 advance delivered as a PENDING PASTE — the prompt sitting in
+    the next stage's terminal input UNSENT. Resolution prefers the CLEANEST DURABLE
+    read source, in order, and NEVER starts a session / runs a model:
+
+      1. the session record's ``pending_paste`` (the exact unsent prompt, when it
+         has not yet been flushed);
+      2. the durable ``NEXT-PROMPT.md`` written into the session's worktree;
+      3. a best-effort rebuild via ``handoff.build_next_stage_prompt`` for a
+         linked CHILD session (using its parent + lane), so a flushed/started
+         session can still surface the prompt it was handed.
+
+    Returns a ``str`` (possibly multi-line). Honest-absent: ``""`` when no handoff
+    prompt resolves. Raises ``KeyError`` for an unknown project.
+    """
+    import session_registry as _sreg
+    import handoff as _handoff
+    _proj, folder = _rnd_resolve(project_id)
+    rec = _sreg.get_session(session_id)
+    if rec is None:
+        return ""
+
+    # 1) The exact unsent prompt held on the record (cleanest source).
+    pending = (rec.get("pending_paste") or "").strip()
+    if pending:
+        return pending
+
+    # 2) The durable NEXT-PROMPT.md in the session's worktree (survives the flush).
+    wt = rec.get("worktree_path") or ""
+    if wt:
+        try:
+            from pathlib import Path as _Path
+            np = _Path(wt) / _handoff.NEXT_PROMPT_FILENAME
+            if np.is_file():
+                body = np.read_text(encoding="utf-8")
+                if body.strip():
+                    return body.rstrip("\r\n")
+        except OSError:
+            pass
+
+    # 3) Rebuild for a linked child session from its parent + lane (read-only).
+    parent = (rec.get("parent_session_id") or "").strip()
+    if parent:
+        try:
+            text = _handoff.build_next_stage_prompt(
+                folder, project_id, parent, rec.get("lane") or "")
+            if text and text.strip():
+                return text.rstrip("\r\n")
+        except Exception:
+            pass
+    return ""
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1260,7 +1343,7 @@ def _rnd_cli(args):
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
               "build-deliverable|chain|blurb|remote|docs|"
-              "folders|ghost-sessions> ...")
+              "folders|ghost-sessions|boneyard|next-prompt> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1286,7 +1369,8 @@ def _rnd_cli(args):
             if a.startswith("--"):
                 # flags that take a value consume the next token
                 if a in ("--lane", "--session", "--notes", "--name",
-                         "--type", "--desc", "--seed-session", "--window"):
+                         "--type", "--desc", "--seed-session", "--window",
+                         "--search"):
                     skip = True
                 continue
             out.append(a)
@@ -1668,6 +1752,49 @@ def _rnd_cli(args):
                       f"{g.get('label','') or '(no label)'} "
                       f"status={g.get('status','')} "
                       f"id={g.get('session_id','')}")
+
+        elif sub == "boneyard":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd boneyard <project_id> "
+                      "[--search <query>]")
+                return
+            query = _opt("--search")
+            entries = rnd_boneyard(pos[0], search=query)
+            if not entries:
+                if query:
+                    print(f"No discarded material matching '{query}' "
+                          f"for {pos[0]}.")
+                else:
+                    print(f"No discarded material for {pos[0]}.")
+                return
+            head = (f"{len(entries)} discarded item(s) for {pos[0]}"
+                    + (f" matching '{query}'" if query else "")
+                    + " (newest-first):")
+            print(head)
+            for e in entries:
+                title = e.get("title", "") or e.get("idea_text", "") or "(untitled)"
+                lane = e.get("lane", "") or "?"
+                docs = e.get("doc_rels", []) or []
+                print(f"  - [{e.get('source','')}] {title} "
+                      f"(lane={lane}, {len(docs)} doc(s)) "
+                      f"id={e.get('entry_id','')}")
+                for r in docs:
+                    print(f"      · {r}")
+
+        elif sub == "next-prompt":
+            pos = _positionals()
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd next-prompt <project_id> "
+                      "--session <session_id>")
+                return
+            prompt = rnd_next_prompt(pos[0], session_id)
+            if not prompt:
+                print(f"(no handoff prompt) for session {session_id}.")
+                return
+            print(f"Next-stage handoff prompt for session {session_id}:")
+            print(prompt)
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

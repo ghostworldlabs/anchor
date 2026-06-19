@@ -195,13 +195,19 @@ def test_main_reraises_non_in_use_bind_error(monkeypatch, tmp_path):
 
 
 def test_make_server_ephemeral_unaffected_by_exclusive(monkeypatch, tmp_path):
-    """port=0 binds must use the plain ThreadingHTTPServer (no exclusive class),
-    proving ephemeral binds used across the suite are unaffected."""
+    """port=0 binds must use a plain ThreadingHTTPServer with NO exclusive bind,
+    proving ephemeral binds used across the suite are unaffected. (v10: the
+    ephemeral server is the quiet-disconnect ThreadingHTTPServer subclass, which
+    only swallows benign client-teardown errors and has NO exclusive bind — so
+    the discriminating intent is "is a ThreadingHTTPServer AND is not the
+    exclusive-bind class".)"""
     from http.server import ThreadingHTTPServer
     gui = _load_gui(monkeypatch, tmp_path)
     server = gui.make_server("127.0.0.1", 0)
     try:
-        # Exactly the base class for ephemeral ports — not the exclusive subclass.
-        assert type(server) is ThreadingHTTPServer
+        # A plain threading server (incl. the quiet-disconnect subclass) — and
+        # explicitly NOT the exclusive-bind class used for the real :8777 port.
+        assert isinstance(server, ThreadingHTTPServer)
+        assert not isinstance(server, gui._ExclusiveThreadingHTTPServer)
     finally:
         server.server_close()

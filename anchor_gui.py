@@ -439,6 +439,7 @@ import handoff as _handoff
 import preview_server as _preview
 import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
+import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -2055,6 +2056,10 @@ def _registry_session_view(rec):
         "artifact_path": "",
         "title": label,
         "kind": "",
+        # v10 Wave 4: grass→project lineage stamp. Just an idea id — SAFE (never
+        # worktree_path/branch). Lets a board tile show the "from grass: <idea>"
+        # back-link chip when this session's chain traces back to a grass idea.
+        "grass_origin": (rec.get("grass_origin") or ""),
         # v7 Wave 3 merge markers (consumed only by _gather_project_sessions):
         "from_registry": True,
         "_reg_session_id": rec.get("session_id") or "",
@@ -2304,6 +2309,167 @@ _GRASS_STATUS_LABEL = {
 }
 
 
+# v10 Wave 7 — Boneyard: human label for each locked source (D3).
+_BONEYARD_SOURCE_LABEL = {
+    _boneyard.SOURCE_KILLED: "killed",
+    _boneyard.SOURCE_DELETED: "deleted",
+    _boneyard.SOURCE_GRASS_DELETED: "grass-deleted",
+}
+
+
+def _boneyard_entry_view(project_id, entry) -> dict:
+    """SAFE projection of a Boneyard entry + server-built traversal-safe doc links.
+
+    The entry comes from ``boneyard.list_entries`` / ``boneyard.search``, already a
+    SAFE projection (only the public ``_SAFE_KEYS`` — never an absolute path /
+    worktree / branch). We add ``doc_links`` (``[{name, href}]``) by routing EVERY
+    ``doc_rel`` through the existing traversal-safe ``/artifact?path=<rel>`` route
+    (W7 routing decision: the produced docs survive on disk by their main-folder
+    rel path under Option A regardless of source — killed/deleted/grass-deleted —
+    so /artifact is ALWAYS resolvable and consistent; no fragile /report job_id
+    resolution from a content-addressed effort id). The href is path+query escaped;
+    the route itself rejects ``..``/absolute/symlink-escape. No absolute path /
+    worktree / branch is ever emitted.
+    """
+    e = entry or {}
+    pid_q = url_quote(str(project_id), safe="")
+    links = []
+    for rel in (e.get("doc_rels", []) or []):
+        rel = str(rel or "").strip()
+        if not rel:
+            continue
+        name = rel.replace("\\", "/").rsplit("/", 1)[-1] or rel
+        href = f"/artifact/{pid_q}?path={url_quote(rel, safe='')}"
+        links.append({"name": name, "href": href})
+    # ``when_display`` is the formatted, LOCAL-tz timestamp string computed ONCE on
+    # the server (v10 Wave 7 fix). BOTH the server initial render
+    # (_render_boneyard_entry_html) AND the client live-search render
+    # (_boneyardEntryHtml) use it verbatim, so the displayed time is byte-identical
+    # across the initial paint and a post-search re-render (the client used to
+    # re-format ``when`` in UTC, causing a ~tz-offset jump on the first search).
+    # ``when`` (raw epoch) is kept too for any ordering/raw use. SAFE: a formatted
+    # string only — no path / worktree / branch.
+    when_raw = e.get("when", 0)
+    when_display = ""
+    try:
+        if when_raw:
+            when_display = datetime.fromtimestamp(
+                float(when_raw)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        when_display = ""
+    return {
+        "entry_id": e.get("entry_id", ""),
+        "source": e.get("source", ""),
+        "source_label": _BONEYARD_SOURCE_LABEL.get(e.get("source", ""),
+                                                   e.get("source", "")),
+        "session_id": e.get("session_id", ""),
+        "lane": e.get("lane", ""),
+        "title": e.get("title", ""),
+        "summary_excerpt": e.get("summary_excerpt", ""),
+        "idea_text": e.get("idea_text", ""),
+        "when": when_raw,
+        "when_display": when_display,
+        "doc_links": links,
+    }
+
+
+def _render_boneyard_entry_html(view) -> str:
+    """Render ONE Boneyard entry as a ``.byentry`` (collapsed; expands to summary +
+    doc links). All engine/user content HTML-escaped. ``view`` is the
+    ``_boneyard_entry_view`` shape (SAFE projection + ``doc_links``)."""
+    src = view.get("source", "")
+    src_lbl = html_lib.escape(view.get("source_label", src) or src)
+    src_cls = html_lib.escape(src, quote=True)
+    # RAW title escaped EXACTLY ONCE (quote-safe). ``title`` here is the escaped
+    # string reused below; we must NOT re-escape it (the v10-W7 double-escape bug
+    # turned ``A & B`` into ``A &amp;amp; B`` because the already-escaped value was
+    # passed back through html.escape on the data-title attribute).
+    title_raw = view.get("title", "") or "(untitled)"
+    title = html_lib.escape(title_raw, quote=True)
+    lane = (view.get("lane", "") or "").strip()
+    lane_chip = (f"<span class='bylanechip'>{html_lib.escape(lane)}</span>"
+                 if lane else "")
+    # The displayed timestamp is the server-computed, LOCAL-tz ``when_display`` from
+    # the SAFE projection — the SAME string the client live-search render uses, so
+    # the initial paint and a post-search re-render are byte-identical (no tz jump).
+    when_txt = view.get("when_display", "") or ""
+    when_chip = (f"<span class='bywhen'>{html_lib.escape(when_txt)}</span>"
+                 if when_txt else "")
+    # The expand body: full summary/idea text + doc links.
+    summary = (view.get("summary_excerpt", "") or "").strip()
+    idea = (view.get("idea_text", "") or "").strip()
+    body_text = summary or idea
+    if body_text:
+        sum_html = (f"<div class='bysum'>{html_lib.escape(body_text)}</div>")
+    else:
+        sum_html = ("<div class='bysum dim'>No summary captured.</div>")
+    # A short collapsed excerpt (the first line of whatever body we have).
+    excerpt = body_text.splitlines()[0] if body_text else ""
+    exc_html = (f"<div class='byexc'>{html_lib.escape(excerpt)}</div>"
+                if excerpt else "")
+    links = view.get("doc_links", []) or []
+    if links:
+        rows = "".join(
+            f"<a class='bydoc' href='{html_lib.escape(l['href'], quote=True)}' "
+            f"target='_blank' rel='noopener'>{html_lib.escape(l['name'])}</a>"
+            for l in links)
+        docs_html = (f"<div class='bydocs'><div class='h'>Documents</div>"
+                     f"{rows}</div>")
+    else:
+        docs_html = ("<div class='bydocs'><div class='h'>Documents</div>"
+                     "<span class='none'>No documents.</span></div>")
+    eid = html_lib.escape(view.get("entry_id", ""), quote=True)
+    return (
+        f"<div class='byentry' data-byentry=\"{eid}\" data-source='{src_cls}' "
+        f"data-title=\"{title}\" "
+        f"onclick='toggleBoneyardEntry(this)'>"
+        f"<div class='byhd'>"
+        f"<span class='bybadge {src_cls}'>{src_lbl}</span>"
+        f"<div class='bymeta'><div class='bytitle'>{title}</div>{exc_html}</div>"
+        f"{lane_chip}{when_chip}<span class='bycar'>&#9656;</span>"
+        f"</div>"
+        f"<div class='bybody' onclick='event.stopPropagation()'>"
+        f"{sum_html}{docs_html}"
+        f"</div>"
+        f"</div>"
+    )
+
+
+def _render_boneyard_panel(project_id) -> str:
+    """Render the Boneyard panel template (hidden; cloned into ``#panelStack`` by
+    ``openBoneyard()``): a search box over a newest-first entry list. The initial
+    entries are server-rendered (so the DOM positive/negative assertions are real);
+    live search re-fetches ``/api/rnd/boneyard?q=`` and re-renders the list. An
+    honest empty state when the project has no discarded material."""
+    entry = _rnd.get_project(project_id)
+    folder = (entry or {}).get("folder_path", "")
+    try:
+        raw = _boneyard.list_entries(folder, project_id)
+    except Exception:
+        raw = []
+    views = [_boneyard_entry_view(project_id, e) for e in raw]
+    if views:
+        rows = "".join(_render_boneyard_entry_html(v) for v in views)
+        list_html = rows
+    else:
+        # Honest empty state — NO fabricated entries (Wave-7 negative).
+        list_html = ("<div class='byempty' data-byempty='1'>"
+                     "Nothing discarded yet. Killed sessions with material, "
+                     "deleted sessions, and deleted grass ideas land here.</div>")
+    return (
+        "<div class='boneyard' id='boneyardView'>"
+        "<div class='bytop'>"
+        "<span class='ic'>&#9760;</span>"
+        "<span class='lbl'>Discarded material</span>"
+        "<span class='sp'></span>"
+        "<input class='bysearch' id='boneyardSearch' type='search' "
+        "placeholder='search discarded&hellip;' oninput='searchBoneyard()'>"
+        "</div>"
+        f"<div class='bylist' id='boneyardList'>{list_html}</div>"
+        "</div>"
+    )
+
+
 def _render_grass_column_tile(folder_path, project_id) -> str:
     """Render the Grass LANE column content: a single tile that OPENS the
     full-width two-pane idea workbench panel (v5 Wave 5).
@@ -2378,11 +2544,13 @@ def _render_grass_workbench(folder_path, project_id) -> str:
         with ``.idchip``/``.stchip``/``.srcchip``) · ``.gwork`` (the selected
         idea's workbench: title + id + status, ``.desc``, ``.devbar`` with
         Develop 🔬 Research / 📐 Plan + engine toggle + → Promote to a lane, a
-        ``.tpane`` workbench terminal, and ``.ghist`` refinement history with
-        per-version pull buttons).
+        ``.gterms`` block of TWO independent, collapsible ``.gterm`` workbench
+        terminals (v10 Wave 3 — one per lane: research, plan), and ``.ghist``
+        refinement history with per-version pull buttons).
 
     The JS (``openGrassWorkbench`` / ``selectGrassIdea`` / ``filterGrass`` /
-    ``developGrass`` / ``pullGrass``) wires interactivity; this server render
+    ``toggleGrassTerminal`` / ``developGrass`` / ``pullGrass``) wires interactivity;
+    this server render
     provides the data-bearing DOM (so the rendered-DOM assertions are real).
     """
     try:
@@ -2682,6 +2850,26 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
             f"<span class='tiechip' title='Open the planning session this build "
             f"executed on' onclick=\"openLinkedPlanning(event,'{lp_sid}')\">"
             f"&#9741; Planning: {lp_lbl} &#9656;</span>")
+    # v10 Wave 4 FIX 2 (D8): the board-tile "from grass" lineage chip. When this
+    # session's record carries a ``grass_origin`` (set on the dev session at
+    # export, or INHERITED down the chain by start_session FIX 1), render a chip
+    # on the plan/build board tile that links back to the originating grass idea
+    # — satisfying D8 VISIBLY on the board (not only in the opened panel). The
+    # chip reads ONLY the SAFE projection field ``grass_origin`` (an idea id —
+    # never worktree_path/branch). Its label + dead-state ("idea removed") are
+    # resolved client-side by ``_resolveGrassOriginChips`` against the loaded
+    # grass data, so the server render stays cheap and the panel + tile chips
+    # share one dead-chip code path. Only plan/build columns carry it (the lanes
+    # the mockup depicts); research is the chain root, never "from" itself.
+    grass_chip = ""
+    origin = (rep.get("grass_origin") or "").strip()
+    if origin and trio_lane in ("plan", "planning", "build"):
+        origin_attr = html_lib.escape(origin, quote=True)
+        grass_chip = (
+            f"<span class='grassorigin' data-grass-origin=\"{origin_attr}\" "
+            f"data-grass-pending=\"1\" "
+            f"title='This work traces back to a grass idea — click to open it'>"
+            f"&#127793; from grass</span>")
     return (
         f"<div class='tile lane-tile{extra}' data-session=\"{sid_attr}\" "
         f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{live_data}{tie_data} "
@@ -2694,6 +2882,7 @@ def _render_lane_tile(sv, trio_lane, project_id, folder_path=None,
         f"<div class='st'>{''.join(st_bits)}</div>"
         f"{counts}"
         f"{tie_chip}"
+        f"{grass_chip}"
         f"</div>"
     )
 
@@ -2936,6 +3125,14 @@ def render_project_window_html(project_id: str) -> str:
     status = render_status_line_html(project_id)
     header_rollup = render_header_rollup_html(project_id)
     tasks_html = render_project_tasks_html(project_id)
+    # v10 Wave 7: the Boneyard panel, rendered ONCE as a hidden template the panel
+    # manager (openBoneyard) clones into #panelStack — same idiom as the grass
+    # workbench template.
+    boneyard_tpl = (
+        "<div id='boneyardTpl' style='display:none'>"
+        + _render_boneyard_panel(project_id)
+        + "</div>"
+    )
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -3087,13 +3284,40 @@ def render_project_window_html(project_id: str) -> str:
         "margin-bottom:4px}"
         ".devbar .lbl{font-size:11px;color:var(--text-dim)}.devbar .sp{flex:1}"
         ".mini.go{border-color:rgba(34,197,94,.5)}"
-        ".grass-workbench .tpane{background:#05070c;border:1px solid var(--border);"
-        "border-radius:8px;overflow:hidden;margin-top:11px;resize:vertical;"
-        "min-height:150px;display:flex;flex-direction:column}"
-        ".grass-workbench .tpane .tbar{display:flex;align-items:center;gap:8px;"
-        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border)}"
-        ".grass-workbench .tpane .tbar .lab{font-size:11px;color:var(--text-dim)}"
-        ".grass-workbench .tpane .term-host{flex:1;overflow:auto;min-height:120px}"
+        # v10 Wave 3 — TWO independent, labeled, collapsible terminal hosts
+        # (research + plan). Each is a .gterm with its own bar + toggle caret; a
+        # collapsed one HIDES its term-host (the session stays LIVE underneath).
+        ".devbar .mini.go.on{background:rgba(34,197,94,.13);"
+        "border-color:var(--success);color:#d8ffe6}"
+        ".devbar .mini.go .car{display:inline-block;width:11px;font-size:10px;"
+        "color:var(--text-dim);margin-left:4px}"
+        ".devbar .mini.go.on .car{color:var(--success)}"
+        ".grass-workbench .gterms{margin-top:11px;display:flex;"
+        "flex-direction:column;gap:11px}"
+        ".grass-workbench .gterm{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden;display:flex;flex-direction:column;"
+        "resize:vertical;min-height:150px}"
+        ".grass-workbench .gterm[data-lane='research']{border-left:3px solid var(--success)}"
+        ".grass-workbench .gterm[data-lane='plan']{border-left:3px solid var(--accent)}"
+        ".grass-workbench .gterm .tbar{display:flex;align-items:center;gap:8px;"
+        "padding:5px 9px;background:#11141c;border-bottom:1px solid var(--border);"
+        "cursor:pointer}"
+        ".grass-workbench .gterm .tbar .lab{font-size:11px;color:var(--text-dim)}"
+        ".grass-workbench .gterm .tbar .lab b{color:var(--text)}"
+        ".grass-workbench .gterm .tbar .sp{flex:1}"
+        ".grass-workbench .gterm .tbar .car{font-size:11px;color:var(--text-dim);"
+        "width:14px;text-align:center}"
+        ".grass-workbench .gterm .tbar .gsave{font-size:10.5px;padding:2px 7px;cursor:pointer}"
+        ".grass-workbench .gterm .tbar .gsave:disabled{opacity:.4;cursor:default}"
+        # v10 Wave 4 — per-lane Archive control (distinct from Save).
+        ".grass-workbench .gterm .tbar .garchive{font-size:10.5px;padding:2px 7px;"
+        "cursor:pointer}"
+        ".grass-workbench .gterm .tbar .garchive:disabled{opacity:.4;cursor:default}"
+        ".grass-workbench .gterm .term-host{flex:1;overflow:auto;min-height:120px}"
+        ".grass-workbench .gterm.collapsed{resize:none;min-height:0}"
+        ".grass-workbench .gterm.collapsed .term-host{display:none}"
+        ".grass-workbench .gterm.collapsed{border-style:dashed;opacity:.92}"
+        ".grass-workbench .gterm .stale{color:var(--text-dim);font-size:10px}"
         ".ghist{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
         ".ghist .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
         "color:var(--text-dim);margin-bottom:7px}"
@@ -3103,9 +3327,89 @@ def render_project_window_html(project_id: str) -> str:
         ".ghist .hr a{color:var(--accent);text-decoration:none}"
         ".ghist .hr .sp{flex:1}"
         ".ghist-empty{font-size:11.5px;color:var(--text-dim)}"
+        # v10 Wave 4 — Archived material list (per-idea bundles: docs + summary).
+        ".garch{margin-top:13px;border-top:1px solid var(--border);padding-top:10px}"
+        ".garch .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:7px}"
+        ".garch .ar{font-size:12px;color:var(--text);padding:6px 0;"
+        "border-bottom:1px solid var(--border);display:flex;gap:9px;"
+        "align-items:center;flex-wrap:wrap}"
+        ".garch .ar .lnchip{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:.5px;background:#1b2030;padding:1px 6px;border-radius:5px;"
+        "color:var(--text-dim)}"
+        ".garch .ar .alink{color:var(--accent);text-decoration:none}"
+        ".garch .ar .sp{flex:1}"
+        ".garch .ar .garch-nodoc,.garch .ar .garch-nosum{color:var(--text-dim);"
+        "font-style:italic;font-size:11px}"
+        ".garch-empty{font-size:11.5px;color:var(--text-dim)}"
+        # v10 Wave 4 — panel-header "from grass: <idea>" lineage back-link chip.
+        ".grassorigin{font-size:10.5px;background:#15301c;color:#7be0a0;"
+        "border:1px solid #2a5a3a;padding:1px 8px;border-radius:9px;cursor:pointer;"
+        "margin-left:6px;white-space:nowrap}"
+        ".grassorigin:hover{background:#1c3d26}"
+        ".grassorigin.removed{background:#1b1e26;color:#6b7280;"
+        "border-color:#33384a;cursor:default;opacity:.7}"
+        ".grassorigin.removed:hover{background:#1b1e26}"
         "@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(108,156,252,.5)}"
         "70%{box-shadow:0 0 0 6px rgba(108,156,252,0)}"
         "100%{box-shadow:0 0 0 0 rgba(108,156,252,0)} }"
+        # ── v10 Wave 7 — Boneyard panel (per-project discarded material) ──────
+        # A search box over a newest-first list of discard entries; each entry has
+        # a source badge (killed/deleted/grass-deleted), title, when, lane, a short
+        # excerpt/idea text, and (expanded) the full text + doc links (open via the
+        # safe /artifact route in a new tab). Honest empty state when nothing was
+        # discarded. Matches the cockpit dark-slate styling.
+        ".boneyard{display:flex;flex-direction:column;min-width:0}"
+        ".bytop{display:flex;align-items:center;gap:9px;padding:10px 14px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex-wrap:wrap}"
+        ".bytop .ic{font-size:15px;margin-right:2px}"
+        ".bytop .lbl{font-size:11px;color:var(--text-dim)}"
+        ".bytop .sp{flex:1}"
+        ".bysearch{font-size:12px;padding:5px 10px;border-radius:7px;"
+        "border:1px solid var(--border);background:var(--surface);color:var(--text);"
+        "min-width:200px}"
+        ".bylist{padding:8px 12px;overflow:auto;max-height:560px;"
+        "display:flex;flex-direction:column;gap:8px}"
+        ".byentry{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:8px;overflow:hidden}"
+        ".byentry .byhd{display:flex;align-items:center;gap:9px;padding:9px 12px;"
+        "cursor:pointer;flex-wrap:wrap}"
+        ".byentry .byhd:hover{background:#20242f}"
+        ".byentry .bytitle{font-size:12.5px;color:var(--text);font-weight:500;"
+        "min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+        "max-width:100%}"
+        ".byentry .byexc{font-size:11px;color:var(--text-dim);margin-top:2px;"
+        "overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        ".byentry .bymeta{min-width:0;flex:1}"
+        ".bybadge{font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;"
+        "padding:2px 8px;border-radius:20px;border:1px solid var(--border);"
+        "color:var(--text-dim);white-space:nowrap}"
+        ".bybadge.killed{color:var(--warning);border-color:rgba(251,191,36,.4);"
+        "background:rgba(251,191,36,.08)}"
+        ".bybadge.deleted{color:var(--danger);border-color:rgba(248,113,113,.4);"
+        "background:rgba(248,113,113,.08)}"
+        ".bybadge.grass-deleted{color:var(--success);"
+        "border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)}"
+        ".bylanechip{font-size:10px;color:var(--text-dim);"
+        "border:1px solid var(--border);border-radius:5px;padding:1px 6px}"
+        ".bywhen{font-size:10px;color:var(--text-dim);white-space:nowrap}"
+        ".bycar{font-size:11px;color:var(--text-dim);width:14px;text-align:center}"
+        ".byentry .bybody{display:none;padding:0 13px 12px;"
+        "border-top:1px solid var(--border)}"
+        ".byentry.open .bybody{display:block}"
+        ".byentry .bysum{font-size:12px;color:var(--text);margin:11px 0 8px;"
+        "white-space:pre-wrap;line-height:1.45}"
+        ".byentry .bysum.dim{color:var(--text-dim);font-style:italic}"
+        ".bydocs{display:flex;flex-direction:column;gap:5px}"
+        ".bydocs .h{font-size:10px;text-transform:uppercase;letter-spacing:1px;"
+        "color:var(--text-dim);margin-bottom:2px}"
+        ".bydoc{font-size:12px;color:var(--accent);text-decoration:none;"
+        "font-family:ui-monospace,Consolas,monospace}"
+        ".bydoc:hover{text-decoration:underline}"
+        ".bydocs .none{font-size:11px;color:var(--text-dim);font-style:italic}"
+        ".byempty{padding:26px 14px;color:var(--text-dim);font-size:13px;"
+        "text-align:center}"
         ".taskstrip{border-top:1px solid var(--border);padding:11px 16px}"
         ".rnd-status-line{margin:0;display:flex;gap:8px;flex-wrap:wrap}"
         ".rnd-lane{padding:4px 10px;border-radius:6px;background:#1b2030;"
@@ -3176,6 +3480,11 @@ def render_project_window_html(project_id: str) -> str:
         # linked build session. Advisory chrome — fades out after a few seconds.
         ".autobuild-note{margin:6px 0;padding:6px 10px;border-radius:6px;"
         "background:#0f291b;border:1px solid #22c55e;color:#86efac;"
+        "font-size:12px;font-weight:600}"
+        # v10 Wave 2: a subtle hint shown when a handoff opens the next stage with
+        # the prompt PASTED-but-UNSENT in the input — "review & press Enter to run".
+        ".pendpaste-hint{margin:6px 0;padding:6px 10px;border-radius:6px;"
+        "background:#1a1530;border:1px solid #7c6cf0;color:#cbc4ff;"
         "font-size:12px;font-weight:600}"
         ".panel{border-top:1px solid var(--border);background:var(--surface);"
         "position:relative}"
@@ -3427,6 +3736,13 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini rnd-accent' id='openTermBtn' "
         "onclick=\"newTermSession('general','claude')\">"
         "&#9000; Open terminal</button>"
+        # v10 Wave 7 (#3): "Boneyard" — open the per-project searchable list of
+        # DISCARDED material (hard-killed-w/-material + v9-deleted + deleted-grass
+        # ideas). Opens an inline panel in #panelStack (like the grass workbench);
+        # read-only (GET /api/rnd/boneyard); docs open via the safe /artifact route.
+        "<button class='rnd-mini' id='openBoneyardBtn' "
+        "onclick=\"openBoneyard()\" title='Discarded material (searchable)'>"
+        "&#9760; Boneyard</button>"
         # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
         # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
         # (a token-gated read). Unlinked → a "Link GitHub" button (linkGithub());
@@ -3474,6 +3790,9 @@ def render_project_window_html(project_id: str) -> str:
         # empty when there are no live sessions; populated by renderSessionBar.)
         "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
+        # v10 Wave 7: the Boneyard panel template (hidden; cloned into #panelStack
+        # by openBoneyard()).
+        + boneyard_tpl +
         # ── Linked tasks strip (kept compact) ──
         f"<div class='taskstrip'>{tasks_html}</div>"
         "</div>"
@@ -3487,6 +3806,10 @@ def render_project_window_html(project_id: str) -> str:
         f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
         "<script>\n"
         f"var PROJECT_ID = {pid_js};\n"
+        # v10 Wave 5 (DEFECT-2 fix): the [grass-dev] label marker, injected from
+        # the single Python constant so the JS top-strip filter can't drift from
+        # ``effort_history.is_grass_dev_label``.
+        f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
@@ -3513,8 +3836,17 @@ _PROJECT_WINDOW_JS = r"""
 // ════════════════════════════════════════════════════════════════════════════
 
 function _esc(s) {
+  // FULL HTML escaping (defense-in-depth). Escapes &, <, > AND BOTH quote chars
+  // (" -> &quot;, ' -> &#39;) so output is safe inside double- OR single-quoted
+  // attributes — not just text nodes. (Pre-v10-W7-fix this escaped only & < >,
+  // which let a title/value containing a double-quote break out of a
+  // data-title="..." attribute → stored DOM XSS in the Boneyard live search.)
+  // Verified safe for every _esc(...) caller in _PROJECT_WINDOW_JS: each puts the
+  // result into HTML text content or a quoted attribute, never a JS-string/URL
+  // context where &quot;/&#39; would render literally wrong.
   return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // ── Access token (D4) ──────────────────────────────────────────────────────
@@ -3540,6 +3872,13 @@ window.addEventListener('DOMContentLoaded', function () {
   // v8 Wave 3: render the GitHub link / auto-push header controls from the
   // current remote_status (read-only GET; never a model call / network).
   try { renderRemoteControls(); } catch (e) {}
+  // v10 Wave 4 FIX 2/3: resolve the board-tile "from grass" chips (label +
+  // dead-state) once the grass data is loaded (read-only GET). Best-effort.
+  try {
+    _loadGrassData().then(function () {
+      try { _resolveGrassOriginChips(document); } catch (e) {}
+    });
+  } catch (e) {}
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -3793,6 +4132,136 @@ async function promoteGrass(ideaId, lane) {
   setTimeout(repopulate, 600);
 }
 
+// ── v10 Wave 7 — Boneyard (per-project searchable discard list) ─────────────
+// The header "Boneyard" button opens a FULL-WIDTH panel in #panelStack (cloned
+// from #boneyardTpl, the server-rendered search box + entry list). Live search
+// re-fetches GET /api/rnd/boneyard?q=<term> (so it exercises boneyard.search) and
+// re-renders the list; each entry expands to its summary + doc links (opened via
+// the safe /artifact route). Read-only — no mutation, no model call.
+function _boneyardTokenQ() {
+  var t = _anchorToken();
+  return t ? ('&token=' + encodeURIComponent(t)) : '';
+}
+
+function openBoneyard() {
+  var stack = document.getElementById('panelStack');
+  var tpl = document.getElementById('boneyardTpl');
+  if (!stack || !tpl) return;
+  var existing = document.getElementById('boneyardPanel');
+  if (existing) {
+    if (existing.classList.contains('minimized')) existing.classList.remove('minimized');
+    existing.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    return;
+  }
+  var panel = document.createElement('div');
+  panel.className = 'panel';
+  panel.id = 'boneyardPanel';
+  var bar = document.createElement('div');
+  bar.className = 'pbar';
+  var title = document.createElement('span');
+  title.className = 'ti';
+  title.textContent = '☠ Boneyard — discarded material';
+  var sp = document.createElement('span');
+  sp.className = 'sp';
+  var minBtn = document.createElement('button');
+  minBtn.className = 'panelbtn min';
+  minBtn.title = 'Minimize';
+  minBtn.textContent = '–';
+  minBtn.onclick = function (e) { e.stopPropagation(); panel.classList.add('minimized'); };
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'panelbtn close';
+  closeBtn.title = 'Close';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = function (e) { e.stopPropagation(); panel.remove(); };
+  bar.appendChild(title); bar.appendChild(sp);
+  bar.appendChild(minBtn); bar.appendChild(closeBtn);
+  var pin = document.createElement('div');
+  pin.className = 'pin';
+  pin.innerHTML = tpl.innerHTML;        // clone the rendered boneyard markup
+  panel.appendChild(bar); panel.appendChild(pin);
+  stack.appendChild(panel);
+  panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+// Build ONE entry's DOM from a server entry view (the SAFE projection + doc_links).
+function _boneyardEntryHtml(e) {
+  var src = e.source || '';
+  var srcLbl = e.source_label || src || '';
+  var title = e.title || '(untitled)';
+  var body = ((e.summary_excerpt || '').trim()) || ((e.idea_text || '').trim());
+  var excerpt = body ? body.split('\n')[0] : '';
+  // Use the server-computed, LOCAL-tz when_display verbatim (the SAME string the
+  // server initial render emits) so the displayed time is byte-identical across
+  // the initial paint and this live-search re-render. (Pre-fix this re-formatted
+  // e.when in UTC via toISOString → a ~tz-offset jump the instant a user searched.)
+  var whenTxt = e.when_display || '';
+
+  var laneChip = e.lane ? ('<span class="bylanechip">' + _esc(e.lane) + '</span>') : '';
+  var whenChip = whenTxt ? ('<span class="bywhen">' + _esc(whenTxt) + '</span>') : '';
+  var excHtml = excerpt ? ('<div class="byexc">' + _esc(excerpt) + '</div>') : '';
+  var sumHtml = body
+    ? ('<div class="bysum">' + _esc(body) + '</div>')
+    : ('<div class="bysum dim">No summary captured.</div>');
+  var docsInner = '';
+  var links = e.doc_links || [];
+  if (links.length) {
+    for (var i = 0; i < links.length; i++) {
+      docsInner += '<a class="bydoc" href="' + _esc(links[i].href)
+        + '" target="_blank" rel="noopener">' + _esc(links[i].name) + '</a>';
+    }
+  } else {
+    docsInner = '<span class="none">No documents.</span>';
+  }
+  var docsHtml = '<div class="bydocs"><div class="h">Documents</div>' + docsInner + '</div>';
+  return '<div class="byentry" data-byentry="' + _esc(e.entry_id || '')
+    + '" data-source="' + _esc(src) + '" data-title="' + _esc(title)
+    + '" onclick="toggleBoneyardEntry(this)">'
+    + '<div class="byhd"><span class="bybadge ' + _esc(src) + '">' + _esc(srcLbl)
+    + '</span><div class="bymeta"><div class="bytitle">' + _esc(title) + '</div>'
+    + excHtml + '</div>' + laneChip + whenChip + '<span class="bycar">&#9656;</span></div>'
+    + '<div class="bybody" onclick="event.stopPropagation()">' + sumHtml + docsHtml + '</div>'
+    + '</div>';
+}
+
+// Toggle one entry's expanded (summary + doc links) state.
+function toggleBoneyardEntry(el) {
+  if (!el) return;
+  el.classList.toggle('open');
+}
+
+// Live search: re-fetch GET /api/rnd/boneyard?q=<term> (exercises boneyard.search)
+// and re-render the list newest-first. Debounced lightly. An empty result shows
+// the honest empty state (no fabricated rows).
+var _boneyardSearchTimer = null;
+function searchBoneyard() {
+  if (_boneyardSearchTimer) clearTimeout(_boneyardSearchTimer);
+  _boneyardSearchTimer = setTimeout(_doBoneyardSearch, 120);
+}
+async function _doBoneyardSearch() {
+  var panel = document.getElementById('boneyardPanel');
+  if (!panel) return;
+  var box = panel.querySelector('#boneyardSearch');
+  var list = panel.querySelector('#boneyardList');
+  if (!list) return;
+  var q = box ? (box.value || '').trim() : '';
+  try {
+    var r = await fetch('/api/rnd/boneyard?project_id=' + encodeURIComponent(PROJECT_ID)
+                        + '&q=' + encodeURIComponent(q) + _boneyardTokenQ());
+    var data = await r.json();
+    if (!data || !data.ok) return;
+    var entries = data.entries || [];
+    if (!entries.length) {
+      list.innerHTML = '<div class="byempty" data-byempty="1">'
+        + (q ? 'No discarded material matches &ldquo;' + _esc(q) + '&rdquo;.'
+             : 'Nothing discarded yet.') + '</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < entries.length; i++) html += _boneyardEntryHtml(entries[i]);
+    list.innerHTML = html;
+  } catch (e) { /* read-only; leave the current list on a transient error */ }
+}
+
 // ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
 // The grass lane column tile (.grass-tile) opens a FULL-WIDTH two-pane workbench
 // panel in #panelStack (the column is too narrow for the two-pane workbench). The
@@ -3803,6 +4272,11 @@ async function promoteGrass(ideaId, lane) {
 var _grassEngine = 'claude';   // workbench engine toggle (research can use gemini)
 var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
 var _grassDevSession = null;    // the active Develop session id (for Save refinement)
+// v10 Wave 3 — per-(idea,lane) develop session id, so each of the TWO terminal
+// hosts (research, plan) remembers its own LIVE session across collapse/expand.
+// Key: ideaId + '::' + lane → session_id. A collapse never clears this (the
+// session stays live); only switching ideas resets via selectGrassIdea.
+var _grassLaneSession = {};
 
 function openGrassWorkbench() {
   var stack = document.getElementById('panelStack');
@@ -3879,6 +4353,9 @@ async function _loadGrassData() {
       for (var i = 0; i < data.ideas.length; i++) _grassData[data.ideas[i].idea_id] = data.ideas[i];
     }
   } catch (e) { /* read-only; workbench still works from row data */ }
+  // v10 Wave 4 FIX 2/3: now that grass data is current, resolve any pending
+  // board-tile "from grass" chips (label/dead-state). Idempotent.
+  try { _resolveGrassOriginChips(document); } catch (e) {}
 }
 function _grassTokenQ() {
   var t = _anchorToken();
@@ -3934,27 +4411,76 @@ function selectGrassIdea(ideaId) {
     + 'idea’s text + any refinements. Output is saved here with a new id and '
     + 'is pullable into a Research or Plan run.</div>'
     + '<div class="devbar"><span class="lbl">Develop:</span>'
-    + '<button class="mini go" data-dev="research">🔬 Research</button>'
-    + '<button class="mini go" data-dev="plan">📐 Plan</button>'
+    + '<button class="mini go" data-dev="research">🔬 Research<span class="car">▸</span></button>'
+    + '<button class="mini go" data-dev="plan">📐 Plan<span class="car">▸</span></button>'
     + '<span class="sp"></span>'
     + '<span class="lbl">Engine</span>'
     + '<button class="mini gengtog">◆ Claude</button>'
     + '<button class="mini gexport" title="Copy this idea’s research/plan work up '
     + 'into real lane tiles; the idea stays here marked promoted">⇪ Export to project</button></div>'
-    + '<div class="tpane"><div class="tbar"><span class="lab">workbench terminal '
-    + '· select Develop to start</span><span class="sp"></span>'
-    + '<button class="mini gsave" disabled title="Save the develop session\'s '
-    + 'output as a new grass-&lt;id&gt;/dev-N refinement">💾 Save refinement</button></div>'
-    + '<div class="term-host" data-grass-term="1"></div></div>'
+    // v10 Wave 3 — TWO independent, labeled, collapsible terminal hosts
+    // (research, plan). Each renders COLLAPSED until its Develop button starts/
+    // focuses its (idea, lane) session; collapsing hides the host, never kills.
+    // Each terminal owns its OWN Save-refinement control (.gsave) so a save
+    // targets the bound session for THAT lane — never the last-focused global one.
+    + '<div class="gterms">'
+    + '<div class="gterm collapsed" data-lane="research">'
+    + '<div class="tbar"><span class="ic">🔬</span>'
+    + '<span class="lab"><b>Research terminal</b> · not started</span>'
+    + '<span class="sp"></span>'
+    // v10 Wave 4 — Archive (D7): persist THIS session produced docs + summary
+    // into a per-idea bundle that survives kill. DISTINCT from Save (a text
+    // snapshot). Disabled until this lane Develop session is live.
+    + '<button class="mini garchive" data-archive-lane="research" disabled '
+    + 'title="Archive THIS research session\'s produced docs + summary into a '
+    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
+    // v10 Wave 5 — Advance to Plan: push THIS research dev session → a linked
+    // grass PLAN dev session using the SAME paste-NOT-submit seeded handoff as
+    // the project-level advance. Only the research lane carries this control.
+    // Disabled until this research Develop session is live.
+    + '<button class="mini gadvance" data-advance="research" disabled '
+    + 'title="Advance this research to a linked Plan session in the workbench — '
+    + 'the Crucible prompt is pasted UNSENT for you to review and press Enter">'
+    + '➜ Advance to Plan</button>'
+    + '<button class="mini gsave" data-save-lane="research" disabled '
+    + 'title="Save THIS research session\'s output as a new '
+    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
+    + '<span class="car">▸</span></div>'
+    + '<div class="term-host" data-grass-term="research"></div></div>'
+    + '<div class="gterm collapsed" data-lane="plan">'
+    + '<div class="tbar"><span class="ic">📐</span>'
+    + '<span class="lab"><b>Plan terminal</b> · not started</span>'
+    + '<span class="sp"></span>'
+    + '<button class="mini garchive" data-archive-lane="plan" disabled '
+    + 'title="Archive THIS plan session\'s produced docs + summary into a '
+    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
+    + '<button class="mini gsave" data-save-lane="plan" disabled '
+    + 'title="Save THIS plan session\'s output as a new '
+    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
+    + '<span class="car">▸</span></div>'
+    + '<div class="term-host" data-grass-term="plan"></div></div>'
+    + '</div>'
+    // v10 Wave 4 — Archived material: the per-idea archive bundles (persisted
+    // docs + summary), newest-first. Empty until the idea is archived.
+    + '<div class="garch"><div class="h">Archived material · saved docs + '
+    + 'summary tied to this idea</div><div class="garch-rows"></div></div>'
     + '<div class="ghist"><div class="h">Refinement history · pull any version '
     + 'into another effort</div><div class="ghist-rows"></div></div>';
   work.innerHTML = html;
-  // Wire the devbar.
+  // Wire the devbar — each Develop button TOGGLES its lane's terminal.
   var dbtns = work.querySelectorAll('button[data-dev]');
   for (var d = 0; d < dbtns.length; d++) {
     dbtns[d].onclick = (function (lane) {
-      return function () { developGrass(ideaId, lane); };
+      return function () { toggleGrassTerminal(ideaId, lane); };
     })(dbtns[d].getAttribute('data-dev'));
+  }
+  // Clicking a terminal's bar toggles that same terminal (collapse/expand) —
+  // independent of the other; never kills the session.
+  var bars = work.querySelectorAll('.gterm .tbar');
+  for (var bi = 0; bi < bars.length; bi++) {
+    bars[bi].onclick = (function (lane) {
+      return function () { toggleGrassTerminal(ideaId, lane); };
+    })(bars[bi].parentNode.getAttribute('data-lane'));
   }
   var eng = work.querySelector('.gengtog');
   if (eng) eng.onclick = function () {
@@ -3963,12 +4489,94 @@ function selectGrassIdea(ideaId) {
   };
   var exp = work.querySelector('.gexport');
   if (exp) exp.onclick = function () { exportGrass(ideaId); };
-  // The Save-refinement button is enabled only once a Develop session is live for
-  // THIS idea (set in developGrass); switching ideas starts disabled.
+  // PER-LANE Save-refinement: each .gterm bar carries its OWN Save button that
+  // saves THAT lane's bound (idea, lane) session — never the last-focused global.
+  // The button lives inside the bar, so stop propagation so a Save click does not
+  // also collapse/expand the terminal. Each starts disabled until its lane's
+  // Develop session is live (enabled in developGrass), and switching ideas resets.
+  var svbtns = work.querySelectorAll('button[data-save-lane]');
+  for (var si = 0; si < svbtns.length; si++) {
+    svbtns[si].disabled = true;
+    svbtns[si].onclick = (function (lane) {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        saveGrassRefinement(ideaId, lane);
+      };
+    })(svbtns[si].getAttribute('data-save-lane'));
+  }
+  // v10 Wave 4 — PER-LANE Archive: each .gterm bar carries its OWN Archive button
+  // that archives THAT lane's bound (idea, lane) session's docs + summary into the
+  // idea bundle. Lives inside the bar → stopPropagation so it does not also
+  // collapse/expand. Disabled until its lane's Develop session is live.
+  var arbtns = work.querySelectorAll('button[data-archive-lane]');
+  for (var ai = 0; ai < arbtns.length; ai++) {
+    arbtns[ai].disabled = true;
+    arbtns[ai].onclick = (function (lane) {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        archiveGrassSession(ideaId, lane);
+      };
+    })(arbtns[ai].getAttribute('data-archive-lane'));
+  }
+  // v10 Wave 5 — Advance to Plan: the research lane's own control pushes its dev
+  // session → a linked grass PLAN dev session. Lives inside the research bar →
+  // stopPropagation so it does not also collapse/expand. Disabled until the
+  // research Develop session is live (enabled in developGrass).
+  var advbtns = work.querySelectorAll('button[data-advance]');
+  for (var avi = 0; avi < advbtns.length; avi++) {
+    advbtns[avi].disabled = true;
+    advbtns[avi].onclick = (function () {
+      return function (ev) {
+        if (ev) ev.stopPropagation();
+        advanceGrassToPlan(ideaId);
+      };
+    })();
+  }
+  // Both terminal hosts render COLLAPSED + unbound for a freshly selected idea.
   _grassDevSession = null;
-  var sv = work.querySelector('.gsave');
-  if (sv) { sv.disabled = true; sv.onclick = function () { saveGrassRefinement(ideaId); }; }
+  _grassLaneSession[ideaId + '::research'] = null;
+  _grassLaneSession[ideaId + '::plan'] = null;
+  _renderGrassArchives(work, rec.archives || []);
   _renderGrassHistory(work, rec.refinements || []);
+}
+
+// _renderGrassArchives(work, archives): render the per-idea Archived-material list
+// (persisted docs + a summary link), newest-first. Each archive's docs link via
+// /artifact/<pid>?path=<rel>; its summary via /summary/<pid>/<lane>/<sid>. Honest
+// empty state when none. (v10 Wave 4.)
+function _renderGrassArchives(work, archives) {
+  var box = work.querySelector('.garch-rows');
+  if (!box) return;
+  if (!archives || !archives.length) {
+    box.innerHTML = '<div class="garch-empty">No archived material yet — Archive '
+      + 'a Research or Plan session to save its docs + summary here.</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < archives.length; i++) {
+    var a = archives[i];
+    var lane = a.lane || '';
+    var sid = a.session_id || '';
+    var docs = a.docs || [];
+    var doclinks = '';
+    for (var d = 0; d < docs.length; d++) {
+      var rel = docs[d];
+      var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(rel);
+      var nm = rel.split('/').pop();
+      doclinks += '<a class="alink" target="_blank" href="' + _esc(href) + '">'
+        + _esc(nm) + '</a>';
+    }
+    if (!doclinks) doclinks = '<span class="garch-nodoc">(no docs)</span>';
+    var sumhref = '/summary/' + encodeURIComponent(PROJECT_ID) + '/'
+      + encodeURIComponent(lane) + '/' + encodeURIComponent(sid);
+    var sumlink = (a.has_summary)
+      ? '<a class="alink" target="_blank" href="' + _esc(sumhref) + '">summary</a>'
+      : '<span class="garch-nosum">summary pending</span>';
+    html += '<div class="ar"><span class="lnchip">' + _esc(lane) + '</span> '
+      + doclinks + '<span class="sp"></span>' + sumlink + '</div>';
+  }
+  box.innerHTML = html;
 }
 
 function _renderGrassHistory(work, refs) {
@@ -3999,12 +4607,75 @@ function _renderGrassHistory(work, refs) {
   }
 }
 
-// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
-// refinements) and mount its terminal in the right pane's .term-host. Token-aware.
-async function developGrass(ideaId, lane) {
+// _grassWork(ideaId): the .gwork pane for THIS idea (fallback to the visible one).
+function _grassWork(ideaId) {
   var panel = document.getElementById('grassPanel');
-  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
-  if (!work) work = panel ? panel.querySelector('.gwork') : null;
+  if (!panel) return null;
+  return panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]')
+      || panel.querySelector('.gwork');
+}
+
+// _grassTermBox(work, lane): the .gterm container for one lane (research|plan).
+function _grassTermBox(work, lane) {
+  return work ? work.querySelector('.gterm[data-lane="' + _cssEsc(lane) + '"]') : null;
+}
+
+// toggleGrassTerminal(ideaId, lane): v10 Wave 3. Research and Plan each own a
+// SEPARATE, independently-collapsible terminal. Clicking a Develop button (or the
+// terminal's own bar):
+//   • if that lane's terminal is COLLAPSED → EXPAND it. If no session is bound
+//     yet, start/focus the (idea, lane) develop session (developGrass) and mount
+//     its xterm in THIS lane's host; if already mounted, just reveal it.
+//   • if that lane's terminal is EXPANDED → COLLAPSE (minimize) it. The session
+//     stays LIVE (the PTY + transport are untouched) — only the host is hidden.
+// The two lanes are fully independent: toggling one never touches the other.
+function toggleGrassTerminal(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var box = _grassTermBox(work, lane);
+  if (!box) return;
+  if (box.classList.contains('collapsed')) {
+    box.classList.remove('collapsed');
+    _setGrassToggle(work, lane, true);
+    // Bind a session the first time this lane is opened (or re-focus its terminal).
+    if (!_grassLaneSession[ideaId + '::' + lane]) {
+      developGrass(ideaId, lane);
+    } else {
+      var host = box.querySelector('[data-grass-term]');
+      if (host) host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      _grassDevSession = _grassLaneSession[ideaId + '::' + lane];
+    }
+  } else {
+    // COLLAPSE only — session stays live (do NOT unmount/kill the PTY).
+    box.classList.add('collapsed');
+    _setGrassToggle(work, lane, false);
+  }
+}
+
+// _setGrassToggle(work, lane, open): reflect the open/collapsed state on the
+// Develop button (active cue + ▾/▸ caret) and the terminal bar's caret.
+function _setGrassToggle(work, lane, open) {
+  if (!work) return;
+  var btn = work.querySelector('button[data-dev="' + _cssEsc(lane) + '"]');
+  if (btn) {
+    btn.classList.toggle('on', !!open);
+    var bc = btn.querySelector('.car');
+    if (bc) bc.textContent = open ? '▾' : '▸';
+  }
+  var box = _grassTermBox(work, lane);
+  if (box) {
+    var tc = box.querySelector('.tbar .car');
+    if (tc) tc.textContent = open ? '▾' : '▸';
+  }
+}
+
+// developGrass(ideaId, lane): start a SEEDED workbench session (the idea + its
+// refinements) and mount its terminal in THIS lane's own .gterm host. Token-aware.
+// Called by toggleGrassTerminal when a lane is first opened. The backend dedupes
+// on the live (idea, lane) session — research and plan are two DIFFERENT lanes, so
+// both can be live at once (two concurrent dev sessions per idea).
+async function developGrass(ideaId, lane) {
+  var work = _grassWork(ideaId);
   var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane, backend: _grassEngine};
   var r, data;
   try {
@@ -4023,39 +4694,174 @@ async function developGrass(ideaId, lane) {
   // (idea, lane). Re-clicking Develop focuses this same session (the backend
   // dedupes on the live (idea, lane) session and returns it). The board bridge
   // also excludes it server-side via the [grass-dev] label marker.
-  var host = work ? work.querySelector('[data-grass-term]') : null;
-  var lab = work ? work.querySelector('.tpane .lab') : null;
-  if (lab) lab.textContent = (_grassEngine) + ' · ' + lane + ' · ' + sid;
+  var box = _grassTermBox(work, lane);
+  var host = box ? box.querySelector('[data-grass-term]') : null;
+  var lab = box ? box.querySelector('.tbar .lab') : null;
+  var icon = (lane === 'plan') ? '📐' : '🔬';
+  var name = (lane === 'plan') ? 'Plan terminal' : 'Research terminal';
+  if (lab) lab.innerHTML = '<b>' + _esc(name) + '</b> · ' + _esc(_grassEngine)
+    + ' · grass-dev · ' + _esc(sid);
   if (host) {
     // Re-focus: if THIS session's terminal is already mounted, just bring it up.
     if (host.getAttribute('data-session') === sid && PANELS[sid]) {
       host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
     } else {
       host.setAttribute('data-session', sid);
-      PANELS[sid] = {el: panel, body: host, term: null, transport: null};
+      PANELS[sid] = {el: document.getElementById('grassPanel'), body: host, term: null, transport: null};
       _mountTerminal(sid, host);
     }
   }
-  // A develop session is now live for this idea → enable "Save refinement".
+  // Bind this session to THIS (idea, lane) so a later expand re-focuses it AND so
+  // Save-refinement targets the right host. Mark this lane's toggle OPEN.
+  _grassLaneSession[ideaId + '::' + lane] = sid;
   _grassDevSession = sid;
-  var sv = work ? work.querySelector('.gsave') : null;
+  _setGrassToggle(work, lane, true);
+  // Enable THIS lane's own Save-refinement button (the other lane's stays as-is).
+  var sv = box ? box.querySelector('button[data-save-lane="' + _cssEsc(lane) + '"]') : null;
   if (sv) sv.disabled = false;
+  // v10 Wave 4 — enable THIS lane's own Archive button too (the other stays as-is).
+  var ar = box ? box.querySelector('button[data-archive-lane="' + _cssEsc(lane) + '"]') : null;
+  if (ar) ar.disabled = false;
+  // v10 Wave 5 — enable the research lane's own Advance-to-Plan control once its
+  // dev session is live (only the research bar carries it).
+  if (lane === 'research') {
+    var adv = box ? box.querySelector('button[data-advance="research"]') : null;
+    if (adv) adv.disabled = false;
+  }
 }
 
-// saveGrassRefinement(ideaId): persist the live Develop session's output as a NEW
-// versioned refinement (grass-<id>/dev-N) and re-render the history so it appears
-// with a pull control. Closes the develop→save→appears loop end to end. The
-// session's visible terminal text is captured best-effort as the refinement text;
-// the session_id links the refinement to the run. Token-aware.
-async function saveGrassRefinement(ideaId) {
-  var panel = document.getElementById('grassPanel');
-  var work = panel ? panel.querySelector('.gwork[data-idea="' + _cssEsc(ideaId) + '"]') : null;
-  if (!work) work = panel ? panel.querySelector('.gwork') : null;
-  var host = work ? work.querySelector('[data-grass-term]') : null;
+// archiveGrassSession(ideaId, lane): v10 Wave 4 (D7). Archive THIS LANE's live
+// Develop session's PRODUCED docs + summary into a per-idea bundle that survives a
+// kill — DISTINCT from Save (a text snapshot). POST /api/rnd/grass_archive →
+// effort_history.archive_grass_session. The idea STAYS in grass. Re-renders the
+// Archived-material list with the new bundle. Honest: if nothing was produced the
+// server returns ok:false with a reason (surfaced, not faked). Token-aware.
+async function archiveGrassSession(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var sid = _grassLaneSession[ideaId + '::' + lane] || null;
+  if (!sid) { alert('[archive] open this lane’s Develop session first'); return; }
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_archive', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_archive', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[archive error] ' + e.message); return; }
+  if (!data.ok) {
+    alert('[nothing to archive] ' + (data.reason || data.error || 'no docs produced yet'));
+    return;
+  }
+  // Re-fetch the grass data so the idea record's archives ride the next render,
+  // then re-render THIS idea's Archived-material list with the new bundle.
+  await _loadGrassData();
+  var rec = _grassData[ideaId] || {};
+  _renderGrassArchives(work, rec.archives || []);
+}
+
+// advanceGrassToPlan(ideaId): v10 Wave 5 (Pillar 2 #2). From THIS idea's RESEARCH
+// dev session, push research → plan using the SAME paste-NOT-submit seeded handoff
+// as the project-level advance — staying INSIDE the grass workbench, linked. POST
+// /api/rnd/grass_advance → effort_history.advance_grass_research_to_plan builds the
+// Crucible prompt from the research dev session's persisted docs, starts (or
+// focuses) the CONTAINED (idea, 'plan') dev session with the prompt delivered
+// PASTED-but-UNSENT, links it to the research session (parent_session_id +
+// grass_origin), and records the stage edge. On success we ENSURE the grass PLAN
+// terminal is OPEN and mounts the returned plan dev session (reusing the Wave-3
+// toggle/mount path), so the pasted-unsent prompt becomes visible in the plan
+// terminal input for the user to review and press Enter. The research dev session
+// must be live first (the control is disabled until then). Honest: if there's no
+// research material the server returns ok:false + a reason (surfaced, not faked).
+// Token-aware. No auto-submit (the prompt is the v10 pending paste).
+async function advanceGrassToPlan(ideaId) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var rsid = _grassLaneSession[ideaId + '::research'] || null;
+  if (!rsid) { alert('[advance] open this idea’s Research session first'); return; }
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_advance', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_advance', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[advance error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    // Honest note: no research material to advance from (no fabricated prompt).
+    alert('[nothing to advance] ' + ((data && (data.reason || data.error))
+      || 'no research material yet — develop the research session first'));
+    return;
+  }
+  var rec = data.session;
+  var psid = rec.session_id;
+  // Mount the returned grass PLAN dev session into the plan lane's OWN host, then
+  // ensure the plan terminal toggles OPEN (reuse the Wave-3 mount/toggle path). We
+  // bind the (idea, 'plan') session id BEFORE toggling so toggleGrassTerminal
+  // re-focuses THIS session instead of starting a second develop session.
+  var box = _grassTermBox(work, 'plan');
+  var host = box ? box.querySelector('[data-grass-term]') : null;
+  var lab = box ? box.querySelector('.tbar .lab') : null;
+  if (lab) lab.innerHTML = '<b>Plan terminal</b> · ' + _esc(_grassEngine)
+    + ' · grass-dev · ' + _esc(psid);
+  if (host && host.getAttribute('data-session') !== psid) {
+    host.setAttribute('data-session', psid);
+    PANELS[psid] = {el: document.getElementById('grassPanel'), body: host, term: null, transport: null};
+    _mountTerminal(psid, host);
+  }
+  _grassLaneSession[ideaId + '::plan'] = psid;
+  _grassDevSession = psid;
+  // Reveal the plan terminal (it may be collapsed) + reflect the open state.
+  if (box) box.classList.remove('collapsed');
+  _setGrassToggle(work, 'plan', true);
+  // Enable the plan lane's own Save + Archive controls (its dev session is live).
+  var sv = box ? box.querySelector('button[data-save-lane="plan"]') : null;
+  if (sv) sv.disabled = false;
+  var ar = box ? box.querySelector('button[data-archive-lane="plan"]') : null;
+  if (ar) ar.disabled = false;
+  // The Crucible prompt is delivered PASTED-but-UNSENT (pending paste, flushed by
+  // the terminal transport after the skill greets). Hint the user it is sitting in
+  // the input line for review — nothing was submitted.
+  // v10 Wave 5 (DEFECT-1 fix): only flash the "prompt ready" hint when the server
+  // actually delivered/queued a fresh paste on THIS advance (data.paste_delivered).
+  // A focus of an ALREADY-handed-off plan session (re-advance, or one the user is
+  // mid-typing in) delivers nothing → we must NOT flash a misleading hint over an
+  // input we didn't write to. (On a fresh mint AND on the develop-plan-first focus
+  // that just queued the handoff, paste_delivered is true.)
+  if (data.paste_delivered) {
+    _flashPendingPasteHint(psid);
+  }
+}
+
+// saveGrassRefinement(ideaId, lane): persist THIS LANE's live Develop session's
+// output as a NEW versioned refinement (grass-<id>/dev-N) and re-render the history
+// so it appears with a pull control. Closes the develop→save→appears loop end to
+// end. v10 Wave 3 — research and plan are INDEPENDENT lanes, each with its OWN Save
+// control, so the save targets THAT lane's bound (idea, lane) session (NOT the
+// last-focused global one). The session's visible terminal text is captured
+// best-effort as the refinement text; the session_id links the refinement to the
+// run. Saving requires that lane's terminal be open (its Develop session live).
+// Token-aware.
+async function saveGrassRefinement(ideaId, lane) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  // THIS lane's bound develop session (set in developGrass). No session ⇒ nothing
+  // to save (the per-lane Save button is disabled until its lane is live anyway).
+  var sid = _grassLaneSession[ideaId + '::' + lane] || null;
+  if (!sid) { alert('[save] open this lane’s Develop session first'); return; }
+  // Capture THIS lane's own terminal host text (its [data-grass-term="<lane>"]).
+  var box = _grassTermBox(work, lane);
+  var host = box ? box.querySelector('[data-grass-term][data-session="'
+                                     + _cssEsc(sid) + '"]') : null;
+  if (!host && box) host = box.querySelector('[data-grass-term]');
   var text = host ? ((host.innerText || '').trim().slice(-4000)) : '';
   var payload = {project_id: PROJECT_ID, idea_id: ideaId,
-                 session_id: _grassDevSession || null,
-                 label: 'Refinement from workbench session', text: text};
+                 session_id: sid,
+                 label: 'Refinement from ' + lane + ' workbench session', text: text};
   var r, data;
   try {
     r = await _postJson('/api/rnd/grass_save_refinement', payload);
@@ -4074,6 +4880,9 @@ async function saveGrassRefinement(ideaId) {
   // The idea is now REFINED — reflect it on the workbench chip + the list row.
   var chip = work.querySelector('h3 .stchip');
   if (chip) { chip.className = 'stchip refined'; chip.textContent = 'refined'; }
+  // The .gli list rows live under #grassPanel (the left list) — look the row up
+  // there (the prior code read an undeclared `panel`, throwing a ReferenceError).
+  var panel = document.getElementById('grassPanel');
   var lrow = panel ? panel.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]') : null;
   if (lrow) lrow.setAttribute('data-status', 'refined');
 }
@@ -4423,6 +5232,18 @@ function _isTerminalStatus(status) {
   return status === 'done' || status === 'failed';
 }
 
+// v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench develop session keeps
+// its research/plan lane (so its trio skill seeds) but its registry label is
+// stamped with the [grass-dev] prefix — it must NEVER appear on the top strip
+// (#sessionBar) or in MANAGED/FINISHED. It lives ONLY in the workbench pane,
+// where it is mounted by session id directly (developGrass → _mountTerminal),
+// not via repopulate(). Mirrors effort_history.is_grass_dev_label; the prefix is
+// injected from the Python constant (GRASS_DEV_LABEL_PREFIX) so they can't drift.
+function _isGrassDevLabel(label) {
+  var p = (typeof GRASS_DEV_LABEL_PREFIX !== 'undefined') ? GRASS_DEV_LABEL_PREFIX : '[grass-dev] ';
+  return typeof label === 'string' && label.indexOf(p) === 0;
+}
+
 // repopulate(): fetch the project's live managed sessions from the registry and
 // re-sync the MANAGED map (so a tile / re-open keys on a real, stable record).
 // Kept under the historical name loadSessions too (callers use it).
@@ -4446,6 +5267,11 @@ async function repopulate() {
   for (var i = 0; i < sessions.length; i++) {
     var s = sessions[i];
     if (!s.session_id) continue;
+    // v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench develop session
+    // (research OR plan) is excluded from the top strip + MANAGED/FINISHED. It is
+    // mounted by session id directly in the workbench pane (developGrass), never
+    // via this path. Skip BEFORE it enters either map or renderSessionBar.
+    if (_isGrassDevLabel(s.label)) continue;
     // v6 Wave 4: a DELIBERATELY hard-killed session is GONE — never re-add it
     // (its registry record persists as 'done', which would otherwise re-enter it
     // as a greyed FINISHED tile). This preserves the v5 "killed tile stays gone".
@@ -4936,6 +5762,7 @@ function openPanel(sessionId) {
   }
   _loadPanelSummary(sessionId, summ);
   _loadChainBreadcrumb(sessionId, crumb);
+  _loadGrassOriginChip(sessionId, crumb);
   _wirePanelResize(sessionId, tpane);
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
@@ -5011,6 +5838,106 @@ function _loadChainBreadcrumb(sessionId, host) {
       });
     })
     .catch(function () {});
+}
+
+// _loadGrassOriginChip(sessionId, host): v10 Wave 4 (D8). If this session's chain
+// carries a grass_origin (it was exported/promoted from a grass idea, OR is a
+// downstream plan/build that inherited the stamp), render a "from grass: <idea>"
+// back-link chip into the panel header. Clicking it opens the Grass workbench
+// focused on that idea (openGrassWorkbench → selectGrassIdea). HONEST: no
+// grass_origin in the chain → no chip (no fabricated back-link). Read-only
+// (GET /api/rnd/chain, ?token=); best-effort (any error leaves no chip).
+function _loadGrassOriginChip(sessionId, host) {
+  if (!host) return;
+  var url = '/api/rnd/chain?project_id=' + encodeURIComponent(PROJECT_ID)
+    + '&session=' + encodeURIComponent(sessionId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var members = (d && d.ok && d.members) ? d.members : [];
+      // Find a grass_origin anywhere in the chain (this session or a sibling).
+      var origin = '';
+      for (var i = 0; i < members.length; i++) {
+        var go = (members[i] && members[i].grass_origin) || '';
+        if (go) { origin = go; break; }
+      }
+      // HONEST: empty origin → no chip (no fabricated back-link).
+      if (!origin) return;
+      // Ensure the grass data is loaded so we can resolve the idea title AND
+      // detect a DELETED origin (FIX 3 dead-chip). _loadGrassData is idempotent.
+      var done = function () {
+        var rec = (_grassData && _grassData[origin]) ? _grassData[origin] : null;
+        var chip = document.createElement('span');
+        chip.className = 'grassorigin';
+        chip.setAttribute('data-grass-origin', origin);
+        if (!rec) {
+          // DEAD CHIP: the originating idea no longer exists — render greyed/
+          // disabled, no live link (FIX 3). Keep the stamp; be honest in the UI.
+          chip.classList.add('removed');
+          chip.setAttribute('data-grass-removed', '1');
+          chip.title = 'The originating grass idea was removed';
+          chip.textContent = '🌱 from grass (idea removed)';
+          host.appendChild(chip);
+          return;
+        }
+        var label = (rec.title || rec.short_id || origin);
+        chip.title = 'This work traces back to a grass idea — click to open it';
+        chip.textContent = '🌱 from grass: ' + (label.length > 40
+          ? label.slice(0, 40) + '…' : label);
+        chip.onclick = function (ev) {
+          ev.stopPropagation();
+          if (typeof openGrassWorkbench === 'function') openGrassWorkbench();
+          // Focus the originating idea once the workbench list has rendered.
+          setTimeout(function () {
+            try { selectGrassIdea(origin); } catch (e) {}
+          }, 250);
+        };
+        host.appendChild(chip);
+      };
+      if (_grassData && Object.keys(_grassData).length) { done(); return; }
+      try { _loadGrassData().then(done).catch(done); } catch (e) { done(); }
+    })
+    .catch(function () {});
+}
+
+// _resolveGrassOriginChips(root): resolve every server-rendered board-tile
+// "from grass" chip placeholder (v10 Wave 4 FIX 2/3). The server emits a chip
+// stub carrying ONLY data-grass-origin (the SAFE idea id) + data-grass-pending;
+// here we resolve its label, dead-state, and click handler against the loaded
+// _grassData — exactly like the panel chip (shared dead-chip path). Idempotent:
+// a chip is processed once (its pending marker is cleared). Best-effort.
+function _resolveGrassOriginChips(root) {
+  root = root || document;
+  var pend = root.querySelectorAll('.grassorigin[data-grass-pending]');
+  for (var i = 0; i < pend.length; i++) {
+    var el = pend[i];
+    var origin = el.getAttribute('data-grass-origin') || '';
+    el.removeAttribute('data-grass-pending');
+    if (!origin) { el.style.display = 'none'; continue; }
+    var rec = (_grassData && _grassData[origin]) ? _grassData[origin] : null;
+    if (!rec) {
+      // DEAD CHIP on the tile: greyed/disabled, no live link (FIX 3).
+      el.classList.add('removed');
+      el.setAttribute('data-grass-removed', '1');
+      el.title = 'The originating grass idea was removed';
+      el.textContent = '🌱 from grass (idea removed)';
+      el.onclick = null;
+      continue;
+    }
+    var label = (rec.title || rec.short_id || origin);
+    el.title = 'This work traces back to a grass idea — click to open it';
+    el.textContent = '🌱 from grass: ' + (label.length > 40
+      ? label.slice(0, 40) + '…' : label);
+    (function (oid) {
+      el.onclick = function (ev) {
+        ev.stopPropagation();
+        if (typeof openGrassWorkbench === 'function') openGrassWorkbench();
+        setTimeout(function () {
+          try { selectGrassIdea(oid); } catch (e) {}
+        }, 250);
+      };
+    })(origin);
+  }
 }
 
 // _renderStaticTieCrumb(sessionId, host): the DISCOVERED build→planning fallback
@@ -5296,6 +6223,10 @@ async function advanceSession(sourceId, toLane) {
   };
   renderSessionBar();
   openPanel(sid);
+  // v10 Wave 2: the next-stage prompt is delivered PASTED-but-UNSENT (pending
+  // paste, flushed by the terminal transport after the skill greets). Hint the
+  // user that it is sitting in the input line for review — nothing was submitted.
+  _flashPendingPasteHint(sid);
   // v7 Wave 6: instant-in-column tile for the advanced (build) session.
   refreshBoard();
   setTimeout(repopulate, 600);
@@ -5648,6 +6579,16 @@ async function refreshBoard() {
     var board = document.getElementById('kanbanBoard');
     if (!board) return;                    // guard: container absent
     board.innerHTML = data.html;
+    // v10 Wave 4 FIX 2/3: the swapped-in board re-emits "from grass" chip stubs;
+    // resolve them (label/dead-state) against the loaded grass data. If grass
+    // data isn't loaded yet, fetch it (which itself re-resolves on completion).
+    try {
+      if (_grassData && Object.keys(_grassData).length) {
+        _resolveGrassOriginChips(board);
+      } else {
+        _loadGrassData();
+      }
+    } catch (e) {}
   } catch (e) { /* never throw into the UI */ }
 }
 
@@ -5822,6 +6763,8 @@ function _addAutoBuildTile(rec) {
   renderSessionBar();
   openPanel(sid);
   _flashAutoBuildNote(rec);
+  // v10 Wave 2: the build prompt is a PENDING PASTE (unsent) — hint the user.
+  _flashPendingPasteHint(sid);
 }
 
 // _flashAutoBuildNote(rec): a small, transient banner above the panel stack.
@@ -5839,6 +6782,25 @@ function _flashAutoBuildNote(rec) {
       if (note && note.parentNode) note.parentNode.removeChild(note);
     }, 6000);
   } catch (e) { /* the tile already landed; the note is advisory */ }
+}
+
+// _flashPendingPasteHint(sessionId): v10 Wave 2 — a subtle, transient hint above
+// the panel stack telling the user the next-stage prompt is PASTED but UNSENT in
+// the terminal input ("review & press Enter to run"). Nothing auto-submits; the
+// prompt is the v10 pending paste, flushed UNSENT by the terminal transport read.
+function _flashPendingPasteHint(sessionId) {
+  try {
+    var host = document.getElementById('panelStack') || document.body;
+    var note = document.createElement('div');
+    note.className = 'pendpaste-hint';
+    note.setAttribute('data-session', sessionId || '');
+    note.textContent = 'prompt ready — review & press Enter to run (nothing was submitted)';
+    if (host.firstChild) host.insertBefore(note, host.firstChild);
+    else host.appendChild(note);
+    setTimeout(function () {
+      if (note && note.parentNode) note.parentNode.removeChild(note);
+    }, 8000);
+  } catch (e) { /* advisory only */ }
 }
 
 // Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
@@ -8924,37 +9886,90 @@ function addTaskDomain(domain) {{
 
 # ── HTTP Server ────────────────────────────────────────────────────────
 
+# WinError codes for the benign "the client went away" socket conditions.
+# 10053 = WSAECONNABORTED (an established connection aborted by the host/software),
+# 10054 = WSAECONNRESET (connection reset by peer). These ride in on a generic
+# OSError on Windows (BufferedWriter.write → sock.sendall) rather than as the
+# typed ConnectionAbortedError / ConnectionResetError, so we sniff .winerror too.
+_BENIGN_DISCONNECT_WINERRORS = (10053, 10054)
+
+
+def _is_benign_disconnect(exc):
+    """True for a socket-teardown error that means the CLIENT closed the
+    connection mid-response — not a server bug. A browser closing a terminal
+    tab (or Playwright tearing down a page) makes the in-flight SSE/WS/HTTP
+    write raise one of these; treating them as a normal client-gone condition
+    is correct production behavior, never an error to surface or log loudly.
+
+    Catches the typed connection-teardown exceptions AND a Windows OSError whose
+    ``winerror`` is 10053/10054 (which is how the abort actually arrives on the
+    BufferedWriter.write → sock.sendall path). Deliberately TIGHT — it never
+    swallows a generic OSError/Exception that could hide a real defect.
+    """
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError,
+                        ConnectionAbortedError)):
+        return True
+    if isinstance(exc, OSError) and getattr(exc, "winerror", None) \
+            in _BENIGN_DISCONNECT_WINERRORS:
+        return True
+    return False
+
+
 class AnchorHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"  [{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
 
+    def log_error(self, format, *args):
+        # Quiet the benign client-disconnect noise the base class would log to
+        # stderr (it routes BrokenPipe/ConnectionReset/timeout messages here).
+        # Real protocol errors still surface via the normal response paths.
+        return
+
     def _send_json(self, data, code=200):
         body = json.dumps(data).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            # Client closed mid-response (browser tab close / Playwright
+            # teardown). Nothing left to send — swallow ONLY the benign
+            # disconnect; re-raise anything else.
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     def _send_html(self, html_text):
         body = html_text.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as exc:
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     def _send_bytes(self, data, content_type, cache="no-cache"):
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", cache)
-        self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", cache)
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception as exc:
+            if _is_benign_disconnect(exc):
+                return
+            raise
 
     # ── SSE for the interactive terminal (Wave 7) ────────────────────────────
     def _sse_event(self, event, data_obj):
@@ -8963,11 +9978,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
         Frame shape (per the SSE spec): an ``event:`` line, one ``data:`` line
         carrying a JSON payload, then a BLANK line terminating the event. Flushed
         immediately so a streaming client observes events as they arrive.
+
+        Teardown hardening: writing/flushing onto a ``wfile`` whose underlying
+        socket was already closed (client gone, or the request thread torn down
+        out from under a leaked pump) raises ``ValueError("I/O operation on
+        closed file")`` — which is a benign client-gone condition, not a server
+        bug, but it is NOT in the OSError family the stream loops guard on. We
+        normalize it to a ``BrokenPipeError`` so the existing
+        ``except (BrokenPipeError, ConnectionResetError, OSError)`` guards end
+        the stream CLEANLY (the daemon thread never raises a stray ValueError on
+        teardown). The benign socket-teardown OSErrors propagate unchanged for
+        those same guards; any non-benign error is re-raised untouched.
         """
         payload = json.dumps(data_obj, ensure_ascii=False)
         frame = f"event: {event}\ndata: {payload}\n\n"
-        self.wfile.write(frame.encode("utf-8"))
-        self.wfile.flush()
+        try:
+            self.wfile.write(frame.encode("utf-8"))
+            self.wfile.flush()
+        except ValueError as exc:
+            # I/O on a closed file (wfile closed under us) == client/connection
+            # gone. Re-raise as BrokenPipeError so the OSError-family guards
+            # catch it; never swallow a different ValueError.
+            if "closed file" in str(exc):
+                raise BrokenPipeError(str(exc)) from exc
+            raise
 
     def _serve_term_sse(self):
         """Stream a terminal session's output as Server-Sent Events.
@@ -9724,6 +10758,49 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
+            elif self.path.startswith("/api/rnd/boneyard"):
+                # Read-only (v10 Wave 7): the project's per-project Boneyard — a
+                # searchable list of DISCARDED material (hard-killed sessions w/
+                # material, v9-deleted sessions, deleted grass ideas). NO mutation,
+                # NO model call. AUTH: ``?token=`` (read-only GET; back-compat when
+                # no token set), mirroring /api/rnd/grass. Project-scoped (D4 —
+                # never a cross-project view).
+                #   /api/rnd/boneyard?project_id=<id>&q=<query>
+                # Empty ``q`` → ALL entries (newest-first); else boneyard.search.
+                # Each entry is the SAFE projection (boneyard._SAFE_KEYS — never an
+                # absolute path / worktree / branch) PLUS server-built, traversal-
+                # safe ``doc_links`` (href via the existing /artifact route — the
+                # file survives on disk by rel path regardless of source, Option A,
+                # so /artifact is ALWAYS resolvable and consistent across sources).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                query = (q.get("q", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            if query:
+                                entries = _boneyard.search(folder, pid, query)
+                            else:
+                                entries = _boneyard.list_entries(folder, pid)
+                        except Exception:
+                            entries = []
+                        out = [_boneyard_entry_view(pid, e) for e in entries]
+                        self._send_json({"ok": True, "entries": out, "q": query})
             elif self.path.startswith("/api/rnd/remote_status"):
                 # Read-only (v8 Wave 3): the project's GitHub link state for the
                 # header control — {linked, remote_url, auto_push}. NO mutation,
@@ -9872,6 +10949,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 for r in recs:
                     if not isinstance(r, dict):
                         continue
+                    # v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench
+                    # develop session (research/plan, [grass-dev] label) must NOT
+                    # surface on the top strip. It is mounted by session id
+                    # directly in the workbench pane (developGrass), not via this
+                    # projection, so dropping it here keeps the contained promise
+                    # at the source (the JS top-strip guard is the belt-and-braces
+                    # second line). Nothing else consumes this projection for
+                    # grass-dev sessions (the chain breadcrumb uses chain_members).
+                    if _eh.is_grass_dev_label(r.get("label")):
+                        continue
                     safe.append({
                         "session_id": r.get("session_id"),
                         "project_id": r.get("project_id", ""),
@@ -9882,6 +10969,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "created_at": r.get("created_at"),
                         "parent_session_id": r.get("parent_session_id", ""),
                         "chain_id": r.get("chain_id", ""),
+                        # v10 Wave 4: grass→project lineage (SAFE — idea id only,
+                        # never worktree_path/branch).
+                        "grass_origin": r.get("grass_origin", ""),
                     })
                 self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/chain"):
@@ -9920,6 +11010,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             "status": r.get("status", ""),
                             "parent_session_id": r.get("parent_session_id", ""),
                             "chain_id": r.get("chain_id", ""),
+                            # v10 Wave 4: grass→project lineage (SAFE — idea id only).
+                            "grass_origin": r.get("grass_origin", ""),
                         })
                     self._send_json({"ok": True, "chain_id": chain_id or "",
                                      "members": safe})
@@ -10043,6 +11135,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 self.send_response(404)
                 self.end_headers()
         except Exception as e:
+            if _is_benign_disconnect(e):
+                # Client closed the connection mid-GET (browser tab close /
+                # Playwright teardown). Not a server error — stop silently;
+                # the socket is gone so there's nothing to write back.
+                return
             _logger.error(f"GET {self.path} failed: {e}\n{traceback.format_exc()}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
@@ -11082,6 +12179,66 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
 
+        elif self.path == "/api/rnd/grass_archive":
+            # v10 Wave 4 (D7): ARCHIVE a grass dev session's produced docs +
+            # summary into a per-idea bundle (survives kill; available at
+            # promotion). Distinct from grass_save_refinement (a text snapshot).
+            # Token-gated by the do_POST middleware above. The idea STAYS in grass.
+            # HONEST: ok:false + reason when there is no dev session / no docs.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            lane = (body.get("lane", "") or "").strip()
+            if not pid or not idea_id or not lane:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id, idea_id and lane required"}, 400)
+            elif lane not in _eh.PROMOTE_LANES:
+                self._send_json(
+                    {"ok": False, "error": "lane must be one of %s"
+                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.archive_grass_session(pid, idea_id, lane)
+                    # ok:false is an honest "nothing to archive" (200, not an
+                    # error) — the bundle is None + a reason; never fabricated.
+                    self._send_json(res, 200)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+
+        elif self.path == "/api/rnd/grass_advance":
+            # v10 Wave 5 (Pillar 2 #2): ADVANCE a grass idea's RESEARCH dev session
+            # → a linked grass PLAN dev session, staying INSIDE the workbench, using
+            # the SAME paste-NOT-submit seeded handoff as the project-level advance
+            # (Wave 1/2). effort_history.advance_grass_research_to_plan builds the
+            # research→plan prompt from the research dev session's persisted docs,
+            # starts (or focuses) the CONTAINED (idea, 'plan') dev session with
+            # paste_prompt (held UNSENT) + parent_session_id (links the chain) +
+            # grass_origin, and records the stage edge. Token-gated by the do_POST
+            # middleware above. HONEST: ok:false + reason when there is no research
+            # session / no research material (no plan session minted, no fabricated
+            # prompt). The idea STAYS in grass.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False, "error": "project_id and idea_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    res = _eh.advance_grass_research_to_plan(
+                        pid, idea_id, backend=backend)
+                    # ok:false is an honest "nothing to advance" (200, not an
+                    # error) — session is None + a reason; never fabricated.
+                    self._send_json(res, 200)
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
         elif self.path == "/api/rnd/grass_delete":
             # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side
             # stores (pointer-record + index entry + refinements dir + the
@@ -11254,36 +12411,56 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                 break
                     except Exception:
                         pass
+                    # v10 Wave 2: split delivery. The reviewable TASK PROMPT (the
+                    # NEXT-PROMPT.md body — the real persisted upstream doc paths +
+                    # "read these first, then plan" + load Crucible) is delivered as
+                    # a PENDING PASTE (held in the new PTY input UNSENT until the
+                    # user presses Enter), NOT folded into the auto-submitted seed.
+                    # The grounded summary context still seeds phase-1 (load+greet)
+                    # so the model has the prior context when it greets. Best-effort:
+                    # an empty prompt → falls back to today's seed-context path.
                     seed_context = _build_continue_seed(
                         folder, pid, src_lane, source)
-                    # v8 Wave 4: for a research→plan advance, prepend the GENERATED
-                    # handoff seed naming the correct skill (Crucible) + the REAL
-                    # persisted research-doc paths ("read these first"), then the
-                    # summary context. Best-effort — degrades to the summary seed.
-                    if (src_lane == "research"
-                            and to_lane in ("plan", "planning")):
-                        try:
-                            doc_seed = _termsess.build_research_to_plan_seed(
-                                pid, source)
-                        except Exception:
-                            doc_seed = None
-                        if doc_seed:
-                            seed_context = (
-                                doc_seed + ("\n\n" + seed_context
-                                            if seed_context else ""))
+                    try:
+                        next_prompt = _handoff.build_next_stage_prompt(
+                            folder, pid, source, to_lane)
+                    except Exception:
+                        next_prompt = ""
+                    paste = (next_prompt or "").strip() or None
                     try:
                         if backend:
                             rec = _termsess.start_session(
                                 pid, to_lane, backend=backend,
                                 seed_context=seed_context,
+                                paste_prompt=paste,
                                 parent_session_id=source)
                         else:
                             rec = _termsess.start_session(
                                 pid, to_lane, seed_context=seed_context,
+                                paste_prompt=paste,
                                 parent_session_id=source)
                     except _termsess.TerminalSessionError as exc:
                         self._send_json({"ok": False, "error": str(exc)}, 400)
                     else:
+                        # Write BOTH durable artifacts into the new planning
+                        # worktree: NEXT-PROMPT.md (the reviewable prompt) always,
+                        # and HANDOFF.md when a plan-set context applies (here the
+                        # upstream is research, so prime_worktree is a no-op unless
+                        # a plan set is discoverable — best-effort either way). Then
+                        # record the research->plan stage edge.
+                        new_wt = rec.get("worktree_path", "")
+                        new_sid = rec.get("session_id", "")
+                        if new_wt and paste:
+                            try:
+                                _handoff.write_next_prompt(new_wt, paste)
+                            except Exception:
+                                pass
+                        try:
+                            _handoff.record_stage_link(
+                                folder, pid, source, new_sid,
+                                kind="research->plan")
+                        except Exception:
+                            pass
                         self._send_json({"ok": True, "session": rec,
                                          "advanced_from": source,
                                          "to_lane": to_lane})
@@ -11321,9 +12498,25 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                   "session",
                          "reason": "not-planning"}, 400)
                 else:
-                    # 1) Capture the plan set BEFORE marking done (no reap here, so
-                    #    the worktree survives — but capture-first mirrors the
-                    #    kill path and is robust either way).
+                    # 0) FIX 2 — North-Star hole: PERSIST the planning session's
+                    #    produced docs into the MAIN project (copy + commit to main
+                    #    HEAD) BEFORE we capture the plan set or open the build. The
+                    #    finish→build path marks the session DONE via update_session
+                    #    WITHOUT kill(), so persist_session_docs is NOT otherwise
+                    #    run — the plan docs authored in the planning worktree would
+                    #    never reach main, and the build worktree (created off main
+                    #    HEAD by auto_advance) would lack NEXT-PROMPT.md/HANDOFF.md's
+                    #    referenced paths. capture_session_docs COPIES + COMMITS the
+                    #    docs WITHOUT reaping the worktree, so the planning session
+                    #    stays a reopenable finished tile (v6 non-destructive finish
+                    #    semantics preserved). Best-effort — never blocks the finish.
+                    try:
+                        _termsess.capture_session_docs(session, project_id=pid)
+                    except Exception:
+                        pass
+                    # 1) Capture the plan set AFTER persisting (so the just-authored
+                    #    plan docs are now on main HEAD and discoverable). No reap
+                    #    here, so the worktree survives either way.
                     plan_set = _termsess.capture_plan_set(pid, session)
                     if not plan_set:
                         # Honest: no plan set yet ⇒ no build (worktree untouched;
@@ -11369,6 +12562,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
         else:
             self._send_json({"ok": False, "error": "Unknown endpoint"}, 404)
       except Exception as e:
+            if _is_benign_disconnect(e):
+                # Client closed the connection mid-POST. Not a server error.
+                return
             _logger.error(f"POST {self.path} failed: {e}\n{traceback.format_exc()}")
             self._send_json({"ok": False, "error": str(e)}, 500)
 
@@ -11389,7 +12585,29 @@ def _heartbeat_watchdog():
     return
 
 
-class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
+class _QuietDisconnectMixin:
+    """Server mixin that quiets BENIGN client-disconnect errors.
+
+    socketserver calls ``handle_error(request, client_address)`` when a request
+    handler raises an unhandled exception, and by default it prints a full
+    traceback to stderr. A browser closing a terminal tab (or Playwright tearing
+    a page down) makes an in-flight SSE/WS/HTTP write raise
+    ``ConnectionAbortedError``/``ConnectionResetError``/``BrokenPipeError`` (on
+    Windows often a bare ``OSError`` with ``winerror`` 10053/10054). That is the
+    client going away, not a server bug — so we swallow it silently here as a
+    last line of defense (the handlers already break out of their stream loops
+    on these). Any OTHER exception still gets the normal noisy traceback so real
+    defects are never hidden.
+    """
+
+    def handle_error(self, request, client_address):
+        exc = sys.exc_info()[1]
+        if _is_benign_disconnect(exc):
+            return
+        super().handle_error(request, client_address)
+
+
+class _ExclusiveThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
     """ThreadingHTTPServer that claims EXCLUSIVE ownership of its port.
 
     On Windows, ``socket.SO_EXCLUSIVEADDRUSE`` guarantees only ONE process can
@@ -11418,6 +12636,14 @@ class _ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
         super().server_bind()
 
 
+class _QuietThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
+    """Plain ThreadingHTTPServer for the ephemeral ``port=0`` path (tests /
+    health check) that also quiets benign client-disconnect errors — so a
+    Playwright teardown racing an in-flight stream can't print a traceback or
+    flake the gate."""
+    daemon_threads = True
+
+
 def make_server(host="127.0.0.1", port=8777):
     """Construct + bind the threading HTTP server.
 
@@ -11438,7 +12664,7 @@ def make_server(host="127.0.0.1", port=8777):
     if _paths.use_exclusive_bind(host, port):
         server_cls = _ExclusiveThreadingHTTPServer
     else:
-        server_cls = ThreadingHTTPServer
+        server_cls = _QuietThreadingHTTPServer
     return _paths.bind_with_retry(
         lambda: server_cls((host, port), AnchorHandler)
     )
