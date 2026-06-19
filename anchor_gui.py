@@ -4967,6 +4967,28 @@ async function pullGrass(ideaId, refinementId, lane) {
   setTimeout(repopulate, 600);
 }
 
+// _refreshGrassCounts(root): recompute the .gtabs filter-count chips from the
+// REMAINING .gli rows under `root` (a live #grassPanel OR the hidden source
+// #grassWorkbenchTpl) and write them into the matching .gtab[data-filter] .n
+// spans (all = total rows, raw/refined/promoted = rows by data-status). Deriving
+// from the actual rows (not an arithmetic decrement) means the counts can never
+// drift after a delete. Guarded for missing elements (no throw).
+function _refreshGrassCounts(root) {
+  if (!root) return;
+  var rows = root.querySelectorAll('.gli[data-status]');
+  var counts = {all: 0, raw: 0, refined: 0, promoted: 0};
+  for (var i = 0; i < rows.length; i++) {
+    counts.all++;
+    var st = rows[i].getAttribute('data-status');
+    if (counts.hasOwnProperty(st)) counts[st]++;
+  }
+  var keys = ['all', 'raw', 'refined', 'promoted'];
+  for (var k = 0; k < keys.length; k++) {
+    var tab = root.querySelector('.gtab[data-filter="' + keys[k] + '"] .n');
+    if (tab) tab.textContent = String(counts[keys[k]]);
+  }
+}
+
 // deleteGrassIdea(ideaId): permanently DELETE a grass idea (v9 Wave 2). confirm()-
 // gated (an irreversible removal), then POST /api/rnd/grass_delete {confirm:true}.
 // On success the idea row is removed from the workbench list AND — if it was the
@@ -5009,6 +5031,13 @@ async function deleteGrassIdea(ideaId) {
   var stpl = document.getElementById('grassWorkbenchTpl');
   var trow = stpl && stpl.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]');
   if (trow) trow.remove();
+  // v10.1 FIX 2 follow-up — the .gtabs filter-count chips were server-rendered
+  // ONCE into the template and never updated, so after a delete they read stale
+  // (e.g. "All 1" over an empty list, both live AND on a later re-clone). Recompute
+  // the counts from the REMAINING rows on BOTH the live panel (immediate update)
+  // and the source template (so a close→reopen re-clone shows correct counts).
+  _refreshGrassCounts(panel);
+  _refreshGrassCounts(stpl);
 }
 
 // ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────

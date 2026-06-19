@@ -106,6 +106,28 @@ def test_fix2_delete_grass_idea_prunes_source_template():
     assert re.search(r"\.querySelector\('\.gli\[data-idea=\"' \+ _cssEsc\(ideaId\)",
                      body), "deleteGrassIdea must select the template's .gli row by idea"
     assert "trow.remove()" in body or ".remove()" in body.split("grassWorkbenchTpl")[1]
+    # v10.1 FIX 2 follow-up — after the row prune, the stale .gtabs filter-count
+    # chips must be recomputed on BOTH the live panel AND the source template
+    # (else the re-clone shows e.g. "All 1" over an empty list).
+    assert "_refreshGrassCounts(panel)" in body, \
+        "deleteGrassIdea must refresh the live panel's .gtabs counts"
+    assert "_refreshGrassCounts(stpl)" in body, \
+        "deleteGrassIdea must refresh the template's .gtabs counts (re-clone path)"
+
+
+def test_fix2_refresh_grass_counts_derives_from_rows():
+    """_refreshGrassCounts(root) must recompute the .gtab .n counts from the
+    REMAINING .gli[data-status] rows under root (all = total, raw/refined/promoted
+    by status) — derive-from-rows, never an arithmetic decrement (can't drift) —
+    writing into .gtab[data-filter] .n, guarded for missing elements."""
+    js = _project_window_js()
+    body = _fn_body(js, "_refreshGrassCounts", "root")
+    assert "querySelectorAll('.gli[data-status]')" in body, \
+        "must count the remaining idea rows"
+    assert "data-filter=" in body and ".n" in body, \
+        "must write into the .gtab[data-filter] .n chip spans"
+    # Guarded: bails on a missing root (no throw).
+    assert "if (!root) return" in body or "if(!root)return" in body.replace(" ", "")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -455,6 +477,22 @@ def test_fix2_deleted_grass_idea_stays_gone_after_reopen(server):
             '#grassPanel .gli[data-idea="' + idea_id + '"]', "els=>els.length")
         assert n == 0, \
             "the deleted grass idea must STAY gone after a close→reopen re-clone"
+
+        # v10.1 FIX 2 follow-up — the .gtabs filter-count chips must match the now-
+        # EMPTY list: all/raw/refined/promoted all read "0". Pre-fix they were
+        # server-rendered once ("All 1 / raw 1 / …") and never updated, so they
+        # stayed stale over the empty list on the re-clone. Derives from rows so
+        # it can't drift. (This was the reported symptom.)
+        def _count(flt):
+            return pg.eval_on_selector(
+                '#grassPanel .gtab[data-filter="' + flt + '"] .n',
+                "e=>e.textContent.trim()")
+        assert _count("all") == "0", "the 'All' chip must read 0 over an empty list"
+        assert _count("raw") == "0", "the 'raw' chip must read 0 over an empty list"
+        assert _count("refined") == "0", \
+            "the 'refined' chip must read 0 over an empty list"
+        assert _count("promoted") == "0", \
+            "the 'promoted' chip must read 0 over an empty list"
 
         pg.screenshot(path=str(shot), full_page=True)
         assert not errors, f"JS console errors: {errors}"
