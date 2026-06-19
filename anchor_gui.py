@@ -1351,16 +1351,26 @@ def _project_summary_text(entry: dict) -> tuple:
     return "", ""
 
 
-def _project_status_dot(entry: dict, status_line: dict) -> str:
+def _project_status_dot(entry: dict, status_line: dict, registry_running: int = 0) -> str:
     """Pick the row's status-dot class (kept simple + documented, Wave 5).
 
     Mapping: green if ANY lane has a running session; for inactive projects
     (archived/future/retired) a dimmed grey; otherwise a neutral idle grey. The
-    dot is purely advisory (the per-lane mini-counts carry the detail)."""
+    dot is purely advisory (the per-lane mini-counts carry the detail).
+
+    v10.1 FIX 3 — ``status_line.running`` counts ONLY effort-history/job_runner
+    sessions; a live MANAGED terminal/ConPTY session registers in
+    ``session_registry`` as RUNNING with NO job_runner record, so it left the dot
+    grey. ``registry_running`` (the count from the SAME registry read the
+    activity line already does, ZERO new rnd_jobs/ scans) greens the dot when any
+    managed session is running. (A running general/grass managed session greens
+    the dot too — a defensible "is anything running" signal.)"""
     state = entry.get("state", "active")
     if state in ("archived", "future", "retired"):
         return "rnd-dot-idle"
     try:
+        if int(registry_running or 0) > 0:
+            return "rnd-dot-running"
         if any(int((status_line.get(l) or {}).get("running", 0) or 0) > 0
                for l in status_line):
             return "rnd-dot-running"
@@ -1487,8 +1497,11 @@ def render_project_tile_html(entry: dict) -> str:
     # "what's happening" line), sourced from the session registry ONLY (no model
     # call on the render path). Honest "idle — no sessions yet" placeholder when
     # the project has none.
-    activity_block = _render_activity_reflection_html(
-        _project_activity_reflection(pid_raw))
+    # v10.1 FIX 3 — capture the reflection ONCE (it carries the registry running
+    # count) so the status dot can reuse it (the SAME single registry read; ZERO
+    # new rnd_jobs/ scans, GET / perf invariant holds).
+    refl = _project_activity_reflection(pid_raw)
+    activity_block = _render_activity_reflection_html(refl)
 
     # Per-lane mini-counts (compact form of the status line) + status dot.
     status = render_status_line_html(pid_raw)
@@ -1496,7 +1509,11 @@ def render_project_tile_html(entry: dict) -> str:
         sline = _rnd.status_line(pid_raw)
     except Exception:
         sline = {}
-    dot_cls = _project_status_dot(entry, sline)
+    # v10.1 FIX 3 — pass the registry running count so a live MANAGED terminal
+    # session (no job_runner record → status_line.running == 0) still greens the
+    # home-row dot.
+    dot_cls = _project_status_dot(
+        entry, sline, registry_running=int(refl.get("running", 0) or 0))
 
     # Per-row cost/tokens/time rollup (v4 Wave 8, MASTER-PLAN cockpit dashboard
     # rows). Reuses the Wave-3 `effort_history.project_effort_rollup` (RUN-session
@@ -4950,6 +4967,28 @@ async function pullGrass(ideaId, refinementId, lane) {
   setTimeout(repopulate, 600);
 }
 
+// _refreshGrassCounts(root): recompute the .gtabs filter-count chips from the
+// REMAINING .gli rows under `root` (a live #grassPanel OR the hidden source
+// #grassWorkbenchTpl) and write them into the matching .gtab[data-filter] .n
+// spans (all = total rows, raw/refined/promoted = rows by data-status). Deriving
+// from the actual rows (not an arithmetic decrement) means the counts can never
+// drift after a delete. Guarded for missing elements (no throw).
+function _refreshGrassCounts(root) {
+  if (!root) return;
+  var rows = root.querySelectorAll('.gli[data-status]');
+  var counts = {all: 0, raw: 0, refined: 0, promoted: 0};
+  for (var i = 0; i < rows.length; i++) {
+    counts.all++;
+    var st = rows[i].getAttribute('data-status');
+    if (counts.hasOwnProperty(st)) counts[st]++;
+  }
+  var keys = ['all', 'raw', 'refined', 'promoted'];
+  for (var k = 0; k < keys.length; k++) {
+    var tab = root.querySelector('.gtab[data-filter="' + keys[k] + '"] .n');
+    if (tab) tab.textContent = String(counts[keys[k]]);
+  }
+}
+
 // deleteGrassIdea(ideaId): permanently DELETE a grass idea (v9 Wave 2). confirm()-
 // gated (an irreversible removal), then POST /api/rnd/grass_delete {confirm:true}.
 // On success the idea row is removed from the workbench list AND — if it was the
@@ -4983,6 +5022,22 @@ async function deleteGrassIdea(ideaId) {
   }
   // Drop it from the cached grass data too, so a later select can't resurrect it.
   if (_grassData && _grassData[ideaId]) { try { delete _grassData[ideaId]; } catch (e) {} }
+  // v10.1 FIX 2 — the workbench is server-rendered ONCE into a hidden template
+  // (#grassWorkbenchTpl); openGrassWorkbench clones it on EVERY fresh open and
+  // closeBtn does panel.remove(). Removing only the LIVE row leaves the stale
+  // idea in the template, so close→reopen re-clones it back. Prune the matching
+  // row from the source template too, so later clones are clean. (DOM-only on a
+  // display:none template; no re-wiring, no server change.)
+  var stpl = document.getElementById('grassWorkbenchTpl');
+  var trow = stpl && stpl.querySelector('.gli[data-idea="' + _cssEsc(ideaId) + '"]');
+  if (trow) trow.remove();
+  // v10.1 FIX 2 follow-up — the .gtabs filter-count chips were server-rendered
+  // ONCE into the template and never updated, so after a delete they read stale
+  // (e.g. "All 1" over an empty list, both live AND on a later re-clone). Recompute
+  // the counts from the REMAINING rows on BOTH the live panel (immediate update)
+  // and the source template (so a close→reopen re-clone shows correct counts).
+  _refreshGrassCounts(panel);
+  _refreshGrassCounts(stpl);
 }
 
 // ── Type-aware deliverable launch (v4 Wave 7) ───────────────────────────────
@@ -6186,7 +6241,19 @@ async function continueSession(sessionId, lane) {
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
   renderSessionBar();
+  // v10.1 FIX 1 — Restart-in-place: the cockpit's only terminal surface is an
+  // inline panel in #panelStack. continueSession mints a BRAND-NEW session id,
+  // so openPanel(sid) would stack a SECOND panel below the still-open source.
+  // Instead: carry the source panel's geometry onto the new id, open the new
+  // panel, then _closePanel the SOURCE (tears down its DOM/transport ONLY —
+  // never the MANAGED record or the lane/board tile, so the source session
+  // stays reopenable). The new session keeps its own board tile (the v6
+  // new-tile-per-session invariant is preserved). NEVER killPanel/term_kill
+  // (those reap the worktree/record).
+  if (_panelRects[sessionId] && !_panelRects[sid]) _panelRects[sid] = _panelRects[sessionId];
+  if (_panelHeights[sessionId] && !_panelHeights[sid]) _panelHeights[sid] = _panelHeights[sessionId];
   openPanel(sid);
+  if (sid !== sessionId) _closePanel(sessionId);
   setTimeout(repopulate, 600);
 }
 
@@ -6536,6 +6603,11 @@ function _fitPanelTerminal(sessionId) {
       // ~third of a wide panel) and reflows on vertical resize. ~7.2px/char,
       // ~17px/row at 12px monospace.
       var host = p.body;
+      // v10.1 FIX 4 — collapse/zero-size guard: a collapsed/hidden host (e.g.
+      // `.gterm.collapsed .term-host{display:none}`) has no offsetParent / zero
+      // box; bail so we don't compute a degenerate cols/rows + spam term_resize.
+      if (!host || host.offsetParent === null
+          || host.clientHeight === 0 || host.clientWidth === 0) return;
       var hw = (host && host.clientWidth) || 600;
       var hh = (host && host.clientHeight) || 90;
       var cols = Math.max(20, Math.floor((hw - 8) / 7.2));
@@ -6610,6 +6682,7 @@ function _closePanel(sessionId) {
   if (!p) return;
   try { if (p.ro && p.ro.disconnect) p.ro.disconnect(); } catch (e) {}
   try { if (p.pinRo && p.pinRo.disconnect) p.pinRo.disconnect(); } catch (e) {}
+  try { if (p.fitRo && p.fitRo.disconnect) p.fitRo.disconnect(); } catch (e) {}  // v10.1 FIX 4
   try { if (p.transport && p.transport.close) p.transport.close(); } catch (e) {}
   try { if (p.term && p.term.dispose) p.term.dispose(); } catch (e) {}
   if (p.el && p.el.parentNode) p.el.parentNode.removeChild(p.el);
@@ -6825,6 +6898,22 @@ function _mountTerminal(sessionId, body) {
   // Fit to the host NOW + shortly after layout settles (xterm starts at 80 cols).
   _fitPanelTerminal(sessionId);
   setTimeout(function () { _fitPanelTerminal(sessionId); }, 60);
+
+  // v10.1 FIX 4 — make _mountTerminal self-sufficient about reflow. The board
+  // path wires a ResizeObserver in _wirePanelResize, but the grass mounts never
+  // call it, so an ENLARGED grass terminal (.gterm host is CSS resize:vertical)
+  // grew but xterm never reflowed (nothing observed it → _fitPanelTerminal never
+  // ran). Attach our OWN observer on the INNER host (`body` = the .term-host the
+  // fit measures), stored on a DISTINCT key (w.fitRo, NOT p.ro — never clobber
+  // the board's _wirePanelResize observer). Disconnect any prior fitRo first
+  // (grass never calls _closePanel, so a re-develop would otherwise leak
+  // observers). Idempotent for the board (same cols/rows → xterm no-ops).
+  if (typeof ResizeObserver !== 'undefined') {
+    try { if (w.fitRo && w.fitRo.disconnect) w.fitRo.disconnect(); } catch (e) {}
+    var fro = new ResizeObserver(function () { _fitPanelTerminal(sessionId); });
+    fro.observe(body);
+    w.fitRo = fro;
+  }
 
   // Outbound user keystrokes → term_input2 (works for BOTH transports; the WS
   // also accepts frames, but routing input through the POST keeps one path).

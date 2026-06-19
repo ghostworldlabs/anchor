@@ -499,15 +499,39 @@ def test_historical_panel_shows_summary_and_continue_works(server, tmp_path):
         assert pg.eval_on_selector_all(
             "#panelStack .panel .ro-continue", "e=>e.length") == 1
 
+        # v10.1 (FIX 1): Continue REUSES the source panel's slot — the read-only
+        # historical panel closes (_closePanel) and the NEW live session opens in
+        # its place. The panel count does NOT grow (no second stacked panel).
         panels_before = pg.eval_on_selector_all("#panelStack .panel",
                                                 "e=>e.length")
-        # Click Continue → a NEW live panel/session appears in the same lane.
+        src_sid = pg.eval_on_selector(
+            "#panelStack .panel[data-session]",
+            "e=>e.getAttribute('data-session')")
+        assert src_sid, "historical panel must carry the source data-session"
+        # Click Continue → the source slot is reused by a NEW live session.
         pg.click("#panelStack .panel .ro-continue")
+        # The read-only historical body is GONE and a live panel carrying a
+        # DIFFERENT data-session now occupies the (single) slot.
         pg.wait_for_function(
-            "document.querySelectorAll('#panelStack .panel').length === %d"
-            % (panels_before + 1), timeout=8000)
+            "src=>{var ps=document.querySelectorAll('#panelStack .panel');"
+            "if(ps.length!==1) return false;"
+            "if(document.querySelectorAll('#panelStack .panel .ro-past').length) return false;"
+            "var ds=ps[0].getAttribute('data-session');"
+            "return !!ds && ds!==src;}",
+            arg=src_sid, timeout=12000)
+        # Slot reused (NOT stacked): still exactly ONE panel, == panels_before.
         assert pg.eval_on_selector_all("#panelStack .panel", "e=>e.length") \
-            == panels_before + 1, "Continue did not open a new live panel"
+            == panels_before == 1, "Continue must reuse the source slot, not stack"
+        # The read-only historical body was replaced (closed), not kept.
+        assert pg.eval_on_selector_all(
+            "#panelStack .panel .ro-past", "e=>e.length") == 0, \
+            "the source read-only panel must be closed/replaced by the live session"
+        # A LIVE session genuinely opened in the reused slot (new data-session).
+        new_sid = pg.eval_on_selector(
+            "#panelStack .panel[data-session]",
+            "e=>e.getAttribute('data-session')")
+        assert new_sid and new_sid != src_sid, \
+            "Continue must open a NEW live session in the reused slot"
         assert not errors, f"JS console errors: {errors}"
         b.close()
 
