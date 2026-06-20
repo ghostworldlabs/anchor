@@ -12500,22 +12500,44 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                 break
                     except Exception:
                         pass
-                    # v10 Wave 2: split delivery. The reviewable TASK PROMPT (the
-                    # NEXT-PROMPT.md body — the real persisted upstream doc paths +
-                    # "read these first, then plan" + load Crucible) is delivered as
-                    # a PENDING PASTE (held in the new PTY input UNSENT until the
-                    # user presses Enter), NOT folded into the auto-submitted seed.
-                    # The grounded summary context still seeds phase-1 (load+greet)
-                    # so the model has the prior context when it greets. Best-effort:
-                    # an empty prompt → falls back to today's seed-context path.
+                    # v11 Wave 2 — THE user-facing fix: route research→plan through
+                    # the SHARED handoff KEYSTONE (terminal_session.prepare_stage_
+                    # handoff), mirroring finish_to_build's capture-before-advance.
+                    # The keystone (a) PERSISTS the live source session's produced
+                    # docs into the MAIN project (copy + commit to main HEAD,
+                    # session-tagged efforts — best-effort, idempotent, never raises)
+                    # so they ride into the planning worktree (checked out off main
+                    # HEAD); (b) BUILDS the REAL doc-referencing prompt (names the
+                    # actual persisted paths + "read these first, then plan" + load
+                    # Crucible — honest minimal only when there are genuinely no
+                    # docs, never fabricated); (c) resolves doc_rels + skill + the
+                    # source's cached summary for HANDOFF.md. This is the fix for the
+                    # reported failure: the pre-v11 path NEVER persisted the live
+                    # research docs, so the prompt was a bare "load Crucible" with no
+                    # paths and no HANDOFF.md.
+                    hk = _termsess.prepare_stage_handoff(pid, source, to_lane)
+                    # v11 honesty guard: if the keystone could NOT resolve the
+                    # source session (ok=False → no record / unknown id → empty
+                    # prompt + empty doc_rels), do NOT mint an orphan planning
+                    # session with an empty paste. Return an honest error instead
+                    # (matching the honest-degradation discipline). The
+                    # no-DOCS-but-valid-source path keeps ok=True and proceeds with
+                    # the honest minimal prompt — only the source-unresolvable case
+                    # is guarded here.
+                    if not hk.get("ok"):
+                        self._send_json(
+                            {"ok": False,
+                             "error": "could not resolve source session"}, 400)
+                        return
+                    # The reviewable TASK PROMPT is delivered as a PENDING PASTE
+                    # (held in the new PTY input UNSENT until the user presses
+                    # Enter — paste-NOT-submit, unchanged). The grounded summary
+                    # context still seeds phase-1 (load+greet) so the model greets
+                    # with prior context. Best-effort: an empty prompt → falls back
+                    # to today's seed-context-only path (honest, no fabrication).
                     seed_context = _build_continue_seed(
                         folder, pid, src_lane, source)
-                    try:
-                        next_prompt = _handoff.build_next_stage_prompt(
-                            folder, pid, source, to_lane)
-                    except Exception:
-                        next_prompt = ""
-                    paste = (next_prompt or "").strip() or None
+                    paste = (hk.get("prompt", "") or "").strip() or None
                     try:
                         if backend:
                             rec = _termsess.start_session(
@@ -12531,19 +12553,28 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     except _termsess.TerminalSessionError as exc:
                         self._send_json({"ok": False, "error": str(exc)}, 400)
                     else:
-                        # Write BOTH durable artifacts into the new planning
-                        # worktree: NEXT-PROMPT.md (the reviewable prompt) always,
-                        # and HANDOFF.md when a plan-set context applies (here the
-                        # upstream is research, so prime_worktree is a no-op unless
-                        # a plan set is discoverable — best-effort either way). Then
-                        # record the research->plan stage edge.
+                        # The planning worktree now EXISTS (off main HEAD, which the
+                        # keystone just committed the research docs to). Write BOTH
+                        # durable artifacts into it: the real HANDOFF.md (lists the
+                        # persisted upstream doc paths + the Crucible skill + the
+                        # source's cached summary) AND NEXT-PROMPT.md (the reviewable
+                        # pasted prompt). Then record the research->plan stage edge.
+                        # All best-effort — a write hiccup never strands the advance.
                         new_wt = rec.get("worktree_path", "")
                         new_sid = rec.get("session_id", "")
-                        if new_wt and paste:
+                        if new_wt:
                             try:
-                                _handoff.write_next_prompt(new_wt, paste)
+                                _handoff.write_handoff_md(
+                                    new_wt, hk.get("doc_rels", []),
+                                    hk.get("skill", "") or "Crucible",
+                                    hk.get("summary_text", ""))
                             except Exception:
                                 pass
+                            if paste:
+                                try:
+                                    _handoff.write_next_prompt(new_wt, paste)
+                                except Exception:
+                                    pass
                         try:
                             _handoff.record_stage_link(
                                 folder, pid, source, new_sid,
@@ -12552,7 +12583,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             pass
                         self._send_json({"ok": True, "session": rec,
                                          "advanced_from": source,
-                                         "to_lane": to_lane})
+                                         "to_lane": to_lane,
+                                         "persisted": hk.get("persisted", [])})
 
         elif self.path == "/api/rnd/finish_to_build":
             # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
