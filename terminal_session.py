@@ -1334,9 +1334,32 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
                     and s.get("parent_session_id") == planning_session_id):
                 return None
 
+        # v11 Wave 3 — route the plan→build prompt + persist + handoff materials
+        # through the SHARED keystone (:func:`prepare_stage_handoff`) so this path
+        # is consistent with research→plan and equally verified, AND so the plan-set
+        # DISCOVERY below sees the planning session's just-persisted docs. The
+        # keystone is called BEFORE discovery because the persist is what makes the
+        # plan set discoverable on the paths where the docs are NOT already on main
+        # (notably the reconcile-dead transition, which marks the session DONE
+        # WITHOUT running kill()'s persist; the hard-kill path already persisted in
+        # kill() so this is an idempotent, content-addressed no-op re-capture). The
+        # keystone:
+        #   - PERSISTS the planning session's produced docs (best-effort, idempotent;
+        #     no-ops safely if the worktree is already reaped — then the docs are
+        #     already on main from kill());
+        #   - BUILDS the build prompt via handoff.build_next_stage_prompt('build'),
+        #     which discovers the plan set and reuses ``_build_seed_for_plan`` (the
+        #     real plan-doc paths) AND applies ``clean_paste_opener`` — so the
+        #     redundant "Load the Foreman skill." opener is already stripped;
+        #   - RESOLVES doc_rels + skill (Foreman) + the planning session's cached
+        #     summary for a shared HANDOFF.md.
+        hk = prepare_stage_handoff(project_id, planning_session_id, "build")
+
         # Discover the plan set the build executes on. Prefer a pre-captured one
         # (the caller captured it BEFORE reaping the planning worktree); else
-        # discover now (discovery reads the project folder, not the worktree).
+        # discover now — AFTER the keystone persisted the planning docs into main,
+        # so they are discoverable on every path. ``prime_worktree`` below uses the
+        # plan set for the richer plan-set-specific HANDOFF.md.
         if not plan_set:
             try:
                 plan_set = _handoff.discover_recent_plan_set(
@@ -1345,18 +1368,17 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
                 plan_set = None
         if not plan_set:
             return None  # no plan ⇒ no advance
-
-        # v10 Wave 2: the task prompt is delivered as a PENDING PASTE (held in the
-        # build PTY input UNSENT until the user presses Enter) — NOT folded into the
+        # The task prompt is delivered as a PENDING PASTE (held in the build PTY
+        # input UNSENT until the user presses Enter) — NOT folded into the
         # auto-submitted seed. The phase-1 load+greet seed still fires (Foreman
         # auto-loads + greets); the build prompt sits pending. This holds for the
         # UNATTENDED reconcile-dead path too: the build greets and waits — nothing
-        # auto-submits — until the first attach flushes the paste unsent.
-        # FIX 3: clean the redundant "Load the Foreman skill." opener (phase-1 has
-        # already loaded+greeted Foreman) — same paste-prompt cleaner the attended
-        # advance_session path applies. The skill NAME + real plan-doc paths +
-        # "read these …" stay in the body.
-        next_prompt = _handoff.clean_paste_opener(_build_seed_for_plan(plan_set))
+        # auto-submits — until the first attach flushes the paste unsent. Honest
+        # fallback to the plan-set seed if the keystone prompt is empty (no docs).
+        next_prompt = (hk.get("prompt") or "").strip()
+        if not next_prompt:
+            next_prompt = _handoff.clean_paste_opener(
+                _build_seed_for_plan(plan_set))
 
         # Start the linked build session: skill auto-loads/greets (phase-1), the
         # build prompt is recorded as pending_paste (delivered unsent after greet).
@@ -1375,7 +1397,14 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         # Prime the (fresh, never-reaped) build worktree with BOTH artifacts BEFORE
         # anyone reaps anything: the structural HANDOFF.md (plan doc paths) and the
         # reviewable NEXT-PROMPT.md (the exact pending-paste prompt). Captured from
-        # the discovered plan set.
+        # the discovered plan set. The plan→build HANDOFF.md is written by
+        # ``prime_worktree`` (the RICHER plan-set-specific form: titled Master plan /
+        # Implementation plan / supporting docs) — kept verbatim (no v10 regression);
+        # the shared ``write_handoff_md`` generalizes ONLY the no-plan-set case
+        # (research→plan), so it is NOT layered here where prime_worktree already
+        # wrote the canonical plan-set HANDOFF.md (it would otherwise clobber it).
+        # The shared keystone's persist (above) is what makes prime_worktree's
+        # referenced plan docs genuinely exist in this checkout.
         if build_wt:
             try:
                 _handoff.prime_worktree(build_wt, plan_set, project_id=project_id)

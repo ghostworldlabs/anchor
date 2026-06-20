@@ -172,17 +172,21 @@ def test_advance_live_research_shows_real_doc_in_browser(server):
                      if r.get("lane") in ("plan", "planning"))
         pg.click("#panelStack .panel .advbtn")
 
-        # A new planning session is minted server-side; find its id.
+        # A new planning session is minted server-side; find its id. The session
+        # row is registered by start_session a beat BEFORE its pending_paste is
+        # written, so wait until the paste is populated to avoid a register-vs-
+        # paste-write race (the discriminating assert below reads pending_paste).
         new_sid = None
-        for _ in range(80):
-            now = [r["session_id"] for r in reg.list_sessions(project_id=pid)
+        for _ in range(160):  # ~8s at 50ms
+            now = [r for r in reg.list_sessions(project_id=pid)
                    if r.get("lane") in ("plan", "planning")
                    and r["session_id"] not in before]
-            if now:
-                new_sid = now[0]
+            if now and (now[0].get("pending_paste") or ""):
+                new_sid = now[0]["session_id"]
                 break
             time.sleep(0.05)
-        assert new_sid, "advance did not create a planning session"
+        assert new_sid, \
+            "advance did not create a planning session with a pending paste"
 
         # Backend truth (the v11 fix): the LIVE research doc was PERSISTED into the
         # project AND named in the new planning session's pending paste — the path

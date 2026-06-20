@@ -12619,20 +12619,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                   "session",
                          "reason": "not-planning"}, 400)
                 else:
-                    # 0) FIX 2 — North-Star hole: PERSIST the planning session's
-                    #    produced docs into the MAIN project (copy + commit to main
-                    #    HEAD) BEFORE we capture the plan set or open the build. The
-                    #    finish→build path marks the session DONE via update_session
-                    #    WITHOUT kill(), so persist_session_docs is NOT otherwise
-                    #    run — the plan docs authored in the planning worktree would
-                    #    never reach main, and the build worktree (created off main
-                    #    HEAD by auto_advance) would lack NEXT-PROMPT.md/HANDOFF.md's
-                    #    referenced paths. capture_session_docs COPIES + COMMITS the
-                    #    docs WITHOUT reaping the worktree, so the planning session
-                    #    stays a reopenable finished tile (v6 non-destructive finish
-                    #    semantics preserved). Best-effort — never blocks the finish.
+                    # 0) v11 Wave 3 — route the persist through the SHARED keystone
+                    #    (:func:`prepare_stage_handoff`), unifying this path with
+                    #    research→plan + auto-advance. The keystone PERSISTS the
+                    #    planning session's produced docs into the MAIN project (copy
+                    #    + commit to main HEAD, session-tagged efforts — best-effort,
+                    #    idempotent, never raises) WITHOUT reaping the worktree, so the
+                    #    planning session stays a reopenable finished tile (v6
+                    #    non-destructive finish semantics preserved). This is the
+                    #    North-Star hole fix (the finish→build path marks the session
+                    #    DONE via update_session WITHOUT kill(), so persist is NOT
+                    #    otherwise run — the plan docs authored in the planning
+                    #    worktree would never reach main, and the build worktree
+                    #    created off main HEAD by auto_advance would lack the
+                    #    HANDOFF.md/NEXT-PROMPT.md referenced paths). It is ALSO what
+                    #    makes the just-authored plan set DISCOVERABLE to the
+                    #    capture_plan_set() below: discovery reads the session-tagged
+                    #    effort pointer-records the persist creates, so the persist
+                    #    MUST run here, before capture, on the worktree-only finish
+                    #    flow (the docs are not yet on main / not yet recorded as
+                    #    efforts otherwise). The build prompt itself is (re)built by
+                    #    auto_advance_planning_to_build through the SAME keystone
+                    #    (idempotent re-persist), so there is ONE persist+prompt
+                    #    mechanism across every advance path.
                     try:
-                        _termsess.capture_session_docs(session, project_id=pid)
+                        _termsess.prepare_stage_handoff(pid, session, "build")
                     except Exception:
                         pass
                     # 1) Capture the plan set AFTER persisting (so the just-authored
