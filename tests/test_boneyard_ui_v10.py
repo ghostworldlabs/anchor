@@ -271,11 +271,20 @@ def server(env):
     try:
         yield env, f"http://127.0.0.1:{port}", port
     finally:
-        time.sleep(0.1)
+        # Hardened teardown (the v11 flake fix). The server runs daemon request
+        # threads, so server_close() does NOT block on an in-flight streaming
+        # response (a boneyard fetch / SSE pump) still writing onto its wfile. If
+        # we close the socket mid-flight that pump raises late on a closed file —
+        # benign noise the conftest excepthook swallows, but under full-suite load
+        # it can still flap. So: stop accepting (shutdown), give any in-flight
+        # request thread a beat to drain, THEN close the socket — and only treat a
+        # still-alive serve_forever thread (never a request thread) as the join
+        # target.
         try:
-            srv.shutdown()
+            srv.shutdown()       # stop the serve_forever accept loop
         except Exception:
             pass
+        time.sleep(0.15)         # let in-flight request threads finish their write
         try:
             srv.server_close()
         except Exception:
@@ -573,6 +582,15 @@ def test_boneyard_client_render_escapes_xss(server):
 
         pg.click("#openBoneyardBtn")
         pg.wait_for_selector("#boneyardPanel #boneyardList", timeout=8000)
+        # WAIT FOR THE SOURCE OF TRUTH before driving the live search: the initial
+        # boneyard load completes asynchronously (GET /api/rnd/boneyard), and the
+        # two seeded XSS entries must be present BEFORE we type a search term —
+        # otherwise the search fires against a not-yet-populated list and the
+        # subsequent "== 2" wait races the initial fetch under full-suite load
+        # (the v11 flake). Settle on the populated initial render first.
+        pg.wait_for_function(
+            "document.querySelectorAll('#boneyardPanel .byentry').length === 2",
+            timeout=8000)
         # Trigger the CLIENT re-render (the vulnerable path) via live search.
         pg.fill("#boneyardPanel #boneyardSearch", "uniquetoken")
         pg.wait_for_function(

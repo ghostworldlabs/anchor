@@ -119,7 +119,17 @@ def _inject_greet(sid):
 def _add_research_doc(eh, repo, pid, rel="research/run-1/REPORT.md",
                       research_session_id=""):
     """Record a research effort whose artifact is a REAL committed report doc,
-    tagged with ``research_session_id`` so research_set_for_session resolves it."""
+    tagged with ``research_session_id`` so research_set_for_session resolves it.
+
+    NOTE (v11): this PRE-PERSISTS the research doc via ``eh.record_effort`` — so
+    these tests are PROMPT-BUILDING-GIVEN-PERSISTED-DOCS coverage, NOT live-flow
+    coverage. The live worktree-only flow (the actual advance, where the doc lives
+    ONLY in the session's worktree until the advance persists it — the path the
+    original bug broke) is covered by
+    ``tests/test_advance_research_to_plan_live_v11.py`` +
+    ``tests/test_handoff_unified_v11.py`` +
+    ``anchor_healthcheck.check_rnd_v11_surface``. Do NOT make a pre-persisted test
+    the SOLE coverage of an advance path (the v11 lesson)."""
     p = repo / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("# Cooling report\n## Findings\nAdequate.\n", encoding="utf-8")
