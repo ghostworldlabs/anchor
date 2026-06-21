@@ -12831,6 +12831,14 @@ def main():
     # rescan/discovery (Wave 5). Unit tests leave this off (default) so importing
     # the module never spawns a background model job.
     _PROACTIVE_SUMMARY_ENABLED = True
+    # v11.1 Wave 1 FIX-3: the keystone's background transcript-refine summary
+    # (terminal_session._trigger_background_source_summary) gates on the
+    # ANCHOR_PROACTIVE_SUMMARY env flag — it reads the env directly to avoid an
+    # import cycle (terminal_session must not import anchor_gui). Set it here in
+    # the SERVER main() path (never imported, never run in tests/healthcheck) so
+    # the refine actually fires in production. Tests/the 5 AM healthcheck never
+    # call main(), so they keep the flag unset/OFF and never spawn live claude.
+    os.environ["ANCHOR_PROACTIVE_SUMMARY"] = "1"
     port = 8777
     no_browser = "--no-browser" in sys.argv
     if "--port" in sys.argv:
