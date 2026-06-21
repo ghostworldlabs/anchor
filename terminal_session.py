@@ -1334,9 +1334,32 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
                     and s.get("parent_session_id") == planning_session_id):
                 return None
 
+        # v11 Wave 3 — route the plan→build prompt + persist + handoff materials
+        # through the SHARED keystone (:func:`prepare_stage_handoff`) so this path
+        # is consistent with research→plan and equally verified, AND so the plan-set
+        # DISCOVERY below sees the planning session's just-persisted docs. The
+        # keystone is called BEFORE discovery because the persist is what makes the
+        # plan set discoverable on the paths where the docs are NOT already on main
+        # (notably the reconcile-dead transition, which marks the session DONE
+        # WITHOUT running kill()'s persist; the hard-kill path already persisted in
+        # kill() so this is an idempotent, content-addressed no-op re-capture). The
+        # keystone:
+        #   - PERSISTS the planning session's produced docs (best-effort, idempotent;
+        #     no-ops safely if the worktree is already reaped — then the docs are
+        #     already on main from kill());
+        #   - BUILDS the build prompt via handoff.build_next_stage_prompt('build'),
+        #     which discovers the plan set and reuses ``_build_seed_for_plan`` (the
+        #     real plan-doc paths) AND applies ``clean_paste_opener`` — so the
+        #     redundant "Load the Foreman skill." opener is already stripped;
+        #   - RESOLVES doc_rels + skill (Foreman) + the planning session's cached
+        #     summary for a shared HANDOFF.md.
+        hk = prepare_stage_handoff(project_id, planning_session_id, "build")
+
         # Discover the plan set the build executes on. Prefer a pre-captured one
         # (the caller captured it BEFORE reaping the planning worktree); else
-        # discover now (discovery reads the project folder, not the worktree).
+        # discover now — AFTER the keystone persisted the planning docs into main,
+        # so they are discoverable on every path. ``prime_worktree`` below uses the
+        # plan set for the richer plan-set-specific HANDOFF.md.
         if not plan_set:
             try:
                 plan_set = _handoff.discover_recent_plan_set(
@@ -1345,18 +1368,17 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
                 plan_set = None
         if not plan_set:
             return None  # no plan ⇒ no advance
-
-        # v10 Wave 2: the task prompt is delivered as a PENDING PASTE (held in the
-        # build PTY input UNSENT until the user presses Enter) — NOT folded into the
+        # The task prompt is delivered as a PENDING PASTE (held in the build PTY
+        # input UNSENT until the user presses Enter) — NOT folded into the
         # auto-submitted seed. The phase-1 load+greet seed still fires (Foreman
         # auto-loads + greets); the build prompt sits pending. This holds for the
         # UNATTENDED reconcile-dead path too: the build greets and waits — nothing
-        # auto-submits — until the first attach flushes the paste unsent.
-        # FIX 3: clean the redundant "Load the Foreman skill." opener (phase-1 has
-        # already loaded+greeted Foreman) — same paste-prompt cleaner the attended
-        # advance_session path applies. The skill NAME + real plan-doc paths +
-        # "read these …" stay in the body.
-        next_prompt = _handoff.clean_paste_opener(_build_seed_for_plan(plan_set))
+        # auto-submits — until the first attach flushes the paste unsent. Honest
+        # fallback to the plan-set seed if the keystone prompt is empty (no docs).
+        next_prompt = (hk.get("prompt") or "").strip()
+        if not next_prompt:
+            next_prompt = _handoff.clean_paste_opener(
+                _build_seed_for_plan(plan_set))
 
         # Start the linked build session: skill auto-loads/greets (phase-1), the
         # build prompt is recorded as pending_paste (delivered unsent after greet).
@@ -1375,7 +1397,14 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
         # Prime the (fresh, never-reaped) build worktree with BOTH artifacts BEFORE
         # anyone reaps anything: the structural HANDOFF.md (plan doc paths) and the
         # reviewable NEXT-PROMPT.md (the exact pending-paste prompt). Captured from
-        # the discovered plan set.
+        # the discovered plan set. The plan→build HANDOFF.md is written by
+        # ``prime_worktree`` (the RICHER plan-set-specific form: titled Master plan /
+        # Implementation plan / supporting docs) — kept verbatim (no v10 regression);
+        # the shared ``write_handoff_md`` generalizes ONLY the no-plan-set case
+        # (research→plan), so it is NOT layered here where prime_worktree already
+        # wrote the canonical plan-set HANDOFF.md (it would otherwise clobber it).
+        # The shared keystone's persist (above) is what makes prime_worktree's
+        # referenced plan docs genuinely exist in this checkout.
         if build_wt:
             try:
                 _handoff.prime_worktree(build_wt, plan_set, project_id=project_id)
@@ -1527,6 +1556,238 @@ def build_research_to_plan_seed(project_id, research_session_id):
     if not rset:
         return None
     return _build_seed_for_research(rset)
+
+
+# ── v11 Wave 1: the shared stage-handoff keystone ────────────────────────────
+#
+# THE BUG v11 fixes: ``advance_session`` (research→plan) never persisted the
+# LIVE source research session's produced docs. Persistence
+# (``effort_history.persist_session_docs`` via :func:`capture_session_docs`) ran
+# ONLY in :func:`kill` and in ``finish_to_build`` (plan→build). So advancing a
+# still-LIVE research session left its reports in the worktree, unpersisted →
+# :func:`research_set_for_session` (reads only session-tagged persisted efforts)
+# returned None → ``handoff.build_next_stage_prompt`` fell to the bare fallback
+# with no doc paths, and no HANDOFF.md was written.
+#
+# ``prepare_stage_handoff`` is the ONE shared helper that fixes this at the root:
+# it PERSISTS the source stage's produced docs FIRST (best-effort, idempotent,
+# does NOT reap the worktree — works whether the source is live or done), THEN
+# builds the real handoff prompt (which now finds the just-persisted,
+# session-tagged docs), resolves the handoff materials (doc_rels + skill +
+# upstream summary), and kicks off a non-blocking background source-stage summary.
+# Wave 2/3 wire the advance/finish paths through it; this wave is backend-only.
+
+def _summary_text_from_cached(cached):
+    """A short plain-text digest from a cached structured summary, or ``""``.
+
+    Prefers the cached ``markdown`` (rendered summary body); falls back to the
+    joined grounded ``claims``; honest ``""`` when nothing is cached/usable.
+    Never raises.
+    """
+    if not isinstance(cached, dict):
+        return ""
+    try:
+        md = (cached.get("markdown") or "").strip()
+        if md:
+            return md
+        claims = cached.get("claims") or []
+        joined = "\n".join(
+            str(c.get("text") if isinstance(c, dict) else c).strip()
+            for c in claims
+            if (c.get("text") if isinstance(c, dict) else c))
+        return joined.strip()
+    except Exception:
+        return ""
+
+
+def _trigger_background_source_summary(folder, project_id, lane, session_id):
+    """Best-effort, NON-BLOCKING: spin a daemon thread to summarize the source
+    session so the upstream digest is available, without blocking the advance.
+
+    Mirrors the ``anchor_gui`` summarize-on-finish mechanism (daemon thread +
+    idempotent cache skip) but lives here so the keystone never imports
+    ``anchor_gui`` (which would be a module cycle: ``anchor_gui`` imports
+    ``terminal_session``). Skips when a cache already exists; a failed generation
+    never poisons the cache (the summarizer surfaces ``error`` without writing).
+    Any failure — including a missing summarizer/runner — is swallowed; the
+    digest is a nice-to-have, never a blocker.
+
+    GATED on the SAME proactive-summary signal as ``anchor_gui`` (the
+    ``ANCHOR_PROACTIVE_SUMMARY`` env flag) — read directly here so we never import
+    ``anchor_gui`` (the cycle). When proactive summary is DISABLED (the default in
+    every unit-test / healthcheck context), this is a hard NO-OP: no daemon thread
+    is spawned, so a stubbed context NEVER spawns a live ``claude`` for the digest.
+    The digest's absence does NOT change ``prepare_stage_handoff`` correctness —
+    that function still persists docs + builds the real prompt regardless.
+    """
+    if not (folder and project_id and lane and session_id):
+        return
+    # No-op unless proactive generation is enabled (same gate anchor_gui uses;
+    # read the env flag directly to avoid the anchor_gui import cycle). Tests and
+    # the 5 AM healthcheck leave this OFF, so the background summary never runs and
+    # no live claude is ever spawned from a stubbed context.
+    if (os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
+            not in ("1", "true", "yes", "on")):
+        return
+
+    def _run():
+        try:
+            import summarizer as _sm  # lazy: no cycle, optional at import time
+            import effort_history as _eh_local
+            # No os.environ mutation: the gate above means this only runs in
+            # PRODUCTION (proactive enabled), where ANCHOR_RUNNER_CMD is already
+            # the real configured value in the ambient process env. The summarizer
+            # resolves the runner from that env, so the daemon thread relies on it
+            # as-is — never writing process-global env from a daemon thread.
+            store_lane = _eh_local._resolve_subdir(lane)
+            # Idempotent: a session that already has a cache is left alone.
+            try:
+                if _sm.load_cached(folder, project_id, store_lane,
+                                   session_id) is not None:
+                    return
+            except Exception:
+                pass
+            # Tie the summary to the docs the session PRODUCED (the keystone just
+            # persisted them tagged with this session_id).
+            try:
+                efforts = _eh_local.efforts_for_session_id(
+                    folder, project_id, store_lane, session_id)
+            except Exception:
+                efforts = []
+            session = {"session_id": session_id, "lane": lane,
+                       "efforts": efforts}
+            _sm.summarize_session(folder, project_id, store_lane, session)
+        except Exception:
+            pass
+
+    try:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def prepare_stage_handoff(project_id, source_session_id, to_lane):
+    """Persist the source stage's docs + build the real next-stage handoff (v11 W1).
+
+    The ONE shared keystone for an advance/handoff. Given a SOURCE session (live
+    or done) and the TARGET lane to advance into, it:
+
+      (a) resolves the source session record (its lane + worktree) and maps
+          ``to_lane`` → the next-stage skill (plan/planning→Crucible, build→Foreman);
+      (b) **PERSISTS** the source session's produced docs via
+          :func:`capture_session_docs` — copies + commits them into the main
+          project AND records session-tagged DISCOVERED efforts. Best-effort and
+          IDEMPOTENT (content-addressed, byte-identical skip); works whether the
+          source is LIVE or done; does NOT reap the worktree. A persistence
+          failure is swallowed (degrades to the honest minimal prompt) — it can
+          NEVER raise out of this function;
+      (c) **BUILDS** the next-stage prompt via
+          ``handoff.build_next_stage_prompt`` — now that the docs are persisted +
+          session-tagged, :func:`research_set_for_session` finds them → the REAL
+          prompt naming the actual doc paths + a "read these first" instruction.
+          For plan→build it discovers the plan set as today. Honest minimal,
+          skill-correct prompt only when there are genuinely no docs;
+      (d) **RESOLVES** the handoff materials: the real persisted ``doc_rels``
+          (from :func:`effort_history.efforts_for_session_id` over the source
+          lane; for plan→build also the discovered plan-set doc rels), the skill,
+          and the source session's cached summary text (``""`` if absent);
+      (e) **TRIGGERS** a NON-BLOCKING background source-stage summary (daemon
+          thread; idempotent; failure swallowed) so the digest becomes available
+          without blocking the advance.
+
+    Returns ``{ok, prompt, doc_rels, skill, summary_text, persisted}``. ``ok`` is
+    True when the source session resolved (even with no docs — an honest empty
+    handoff is still a successful prepare). Never raises.
+    """
+    out = {"ok": False, "prompt": "", "doc_rels": [], "skill": "",
+           "summary_text": "", "persisted": []}
+
+    lane_key = (to_lane or "").strip().lower()
+    skill = LANE_SKILL.get(lane_key, "")
+    out["skill"] = skill
+
+    # (a) Resolve the source session record + the project folder.
+    rec = _reg.get_session(source_session_id)
+    if rec is None:
+        return out
+    if not project_id:
+        project_id = rec.get("project_id") or None
+    if not project_id:
+        return out
+    source_lane = (rec.get("lane") or "").strip()
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        return out
+    folder = proj.get("folder_path", "")
+    if not folder:
+        return out
+    # From here on the source resolved → an honest empty handoff is still ok.
+    out["ok"] = True
+
+    # (b) PERSIST the source session's produced docs — best-effort, idempotent,
+    # NEVER raises out of prepare_stage_handoff (degrade to the honest prompt).
+    try:
+        persist_res = capture_session_docs(
+            source_session_id, project_id=project_id, record=rec)
+        if isinstance(persist_res, dict):
+            out["persisted"] = list(persist_res.get("persisted") or [])
+    except Exception:
+        out["persisted"] = []
+
+    # (c) BUILD the next-stage prompt from the now-persisted, session-tagged docs.
+    try:
+        out["prompt"] = _handoff.build_next_stage_prompt(
+            folder, project_id, source_session_id, lane_key) or ""
+    except Exception:
+        out["prompt"] = ""
+
+    # (d) RESOLVE the handoff materials: the real persisted doc rels.
+    doc_rels = []
+    try:
+        if source_lane:
+            store_lane = _eh._resolve_subdir(source_lane)
+            for e in _eh.efforts_for_session_id(
+                    folder, project_id, store_lane, source_session_id):
+                rel = (e.get("artifact_path") or "").strip().replace("\\", "/")
+                if rel and rel not in doc_rels:
+                    doc_rels.append(rel)
+        # For plan→build also fold in the discovered plan-set doc rels (the
+        # build's HANDOFF.md lists the plan documents, not the planning session's
+        # own member docs only).
+        if lane_key == "build":
+            try:
+                plan_set = _handoff.discover_recent_plan_set(
+                    folder, project_id, source_session_id=source_session_id)
+            except Exception:
+                plan_set = None
+            if plan_set:
+                for r in _doc_paths_for_seed(plan_set):
+                    if r and r not in doc_rels:
+                        doc_rels.append(r)
+    except Exception:
+        pass
+    out["doc_rels"] = doc_rels
+
+    # (d cont.) the source session's cached summary text (honest "" if absent).
+    try:
+        import summarizer as _sm
+        if source_lane:
+            cached = _sm.load_cached(
+                folder, project_id, _eh._resolve_subdir(source_lane),
+                source_session_id)
+            out["summary_text"] = _summary_text_from_cached(cached)
+    except Exception:
+        out["summary_text"] = ""
+
+    # (e) TRIGGER a non-blocking background source-stage summary.
+    try:
+        _trigger_background_source_summary(
+            folder, project_id, source_lane, source_session_id)
+    except Exception:
+        pass
+
+    return out
 
 
 def list_sessions(project_id=None, status=None):

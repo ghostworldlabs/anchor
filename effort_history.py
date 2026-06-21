@@ -790,34 +790,30 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
         return {"ok": False, "session": None, "research_session_id": "",
                 "reason": "no-research-session"}
 
-    # 2) Persist the research dev session's produced docs (best-effort keystone)
-    #    so the prompt builder resolves the REAL research doc paths. Resolve the
-    #    session's worktree from the registry when live.
-    try:
-        import session_registry as _sr
-        rrec = _sr.get_session(rsid)
-    except Exception:
-        rrec = None
-    if rrec is not None and rrec.get("worktree_path"):
-        try:
-            persist_session_docs(folder_path, project_id, "research", rsid,
-                                 rrec.get("worktree_path"))
-        except Exception:
-            pass
-
-    # 3) Build the reviewable next-stage (research→plan) prompt. Require it to name
-    #    a REAL persisted research doc — otherwise this is a fabricated/empty
-    #    handoff and we refuse (no plan session minted).
+    # 2+3) v11 Wave 3 — route the PERSIST + PROMPT through the SHARED keystone
+    #    (:func:`terminal_session.prepare_stage_handoff`), unifying this grass
+    #    research→plan variant with the project-level advance paths so the
+    #    persist+prompt logic is no longer DUPLICATED here. The keystone PERSISTS
+    #    the research dev session's produced docs into the main project (best-effort,
+    #    idempotent, works on the LIVE dev session) and BUILDS the real research→plan
+    #    prompt (Crucible + the persisted research doc paths + "read these first").
+    #    SAFE/PARTIAL unification (per the wave plan's CAUTION): only the persist +
+    #    prompt builder + doc_rels are shared; the CONTAINED-grass session wiring
+    #    (GRASS_DEV_LABEL_PREFIX label, dev_sessions dedup/focus, queue_paste,
+    #    grass_origin) stays grass-specific below so the v10 W5 behavior is preserved
+    #    exactly (these contained-session semantics do NOT fit the keystone and must
+    #    not be forced through it).
+    import terminal_session as _ts
     import handoff as _handoff
-    try:
-        prompt = _handoff.build_next_stage_prompt(
-            folder_path, project_id, rsid, "planning") or ""
-    except Exception:
-        prompt = ""
-    research_docs = efforts_for_session_id(folder_path, project_id,
-                                           "research", rsid)
-    research_doc_rels = [e.get("artifact_path", "") for e in research_docs
-                         if e.get("artifact_path")]
+    hk = _ts.prepare_stage_handoff(project_id, rsid, "planning")
+    prompt = (hk.get("prompt") or "") if isinstance(hk, dict) else ""
+    research_doc_rels = list((hk.get("doc_rels") or [])
+                             if isinstance(hk, dict) else [])
+
+    # Require the prompt to name a REAL persisted research doc — otherwise this is a
+    # fabricated/empty handoff and we refuse (no plan session minted). HONEST: the
+    # v10 W5 "no-research-material" guard is preserved verbatim, now driven by the
+    # keystone's resolved doc_rels (efforts_for_session_id over the research lane).
     has_material = bool(prompt.strip()) and any(
         rel and rel in prompt for rel in research_doc_rels)
     if not has_material:
@@ -827,7 +823,6 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
 
     # 4) Start (or FOCUS) the contained (idea, 'plan') dev session, seeded with the
     #    pending paste, linked to the research dev session, carrying grass_origin.
-    import terminal_session as _ts
     existing_psid = dev_map.get("plan") or ""
     live_plan = _live_grass_dev_session(existing_psid)
     if live_plan is not None:

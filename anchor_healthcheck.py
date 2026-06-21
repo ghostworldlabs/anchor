@@ -3196,6 +3196,312 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def _git_committed(repo: Path, rel: str) -> bool:
+    """True iff ``rel`` is tracked/committed in ``repo`` at HEAD (best-effort)."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(repo), "ls-files", "--error-unmatch", rel],
+            capture_output=True, text=True, timeout=30)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def check_rnd_v11_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v11 "Reliable Trio Handoff" R&D surface — FULLY STUBBED.
+
+    v11 fixed the bug where advancing a LIVE research session to planning never
+    PERSISTED the research docs (persistence ran only in ``kill`` +
+    ``finish_to_build``) → a bare prompt + no HANDOFF.md. The keystone is
+    ``terminal_session.prepare_stage_handoff`` (persist source docs FIRST + build
+    the real doc-referencing prompt + resolve materials), through which ALL
+    advance paths now route (research→plan / plan→build / grass).
+
+    This walk is THE v11 lesson made permanent: it exercises the REAL
+    WORKTREE-ONLY live flow — start a LIVE session, write a produced doc into its
+    WORKTREE ONLY (NO ``record_effort``, NO kill), advance, then assert the doc
+    was PERSISTED + committed into the MAIN project AND named in the prompt AND
+    referenced in a HANDOFF.md. (Pre-fix this would fail — the doc never left the
+    worktree.) It is the walk that would have caught the original bug.
+
+      (a) RESEARCH→PLAN keystone — a live research session writes
+          ``research/run-1/REPORT.md`` into its WORKTREE ONLY;
+          ``prepare_stage_handoff(pid, rsid, 'planning')`` then (i) persists +
+          commits it into the main project + records it as a research effort
+          tagged with ``rsid``, (ii) returns a prompt NAMING the real path +
+          "read these" + Crucible, (iii) ``doc_rels`` contains the real path;
+          ``handoff.write_handoff_md`` into the next worktree references it.
+      (b) PLAN→BUILD — a live planning session writes plan docs into its WORKTREE
+          ONLY (no record_effort), is marked DONE, then
+          ``auto_advance_planning_to_build`` opens ONE linked build whose prompt
+          NAMES the real plan paths and whose worktree CONTAINS them on disk
+          (HANDOFF.md + NEXT-PROMPT.md present).
+
+    All model / PTY interaction is stubbed (``ANCHOR_PTY_BACKEND=stub`` +
+    ``ANCHOR_RUNNER_CMD`` → the stream-json stub + a temp ``ANCHOR_WORKTREE_BASE``
+    + a throwaway temp git project). Proactive summary stays OFF (no env set), so
+    the keystone's background summary hard no-ops — never a live-claude summary
+    spawn. Every stub PTY + synthetic session row is reaped, all forced env is
+    restored, and the temp dirs are torn down. Nothing binds ``:8777`` / touches
+    real data / reaches the network. A sub-step that genuinely can't run (no git)
+    is recorded honestly as skipped (v9/v10 tolerance).
+    """
+    name = "R&D v11 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    os.environ.pop("ANCHOR_TERMINAL_SEED", None)  # rely on the built-in greet seed
+    # Proactive summary OFF → prepare_stage_handoff's background summary no-ops;
+    # the walk never spawns a live-claude summarizer run.
+    os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v11-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import handoff as _handoff
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v11-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v11 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v11", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v11 project", bool(pid), str(pid)))
+
+        # ── (a) RESEARCH→PLAN keystone: WORKTREE-ONLY live flow (the truth walk) ─
+        if git_ok:
+            try:
+                rsess = _ts.start_session(pid, "research", backend="claude")
+                rsid = rsess["session_id"]
+                rwt = rsess.get("worktree_path", "")
+                rel = "research/run-1/REPORT.md"
+                # Write the produced doc into the session's WORKTREE ONLY — NO
+                # record_effort, NO kill (this is the live flow the bug evaded).
+                if rwt:
+                    p = Path(rwt) / rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text("# Cooling report\n## Findings\nAdequate.\n",
+                                 encoding="utf-8")
+                store_lane = _eh._resolve_subdir("research")
+                # Pre-condition: the doc is NOT yet in the main folder / not an effort.
+                pre_clean = (not (proj_folder / rel).is_file()
+                             and _eh.efforts_for_session_id(
+                                 str(proj_folder), pid, store_lane, rsid) == [])
+
+                out = _ts.prepare_stage_handoff(pid, rsid, "planning")
+
+                # (i) persisted + committed into the MAIN project + tagged effort.
+                persisted = (out.get("ok")
+                             and (proj_folder / rel).is_file()
+                             and _git_committed(proj_folder, rel)
+                             and rel in (out.get("persisted") or []))
+                tagged = _eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid)
+                tagged_rels = [(e.get("artifact_path") or "").replace("\\", "/")
+                               for e in tagged]
+                tagged_ok = rel in tagged_rels
+                # (ii) the REAL prompt names the path + read-first + Crucible
+                #      (NOT the bare fallback that the bug produced).
+                prompt = out.get("prompt", "")
+                prompt_ok = (rel in prompt
+                             and "Crucible" in prompt
+                             and "Foreman" not in prompt
+                             and ("read these" in prompt.lower()))
+                # (iii) doc_rels + skill resolved.
+                rels_ok = (rel in (out.get("doc_rels") or [])
+                           and out.get("skill") == "Crucible")
+                # write_handoff_md into the next-stage worktree references it.
+                ho_ok = False
+                plan_wt = Path(_tf.mkdtemp(prefix="anchor-hc-v11-planwt-"))
+                rnd_env["v3_temp_dirs"].append(plan_wt)
+                try:
+                    hres = _handoff.write_handoff_md(
+                        str(plan_wt), out.get("doc_rels") or [], "Crucible",
+                        out.get("summary_text", ""))
+                    ho_path = plan_wt / _handoff.HANDOFF_FILENAME
+                    ho_ok = (hres.get("ok") and ho_path.is_file()
+                             and rel in ho_path.read_text(encoding="utf-8"))
+                except Exception:
+                    ho_ok = False
+
+                steps.append((
+                    "research→plan keystone persists worktree-only doc + real "
+                    "prompt + HANDOFF.md",
+                    pre_clean and persisted and tagged_ok and prompt_ok
+                    and rels_ok and ho_ok,
+                    f"pre_clean={pre_clean} persisted={persisted} "
+                    f"tagged={tagged_ok} prompt={prompt_ok} rels={rels_ok} "
+                    f"handoff={ho_ok}"))
+
+                # Idempotency: a second prepare does NOT duplicate the effort and
+                # returns the same real prompt (the v11 W1 invariant).
+                n1 = len(_eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid))
+                out2 = _ts.prepare_stage_handoff(pid, rsid, "planning")
+                n2 = len(_eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid))
+                idem_ok = (n2 == n1 and out2.get("prompt") == out.get("prompt")
+                           and rel in out2.get("prompt", ""))
+                steps.append(("research→plan prepare is idempotent",
+                              idem_ok, f"efforts {n1}->{n2}"))
+
+                try:
+                    _ts.kill(rsid, project_id=pid, _record_boneyard=False)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("research→plan keystone", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("research→plan keystone", True,
+                          "skipped (git unavailable)"))
+
+        # ── (b) PLAN→BUILD: live planning docs in WORKTREE ONLY → linked build ─
+        if git_ok:
+            try:
+                plansess = _ts.start_session(pid, "planning", backend="claude",
+                                             label="hc v11 plan")
+                plan_sid = plansess["session_id"]
+                plan_wt = plansess.get("worktree_path", "")
+                # Write a REAL MASTER+IMPL plan set into the planning WORKTREE
+                # ONLY (no record_effort) — the keystone must persist these so the
+                # build worktree (off main HEAD) contains them + discovery finds
+                # them for the build prompt.
+                master_rel = "planning/rnd-hc-v11/MASTER-PLAN.md"
+                impl_rel = "planning/rnd-hc-v11/IMPLEMENTATION-PLAN.md"
+                if plan_wt:
+                    for rel_, body in ((master_rel, "# Master Plan\n## Waves\nW1.\n"),
+                                       (impl_rel,
+                                        "# Implementation Plan\n## Wave 1\nDo it.\n")):
+                        pp = Path(plan_wt) / rel_
+                        pp.parent.mkdir(parents=True, exist_ok=True)
+                        pp.write_text(body, encoding="utf-8")
+                # Mark DONE (the terminal transition auto_advance gates on), then
+                # auto-advance to ONE linked build through the shared keystone.
+                _sreg.update_session(plan_sid, status=_sreg.STATUS_DONE)
+                build_rec = _ts.auto_advance_planning_to_build(pid, plan_sid)
+                adv_ok = bool(build_rec)
+                docs_persisted = False
+                build_prompt_ok = False
+                build_wt_has_docs = False
+                linked = False
+                artifacts = False
+                idem_ok = False
+                store_plan = _eh._resolve_subdir("planning")
+                if build_rec:
+                    bsid = build_rec.get("session_id", "")
+                    bwt = build_rec.get("worktree_path", "")
+                    # The plan docs were persisted + committed into the MAIN project.
+                    docs_persisted = (
+                        (proj_folder / master_rel).is_file()
+                        and (proj_folder / impl_rel).is_file()
+                        and _git_committed(proj_folder, master_rel)
+                        and _git_committed(proj_folder, impl_rel))
+                    # The build worktree (off main HEAD) CONTAINS them on disk.
+                    build_wt_has_docs = bool(bwt) and (
+                        (Path(bwt) / master_rel).is_file()
+                        and (Path(bwt) / impl_rel).is_file())
+                    # Both handoff artifacts written into the build worktree.
+                    artifacts = bool(bwt) and (
+                        (Path(bwt) / "HANDOFF.md").is_file()
+                        and (Path(bwt) / "NEXT-PROMPT.md").is_file())
+                    # The build's pending-paste prompt NAMES the real plan paths.
+                    brec = _sreg.get_session(bsid)
+                    bprompt = brec.get("pending_paste", "") or ""
+                    build_prompt_ok = (master_rel in bprompt
+                                       or impl_rel in bprompt
+                                       or "Foreman" in bprompt)
+                    linked = (brec.get("parent_session_id") == plan_sid
+                              and brec.get("chain_id")
+                              == _sreg.get_session(plan_sid).get("chain_id"))
+                    # Idempotent: a second advance does NOT mint a second build.
+                    again = _ts.auto_advance_planning_to_build(pid, plan_sid)
+                    idem_ok = again is None
+                    try:
+                        _ts.kill(bsid, project_id=pid, _record_boneyard=False)
+                    except Exception:
+                        pass
+                steps.append((
+                    "plan→build keystone persists worktree-only plan docs + "
+                    "build prompt names them + artifacts + linked",
+                    adv_ok and docs_persisted and build_wt_has_docs
+                    and build_prompt_ok and artifacts and linked and idem_ok,
+                    f"advanced={adv_ok} persisted={docs_persisted} "
+                    f"build_wt_docs={build_wt_has_docs} prompt={build_prompt_ok} "
+                    f"artifacts={artifacts} linked={linked} idempotent={idem_ok}"))
+                try:
+                    _ts.kill(plan_sid, project_id=pid, _record_boneyard=False)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("plan→build keystone", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("plan→build keystone", True,
+                          "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -3453,6 +3759,7 @@ def main():
         check_rnd_v8_surface(report, server_proc, rnd_env)
         check_rnd_v9_surface(report, server_proc, rnd_env)
         check_rnd_v10_surface(report, server_proc, rnd_env)
+        check_rnd_v11_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
