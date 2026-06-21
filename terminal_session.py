@@ -326,7 +326,8 @@ _UNSET = object()
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
-                  parent_session_id=None, paste_prompt=None, grass_origin=None):
+                  parent_session_id=None, paste_prompt=None, grass_origin=None,
+                  effort_id=None, effort_managed=False):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -374,6 +375,14 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     origin and can trace back to the idea). Empty for any non-grass chain (the
     default). It is just an idea id — SAFE to carry into the board / chain
     projections (never worktree_path/branch).
+
+    v12 Wave 1: ``effort_id`` (optional) is the stable id of the EFFORT this
+    session belongs to. When given the new record inherits it (a context-relief
+    continuation joins the SAME effort); when omitted the record's
+    ``effort_id`` defaults to its own session_id (a fresh effort). ``effort_managed``
+    (default False) is the v12 discriminator — passed True ONLY by the v12
+    entrypoints; every existing caller leaves it False, so there is NO behavior
+    change for them (both default to today's behavior).
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -470,6 +479,11 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             parent_session_id=parent_id,
             chain_id=chain_id,
             grass_origin=origin,
+            # v12 Wave 1: inherit the effort id if given (a context-relief
+            # continuation joins the SAME effort), else default to own sid;
+            # ``effort_managed`` stored exactly as passed (the v12 discriminator).
+            effort_id=(effort_id or sid),
+            effort_managed=bool(effort_managed),
         )
     except Exception as exc:
         try:

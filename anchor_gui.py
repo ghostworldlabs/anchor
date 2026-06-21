@@ -2015,6 +2015,44 @@ _REGISTRY_LANE_TO_COLUMN = {
     "deliverables": "deliverables",
 }
 
+# ── v12 Wave 1: effort board-routing accessor ───────────────────────────────
+#
+# Layout-D routes an effort to a zone by ``current_stage``/``kind`` ONLY (the
+# record's ``lane`` flips with the stage, so it must NOT be the routing key —
+# Skeptic SK-8). A trio effort in research → the Research zone; in plan/build →
+# the Plan/Build zone; a general/grass-dev effort → no trio zone.
+#
+# RENDER UNCHANGED this wave (the 5-col board still renders); this accessor is
+# added + unit-tested only. Its live render consumer arrives in W10.
+_EFFORT_ZONE_RESEARCH = "Research"
+_EFFORT_ZONE_PLAN_BUILD = "Plan/Build"
+
+
+def _effort_zone(record):
+    """Return the Layout-D board zone for an effort record (v12 Wave 1).
+
+    Routes by ``current_stage``/``kind`` only (never ``lane``, which flips):
+
+    - ``current_stage == "research"`` → :data:`_EFFORT_ZONE_RESEARCH`.
+    - ``current_stage in {"plan", "build"}`` → :data:`_EFFORT_ZONE_PLAN_BUILD`.
+    - ``kind in {"general", "grass-dev"}`` → ``None`` (never a trio zone).
+    - anything else → ``None``.
+
+    ``record`` is a normalized session record (dict). Pure / read-only.
+    """
+    if not isinstance(record, dict):
+        return None
+    kind = (record.get("kind") or "").strip()
+    if kind in ("general", "grass-dev"):
+        return None
+    stage = (record.get("current_stage") or "").strip()
+    if stage == "research":
+        return _EFFORT_ZONE_RESEARCH
+    if stage in ("plan", "build"):
+        return _EFFORT_ZONE_PLAN_BUILD
+    return None
+
+
 #: session_registry status → the locked light-color bucket (mirrors
 #: :func:`_session_light_class`; running=green, needs-attention=amber,
 #: done=amber, failed=red, idle/unknown=grey).
