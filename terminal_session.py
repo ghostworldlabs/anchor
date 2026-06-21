@@ -31,6 +31,7 @@ error dict, never a crash). Stdlib only; the native PTY dep is isolated in
 
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 
@@ -1630,6 +1631,25 @@ def _trigger_background_source_summary(folder, project_id, lane, session_id):
             not in ("1", "true", "yes", "on")):
         return
 
+    # Dedup at the root (v11.1 FIX): when the SOURCE session is already TERMINAL
+    # (DONE / FAILED — i.e. it's being/was finished, e.g. a hard-killed planning
+    # session that auto-advances to build), its summary is owned by the canonical
+    # summarize-on-finish hook (``anchor_gui._trigger_session_summary_on_finish``).
+    # The keystone background summary must NOT double up on it (two model calls
+    # for the same session + racy idempotency). The keystone summary's value is for
+    # a LIVE source being advanced from (the normal research→plan advance + the
+    # v11.1 conversation-transcript case, where the research source stays RUNNING) —
+    # there it remains the only trigger and fires as before. Best-effort: a status
+    # read failure falls through to the prior behavior (fire the summary).
+    try:
+        _src_rec = _reg.get_session(session_id)
+        if isinstance(_src_rec, dict):
+            _src_status = (_src_rec.get("status") or "").strip().lower()
+            if _src_status in (_reg.STATUS_DONE, _reg.STATUS_FAILED):
+                return
+    except Exception:
+        pass
+
     def _run():
         try:
             import summarizer as _sm  # lazy: no cycle, optional at import time
@@ -1665,6 +1685,325 @@ def _trigger_background_source_summary(folder, project_id, lane, session_id):
         threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
+
+
+# v11.1 Wave 1 (D3/D4): snapshot a CONVERSATION-only research session.
+#
+# THE GAP v11.1 fixes: a research (or plan) session whose work lived only as a
+# terminal CONVERSATION (the model answered in the PTY, wrote NO file) produces no
+# document-classified doc → the handoff's ``doc_rels`` is empty → grass hard-
+# refuses and the non-grass advance opens with a misleading prompt. The
+# conversation is lost — only files survived.
+#
+# When the initial ``capture_session_docs`` persist yields ZERO docs (D4 — only
+# the gap case), the keystone SYNCHRONOUSLY snapshots the source session's PTY
+# transcript into ``<lane>/<short-sid>-transcript.md`` (an ``_is_document_rel``-
+# valid ``.md`` under the lane dir), cleaned of the seed/greet boilerplate + ANSI
+# control sequences and capped to a sane tail. Re-running ``capture_session_docs``
+# then persists + session-tags it, so ``research_set_for_session`` finds it and
+# the REAL doc-referencing prompt engages, and the transcript rides into the next
+# worktree (off main HEAD). Best-effort + idempotent (deterministic filename,
+# content-addressed persist); a snapshot failure NEVER breaks the advance.
+
+#: Strip ANSI / control escape sequences (CSI / OSC / single-char escapes).
+#:
+#: A REAL ``claude`` ConPTY stream is a TUI: SGR colors, CSI cursor moves +
+#: erase-line/screen, OSC title sequences, plus DEC private-mode toggles
+#: (``\x1b[?25l`` etc.). The pre-v11.1 regex only covered the common CSI/OSC
+#: forms; this one broadens to ALL CSI (any params/intermediates/final), both OSC
+#: terminators (BEL ``\x07`` and ST ``\x1b\\``), the standalone ``\x1b(`` charset
+#: selects, and stray control bytes (KEEP ``\t`` ``\n`` ``\r`` — ``\r`` is needed
+#: for the in-place redraw collapse below, the others are real layout).
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b\[[0-?]*[ -/]*[@-~]"        # CSI  \x1b[ ... final byte (incl. ?, =, >)
+    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC  \x1b] ... BEL / ST
+    r"|\x1b[PX^_].*?(?:\x07|\x1b\\)"  # DCS/PM/APC/SOS strings ... ST/BEL
+    r"|\x1b[()][0-9A-Za-z]"           # charset designation \x1b( B  etc.
+    r"|\x1b[@-Z\\-_]"                 # other two-char escapes (RIS, IND, NEL…)
+    r"|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]"  # stray control chars (keep \t \n \r)
+)
+
+#: The box-drawing input chrome ``claude`` draws around the prompt line
+#: (``╭───╮`` ``│ > … │`` ``╰───╯``) plus the bottom status bar. A line that is
+#: DOMINATED by box-drawing glyphs is interface chrome, not dialogue.
+_BOX_DRAW_CHARS = "─━│┃┄┅┆┇┈┉┊┋┌┍┎┏┐┑┒┓└┕┖┗┘┙┚┛├┝┞┟┠┡┢┣┤┥┦┧┨┩┪┫┬┭┮┯┰┱┲┳┴┵┶┷┸┹┺┻┼┽┾┿╀╁╂╃╄╅╆╇╈╉╊╋╌╍╎╏═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰"
+_BOX_DRAW_SET = set(_BOX_DRAW_CHARS)
+
+#: Spinner / status glyphs ``claude`` redraws on the working line (braille dots
+#: + a few common spinner frames). A line that is only spinner chrome (a spinner
+#: glyph + "esc to interrupt"-style text + tokens/elapsed) is transient status.
+_SPINNER_CHARS = "⠀⠁⠂⠃⠄⠅⠆⠇⠈⠉⠊⠋⠌⠍⠎⠏⠐⠑⠒⠓⠔⠕⠖⠗⠘⠙⠚⠛⠜⠝⠞⠟⠠⠡⠢⠣⠤⠥⠦⠧⠨⠩⠪⠫⠬⠭⠮⠯⠰⠱⠲⠳⠴⠵⠶⠷⠸⠹⠺⠻⠼⠽⠾⠿⣀⣄⣆⣇⣦⣧⣷⣿◐◓◑◒◴◵◶◷⣾⣽⣻⢿⡿⣟⣯⣷✶✻✽✢·∗"
+_SPINNER_SET = set(_SPINNER_CHARS)
+#: Status-line phrases ``claude`` shows on the spinner / working line.
+_STATUS_PHRASE_RE = re.compile(
+    r"esc to interrupt|ctrl\+|tokens?\b|press up|\bthinking\b|\besc\b",
+    re.IGNORECASE,
+)
+
+#: Cap the snapshot — keep a HEAD (the research framing/question) AND a TAIL (the
+#: latest findings); the middle is what gets dropped when oversized.
+_TRANSCRIPT_MAX_CHARS = 32768   # ~32 KB total budget
+_TRANSCRIPT_HEAD_CHARS = 12288  # ~12 KB of the opening (the framing survives)
+_TRANSCRIPT_TAIL_CHARS = 20480  # ~20 KB of the latest discussion
+
+
+def _collapse_cr_redraws(text):
+    """Collapse carriage-return in-place redraws to each line's FINAL frame.
+
+    A real terminal stream redraws the status/spinner line hundreds of times by
+    emitting ``...\\r...\\r...`` with NO newline — each ``\\r`` returns the cursor
+    to column 0 so subsequent chars OVERWRITE the line in place. Naively
+    ``text.replace("\\r", "\\n")`` would explode every redraw frame into its own
+    line (the pre-fix bug). Instead, process line-by-line: within a logical line
+    (split on ``\\n``), apply ``\\r`` as an in-place cursor reset and emit only the
+    LAST rendered state. ``\\r\\n`` is normalized first so a real CRLF stays one
+    line break. Stdlib only.
+    """
+    text = text.replace("\r\n", "\n")
+    out_lines = []
+    for logical in text.split("\n"):
+        if "\r" not in logical:
+            out_lines.append(logical)
+            continue
+        # Render the segments separated by \r as overwrites onto one line buffer.
+        rendered = ""
+        for seg in logical.split("\r"):
+            if len(seg) >= len(rendered):
+                rendered = seg
+            else:
+                # Shorter segment overwrites the prefix; the tail of the prior
+                # frame remains (true terminal column semantics, no clear-line).
+                rendered = seg + rendered[len(seg):]
+        out_lines.append(rendered)
+    return "\n".join(out_lines)
+
+
+def _is_chrome_line(line):
+    """True when ``line`` is terminal interface chrome (box / spinner / status).
+
+    Conservative — only flags a line that is DOMINATED by box-drawing glyphs, or
+    is a spinner/status frame (a spinner glyph and/or a known status phrase with
+    little else). Real prose (even prose that mentions "esc") is kept because it
+    has substantial non-chrome content.
+    """
+    s = line.strip()
+    if not s:
+        return False
+    # Box-drawing chrome: the line is mostly box glyphs (the prompt frame).
+    boxy = sum(1 for ch in s if ch in _BOX_DRAW_SET)
+    nonspace = sum(1 for ch in s if not ch.isspace())
+    if nonspace and boxy >= max(2, int(nonspace * 0.5)):
+        return True
+    # Spinner/status frame: starts with (or is mostly) a spinner glyph, and the
+    # residual text is short status chrome.
+    has_spinner = any(ch in _SPINNER_SET for ch in s)
+    residual = "".join(ch for ch in s if ch not in _SPINNER_SET).strip()
+    if has_spinner and (not residual or len(residual) <= 60
+                        or _STATUS_PHRASE_RE.search(residual)):
+        return True
+    # A pure status line with no real content (e.g. a redrawn token counter).
+    if _STATUS_PHRASE_RE.search(s) and len(s) <= 40:
+        return True
+    # The model's own greet line ("✓ <Skill> loaded — what would you like to
+    # do?") — boilerplate, not dialogue. Dropped whether or not the seed echo was
+    # already stripped (it survives as a separate real-output line).
+    low = s.lower()
+    if GREET_MARKER.lower() in low and "loaded" in low and len(s) <= 80:
+        return True
+    return False
+
+
+def _strip_seed_greet(text, seed_text=""):
+    """Remove the load+greet preamble from CLEANED text, robust to rendering.
+
+    The seed Anchor writes ("Load the <Skill> skill now … greet me EXACTLY once …
+    ✓ <Skill> loaded — what would you like to do?") is ECHOED by the PTY. On the
+    STUB / a narrow terminal it echoes the seed VERBATIM (byte-exact); on a real
+    ConPTY it comes back RENDERED (line-wrapped at terminal width, glyphs), so a
+    byte-exact ``startswith`` won't match.
+
+    Resolution order (byte-exact FIRST so we never under-strip a known seed — e.g.
+    a grass develop seed that carries the idea text AS PART OF the seed must be
+    removed WHOLE, not cut at the greet marker mid-seed):
+
+      1. **byte-exact** full-seed strip (``startswith`` / ``find``) — removes the
+         entire recorded seed including any idea-text suffix;
+      2. **whitespace-normalized** full-seed match — handles a rendered seed whose
+         only difference is collapsed/wrapped whitespace; cut the same span;
+      3. **marker-based** cut — when the seed isn't recoverable as a whole (heavily
+         re-flowed render), cut everything up to and INCLUDING the greet marker
+         (``what would you like to do?``), the boilerplate↔dialogue boundary, but
+         ONLY when the "Load the … skill" boilerplate genuinely precedes it.
+
+    If none matches (env-overridden / absent seed), leave the text untouched
+    (never over-strip real dialogue). Operates on the CLEANED text (post ANSI
+    strip) so control codes don't defeat the match.
+    """
+    if not text:
+        return text
+    seed = (seed_text or "").strip()
+    # 1) byte-exact whole-seed strip (stub echo + the grass idea-suffix seed).
+    if seed_text and text.startswith(seed_text):
+        return text[len(seed_text):]
+    if seed:
+        idx = text.find(seed)
+        if idx != -1:
+            return text[:idx] + text[idx + len(seed):]
+    # 2) whitespace-normalized whole-seed match (rendered/re-flowed seed). Map the
+    # normalized match span back to a raw cut by walking raw chars while skipping
+    # the collapsed whitespace, so the WHOLE seed (incl. idea suffix) is removed.
+    if seed and len(seed) > 20:
+        norm_seed = re.sub(r"\s+", " ", seed).strip()
+        # Build a normalized view of text + an index map back to raw offsets.
+        norm_chars = []
+        norm_to_raw = []
+        prev_ws = False
+        for i, ch in enumerate(text):
+            if ch.isspace():
+                if prev_ws:
+                    continue
+                norm_chars.append(" ")
+                norm_to_raw.append(i)
+                prev_ws = True
+            else:
+                norm_chars.append(ch)
+                norm_to_raw.append(i)
+                prev_ws = False
+        norm_text = "".join(norm_chars)
+        nidx = norm_text.find(norm_seed)
+        if nidx != -1:
+            raw_start = norm_to_raw[nidx]
+            end_n = nidx + len(norm_seed) - 1
+            raw_end = norm_to_raw[end_n] if end_n < len(norm_to_raw) else len(text) - 1
+            return text[:raw_start] + text[raw_end + 1:]
+    # 3) marker-based cut (heavily re-flowed render; no whole-seed recovery).
+    low = text.lower()
+    greet = GREET_MARKER.lower()  # "what would you like to do?"
+    gpos = low.rfind(greet)
+    if gpos != -1 and re.search(r"load the .{0,40}? skill", low):
+        load_pos = low.find("load the")
+        if 0 <= load_pos < gpos:
+            cut = gpos + len(greet)
+            nl = text.find("\n", cut)
+            return text[nl + 1:] if nl != -1 else text[cut:]
+    return text
+
+
+def _clean_transcript_text(raw, seed_text=""):
+    """Clean a raw PTY buffer into honest transcript markdown text, or ``""``.
+
+    Real-ConPTY-robust. The pipeline (stdlib ``re`` only):
+
+      1. **Collapse ``\\r`` in-place redraws** to each line's FINAL frame
+         (:func:`_collapse_cr_redraws`) — a real status/spinner line is rewritten
+         hundreds of times via carriage-return with no newline; we keep only the
+         last render instead of exploding every frame into a line (the pre-fix
+         bug that buried the Q&A under stale redraw frames).
+      2. **Strip ANSI/CSI/OSC/DCS** escape sequences + stray control bytes
+         (:data:`_ANSI_ESCAPE_RE`).
+      3. **Strip the load+greet preamble** robustly (:func:`_strip_seed_greet`) —
+         marker-based so a line-wrapped rendered seed is still removed.
+      4. **Drop interface chrome** lines (box-drawing input frame + spinner/status
+         frames) — :func:`_is_chrome_line`, conservative.
+      5. **Collapse consecutive DUPLICATE content lines** to one (a spinner that
+         survived as repeated identical lines folds to a single line) and collapse
+         runs of blank lines.
+      6. **Cap** keeping a HEAD + TAIL slice (the research framing AND the latest
+         findings survive; the middle is marked truncated on a line boundary).
+
+    Returns ``""`` when nothing meaningful remains. Never raises.
+    """
+    try:
+        text = raw or ""
+        # 1. Carriage-return in-place redraw collapse (BEFORE ANSI strip so the
+        # \r boundaries are intact; the ANSI regex keeps \r).
+        text = _collapse_cr_redraws(text)
+        # 2. Strip ANSI / control sequences (now keeps \t \n only; \r consumed).
+        text = _ANSI_ESCAPE_RE.sub("", text)
+        text = text.replace("\r", "\n")  # any residual lone CR → newline
+        # 3. Strip the load+greet preamble (rendered-robust, on cleaned text).
+        text = _strip_seed_greet(text, seed_text=seed_text)
+        # 4 + 5. Drop chrome lines; collapse consecutive duplicate content lines.
+        kept = []
+        prev = None
+        blank_run = 0
+        for line in text.split("\n"):
+            if _is_chrome_line(line):
+                continue
+            stripped = line.rstrip()
+            if not stripped.strip():
+                blank_run += 1
+                if blank_run <= 1:
+                    kept.append("")
+                continue
+            blank_run = 0
+            if stripped == prev:
+                continue  # collapse a repeated identical content line
+            prev = stripped
+            kept.append(stripped)
+        text = "\n".join(kept)
+        text = re.sub(r"\n[ \t]*\n([ \t]*\n)+", "\n\n", text)
+        text = text.strip()
+        if not text:
+            return ""
+        # 6. Cap keeping HEAD + TAIL (the framing + the latest discussion).
+        if len(text) > _TRANSCRIPT_MAX_CHARS:
+            head = text[:_TRANSCRIPT_HEAD_CHARS]
+            # End the head on a line boundary.
+            hnl = head.rfind("\n")
+            if hnl > 0:
+                head = head[:hnl]
+            tail = text[-_TRANSCRIPT_TAIL_CHARS:]
+            tnl = tail.find("\n")
+            if 0 <= tnl < 200:
+                tail = tail[tnl + 1:]
+            text = (head.rstrip() + "\n\n[… middle truncated …]\n\n"
+                    + tail.strip())
+        return text
+    except Exception:
+        return ""
+
+
+def _snapshot_transcript_doc(record, source_session_id):
+    """Snapshot the source session's PTY transcript into a lane doc (D3/D4).
+
+    Reads the source session's full cumulative PTY output (``read_since(sid, 0)``),
+    cleans it (:func:`_clean_transcript_text`), and writes it to
+    ``<source_worktree>/<source_lane>/<short-sid>-transcript.md`` — a deterministic
+    filename (so a re-advance overwrites the same path, idempotent) that
+    ``_is_document_rel`` classifies as a produced doc. Creates the lane dir if
+    missing. Returns the repo-relative POSIX path written, or ``None`` when there
+    is no live PTY / no meaningful transcript / any failure. Never raises.
+    """
+    try:
+        if not isinstance(record, dict):
+            return None
+        worktree_path = (record.get("worktree_path") or "").strip()
+        lane = (record.get("lane") or "").strip()
+        if not worktree_path or not lane:
+            return None
+        wt = Path(worktree_path)
+        if not wt.is_dir():
+            return None
+        # Read the full cumulative output buffer (cursor 0).
+        try:
+            out = _pty.read_since(source_session_id, 0)
+        except _pty.UnknownSession:
+            return None  # no live PTY (e.g. reaped) → nothing to snapshot
+        raw = (out.get("text") or "") if isinstance(out, dict) else ""
+        body = _clean_transcript_text(raw, seed_text=record.get("seed_text") or "")
+        if not body:
+            return None
+        store_lane = _eh._resolve_subdir(lane)
+        short_sid = (source_session_id or "")[:12] or "session"
+        rel = "%s/%s-transcript.md" % (store_lane, short_sid)
+        dest = wt / store_lane / ("%s-transcript.md" % short_sid)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        header = "# %s session transcript (%s)\n\n" % (lane.title(), short_sid)
+        dest.write_text(header + body + "\n", encoding="utf-8")
+        return rel
+    except Exception:
+        return None
 
 
 def prepare_stage_handoff(project_id, source_session_id, to_lane):
@@ -1734,6 +2073,23 @@ def prepare_stage_handoff(project_id, source_session_id, to_lane):
             out["persisted"] = list(persist_res.get("persisted") or [])
     except Exception:
         out["persisted"] = []
+
+    # (b.2) v11.1 D3/D4: CONVERSATION-only capture. When the initial persist
+    # produced ZERO document-classified docs (D4 — only the gap case), snapshot
+    # the source session's PTY transcript into a lane doc and re-persist it so the
+    # conversation is not lost and the REAL doc-referencing prompt engages. Wrapped
+    # best-effort — on ANY failure leave ``persisted`` empty and fall through to
+    # the honest-minimal prompt; NEVER raise out of prepare_stage_handoff.
+    if not out["persisted"]:
+        try:
+            snap_rel = _snapshot_transcript_doc(rec, source_session_id)
+            if snap_rel:
+                persist_res2 = capture_session_docs(
+                    source_session_id, project_id=project_id, record=rec)
+                if isinstance(persist_res2, dict):
+                    out["persisted"] = list(persist_res2.get("persisted") or [])
+        except Exception:
+            pass  # leave persisted as-is (empty) → honest-minimal prompt
 
     # (c) BUILD the next-stage prompt from the now-persisted, session-tagged docs.
     try:

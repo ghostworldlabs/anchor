@@ -248,15 +248,27 @@ def test_build_next_stage_prompt_build_lists_plan_docs(env):
 
 def test_build_next_stage_prompt_honest_minimal_when_no_docs(env):
     """With NO resolvable docs the prompt is minimal + skill-correct and references
-    NO fabricated paths (HANDOFF.md is the pointer)."""
+    NO fabricated paths.
+
+    v11.1 D2 update: the no-docs fallback no longer makes the false "the research
+    report is in this worktree; see HANDOFF.md" claim (it misled the planner into
+    looking for a report that was never written). It now HONESTLY states no written
+    research artifact exists and instructs Crucible to CREATE the planning
+    materials. So this asserts the NEW honest+actionable contract (NOT a weakening:
+    the old "HANDOFF.md is the pointer" assertion encoded the misleading behavior
+    v11.1 fixes)."""
     ts, repo, pid, ho = env["ts"], env["repo"], env["pid"], env["handoff"]
     rsess = ts.start_session(pid, "research", backend="claude")
     rsid = rsess["session_id"]
     prompt = ho.build_next_stage_prompt(repo, pid, rsid, "planning")
     assert "Crucible" in prompt
-    assert "HANDOFF.md" in prompt
-    # No fabricated paths — there is no real research/run-*/ doc to name.
-    assert ".md" not in prompt.replace("HANDOFF.md", "")
+    # Honest + actionable: instruct the planner to CREATE the materials.
+    import re as _re
+    assert _re.search(r"create the", prompt, _re.I), prompt
+    # No false "report is in this worktree" claim.
+    assert "the research report is in this worktree" not in prompt
+    # No fabricated doc path — there is no real research/run-*/ doc to name.
+    assert ".md" not in prompt
     ts.kill(rsid)
 
 

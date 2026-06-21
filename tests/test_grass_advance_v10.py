@@ -225,27 +225,49 @@ def test_advance_grass_no_research_session_is_honest(env):
     assert not plans
 
 
-def test_advance_grass_no_research_material_is_honest(env):
-    """A research dev session that produced NO docs → honest 'no-research-
-    material' (no fabricated prompt), and NO plan dev session minted."""
+def test_advance_grass_empty_research_still_opens_honest_minimal(env):
+    """v11.1 Wave 2 (D1): a research dev session that produced NO docs AND has no
+    conversation in its buffer (genuinely empty) NO LONGER refuses — the grass
+    advance ALWAYS opens the contained plan dev session, now with the honest-
+    minimal "create the materials" prompt (D2). The old "no-research-material"
+    hard-refusal was removed (it diverged from the non-grass path and refused the
+    conversation-only case John reported)."""
     ts, eh, reg, pid, idea_id = (
         env["ts"], env["eh"], env["reg"], env["pid"], env["idea_id"])
     rrec = eh.develop_grass_idea(pid, idea_id, "research", backend="claude")
     rsid = rrec["session_id"]
-    # Deliberately produce NOTHING in the research worktree.
+    # Deliberately produce NOTHING in the research worktree AND no conversation.
 
     out = eh.advance_grass_research_to_plan(pid, idea_id)
-    assert out["ok"] is False
-    assert out["session"] is None
-    assert out["reason"] == "no-research-material"
-    # No plan dev session minted (no fabrication).
+    assert out["ok"] is True, out
+    assert out["reason"] != "no-research-material", \
+        "the removed guard must no longer fire"
+    prec = out["session"]
+    assert prec is not None and prec["lane"] == "plan"
+    psid = prec["session_id"]
+
+    # The plan dev session OPENS, linked + contained, with the honest-minimal
+    # "create the materials" Crucible prompt (no fabricated research doc path).
+    full = reg.get_session(psid)
+    assert full["parent_session_id"] == rsid
+    assert full["grass_origin"] == idea_id
+    assert full["label"].startswith(eh.GRASS_DEV_LABEL_PREFIX)
+    paste = full["pending_paste"]
+    assert paste, "the plan dev session must still carry a pending paste"
+    assert "Crucible" in paste
+    assert re.search(r"create the", paste, re.I), \
+        f"honest-minimal prompt must instruct to CREATE the materials: {paste!r}"
+    assert not re.search(r"research/\S+-transcript\.md", paste), \
+        "an empty session must not fabricate a transcript path"
+
+    # Exactly ONE plan dev session minted, and the idea record is stamped.
     plans = [s for s in reg.list_sessions(project_id=pid)
              if s.get("lane") == "plan"]
-    assert not plans
-    # The idea record was NOT stamped with a plan dev session.
+    assert len(plans) == 1
     idea_rec = eh.get_grass_idea(env["repo"], pid, idea_id)
-    assert "plan" not in eh._grass_dev_sessions(idea_rec)
+    assert eh._grass_dev_sessions(idea_rec).get("plan") == psid
 
+    ts.kill(psid)
     ts.kill(rsid)
 
 

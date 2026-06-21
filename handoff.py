@@ -607,13 +607,20 @@ def build_next_stage_prompt(folder_path, project_id, from_session_id, to_lane):
         if lane in ("plan", "planning"):
             text = _ts.build_research_to_plan_seed(project_id, from_session_id) or ""
             if not text:
-                # Honest minimal plan prompt (no fabricated paths). Names the skill
-                # WITHOUT re-instructing the load (phase-1 already loaded it).
+                # Honest minimal plan prompt (v11.1 D2): no fabricated paths and no
+                # false "the research report is in this worktree" claim — when no
+                # written research artifact was produced upstream, instruct the
+                # planner to CREATE the materials from the captured context + the
+                # project objective. Names the skill WITHOUT re-instructing the load
+                # (phase-1 already loaded it).
                 skill = _ts.LANE_SKILL.get("plan", "Crucible")
                 text = (
-                    "With %s loaded, plan from the upstream research session's "
-                    "findings (the research report is in this worktree checkout; "
-                    "see HANDOFF.md)." % skill)
+                    "With %s loaded: no written research artifact was produced "
+                    "upstream. Review the upstream research (its transcript/summary "
+                    "if present in this worktree), then CREATE the planning "
+                    "materials — a Master Plan and an Implementation Plan — "
+                    "grounded in the project objective. Do not assume a prior report "
+                    "exists." % skill)
         elif lane == "build":
             plan_set = None
             try:
@@ -624,10 +631,17 @@ def build_next_stage_prompt(folder_path, project_id, from_session_id, to_lane):
             if plan_set:
                 text = _ts._build_seed_for_plan(plan_set)
             else:
+                # Honest minimal build prompt (v11.1 D2): no fabricated plan-doc
+                # path claim — when no finalized plan document was produced
+                # upstream, instruct Foreman to review the upstream context,
+                # reconstruct the plan if needed, then execute the build.
                 skill = _ts.LANE_SKILL.get("build", "Foreman")
                 text = (
-                    "With %s loaded, execute on the plan documents referenced "
-                    "in HANDOFF.md in this worktree." % skill)
+                    "With %s loaded: no finalized plan document was produced "
+                    "upstream. Review the upstream context (its transcript/summary "
+                    "if present in this worktree), reconstruct the plan if needed, "
+                    "then execute the build grounded in the project objective. Do "
+                    "not assume a finished plan exists." % skill)
         else:
             # Unknown target lane → a generic honest prompt (no fabrication).
             text = ("Continue this work in the next stage; see HANDOFF.md in this "

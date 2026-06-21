@@ -3502,6 +3502,299 @@ def check_rnd_v11_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def check_rnd_v11_1_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v11.1 "Handoff Always Primes" R&D surface — FULLY STUBBED.
+
+    v11.1 fixed the bug where advancing a CONVERSATION-only research session — one
+    whose work lived ONLY as a terminal conversation (the model answered in the
+    PTY, wrote NO file) — either hard-refused (grass: ``no-research-material``) or
+    opened with a misleading prompt (non-grass). The keystone is the transcript
+    SNAPSHOT in ``terminal_session.prepare_stage_handoff``: when the initial
+    persist yields ZERO document-classified docs, it snapshots the source
+    session's PTY transcript → cleans it → writes ``<lane>/<short-sid>-transcript.md``
+    → re-persists it → builds the REAL doc-referencing prompt. Wave 2 removed the
+    grass hard-refusal so the grass advance ALWAYS opens + materializes the
+    transcript into the plan worktree on disk.
+
+    This walk is THE v11.1 lesson made permanent: it exercises the REAL
+    CONVERSATION-ONLY live flow — start a LIVE session, seed its STUB PTY read
+    buffer with simulated transcript content (a ``pty_manager.write`` ECHOES into
+    the readable buffer, exactly the conversation-only live path), write NOTHING to
+    the worktree + NO ``record_effort`` + NO kill, then advance and assert the
+    transcript was SNAPSHOTTED + persisted + named in the prompt + the next session
+    opens. (Pre-fix this would fail — the conversation was never captured.)
+
+      (a) RESEARCH→PLAN conversation-only — a live research session's only output is
+          a transcript in its PTY buffer (NO file); ``prepare_stage_handoff(pid,
+          rsid, 'planning')`` then (i) snapshots + persists + commits
+          ``research/<short-sid>-transcript.md`` into the MAIN project + records it
+          as a research effort tagged with ``rsid``, (ii) returns a prompt NAMING
+          that real path + a "read these / create" instruction + Crucible (not
+          Foreman), (iii) ``doc_rels`` / ``persisted`` contain it.
+      (b) GRASS conversation-only — a contained grass research dev session's only
+          output is a transcript in its PTY buffer (NO file);
+          ``advance_grass_research_to_plan`` OPENS the contained grass plan dev
+          session (NO refusal — the W2 unification), the transcript is materialized
+          into the plan worktree ON DISK + named in the pending paste, and the
+          session is contained + linked (parent + grass_origin).
+
+    All model / PTY interaction is stubbed (``ANCHOR_PTY_BACKEND=stub`` +
+    ``ANCHOR_RUNNER_CMD`` → the stream-json stub + a temp ``ANCHOR_WORKTREE_BASE``
+    + a throwaway temp git project). Proactive summary stays OFF — and is RESTORED
+    in ``finally`` — so the keystone's background summary (which now reads that env)
+    hard no-ops and never spawns a live-claude summarizer run. Every stub PTY +
+    synthetic session row is reaped, all forced env is restored, and the temp dirs
+    are torn down. Nothing binds ``:8777`` / touches real data / reaches the
+    network. A sub-step that genuinely can't run (no git) is recorded honestly as
+    skipped (v9/v10/v11 tolerance).
+    """
+    name = "R&D v11.1 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    os.environ.pop("ANCHOR_TERMINAL_SEED", None)  # rely on the built-in greet seed
+    # Proactive summary OFF → prepare_stage_handoff's background summary no-ops; the
+    # walk never spawns a live-claude summarizer run. (The keystone now READS this
+    # env, so restoring it in finally matters — it must not leak ON.)
+    os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v11_1-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    # Simulated research CONVERSATION content — plausibly named so the snapshot
+    # text is non-trivial. NO file is written; this is ECHOED into the PTY buffer.
+    transcript = (
+        "\nResearcher: Which coolant loop maximizes thermal margin?\n"
+        "Assistant: The molten-salt loop wins - a 40C transient tolerance with no\n"
+        "scram and the simplest pump topology. Recommendation: prototype the pump\n"
+        "seal and pursue the molten-salt design.\n")
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import pty_manager as _pty
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v11_1-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v11.1 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v11.1", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v11.1 project", bool(pid), str(pid)))
+
+        # ── (a) RESEARCH→PLAN: CONVERSATION-ONLY live flow (the v11.1 truth walk) ─
+        if git_ok:
+            try:
+                rsess = _ts.start_session(pid, "research", backend="claude")
+                rsid = rsess["session_id"]
+                # CONVERSATION ONLY: seed the source session's PTY read buffer (the
+                # stub PTY echoes a write into its readable buffer) — write NO file
+                # to the worktree, NO record_effort, NO kill. This is the exact
+                # live path the original bug evaded.
+                _pty.write(rsid, transcript)
+
+                store_lane = _eh._resolve_subdir("research")
+                short_sid = rsid[:12]
+                rel = "research/%s-transcript.md" % short_sid
+                # Pre-condition: the transcript is NOT in the worktree/main, no effort.
+                pre_clean = (not (proj_folder / rel).is_file()
+                             and _eh.efforts_for_session_id(
+                                 str(proj_folder), pid, store_lane, rsid) == [])
+
+                out = _ts.prepare_stage_handoff(pid, rsid, "planning")
+
+                # (i) snapshotted + persisted + committed into MAIN + tagged effort.
+                snapshotted = (out.get("ok")
+                               and (proj_folder / rel).is_file()
+                               and _git_committed(proj_folder, rel)
+                               and rel in (out.get("persisted") or []))
+                body = ""
+                if (proj_folder / rel).is_file():
+                    try:
+                        body = (proj_folder / rel).read_text(encoding="utf-8")
+                    except Exception:
+                        body = ""
+                content_kept = ("molten-salt" in body
+                                and "transcript" in body.lower())
+                tagged = _eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid)
+                tagged_rels = [(e.get("artifact_path") or "").replace("\\", "/")
+                               for e in tagged]
+                tagged_ok = rel in tagged_rels
+                # (ii) the REAL prompt names the path + read/create + Crucible (the
+                #      conversation-only flow's whole point — NOT a misleading prompt).
+                prompt = out.get("prompt", "")
+                prompt_lower = prompt.lower()
+                prompt_ok = (rel in prompt
+                             and "Crucible" in prompt
+                             and "Foreman" not in prompt
+                             and ("read these" in prompt_lower
+                                  or "create" in prompt_lower))
+                # (iii) doc_rels + skill resolved.
+                rels_ok = (rel in (out.get("doc_rels") or [])
+                           and out.get("skill") == "Crucible")
+
+                steps.append((
+                    "research→plan conversation-only: transcript snapshotted + "
+                    "persisted + real prompt names it",
+                    pre_clean and snapshotted and content_kept and tagged_ok
+                    and prompt_ok and rels_ok,
+                    f"pre_clean={pre_clean} snapshotted={snapshotted} "
+                    f"content={content_kept} tagged={tagged_ok} "
+                    f"prompt={prompt_ok} rels={rels_ok}"))
+
+                # Idempotency: a second prepare does NOT duplicate the effort + the
+                # same real prompt (the transcript filename is deterministic).
+                n1 = len(_eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid))
+                out2 = _ts.prepare_stage_handoff(pid, rsid, "planning")
+                n2 = len(_eh.efforts_for_session_id(
+                    str(proj_folder), pid, store_lane, rsid))
+                idem_ok = (n2 == n1 and out2.get("prompt") == out.get("prompt")
+                           and rel in out2.get("prompt", ""))
+                steps.append(("research→plan snapshot is idempotent",
+                              idem_ok, f"efforts {n1}->{n2}"))
+
+                try:
+                    _ts.kill(rsid, project_id=pid, _record_boneyard=False)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("research→plan conversation-only", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("research→plan conversation-only", True,
+                          "skipped (git unavailable)"))
+
+        # ── (b) GRASS: CONVERSATION-ONLY advance always opens (the W2 unification) ─
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid,
+                                    "Passive autonomous cooling loop",
+                                    notes="A natural-circulation decay-heat loop.")
+                idea_id = idea.get("job_id") or idea.get("id")
+                # Develop the contained (idea, 'research') dev session, then seed
+                # its PTY buffer with a CONVERSATION — write NO file, NO effort.
+                rrec = _eh.develop_grass_idea(pid, idea_id, "research",
+                                              backend="claude")
+                grsid = rrec["session_id"]
+                _pty.write(grsid, transcript)
+
+                gstore = _eh._resolve_subdir("research")
+                grel = "research/%s-transcript.md" % (grsid[:12])
+                pre_clean_g = (_eh.efforts_for_session_id(
+                    str(proj_folder), pid, gstore, grsid) == [])
+
+                adv = _eh.advance_grass_research_to_plan(pid, idea_id)
+
+                # (a) ok:True + a grass PLAN dev session OPENS — no refusal (W2).
+                opened = (adv.get("ok")
+                          and adv.get("reason") != "no-research-material"
+                          and adv.get("session") is not None
+                          and adv.get("research_session_id") == grsid)
+                psid = (adv.get("session") or {}).get("session_id", "")
+                full = _sreg.get_session(psid) if psid else None
+                # (b) the transcript is snapshotted + persisted into MAIN + named in
+                #     the pending paste + materialized ON DISK in the plan worktree.
+                in_main = (proj_folder / grel).is_file()
+                paste = (full.get("pending_paste") or "") if full else ""
+                paste_ok = (bool(paste) and "Crucible" in paste
+                            and grel in paste and not paste.endswith("\n"))
+                plan_wt = (full.get("worktree_path") or "") if full else ""
+                on_disk = bool(plan_wt) and (Path(plan_wt) / grel).is_file()
+                # (c) contained (GRASS_DEV_LABEL_PREFIX) + linked (parent + origin).
+                contained = bool(full) and str(
+                    full.get("label", "")).startswith(_eh.GRASS_DEV_LABEL_PREFIX)
+                linked = bool(full) and (
+                    full.get("parent_session_id") == grsid
+                    and full.get("grass_origin") == idea_id)
+                # The idea STAYS in grass (copy, never destroy).
+                idea_kept = _eh.get_grass_idea(
+                    str(proj_folder), pid, idea_id) is not None
+
+                steps.append((
+                    "grass conversation-only advance opens + materializes "
+                    "transcript on disk + contained + linked",
+                    pre_clean_g and opened and in_main and paste_ok and on_disk
+                    and contained and linked and idea_kept,
+                    f"pre_clean={pre_clean_g} opened={opened} in_main={in_main} "
+                    f"paste={paste_ok} on_disk={on_disk} contained={contained} "
+                    f"linked={linked} idea_kept={idea_kept}"))
+
+                for sid in (psid, grsid):
+                    if not sid:
+                        continue
+                    try:
+                        _ts.kill(sid, project_id=pid, _record_boneyard=False)
+                    except Exception:
+                        pass
+            except Exception as e:
+                steps.append(("grass conversation-only advance", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass conversation-only advance", True,
+                          "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk (incl. PROACTIVE_SUMMARY,
+        # which the keystone now reads — it must not leak ON).
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -3760,6 +4053,7 @@ def main():
         check_rnd_v9_surface(report, server_proc, rnd_env)
         check_rnd_v10_surface(report, server_proc, rnd_env)
         check_rnd_v11_surface(report, server_proc, rnd_env)
+        check_rnd_v11_1_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
