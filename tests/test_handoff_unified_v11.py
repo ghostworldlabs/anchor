@@ -24,9 +24,11 @@ worktree-only docs, then (1) for plan→build the plan docs would never reach ma
 HEAD → ``discover_recent_plan_set`` (reads persisted planning efforts) would find
 NO plan set → no build would open (the test asserting a build with the real plan
 paths would FAIL); (2) for grass the prompt builder would resolve no research
-doc → the honest ``no-research-material`` guard fires → NO plan session minted
-(the test asserting a linked plan dev session would FAIL). So each test would
-fail were persistence absent — the masking pattern cannot make them pass.
+doc → the prompt would NOT name the real research doc path (the test asserting the
+prompt names ``rel`` would FAIL). So each test would fail were persistence absent —
+the masking pattern cannot make them pass. (v11.1 Wave 2 removed the
+``no-research-material`` hard-refusal; the advance now always opens the plan session,
+so the asserted material is the prompt's NAMED doc path, not the refusal.)
 
 Hermetic: NO real claude/gemini, NO real PTY — ``ANCHOR_PTY_BACKEND=stub``, a
 temp git repo for the worktree, a tmp data dir + tmp worktree base,
@@ -408,21 +410,36 @@ def test_grass_advance_through_keystone_preserves_v10_w5(env):
     assert eh._grass_dev_sessions(idea_rec).get("plan") == psid
 
 
-def test_grass_advance_no_material_is_honest(env):
-    """A grass research dev session with NO produced docs → honest
-    'no-research-material', NO plan dev session minted (no fabricated handoff)."""
+def test_grass_advance_empty_research_still_opens_honest_minimal(env):
+    """v11.1 Wave 2 (D1): a grass research dev session with NO produced docs AND no
+    conversation in its buffer NO LONGER refuses — the advance ALWAYS opens the
+    contained plan dev session with the honest-minimal 'create the materials'
+    prompt (the v10/v11 'no-research-material' hard-refusal was removed; it diverged
+    from the non-grass path and refused the conversation-only case)."""
     ts, eh, reg, repo, pid = (env["ts"], env["eh"], env["reg"], env["repo"],
                               env["pid"])
     idea_id = _add_grass_idea(eh, repo, pid)
     rrec = eh.develop_grass_idea(pid, idea_id, "research", backend="claude")
-    # Produce NOTHING in the worktree.
+    rsid = rrec["session_id"]
+    # Produce NOTHING in the worktree AND no conversation.
     out = eh.advance_grass_research_to_plan(pid, idea_id)
-    assert out["ok"] is False
-    assert out["reason"] == "no-research-material"
-    assert out["session"] is None
-    # No plan dev session minted.
+    assert out["ok"] is True, out
+    assert out["reason"] != "no-research-material"
+    prec = out["session"]
+    assert prec is not None and prec["lane"] == "plan"
+    psid = prec["session_id"]
+    full = reg.get_session(psid)
+    assert full["parent_session_id"] == rsid
+    assert full["grass_origin"] == idea_id
+    assert full["label"].startswith(eh.GRASS_DEV_LABEL_PREFIX)
+    paste = full["pending_paste"]
+    assert paste and "Crucible" in paste
+    assert re.search(r"create the", paste, re.I), paste
+    # The (idea, 'plan') dedupe map is persisted.
     idea_rec = eh.get_grass_idea(repo, pid, idea_id)
-    assert "plan" not in eh._grass_dev_sessions(idea_rec)
+    assert eh._grass_dev_sessions(idea_rec).get("plan") == psid
+    ts.kill(psid)
+    ts.kill(rsid)
 
 
 def test_grass_advance_re_advance_focuses_same_plan(env):

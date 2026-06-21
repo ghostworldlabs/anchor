@@ -732,6 +732,90 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     return record
 
 
+def _materialize_handoff_into_plan_worktree(folder_path, plan_record, hk):
+    """Make the upstream handoff docs READABLE from a grass plan dev worktree.
+
+    v11.1 Wave 2 BLOCKER fix. ``advance_grass_research_to_plan`` snapshots +
+    persists the research session's transcript into the MAIN project (committed
+    on main HEAD) and delivers a prompt naming ``research/<sid>-transcript.md``.
+    For a FRESH-MINT plan session the worktree is cut off main HEAD AFTER the
+    commit → the file is already present. But for a FOCUSED-EXISTING (the user
+    developed "Plan" FIRST) plan session, its worktree was created BEFORE the
+    transcript commit → the named file is ABSENT from its checkout, so Crucible
+    would hit file-not-found.
+
+    This makes the named docs PRESENT on disk in the plan worktree for BOTH
+    orderings and writes the same durable artifacts the non-grass advance writes
+    (HANDOFF.md + NEXT-PROMPT.md), so the named doc is always reachable:
+
+      - For each persisted upstream doc rel (``hk['doc_rels']`` / ``hk['persisted']``)
+        COPY ``<folder>/<rel>`` → ``<plan_wt>/<rel>`` (creating parent dirs),
+        skipping a byte-identical copy (idempotent — a no-op for the fresh-mint
+        case where the file is already there off main HEAD).
+      - Write ``HANDOFF.md`` + ``NEXT-PROMPT.md`` into the plan worktree.
+
+    Best-effort: ANY failure is swallowed so it NEVER breaks the advance. Stays
+    within contained-grass semantics — it only materializes docs + handoff files,
+    it does NOT touch the session record / dedup / linkage / grass_origin.
+    """
+    try:
+        if not isinstance(hk, dict) or not isinstance(plan_record, dict):
+            return
+        plan_wt = (plan_record.get("worktree_path") or "").strip()
+        if not plan_wt:
+            return
+        wt = Path(plan_wt)
+        if not wt.is_dir():
+            return
+        main = Path(folder_path) if folder_path else None
+
+        # Union of the named upstream doc rels (doc_rels + persisted), deduped.
+        rels = []
+        for key in ("doc_rels", "persisted"):
+            for r in (hk.get(key) or []):
+                r = str(r).strip().replace("\\", "/")
+                if r and r not in rels:
+                    rels.append(r)
+
+        # Materialize each rel into the plan worktree from the MAIN project copy.
+        if main is not None and main.exists():
+            for rel in rels:
+                try:
+                    # Guard against traversal: the rel must resolve UNDER the wt.
+                    dst = (wt / rel).resolve()
+                    if not str(dst).startswith(str(wt.resolve())):
+                        continue
+                    src = main / rel
+                    if not src.is_file():
+                        continue
+                    if dst.is_file():
+                        try:
+                            if src.read_bytes() == dst.read_bytes():
+                                continue  # already present + identical → no-op
+                        except OSError:
+                            pass
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(src), str(dst))
+                except OSError:
+                    continue
+
+        # Write the durable handoff artifacts INTO the plan worktree, matching the
+        # non-grass /api/rnd/advance_session path (the safety net so the named doc
+        # is always reachable via HANDOFF.md / NEXT-PROMPT.md too).
+        try:
+            import handoff as _hk
+            _hk.write_handoff_md(plan_wt, hk.get("doc_rels", []),
+                                 hk.get("skill", "") or "Crucible",
+                                 hk.get("summary_text", ""))
+            prompt = (hk.get("prompt") or "").strip()
+            if prompt:
+                _hk.write_next_prompt(plan_wt, prompt)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 def advance_grass_research_to_plan(project_id: str, idea_id: str,
                                    folder_path=None, backend=None) -> dict:
     """Push a grass idea's RESEARCH dev session → a linked grass PLAN dev session.
@@ -749,15 +833,16 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
       2. PERSIST that research session's produced docs into the main project (the
          v8 keystone, best-effort) so :func:`handoff.build_next_stage_prompt`
          resolves the REAL research doc paths.
-      3. Build the reviewable next-stage prompt via
-         ``handoff.build_next_stage_prompt(folder, pid, research_dev_sid,
-         to_lane='planning')`` — the research→plan body (real research doc paths +
-         "read these first, then plan" + Crucible). HONEST: when the research dev
-         session produced NO material, the prompt would be the minimal skill-only
-         fallback (no real doc paths). To keep this advance honest (D: "no
-         fabricated prompt"), we REQUIRE that the prompt actually reference a
-         persisted research doc; otherwise → ``{"ok": False,
-         "reason": "no-research-material"}`` and NO plan session is minted.
+      3. Build the reviewable next-stage prompt via the v11 keystone
+         ``terminal_session.prepare_stage_handoff(pid, rsid, 'planning')`` — the
+         research→plan body (real research doc paths + "read these first, then
+         plan" + Crucible). v11.1 Wave 2 (D1): this advance NO LONGER refuses on
+         "no written doc". The keystone (W1) ALWAYS produces material — it
+         snapshots the research session's PTY transcript when no file was written
+         (naming ``research/<sid>-transcript.md`` in the prompt), or returns the
+         honest-minimal "create the materials" prompt for a genuinely zero-output
+         session — so the old ``no-research-material`` hard-refusal is removed and
+         the path ALWAYS opens the next session, exactly like the non-grass advance.
       4. Start (or FOCUS — dedupe like :func:`develop_grass_idea`) the idea's
          CONTAINED ``(idea, 'plan')`` dev session (GRASS_DEV_LABEL_PREFIX label →
          excluded from the board + top strip; keyed in ``dev_sessions``) with
@@ -807,19 +892,31 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
     import handoff as _handoff
     hk = _ts.prepare_stage_handoff(project_id, rsid, "planning")
     prompt = (hk.get("prompt") or "") if isinstance(hk, dict) else ""
-    research_doc_rels = list((hk.get("doc_rels") or [])
-                             if isinstance(hk, dict) else [])
 
-    # Require the prompt to name a REAL persisted research doc — otherwise this is a
-    # fabricated/empty handoff and we refuse (no plan session minted). HONEST: the
-    # v10 W5 "no-research-material" guard is preserved verbatim, now driven by the
-    # keystone's resolved doc_rels (efforts_for_session_id over the research lane).
-    has_material = bool(prompt.strip()) and any(
-        rel and rel in prompt for rel in research_doc_rels)
-    if not has_material:
-        return {"ok": False, "session": None,
-                "research_session_id": rsid,
-                "reason": "no-research-material"}
+    # v11.1 Wave 2 (D1) — the grass advance NO LONGER refuses on "no written doc".
+    # The v10 W5 ``no-research-material`` early-return that used to live here (it
+    # required the keystone's prompt to name a persisted research doc, else it
+    # returned ``{"ok": False, "reason": "no-research-material"}`` BEFORE any
+    # ``start_session``) is REMOVED. It refused the CONVERSATION-ONLY case (a
+    # research session that was a dialogue, no file written) — exactly John's
+    # reported failure — and it diverged from the non-grass advance path which has
+    # no such guard. The v11.1 keystone (W1) now ALWAYS produces material: it
+    # snapshots the research session's PTY transcript to ``research/<sid>-transcript.md``
+    # when no document was written and references it in the prompt, or — for a
+    # genuinely zero-output session — returns the honest-minimal "create the
+    # materials" prompt. Either way we fall through to the existing contained-grass
+    # mint/focus/link machinery below (UNCHANGED from v10 W5) and OPEN the plan
+    # session. The only legitimate refusal remaining is ``no-research-session``
+    # (there is no research dev session at all to advance FROM — handled above).
+    if not prompt.strip():
+        # Belt-and-suspenders: the keystone is best-effort and should never hand back
+        # an empty prompt after W1, but if it somehow did, build the honest-minimal
+        # fallback ourselves so we STILL open the session (never refuse).
+        try:
+            prompt = _handoff.build_next_stage_prompt(
+                folder_path, project_id, rsid, "planning")
+        except Exception:
+            prompt = ""
 
     # 4) Start (or FOCUS) the contained (idea, 'plan') dev session, seeded with the
     #    pending paste, linked to the research dev session, carrying grass_origin.
@@ -851,6 +948,12 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
                 delivered = _ts.queue_paste(existing_psid, prompt)
             except Exception:
                 delivered = False
+        # v11.1 W2 BLOCKER FIX — the FOCUSED-EXISTING (develop-plan-FIRST) case.
+        # This plan worktree was created BEFORE the transcript commit, so the doc
+        # named in the prompt is ABSENT from its checkout. Materialize the named
+        # upstream docs into THIS worktree + write HANDOFF.md/NEXT-PROMPT.md, so
+        # Crucible can READ the transcript. Best-effort — never breaks the advance.
+        _materialize_handoff_into_plan_worktree(folder_path, live_plan, hk)
         return {"ok": True, "session": live_plan,
                 "research_session_id": rsid, "reason": "focused-existing",
                 "paste_delivered": delivered}
@@ -863,6 +966,13 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
         kwargs["backend"] = backend
     record = _ts.start_session(project_id, "plan", **kwargs)
     psid = record.get("session_id", "")
+
+    # v11.1 W2 BLOCKER FIX — the FRESH-MINT case. The new worktree IS cut off main
+    # HEAD after the transcript commit, so the named doc is already present; this
+    # call is then idempotent (byte-identical → no-op) but STILL writes the durable
+    # HANDOFF.md/NEXT-PROMPT.md into the plan worktree, matching the non-grass
+    # advance path. Best-effort — never breaks the advance.
+    _materialize_handoff_into_plan_worktree(folder_path, record, hk)
 
     # Persist the (idea, 'plan') -> session_id map so a re-click focuses THIS
     # session (best-effort; a failed annotation never tears down a live session).

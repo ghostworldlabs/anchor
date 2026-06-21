@@ -4790,8 +4790,11 @@ async function archiveGrassSession(ideaId, lane) {
 // terminal is OPEN and mounts the returned plan dev session (reusing the Wave-3
 // toggle/mount path), so the pasted-unsent prompt becomes visible in the plan
 // terminal input for the user to review and press Enter. The research dev session
-// must be live first (the control is disabled until then). Honest: if there's no
-// research material the server returns ok:false + a reason (surfaced, not faked).
+// must be live first (the control is disabled until then). v11.1 Wave 2: the
+// advance NEVER refuses on "no written doc" — the keystone snapshots the research
+// conversation transcript so the plan session ALWAYS opens with a transcript-backed
+// (or honest-minimal "create the plan") prompt. The only ok:false left is
+// no-research-session (no research dev session to advance from), surfaced honestly.
 // Token-aware. No auto-submit (the prompt is the v10 pending paste).
 async function advanceGrassToPlan(ideaId) {
   var work = _grassWork(ideaId);
@@ -4809,9 +4812,13 @@ async function advanceGrassToPlan(ideaId) {
     }
   } catch (e) { alert('[advance error] ' + e.message); return; }
   if (!data || !data.ok || !data.session) {
-    // Honest note: no research material to advance from (no fabricated prompt).
+    // v11.1 Wave 2: the advance NO LONGER refuses on "no written doc" — the
+    // keystone snapshots the research conversation transcript and the plan session
+    // ALWAYS opens (with a transcript-backed or honest-minimal "create the plan"
+    // prompt). The only legitimate refusal left is no-research-session (there is no
+    // research dev session at all to advance FROM); honest-surface it.
     alert('[nothing to advance] ' + ((data && (data.reason || data.error))
-      || 'no research material yet — develop the research session first'));
+      || 'open this idea’s Research session first'));
     return;
   }
   var rec = data.session;
@@ -12305,9 +12312,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # starts (or focuses) the CONTAINED (idea, 'plan') dev session with
             # paste_prompt (held UNSENT) + parent_session_id (links the chain) +
             # grass_origin, and records the stage edge. Token-gated by the do_POST
-            # middleware above. HONEST: ok:false + reason when there is no research
-            # session / no research material (no plan session minted, no fabricated
-            # prompt). The idea STAYS in grass.
+            # middleware above. v11.1 Wave 2: the keystone snapshots a research
+            # CONVERSATION's transcript when no file was written, so the plan session
+            # ALWAYS opens (transcript-backed or honest-minimal prompt); the only
+            # ok:false left is no-research-session (no research dev session at all to
+            # advance FROM). The idea STAYS in grass.
             pid = (body.get("project_id", "") or body.get("id", "")).strip()
             idea_id = (body.get("idea_id", "") or "").strip()
             backend = (body.get("backend", "") or "").strip() or None
