@@ -119,6 +119,29 @@
   conversation capture) genuinely sound.
 - **RE-GATE:** 1318 passed, 1 skipped. **Converged.**
 
+## Wave 7 — detect_stage_progress + the COMPLETE retirement map + term_sessions rewire — GREEN ✅
+
+- **EXECUTE:** `terminal_session.detect_stage_progress` (ON-DISK only — `git diff <baseline>..HEAD`, ZERO
+  PTY; research→plan on a committed MASTER+IMPL pair, plan→build on a committed EXECUTION-LOG/build product;
+  idempotent; conversation-only never auto-advances). **COMPLETE retirement map gated on `effort_managed`
+  ONLY** (Shark C3) across all six minting sites + grass: `auto_advance_planning_to_build` (function-level
+  → covers `reconcile_and_advance`), the `term_kill` planning-kill branch, the `finish_to_build` + 
+  `advance_session` HTTP handlers, `effort_history.advance_grass_research_to_plan` (→ `/api/rnd/grass_advance`),
+  + the two `_PROJECT_WINDOW_JS` advance bars. `term_sessions` refresh rewired to call detect for effort_managed
+  efforts (legacy stays on reconcile_and_advance). New `tests/test_detect_stage_progress_v12.py` +
+  `tests/test_retire_auto_advance_v12.py`.
+- **GATE:** 1337 passed, 1 skipped.
+- **REVIEW (2 independent):** both GO-WITH-NITS. **≥2-AGREE MAJOR (W7-R2-01/R1-W7-01):** the JS guard on the
+  two advance bars was INERT — `effort_managed` never reached the JS session record, so the bars still rendered
+  for an effort (SC1 mint still blocked server-side by the tested 409, so a UX-not-safety defect). FIXED:
+  propagate `effort_managed` into the JS MANAGED + FINISHED records, `_registry_session_view`, the
+  minitile/headline `data-effort-managed` attr, and `_synthSessionRecord` — guard now live on both live +
+  historical paths. Also R1-W7-03: detect no longer diffs the empty-tree for a plan/build stage with an empty
+  baseline (no false-fire). R1-W7-02 perf already mitigated (no-next-stage early-return precedes the git diff).
+  +2 tests. (The rendered-bar Playwright assertion belongs to W10's UI gate, which rebuilds the advance UI.)
+- **RE-GATE:** 1339 passed, 1 skipped. **Converged.** All six server paths gated + legacy walks intact.
+
+
 
 
 

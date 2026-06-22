@@ -33,7 +33,7 @@ import json
 import os
 import re
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import paths as _paths
 import pty_manager as _pty
@@ -1353,6 +1353,178 @@ def advance_stage(session_id, to_stage=None, mode="manual", project_id=None,
                 "finished": finished, "record": record}
 
 
+# ── v12 Wave 7 — on-disk-only stage-progress detection (NO PTY scrape) ────────
+
+# Filename signals (basename, case-insensitive). research→plan requires the
+# MASTER+IMPL pair; plan→build requires an execution log OR a build product.
+_PLAN_SET_NAMES = ("master-plan.md", "implementation-plan.md")
+_BUILD_SIGNAL_NAMES = ("execution-log.md",)
+
+
+def _committed_since_baseline(worktree_path, baseline_ref):
+    """Repo-relative POSIX paths COMMITTED into ``worktree_path`` SINCE
+    ``baseline_ref`` (the HEAD captured at the stage's start). On-disk ONLY —
+    reads the git history, never the PTY.
+
+    This is the precise, clock-INDEPENDENT "newer than the stage start" signal:
+    ``git diff --name-only <baseline_ref>..HEAD`` lists exactly the files whose
+    state changed in commits made AFTER the baseline. Unlike a commit-TIME
+    comparison it is unambiguous at sub-second resolution (a stage-start baseline
+    and a file committed in the same wall-clock second are still correctly
+    separated by the commit DAG), so a research/plan doc committed BEFORE the
+    current stage's baseline is never mistaken for the current stage's product.
+
+    Best-effort: a non-repo / missing-git worktree → empty set. A FALSY
+    ``baseline_ref`` (the first stage of a brand-new repo, no earlier HEAD) →
+    diff against the git EMPTY-TREE so the stage's first commits still register;
+    if even that is unavailable, an empty set (honest — never fabricate).
+    Only COMMITTED changes count (an uncommitted working-tree file is NOT a
+    signal — the v11.1 isolation contract).
+    """
+    out = set()
+    wt = Path(worktree_path) if worktree_path else None
+    if not wt or not wt.is_dir():
+        return out
+    base = baseline_ref or _eh._empty_tree_sha(wt)
+    if not base:
+        return out
+    try:
+        r = _eh._git(wt, "diff", "--name-only", "%s..HEAD" % base)
+    except Exception:
+        return out
+    if r.returncode != 0:
+        return out
+    for line in (r.stdout or "").splitlines():
+        p = line.strip().strip('"')
+        if p:
+            out.add(p.replace("\\", "/"))
+    return out
+
+
+def _basenames(rels):
+    """Lowercased basenames of an iterable of repo-relative paths."""
+    names = set()
+    for rel in rels:
+        try:
+            names.add(PurePosixPath(rel).name.lower())
+        except Exception:
+            continue
+    return names
+
+
+def detect_stage_progress(session_id, project_id=None):
+    """Auto-advance an effort on a HIGH-PRECISION ON-DISK signal (v12 Wave 7).
+
+    Called from the cockpit's ``term_sessions`` refresh for an ``effort_managed``
+    effort. It reads **ZERO PTY bytes** — the decision is made entirely from the
+    worktree's *committed* git history, NOT by scraping the terminal for a skill
+    name (which caused the v11.1 seed-echo false-fire). The signal per current
+    stage:
+
+      - **research → plan** — a COMMITTED ``MASTER-PLAN.md`` **and**
+        ``IMPLEMENTATION-PLAN.md`` pair whose commit-time is **newer than the
+        research stage's start**.
+      - **plan → build** — a committed ``EXECUTION-LOG.md`` (or a committed build
+        PRODUCT — a non-doc artifact) whose commit-time is **newer than the plan
+        stage's start**.
+
+    A conversation-only stage (no committed plan files) does **NOT** auto-advance
+    — that is the manual ``Advance →``'s job (W10). On a positive signal it calls
+    :func:`advance_stage` with ``mode='auto'`` (which writes nothing to the PTY
+    and persists+summarizes the closing stage). It is **idempotent**: re-polling
+    after an advance is a no-op via ``advance_stage``'s ``current_stage >=
+    to_stage`` guard, and the same on-disk signal simply re-passes harmlessly.
+
+    Returns ``{"ok": bool, "advanced": bool, "reason": str, ...}``. Never raises
+    — any failure (unknown session, non-effort, git error) is an honest no-op so
+    the read-only refresh path is never broken. Gated OUT (``advanced=False``)
+    for a legacy (``effort_managed==False``) record — the legacy auto-advance
+    paths own those (the retirement map).
+    """
+    try:
+        rec = _reg.get_session(session_id)
+    except Exception:
+        return {"ok": False, "advanced": False, "reason": "error",
+                "session_id": session_id}
+    if rec is None:
+        return {"ok": False, "advanced": False, "reason": "unknown-session",
+                "session_id": session_id}
+
+    # ON-DISK detect is for v12 efforts ONLY. A legacy record is owned by the
+    # legacy auto-advance paths (the retirement map keeps them live there).
+    if not rec.get("effort_managed"):
+        return {"ok": True, "advanced": False, "reason": "not-effort-managed",
+                "session_id": session_id}
+
+    # Must be a LIVE trio/grass-dev effort.
+    if rec.get("status") != _reg.STATUS_RUNNING:
+        return {"ok": True, "advanced": False, "reason": "not-live",
+                "session_id": session_id}
+    if (rec.get("kind") or "") not in ("trio", "grass-dev"):
+        return {"ok": True, "advanced": False, "reason": "not-an-effort",
+                "session_id": session_id}
+
+    current_stage = rec.get("current_stage") or ""
+    to_stage = _next_stage(current_stage)
+    if not to_stage:
+        return {"ok": True, "advanced": False, "reason": "no-next-stage",
+                "session_id": session_id}
+
+    entry = _active_stage_entry(rec)
+    baseline_ref = (entry.get("baseline_ref")
+                    if isinstance(entry, dict) else "") or ""
+    worktree_path = rec.get("worktree_path", "")
+    if not worktree_path:
+        return {"ok": True, "advanced": False, "reason": "no-worktree",
+                "session_id": session_id}
+    # The empty-tree fallback in _committed_since_baseline is only legitimate for
+    # the chain-root research stage; for plan/build an EMPTY baseline_ref would
+    # diff the empty tree and over-report prior-stage commits → a false-fire. Treat
+    # a missing plan/build baseline as no signal (W7-R2-03 / R1-W7-03).
+    if not baseline_ref and current_stage != "research":
+        return {"ok": True, "advanced": False, "reason": "no-baseline",
+                "session_id": session_id}
+
+    # On-disk signal: files COMMITTED since the current stage's baseline. ZERO
+    # PTY. Clock-independent (committed-since-baseline, not commit-TIME) so a
+    # sub-second test and a prior-stage doc are correctly separated.
+    committed = _committed_since_baseline(worktree_path, baseline_ref)
+    names = _basenames(committed)
+
+    advance = False
+    if current_stage == "research" and to_stage == "plan":
+        # Require BOTH the master plan AND the implementation plan, committed
+        # newer than the research stage start (a committed pair — never an
+        # uncommitted working-tree file, never a PTY echo).
+        advance = all(n in names for n in _PLAN_SET_NAMES)
+    elif current_stage == "plan" and to_stage == "build":
+        # A committed execution log OR a committed build PRODUCT (a non-doc
+        # artifact newer than the plan stage start).
+        has_log = any(n in names for n in _BUILD_SIGNAL_NAMES)
+        has_product = any(
+            not _eh._is_document_rel(rel) for rel in committed)
+        advance = has_log or has_product
+    else:
+        return {"ok": True, "advanced": False, "reason": "stage-not-auto",
+                "session_id": session_id}
+
+    if not advance:
+        return {"ok": True, "advanced": False, "reason": "no-disk-signal",
+                "session_id": session_id}
+
+    # High-precision signal present → advance IN-SESSION (mode='auto' writes
+    # nothing to the PTY). advance_stage is idempotent under the lock, so a
+    # re-poll after the flip is a clean no-op.
+    res = advance_stage(session_id, to_stage, mode="auto",
+                        project_id=project_id)
+    return {"ok": bool(res.get("ok")),
+            "advanced": bool(res.get("advanced")),
+            "reason": res.get("reason", "advanced"),
+            "session_id": session_id,
+            "from_stage": current_stage, "to_stage": to_stage,
+            "result": res}
+
+
 def kill(session_id, project_id=None, _record_boneyard=True):
     """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
@@ -1791,6 +1963,15 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
     try:
         record = _reg.get_session(planning_session_id)
         if record is None:
+            return None
+        # v12 Wave 7 — RETIREMENT MAP (Shark C1/C3). A v12 EFFORT
+        # (effort_managed==True) advances IN-SESSION via advance_stage /
+        # detect_stage_progress (no new session); the legacy auto-advance must
+        # NEVER mint a second build for it. Gate keys on ``effort_managed`` ONLY
+        # (NEVER on kind/current_stage — legacy records carry those too, and
+        # gating on them would break the v6/v8/v10/v11 healthcheck walks). A
+        # legacy (effort_managed==False) record falls through unchanged.
+        if record.get("effort_managed"):
             return None
         lane = record.get("lane", "")
         if lane not in _PLANNING_LANES:

@@ -222,3 +222,24 @@ def test_layoutd_plan_build_headline_is_newest_effort():
     }
     z2 = ag._layoutd_zones("/x", "pid", sessions_by_lane=sbl2)
     assert z2["plan_build"][0]["session_id"] == "p2", "newest (plan) must be headline"
+
+
+def test_minitile_emits_effort_managed_attr():
+    """W7-R2-01: a Layout-D tile for an effort_managed session carries
+    data-effort-managed="1" so the JS advance-bar retirement guard goes live; a
+    legacy session omits it."""
+    import importlib
+    ag = importlib.import_module("anchor_gui")
+    rv = ag._registry_session_view({"session_id": "s1", "lane": "research",
+                                    "status": "running", "label": "x",
+                                    "effort_managed": True})
+    assert rv["effort_managed"] is True
+    html = ag._render_layoutd_minitile({"session_id": "s1", "members": [rv]},
+                                       "research", "pid", "/x", "research")
+    assert 'data-effort-managed="1"' in html
+    rv2 = ag._registry_session_view({"session_id": "s2", "lane": "research",
+                                     "status": "running", "label": "y",
+                                     "effort_managed": False})
+    html2 = ag._render_layoutd_minitile({"session_id": "s2", "members": [rv2]},
+                                        "research", "pid", "/x", "research")
+    assert "data-effort-managed" not in html2

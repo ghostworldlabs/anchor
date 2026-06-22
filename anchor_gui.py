@@ -2119,6 +2119,10 @@ def _registry_session_view(rec):
         # worktree_path/branch). Lets a board tile show the "from grass: <idea>"
         # back-link chip when this session's chain traces back to a grass idea.
         "grass_origin": (rec.get("grass_origin") or ""),
+        # v12 W7: the effort_managed discriminator on the rep, so a board tile can
+        # emit data-effort-managed and the JS advance-bar guard goes live for the
+        # historical/synth path too (W7-R2-01). SAFE (a bool).
+        "effort_managed": bool(rec.get("effort_managed", False)),
         # v7 Wave 3 merge markers (consumed only by _gather_project_sessions):
         "from_registry": True,
         "_reg_session_id": rec.get("session_id") or "",
@@ -2872,9 +2876,10 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane)
             + (f"<span class='age'>{age}</span>" if age else "<span></span>"))
     grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
     tie_data, tie_chip = _layoutd_tie_chip(sv)
+    em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
     return (
         f"<div class='minitile tile lane-tile{extra}' data-session=\"{sid_attr}\" "
-        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data} "
+        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data}{em_data} "
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='mtop'><span class='dot {light}'></span>"
         f"<span class='badge {badge_lane}'>{badge_lbl}</span></div>"
@@ -2922,10 +2927,11 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     track = _render_layoutd_track(trio_lane, reached)
     grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
     tie_data, tie_chip = _layoutd_tie_chip(sv)
+    em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
     return (
         f"<div class='headline tile lane-tile{running_cls}' "
         f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "
-        f"data-light=\"{light}\"{tie_data} "
+        f"data-light=\"{light}\"{tie_data}{em_data} "
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='htop'>"
         f"<span class='dot {light}'></span>"
@@ -5992,6 +5998,7 @@ async function repopulate() {
         status: s.status || 'done', label: s.label || '',
         created_at: s.created_at || pdone.created_at || 0,
         chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
+        effort_managed: !!s.effort_managed,  // v12 W7 (W7-R2-01)
         idx: pdone.idx || 0
       };
       seenDone[s.session_id] = true;
@@ -6008,6 +6015,7 @@ async function repopulate() {
       status: s.status || 'idle', label: s.label || '',
       chain_id: s.chain_id || '', parent_session_id: s.parent_session_id || '',
       created_at: s.created_at || prev.created_at || 0,
+      effort_managed: !!s.effort_managed,  // v12 W7: live the advance-bar retirement guard (W7-R2-01)
       idx: prev.idx || _laneCounters[lane]
     };
     seenLive[s.session_id] = true;
@@ -6396,7 +6404,13 @@ function openPanel(sessionId) {
   // (mockup Step 3). One click starts a NEW linked planning tile seeded from this
   // research (advanceSession → POST /api/rnd/advance_session). Shown ONLY for the
   // research lane this wave (the plan→build auto path is Wave 6).
+  // v12 Wave 7 — RETIREMENT MAP (Shark C2): the legacy "Advance to Planning →"
+  // bar (which MINTS a new linked planning session) is NOT reachable for a v12
+  // effort. A v12 effort advances IN-SESSION (the new Advance → lands in W10);
+  // the !s.effort_managed guard INSIDE the block suppresses it for an effort.
+  // Legacy (non-effort) research sessions keep the bar exactly as before.
   if ((s.lane || '') === 'research') {
+   if (!s.effort_managed) {
     var adv = document.createElement('div');
     adv.className = 'advbar';
     var advt = document.createElement('span');
@@ -6414,6 +6428,7 @@ function openPanel(sessionId) {
     adv.appendChild(advt);
     adv.appendChild(advb);
     pin.appendChild(adv);
+   }
   }
 
   // v6 Wave 9 (polish 1): a PLANNING session's panel gets an explicit, friendly
@@ -6422,7 +6437,12 @@ function openPanel(sessionId) {
   // done (non-destructive — its worktree is kept, the tile stays reopenable), and
   // auto-opens ONE linked build session. Honest when there is no plan set yet
   // (shows a small note, opens no build). Shown ONLY for the plan/planning lane.
-  if ((s.lane || '') === 'plan' || (s.lane || '') === 'planning') {
+  // v12 Wave 7 — RETIREMENT MAP (Shark C2): the legacy "Finish → Build →" bar
+  // (which MINTS a new linked build session) is NOT reachable for a v12 effort.
+  // A v12 effort advances IN-SESSION (the new Advance → lands in W10); for it
+  // this bar is suppressed. Legacy (non-effort) planning sessions keep it.
+  if (((s.lane || '') === 'plan' || (s.lane || '') === 'planning')
+      && !s.effort_managed) {
     var fbb = document.createElement('div');
     fbb.className = 'fbbar';
     var fbt = document.createElement('span');
@@ -6690,8 +6710,11 @@ function _synthSessionRecord(sessionId) {
              : (light === 'red') ? 'failed' : 'idle';
   var ttlEl = tile.querySelector('.ttl');
   var label = ttlEl ? (ttlEl.textContent || '').trim() : '';
+  // v12 W7: carry effort_managed so the advance-bar retirement guard is live on
+  // the historical/synth panel path too (W7-R2-01).
+  var em = tile.getAttribute('data-effort-managed') === '1';
   return {session_id: sessionId, lane: lane, backend: '', status: status,
-          label: label, idx: '', historical: true};
+          label: label, idx: '', historical: true, effort_managed: em};
 }
 
 // CSS.escape shim for the attribute selector (older engines lack CSS.escape).
@@ -11655,6 +11678,32 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     live = list(_termsess._pty.live_sessions())
                     _rec_out = _termsess.reconcile_and_advance(
                         live_session_ids=live)
+                    # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
+                    # use the legacy reconcile→auto_advance_planning_to_build mint
+                    # (which is gated off for it anyway). Instead, on the SAME
+                    # refresh poll, run the on-disk-only ``detect_stage_progress``
+                    # over the project's LIVE efforts — it auto-advances IN-SESSION
+                    # on a committed plan-set / build signal (ZERO PTY bytes,
+                    # idempotent, mints nothing). Legacy sessions stay on the
+                    # reconcile_and_advance path above. Best-effort + fully guarded
+                    # (never breaks the read-only session-list response).
+                    try:
+                        for _er in _termsess.list_sessions(
+                                project_id=pid or None):
+                            if not isinstance(_er, dict):
+                                continue
+                            if not _er.get("effort_managed"):
+                                continue
+                            if _er.get("status") != _termsess._reg.STATUS_RUNNING:
+                                continue
+                            try:
+                                _termsess.detect_stage_progress(
+                                    _er.get("session_id"),
+                                    project_id=_er.get("project_id") or None)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                     # v7 Wave 2: any session newly re-statused DONE by the
                     # reconcile-dead path gets a background session-summary
                     # scheduled (best-effort, non-blocking, idempotent — a cached
@@ -11704,6 +11753,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         # v10 Wave 4: grass→project lineage (SAFE — idea id only,
                         # never worktree_path/branch).
                         "grass_origin": r.get("grass_origin", ""),
+                        # v12 Wave 7: the effort discriminator (SAFE — a bool).
+                        # The JS uses it to HIDE the retired legacy advance bars
+                        # (research "Advance to Planning →" / planning
+                        # "Finish → Build →") for a v12 effort, so the old
+                        # session-minting affordances are not reachable for it.
+                        "effort_managed": bool(r.get("effort_managed", False)),
                     })
                 self._send_json({"ok": True, "sessions": safe})
             elif self.path.startswith("/api/rnd/chain"):
@@ -12526,8 +12581,15 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # on parent_session_id; no plan ⇒ no advance). Best-effort.
                 rec = _termsess.get_session(session)
                 pid_for_advance = rec.get("project_id") if rec else None
+                # v12 Wave 7 — RETIREMENT MAP (Shark C1/C3): a v12 EFFORT
+                # advances IN-SESSION (advance_stage / detect_stage_progress) and
+                # must NEVER trigger the legacy plan→build auto-advance mint. Gate
+                # on ``effort_managed`` ONLY (never lane/kind/current_stage —
+                # legacy records carry those too). A legacy record (False) keeps
+                # the v6 planning-kill auto-advance fully live.
                 planning_kill = (
                     rec is not None
+                    and not rec.get("effort_managed")
                     and rec.get("lane") in _termsess._PLANNING_LANES
                     and pid_for_advance)
                 out = _termsess.kill(session)
@@ -13135,6 +13197,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if proj is None:
                     self._send_json({"ok": False,
                                      "error": "Unknown project"}, 404)
+                elif (_termsess.get_session(source) or {}).get("effort_managed"):
+                    # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
+                    # advances IN-SESSION via /api/rnd/advance_stage; the legacy
+                    # research→plan advance must mint NOTHING for it. Early-return
+                    # so the effort's session-id set is unchanged. Gate on the
+                    # SOURCE session's ``effort_managed`` ONLY (never lane/kind).
+                    # Legacy records (False) fall through to the full v6/v11
+                    # advance path below, unchanged.
+                    self._send_json(
+                        {"ok": False, "session": None,
+                         "reason": "effort-managed-use-advance-stage"}, 409)
                 else:
                     folder = proj.get("folder_path", "")
                     # Resolve the SOURCE session's lane for the seed lookup. The
@@ -13321,6 +13394,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                          "error": "finish→build applies only to a planning "
                                   "session",
                          "reason": "not-planning"}, 400)
+                elif rec.get("effort_managed"):
+                    # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
+                    # advances IN-SESSION via /api/rnd/advance_stage; the legacy
+                    # finish→build path must mint NOTHING for it. Early-return
+                    # (no persist-DONE-mark, no auto-advance) so the effort's
+                    # session-id set is unchanged. Gate on ``effort_managed``
+                    # ONLY (never lane/kind). Legacy records (False) fall through
+                    # to the full v6 finish→build path below, unchanged.
+                    self._send_json(
+                        {"ok": False, "auto_build": None,
+                         "reason": "effort-managed-use-advance-stage"}, 409)
                 else:
                     # 0) v11 Wave 3 — route the persist through the SHARED keystone
                     #    (:func:`prepare_stage_handoff`), unifying this path with

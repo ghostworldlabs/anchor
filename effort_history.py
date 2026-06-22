@@ -875,6 +875,23 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
         return {"ok": False, "session": None, "research_session_id": "",
                 "reason": "no-research-session"}
 
+    # v12 Wave 7 — RETIREMENT MAP (Shark C4/C3): the grass SECOND-ADVANCE is
+    # retired for a v12 EFFORT. A grass-dev effort (effort_managed==True)
+    # advances IN-SESSION via terminal_session.advance_stage (one session per
+    # idea, W11); this legacy grass research→plan path must mint NO second grass
+    # plan session for it. Gate on the RESEARCH dev session's ``effort_managed``
+    # ONLY (never kind/lane — a legacy grass-dev record carries kind=='grass-dev'
+    # too). A legacy idea (effort_managed==False) falls through to the full v10/
+    # v11 grass-advance path below, unchanged, so those healthcheck walks pass.
+    try:
+        import session_registry as _sr
+        _rrec = _sr.get_session(rsid)
+    except Exception:
+        _rrec = None
+    if _rrec is not None and _rrec.get("effort_managed"):
+        return {"ok": False, "session": None, "research_session_id": rsid,
+                "reason": "effort-managed-use-advance-stage"}
+
     # 2+3) v11 Wave 3 — route the PERSIST + PROMPT through the SHARED keystone
     #    (:func:`terminal_session.prepare_stage_handoff`), unifying this grass
     #    research→plan variant with the project-level advance paths so the
