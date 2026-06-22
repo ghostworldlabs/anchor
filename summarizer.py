@@ -57,7 +57,12 @@ SUMMARY_MD = "summary.md"
 #: stream-json parser + grounding fix — every pre-fix project/session cache on
 #: disk was empty (the old parser discarded all model text), so all of them must
 #: be regenerated rather than served as a permanent blank.
-SUMMARY_SCHEMA_VERSION = 2
+#:
+#: Bumped to 3 (v12 Wave 4) with stage-keyed summaries: a stage's cache now lives
+#: under ``<store_lane>/summaries/<sid>/<stage>/`` (vs the legacy single-key
+#: ``<lane>/summaries/<sid>/``). An older/missing version is a MISS so the
+#: pre-bump single-key caches heal on the next generation.
+SUMMARY_SCHEMA_VERSION = 3
 
 #: How many member docs to read, and how many bytes per doc, for the extraction
 #: seed (bounded — mirrors brownfield_scan's conservative reads).
@@ -667,11 +672,24 @@ def _validate(candidates: list, seed: dict,
 
 # ── (d) Cache layout + render ────────────────────────────────────────────────
 
-def summary_dir(folder_path, project_id, lane, session_id) -> Path:
-    """``<lane>/summaries/<session_id>/`` — the per-session cache dir."""
+def summary_dir(folder_path, project_id, lane, session_id, stage=None) -> Path:
+    """The per-session cache dir.
+
+    Legacy (``stage=None``) → ``<lane>/summaries/<session_id>/`` — byte-for-byte
+    the pre-v12 layout, unchanged for every existing caller.
+
+    Stage-keyed (v12 Wave 4; ``stage`` given) → ``<lane>/summaries/<session_id>/
+    <stage>/`` — one summary per (session, stage), so a stage's cache resolves
+    correctly even after the effort's ``lane`` flips to a later stage. The caller
+    is expected to pass the stage's recorded ``store_lane`` as ``lane`` (see
+    :func:`stage_store_lane` for the closed-stage read-resolution).
+    """
     safe_sid = _safe_segment(session_id)
-    return (_eh.lane_dir(folder_path, project_id, lane)
+    base = (_eh.lane_dir(folder_path, project_id, lane)
             / SUMMARIES_DIRNAME / safe_sid)
+    if stage:
+        return base / _safe_segment(stage)
+    return base
 
 
 def _safe_segment(seg: str) -> str:
@@ -679,23 +697,72 @@ def _safe_segment(seg: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", str(seg or "")) or "session"
 
 
-def _summary_json_path(folder_path, project_id, lane, session_id) -> Path:
-    return summary_dir(folder_path, project_id, lane, session_id) / SUMMARY_JSON
+def _summary_json_path(folder_path, project_id, lane, session_id,
+                       stage=None) -> Path:
+    return summary_dir(folder_path, project_id, lane, session_id,
+                       stage=stage) / SUMMARY_JSON
 
 
-def _summary_md_path(folder_path, project_id, lane, session_id) -> Path:
-    return summary_dir(folder_path, project_id, lane, session_id) / SUMMARY_MD
+def _summary_md_path(folder_path, project_id, lane, session_id,
+                     stage=None) -> Path:
+    return summary_dir(folder_path, project_id, lane, session_id,
+                       stage=stage) / SUMMARY_MD
 
 
-def load_cached(folder_path, project_id, lane, session_id):
+# ── Closed-stage read-resolution via store_lane (v12 Wave 4) ─────────────────
+#
+# An effort's ``lane`` flips as it advances (research → planning → build), but a
+# CLOSED stage's docs + summary stay under the lane they were written in. The
+# stage's ``store_lane`` is recorded on its ``stage_history`` entry (Wave 1), so
+# a caller asking for the 'research' stage of an effort whose CURRENT lane is
+# 'build' must resolve the cache under the research store_lane — NOT the current
+# ``lane``. ``stage_store_lane`` is the read-resolution helper.
+
+def stage_store_lane(record, stage, default=None):
+    """The recorded ``store_lane`` for ``stage`` of an effort ``record``.
+
+    ``record`` is a normalized session record (the dict from
+    ``session_registry``). Looks up the stage's ``stage_history`` entry (via
+    ``session_registry.stage_entry``) and returns its ``store_lane`` — the lane
+    the stage's docs + summary were written under, which is correct even after
+    the record's ``lane`` has since flipped to a later stage.
+
+    Falls back to ``default`` (when given), else the canonical store-lane for the
+    stage (``research``/``plan``→``planning``/``build``), so a record that
+    predates ``stage_history`` (or a stage with no entry yet) still resolves
+    sensibly. Pure / read-only; never raises.
+    """
+    sl = ""
+    try:
+        import session_registry as _sr
+        ent = _sr.stage_entry(record, stage) if isinstance(record, dict) else None
+        if ent:
+            sl = (ent.get("store_lane") or "").strip()
+    except Exception:
+        sl = ""
+    if sl:
+        return sl
+    if default:
+        return default
+    # Canonical fallback when no stage_history entry recorded a store_lane.
+    return {"research": "research", "plan": "planning",
+            "build": "build"}.get(stage, stage)
+
+
+def load_cached(folder_path, project_id, lane, session_id, stage=None):
     """Return the cached structured summary dict, or ``None``.
 
     A cache stamped with an older/missing ``schema_version`` is treated as a MISS
     (returns ``None``) so it regenerates on the next ``force``/rescan — every
     pre-fix cache was written by the broken parser and is empty, so it must not be
     served as a permanent blank.
+
+    ``stage`` (v12 Wave 4): when given, the cache resolves under the stage-keyed
+    dir ``<lane>/summaries/<session_id>/<stage>/`` (``lane`` should be the stage's
+    ``store_lane`` — see :func:`stage_store_lane` for a closed stage whose lane
+    has flipped). ``stage=None`` is the unchanged legacy single-key path.
     """
-    p = _summary_json_path(folder_path, project_id, lane, session_id)
+    p = _summary_json_path(folder_path, project_id, lane, session_id, stage=stage)
     if not p.exists():
         return None
     try:
@@ -924,7 +991,8 @@ def _find_session(folder_path, project_id, store_lane, session_id):
     return None
 
 
-def session_doc_roles(project_id, lane, session_id, folder_path=None) -> dict:
+def session_doc_roles(project_id, lane, session_id, folder_path=None,
+                      stage=None) -> dict:
     """Per-lane ROLE→doc map for one session (v4 Wave 3, MASTER-PLAN cockpit).
 
     Maps the session's member docs (by filename) to the LANE'S locked role set
@@ -936,6 +1004,12 @@ def session_doc_roles(project_id, lane, session_id, folder_path=None) -> dict:
       - research → exec · report · agent · provenance
       - planning → master · impl · northstar
       - build    → northstar · deliverable · execlog · plan
+
+    ``stage`` (v12 Wave 4): accepted for call-site symmetry ONLY — the body does
+    NOT read it (resolution is entirely lane-driven). To resolve a CLOSED stage,
+    the caller pre-resolves that stage's ``store_lane`` (see :func:`stage_store_lane`)
+    and passes it as ``lane`` so the docs resolve under the lane they were written
+    in. ``stage=None`` is the unchanged legacy behavior; a non-None stage is inert.
 
     Roles whose document is ABSENT are OMITTED — never fabricated. ``folder_path``
     is resolved from the registry when omitted (mirrors ``project_rollup``).
@@ -1054,10 +1128,14 @@ def render_markdown(structured: dict) -> str:
 
 
 def _write_cache(folder_path, project_id, lane, session_id,
-                 structured: dict) -> dict:
-    """Write summary.json + summary.md under the session cache dir (under lock)."""
+                 structured: dict, stage=None) -> dict:
+    """Write summary.json + summary.md under the session cache dir (under lock).
+
+    ``stage`` (v12 Wave 4) routes the write into the stage-keyed dir; ``None`` is
+    the unchanged legacy single-key path.
+    """
     with _paths.WRITE_LOCK:
-        d = summary_dir(folder_path, project_id, lane, session_id)
+        d = summary_dir(folder_path, project_id, lane, session_id, stage=stage)
         d.mkdir(parents=True, exist_ok=True)
         md = render_markdown(structured)
         structured["markdown"] = md
@@ -1074,7 +1152,7 @@ def _write_cache(folder_path, project_id, lane, session_id,
 # ── Public entry: summarize_session (run-once + regenerate) ──────────────────
 
 def summarize_session(folder_path, project_id, lane, session,
-                      force: bool = False) -> dict:
+                      force: bool = False, stage=None) -> dict:
     """Summarize ONE session → validated, cached structured summary (MASTER §B).
 
     Run-once semantics (step e): unless ``force`` is set, a cached summary for
@@ -1084,6 +1162,11 @@ def summarize_session(folder_path, project_id, lane, session,
     Pipeline: extraction-seed (a) → generate twice through the runner seam (b) →
     deterministic grounding validation (c) → cache summary.json + summary.md (d).
 
+    ``stage`` (v12 Wave 4): when given, the summary is cached under the
+    stage-keyed dir ``<store_lane>/summaries/<session_id>/<stage>/`` and the
+    structured dict carries ``stage`` — so each stage of an effort gets its own
+    summary. ``stage=None`` keeps the exact pre-v12 single-key behavior.
+
     Returns the structured summary dict::
 
         {"session_id", "lane", "title", "claims": [...], "member_links": [...],
@@ -1092,20 +1175,24 @@ def summarize_session(folder_path, project_id, lane, session,
     session_id = session.get("session_id") or ""
     store_lane = _eh._resolve_subdir(lane)
     if not force:
-        cached = load_cached(folder_path, project_id, store_lane, session_id)
+        cached = load_cached(folder_path, project_id, store_lane, session_id,
+                             stage=stage)
         if cached is not None:
             return cached
 
     # FIX 1 — run-once under concurrency: serialize cache-check → generate →
-    # write PER session. Two concurrent calls for the SAME uncached session must
-    # together run the model exactly GENERATE_RUNS times, not 2×.
-    lock = _session_lock(folder_path, project_id, store_lane, session_id)
+    # write PER session (and, for v12, per stage — two stages of the same
+    # session must not serialize against each other). Two concurrent calls for
+    # the SAME uncached (session, stage) run the model exactly GENERATE_RUNS
+    # times, not 2×.
+    lock_key_lane = store_lane if stage is None else f"{store_lane}::{stage}"
+    lock = _session_lock(folder_path, project_id, lock_key_lane, session_id)
     with lock:
         # Double-checked locking: a racing caller may have just written the
         # cache while we waited for the lock — serve it instead of regenerating.
         if not force:
             cached = load_cached(folder_path, project_id, store_lane,
-                                 session_id)
+                                 session_id, stage=stage)
             if cached is not None:
                 return cached
 
@@ -1153,6 +1240,10 @@ def summarize_session(folder_path, project_id, lane, session,
             "generated_at": time.time(),
             "runs": len(candidates),
         }
+        # v12 Wave 4 — stamp the stage onto the cached record when stage-keyed
+        # (added conditionally so the legacy stage=None record is byte-identical).
+        if stage is not None:
+            structured["stage"] = stage
         # FIX 2 — all-ungrounded behavior: the model ran successfully but every
         # claim was filtered out as ungrounded. We CACHE this (the run-once
         # contract holds — a successful run shouldn't re-burn the model) but flag
@@ -1160,7 +1251,7 @@ def summarize_session(folder_path, project_id, lane, session,
         if not claims:
             structured["no_grounded_claims"] = True
         return _write_cache(folder_path, project_id, store_lane, session_id,
-                            structured)
+                            structured, stage=stage)
 
 
 def render_summary_page(folder_path, project_id, lane, session_id,
@@ -1658,7 +1749,8 @@ def tile_blurb(structured_or_text, max_chars=64) -> str:
     return _normalize_plain(_coerce_summary_input(structured_or_text), max_chars)
 
 
-def session_blurb(folder_path, project_id, lane, session_id, max_chars=64) -> str:
+def session_blurb(folder_path, project_id, lane, session_id, max_chars=64,
+                  stage=None) -> str:
     """Short, clean one-line blurb for a session's lane tile (v7 Wave 2/3).
 
     READ-ONLY cache lookup: loads the CACHED session summary (never a synchronous
@@ -1669,6 +1761,10 @@ def session_blurb(folder_path, project_id, lane, session_id, max_chars=64) -> st
       2. ``what_was_asked`` (the prompt the session ran on),
       3. ``title``.
 
+    ``stage`` (v12 Wave 4): when given, reads the stage-keyed cache (``lane``
+    should be the stage's ``store_lane``); ``None`` reads the legacy single-key
+    cache, unchanged.
+
     Returns ``""`` (honest empty — the caller renders a placeholder / the running
     session's own intent) when there is no cache yet or the cache carries no usable
     short text. NEVER fabricates and NEVER calls the model. Stdlib only; never
@@ -1676,7 +1772,8 @@ def session_blurb(folder_path, project_id, lane, session_id, max_chars=64) -> st
     """
     store_lane = _eh._resolve_subdir(lane)
     try:
-        cached = load_cached(folder_path, project_id, store_lane, session_id)
+        cached = load_cached(folder_path, project_id, store_lane, session_id,
+                             stage=stage)
     except Exception:
         cached = None
     if not isinstance(cached, dict):

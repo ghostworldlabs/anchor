@@ -63,5 +63,23 @@
   falsification genuineness, legacy byte-unchanged, idempotency, backfill C6 protection, distro clean.
 - **RE-GATE:** 1294 passed, 1 skipped. **Converged.** (Keystone unwired until W6 — by design.)
 
+## Wave 4 — Keystone B: stage-keyed summaries + schema heal + closed-stage read via store_lane — GREEN ✅
+
+- **EXECUTE:** `summarizer.py` threads optional `stage=None` through `summary_dir`/`_summary_json_path`/
+  `_summary_md_path`/`load_cached`/`summarize_session`/`_write_cache`/`session_blurb`/`session_doc_roles`;
+  stage cache = `<store_lane>/summaries/<sid>/<stage>/` (stage=None = legacy path, byte-identical). New
+  `stage_store_lane(record, stage)` resolves a CLOSED stage's lane from `stage_history` (not the flipped
+  current lane). `SUMMARY_SCHEMA_VERSION` 2→3 (old/missing = MISS, session AND project caches).
+  Per-stage lock key preserves the run-once-under-concurrency guarantee. New `tests/test_stage_summary_key_v12.py`
+  (distinct dirs + no-collision + lane-flip resolution + schema heal + stage=None legacy), stub-runner driven.
+- **GATE:** 1298 passed, 1 skipped.
+- **REVIEW (2 independent):** both GO-WITH-NITS, zero BLOCKERs. ≥2-agree MINOR: `session_doc_roles(stage=…)`
+  is an unused/inert param (by design — resolution is lane-driven) → tightened the docstring to say so.
+  Non-blocking nits noted: `stage=''` collapses to legacy (no caller passes it); the schema bump needs a
+  post-deploy rescan to repopulate caches (consistent with prior bumps). Verified: legacy byte-identical,
+  clean MISS (no crash) on old caches, correct store_lane resolution, lock-key safe, scope = summarizer.py only.
+- **DOCSTRING-ONLY FIX** (no re-gate needed for a comment). **Converged.**
+
+
 
 
