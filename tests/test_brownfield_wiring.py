@@ -97,17 +97,19 @@ def test_register_populates_tile_and_kanban(server, tmp_path):
     code, home = _get_text(base + "/")
     assert "imported" in home
 
-    # Project window lane board is non-empty: the 3 discovered artifacts adopted
-    # (build/planning/research) render as 3 "imported" Paradigm-2 tiles (grey
-    # light, no run metrics). v4.1 cockpit-render: the per-card data-discovered
-    # hook moved off the tile; a discovered session's tile shows the "imported"
-    # state with a grey status light.
+    # Project window board is non-empty: the 3 discovered artifacts adopted
+    # (build/planning/research) render as 3 "imported" Layout-D tiles (grey
+    # light, no run metrics). v12 Wave 2 Layout-D: a discovered session is a
+    # headline card or a shelf little-tile — both carry the legacy
+    # ``tile lane-tile`` alias + ``data-session``/``data-lane``/``data-light``.
     code, win = _get_text(base + f"/project/{pid}")
     assert "imported" in win
-    # One imported (grey) tile per discovered lane (3 total).
+    # One imported (grey) tile per discovered lane (3 total). Class order varies
+    # by Layout-D variant (``headline tile lane-tile`` / ``minitile tile lane-tile``)
+    # so match the alias anywhere in the class list.
     import re as _re
     grey_tiles = _re.findall(
-        r"<div class='tile lane-tile[^']*' data-session=\"[^\"]+\" "
+        r"<div class='[^']*\btile lane-tile\b[^']*' data-session=\"[^\"]+\" "
         r"data-lane=\"[^\"]+\" data-light=\"grey\"", win)
     assert len(grey_tiles) == 3, grey_tiles
     # Anchor.md was written at the folder root.

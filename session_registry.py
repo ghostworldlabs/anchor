@@ -161,6 +161,53 @@ def _normalize(record: dict) -> dict:
     # already valid one-member chains.
     parent_session_id = record.get("parent_session_id", "") or ""
     chain_id = record.get("chain_id") or sid or ""
+    # ── v12 Wave 1: effort stage fields (all back-compat) ──────────────────
+    # An effort is ONE session carrying a stage. These fields let a record
+    # carry the effort's stage + the v12 discriminator without breaking ANY
+    # pre-v12 record (an old record with none of these normalizes with no
+    # crash and ``effort_managed==False``).
+    lane = record.get("lane", "") or ""
+    # ``kind``: trio (the R→P→B lanes) / grass-dev (the grass lane) / general
+    # (everything else). Derived from ``lane`` when absent on the record.
+    kind = record.get("kind") or ""
+    if not kind:
+        if lane in ("research", "plan", "planning", "build"):
+            kind = "trio"
+        elif lane == "grass":
+            kind = "grass-dev"
+        else:
+            kind = "general"
+    # ``current_stage``: ""|research|plan|build — the effort's active stage.
+    # Derived from ``lane`` when absent (planning → plan; "" for non-trio).
+    current_stage = record.get("current_stage")
+    if not current_stage:  # re-derive on None OR "" (a persisted trio record may carry "")
+        if kind == "trio":
+            if lane == "research":
+                current_stage = "research"
+            elif lane in ("plan", "planning"):
+                current_stage = "plan"
+            elif lane == "build":
+                current_stage = "build"
+            else:
+                current_stage = ""
+        else:
+            current_stage = ""
+    current_stage = current_stage or ""
+    # ``stage_history``: append-only list of per-stage entries. Default [].
+    sh = record.get("stage_history")
+    # deep-copy each entry dict so a normalized record never aliases the caller's
+    # stage entries (W4/W5 mutate entries in place — aliasing would corrupt the source).
+    stage_history = [dict(e) if isinstance(e, dict) else e for e in sh] if isinstance(sh, list) else []
+    # ``seeded_stages``: audit list of stages whose skill seed was written.
+    ss = record.get("seeded_stages")
+    seeded_stages = list(ss) if isinstance(ss, list) else []
+    # ``effort_id``: the effort's stable id (the root session_id). Defaults to
+    # the record's OWN session_id when absent.
+    effort_id = record.get("effort_id") or sid or ""
+    # ``effort_managed``: the v12 discriminator. Set True ONLY by the v12
+    # entrypoints; legacy records (incl. the v6/v8/v10/v11 healthcheck walks)
+    # normalize to False.
+    effort_managed = bool(record.get("effort_managed", False))
     return {
         "session_id": sid,
         "project_id": record.get("project_id", ""),
@@ -188,6 +235,16 @@ def _normalize(record: dict) -> dict:
         # board projections (no worktree_path/branch leak).
         "pending_paste": record.get("pending_paste", "") or "",
         "paste_flushed": bool(record.get("paste_flushed", False)),
+        # v12 Wave 1: effort stage fields (see derivation above). All
+        # back-compat; an old record normalizes with no crash and
+        # ``effort_managed==False``. The board routes by ``current_stage``/
+        # ``kind`` only (``lane`` flips with the stage).
+        "kind": kind,
+        "current_stage": current_stage,
+        "stage_history": stage_history,
+        "seeded_stages": seeded_stages,
+        "effort_id": effort_id,
+        "effort_managed": effort_managed,
         # v10 Wave 4: grass→project lineage (D8). ``grass_origin`` is the
         # originating grass idea id (``idea-…``) stamped on the chain when an idea
         # is exported/promoted to the project level, so every downstream project
@@ -223,7 +280,8 @@ def _save_sessions(reg: dict) -> None:
 def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      worktree_path="", branch="", status=STATUS_IDLE,
                      label="", session_id=None, parent_session_id="",
-                     chain_id=None, grass_origin="") -> dict:
+                     chain_id=None, grass_origin="",
+                     effort_id=None, effort_managed=False) -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
@@ -254,6 +312,11 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "parent_session_id": parent_session_id or "",
             "chain_id": chain_id or sid,
             "grass_origin": grass_origin or "",
+            # v12 Wave 1: the effort's stable id (defaults to the OWN sid when
+            # not inherited) + the v12 discriminator (set True ONLY by the v12
+            # entrypoints; legacy callers leave it False).
+            "effort_id": effort_id or sid,
+            "effort_managed": bool(effort_managed),
         })
         reg[sid] = record
         _save_sessions(reg)
@@ -331,6 +394,108 @@ def chain_members(chain_id: str) -> list:
     return members
 
 
+# ── Effort stages (v12 Wave 1) ──────────────────────────────────────────────
+#
+# An effort is ONE session that carries a stage. ``stage_history`` is an
+# append-only list of per-stage entries; ``current_stage``/``lane`` flip as the
+# effort advances research → plan → build. ``store_lane`` is recorded per stage
+# so a CLOSED stage's docs/summary resolve under the lane they were written in,
+# even after ``lane`` later flips (Analyst A1).
+
+#: ``store_lane`` mapping for the trio stages (the on-disk dir a stage's docs +
+#: summaries live under). research → research; plan → planning; build → build.
+_STAGE_STORE_LANE = {
+    "research": "research",
+    "plan": "planning",
+    "build": "build",
+}
+
+
+def effort_root(session_id: str):
+    """Return the ``effort_id`` (the effort's stable root id) for ``session_id``.
+
+    For a v12 effort this is the root session_id (inherited by a context-relief
+    continuation). For a pre-v12 record it normalizes to the record's own
+    session_id. Returns ``None`` for an unknown session.
+    """
+    rec = load_sessions().get(session_id)
+    if rec is None:
+        return None
+    return rec.get("effort_id") or rec.get("session_id")
+
+
+def stage_entry(record: dict, stage: str):
+    """Return the most-recent ``stage_history`` entry for ``stage`` in ``record``.
+
+    ``record`` is a normalized session record (a dict). Searches its
+    ``stage_history`` newest-last and returns the LAST entry whose ``stage``
+    matches (the active or most-recently-closed entry for that stage), or
+    ``None`` when the stage has no entry. Pure / read-only — never touches the
+    store.
+    """
+    if not isinstance(record, dict):
+        return None
+    found = None
+    for ent in record.get("stage_history") or []:
+        if isinstance(ent, dict) and ent.get("stage") == stage:
+            found = ent
+    return found
+
+
+def set_current_stage(session_id: str, stage: str, store_lane: str,
+                      baseline_ref: str) -> dict:
+    """Flip an effort to a new ``stage``: close the prior active entry, append a
+    new active one, and update ``current_stage`` + ``lane`` (v12 Wave 1).
+
+    Mechanics (under ``paths.WRITE_LOCK``):
+
+    - The prior ACTIVE ``stage_history`` entry (``ended_at`` is None) is closed:
+      ``ended_at`` is stamped now and its ``state`` becomes ``"done"``.
+    - A NEW entry for ``stage`` is appended with ``state="active"``,
+      ``started_at`` now, ``ended_at=None``, the given ``store_lane`` +
+      ``baseline_ref``, and ``seeded=False`` / ``summary_ref=None`` /
+      ``doc_count=0``.
+    - ``current_stage`` is set to ``stage`` and ``lane`` is set to
+      ``store_lane`` (the board routes by ``current_stage``/``kind``; ``lane``
+      tracks the current store-lane).
+
+    Returns the updated record. Raises ``KeyError`` for an unknown id.
+    """
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        if session_id not in reg:
+            raise KeyError(session_id)
+        rec = dict(reg[session_id])
+        now = time.time()
+        history = [dict(e) for e in (rec.get("stage_history") or [])
+                   if isinstance(e, dict)]
+        # Close the prior active entry (the one still open).
+        for ent in history:
+            if ent.get("ended_at") is None:
+                ent["ended_at"] = now
+                ent["state"] = "done"
+        # Append the new active stage entry.
+        history.append({
+            "stage": stage,
+            "store_lane": store_lane,
+            "started_at": now,
+            "ended_at": None,
+            "baseline_ref": baseline_ref,
+            "seeded": False,
+            "summary_ref": None,
+            "doc_count": 0,
+            "state": "active",
+        })
+        rec["stage_history"] = history
+        rec["current_stage"] = stage
+        rec["lane"] = store_lane
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg)
+        return rec
+
+
 def update_session(session_id: str, **fields) -> dict:
     """Update allowed fields of a session record. Returns the updated record.
 
@@ -344,7 +509,10 @@ def update_session(session_id: str, **fields) -> dict:
                # v10 Wave 1: paste-NOT-submit handoff bookkeeping.
                "pending_paste", "paste_flushed",
                # v10 Wave 4: grass→project lineage stamp.
-               "grass_origin"}
+               "grass_origin",
+               # v12 Wave 1: effort stage fields.
+               "kind", "current_stage", "stage_history", "seeded_stages",
+               "effort_id", "effort_managed"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:

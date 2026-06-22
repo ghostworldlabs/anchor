@@ -580,6 +580,10 @@ def test_boneyard_client_render_escapes_xss(server):
         pg.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
+        # v12 Wave 2: wait for the Layout-D board to settle (its async board_html
+        # swap reflows the page) before clicking the masthead control, so the
+        # actionability "stable" check doesn't race the in-place board render.
+        pg.wait_for_selector("#kanbanBoard .sectionlbl", timeout=8000)
         pg.click("#openBoneyardBtn")
         pg.wait_for_selector("#boneyardPanel #boneyardList", timeout=8000)
         # WAIT FOR THE SOURCE OF TRUTH before driving the live search: the initial
@@ -663,8 +667,20 @@ def test_boneyard_client_render_escapes_xss(server):
         live_imgs = pg.eval_on_selector_all(
             "#boneyardPanel #boneyardList img", "els => els.length")
         assert live_imgs == 0, "no <img> payload element in the live list"
-        for sel in pg.query_selector_all("#boneyardPanel .byentry"):
-            sel.hover()   # give any latent onmouseover a chance to fire
+        # Give any latent onmouseover a chance to fire. Re-query by index right
+        # before each hover and tolerate a stale handle: a debounced live-search
+        # re-render can detach the prior .byentry handles (harmless — the payload
+        # would still have fired a dialog), so a detachment is not a test failure;
+        # the dialogs/console assertions below are the real signal.
+        n_entries = pg.eval_on_selector_all(
+            "#boneyardPanel .byentry", "els => els.length")
+        for i in range(n_entries):
+            try:
+                rows = pg.query_selector_all("#boneyardPanel .byentry")
+                if i < len(rows):
+                    rows[i].hover()
+            except Exception:
+                pass   # element detached by a live re-render — not an XSS signal
         assert dialogs == [], f"a payload executed (dialog): {dialogs}"
         assert not errors, f"JS console errors: {errors}"
         b.close()

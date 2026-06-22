@@ -485,53 +485,48 @@ def test_historical_panel_shows_summary_and_continue_works(server, tmp_path):
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
         assert pg.eval_on_selector_all(".lane-tile", "e=>e.length") >= 1
 
-        # Open the historical session's panel.
+        # v12 W10: clicking an effort tile opens the SINGLE bottom DOCK bound to
+        # the effort (replacing the inline-panel stack for efforts).
         pg.click(".lane-tile")
-        pg.wait_for_selector("#panelStack .panel", timeout=5000)
-        # The read-only past-session body appears (not a live terminal).
-        pg.wait_for_selector("#panelStack .panel .ro-past", timeout=8000)
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=5000)
+        # The read-only past-session body appears in the dock terminal host (not a
+        # live terminal).
+        pg.wait_for_selector("#dockTermHost .ro-past", timeout=8000)
         # It shows a real summary section (skill/prompts/files), >= 1 element.
-        pg.wait_for_selector("#panelStack .panel .ro-sec", timeout=8000)
+        pg.wait_for_selector("#dockTermHost .ro-sec", timeout=8000)
         assert pg.eval_on_selector_all(
-            "#panelStack .panel .ro-sec", "e=>e.length") >= 1, \
+            "#dockTermHost .ro-sec", "e=>e.length") >= 1, \
             "past-session body has no summary sections (dead-end note only)"
         # The Continue control is present.
         assert pg.eval_on_selector_all(
-            "#panelStack .panel .ro-continue", "e=>e.length") == 1
+            "#dockTermHost .ro-continue", "e=>e.length") == 1
 
-        # v10.1 (FIX 1): Continue REUSES the source panel's slot — the read-only
-        # historical panel closes (_closePanel) and the NEW live session opens in
-        # its place. The panel count does NOT grow (no second stacked panel).
-        panels_before = pg.eval_on_selector_all("#panelStack .panel",
-                                                "e=>e.length")
+        # The dock is bound to the historical session.
         src_sid = pg.eval_on_selector(
-            "#panelStack .panel[data-session]",
-            "e=>e.getAttribute('data-session')")
-        assert src_sid, "historical panel must carry the source data-session"
-        # Click Continue → the source slot is reused by a NEW live session.
-        pg.click("#panelStack .panel .ro-continue")
-        # The read-only historical body is GONE and a live panel carrying a
-        # DIFFERENT data-session now occupies the (single) slot.
+            "#effortDock", "e=>e.getAttribute('data-session')")
+        assert src_sid, "dock must carry the source data-session"
+        # Click Continue → the dock RE-BINDS to a NEW live session (same dock, the
+        # read-only body is replaced by a live terminal). No second dock.
+        pg.click("#dockTermHost .ro-continue")
+        # The read-only historical body is GONE and the dock now carries a
+        # DIFFERENT data-session (the new live session).
         pg.wait_for_function(
-            "src=>{var ps=document.querySelectorAll('#panelStack .panel');"
-            "if(ps.length!==1) return false;"
-            "if(document.querySelectorAll('#panelStack .panel .ro-past').length) return false;"
-            "var ds=ps[0].getAttribute('data-session');"
+            "src=>{var d=document.getElementById('effortDock');"
+            "if(d.style.display!=='flex') return false;"
+            "if(document.querySelectorAll('#dockTermHost .ro-past').length) return false;"
+            "var ds=d.getAttribute('data-session');"
             "return !!ds && ds!==src;}",
             arg=src_sid, timeout=12000)
-        # Slot reused (NOT stacked): still exactly ONE panel, == panels_before.
-        assert pg.eval_on_selector_all("#panelStack .panel", "e=>e.length") \
-            == panels_before == 1, "Continue must reuse the source slot, not stack"
-        # The read-only historical body was replaced (closed), not kept.
-        assert pg.eval_on_selector_all(
-            "#panelStack .panel .ro-past", "e=>e.length") == 0, \
-            "the source read-only panel must be closed/replaced by the live session"
-        # A LIVE session genuinely opened in the reused slot (new data-session).
+        # Still exactly ONE dock (no stacking).
+        assert pg.eval_on_selector_all(".dock", "e=>e.length") == 1, \
+            "Continue must reuse the single dock, not stack"
+        # A LIVE session genuinely opened (new data-session on the dock).
         new_sid = pg.eval_on_selector(
-            "#panelStack .panel[data-session]",
-            "e=>e.getAttribute('data-session')")
+            "#effortDock", "e=>e.getAttribute('data-session')")
         assert new_sid and new_sid != src_sid, \
-            "Continue must open a NEW live session in the reused slot"
+            "Continue must open a NEW live session in the dock"
         assert not errors, f"JS console errors: {errors}"
         b.close()
 

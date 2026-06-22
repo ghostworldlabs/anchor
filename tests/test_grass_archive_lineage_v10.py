@@ -486,35 +486,34 @@ def _selectgrass_html(gui):
     return "".join(s.replace("\\'", "'") for s in lits)
 
 
-def test_dom_workbench_has_per_lane_archive_controls(env):
-    """POSITIVE: each terminal lane renders its OWN Archive control keyed by lane
-    (data-archive-lane="research" / "plan"), distinct from the Save control."""
+def test_dom_workbench_has_archive_snapshot_control_v12(env):
+    """v12 Wave 11 (MIGRATED): the one-session workbench renders a SINGLE
+    "Archive snapshot" control in its header (.garchive-snap) — not the retired
+    per-lane (research/plan) archive controls. (The backend archive bundle path is
+    unchanged + covered by the backend tests above.)"""
     html = _selectgrass_html(env["gui"])
     els = _parse(html)
-    archs = [d for t, d in els if d.get("data-archive-lane")]
-    lanes = sorted(d.get("data-archive-lane") for d in archs)
-    assert lanes == ["plan", "research"], \
-        f"expected one Archive control per lane, got {lanes}"
-    assert len(archs) == 2 and archs[0] is not archs[1]
-    # An "Archived material" section host exists for the bundles list.
-    assert any("garch" in (d.get("class") or "").split() for t, d in els), \
-        "expected an .garch Archived-material section"
+    # ONE Archive snapshot control (header), not per-lane.
+    snaps = [d for t, d in els if "garchive-snap" in (d.get("class") or "").split()]
+    assert len(snaps) == 1, \
+        f"expected one Archive-snapshot control, got {len(snaps)}"
+    # The retired per-lane archive controls are gone.
+    assert not [d for t, d in els if d.get("data-archive-lane")], \
+        "the retired per-lane Archive controls must be gone (v12 W11)"
 
 
-def test_dom_archive_distinct_from_save(env):
-    """NEGATIVE: the Archive control is NOT the Save control — every data-save-lane
-    button is a .gsave, and the Archive buttons are a distinct .garchive class."""
+def test_dom_archive_distinct_from_migrate_v12(env):
+    """v12 Wave 11 (MIGRATED): the Archive snapshot control is DISTINCT from the
+    Migrate-to-project control — different classes, neither is a per-lane save."""
     html = _selectgrass_html(env["gui"])
     els = _parse(html)
-    saves = [d for t, d in els if d.get("data-save-lane")]
-    archs = [d for t, d in els if d.get("data-archive-lane")]
-    assert saves and archs
-    for d in saves:
-        assert "gsave" in (d.get("class") or "").split()
-        assert "data-archive-lane" not in d
-    for d in archs:
-        assert "garchive" in (d.get("class") or "").split()
-        assert "data-save-lane" not in d
+    snaps = [d for t, d in els if "garchive-snap" in (d.get("class") or "").split()]
+    migs = [d for t, d in els if "gmigrate" in (d.get("class") or "").split()]
+    assert len(snaps) == 1 and len(migs) == 1
+    assert snaps[0] is not migs[0]
+    # No retired per-lane save controls remain.
+    assert not [d for t, d in els if d.get("data-save-lane")], \
+        "the retired per-lane Save controls must be gone (v12 W11)"
 
 
 def _lineage_chip_js(gui):
@@ -697,12 +696,12 @@ def pw_server(env):
 
 
 def test_archive_button_and_lineage_chip_in_browser(pw_server):
-    """In the grass workbench: Develop Research → write a doc in its worktree →
-    click THAT lane's Archive control → assert the 'Archived material' list shows
-    the bundle (no JS console error). Then export the idea (stamping grass_origin),
-    start a downstream linked session, open its panel → assert the
-    '🌱 from grass:' lineage chip renders. Screenshot →
-    _devtest/wave4_grass_archive_lineage.png."""
+    """v12 Wave 11 (MIGRATED). In the one-session grass workbench: Open the single
+    session → write a doc in its worktree → click the header **Archive snapshot**
+    control → assert the History panel shows the archived bundle (no JS console
+    error). Then export the idea (stamping grass_origin), start a downstream linked
+    session, open its panel → assert the '🌱 from grass:' lineage chip renders.
+    Screenshot → _devtest/wave4_grass_archive_lineage.png."""
     pytest.importorskip("playwright.sync_api")
     env, base, _ = pw_server
     eh, ts, reg, repo, pid = (env["eh"], env["ts"], env["reg"],
@@ -733,33 +732,26 @@ def test_archive_button_and_lineage_chip_in_browser(pw_server):
         pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="research"]',
                              timeout=8000)
 
-        # Develop Research → its session binds; capture the sid + write a doc in
-        # its worktree (so there IS material to archive).
-        pg.click('#grassPanel button[data-dev="research"]')
+        # Open the SINGLE workbench session → it binds; write a doc in its worktree
+        # so there IS material to archive.
+        pg.click('#grassPanel .gwork .gopen')
         pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"research\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"research\"] [data-grass-term]')"
+            "document.querySelector('#grassPanel .gwork [data-grass-term]') && "
+            "document.querySelector('#grassPanel .gwork [data-grass-term]')"
             ".getAttribute('data-session')", timeout=10000)
         rsid = pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="research"] [data-grass-term]',
+            '#grassPanel .gwork [data-grass-term]',
             "e=>e.getAttribute('data-session')")
         assert rsid
         _write_research_doc(reg.get_session(rsid)["worktree_path"])
 
-        # The research lane's Archive control is enabled; click it.
-        pg.wait_for_function(
-            "(()=>{var b=document.querySelector('#grassPanel .gterm"
-            "[data-lane=\"research\"] button[data-archive-lane=\"research\"]');"
-            "return b && !b.disabled;})()", timeout=8000)
-        pg.click('#grassPanel .gterm[data-lane="research"] '
-                 'button[data-archive-lane="research"]')
-
-        # The Archived-material list now shows the bundle (a .ar row).
-        pg.wait_for_selector('#grassPanel .garch .ar', timeout=10000)
-        ar_count = pg.eval_on_selector_all('#grassPanel .garch .ar',
-                                           "els=>els.length")
-        assert ar_count >= 1, "the Archived material list should show the bundle"
+        # Click the header Archive snapshot control.
+        pg.click('#grassPanel .gwork .garchive-snap')
+        # The History panel now shows the archived bundle (an .hitem.arch row).
+        pg.wait_for_selector('#grassPanel .gwork .ghist .hitem.arch', timeout=10000)
+        ar_count = pg.eval_on_selector_all(
+            '#grassPanel .gwork .ghist .hitem.arch', "els=>els.length")
+        assert ar_count >= 1, "the History panel should show the archived bundle"
         assert not errors, f"JS console errors on archive: {errors}"
 
         pg.screenshot(path=str(shot), full_page=True)

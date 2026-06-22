@@ -146,17 +146,13 @@ def _parse(body):
 
 
 def _col_tiles(body, trio_lane):
-    start = body.find('id="cards_%s"' % trio_lane)
-    if start < 0:
-        start = body.find("id='cards_%s'" % trio_lane)
-    assert start >= 0, "no cards_%s container in body" % trio_lane
-    rest = body[start:]
-    nxt = re.search(r"data-col-lane=", rest[5:])
-    end = (nxt.start() + 5) if nxt else len(rest)
-    seg = rest[:end]
+    """v12 Wave 2 Layout-D: tiles carry their lane on ``data-lane`` (the 5-col
+    ``#cards_<lane>`` grid is retired). ``plan`` matches ``planning`` too."""
+    aliases = {"plan": {"plan", "planning"}}.get(trio_lane, {trio_lane})
     tiles = []
-    for tag, classes, attrs in _parse(seg):
-        if tag == "div" and "tile" in classes:
+    for tag, classes, attrs in _parse(body):
+        if (tag == "div" and "tile" in classes
+                and (attrs.get("data-lane") or "") in aliases):
             tiles.append((classes, attrs))
     return tiles
 
@@ -269,16 +265,17 @@ def test_cumulative_refinements_and_resume(env):
 # ── 4) NO BUILD develop in grass (negative) ───────────────────────────────────
 
 def test_no_build_develop_control_in_grass(env):
-    """Grass develop is research/plan ONLY — build is rejected, and the workbench
-    devbar renders NO build develop control."""
+    """v12 Wave 11 (MIGRATED): grass develop is research/plan ONLY — build is
+    rejected at the backend. The one-session workbench renders NO build develop
+    control (and no research/plan develop split at all — the single session
+    advances in-session)."""
     eh, gui, repo, pid = env["eh"], env["gui"], env["repo"], env["pid"]
     idea = eh.add_idea(repo, pid, "an idea")
     with pytest.raises(ValueError):
         eh.develop_grass_idea(pid, idea["job_id"], "build")
-    # The rendered workbench devbar exposes data-dev=research/plan only — no build.
+    # The one-session workbench template carries NO data-dev develop controls.
     src = _GUI_SRC.read_text(encoding="utf-8")
     assert 'data-dev="build"' not in src, "a build develop control exists in grass"
-    assert "data-dev=\"research\"" in src and "data-dev=\"plan\"" in src
 
 
 # ── 5) EXPORT (Option B) — real lane tiles + idea stays promoted+linked ────────
@@ -353,14 +350,16 @@ def test_export_unknown_idea_rejected(env):
 
 # ── 6) RENDERED-DOM (positive + negative) ─────────────────────────────────────
 
-def test_workbench_dom_has_export_no_build(env):
-    """POSITIVE: the workbench renders an Export control. NEGATIVE: no build
-    develop control, and the contained develop session is not a top-strip chip."""
+def test_workbench_dom_has_migrate_no_build(env):
+    """v12 Wave 11 (MIGRATED) POSITIVE: the one-session workbench renders a Migrate
+    -to-project control (export Option B). NEGATIVE: no build develop control."""
     eh, gui, repo, pid = env["eh"], env["gui"], env["repo"], env["pid"]
     eh.add_idea(repo, pid, "dom idea")
     body = gui.render_project_window_html(pid)
-    # The workbench JS+template carry an Export action and NO build develop.
-    assert "gexport" in body, "no Export-to-project control rendered"
+    # The one-session workbench JS+template carry a Migrate action (→ exportGrass)
+    # and NO build develop control.
+    assert "gmigrate" in body, "no Migrate-to-project control rendered"
+    assert "exportGrass(" in body, "Migrate must wire to exportGrass"
     assert 'data-dev="build"' not in body
     # The grass workbench surface is present.
     assert "grass-workbench" in body
@@ -477,10 +476,11 @@ def test_grass_contained_export_playwright(env):
             pg.click(".grass-tile")
             pg.wait_for_selector("#grassPanel .grass-workbench", timeout=5000)
             pg.click(f"#grassPanel .gli[data-idea='{iid}']")
-            pg.wait_for_selector("#grassPanel .gwork .devbar", timeout=5000)
+            pg.wait_for_selector("#grassPanel .gwork .gterm", timeout=5000)
 
-            # Develop with Research → ONE contained session mounts a terminal.
-            pg.click("#grassPanel .gwork button[data-dev='research']")
+            # v12 W11: Open the SINGLE workbench session → ONE contained session
+            # mounts a terminal.
+            pg.click("#grassPanel .gwork .gopen")
             pg.wait_for_selector("#grassPanel .gwork [data-grass-term] .xterm",
                                  timeout=8000)
             sid1 = pg.eval_on_selector(
@@ -493,25 +493,29 @@ def test_grass_contained_export_playwright(env):
                 "#sessionBar [data-session='%s']" % sid1, "e=>e.length")
             assert strip_chips == 0, "develop session leaked into the top strip"
             board_tiles = pg.eval_on_selector_all(
-                "#cards_research .tile[data-session='%s']" % sid1, "e=>e.length")
+                ".tile[data-lane='research'][data-session='%s']" % sid1,
+                "e=>e.length")
             assert board_tiles == 0, "develop session leaked into the board"
 
-            # Click Develop AGAIN → FOCUSES the same session (no second one).
-            pg.click("#grassPanel .gwork button[data-dev='research']")
+            # Re-open (toggle the bar) → FOCUSES the same session (no second one).
+            pg.eval_on_selector("#grassPanel .gwork .gterm .tbar", "e=>e.click()")
+            pg.wait_for_timeout(200)
+            pg.eval_on_selector("#grassPanel .gwork .gterm .tbar", "e=>e.click()")
             pg.wait_for_timeout(400)
             sid2 = pg.eval_on_selector(
                 "#grassPanel .gwork [data-grass-term]",
                 "e=>e.getAttribute('data-session')")
             assert sid2 == sid1, "a second develop session was started"
 
-            # Export to project → a promoted research lane tile appears + the
+            # Migrate to project → a promoted research lane tile appears + the
             # idea is marked promoted.
-            pg.click("#grassPanel .gwork .gexport")
+            pg.click("#grassPanel .gwork .gmigrate")
             pg.wait_for_function(
-                "document.querySelectorAll('#cards_research .tile').length >= 1",
+                "document.querySelectorAll(\".tile[data-lane='research']\")"
+                ".length >= 1",
                 timeout=8000)
             assert pg.eval_on_selector_all(
-                "#cards_research .tile", "e=>e.length") >= 1
+                ".tile[data-lane='research']", "e=>e.length") >= 1
             chip = pg.inner_text("#grassPanel .gwork h3 .stchip")
             assert "promoted" in chip.lower()
 

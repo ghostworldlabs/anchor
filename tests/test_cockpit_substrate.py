@@ -42,33 +42,40 @@ def _make_window_html(gui, tmp_path, name="Cockpit"):
 
 
 def test_lane_launch_uses_seeded_term_start_not_start_terminal(gui, tmp_path):
-    """(a) The lane "+ New run" affordances launch the seeded path
-    (newTermSession / term_start). (b) NO lane-launch affordance wires the v2
-    unseeded openTerminal / start_terminal path."""
+    """(a) Session launch uses the seeded path (newTermSession / term_start).
+    (b) NO launch affordance wires the v2 unseeded openTerminal / start_terminal
+    path.
+
+    v12 Wave 2 Layout-D: the per-lane "+ New <lane> run" launchers are retired —
+    the masthead "Open terminal" wires the live general-session start and the
+    "+ New effort" control (inert this wave, wired in W10) is the effort-start
+    entry — but the seeded ConPTY start path is unchanged."""
     html = _make_window_html(gui, tmp_path)
 
-    # (a) Every Kanban lane "+ New run" affordance routes to newTermSession.
-    #     research offers Claude + Gemini; plan/build are bare newTermSession.
-    assert "newTermSession('research','claude')" in html
-    assert "newTermSession('research','gemini')" in html
-    assert "newTermSession('plan')" in html
-    assert "newTermSession('build')" in html
+    # (a) The seeded ConPTY start path is defined + wired; the surviving live
+    #     launch affordance (masthead general session) routes through it.
+    assert "function newTermSession" in html
+    assert "newGeneral('claude')" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The seeded endpoint is the launch target.
     assert "/api/rnd/term_start" in html
 
-    # (b) The cockpit lane-launch must NOT invoke the v2 unseeded REPL.
-    #     openTerminal(...) must not appear as a lane-launch onclick handler, and
-    #     no lane-launch wiring may reference start_terminal.
+    # (b) The launch must NOT invoke the v2 unseeded REPL: openTerminal(...) must
+    #     not appear as a launch onclick handler, and no launch affordance may
+    #     reference the v2 start_terminal endpoint. (The v2 function/endpoint may
+    #     still exist on disk for the legacy console drawer, but the cockpit
+    #     launch no longer routes through it.)
     assert "onclick=\"openTerminal(" not in html
     assert "onclick='openTerminal(" not in html
-    # No lane-launch affordance calls the v2 start_terminal endpoint. (The v2
-    # function/endpoint may still exist on disk for the legacy console drawer,
-    # but the Kanban lane launch no longer routes through it.)
-    addnew_onclicks = re.findall(r"class='addnew'[^>]*onclick=\"([^\"]*)\"", html)
-    for handler in addnew_onclicks:
-        assert "openTerminal" not in handler, (
-            "lane '+ New run' affordance still wires the v2 unseeded path: "
-            + handler)
+    # No live-launch button wires the v2 path. The v12 launch affordances are
+    # newGeneral(...) (masthead general → W10 dock) + newEffort(...) (+ New research
+    # / + New plan/build); none may route through the v2 openTerminal/start_terminal.
+    launch_onclicks = re.findall(
+        r"onclick=\"((?:newGeneral|newEffort)[^\"]*)\"", html)
+    assert launch_onclicks, "no seeded launch affordance (newGeneral/newEffort) rendered"
+    for handler in launch_onclicks:
+        assert "openTerminal" not in handler
         assert "start_terminal" not in handler
 
 

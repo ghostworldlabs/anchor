@@ -498,17 +498,19 @@ def test_playwright_delete_tile_gone_and_stays_gone(server):
         pg.wait_for_selector(tile_sel, timeout=8000)
         assert pg.eval_on_selector_all(tile_sel, "e=>e.length") >= 1
 
-        # Open its panel (click the tile) and assert the red ✕ delete control.
+        # v12 W10: clicking the EFFORT tile opens the SINGLE bottom DOCK; assert
+        # the red ✕ delete control there, distinct from Kill -> Boneyard.
         pg.click(tile_sel)
-        pg.wait_for_selector('#panelStack .panel[data-session="%s"]' % sid,
-                             timeout=5000)
-        del_sel = ('#panelStack .panel[data-session="%s"] .panelbtn.delete' % sid)
-        kill_sel = ('#panelStack .panel[data-session="%s"] .panelbtn.hardkill' % sid)
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=5000)
+        del_sel = "#dockDelete"
+        kill_sel = "#dockKill"
         pg.wait_for_selector(del_sel, timeout=5000)
         assert pg.eval_on_selector_all(del_sel, "e=>e.length") == 1
-        # Distinct from the kill control (both present, different glyph).
+        # Distinct from the kill control (both present; the ✕ is TRUE-delete).
         assert pg.eval_on_selector(del_sel, "e=>e.textContent") == "✕"
-        assert pg.eval_on_selector(kill_sel, "e=>e.textContent") == "🗑"
+        assert "Kill" in pg.eval_on_selector(kill_sel, "e=>e.textContent")
 
         _DEVTEST.mkdir(exist_ok=True)
         pg.screenshot(path=str(_DEVTEST / "wave1_delete.png"))
@@ -516,12 +518,13 @@ def test_playwright_delete_tile_gone_and_stays_gone(server):
         # Auto-accept the confirm() dialog, click delete.
         pg.on("dialog", lambda d: d.accept())
         pg.click(del_sel)
-        # The tile + panel disappear.
+        # The tile disappears and the dock closes (unbinds).
         pg.wait_for_function(
             "document.querySelectorAll('.tile[data-session=\"%s\"]').length === 0"
             % sid, timeout=8000)
-        assert pg.eval_on_selector_all(
-            '#panelStack .panel[data-session="%s"]' % sid, "e=>e.length") == 0
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'none'",
+            timeout=8000)
 
         # RELOAD — the key bug: it must STAY gone (record is truly removed).
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")

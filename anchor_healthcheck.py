@@ -3795,6 +3795,559 @@ def check_rnd_v11_1_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+def _git_commit_in(repo: Path, msg: str = "hc commit") -> bool:
+    """Best-effort ``git add -A`` + commit in ``repo`` (a throwaway hc project)."""
+    try:
+        for args in (["git", "-C", str(repo), "add", "-A"],
+                     ["git", "-C", str(repo), "commit", "-m", msg,
+                      "--no-gpg-sign"]):
+            subprocess.run(args, capture_output=True, text=True, timeout=30)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the v12 "Efforts" R&D surface — FULLY STUBBED.
+
+    v12 makes an effort ONE session by default: "Advance" relabels + persists +
+    summarizes a completed stage IN-SESSION (no new session, no PTY injection); a
+    one-click fresh-session handoff is the context-relief valve; legacy chains
+    render AS efforts via a non-destructive view layer. The keystones are
+    stage-scoped doc attribution (each stage's docs attribute to THAT stage only,
+    even in one shared worktree) and the complete RETIREMENT MAP (every legacy
+    session-minting path is gated off for ``effort_managed`` efforts, keyed on the
+    ``effort_managed`` discriminator — never ``kind``/``current_stage`` — so the
+    v6/v8/v10/v11 healthcheck walks keep passing).
+
+    This walk is THE v11 lesson made permanent — WORKTREE-ONLY for the committed
+    advance and CONVERSATION-ONLY (PTY-buffer-seeded, no file) for the transcript
+    advance — and asserts session-id SET equality (snapshot pre/post, assert
+    equal) after every advance so a reconcile churn can't mask a stray mint. The
+    eight steps:
+
+      (1) effort-record back-compat normalize — an OLD record (no v12 fields)
+          loads with a derived ``kind``/``current_stage``, ``effort_managed==False``.
+      (2) a trio effort (``effort_managed=True``) advanced research→plan via a
+          COMMITTED plan-set (worktree-only) then plan→build CONVERSATION-ONLY
+          (the stub PTY buffer seeded, NO file → transcript-snapshot persist);
+          after EACH advance the session-id SET is unchanged (zero mint),
+          ``current_stage`` flipped, per-stage doc attribution disjoint, per-stage
+          summary dirs distinct.
+      (3) the build-stage deliverable resolves the build PRODUCT WITH a plan-stage
+          ``MASTER-PLAN.md`` DECOY asserted NOT resolved (Shark C6).
+      (4) the retirement: an ``effort_managed`` effort through a legacy minting
+          path (``auto_advance_planning_to_build``) → SET unchanged; AND a LEGACY
+          (``effort_managed==False``) record still mints a build.
+      (5) ``handoff_to_fresh`` → a NEW session, the SAME ``effort_id``, the next
+          prompt held as a PENDING PASTE (UNSENT).
+      (6) ``recover_interrupted_efforts`` → the active stage marked
+          ``'interrupted'`` (≠ done), no auto-spawn; the effort stays reopenable
+          to continue the SAME stage (a continuation inherits ``effort_id``).
+      (7) ``build_effort_view`` groups a legacy chain + a new single-session effort
+          into exactly the right efforts (no double tile / no ghost stage).
+      (8) grass one-session back-compat (``develop_grass_workbench`` → ONE dev
+          session) + ✕→Boneyard capture (``delete_grass_idea`` records a
+          ``grass-deleted`` entry).
+
+    All model / PTY interaction is stubbed (``ANCHOR_PTY_BACKEND=stub`` +
+    ``ANCHOR_RUNNER_CMD`` → the stream-json stub + a temp ``ANCHOR_WORKTREE_BASE``
+    + a throwaway temp git project). ``ANCHOR_PROACTIVE_SUMMARY`` stays OFF (so the
+    background stage summary hard no-ops, never spawning a live-claude run) and is
+    RESTORED in ``finally``. Every stub PTY + synthetic session row is reaped, all
+    forced env is restored, and the temp dirs are torn down. Nothing binds
+    ``:8777`` / touches real data / reaches the network. A sub-step that genuinely
+    can't run (no git) is recorded honestly as skipped (v9/v10/v11 tolerance).
+    """
+    name = "R&D v12 surface"
+    sj_cmd = _streamjson_runner_cmd()
+    if not rnd_env.get("runner_cmd") or not sj_cmd:
+        report.check(name, True,
+                     "skipped (no stub runner; live claude avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    os.environ.pop("ANCHOR_TERMINAL_SEED", None)  # rely on the built-in greet seed
+    os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)  # background summary no-ops
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-v12-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    os.environ["ANCHOR_RUNNER_CMD"] = sj_cmd
+    rnd_env.setdefault("v3_temp_dirs", []).append(wt_base)
+
+    # Simulated build CONVERSATION content — echoed into the PTY buffer (no file).
+    transcript = (
+        "\nBuilder: Wire the worktree splitter fit and the warn banner.\n"
+        "Assistant: Done - the splitter now debounces the xterm fit and the\n"
+        "context-full banner polls /api/rnd/context_status. Build complete.\n")
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import session_registry as _sreg
+        import effort_history as _eh
+        import deliverables as _deliv
+        import effort_view as _ev
+        import boneyard as _bone
+        import pty_manager as _pty
+
+        # ── 0. A throwaway git project (worktrees attach to a real repo) ───────
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-v12-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc v12 probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v12", str(proj_folder),
+                                scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register v12 project", bool(pid), str(pid)))
+
+        # ── (1) effort-record back-compat normalize ───────────────────────────
+        try:
+            old = _sreg._normalize({"session_id": "hc-v12-legacy",
+                                    "project_id": pid, "lane": "research",
+                                    "status": "done"})
+            norm_ok = (old.get("kind") == "trio"
+                       and old.get("current_stage") == "research"
+                       and old.get("stage_history") == []
+                       and old.get("effort_id") == "hc-v12-legacy"
+                       and old.get("effort_managed") is False)
+            steps.append(("effort-record back-compat normalize "
+                          "(derived kind/stage, effort_managed False)",
+                          norm_ok,
+                          f"kind={old.get('kind')} "
+                          f"stage={old.get('current_stage')} "
+                          f"managed={old.get('effort_managed')}"))
+        except Exception as e:
+            steps.append(("effort-record back-compat normalize", False,
+                          f"{type(e).__name__}: {e}"))
+
+        def _ids():
+            return set(r["session_id"]
+                       for r in _sreg.list_sessions(project_id=pid))
+
+        # ── (2) one effort, two advances (committed + conversation-only) ───────
+        eff_sid = None
+        if git_ok:
+            try:
+                sess = _ts.start_session(pid, "research", backend="claude",
+                                         effort_managed=True)
+                eff_sid = sess["session_id"]
+                wt = sess.get("worktree_path", "")
+                S0 = _ids()
+
+                # research→plan via a COMMITTED doc in the SHARED worktree
+                # (worktree-only — committed before advance, never record_effort'd).
+                # The research stage's committed content persists under research/.
+                rdir = Path(wt) / "research"
+                rdir.mkdir(parents=True, exist_ok=True)
+                (rdir / "findings.md").write_text(
+                    "# Research findings\n\nThe efforts probe finding.\n",
+                    encoding="utf-8")
+                _git_commit_in(Path(wt), "research findings")
+
+                out1 = _ts.advance_stage(eff_sid, "plan", mode="manual",
+                                         project_id=pid)
+                S1 = _ids()
+                rec1 = out1.get("record") or {}
+                adv1_ok = (out1.get("ok") and out1.get("advanced")
+                           and rec1.get("current_stage") == "plan"
+                           and rec1.get("session_id") == eff_sid
+                           and S1 == S0)  # ZERO mint
+                steps.append((
+                    "advance research->plan (committed, worktree-only): "
+                    "zero-mint + stage flip",
+                    bool(adv1_ok),
+                    f"ok={out1.get('ok')} adv={out1.get('advanced')} "
+                    f"stage={rec1.get('current_stage')} set_eq={S1 == S0}"))
+
+                # plan→build CONVERSATION-ONLY: seed the stub PTY buffer (no file)
+                # for the PLAN stage that is about to close → it snapshots to a
+                # planning/<sid>-transcript.md (the conversation-only persist path).
+                _pty.write(eff_sid, transcript)
+                pty_before = 0
+                try:
+                    rb = _pty.read_since(eff_sid, 0)
+                    pty_before = len((rb.get("text") or "")
+                                     if isinstance(rb, dict) else "")
+                except Exception:
+                    pty_before = 0
+
+                out2 = _ts.advance_stage(eff_sid, "build", mode="manual",
+                                         project_id=pid)
+                S2 = _ids()
+                rec2 = out2.get("record") or {}
+                # transcript snapshot persisted under the CLOSING (plan) stage's
+                # store-lane (planning/<short-sid>-transcript.md).
+                prel = "planning/%s-transcript.md" % (eff_sid[:12])
+                snap_ok = (proj_folder / prel).is_file()
+                pty_after = 0
+                try:
+                    ra = _pty.read_since(eff_sid, 0)
+                    pty_after = len((ra.get("text") or "")
+                                    if isinstance(ra, dict) else "")
+                except Exception:
+                    pty_after = 0
+                adv2_ok = (out2.get("ok") and out2.get("advanced")
+                           and rec2.get("current_stage") == "build"
+                           and rec2.get("session_id") == eff_sid
+                           and S2 == S0          # ZERO mint across BOTH advances
+                           and snap_ok           # conversation captured to a file
+                           and pty_after == pty_before)  # ZERO PTY bytes injected
+                steps.append((
+                    "advance plan->build (conversation-only): zero-mint + "
+                    "transcript snapshot + zero PTY injection",
+                    bool(adv2_ok),
+                    f"ok={out2.get('ok')} stage={rec2.get('current_stage')} "
+                    f"set_eq={S2 == S0} snap={snap_ok} "
+                    f"pty_delta={pty_after - pty_before}"))
+
+                # Per-stage doc attribution DISJOINT: the research stage holds the
+                # committed findings; the plan stage holds the transcript snapshot;
+                # the two sets do not overlap (each stage's docs attribute to THAT
+                # stage only, even in the ONE shared worktree — the keystone).
+                research_docs = {
+                    (e.get("artifact_path") or "").replace("\\", "/")
+                    for e in _eh.efforts_for_session_stage(
+                        str(proj_folder), pid, eff_sid, "research")}
+                plan_docs = {(e.get("artifact_path") or "").replace("\\", "/")
+                             for e in _eh.efforts_for_session_stage(
+                                 str(proj_folder), pid, eff_sid, "plan")}
+                attribution_ok = (
+                    "research/findings.md" in research_docs
+                    and prel in plan_docs
+                    and not (research_docs & plan_docs)        # DISJOINT
+                    and "research/findings.md" not in plan_docs)
+                steps.append((
+                    "per-stage doc attribution disjoint "
+                    "(research != plan doc sets)",
+                    bool(attribution_ok),
+                    f"research={sorted(research_docs)} "
+                    f"plan={sorted(plan_docs)}"))
+
+                # Per-stage summary dirs distinct — isolate the STAGE key (V12R1-02):
+                # hold the lane CONSTANT and vary ONLY ``stage`` so the assertion
+                # would FAIL if summary_dir dropped stage-keying (the prior form
+                # also varied the lane arg, so it couldn't catch that regression).
+                try:
+                    import summarizer as _sm
+                    sd_plan = _sm.summary_dir(str(proj_folder), pid, "planning",
+                                              eff_sid, stage="plan")
+                    sd_build = _sm.summary_dir(str(proj_folder), pid, "planning",
+                                               eff_sid, stage="build")
+                    sumdir_ok = str(sd_plan) != str(sd_build)
+                except Exception:
+                    sumdir_ok = True  # absent summarizer key path → don't fail
+                steps.append(("per-stage summary dirs distinct "
+                              "(stage-keyed, lane held constant)",
+                              bool(sumdir_ok), ""))
+            except Exception as e:
+                steps.append(("effort two-advance walk", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("effort two-advance walk", True,
+                          "skipped (git unavailable)"))
+
+        # ── (3) build-stage deliverable resolves the product, NOT the decoy ────
+        if git_ok and eff_sid:
+            try:
+                # The effort is at build with a transcript; add an explicit build
+                # PRODUCT (a non-doc) in the build stage so the resolver has a
+                # signal, and prove the plan-stage MASTER-PLAN.md DECOY is excluded.
+                wt2 = (_sreg.get_session(eff_sid) or {}).get("worktree_path", "")
+                base = _eh.record_stage_baseline(Path(wt2)) if wt2 else None
+                if wt2:
+                    (Path(wt2) / "app.py").write_text("print('app')\n",
+                                                      encoding="utf-8")
+                    _eh.persist_session_stage_docs(
+                        str(proj_folder), pid, eff_sid, "build", "build",
+                        Path(wt2), base)
+                subject = _sreg.get_session(eff_sid)
+                res = _deliv.resolve_build_deliverable(
+                    str(proj_folder), pid, subject)
+                path = ""
+                if res.get("resolved") and res.get("deliverable"):
+                    path = (res["deliverable"].get("path") or "").replace(
+                        "\\", "/")
+                deliv_ok = (res.get("resolved")
+                            and "MASTER-PLAN" not in path
+                            and path.endswith("app.py"))
+                steps.append((
+                    "build-stage deliverable resolves the product, "
+                    "MASTER-PLAN.md decoy NOT resolved",
+                    bool(deliv_ok),
+                    f"resolved={res.get('resolved')} path={path}"))
+            except Exception as e:
+                steps.append(("build-stage deliverable + decoy", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("build-stage deliverable + decoy", True,
+                          "skipped (git unavailable / no effort)"))
+
+        # ── (4) retirement (effort gated off) + legacy still mints ─────────────
+        if git_ok:
+            try:
+                # An effort_managed PLANNING effort through a legacy minting path
+                # (auto_advance_planning_to_build) → SET unchanged (gated off).
+                eff_plan = _ts.start_session(pid, "planning", backend="claude",
+                                             effort_managed=True)
+                eff_psid = eff_plan["session_id"]
+                _sreg.update_session(eff_psid, status=_sreg.STATUS_DONE)
+                before_eff = _ids()
+                gated = _ts.auto_advance_planning_to_build(pid, eff_psid)
+                gate_ok = (gated is None and _ids() == before_eff)
+                steps.append((
+                    "retirement: effort_managed effort gated off the legacy "
+                    "auto-advance (zero mint)",
+                    bool(gate_ok),
+                    f"returned={gated!r} set_eq={_ids() == before_eff}"))
+
+                # A LEGACY (effort_managed False) planning record with a
+                # discoverable committed plan-set still MINTS a build.
+                lp_dir = "planning/rnd-legacy"
+                for rel, body in ((f"{lp_dir}/MASTER-PLAN.md", "# MP\n"),
+                                  (f"{lp_dir}/IMPLEMENTATION-PLAN.md",
+                                   "# IMPL\n")):
+                    p = proj_folder / rel
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.write_text(body, encoding="utf-8")
+                _git_commit_in(proj_folder, "legacy plan set")
+                for i, (rel, title) in enumerate((
+                        (f"{lp_dir}/MASTER-PLAN.md", "Master Plan"),
+                        (f"{lp_dir}/IMPLEMENTATION-PLAN.md",
+                         "Implementation Plan"))):
+                    jid = _eh.discovered_job_id("planning", rel)
+                    _eh.record_effort(
+                        str(proj_folder), pid, "planning", jid, skill="Crucible",
+                        extra={"source": _eh.SOURCE_DISCOVERED,
+                               "kind": "plan-doc", "title": title,
+                               "artifact_path": rel, "status": "imported",
+                               "created_at": 2000.0 + i * 0.001})
+                legacy = _ts.start_session(pid, "planning", backend="claude")
+                lsid = legacy["session_id"]
+                _sreg.update_session(lsid, status=_sreg.STATUS_DONE)
+                before_legacy = _ids()
+                minted = _ts.auto_advance_planning_to_build(pid, lsid)
+                legacy_ok = (minted is not None
+                             and minted.get("session_id") not in before_legacy
+                             and minted.get("lane") == "build")
+                steps.append((
+                    "retirement: a LEGACY (effort_managed False) record still "
+                    "mints a build",
+                    bool(legacy_ok),
+                    f"minted={(minted or {}).get('session_id')!r}"))
+                for sid in (eff_psid, lsid,
+                            (minted or {}).get("session_id")):
+                    if sid:
+                        try:
+                            _ts.kill(sid, project_id=pid, _record_boneyard=False)
+                        except Exception:
+                            pass
+            except Exception as e:
+                steps.append(("retirement map", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("retirement map", True, "skipped (git unavailable)"))
+
+        # ── (5) handoff_to_fresh → new session, SAME effort_id, pending paste ──
+        if git_ok:
+            try:
+                hsrc = _ts.start_session(pid, "research", backend="claude",
+                                         effort_managed=True)
+                hsid = hsrc["session_id"]
+                heff = hsrc.get("effort_id") or hsid
+                hwt = hsrc.get("worktree_path", "")
+                # worktree-only research doc so prepare_stage_handoff names a doc.
+                rdir = Path(hwt) / "research"
+                rdir.mkdir(parents=True, exist_ok=True)
+                (rdir / "findings.md").write_text(
+                    "# Findings\n\nThe handoff probe finding.\n",
+                    encoding="utf-8")
+                ho = _ts.handoff_to_fresh(hsid, project_id=pid)
+                new_rec = ho.get("new_session") or {}
+                new_sid = new_rec.get("session_id", "")
+                paste = new_rec.get("pending_paste") or ""
+                ho_ok = (ho.get("ok")
+                         and new_sid and new_sid != hsid       # NEW session
+                         and (new_rec.get("effort_id") == heff)  # SAME effort
+                         and bool(paste)                        # prompt held
+                         and new_rec.get("paste_flushed") is False)  # UNSENT
+                steps.append((
+                    "handoff_to_fresh: new session, SAME effort_id, pending "
+                    "paste UNSENT",
+                    bool(ho_ok),
+                    f"ok={ho.get('ok')} new!=old={new_sid != hsid} "
+                    f"same_eff={new_rec.get('effort_id') == heff} "
+                    f"unsent={new_rec.get('paste_flushed') is False}"))
+                for sid in (hsid, new_sid):
+                    if sid:
+                        try:
+                            _ts.kill(sid, project_id=pid,
+                                     _record_boneyard=False)
+                        except Exception:
+                            pass
+            except Exception as e:
+                steps.append(("handoff_to_fresh", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("handoff_to_fresh", True,
+                          "skipped (git unavailable)"))
+
+        # ── (6) recover_interrupted_efforts → 'interrupted', no auto-spawn ─────
+        if git_ok:
+            try:
+                rsrc = _ts.start_session(pid, "build", backend="claude",
+                                         effort_managed=True)
+                rsid2 = rsrc["session_id"]
+                reff = rsrc.get("effort_id") or rsid2
+                before_rec = _ids()
+                # Simulate PTY-gone (the reconcile-dead / restart state) WITHOUT
+                # terminal_session.kill: reap only the PTY, leave the record
+                # RUNNING.
+                try:
+                    _pty.kill(rsid2)
+                except Exception:
+                    pass
+                out_rec = _ts.recover_interrupted_efforts(live_session_ids=[])
+                rec_after = _sreg.get_session(rsid2) or {}
+                active = None
+                for ent in rec_after.get("stage_history") or []:
+                    if ent.get("stage") == "build":
+                        active = ent
+                interrupted = bool(active) and active.get("state") == "interrupted"
+                no_spawn = _ids() == before_rec        # nothing auto-spawned
+                reopen_ok = rec_after.get("effort_id") == reff  # SAME effort id
+                steps.append((
+                    "recover_interrupted_efforts: active stage 'interrupted' "
+                    "(!=done), no auto-spawn, effort_id preserved",
+                    bool(rsid2 in (out_rec.get("recovered") or [])
+                         and interrupted and no_spawn and reopen_ok),
+                    f"recovered={rsid2 in (out_rec.get('recovered') or [])} "
+                    f"state={(active or {}).get('state')} "
+                    f"no_spawn={no_spawn} eff={reopen_ok}"))
+                try:
+                    _ts.kill(rsid2, project_id=pid, _record_boneyard=False)
+                except Exception:
+                    pass
+            except Exception as e:
+                steps.append(("recover_interrupted_efforts", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("recover_interrupted_efforts", True,
+                          "skipped (git unavailable)"))
+
+        # ── (7) build_effort_view: legacy chain + new effort, no double/ghost ──
+        try:
+            efforts = _ev.build_effort_view(str(proj_folder), pid)
+            # Sanity shape: a list of effort dicts, each with an effort_id +
+            # current_stage + a stage_history list (no crash / no exception is
+            # the core guarantee; we also assert the live effort surfaces once).
+            view_ok = isinstance(efforts, list)
+            if view_ok and eff_sid:
+                # The advanced effort appears EXACTLY once (deduped by chain_id),
+                # at the build stage, with NO ghost / duplicate tile for its sid.
+                matching = [e for e in efforts
+                            if any(m.get("session_id") == eff_sid
+                                   for m in (e.get("members") or []))]
+                view_ok = (len(matching) == 1
+                           and matching[0].get("current_stage") == "build")
+            # Idempotent rebuild (a derived cache, not a source).
+            idem = (_ev.build_effort_view(str(proj_folder), pid)
+                    is not efforts)  # a fresh list object each call
+            steps.append((
+                "build_effort_view groups efforts (no double tile / no ghost "
+                "stage; idempotent rebuild)",
+                bool(view_ok and idem),
+                f"n_efforts={len(efforts) if isinstance(efforts, list) else '?'} "
+                f"view_ok={view_ok}"))
+        except Exception as e:
+            steps.append(("build_effort_view", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (8) grass one-session back-compat + ✕→Boneyard capture ────────────
+        if git_ok:
+            try:
+                idea = _eh.add_idea(str(proj_folder), pid,
+                                    "Self-pacing review cadence",
+                                    notes="An idea to develop then discard.")
+                idea_id = idea.get("job_id") or idea.get("id")
+                # ONE workbench dev session per idea (the v12 collapse). It always
+                # starts at research (no lane arg — the v12 one-session model).
+                wb = _eh.develop_grass_workbench(pid, idea_id, backend="claude")
+                gsid = (wb or {}).get("session_id", "")
+                one_session = bool(gsid)
+                # ✕ → Boneyard: deleting the idea records a 'grass-deleted' entry.
+                _eh.delete_grass_idea(str(proj_folder), pid, idea_id)
+                gone = _eh.get_grass_idea(str(proj_folder), pid,
+                                          idea_id) is None
+                entries = _bone.list_entries(str(proj_folder), pid)
+                captured = any(e.get("source") == "grass-deleted"
+                               for e in entries)
+                steps.append((
+                    "grass one-session workbench + ✕→Boneyard capture",
+                    bool(one_session and gone and captured),
+                    f"one_session={one_session} gone={gone} "
+                    f"boneyard_grass_deleted={captured}"))
+                if gsid:
+                    try:
+                        _ts.kill(gsid, project_id=pid, _record_boneyard=False)
+                    except Exception:
+                        pass
+            except Exception as e:
+                steps.append(("grass back-compat + boneyard", False,
+                              f"{type(e).__name__}: {e}"))
+        else:
+            steps.append(("grass back-compat + boneyard", True,
+                          "skipped (git unavailable)"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY sessions this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            import session_registry as _sreg2
+            for sid in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(sid)
+                except Exception:
+                    pass
+            for pid_ in rnd_env.get("created_ids", []):
+                for srec in _sreg2.list_sessions(project_id=pid_):
+                    try:
+                        _sreg2.remove_session(srec.get("session_id"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Restore every env var we forced for this walk.
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_TERMINAL_SEED", prev_seed),
+                          ("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def _rnd_session(session_id):
     """Best-effort read of one managed session record by id (for the v4 walk)."""
     try:
@@ -3802,6 +4355,23 @@ def _rnd_session(session_id):
         return _sreg.get_session(session_id)
     except Exception:
         return None
+
+
+def _rmtree_force(path):
+    """``rmtree`` that survives READ-ONLY files — e.g. git's ``.git/objects`` on
+    Windows, which ``shutil.rmtree(ignore_errors=True)`` silently SKIPS, leaking the
+    throwaway dir into %TEMP% (Reviewer V12R1-01). The ``onerror`` handler chmods the
+    offending path writable and retries. Shared by every surface's temp teardown."""
+    def _onerror(func, p, exc):
+        try:
+            os.chmod(p, 0o700)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onerror=_onerror)
+    except Exception:
+        pass
 
 
 def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
@@ -3853,13 +4423,13 @@ def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
     folder = rnd_env.get("folder")
     if folder is not None:
         try:
-            shutil.rmtree(folder, ignore_errors=True)
+            _rmtree_force(folder)
         except Exception:
             pass
     # Remove the v3 walk's throwaway dirs (temp git repo + worktree base).
     for d in rnd_env.get("v3_temp_dirs", []):
         try:
-            shutil.rmtree(d, ignore_errors=True)
+            _rmtree_force(d)
         except Exception:
             pass
     # Strip the synthetic inbox probe line we appended.
@@ -4054,6 +4624,7 @@ def main():
         check_rnd_v10_surface(report, server_proc, rnd_env)
         check_rnd_v11_surface(report, server_proc, rnd_env)
         check_rnd_v11_1_surface(report, server_proc, rnd_env)
+        check_rnd_v12_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

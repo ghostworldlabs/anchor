@@ -618,6 +618,22 @@ def _deliverable_view(folder_path, project_id, name, rel, dtype, source,
     }
 
 
+def _is_effort_subject(bs: dict) -> bool:
+    """True iff ``bs`` is a v12 EFFORT subject (carries stage fields), not a
+    legacy discovered build_session.
+
+    An effort carries ``stage_history`` and/or ``current_stage`` (set by the v12
+    record + advance path) plus a ``session_id``/``effort_id``. A legacy
+    discovered build session from ``sessions.list_sessions`` has neither stage
+    field, so this is False for it — preserving the existing behavior exactly.
+    """
+    if not isinstance(bs, dict):
+        return False
+    if "stage_history" not in bs and "current_stage" not in bs:
+        return False
+    return bool(bs.get("session_id") or bs.get("effort_id"))
+
+
 def resolve_build_deliverable(folder_path, project_id: str,
                               build_session: dict,
                               allow_config: bool = False) -> dict:
@@ -639,6 +655,33 @@ def resolve_build_deliverable(folder_path, project_id: str,
     raises (any failure → unresolved with a reason).
     """
     bs = build_session or {}
+
+    # v12 Wave 3 — EFFORT subject (carries stage fields): feed the resolver ONLY
+    # the BUILD-stage doc set, so a plan-stage MASTER-PLAN.md can never be
+    # mis-resolved as the build product (Shark C6). An effort subject is one that
+    # carries ``stage_history`` (or ``current_stage``) + a ``session_id``; a
+    # legacy (non-effort) discovered build_session from ``sessions.list_sessions``
+    # has neither, so its existing behavior is untouched.
+    if _is_effort_subject(bs):
+        cur = (bs.get("current_stage") or "").strip()
+        if cur != "build":
+            return {"resolved": False, "deliverable": None, "signal": "none",
+                    "reason": ("effort is at stage %r, not build — no build "
+                               "deliverable yet" % (cur or "?"))}
+        sid = bs.get("session_id") or bs.get("effort_id") or ""
+        try:
+            build_efforts = _eh.efforts_for_session_stage(
+                folder_path, project_id, sid, "build")
+        except Exception:
+            build_efforts = []
+        if not build_efforts:
+            return {"resolved": False, "deliverable": None, "signal": "none",
+                    "reason": "no build-stage docs persisted for this effort yet"}
+        # Re-shape the build-stage efforts into the member_files the
+        # session-scoped resolver below understands, then fall through.
+        bs = dict(bs)
+        bs["member_files"] = build_efforts
+
     members = bs.get("member_files", []) or []
 
     # SESSION-SCOPED resolution (v5 Wave 4 fix). The ONLY honest "what THIS build
@@ -721,6 +764,14 @@ def resolve_build_deliverable(folder_path, project_id: str,
             if view:
                 return {"resolved": True, "deliverable": view, "signal": "pinned",
                         "reason": "resolved from this build's pinned product file"}
+
+    # v12 — an EFFORT subject is resolved ONLY from its own build-stage docs (a
+    # member product, or a pin matching a build-stage member). It NEVER falls
+    # through to a project-level pin/marker/config (which could be a plan-stage
+    # MASTER-PLAN.md) — honest unresolved instead (Shark C6).
+    if _is_effort_subject(build_session or {}):
+        return {"resolved": False, "deliverable": None, "signal": "none",
+                "reason": "no build-stage deliverable signal for this effort yet"}
 
     # (3) Project-level fallback (newest pin / declared marker / [opt-in] config)
     # ONLY when this is the project's SOLE build session → attribution is

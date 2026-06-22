@@ -732,6 +732,137 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     return record
 
 
+#: v12 Wave 11 — the SINGLE-session grass workbench key. The one-session-per-idea
+#: workbench (the approved ``_mockups/grass_2_workbench.html``) keeps ONE
+#: stage-carrying ``effort_managed`` grass-dev session per idea under this key in
+#: the idea record's ``dev_sessions`` map (so it never collides with the legacy
+#: per-lane ``research``/``plan`` keys a pre-v12 idea may carry, and the
+#: back-compat resolver can find it). It advances research→plan IN-SESSION via
+#: :func:`terminal_session.advance_stage` — it does NOT mint a second grass
+#: session (the grass second-advance is retired for ``effort_managed`` ideas, W7).
+GRASS_WORKBENCH_KEY = "workbench"
+
+
+def _grass_workbench_session(idea: dict):
+    """Resolve the idea's SINGLE workbench session record (v12 Wave 11).
+
+    Returns ``(session_id, registry_record)`` for the idea's one-session
+    workbench, or ``(None, None)`` when none is live. Resolution order
+    (back-compat — A10):
+
+      1. the explicit v12 single-session key (``dev_sessions['workbench']``);
+      2. a pre-v12 idea with two ``dev_sessions`` ``{research, plan}`` → the
+         MOST-ADVANCED live one (``plan`` over ``research``) is surfaced as THE
+         single workbench session (a stage history; no orphan).
+
+    A session is only surfaced when it is LIVE (registry RUNNING); a reaped one
+    yields ``(None, None)`` so the workbench re-mints/focuses cleanly.
+    """
+    dev_map = _grass_dev_sessions(idea)
+    # 1) The v12 single-session key wins when live.
+    wsid = dev_map.get(GRASS_WORKBENCH_KEY) or ""
+    live = _live_grass_dev_session(wsid)
+    if live is not None:
+        return wsid, live
+    # 2) Back-compat: a pre-v12 idea's most-advanced live lane session.
+    for lane in ("plan", "research"):
+        sid = dev_map.get(lane) or ""
+        rec = _live_grass_dev_session(sid)
+        if rec is not None:
+            return sid, rec
+    return None, None
+
+
+def _grass_workbench_session_view(idea: dict):
+    """SAFE single-session projection for :func:`grass_workbench_data` (W11).
+
+    Returns ``{session_id, lane, current_stage, status, label}`` for the idea's
+    one live workbench session (the v12 key or a back-compat most-advanced lane
+    session), or ``None`` when none is live. NEVER carries worktree/branch (the
+    SAFE-projection rule). Best-effort; never raises.
+    """
+    try:
+        sid, rec = _grass_workbench_session(idea)
+    except Exception:
+        sid, rec = None, None
+    if not sid or rec is None:
+        return None
+    return {
+        "session_id": sid,
+        "lane": rec.get("lane", ""),
+        "current_stage": rec.get("current_stage", "") or rec.get("lane", ""),
+        "status": rec.get("status", ""),
+        "label": rec.get("label", ""),
+    }
+
+
+def develop_grass_workbench(project_id: str, idea_id: str,
+                            folder_path=None, backend=None) -> dict:
+    """Open the idea's SINGLE one-session workbench (v12 Wave 11; SC5).
+
+    The v12 grass model: ONE stage-carrying ``effort_managed`` grass-dev session
+    per idea (no Research/Plan split). It starts at the ``research`` lane (so the
+    researchPrime skill seeds) and ADVANCES research→plan IN-SESSION via
+    :func:`terminal_session.advance_stage` — it never mints a second grass session
+    (the legacy grass second-advance is gated off for ``effort_managed`` ideas, W7).
+
+    Dedupe/focus + back-compat (A10):
+      * If the idea already has a LIVE workbench session (the v12 key OR — for a
+        pre-v12 idea — its most-advanced ``{research,plan}`` dev session) it is
+        RETURNED (re-focused), never re-minted.
+      * Only when none is live is a NEW ``effort_managed`` grass-dev session
+        started and the ``dev_sessions['workbench']`` key recorded.
+
+    Seeds the idea text + its refinements (reuses :func:`_grass_develop_seed`).
+    The idea STAYS in grass (copy, never destroy). Returns the workbench session's
+    registry record. Raises ``ValueError`` for an unknown idea.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+
+    # Atomic check-then-mint (W11-R2-02): hold WRITE_LOCK across the dedupe check,
+    # start_session, AND the dev_sessions['workbench'] record so two near-simultaneous
+    # opens can't both pass the "no live session" check and double-mint a session for
+    # one idea (parity with advance_stage; WRITE_LOCK is a re-entrant RLock, so the
+    # nested acquisitions in start_session/record_effort are safe).
+    with _paths.WRITE_LOCK:
+        # Re-fetch under the lock so the dedupe check sees a key a concurrent open
+        # may have just recorded.
+        idea = get_grass_idea(folder_path, project_id, idea_id) or idea
+        _wsid, live = _grass_workbench_session(idea)
+        if live is not None:
+            return live
+
+        refinements = list_grass_refinements(folder_path, project_id, jid)
+        seed = _grass_develop_seed(idea, refinements)
+        if not seed.strip():
+            raise ValueError("grass idea has no text: %s" % (idea_id,))
+        import terminal_session as _ts
+        label = GRASS_DEV_LABEL_PREFIX + ("idea: " + ((idea.get("title") or "")[:40]))
+        kwargs = {"label": label, "seed_context": seed, "effort_managed": True}
+        if backend is not None:
+            kwargs["backend"] = backend
+        record = _ts.start_session(project_id, "research", **kwargs)
+
+        # Record the single-session key so a re-click focuses THIS session.
+        # Best-effort — a failed annotation never tears down the live session.
+        try:
+            dev_map = _grass_dev_sessions(idea)
+            dev_map[GRASS_WORKBENCH_KEY] = record.get("session_id")
+            record_effort(folder_path, project_id, "grass", jid,
+                          extra={"dev_sessions": dev_map})
+        except Exception:
+            pass
+        return record
+
+
 def _materialize_handoff_into_plan_worktree(folder_path, plan_record, hk):
     """Make the upstream handoff docs READABLE from a grass plan dev worktree.
 
@@ -871,9 +1002,34 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
     # 1) Resolve the contained RESEARCH dev session. Honest if absent.
     dev_map = _grass_dev_sessions(idea)
     rsid = dev_map.get("research") or ""
+    # v12 Wave 11: a one-session workbench idea keeps its single session under the
+    # ``workbench`` key (no per-lane ``research`` key). Resolve it as the research
+    # source so the W7 effort_managed retirement gate below catches it (the gate
+    # then early-returns — a v12 effort advances IN-SESSION, never via a second
+    # grass session). A legacy idea (per-lane keys, effort_managed==False) is
+    # unchanged.
+    if not rsid:
+        rsid = dev_map.get(GRASS_WORKBENCH_KEY) or ""
     if not rsid:
         return {"ok": False, "session": None, "research_session_id": "",
                 "reason": "no-research-session"}
+
+    # v12 Wave 7 — RETIREMENT MAP (Shark C4/C3): the grass SECOND-ADVANCE is
+    # retired for a v12 EFFORT. A grass-dev effort (effort_managed==True)
+    # advances IN-SESSION via terminal_session.advance_stage (one session per
+    # idea, W11); this legacy grass research→plan path must mint NO second grass
+    # plan session for it. Gate on the RESEARCH dev session's ``effort_managed``
+    # ONLY (never kind/lane — a legacy grass-dev record carries kind=='grass-dev'
+    # too). A legacy idea (effort_managed==False) falls through to the full v10/
+    # v11 grass-advance path below, unchanged, so those healthcheck walks pass.
+    try:
+        import session_registry as _sr
+        _rrec = _sr.get_session(rsid)
+    except Exception:
+        _rrec = None
+    if _rrec is not None and _rrec.get("effort_managed"):
+        return {"ok": False, "session": None, "research_session_id": rsid,
+                "reason": "effort-managed-use-advance-stage"}
 
     # 2+3) v11 Wave 3 — route the PERSIST + PROMPT through the SHARED keystone
     #    (:func:`terminal_session.prepare_stage_handoff`), unifying this grass
@@ -1079,6 +1235,13 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
             # the Export-to-project link (the real lane sessions this idea's work
             # became). Both empty until the idea is developed / exported.
             "dev_sessions": _grass_dev_sessions(eff),
+            # v12 Wave 11: the SINGLE-session workbench shape (SC5). A SAFE
+            # projection (session_id · stage · status — never worktree/branch) of
+            # the idea's one live workbench session: the v12 ``workbench`` key, or
+            # — for a pre-v12 idea with ``{research,plan}`` dev_sessions — its
+            # MOST-ADVANCED live one (back-compat A10; no orphan). ``None`` when
+            # no workbench session is live.
+            "workbench_session": _grass_workbench_session_view(eff),
             "exported_to": list((eff.get("exported_to") or [])),
             # v10 Wave 4: per-idea ARCHIVE bundles (persisted dev docs + summary
             # ref tied to this idea), newest-first. Empty until the idea is
@@ -1221,7 +1384,20 @@ def export_grass_to_project(project_id: str, idea_id: str,
     jid = idea.get("job_id", idea_id)
     title = (idea.get("title") or "").strip()
 
-    dev_map = _grass_dev_sessions(idea)
+    raw_map = _grass_dev_sessions(idea)
+    # v12 Wave 11: the one-session workbench keeps a SINGLE session under the
+    # ``workbench`` key (NOT a per-lane key). Build the per-lane export map from the
+    # legacy per-lane keys PLUS the workbench session filed under the lane matching
+    # its current stage (research → research lane; plan/build → plan lane) so the
+    # one-session model exports just like the legacy per-lane sessions. The
+    # session's per-stage docs persist under their own store lanes; the export
+    # effort carries the joined docs for the chosen lane.
+    dev_map = {k: v for k, v in raw_map.items() if k in PROMOTE_LANES}
+    wsid, wrec = _grass_workbench_session(idea)
+    if wsid:
+        wstage = (wrec or {}).get("current_stage", "") if isinstance(wrec, dict) else ""
+        wlane = "plan" if wstage in ("plan", "build") else "research"
+        dev_map.setdefault(wlane, wsid)
     exported = []
     for lane in PROMOTE_LANES:
         sid = dev_map.get(lane)
@@ -1384,7 +1560,23 @@ def archive_grass_session(project_id: str, idea_id: str, lane: str,
         raise ValueError("grass idea not found: %s" % (idea_id,))
     jid = idea.get("job_id", idea_id)
 
-    sid = _grass_dev_sessions(idea).get(lane)
+    dev_map = _grass_dev_sessions(idea)
+    sid = dev_map.get(lane)
+    if not sid:
+        # v12 Wave 11: the one-session workbench keeps a SINGLE session under the
+        # ``workbench`` key (it advances research→plan in-session, so it is not
+        # filed under a per-lane key). Fall back to it for the Archive snapshot —
+        # the session's docs persist under whichever stage's store lane they were
+        # written in, but archiving records the bundle under the requested lane and
+        # the doc-join resolves the actual persisted docs (so an empty join → the
+        # honest "no-docs" path below). Only archive against the workbench session
+        # for the lane matching its current stage (avoids a duplicate archive under
+        # both research+plan for the same single session).
+        wsid, wrec = _grass_workbench_session(idea)
+        if wsid:
+            cur = (wrec or {}).get("current_stage", "") if isinstance(wrec, dict) else ""
+            if not cur or _resolve_subdir(lane) == _resolve_subdir(cur or "research"):
+                sid = wsid
     if not sid:
         return {"ok": False, "archive": None, "reason": "no-dev-session"}
 
@@ -2279,6 +2471,41 @@ _DOC_ROOT_NAMES = ("master-plan.md", "implementation-plan.md",
 #: Document extensions we consider persistable produced artifacts.
 _DOC_EXTS = (".md", ".pdf")
 
+#: Output dirs a BUILD PRODUCT commonly lives under (v12 Wave 3). Retained for
+#: reference; the build-stage accept is now a JUNK DENYLIST (below), not a dir
+#: allowlist, so a root-level product (e.g. anchor_gui.py — the canonical Anchor
+#: deliverable, NOT under any of these) is captured too (Reviewer W3-R2).
+_BUILD_PRODUCT_DIRS = ("build", "deliverables", "dist", "bin", "out")
+
+#: Build INTERMEDIATES / junk we must NEVER sweep+commit into the main repo
+#: (Reviewer W3-R1): compiled bytecode, shared libs, object files, coverage/lock/
+#: log/tmp/debug artifacts. A rare native-lib deliverable can be pinned explicitly.
+_BUILD_JUNK_EXT = frozenset((
+    ".pyc", ".pyo", ".pyd", ".so", ".dll", ".dylib", ".o", ".obj", ".a", ".lib",
+    ".class", ".coverage", ".lock", ".log", ".tmp", ".temp", ".swp", ".pdb",
+    ".cache", ".egg-link",
+))
+
+#: A build stage producing more than this many NON-doc products is a bundle sweep
+#: (PyInstaller/webpack/etc.), not a deliverable — we persist docs only and rely on
+#: the EXPLICIT pin/marker signal for the deliverable (Reviewer W3-R1 cap).
+_MAX_BUILD_PRODUCTS = 25
+
+
+def _empty_tree_sha(worktree_path) -> str:
+    """The git empty-tree object id (a stable diff base when no earlier commit
+    exists). Computed at runtime via ``git hash-object -t tree`` rather than
+    hard-coded, so the constant never trips the distro high-entropy-token scan.
+    Returns ``""`` if git can't produce it."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(worktree_path), "hash-object", "-t", "tree",
+             "--stdin"],
+            input="", capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return (r.stdout or "").strip() if r.returncode == 0 else ""
+
 
 def _is_document_rel(rel: str) -> bool:
     """True iff ``rel`` (a forward-slash repo-relative path) is a produced doc.
@@ -2487,6 +2714,335 @@ def persist_session_docs(folder_path, project_id: str, lane: str,
     except Exception:  # keystone is best-effort: NEVER raise into the kill path
         out["reason"] = "error"
         return out
+
+
+# ── v12 Wave 3: per-stage baseline commit + stage-scoped persist ─────────────
+#
+# The doc-attribution crux (Risk R1 / Shark B1/B2): the LEGACY ``persist_session
+# _docs`` uses ``_produced_doc_rels`` — a WHOLE-WORKTREE diff (``git diff
+# --name-only HEAD`` ∪ ``git status --porcelain``). When research, plan and build
+# all run in ONE shared worktree, that whole-tree diff attributes EVERY produced
+# file to EVERY stage — a plan persist would wrongly grab the research ``r.md``,
+# and ``backfill`` could pin a plan-stage ``MASTER-PLAN.md`` as a build product.
+#
+# v12 fixes this with a per-stage **baseline commit**: at each stage START we
+# record the current HEAD as the stage's ``baseline_ref``. A stage's produced set
+# is then computed with EXACT git commands measured against THAT baseline (never
+# the vague "porcelain since baseline", which is not a real git construct), and
+# any path already attributed to a CLOSED prior stage is subtracted. The legacy
+# ``persist_session_docs`` + ``_produced_doc_rels`` are untouched (non-effort /
+# legacy callers keep their exact behavior).
+
+
+def record_stage_baseline(worktree_path) -> str:
+    """Capture a stage-START baseline ref (the worktree's current HEAD commit).
+
+    Returned by value as a ``baseline_ref`` string to store on the stage_history
+    entry. A subsequent :func:`persist_session_stage_docs` diffs the stage's
+    produced docs against THIS ref (committed-since ∪ working-tree-vs-baseline ∪
+    untracked), so a stage attributes only the files it produced — even when
+    research/plan/build share one worktree.
+
+    Best-effort: a non-repo worktree, a missing git binary, an empty repo (no
+    commits yet → no HEAD) all degrade to ``""`` (never raises). When the
+    baseline is ``""`` the persist helper falls back to the legacy whole-tree
+    diff for that stage (honest — the first stage of a brand-new repo has nothing
+    earlier to exclude anyway).
+    """
+    wt = Path(worktree_path) if worktree_path else None
+    if not wt or not wt.is_dir():
+        return ""
+    try:
+        r = _git(wt, "rev-parse", "HEAD")
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if r.returncode != 0:
+        return ""
+    return (r.stdout or "").strip()
+
+
+def _is_stage_artifact_rel(rel: str, stage: str) -> bool:
+    """True iff ``rel`` is a persistable artifact for ``stage``.
+
+    Research/plan stages persist DOCUMENTS only (:func:`_is_document_rel` —
+    ``.md``/``.pdf`` under the lane dirs / trio root names), matching the legacy
+    persist. The **build** stage ALSO persists its PRODUCT (e.g. ``build/app.py``,
+    ``dist/app.exe``) — a build's deliverable is code/binary, not a doc — so for
+    build we accept any non-excluded file under a lane/dist/product dir in
+    addition to documents. (This is the v12 keystone's reason for being: the
+    build deliverable resolver feeds on the build-stage doc set.)
+    """
+    if _is_document_rel(rel):
+        return True
+    if stage != "build":
+        return False
+    r = (rel or "").strip().replace("\\", "/").lstrip("/")
+    if not r:
+        return False
+    parts = PurePosixPath(r).parts
+    for seg in parts:
+        if seg in _DOC_EXCLUDE_DIRS:
+            return False
+    name = parts[-1]
+    # Never sweep build intermediates / dotfiles into the main repo (W3-R1).
+    if name.startswith("."):
+        return False
+    if PurePosixPath(name).suffix.lower() in _BUILD_JUNK_EXT:
+        return False
+    # A build PRODUCT can live at the repo ROOT (e.g. anchor_gui.py — the canonical
+    # Anchor deliverable) or any depth. The baseline diff already scopes this to
+    # what the BUILD stage produced, and prior-stage subtraction removes the
+    # research/plan docs — so accept any remaining non-junk produced file (W3-R2).
+    return True
+
+
+def _stage_produced_rels(worktree_path, baseline_ref, stage="") -> list:
+    """Repo-relative POSIX paths a stage produced SINCE ``baseline_ref``.
+
+    Computed with the EXACT git commands (Shark B2 — no vague "porcelain since
+    baseline"):
+
+      - ``committed = git diff --name-only <baseline_ref>..HEAD``  (committed
+        since the baseline);
+      - ``working   = git diff --name-only <baseline_ref> --``     (working-tree
+        vs the baseline — uncommitted edits to tracked files);
+      - ``untracked = git status --porcelain -uall`` additions     (brand-new
+        files not yet tracked).
+
+    The union is filtered through :func:`_is_stage_artifact_rel` (docs for
+    research/plan; docs + build products for build). When ``baseline_ref`` is
+    falsy (no earlier commit) this degrades to the legacy whole-tree set
+    (:func:`_produced_doc_rels`) for documents, plus build products for the build
+    stage. Best-effort — a git failure yields ``[]``.
+    """
+    wt = Path(worktree_path)
+    if not worktree_path or not wt.is_dir():
+        return []
+    if not baseline_ref:
+        # No earlier commit to diff against (the first stage of a fresh repo has
+        # nothing prior to exclude). research/plan → the legacy whole-tree DOC
+        # set. build → fall through to the whole-tree scan against the git
+        # EMPTY-TREE so build PRODUCTS are swept too (filtered by stage below).
+        if stage != "build":
+            return _produced_doc_rels(worktree_path)
+        baseline_ref = _empty_tree_sha(worktree_path)
+        if not baseline_ref:
+            return _produced_doc_rels(worktree_path)
+
+    rels = set()
+
+    def _emit_diff(*args):
+        try:
+            r = _git(wt, *args)
+        except (OSError, subprocess.SubprocessError):
+            return
+        if r.returncode != 0:
+            return
+        for line in (r.stdout or "").splitlines():
+            p = line.strip().strip('"')
+            if p:
+                rels.add(p.replace("\\", "/"))
+
+    # committed-since the baseline.
+    _emit_diff("diff", "--name-only", f"{baseline_ref}..HEAD")
+    # working-tree vs the baseline (uncommitted edits to tracked files).
+    _emit_diff("diff", "--name-only", baseline_ref, "--")
+    # untracked additions (brand-new files) via porcelain.
+    try:
+        r = _git(wt, "status", "--porcelain", "-uall")
+        if r.returncode == 0:
+            for line in (r.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                # porcelain XY: an untracked file is '?? <path>'. We also accept
+                # added entries 'A  <path>' (in case a stage staged its work).
+                code = line[:2]
+                path = line[3:]
+                if " -> " in path:          # rename → take the destination
+                    path = path.split(" -> ", 1)[1]
+                path = path.strip().strip('"')
+                if not path:
+                    continue
+                if code == "??" or "A" in code:
+                    rels.add(path.replace("\\", "/"))
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    kept = sorted(r for r in rels if _is_stage_artifact_rel(r, stage))
+    if stage == "build":
+        # Bundle-sweep guard (W3-R1): if the build produced an unreasonable number
+        # of NON-doc products, it's an artifact tree, not a deliverable — persist
+        # the docs only and let the EXPLICIT pin/marker resolve the deliverable.
+        products = [r for r in kept if not _is_document_rel(r)]
+        if len(products) > _MAX_BUILD_PRODUCTS:
+            kept = [r for r in kept if _is_document_rel(r)]
+    return kept
+
+
+def efforts_for_session_stage(folder_path, project_id: str, session_id: str,
+                              stage: str) -> list:
+    """Return the persisted-doc efforts tagged with BOTH ``session_id`` + ``stage``.
+
+    The v12 Wave-3 stage-scoped persist (:func:`persist_session_stage_docs`)
+    stamps each produced-doc effort with the originating managed ``session_id``
+    AND the producing ``stage`` (in ``extra``). This join recovers the EXACT docs
+    one stage of one effort produced — used to (a) exclude a prior closed stage's
+    paths from a later stage's produced set, and (b) feed the build deliverable
+    resolver ONLY the build-stage docs.
+
+    Scans the stage's STORE-lane subdir (research→research / plan→planning /
+    build→build), newest-first. Returns ``[]`` for an empty/unmatched lane or
+    missing args. Never raises.
+    """
+    if not session_id or not stage:
+        return []
+    store_lane = _STORE_LANE_FOR_STAGE.get(stage, stage)
+    try:
+        return [e for e in list_efforts(folder_path, project_id, store_lane)
+                if (e.get("session_id") or "") == session_id
+                and (e.get("stage") or "") == stage]
+    except Exception:
+        return []
+
+
+def persist_session_stage_docs(folder_path, project_id: str, session_id: str,
+                               stage: str, store_lane: str, worktree_path,
+                               baseline_ref) -> dict:
+    """Persist ONE stage's produced docs into the MAIN project (the v12 keystone).
+
+    Unlike the legacy :func:`persist_session_docs` (a whole-worktree diff that
+    grabs everything since the worktree was cut), this attributes docs to
+    ``stage`` only:
+
+      produced = (committed-since ∪ working-vs-baseline ∪ untracked-additions)
+                 MINUS any path already attributed to a CLOSED PRIOR stage of
+                 THIS session (looked up via :func:`efforts_for_session_stage`
+                 for the earlier trio stages).
+
+    Each persisted effort is tagged ``(session_id, stage)`` (so
+    ``efforts_for_session_stage`` can recover it). The docs are copied into the
+    MAIN folder at the same rel path (byte-identical skip → idempotent), recorded
+    as per-doc DISCOVERED efforts in ``store_lane``, and committed scoped to ONLY
+    those paths (+ pointer/index) — never ``git add -A``.
+
+    Returns ``{"ok", "persisted":[rel,...], "committed", "commit", "reason"}``.
+    Best-effort — NEVER raises (a persistence failure can't break a stage
+    boundary or a kill).
+    """
+    out = {"ok": False, "persisted": [], "committed": False, "commit": None,
+           "reason": "ok"}
+    try:
+        main = Path(folder_path)
+        if not folder_path or not main.exists():
+            out["reason"] = "folder-missing"
+            return out
+
+        produced = _stage_produced_rels(worktree_path, baseline_ref, stage)
+
+        # Subtract paths already attributed to a CLOSED prior stage of THIS
+        # session (the stages that come BEFORE ``stage`` in the trio order).
+        prior_rels = set()
+        for prior in _STAGES_BEFORE.get(stage, ()):  # () for unknown stages
+            for e in efforts_for_session_stage(main, project_id, session_id,
+                                               prior):
+                ap = (e.get("artifact_path") or "").strip().replace("\\", "/")
+                if ap:
+                    prior_rels.add(ap)
+        doc_rels = [r for r in produced if r not in prior_rels]
+
+        if not doc_rels:
+            out["ok"] = True
+            out["reason"] = "no-docs"
+            return out
+
+        wt = Path(worktree_path)
+        persisted = []
+        for rel in doc_rels:
+            src = wt / rel
+            if not src.is_file():
+                continue
+            dst = main / rel
+            try:
+                if dst.is_file():
+                    try:
+                        if src.read_bytes() == dst.read_bytes():
+                            persisted.append(rel)
+                            continue
+                    except OSError:
+                        pass
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(dst))
+                persisted.append(rel)
+            except OSError:
+                continue
+
+        if not persisted:
+            out["ok"] = True
+            out["reason"] = "nothing-copied"
+            return out
+
+        # Per-doc DISCOVERED efforts in the STORE lane, tagged (session, stage).
+        pointer_rels = []
+        for rel in persisted:
+            kind, title = _doc_kind_title(rel)
+            jid = discovered_job_id(store_lane, rel)
+            try:
+                existing = load_effort(main, project_id, store_lane, jid)
+                extra = {"source": SOURCE_DISCOVERED, "kind": kind,
+                         "title": title, "artifact_path": rel,
+                         "status": "imported", "session_id": session_id,
+                         "stage": stage}
+                if existing is None:
+                    try:
+                        extra["created_at"] = (main / rel).stat().st_mtime
+                    except OSError:
+                        pass
+                    record_effort(main, project_id, store_lane, jid, skill=None,
+                                  extra=extra)
+                elif (existing.get("stage") or "") != stage:
+                    # Same content-addressed id but no stage tag yet (or a
+                    # legacy persist) — stamp the producing stage in place so
+                    # ``efforts_for_session_stage`` recovers it. Keep created_at.
+                    record_effort(main, project_id, store_lane, jid, skill=None,
+                                  extra={"stage": stage,
+                                         "session_id": session_id})
+                pp = _pointer_path(main, project_id, store_lane, jid)
+                if pp.exists():
+                    pointer_rels.append(_rel_to_folder(main, pp))
+            except (OSError, ValueError):
+                continue
+        ipath = _index_path(main, project_id, store_lane)
+        if ipath.exists():
+            pointer_rels.append(_rel_to_folder(main, ipath))
+
+        out["persisted"] = persisted
+        commit = _commit_session_docs(main, project_id, store_lane, session_id,
+                                      persisted, pointer_rels)
+        out["committed"] = bool(commit.get("committed"))
+        out["commit"] = commit.get("commit")
+        out["reason"] = commit.get("reason", "ok")
+        out["ok"] = True
+        return out
+    except Exception:  # keystone is best-effort: NEVER raise into the boundary
+        out["reason"] = "error"
+        return out
+
+
+#: Per-stage store-lane (mirrors session_registry._STAGE_STORE_LANE, kept here so
+#: effort_history has no import dependency on the registry for this map).
+_STORE_LANE_FOR_STAGE = {
+    "research": "research",
+    "plan": "planning",
+    "build": "build",
+}
+
+#: The trio stages that come BEFORE a given stage (closed prior stages whose
+#: produced paths are excluded from a later stage's set).
+_STAGES_BEFORE = {
+    "research": (),
+    "plan": ("research",),
+    "build": ("research", "plan"),
+}
 
 
 def _rel_to_folder(folder: Path, p: Path) -> str:

@@ -136,7 +136,9 @@ def test_fix2_refresh_grass_counts_derives_from_rows():
 
 def test_fix4_mount_terminal_attaches_fitRo_observer():
     js = _project_window_js()
-    body = _fn_body(js, "_mountTerminal", "sessionId, body")
+    # v12 W10: _mountTerminal gained an optional `rec` param (the bottom dock
+    # passes its own panel record; default = PANELS[sessionId]).
+    body = _fn_body(js, "_mountTerminal", "sessionId, body, rec")
     assert "w.fitRo" in body, "_mountTerminal must store its observer on w.fitRo"
     assert "new ResizeObserver" in body, "_mountTerminal must create a ResizeObserver"
     assert "fro.observe(body)" in body, \
@@ -149,7 +151,9 @@ def test_fix4_mount_terminal_attaches_fitRo_observer():
 
 def test_fix4_fit_panel_terminal_has_collapse_guard():
     js = _project_window_js()
-    body = _fn_body(js, "_fitPanelTerminal", "sessionId")
+    # v12 W10: _fitPanelTerminal gained an optional `rec` param (defaults to
+    # PANELS[sessionId]; the dock passes its DOCK record).
+    body = _fn_body(js, "_fitPanelTerminal", "sessionId, rec")
     # The manual (no-fit-addon) branch bails on a collapsed/hidden/zero host.
     assert "offsetParent === null" in body
     assert "clientHeight === 0" in body and "clientWidth === 0" in body
@@ -530,18 +534,15 @@ def test_fix4_grass_terminal_reflows_on_enlarge_in_browser(server):
         pg.click('[data-grass-tile="1"]')
         pg.wait_for_selector('#grassPanel .gli', timeout=8000)
         pg.eval_on_selector('#grassPanel .gli', "e=>e.click()")
-        pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="research"]',
-                             timeout=8000)
-
-        # Develop Research → its terminal host mounts (a session binds).
-        pg.click('#grassPanel button[data-dev="research"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"research\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"research\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=10000)
+        # v12 W11: ONE workbench session per idea (the two-terminal research/plan
+        # grass is retired). Open the single session; the FIX-4 reflow intent now
+        # applies to it.
+        pg.wait_for_selector('#grassPanel .gwork .gsession', timeout=8000)
+        pg.click('#grassPanel .gwork .gopen')
+        pg.wait_for_selector(
+            '#grassPanel .gwork [data-grass-term] .xterm', timeout=10000)
         sid = pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="research"] [data-grass-term]',
+            '#grassPanel .gwork [data-grass-term]',
             "e=>e.getAttribute('data-session')")
         assert sid
 
@@ -560,7 +561,7 @@ def test_fix4_grass_terminal_reflows_on_enlarge_in_browser(server):
         rows0 = pg.evaluate("sid=>window.PANELS[sid].term.rows", sid)
         pg.evaluate(
             "sid=>{var h=window.PANELS[sid].body;"
-            "var g=h.closest('.gterm');"
+            "var g=h.closest('.gterm')||h.parentElement;"
             "if(g){g.style.height='620px'; g.style.minHeight='620px';}"
             "h.style.minHeight='560px';}", sid)
         # Give the ResizeObserver + fit a beat.

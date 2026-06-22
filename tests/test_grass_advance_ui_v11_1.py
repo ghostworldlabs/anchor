@@ -135,112 +135,69 @@ def server(env):
         t.join(timeout=5)
 
 
-def test_grass_advance_conversation_opens_plan_in_browser(server):
-    """Open the grass workbench, Develop Research, produce CONVERSATION content
-    LIVE in its PTY buffer (no file), click "Advance to Plan" → the contained PLAN
-    terminal OPENS (no "no materials" toast) and its pasted prompt shows the
-    captured research/<sid>-transcript.md path (the discriminating token).
-    Screenshot → _devtest/wave_v11_1_grass_advance.png. No JS console errors."""
-    pytest.importorskip("playwright.sync_api")
+def test_grass_advance_conversation_opens_plan_over_http(server):
+    """v12 Wave 11 (MIGRATED). The retired two-terminal ``data-dev``/``data-advance``
+    grass UI is gone (research→plan now advances IN-SESSION for v12 efforts). The
+    v11.1 CONVERSATION-ONLY advance contract is RETAINED for LEGACY ideas and is
+    asserted here over HTTP (server truth), exactly as the retired UI exercised it:
+    a research dev session that is a CONVERSATION (transcript in the PTY buffer, NO
+    file) advances → a linked grass PLAN dev session OPENS (no "no materials"
+    refusal) whose pending paste NAMES the snapshotted
+    ``research/<sid>-transcript.md`` (the discriminating W1 token), held UNSENT.
+
+    DISCRIMINATING TOKEN: the transcript path appears in the plan session's pasted
+    prompt ONLY if the W1 snapshot + W2 advance worked. Pre-W2 the conversation
+    advance refused → no plan session, no token."""
+    import json
+    import urllib.request
     env, base, _ = server
     pid, idea_id = env["pid"], env["idea_id"]
     ts, eh, reg, pty = env["ts"], env["eh"], env["reg"], env["pty"]
 
-    # Pre-create the research dev session (the browser Develop click dedupes onto
-    # the live one) and seed its PTY buffer with a CONVERSATION — write NO file,
-    # NO record_effort. The discriminating token is the snapshot path the W1
-    # keystone will write; it appears in the paste ONLY if the snapshot+advance ran.
+    # A LEGACY research dev session seeded with a CONVERSATION (no file written).
     rrec = eh.develop_grass_idea(pid, idea_id, "research", backend="claude")
     rsid = rrec["session_id"]
+    assert not rrec.get("effort_managed"), "legacy develop must be effort_managed False"
     pty.write(rsid, TRANSCRIPT)
     transcript_token = f"research/{rsid[:12]}-transcript.md"
 
-    from playwright.sync_api import sync_playwright
-    _DEVTEST.mkdir(exist_ok=True)
-    shot = _DEVTEST / "wave_v11_1_grass_advance.png"
+    # Advance over HTTP (no token set in this fixture → 200). It must NOT refuse on
+    # the conversation-only case (v11.1 D1) — the plan session opens.
+    payload = json.dumps({"project_id": pid, "idea_id": idea_id}).encode("utf-8")
+    req = urllib.request.Request(base + "/api/rnd/grass_advance", data=payload,
+                                 method="POST")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    assert data["ok"] is True, f"conversation advance must NOT refuse: {data}"
+    psid = data["session"]["session_id"]
+    assert psid != rsid, "the plan dev session must be distinct"
 
-    with sync_playwright() as p:
-        b = p.chromium.launch()
-        pg = b.new_page()
-        errors = []
-        dialogs = []
-        pg.on("console",
-              lambda m: errors.append(m.text) if m.type == "error" else None)
-        # A "no materials" toast would be an alert() dialog — capture + dismiss it
-        # so a regression (refusal) is observable rather than hanging the test.
-        pg.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
-        pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    # Server truth: linked + grass_origin + the pending paste NAMES the snapshotted
+    # transcript (the discriminating token), held UNSENT.
+    prec = reg.get_session(psid)
+    assert prec["parent_session_id"] == rsid
+    assert prec["grass_origin"] == idea_id
+    assert prec["pending_paste"], "the plan session must carry a pending paste"
+    assert transcript_token in prec["pending_paste"], \
+        "the prompt must name the snapshotted transcript (W1+W2 token)"
+    assert prec["paste_flushed"] is False
 
-        pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
-        pg.click('[data-grass-tile="1"]')
-        pg.wait_for_selector('#grassPanel .gli', timeout=8000)
-        pg.eval_on_selector('#grassPanel .gli', "e=>e.click()")
-        pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="research"]',
-                             timeout=8000)
-
-        # Develop Research → binds the live (idea, 'research') dev session.
-        pg.click('#grassPanel button[data-dev="research"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"research\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"research\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=10000)
-        pg.wait_for_function(
-            "(()=>{var b=document.querySelector('#grassPanel .gterm"
-            "[data-lane=\"research\"] button[data-advance=\"research\"]');"
-            "return b && !b.disabled;})()", timeout=8000)
-
-        # Click Advance → the plan terminal opens + a plan dev session binds.
-        # (No "no materials" alert must fire — checked after.)
-        pg.click('#grassPanel .gterm[data-lane="research"] '
-                 'button[data-advance="research"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"plan\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"plan\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=12000)
-        # The plan terminal is OPEN (no refusal).
-        assert pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="plan"]',
-            "e=>e.classList.contains('collapsed')") is False, \
-            "Advance must open the plan terminal (no refusal)"
-        psid = pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="plan"] [data-grass-term]',
-            "e=>e.getAttribute('data-session')")
-        assert psid and psid != rsid, "plan dev session must be distinct"
-
-        # No "no materials" toast was raised.
-        assert not dialogs, f"an alert/toast fired on advance: {dialogs}"
-
-        # Server truth: linked + grass_origin + the pending paste NAMES the
-        # snapshotted transcript (the discriminating token).
-        prec = reg.get_session(psid)
-        assert prec["parent_session_id"] == rsid
-        assert prec["grass_origin"] == idea_id
-        assert prec["pending_paste"], "the plan session must carry a pending paste"
-        assert transcript_token in prec["pending_paste"], \
-            "the prompt must name the snapshotted transcript (W1+W2 token)"
-        assert prec["paste_flushed"] is False
-
-        # Drive the greet so the pending paste flushes UNSENT, then wait for the
-        # transcript token to render in the plan terminal.
-        pty.write(psid, GREET_LINE)
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"plan\"] "
-            "[data-grass-term]').innerText.indexOf("
-            + repr(transcript_token) + ") !== -1", timeout=12000)
-
-        # RENDERED NEGATIVE: the paste is present but NOT auto-submitted.
+    # Drive the greet so the pending paste flushes UNSENT, then confirm the token
+    # lands in the PTY but is NOT auto-submitted. The flush is wired into
+    # terminal_session.read_since (the greet-marker guard) — read via the terminal
+    # session, not the raw pty, so the flush fires.
+    pty.write(psid, GREET_LINE)
+    full = ""
+    for _ in range(8):
+        ts.read_since(psid, 0)         # triggers _flush_pending_paste after greet
         full = pty.read_since(psid, 0)["text"]
-        assert transcript_token in full
-        assert prec["pending_paste"] + "\n" not in full, \
-            "the advance paste must NOT be auto-submitted"
-
-        pg.screenshot(path=str(shot), full_page=True)
-        assert not errors, f"JS console errors: {errors}"
-        b.close()
-
-    assert shot.exists(), "screenshot not written"
+        if transcript_token in full:
+            break
+        time.sleep(0.1)
+    assert transcript_token in full, "the pending paste must flush into the PTY"
+    assert prec["pending_paste"] + "\n" not in full, \
+        "the advance paste must NOT be auto-submitted"
 
     for r in reg.list_sessions(project_id=pid):
         try:

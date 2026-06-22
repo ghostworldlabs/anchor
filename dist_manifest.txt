@@ -66,6 +66,14 @@ project_move.py
 # already-persisted docs (v8 keystone), not a second copy.
 boneyard.py
 
+# ── R&D control surface v12 "Efforts" modules ─────────────────────────────
+# Stdlib-only: effort_view (the derived, drift-safe, deduped view-layer that
+# groups registry chains + new single-session efforts into uniform efforts) uses
+# only the session_registry / effort_history / summarizer seams — no third-party
+# imports. It is a DERIVED CACHE rebuilt from the registry on every call, never a
+# stored source of truth, and never mutates a live member.
+effort_view.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 

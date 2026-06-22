@@ -489,12 +489,15 @@ def test_project_window_has_lane_controls_and_panel_terminal(gui_env):
     with tempfile.TemporaryDirectory() as td:
         proj = _mkproject(gui, Path(td) / "win", "WindowProj")
         html = gui.render_project_window_html(proj["id"])
-    # Lane-launch controls. The "+ new <lane>" affordances launch the SEEDED
-    # ConPTY path (newTermSession → term_start). Research carries an engine choice
-    # (Claude default + Gemini); plan/build stay Claude-only (no engine arg).
-    assert "newTermSession('research','claude')" in html
-    assert "newTermSession('plan')" in html
-    assert "newTermSession('build')" in html
+    # v12 Wave 2 Layout-D: the per-lane "+ new <lane>" board launchers are RETIRED
+    # (the start path moves to the W10 "+ New effort" flow). The live-terminal
+    # start path itself survives: the masthead "Open terminal" general session
+    # (newTermSession → term_start) is still wired, and the W10 "+ New research"
+    # (#newResearchBtn) / "+ New plan/build" (#newPlanBuildBtn) controls are the
+    # effort-start entry points.
+    assert "newGeneral('claude')" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     assert "/api/rnd/term_start" in html
     # Terminal substrate: a LIVE session mounts the REAL xterm.js terminal inside
     # its inline panel over the v3 transport. v4.1: the v2 console-drawer REPL

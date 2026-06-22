@@ -114,24 +114,30 @@ def _parse(body):
 
 
 def _col_tiles(body, trio_lane):
-    """Return the list of (classes, attrs) for .tile elements that sit INSIDE the
-    given lane column (``#cards_<lane>`` content). We approximate column scoping
-    by slicing the body between this column's ``cards_<lane>`` id and the next
-    column / board end (the columns render sequentially)."""
-    # Find the column-content container id and the next p2col boundary.
-    start = body.find('id="cards_%s"' % trio_lane)
-    if start < 0:
-        start = body.find("id='cards_%s'" % trio_lane)
-    assert start >= 0, "no cards_%s container in body" % trio_lane
-    # Next column starts at the next data-col-lane; the grass workbench template
-    # follows the board, so also stop at grassWorkbenchTpl.
-    rest = body[start:]
-    nxt = re.search(r"data-col-lane=", rest[5:])
-    end = (nxt.start() + 5) if nxt else len(rest)
-    seg = rest[:end]
+    """Return the (classes, attrs) for the Layout-D board tiles routed to the
+    given lane (v12 Wave 2).
+
+    The v7 5-col board (``#cards_<lane>``) is RETIRED for Layout D: the Research
+    zone holds the research sessions and the Plan/Build zone holds the plan +
+    build sessions, each as a ``.headline`` (most-recent) + ``.minitile``s in a
+    collapsible shelf. We scope "the X column" to the board tiles carrying
+    ``data-session`` whose ``data-lane`` maps to ``trio_lane`` (with the
+    ``planning``→``plan`` store-form alias). ``deliverables`` has no session
+    tiles (it's the right-column panel), so it returns ``[]``.
+    """
+    # The board is the .pgrid.layoutd region (before the hidden grass template).
+    start = body.find("pgrid layoutd")
+    assert start >= 0, "no Layout-D board in body"
+    end = body.find("grassWorkbenchTpl", start)
+    seg = body[start:(end if end >= 0 else len(body))]
+    aliases = {"plan": {"plan", "planning"}}.get(trio_lane, {trio_lane})
     tiles = []
     for tag, classes, attrs in _parse(seg):
-        if tag == "div" and "tile" in classes:
+        if tag != "div" or "tile" not in classes:
+            continue
+        if not attrs.get("data-session"):
+            continue   # only session tiles (headline/minitile), not deliv rows
+        if (attrs.get("data-lane") or "") in aliases:
             tiles.append((classes, attrs))
     return tiles
 
@@ -164,9 +170,10 @@ def test_live_planning_session_appears_in_planning_column(gui_env):
         "live planning session not rendered as exactly one column tile"
     classes, attrs = sess_tiles[0]
     assert attrs.get("data-light") == "green", "running session not green-lit"
-    assert attrs.get("data-lane") == "plan", "tile not in the plan board column"
-    # It carries the running data hooks (live).
-    assert attrs.get("data-live") == "1", "live session tile missing data-live=1"
+    assert attrs.get("data-lane") == "plan", "tile not in the plan board zone"
+    # v12 Wave 2: the Layout-D tile signals "live" via the green status light +
+    # the lane-tile click hook (the old data-live re-adoption hook is retired).
+    assert "lane-tile" in classes, "live session tile missing the click hook"
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
@@ -236,8 +243,9 @@ def _strip_prefix(sid):
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
 def test_newest_prominent_older_under_expander(gui_env):
-    """Two registry sessions in the same lane: the newest is the prominent tile;
-    the older sits inside the ``prev-sessions`` expander."""
+    """Two registry sessions in the same lane: the newest is the prominent tile
+    (the Layout-D ``.headline``); the older sits inside the collapsible shelf
+    (``.shelf-wrap`` → ``.minitile``)."""
     gui = gui_env["gui"]
     pid = gui_env["pid"]
     import session_registry as reg
@@ -247,21 +255,23 @@ def test_newest_prominent_older_under_expander(gui_env):
     newer = reg.register_session(pid, "research", status=reg.STATUS_RUNNING)
 
     body = _strip(gui.render_project_window_html(pid))
-    # The prominent tile is the first .tile before the <details> expander in the
-    # research column slice (the column container id is single-quoted in render).
-    start = body.find("id='cards_research'")
-    if start < 0:
-        start = body.find('id="cards_research"')
-    assert start >= 0, "no cards_research container in body"
-    seg = body[start:body.find("data-col-lane", start + 5)]
-    det = seg.find("prev-sessions")
-    assert det >= 0, "no previous-sessions expander when 2 sessions exist"
-    prominent = seg[:det]
-    expander = seg[det:]
+    # The Research zone: the prominent tile is the .headline (newest); the older
+    # one is a .minitile inside the #shelf_research collapsible shelf.
+    start = body.find("pgrid layoutd")
+    assert start >= 0, "no Layout-D board in body"
+    shelf_at = body.find("id='shelf_research'", start)
+    if shelf_at < 0:
+        shelf_at = body.find('id="shelf_research"', start)
+    assert shelf_at >= 0, "no research shelf when 2 sessions exist"
+    prominent = body[start:shelf_at]          # headline region (before the shelf)
+    shelf = body[shelf_at:body.find("grassWorkbenchTpl", shelf_at)]
     assert ('data-session="%s"' % newer["session_id"]) in prominent, \
-        "newest session not the prominent tile"
-    assert ('data-session="%s"' % older["session_id"]) in expander, \
-        "older session not under the expander"
+        "newest session not the prominent headline tile"
+    # the newest is a headline; the older is a minitile in the shelf
+    assert "class='headline" in prominent
+    assert ('data-session="%s"' % older["session_id"]) in shelf, \
+        "older session not under the collapsible shelf"
+    assert "minitile" in shelf
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
@@ -293,9 +303,12 @@ def test_tile_carries_a_short_clean_blurb(gui_env):
     assert len(blurb) <= 70, "blurb not capped: %r" % blurb
 
     body = _strip(gui.render_project_window_html(pid))
-    # The blurb appears in the rendered tile.
-    assert ("<div class=\"blurb\">" in body) or ("<div class='blurb'>" in body), \
-        "no .blurb element rendered on the tile"
+    # v12 Wave 2: the blurb appears on the Layout-D headline card (.hblurb). The
+    # single DONE research session is the Latest-Research headline.
+    assert "class='hblurb'" in body, \
+        "no .hblurb element rendered on the headline tile"
+    # and it carries the clean (glyph/markdown-stripped) blurb text.
+    assert blurb in body, "the clean blurb text is not on the rendered tile"
 
 
 def _write_cached_summary(summarizer, folder, pid, store_lane, sid, structured):
@@ -381,14 +394,15 @@ def test_playwright_started_session_appears_in_column_and_strip(server):
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
-        # 1) Exactly one tile for sid1 in the PLANNING column, running light.
-        plan_sel = '#cards_plan .tile[data-session="%s"]' % sid1
+        # 1) Exactly one Layout-D tile for sid1 in the Plan/Build zone, running.
+        #    Initially the sole plan session is the Latest-Plan/Build headline.
+        plan_sel = '.pgrid.layoutd .tile[data-session="%s"][data-lane="plan"]' % sid1
         pg.wait_for_selector(plan_sel, timeout=8000)
         assert pg.eval_on_selector_all(plan_sel, "e=>e.length") == 1, \
-            "expected exactly one planning-column tile for the session"
+            "expected exactly one Plan/Build-zone tile for the session"
         assert pg.eval_on_selector(
             plan_sel, "e=>e.getAttribute('data-light')") == "green", \
-            "planning-column tile not green (running)"
+            "Plan/Build tile not green (running)"
         # The session also shows in the top active strip.
         pg.wait_for_selector(
             '#sessionBar .live-chip[data-session="%s"]' % sid1, timeout=8000)
@@ -400,20 +414,21 @@ def test_playwright_started_session_appears_in_column_and_strip(server):
         sid2 = ts.start_session(pid, "plan", backend="claude")["session_id"]
         reg.update_session(sid1, status=reg.STATUS_DONE)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
-        # The newer (sid2) is the prominent tile; the finished sid1 is under the
-        # planning column's previous-sessions expander, greyed, and still present.
+        # The newer (sid2) is the prominent .headline; the finished sid1 is a
+        # .minitile inside the Plan/Build collapsible shelf (#shelf_plan_build),
+        # greyed/amber, and still present.
         pg.wait_for_selector(
-            '#cards_plan > .tile[data-session="%s"]' % sid2, timeout=8000)
+            '.pgrid.layoutd .headline[data-session="%s"]' % sid2, timeout=8000)
         assert pg.eval_on_selector_all(
-            '#cards_plan .prev-sessions .tile[data-session="%s"]' % sid1,
-            "e=>e.length") == 1, "finished planning session not under expander"
+            '#shelf_plan_build .minitile[data-session="%s"]' % sid1,
+            "e=>e.length") == 1, "finished planning session not under the shelf"
         assert pg.eval_on_selector(
-            '#cards_plan .tile[data-session="%s"]' % sid1,
+            '.pgrid.layoutd .tile[data-session="%s"]' % sid1,
             "e=>e.getAttribute('data-light')") == "amber", \
             "finished (done) session tile not amber/grey"
-        # Still exactly ONE tile per session id in the column (no dupes).
+        # Still exactly ONE tile per session id in the board (no dupes).
         assert pg.eval_on_selector_all(
-            '#cards_plan .tile[data-session="%s"]' % sid1,
+            '.pgrid.layoutd .tile[data-session="%s"]' % sid1,
             "e=>e.length") == 1
 
         assert not errors, f"JS console errors during board integration: {errors}"

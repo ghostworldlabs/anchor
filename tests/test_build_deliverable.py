@@ -489,33 +489,40 @@ def test_build_deliverable_in_lane_and_panel_playwright(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
 
-        # ── project A: lane lists it + panel shows it ──
+        # ── project A: deliverables panel lists it + panel shows it ──
         pg.goto(f"{base}/project/{pidA}", wait_until="networkidle")
-        # Deliverables lane lists the backfilled build deliverable.
-        lane_html = pg.inner_html(".p2lanes")
-        assert "myapp.py" in lane_html, "build deliverable missing from lane"
-        # open the build session's panel (its tile is in the Build column).
+        # v12 Wave 2: the Deliverables panel lives in the Layout-D right column;
+        # the board grid is .pgrid.layoutd (covers left + right columns).
+        lane_html = pg.inner_html(".pgrid.layoutd")
+        assert "myapp.py" in lane_html, \
+            "build deliverable missing from the Deliverables panel"
+        # v12 W10: clicking the build effort tile opens the SINGLE bottom DOCK
+        # (its tile is the Plan/Build headline); the resolved deliverable surfaces
+        # in the dock summary (ON TOP), which reuses _renderSplitSummary.
         build_tile = pg.query_selector('.lane-tile[data-lane="build"]')
         assert build_tile, "no build lane tile"
         build_tile.click()
-        pg.wait_for_selector("#panelStack .panel", timeout=5000)
-        # the panel surfaces the resolved deliverable link.
-        pg.wait_for_selector("#panelStack .panel .bdeliv.resolved", timeout=8000)
-        bd_html = pg.inner_html("#panelStack .panel .bdeliv.resolved")
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=5000)
+        pg.wait_for_selector("#dockSummary .bdeliv.resolved", timeout=8000)
+        bd_html = pg.inner_html("#dockSummary .bdeliv.resolved")
         assert "myapp.py" in bd_html
 
-        # ── project B: panel shows the honest placeholder ──
+        # ── project B: dock shows the honest placeholder ──
         pg.goto(f"{base}/project/{pidB}", wait_until="networkidle")
         bt2 = pg.query_selector('.lane-tile[data-lane="build"]')
         assert bt2, "no build lane tile (B)"
         bt2.click()
-        pg.wait_for_selector("#panelStack .panel", timeout=5000)
-        pg.wait_for_selector("#panelStack .panel .bdeliv.none", timeout=8000)
-        none_html = pg.inner_html("#panelStack .panel .bdeliv.none")
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=5000)
+        pg.wait_for_selector("#dockSummary .bdeliv.none", timeout=8000)
+        none_html = pg.inner_html("#dockSummary .bdeliv.none")
         assert "pin one" in none_html.lower()
         # nothing fabricated: no spurious .resolved deliverable for B.
         assert pg.eval_on_selector_all(
-            "#panelStack .panel .bdeliv.resolved", "e=>e.length") == 0
+            "#dockSummary .bdeliv.resolved", "e=>e.length") == 0
 
         assert not errors, f"JS console errors: {errors}"
         b.close()

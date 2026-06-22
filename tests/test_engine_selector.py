@@ -294,18 +294,22 @@ def test_project_window_offers_gemini_for_research_only(gui_env, tmp_path):
     gui = gui_env
     proj = _mkproject(tmp_path / "win", "WindowProj")
     html = gui.render_project_window_html(proj["id"])
-    # Research offers an engine choice (Claude + Gemini buttons). v4 Wave 1: the
-    # "+ New run" affordances launch the SEEDED ConPTY path (newTermSession →
-    # term_start), replacing the v2 unseeded REPL (openTerminal); the engine
-    # policy surfaced by the affordance text is unchanged.
-    assert "newTermSession('research','claude')" in html
-    assert "newTermSession('research','gemini')" in html
-    # Plan/Build stay Claude-only — no engine choice.
-    assert "newTermSession('plan')" in html
-    assert "newTermSession('build')" in html
+    # v12 Wave 2 Layout-D: the per-lane "+ New <lane> run" Claude/Gemini launchers
+    # are retired (the effort-start engine choice lands in W10). The engine policy
+    # — Gemini is research-only, plan/build are Claude-only — is still enforced
+    # via the per-panel engine toggle (engtog → term_set_engine / switch_engine,
+    # gated by lanes.check_engine_allowed). The surviving live launch (masthead
+    # general session) defaults to Claude.
+    assert "newGeneral('claude')" in html
+    # No plan/build Gemini launch affordance is offered.
     assert "newTermSession('plan','gemini')" not in html
     assert "newTermSession('build','gemini')" not in html
-    # A Gemini option is offered somewhere in the window.
-    assert "gemini" in html.lower()
+    # NOTE (v12 W2, Reviewer W2-R1): the W2 static skeleton renders NO live engine
+    # affordance — the per-panel engine toggle + the effort-start engine choice are
+    # wired in W10. So we do NOT assert a rendered "gemini"/"engtog" here (those
+    # tokens appear only in inert CSS/JS and would be a dead-token false-pass). The
+    # research-only policy itself is enforced server-side and tested by
+    # test_research_gemini_launches_* / test_plan_gemini_refused_* above; the
+    # rendered engine affordance is re-asserted in the W10 live-dock UI test.
     # f-string intact: no leaked doubled braces.
     assert "{{" not in html and "}}" not in html

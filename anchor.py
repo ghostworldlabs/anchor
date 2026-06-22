@@ -67,6 +67,12 @@ session/grass delete, the guarded move, live paste/advance are interactive and
 have NO one-shot CLI form):
     python3 anchor.py rnd boneyard <project_id> [--search <q>]  # discarded material (killed/deleted/grass-deleted), newest-first
     python3 anchor.py rnd next-prompt <project_id> --session <id>  # the generated next-stage handoff prompt (pending paste / NEXT-PROMPT.md)
+
+R&D v12 "Efforts" inspection mirror (read-only DATA seams; the in-session
+advance/handoff/dock are interactive live ops with NO CLI form):
+    python3 anchor.py rnd efforts <project_id>               # the project's efforts (id - current_stage - status - stage count)
+    python3 anchor.py rnd effort <project_id> --session <id>  # one effort's ordered stage_history (SAFE: no worktree/branch/baseline)
+    python3 anchor.py rnd effort-deliverable <project_id> --session <id>  # the build-stage resolved deliverable (honest unresolved)
 """
 
 import json, os, re, sys
@@ -1204,6 +1210,95 @@ def rnd_next_prompt(project_id, session_id):
     return ""
 
 
+# ── R&D v12 "Efforts" inspection mirror (read-only) ──────────────────────
+
+def rnd_efforts(project_id):
+    """CLI mirror of ``effort_view.build_effort_view`` — the project's efforts (v12).
+
+    READ-ONLY: returns the project's efforts (legacy research→plan→build *chains*
+    and new v12 single-session efforts rendered UNIFORMLY as one effort each),
+    rebuilt from the ``session_registry`` on every call (a derived cache, never a
+    stored source). Each entry is a SAFE projection
+    ``{effort_id, current_stage, status, stage_count}`` — NEVER a ``worktree_path``
+    / ``branch`` (those are stripped by ``effort_view``'s member projections, which
+    this further reduces). Honest-absent: ``[]`` when the project has no efforts.
+    Raises ``KeyError`` for an unknown project.
+    """
+    import effort_view as _ev
+    _proj, folder = _rnd_resolve(project_id)
+    efforts = _ev.build_effort_view(folder, project_id) or []
+    out = []
+    for eff in efforts:
+        if not isinstance(eff, dict):
+            continue
+        out.append({
+            "effort_id": eff.get("effort_id", "") or "",
+            "current_stage": eff.get("current_stage", "") or "",
+            "status": eff.get("status", "") or "",
+            "stage_count": len(eff.get("stage_history", []) or []),
+        })
+    return out
+
+
+def rnd_effort(project_id, session_id):
+    """CLI mirror of ``effort_view.effort_for_session`` — one effort's stages (v12).
+
+    READ-ONLY: returns the ordered ``stage_history`` of the effort the given
+    ``session_id`` belongs to, as a SAFE projection of each stage entry
+    ``{stage, state, doc_count, summary_ref}`` — NEVER ``baseline_ref`` (a git
+    SHA), ``store_lane``, ``worktree_path`` or ``branch`` (matching the
+    ``/api/rnd/advance_stage`` SAFE-projection contract). Returns
+    ``{effort_id, current_stage, status, stage_history}``; honest-absent
+    (``stage_history==[]`` / ``effort_id==None``) for an unknown session or one
+    with no effort. No spawn, no model call. Raises ``KeyError`` for an unknown
+    project.
+    """
+    import effort_view as _ev
+    _proj, folder = _rnd_resolve(project_id)
+    eff = _ev.effort_for_session(folder, project_id, session_id)
+    if not isinstance(eff, dict):
+        return {"effort_id": None, "current_stage": "", "status": "",
+                "stage_history": []}
+    stages = []
+    for ent in eff.get("stage_history", []) or []:
+        if not isinstance(ent, dict):
+            continue
+        stages.append({
+            "stage": ent.get("stage", "") or "",
+            "state": ent.get("state", "") or "",
+            "doc_count": int(ent.get("doc_count", 0) or 0),
+            "summary_ref": ent.get("summary_ref"),
+        })
+    return {
+        "effort_id": eff.get("effort_id", "") or "",
+        "current_stage": eff.get("current_stage", "") or "",
+        "status": eff.get("status", "") or "",
+        "stage_history": stages,
+    }
+
+
+def rnd_effort_deliverable(project_id, session_id):
+    """CLI mirror of ``deliverables.resolve_build_deliverable`` (effort-scoped) (v12).
+
+    READ-ONLY: resolves the deliverable an EFFORT's BUILD stage produced — feeding
+    the resolver the live session RECORD as a v12 effort subject (it carries
+    ``current_stage`` / ``stage_history`` / ``session_id``), so the resolver scopes
+    to the BUILD-stage doc set ONLY (a plan-stage ``MASTER-PLAN.md`` can never be
+    mis-resolved as the build product — Shark C6). Returns the
+    ``{resolved, deliverable, signal, reason}`` dict — an HONEST ``resolved=False``
+    when the effort is not at the build stage or has no build signal (never a
+    fabricated path). No spawn, no model call. Raises ``KeyError`` for an unknown
+    project and ``ValueError`` for an unknown session.
+    """
+    import session_registry as _sreg
+    import deliverables as _deliv
+    _proj, folder = _rnd_resolve(project_id)
+    rec = _sreg.get_session(session_id)
+    if rec is None:
+        raise ValueError(f"unknown session: {session_id}")
+    return _deliv.resolve_build_deliverable(folder, project_id, rec)
+
+
 # ── CLI ────────────────────────────────────────────────────────────────
 
 def main():
@@ -1343,7 +1438,8 @@ def _rnd_cli(args):
               "term-sessions|previews|handoff|rollup|doc-roles|"
               "deliverable-type|engine|session-summary|grass|"
               "build-deliverable|chain|blurb|remote|docs|"
-              "folders|ghost-sessions|boneyard|next-prompt> ...")
+              "folders|ghost-sessions|boneyard|next-prompt|"
+              "efforts|effort|effort-deliverable> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1795,6 +1891,66 @@ def _rnd_cli(args):
                 return
             print(f"Next-stage handoff prompt for session {session_id}:")
             print(prompt)
+
+        elif sub == "efforts":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd efforts <project_id>")
+                return
+            efforts = rnd_efforts(pos[0])
+            if not efforts:
+                print(f"No efforts for {pos[0]}.")
+                return
+            print(f"{len(efforts)} effort(s) for {pos[0]} (newest-first):")
+            for e in efforts:
+                stage = e.get("current_stage", "") or "(no stage)"
+                print(f"  - stage={stage:<9} "
+                      f"status={e.get('status','') or '?':<9} "
+                      f"stages={e.get('stage_count',0)} "
+                      f"id={e.get('effort_id','')}")
+
+        elif sub == "effort":
+            pos = _positionals()
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd effort <project_id> "
+                      "--session <session_id>")
+                return
+            out = rnd_effort(pos[0], session_id)
+            stages = out.get("stage_history", []) or []
+            if not out.get("effort_id"):
+                print(f"No effort for session {session_id} "
+                      f"(unknown session or no effort).")
+                return
+            print(f"Effort {out.get('effort_id','')} "
+                  f"(current_stage={out.get('current_stage','') or '(none)'}, "
+                  f"status={out.get('status','') or '?'}, "
+                  f"{len(stages)} stage(s), research -> plan -> build):")
+            for s in stages:
+                sref = "yes" if s.get("summary_ref") else "no"
+                print(f"  - [{s.get('stage','')}] state={s.get('state','')} "
+                      f"docs={s.get('doc_count',0)} summary={sref}")
+
+        elif sub == "effort-deliverable":
+            pos = _positionals()
+            session_id = _opt("--session")
+            if not pos or not session_id:
+                print("Usage: anchor.py rnd effort-deliverable <project_id> "
+                      "--session <session_id>")
+                return
+            res = rnd_effort_deliverable(pos[0], session_id)
+            if res.get("resolved"):
+                d = res.get("deliverable", {}) or {}
+                print(f"Effort build deliverable for session {session_id}: "
+                      f"RESOLVED")
+                print(f"  name:   {d.get('name','')}")
+                print(f"  type:   {d.get('type','')}")
+                print(f"  path:   {d.get('rel') or d.get('path','')}")
+                print(f"  signal: {res.get('signal','')}")
+            else:
+                print(f"Effort build deliverable for session {session_id}: "
+                      f"UNRESOLVED")
+                print(f"  reason: {res.get('reason','no deliverable yet')}")
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

@@ -363,8 +363,9 @@ def test_workbench_playwright_flow(env):
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
-            # Open the workbench from the grass column tile.
-            pg.click(".grass-tile")
+            # v12 Wave 2 Layout-D: grass is the right-column mini-panel; open the
+            # workbench via its "Open workbench →" control (openGrassWorkbench()).
+            pg.click(".grass-open")
             pg.wait_for_selector("#grassPanel .grass-workbench", timeout=5000)
             # Two idea rows in the list.
             assert pg.eval_on_selector_all("#grassPanel .gli", "e=>e.length") == 2
@@ -385,38 +386,36 @@ def test_workbench_playwright_flow(env):
             assert vis == 1
             pg.fill("#grassPanel .gsearch", "")
 
-            # Select the refined idea → its workbench loads with a Develop bar +
-            # the refinement history (grass-<id>/dev-1 + a pull control).
+            # v12 W11: select the refined idea → the ONE-session workbench loads
+            # with the auto-gathered History panel (the prior refinement listed,
+            # each pullable into the live session) + a single session terminal +
+            # Migrate / Archive-snapshot controls. NO Research/Plan develop split.
             short = eh.grass_short_id(i2["job_id"])
             pg.click(f"#grassPanel .gli[data-idea='{i2['job_id']}']")
-            pg.wait_for_selector("#grassPanel .gwork .devbar", timeout=5000)
+            pg.wait_for_selector("#grassPanel .gwork .gsession", timeout=5000)
+            # No retired develop bar.
+            assert pg.eval_on_selector_all(
+                "#grassPanel .gwork [data-dev]", "e=>e.length") == 0, \
+                "the one-session workbench must NOT render develop buttons"
             hist = pg.inner_text("#grassPanel .gwork .ghist")
             assert f"{short}/dev-1" in hist
             assert pg.eval_on_selector_all(
                 "#grassPanel .gwork .ghist button[data-pull]", "e=>e.length") >= 1
 
-            # Develop with Research → a seeded live session mounts a terminal.
-            pg.click("#grassPanel .gwork button[data-dev='research']")
+            # Open the SINGLE workbench session → a seeded live session mounts a
+            # terminal (one host, not two).
+            pg.click("#grassPanel .gwork .gopen")
             pg.wait_for_selector("#grassPanel .gwork [data-grass-term] .xterm",
                                  timeout=8000)
             assert pg.eval_on_selector_all(
                 "#grassPanel .gwork [data-grass-term][data-session]",
                 "e=>e.length") == 1
 
-            # CLOSE THE LOOP (adversarial Wave-5 finding): clicking "Save
-            # refinement" must persist the develop session's output as a NEW
-            # grass-<id>/dev-N version that APPEARS in the history as a RESULT of
-            # the save — not pre-seeded. i2 already shows dev-1; after Save a
-            # dev-2 row (with a pull control) must appear.
-            pg.wait_for_selector("#grassPanel .gwork .gsave:not([disabled])",
-                                 timeout=5000)
-            pg.click("#grassPanel .gwork .gsave")
-            pg.wait_for_function(
-                "document.querySelector('#grassPanel .gwork .ghist')"
-                ".innerText.indexOf('%s/dev-2') !== -1" % short, timeout=8000)
+            # The Migrate-to-project + Archive-snapshot header controls render.
             assert pg.eval_on_selector_all(
-                "#grassPanel .gwork .ghist button[data-pull]",
-                "e=>e.length") >= 2, "saved refinement did not add a pull control"
+                "#grassPanel .gwork .gmigrate", "e=>e.length") == 1
+            assert pg.eval_on_selector_all(
+                "#grassPanel .gwork .garchive-snap", "e=>e.length") == 1
 
             assert not errors, f"JS console errors: {errors}"
             b.close()

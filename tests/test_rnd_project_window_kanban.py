@@ -134,28 +134,38 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
 
     html = gui.render_project_window_html(pid)
 
-    # v4.1 cockpit-render: the board is the Paradigm-2 lane grid (.p2lanes / 5
-    # .p2col columns), replacing the old .kan/.col board.
-    assert "class='p2lanes'" in html
-    assert html.count("class='p2col'") == 5
-    for label in ("Research", "Planning", "Build", "Deliverables"):
+    # v12 Wave 2 Layout-D: the 5-col .p2lanes grid is RETIRED for the Layout-D
+    # shell (.pgrid.layoutd) — two headline zones (Latest Research + Latest
+    # Plan/Build) + a persistent right column (Grass + Deliverables).
+    assert "class='p2lanes'" not in html
+    assert "class='p2col'" not in html
+    assert "pgrid layoutd" in html
+    assert html.count("class='sectionlbl'") == 2
+    assert "Latest Research" in html
+    assert "Latest Plan" in html
+    for label in ("Research", "Plan", "Build", "Deliverables"):
         assert label in html
-    # Version labels by recency (research has 2 sessions -> v2 newest, v1 oldest),
-    # now shown in the tile's .lane row.
-    assert ">v2<" in html
-    assert ">v1<" in html
-    # Genuine Paradigm-2 tiles (with the legacy lane-tile alias) — NOT effort cards.
+    # Recency is now expressed structurally: the NEWEST research session is the
+    # headline card and the older one is a little-tile in the collapsible shelf
+    # (replaces the old vN labels). research has 2 sessions -> 1 headline + 1
+    # shelf minitile.
+    assert "class='headline" in html
+    assert "minitile" in html
+    assert "shelf-wrap" in html
+    assert "Survey v2" in html   # newest research → headline title
+    assert "Survey smart-home protocols" in html  # older → shelf minitile
+    # Genuine tiles (with the legacy lane-tile alias) — NOT old effort cards.
     assert "tile lane-tile" in html
     assert "class='effort'" not in html
     assert "class='kan'" not in html
-    # Per-lane "New run" affordances. v4 Wave 1: these launch the SEEDED ConPTY
-    # path (newTermSession → term_start → terminal_session.start_session), NOT
-    # the v2 unseeded REPL (openTerminal / start_terminal) that caused the
-    # repeating-prompt bug.
-    assert "newTermSession('research','claude')" in html
-    assert "newTermSession('plan')" in html
-    assert "newTermSession('build')" in html
-    assert "New research run" in html
+    # Start affordances. v12 Wave 2: the per-lane "+ New <lane> run" launchers
+    # are retired for Layout D — a single "+ New effort" control (inert this
+    # wave, wired in W10) is the effort-start entry, and the masthead "Open
+    # terminal" still wires the live general-session start path
+    # (newTermSession → term_start → terminal_session.start_session).
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
+    assert "newGeneral('claude')" in html
     # Real xterm.js terminal: the vendored library + stylesheet are included and
     # the inline panel mounts xterm directly (new window.Terminal). v4.1: the v2
     # anchor-term REPL adapter is no longer used by the cockpit.
@@ -438,15 +448,20 @@ def test_two_sessions_switchable_and_answer_routes_to_job(server, tmp_path):
         jidB, GATE.read_text(encoding="utf-8").splitlines())
     assert prompt is not None
 
-    # The served window exposes BOTH jobs as live tiles (each carries its job_id +
-    # live flag). v4.1: the console drawer is gone — a live tile opens its inline
-    # panel terminal via laneTileClick → openPanel — but the per-job answer-gate
-    # routing below is unchanged and is the real subject of this test.
+    # The served window exposes BOTH jobs as live (green) tiles — in Layout D the
+    # research session is the Latest-Research headline and the plan session is the
+    # Latest-Plan/Build headline, each keyed by its run:: session id and rendered
+    # with the running (green) status light. v12 Wave 2: a tile opens its inline
+    # panel via laneTileClick → openPanel — but the per-job answer-gate routing
+    # below is unchanged and is the real subject of this test.
     status, html = _get_text(base + f"/project/{pid}")
     assert status == 200
-    assert f'data-job-id="{jidA}"' in html
-    assert f'data-job-id="{jidB}"' in html
-    assert html.count('data-live="1"') >= 2
+    # Both sessions surface as headline tiles keyed by their run:: ids: A is
+    # running (green) and B is awaiting input (amber, from its injected gate).
+    assert f'data-session="run::{jidA}"' in html
+    assert f'data-session="run::{jidB}"' in html
+    assert 'data-light="green"' in html   # job A, running
+    assert 'data-light="amber"' in html   # job B, needs-input (gate)
     assert "function openPanel" in html
 
     # An answer routes to the SPECIFIC job_id (job B's gate), not job A.

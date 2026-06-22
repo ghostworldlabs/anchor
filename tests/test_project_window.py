@@ -153,22 +153,33 @@ def test_grass_in_lane_dirs(gui):
 
 
 def test_grass_column_renders_in_window(gui, tmp_path):
-    """An empty Grass Catchers column is present and does not break the others."""
+    """v12 Wave 2 Layout-D: Grass is the persistent right-column mini-panel (no
+    longer a board lane column), and the two-pane workbench template is retained
+    so 'Open workbench' still opens it. The other surfaces (research/plan-build
+    zones + Deliverables panel) still render."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("Grassy", str(folder))["entry"]["id"]
     html = gui.render_project_window_html(pid)
-    assert "Grass Catchers" in html
-    assert "data-col-lane='grass'" in html
-    # The 4 original columns still render.
-    for lane in ("research", "plan", "build", "deliverables"):
-        assert f"data-col-lane='{lane}'" in html
+    # The grass lane column / data-col-lane containers are retired.
+    assert "data-col-lane=" not in html
+    # Grass is now the right-column mini-panel + the retained workbench template.
+    assert "Grass Catcher" in html
+    assert "openGrassWorkbench()" in html
+    assert "id='grassWorkbenchTpl'" in html
+    # The Layout-D zones + the Deliverables panel still render.
+    assert html.count("class='sectionlbl'") == 2
+    assert "Latest Research" in html
+    assert "Latest Plan" in html
+    assert "Deliverables" in html
 
 
 def test_most_recent_plus_previous_sessions_expander(gui, tmp_path):
-    """G/W/T: given a lane with >=2 sessions, exactly 1 session card is visible
-    and the remainder sit behind a 'previous sessions' toggle."""
+    """G/W/T: given a zone with >=2 sessions, exactly 1 session is the prominent
+    headline and the remainder sit behind the Layout-D collapsible shelf
+    (v12 Wave 2 — replaces the old 'previous sessions' expander)."""
     import effort_history as eh
+    import re
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("MultiSess", str(folder))["entry"]["id"]
@@ -188,13 +199,24 @@ def test_most_recent_plus_previous_sessions_expander(gui, tmp_path):
     assert len(sess_list) == 2
 
     html = gui.render_project_window_html(pid)
-    # Exactly one "previous sessions" expander for the lane with 2 sessions.
-    assert "previous sessions (1)" in html
-    assert html.count("previous sessions (") == 1
-    # v4.1 cockpit-render: a multi-file session is ONE Paradigm-2 tile that shows
-    # its member count ("2 files") rather than rendering N separate cards. (The
-    # per-member doc links moved into the opened panel's summary.)
-    assert "2 files" in html
+    # Strip style/script so CSS/JS occurrences can't satisfy a structural check.
+    body = re.sub(r"<style[\s\S]*?</style>", "", html)
+    body = re.sub(r"<script[\s\S]*?</script>", "", body)
+    # The two plan sessions land in the Plan/Build zone: ONE prominent headline +
+    # ONE little-tile in the collapsible shelf ("Hide 1 older plan/build sessions").
+    board = body[body.find("pgrid layoutd"):body.find("grassWorkbenchTpl")]
+    assert "Hide 1 older plan/build sessions" in board, \
+        "no Plan/Build shelf toggle for the older session"
+    # Exactly two session tiles in the Plan/Build zone (1 headline + 1 minitile) —
+    # proving a multi-file session is ONE tile, not N per-file cards.
+    pb_tiles = re.findall(
+        r"<div class='(?:headline|minitile) tile lane-tile[^>]*"
+        r"data-lane=\"(?:plan|planning|build)\"", board)
+    assert len(pb_tiles) == 2, \
+        "expected exactly 2 Plan/Build session tiles, got %d" % len(pb_tiles)
+    # The newest (v1 Plan) is the prominent headline.
+    assert re.search(r"<div class='headline tile lane-tile[\s\S]*?v1 Plan", board), \
+        "newest session not the prominent headline"
 
 
 def test_single_session_lane_has_no_previous_expander(gui, tmp_path):
@@ -402,22 +424,26 @@ def test_summary_panel_renders_doc_links_and_effort(gui, tmp_path):
 
 
 def test_launch_new_session_button_wired_to_wave4_path(gui, tmp_path):
-    """A new session can be launched via the Wave-3/4 path (newTermSession →
-    term_start). v4.1: the launch affordance is the lane footer "+ new <lane>"
-    launcher (the old in-panel "Launch new session" button + _wireLaunchFromPanel
-    were removed with the in-lane summary accordion). The seed-session seam that
-    Wave 7 builds the handoff on is still forwarded by newTermSession."""
+    """A new session can still be launched via the Wave-3/4 path (newTermSession →
+    term_start). v12 Wave 2 Layout-D: the per-lane "+ New <lane> run" launchers
+    are retired — the masthead "Open terminal" wires the live general-session
+    start, and the "+ New effort" control (inert this wave, wired in W10) is the
+    effort-start entry. The seeded ConPTY start path + the seed-session seam
+    (Wave 7's handoff base) are unchanged."""
     folder = tmp_path / "P"
     folder.mkdir()
     pid = gui.select_existing_project("LaunchPanel", str(folder))["entry"]["id"]
     _discovered_planning_session(gui, folder, pid)
     html = gui.render_project_window_html(pid)
 
-    # The "+ new <lane>" launchers wire the seeded ConPTY path.
-    assert "newTermSession('research','claude')" in html
-    assert "newTermSession('plan')" in html
-    assert "newTermSession('build')" in html
+    # The seeded ConPTY start path is still defined + wired.
+    assert "function newTermSession" in html
     assert "/api/rnd/term_start" in html
+    # The surviving live start affordance (masthead general session) + the W10
+    # effort-start entry both render.
+    assert "newGeneral('claude')" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The dead in-lane "Launch new session" button is gone.
     assert "summ-launch-btn" not in html
     assert "_wireLaunchFromPanel" not in html
