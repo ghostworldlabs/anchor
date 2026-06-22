@@ -42,4 +42,26 @@
   helpers left in place (W10 reuses the tile helpers).
 - **RE-GATE:** 1281 passed, 1 skipped. **Converged + UI sign-off (screenshot `_mockups/w2_layoutd_screenshot.png`).**
 
+## Wave 3 — Keystone A: per-stage baseline commit + stage-scoped persist + stage deliverable — GREEN ✅
+
+- **EXECUTE:** `effort_history.record_stage_baseline` (HEAD sha as baseline) + `persist_session_stage_docs`
+  (EXACT git: `diff <base>..HEAD` ∪ `diff <base> --` ∪ `status --porcelain -uall` additions, MINUS
+  prior closed-stage paths via `efforts_for_session_stage`; tags efforts by `(session_id, stage)`;
+  best-effort, idempotent) + `efforts_for_session_stage`. `deliverables.resolve_build_deliverable`/`backfill`
+  stage-scoped for efforts (build-stage docs only; honest unresolved off-build; legacy path byte-unchanged).
+  Build stage also persists products (not just docs). New `tests/test_stage_baseline_persist_v12.py` +
+  `tests/test_stage_deliverable_v12.py` incl. the Shark-B1 legacy-superset falsification + B2 uncommitted
+  build product + deliverable decoy. Legacy `persist_session_docs`/`_produced_doc_rels` untouched.
+- **GATE:** 1291 passed, 1 skipped.
+- **REVIEW (2 independent):** both GO-WITH-NITS. Two MAJORs = two sides of the build-accept heuristic:
+  **W3-R1** over-capture (swept `.pyc`/`.dll`/`.coverage`/bundle trees) + **W3-R2** under-capture (dropped
+  a ROOT product like `anchor_gui.py`, the canonical Anchor deliverable). Fixed: build-accept switched from
+  a dir-allowlist to a **junk denylist** (`_BUILD_JUNK_EXT` + dotfiles excluded) accepting root + any-depth
+  products, PLUS a bundle-sweep cap (`_MAX_BUILD_PRODUCTS=25` non-doc → docs-only, rely on explicit pin).
+  +3 tests (root captured / junk excluded / bundle capped). W3-N1 (prior-stage lane coupling) = documented
+  forward-note for the W6 wiring (callers must pass the canonical store_lane). Verified good: git mechanic,
+  falsification genuineness, legacy byte-unchanged, idempotency, backfill C6 protection, distro clean.
+- **RE-GATE:** 1294 passed, 1 skipped. **Converged.** (Keystone unwired until W6 — by design.)
+
+
 
