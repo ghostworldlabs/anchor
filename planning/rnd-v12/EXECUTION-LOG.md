@@ -254,6 +254,42 @@
   → a real `inspect.getsource` route-registered assertion. Dead-JS (F2) = the documented debt.
 - **Converged + John signed off.** (8 dead legacy grass JS fns left as documented W-next cleanup debt.)
 
+## Wave 12 — CLI mirror + check_rnd_v12_surface + distro + docs — GREEN ✅ (PROJECT DONE)
+
+- **EXECUTE:** `anchor.py` read-only CLI mirrors — `rnd efforts <pid>` (effort view: id·current_stage·status·
+  stage_count), `rnd effort <pid> --session <id>` (ordered stage_history, SAFE: drops baseline_ref/store_lane/
+  worktree/branch), `rnd effort-deliverable <pid> --session <id>` (build-stage deliverable, honest unresolved;
+  MASTER-PLAN decoy never resolves). `anchor_healthcheck.check_rnd_v12_surface` — the 8-step fully-stubbed walk
+  (back-compat normalize · advance R→P→B in ONE session [committed-worktree-only + conversation-only PTY-buffer-
+  seeded] with session-id SET-equality/zero-mint + disjoint per-stage docs + distinct summary dirs · build
+  deliverable + decoy · retirement [effort gated, legacy mints] · handoff same effort_id + unsent paste ·
+  recover interrupted≠done no-spawn · effort_view no double/ghost · grass one-session + ✕→Boneyard), registered
+  in main() after v11.1; hermetic (env restored in finally, never :8777, PTYs reaped, no row leak). distro:
+  effort_view.py stdlib-only + in dist_manifest.txt, scan green. Docs: CLAUDE.md v12 section + SESSION-HANDOFF.md
+  (BUILT, awaiting sign-off). New `tests/test_cli_efforts_v12.py` + `test_healthcheck_v12.py` + `test_distro_scan_v12.py`.
+- **GATE:** 1424 passed, 1 skipped (full suite, clean — purely additive).
+- **REVIEW (2 independent):** R1 GO-WITH-NITS (healthcheck hermetic + non-vacuous verified empirically;
+  ENV_LEAK {}, LEAKED_ROWS 0), R2 **GO** (CLI SAFE, distro green, docs accurate — every listed endpoint exists).
+  Fixed: **V12R1-01** `_rmtree_force` (chmod-on-error rmtree so a temp git repo's read-only `.git/objects` is
+  actually removed, not leaked into %TEMP% — shared helper, benefits all surfaces) + the teardown test now
+  asserts REMOVAL; **V12R1-02** the per-stage summary-dir assertion now holds the lane constant + varies ONLY
+  `stage` (isolates the stage-key — the prior form also varied lane). NIT-01 (CLI unknown-session asymmetry) left
+  (cosmetic, both print cleanly). V12R1-03 (5 AM walk touches real .anchor/sessions.json transiently, self-healing)
+  = pre-existing multi-surface pattern, out of scope.
+- **RE-GATE:** 1424 passed, 1 skipped. **Converged.**
+
+---
+
+## 🏁 v12 "Efforts" — PROJECT DONE (2026-06-22)
+
+All **12 waves GREEN** on `foreman/rnd-surface-v12` (off master `f2e0e40`, v11.1). Final gate **1424 passed,
+1 skipped** (baseline 1266 → +158). Every wave: EXECUTE → orchestrator full-suite gate → 2 independent
+adversarial reviewers → fix → re-gate. The 3 UI waves (W2 skeleton, W10 live dock, W11 grass) each have
+John's screenshot sign-off. **Adversarial review caught real bugs the green suite hid** every round (doc
+mis-attribution, summary mis-keying, the incomplete retirement map, the W8 reconcile-before-recover doc-loss,
+the W10 double-mount, rename-stale tests). **NOT merged / NOT deployed — awaiting John's whole-branch sign-off
+→ `git merge --no-ff` + `nssm restart anchor` (elevated) + rescan the 6 active projects.**
+
 
 
 
