@@ -243,3 +243,16 @@ def test_minitile_emits_effort_managed_attr():
     html2 = ag._render_layoutd_minitile({"session_id": "s2", "members": [rv2]},
                                         "research", "pid", "/x", "research")
     assert "data-effort-managed" not in html2
+
+
+def test_grass_mini_panel_has_collapse_toggle():
+    """John tweak: the right-column Grass Catcher panel can COLLAPSE its idea list
+    in the tile (a caret toggle) while keeping +capture / Open-workbench reachable."""
+    import importlib
+    ag = importlib.import_module("anchor_gui")
+    html = ag._render_layoutd_grass_panel(".", "no-such-project")
+    assert "id='grassMiniTog'" in html and "toggleGrassMini(" in html, \
+        "grass panel missing the collapse toggle"
+    assert "id='grassMiniList'" in html, "grass idea list not in a collapsible container"
+    assert "openGrassWorkbench()" in html, "Open-workbench must stay reachable"
+    assert "function toggleGrassMini" in ag._PROJECT_WINDOW_JS, "toggle JS missing"

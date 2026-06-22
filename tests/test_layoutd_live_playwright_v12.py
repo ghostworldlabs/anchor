@@ -450,3 +450,35 @@ def test_layoutd_dock_advance_hidden_at_build(server, tmp_path):
         ts.kill(sid)
     except Exception:
         pass
+
+
+def test_grass_mini_panel_collapse_toggle(server, tmp_path):
+    """John tweak (machine-checkable): clicking the Grass Catcher panel's caret
+    collapses/expands its idea list IN THE TILE (#grassMiniList gets .collapsed),
+    while Open-workbench stays present."""
+    pytest.importorskip("playwright.sync_api")
+    gui, base, _ = server
+    pid, fp, rec = _live_effort(tmp_path, "GrassTog", "research")
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        pg.wait_for_selector("#grassMiniTog", timeout=8000)
+        # starts EXPANDED (no .collapsed)
+        assert pg.eval_on_selector(
+            "#grassMiniList", "e=>e.classList.contains('collapsed')") is False
+        pg.click("#grassMiniTog")
+        assert pg.eval_on_selector(
+            "#grassMiniList", "e=>e.classList.contains('collapsed')") is True, \
+            "caret did not collapse the grass idea list"
+        # Open-workbench stays reachable even when collapsed.
+        assert pg.eval_on_selector_all(".grass-open", "e=>e.length") >= 1
+        pg.click("#grassMiniTog")
+        assert pg.eval_on_selector(
+            "#grassMiniList", "e=>e.classList.contains('collapsed')") is False, \
+            "second click did not expand"
+        b.close()
+    import terminal_session as ts
+    try: ts.kill(rec["session_id"])
+    except Exception: pass

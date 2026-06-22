@@ -3159,11 +3159,16 @@ def _render_layoutd_grass_panel(folder_path, project_id) -> str:
         )
     if not rows:
         rows.append("<div class='idea-empty'>No ideas captured yet.</div>")
+    # The idea list is collapsible IN THE TILE (caret toggle) — fold the open items
+    # away while keeping +capture / Open-workbench reachable; default expanded.
     return (
         "<div class='panel'>"
-        f"<div class='ptitle'>&#127793; Grass Catcher "
+        "<div class='ptitle'>"
+        "<span class='gmini-tog' id='grassMiniTog' title='Collapse / expand the "
+        "idea list' onclick='toggleGrassMini(this)'>&#9662;</span> "
+        "&#127793; Grass Catcher "
         f"<span class='cnt'>{n} idea{'s' if n != 1 else ''}</span></div>"
-        f"{''.join(rows)}"
+        f"<div class='grass-mini-list' id='grassMiniList'>{''.join(rows)}</div>"
         "<div class='pactions'>"
         "<button class='btn sm' onclick='addIdea()'>+ capture</button>"
         # The open-workbench control carries the legacy grass-tile hooks
@@ -4442,6 +4447,10 @@ def render_project_window_html(project_id: str) -> str:
         # collapsible shelf of "little tiles"
         ".shelf-wrap{margin:10px 0 4px}"
         ".shelf-wrap.collapsed{display:none}"
+        ".gmini-tog{cursor:pointer;user-select:none;color:var(--dim);"
+        "font-size:11px;margin-right:2px}"
+        ".gmini-tog:hover{color:var(--text)}"
+        ".grass-mini-list.collapsed{display:none}"
         ".shelf{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 10px}"
         ".minitile{flex:0 0 auto;width:185px;background:var(--surface2);"
         "border:1px solid var(--border);border-radius:9px;padding:11px 12px;"
@@ -4740,6 +4749,15 @@ function toggleShelf(id, btnId, n, label) {
       ? ('▸ Show all ' + n + ' older ' + label + ' sessions')
       : ('▾ Hide ' + n + ' older ' + label + ' sessions');
   }
+}
+
+// Collapse / expand the right-column Grass Catcher idea list IN THE TILE (the open
+// items fold away; +capture / Open-workbench stay reachable). Default expanded.
+function toggleGrassMini(el) {
+  var list = document.getElementById('grassMiniList');
+  if (!list) return;
+  var collapsed = list.classList.toggle('collapsed');
+  if (el) el.innerHTML = collapsed ? '&#9656;' : '&#9662;';  // ▸ / ▾
 }
 
 // ── Access token (D4) ──────────────────────────────────────────────────────

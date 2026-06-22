@@ -290,6 +290,18 @@ mis-attribution, summary mis-keying, the incomplete retirement map, the W8 recon
 the W10 double-mount, rename-stale tests). **NOT merged / NOT deployed — awaiting John's whole-branch sign-off
 → `git merge --no-ff` + `nssm restart anchor` (elevated) + rescan the 6 active projects.**
 
+### Post-build tweak (John, 2026-06-22, during review)
+- **Grass Catcher right-column panel: collapsible idea list.** Added a caret toggle (`#grassMiniTog` →
+  `toggleGrassMini`) that folds the idea items IN THE TILE (`#grassMiniList.collapsed`), keeping +capture /
+  Open-workbench reachable; default expanded. +2 tests (DOM presence + Playwright collapse-click). Gate:
+  1426 passed, 1 skipped. (John reviewed v12 via an isolated preview on :8799; this was his one tweak.)
+
+### Deploy (2026-06-22) — DONE
+- John ran `nssm restart anchor` (the branch working tree = v12, so the restart loaded v12). Service GET / → 200,
+  v12 + grass toggle live. **Rescanned the 6 real projects** (Anchor/Agentic-Home/MBA Teaching AI/aurora/
+  Transformer Math/Skill Foundry) → all 200. (The live registry also carries ~22 leftover TEST-cruft projects +
+  duplicate Anchor/aurora registrations — a registry-tidy item for later, not rescanned.) Merged v12 → master.
+
 
 
 
