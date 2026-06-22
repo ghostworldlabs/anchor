@@ -136,7 +136,9 @@ def test_fix2_refresh_grass_counts_derives_from_rows():
 
 def test_fix4_mount_terminal_attaches_fitRo_observer():
     js = _project_window_js()
-    body = _fn_body(js, "_mountTerminal", "sessionId, body")
+    # v12 W10: _mountTerminal gained an optional `rec` param (the bottom dock
+    # passes its own panel record; default = PANELS[sessionId]).
+    body = _fn_body(js, "_mountTerminal", "sessionId, body, rec")
     assert "w.fitRo" in body, "_mountTerminal must store its observer on w.fitRo"
     assert "new ResizeObserver" in body, "_mountTerminal must create a ResizeObserver"
     assert "fro.observe(body)" in body, \
@@ -149,7 +151,9 @@ def test_fix4_mount_terminal_attaches_fitRo_observer():
 
 def test_fix4_fit_panel_terminal_has_collapse_guard():
     js = _project_window_js()
-    body = _fn_body(js, "_fitPanelTerminal", "sessionId")
+    # v12 W10: _fitPanelTerminal gained an optional `rec` param (defaults to
+    # PANELS[sessionId]; the dock passes its DOCK record).
+    body = _fn_body(js, "_fitPanelTerminal", "sessionId, rec")
     # The manual (no-fit-addon) branch bails on a collapsed/hidden/zero host.
     assert "offsetParent === null" in body
     assert "clientHeight === 0" in body and "clientWidth === 0" in body

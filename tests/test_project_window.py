@@ -442,7 +442,8 @@ def test_launch_new_session_button_wired_to_wave4_path(gui, tmp_path):
     # The surviving live start affordance (masthead general session) + the W10
     # effort-start entry both render.
     assert "newTermSession('general','claude')" in html
-    assert "id='newEffortBtn'" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The dead in-lane "Launch new session" button is gone.
     assert "summ-launch-btn" not in html
     assert "_wireLaunchFromPanel" not in html

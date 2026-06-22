@@ -56,7 +56,8 @@ def test_lane_launch_uses_seeded_term_start_not_start_terminal(gui, tmp_path):
     #     launch affordance (masthead general session) routes through it.
     assert "function newTermSession" in html
     assert "newTermSession('general','claude')" in html
-    assert "id='newEffortBtn'" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The seeded endpoint is the launch target.
     assert "/api/rnd/term_start" in html
 

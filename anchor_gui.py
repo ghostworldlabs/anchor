@@ -1420,8 +1420,14 @@ def _project_activity_reflection(pid_raw: str) -> dict:
     status = (newest.get("status") or _sessreg.STATUS_IDLE).strip()
     # A friendly title: the session's own label if it set one, else the lane name.
     label = (newest.get("label") or "").strip() or (lane.capitalize() or "session")
+    # v12 W10 — the EFFORT's current_stage (research/plan/build) is the truthful
+    # "where this effort is" signal (the lane flips as an effort advances, but it
+    # always reflects the most-advanced stage). Prefer it for the home-row line;
+    # fall back to the lane when this is not a v12 effort. Cache/registry-only.
+    stage = (newest.get("current_stage") or "").strip()
     out["latest"] = {
         "lane": lane,
+        "stage": stage,
         "label": label,
         "status": status,
         "color": _SESSION_STATUS_COLOR.get(status, "grey"),
@@ -1447,7 +1453,11 @@ def _render_activity_reflection_html(refl: dict) -> str:
         )
     if latest:
         lane = latest.get("lane") or ""
-        lane_lbl = html_lib.escape(lane.capitalize() or "session")
+        # v12 W10 — show the effort's current_stage when present (research/plan/
+        # build), else the lane (honest fallback for non-effort sessions).
+        stage = (latest.get("stage") or "").strip()
+        lane_lbl = html_lib.escape(
+            (stage or lane).capitalize() or "session")
         title = html_lib.escape(latest.get("label") or "")
         status = html_lib.escape(latest.get("status") or "")
         color = html_lib.escape(latest.get("color") or "grey")
@@ -2868,14 +2878,74 @@ def _layoutd_grass_origin_chip(rep, trio_lane):
         f"&#127793; from grass</span>")
 
 
-def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane):
+#: trio-lane → the trio STAGE it represents (for the EV-2 stage-track fallback
+#: when a tile has no live effort-view entry, e.g. a discovered/imported tile).
+_LANE_TO_STAGE = {"research": "research", "plan": "plan", "planning": "plan",
+                  "build": "build"}
+
+
+def _effort_data_attrs(sid, effort_index, fallback_lane=""):
+    """The v12 W10 effort-binding data-* attrs for a Layout-D tile.
+
+    Resolves the session id to its EFFORT (via ``effort_index`` = session_id →
+    effort dict, built from :func:`_gather_efforts`) and emits
+    ``data-effort-id`` + ``data-current-stage`` so the bottom dock can open BOUND
+    to the effort and light the 3-node stage track from ``current_stage`` (EV-2 —
+    presence-based, NOT by iterating stage_history). When the index has no entry
+    (a discovered/imported tile that never minted a managed session), it falls
+    back to the session id as a singleton effort id and derives the stage from the
+    tile's trio lane (``fallback_lane``) — honest, never blank for a real lane
+    tile. Returns a leading-space attribute string ("" only if ``sid`` is empty).
+    """
+    if not sid:
+        return ""
+    eff = (effort_index or {}).get(sid)
+    if eff:
+        eid = (eff.get("effort_id") or sid)
+        stage = (eff.get("current_stage") or "")
+    else:
+        eid = sid
+        stage = ""
+    if not stage:
+        stage = _LANE_TO_STAGE.get((fallback_lane or "").strip(), "")
+    eid_attr = html_lib.escape(str(eid), quote=True)
+    stage_attr = html_lib.escape(str(stage), quote=True)
+    return (f" data-effort-id=\"{eid_attr}\""
+            f" data-current-stage=\"{stage_attr}\"")
+
+
+def _build_effort_index(project_id):
+    """Build a ``session_id -> effort dict`` index from :func:`_gather_efforts`
+    (the v12 Wave 9 effort view). Used by the Layout-D render to bind each tile to
+    its effort (W10). Each effort's chain root AND every member session id map to
+    the SAME effort dict. Best-effort: honest ``{}`` on any failure (the tiles
+    then fall back to a singleton effort = the session id)."""
+    idx = {}
+    try:
+        for eff in _gather_efforts(project_id):
+            if not isinstance(eff, dict):
+                continue
+            eid = eff.get("effort_id") or eff.get("chain_id") or ""
+            if eid:
+                idx[eid] = eff
+            for m in eff.get("members", []) or []:
+                msid = m.get("session_id") if isinstance(m, dict) else None
+                if msid:
+                    idx[msid] = eff
+    except Exception:
+        return {}
+    return idx
+
+
+def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane,
+                             effort_index=None):
     """Render ONE Layout-D shelf ``.minitile`` from a session view (v12 Wave 2).
 
     Mockup schema: a ``.minitile`` with a ``.mtop`` (status dot + a stage badge),
     a ``.mtitle`` (the session's short title), and a ``.mfoot`` (state + age). It
     ALSO carries the legacy ``tile lane-tile`` + ``data-session`` click hooks so
-    the W10 panel-open wiring (and the panel-open tests) bind to it; the
-    interaction itself is inert this wave (the dock is W10).
+    the W10 dock-open wiring (and the panel-open tests) bind to it. v12 W10:
+    clicking it opens the SINGLE bottom dock bound to the tile's effort.
     """
     members = sv.get("members", []) or []
     rep = members[0] if members else None
@@ -2902,9 +2972,11 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane)
     grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
     tie_data, tie_chip = _layoutd_tie_chip(sv)
     em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
+    eff_data = _effort_data_attrs(sid, effort_index, fallback_lane=trio_lane)
     return (
         f"<div class='minitile tile lane-tile{extra}' data-session=\"{sid_attr}\" "
-        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data}{em_data} "
+        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data}{em_data}"
+        f"{eff_data} "
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='mtop'><span class='dot {light}'></span>"
         f"<span class='badge {badge_lane}'>{badge_lbl}</span></div>"
@@ -2917,12 +2989,17 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane)
 
 
 def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
-                             zone_label):
+                             zone_label, effort_index=None):
     """Render the Layout-D ``.headline`` card for a zone's most-recent session
-    (v12 Wave 2). Mirrors the mockup headline (status dot + stage badge + title +
-    blurb + a 3-node stage track + report/summary links). Carries the legacy
-    ``tile lane-tile`` + ``data-session`` hooks so the W10 panel-open wiring (and
-    the panel-open tests) bind. Inert this wave (the dock is W10).
+    (v12 Wave 2 / wired W10). Mirrors the mockup headline (status dot + stage
+    badge + title + blurb + a 3-node stage track + report/summary links). Carries
+    the legacy ``tile lane-tile`` + ``data-session`` hooks so the W10 dock-open
+    wiring (and the panel-open tests) bind.
+
+    v12 W10 / EV-2: the 3-node stage track lights by the tile's EFFORT
+    ``current_stage`` (presence-based — research→node1, plan→1-2, build→1-3), NOT
+    by the bare lane and NOT by iterating ``stage_history`` 1:1. Falls back to the
+    lane when no effort resolves.
     """
     members = sv.get("members", []) or []
     rep = members[0] if members else None
@@ -2945,18 +3022,22 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     running_cls = " running" if light == "green" else ""
     running_chip = ("<span style='font-size:11px;color:var(--success)'>"
                     "&#9679; running</span>" if light == "green" else "")
-    # 3-node stage track: light up the nodes up to (and including) the current
-    # zone/lane (research → first node; plan → first two; build → all three).
+    # v12 W10 / EV-2: light the 3-node stage track by the EFFORT's current_stage
+    # (presence-based), falling back to the bare lane when no effort resolves.
+    eff = (effort_index or {}).get(sid)
+    track_stage = (eff.get("current_stage") if eff else "") or trio_lane
+    # research → first node; plan → first two; build → all three.
     reached = {"research": 1, "plan": 2, "planning": 2, "build": 3}.get(
-        trio_lane, 1)
-    track = _render_layoutd_track(trio_lane, reached)
+        track_stage, 1)
+    track = _render_layoutd_track(track_stage, reached)
     grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
     tie_data, tie_chip = _layoutd_tie_chip(sv)
     em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
+    eff_data = _effort_data_attrs(sid, effort_index, fallback_lane=trio_lane)
     return (
         f"<div class='headline tile lane-tile{running_cls}' "
         f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "
-        f"data-light=\"{light}\"{tie_data}{em_data} "
+        f"data-light=\"{light}\"{tie_data}{em_data}{eff_data} "
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='htop'>"
         f"<span class='dot {light}'></span>"
@@ -2992,10 +3073,11 @@ def _render_layoutd_track(trio_lane, reached):
 
 
 def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
-                         folder_path, project_id):
+                         folder_path, project_id, effort_index=None):
     """Render one Layout-D zone: a section label + the headline card + a
-    collapsible shelf of older "little tiles" (v12 Wave 2). Honest empty state
-    (and NO shelf) when the zone has no sessions.
+    collapsible shelf of older "little tiles" (v12 Wave 2 / wired W10). Honest
+    empty state (and NO shelf) when the zone has no sessions. ``effort_index``
+    (session_id → effort dict) binds each tile to its effort for the dock.
     """
     if not sessions:
         empty = (
@@ -3009,7 +3091,8 @@ def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
     head_lane = _sv_zone_lane(head_sv, zone_key)
     store_lane = "planning" if head_lane == "plan" else head_lane
     headline = _render_layoutd_headline(
-        head_sv, head_lane, project_id, folder_path, store_lane, zone_label)
+        head_sv, head_lane, project_id, folder_path, store_lane, zone_label,
+        effort_index=effort_index)
     older = sessions[1:]
     shelf = ""
     if older:
@@ -3018,7 +3101,8 @@ def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
             ln = _sv_zone_lane(sv, zone_key)
             sl = "planning" if ln == "plan" else ln
             tiles.append(_render_layoutd_minitile(
-                sv, ln, project_id, folder_path, sl))
+                sv, ln, project_id, folder_path, sl,
+                effort_index=effort_index))
         n = len(older)
         shelf_id = f"shelf_{html_lib.escape(zone_key, quote=True)}"
         tgl_id = f"tgl_{html_lib.escape(zone_key, quote=True)}"
@@ -3131,28 +3215,41 @@ def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
 
 
 def _render_layoutd_html(folder_path, project_id):
-    """Render the v12 Layout-D static skeleton (Wave 2). Driven by EXISTING data
-    (:func:`_gather_project_sessions`) via :func:`_layoutd_zones`; the bottom
-    dock + live wiring arrive in W10. Returns the board fragment (+ the retained
-    hidden grass-workbench template the panel manager clones)."""
+    """Render the v12 Layout-D board (Wave 2 skeleton, wired LIVE in W10).
+
+    The headline cards + collapsible shelves render from
+    :func:`_gather_project_sessions` (the visible tile shape) and are BOUND to the
+    effort view (:func:`_gather_efforts`) via an effort index so each tile carries
+    ``data-effort-id`` + ``data-current-stage`` — the dock opens bound to the
+    effort and the 3-node stage track lights by ``current_stage`` (W10 / EV-2).
+    The single bottom dock (chrome rendered separately) is the live surface.
+    Returns the board fragment (+ the retained hidden grass-workbench template)."""
     sessions_by_lane = _gather_project_sessions(folder_path, project_id)
     zones = _layoutd_zones(folder_path, project_id, sessions_by_lane)
+    # v12 W10: bind the tiles to the effort view (session_id → effort dict).
+    effort_index = _build_effort_index(project_id)
     research_zone = _render_layoutd_zone(
         "research", "Research", "&#128300; Latest Research",
-        zones["research"], folder_path, project_id)
+        zones["research"], folder_path, project_id, effort_index=effort_index)
     plan_build_zone = _render_layoutd_zone(
         "plan_build", "Plan/Build", "&#128208;&#8594;&#128296; Latest Plan / Build",
-        zones["plan_build"], folder_path, project_id)
+        zones["plan_build"], folder_path, project_id, effort_index=effort_index)
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
-    # The "+ New effort" control. INERT this wave (no advance/start wiring until
-    # W6/W10); explicitly labeled so the look ships honestly.
+    # v12 W10 (John change #2): TWO explicit start controls — "+ New research"
+    # starts an effort at the Research stage, "+ New plan/build" starts one at the
+    # Plan stage (W6 supports starting at research OR plan). Both go through
+    # newEffort(stage) → term_start (effort_managed=True), token-authed.
     new_effort = (
-        "<div class='neweffort-wrap' style='margin:0 0 18px'>"
-        "<button class='btn primary neweffort' id='newEffortBtn' disabled "
-        "title='Starts an effort at Research (wired in W10)'>"
-        "+ New effort <span style='opacity:.7;font-weight:400'>"
-        "(wired in W10)</span></button></div>"
+        "<div class='neweffort-wrap' style='margin:0 0 18px;display:flex;gap:8px'>"
+        "<button class='btn primary neweffort' id='newResearchBtn' "
+        "onclick=\"newEffort('research')\" "
+        "title='Start a new effort at the Research stage'>"
+        "+ New research</button>"
+        "<button class='btn primary neweffort' id='newPlanBuildBtn' "
+        "onclick=\"newEffort('plan')\" "
+        "title='Start a new effort at the Plan stage (then advance to Build)'>"
+        "+ New plan/build</button></div>"
     )
     board = (
         "<div class='pgrid layoutd'>"
@@ -3178,47 +3275,79 @@ def _render_layoutd_html(folder_path, project_id):
 
 
 def _render_layoutd_dock_html() -> str:
-    """Render the Layout-D bottom DOCK chrome (v12 Wave 2) — present but INERT.
+    """Render the Layout-D single bottom DOCK chrome (v12 Wave 2; wired LIVE W10).
 
-    Mirrors the mockup dock: a title bar, a summary-on-top region, a draggable
-    vertical splitter, and a terminal host placeholder. NO transport, NO xterm
-    attach this wave; the control buttons are disabled + labeled "(wired in W10)".
-    Hidden by default (``display:none``); the W10 wiring shows + binds it.
+    Mirrors the mockup dock: a title bar (status dot + title + a 3-node stage
+    track + min/max/close + a distinct Kill -> Boneyard + the context-full WARN
+    banner + Advance ->), then the body — summary ON TOP (full width), a draggable
+    vertical splitter, and a full-width terminal whose height the user drags.
+    Hidden + UNBOUND by default (``display:none``, no ``data-effort-id``); the W10
+    JS (``openEffortDock``) shows + binds it to the clicked effort. The structural
+    ids/classes here are the JS attach points; the live content is filled by JS
+    (summary via ``_loadPanelSummary``/``_renderSplitSummary``; terminal via
+    ``_mountTerminal``/``_mountReadOnlyBody`` over the WS->SSE transport).
     """
     return (
-        "<div class='dock' id='effortDock' data-inert='1' "
-        "style='display:none'>"
+        "<div class='dock' id='effortDock' style='display:none'>"
         "<div class='dbar'>"
-        "<span class='dot grey'></span>"
+        "<span class='dot grey' id='dockDot'></span>"
         "<span class='dtitle' id='dockTitle'>Effort</span>"
+        # The 3-node stage track (filled by JS from current_stage — EV-2).
+        "<span class='track' id='dockTrack'></span>"
+        "<span class='dockrun' id='dockRun' style='display:none;font-size:11px;"
+        "color:var(--success)'>&#9679; running</span>"
+        # The context-full WARN banner (hidden until context_status.over_threshold;
+        # one click -> handoff_to_fresh). An intentional addition beyond the mockup.
+        "<span class='dock-warn' id='dockWarn' style='display:none' "
+        "title='This session is getting full — hand off to a fresh session "
+        "(continues the same effort)' onclick='dockHandoffToFresh()'>"
+        "&#9888; context getting full &mdash; hand off &#8594;</span>"
         "<div class='dctrls'>"
-        "<span class='ctl' title='Minimize (wired in W10)'>&#9601;</span>"
-        "<span class='ctl' title='Maximize (wired in W10)'>&#9634;</span>"
-        "<span class='ctl' title='Close' "
-        "onclick=\"document.getElementById('effortDock').style.display='none'\">"
-        "&#10005;</span>"
-        "<button class='btn kill sm' disabled "
-        "title='Kill this effort and send it to the Boneyard (wired in W10)'>"
-        "Kill &#8594; Boneyard</button>"
+        # Advance -> : in-session stage advance (POST /api/rnd/advance_stage).
+        "<button class='btn primary sm' id='dockAdvance' "
+        "title='Advance this effort to the next stage (same session)' "
+        "onclick='dockAdvance()'>Advance &#8594;</button>"
+        "<span class='ctl' id='dockMin' title='Minimize' "
+        "onclick='dockMinimize()'>&#9601;</span>"
+        "<span class='ctl' id='dockMax' title='Maximize / restore' "
+        "onclick='dockMaximize()'>&#9634;</span>"
+        "<span class='ctl' id='dockClose' title='Close (keeps the effort)' "
+        "onclick='dockClose()'>&#10005;</span>"
+        "<button class='btn kill sm' id='dockKill' "
+        "title='Kill this effort and send it to the Boneyard' "
+        "onclick='dockKill()'>Kill &#8594; Boneyard</button>"
+        # v9 TRUE-delete (keep documents) — distinct from Kill -> Boneyard; the red
+        # ✕ removes the record + effort/summary cache but KEEPS the produced docs.
+        "<span class='ctl panelbtn delete' id='dockDelete' "
+        "title='Delete this effort from Anchor (removes the record; keeps its "
+        "documents)' onclick='dockDelete()'>&#10005;</span>"
         "</div></div>"
         "<div class='dbody'>"
-        # TOP: summary region (full width), INERT placeholder this wave.
-        "<div class='dtop'>"
+        # TOP: summary region (full width).
+        "<div class='dtop' id='dockTop'>"
+        "<div class='dtop-head'>"
         "<p class='slabel'>Summary</p>"
-        "<div class='dock-summary' id='dockSummary'>"
+        # v12 W10 (John change #3): the SELECTED effort's metrics — Σ tokens ·
+        # time · $ — summed from its members' job_runner cost records
+        # (GET /api/rnd/effort_rollup). Imported/discovered contribute 0 (honest).
+        "<span class='dock-metrics' id='dockMetrics' "
+        "title='This effort: tokens spent &middot; wall-clock time &middot; cost'>"
+        "&#931; &mdash; tok &middot; &mdash; &middot; $&mdash;</span>"
+        "</div>"
+        "<div class='dock-summary summary split' id='dockSummary'>"
         "<span class='summ-loading'>Select an effort &mdash; "
-        "summary loads here (wired in W10).</span>"
+        "its summary loads here.</span>"
         "</div></div>"
-        # The DRAGGABLE vertical splitter (chrome only this wave).
+        # The DRAGGABLE vertical splitter (drag to resize the terminal height).
         "<div class='dsplit' id='dockSplit' "
-        "title='Drag to resize the terminal height (wired in W10)'></div>"
-        # BOTTOM: terminal host placeholder (no attach this wave).
-        "<div class='dbottom'>"
+        "title='Drag to resize the terminal height'></div>"
+        # BOTTOM: full-width terminal host (xterm mounts here for a live session,
+        # a read-only body for a historical one).
+        "<div class='dbottom' id='dockBottom'>"
         "<p class='slabel'>Live terminal &middot; full width "
         "&middot; drag the bar above to resize</p>"
-        "<div class='term dock-term-host' id='dockTermHost'>"
-        "<span class='out'>terminal attaches here (wired in W10)</span>"
-        "</div></div>"
+        "<div class='term dock-term-host' id='dockTermHost'></div>"
+        "</div>"
         "</div></div>"
     )
 
@@ -4346,10 +4475,15 @@ def render_project_window_html(project_id: str) -> str:
         "border-radius:9px;padding:1px 7px}"
         ".layoutd .panel .pactions{display:flex;gap:8px;margin-top:10px}"
         # ── v12 Wave 2: the bottom DOCK chrome (INERT this wave) ─────────────
-        ".dock{position:fixed;bottom:0;left:0;right:0;height:300px;"
-        "background:var(--surface);border-top:2px solid var(--accent);"
-        "box-shadow:0 -8px 30px rgba(0,0,0,.5);display:flex;"
-        "flex-direction:column;z-index:50}"
+        # v12 W10 (John change #1): the dock is EMBEDDED in the document flow — a
+        # normal full-width section at the bottom of the project content (NOT a
+        # position:fixed overlay floating over the page). Selecting an effort shows
+        # it in-flow (the page grows / scrolls to it); no effort → display:none.
+        ".dock{position:relative;width:100%;height:420px;margin:12px 0 4px;"
+        "background:var(--surface);border:1px solid var(--border);"
+        "border-top:2px solid var(--accent);border-radius:10px;"
+        "box-shadow:0 4px 20px rgba(0,0,0,.35);display:flex;"
+        "flex-direction:column;overflow:hidden}"
         ".dock .dbar{display:flex;align-items:center;gap:14px;padding:9px 20px;"
         "border-bottom:1px solid var(--border);background:var(--surface2);"
         "flex:0 0 auto}"
@@ -4364,6 +4498,12 @@ def render_project_window_html(project_id: str) -> str:
         ".dock .dbody{display:flex;flex-direction:column;flex:1;min-height:0}"
         ".dock .dtop{padding:11px 20px;overflow-y:auto;flex:0 0 auto;"
         "max-height:48%}"
+        # v12 W10 (change #3): the dock summary header row carries the per-effort
+        # metrics line (Σ tokens · time · $) on the right, like the old cockpit.
+        ".dock .dtop-head{display:flex;align-items:baseline;gap:12px}"
+        ".dock .dock-metrics{margin-left:auto;font-size:11px;"
+        "font-family:ui-monospace,Consolas,monospace;color:var(--text-dim);"
+        "white-space:nowrap}"
         ".dock .dsplit{height:11px;flex:0 0 auto;background:var(--surface2);"
         "border-top:1px solid var(--border);border-bottom:1px solid var(--border);"
         "cursor:row-resize;display:flex;align-items:center;"
@@ -4377,8 +4517,55 @@ def render_project_window_html(project_id: str) -> str:
         "letter-spacing:.7px;color:var(--text-dim);font-weight:700;margin:0 0 4px}"
         ".dock .term{background:#05070c;border:1px solid var(--border);"
         "border-radius:8px;font-family:ui-monospace,Consolas,monospace;"
-        "font-size:12px;padding:12px 14px;flex:1;overflow-y:auto;min-height:0}"
+        "font-size:12px;padding:6px 8px;flex:1;overflow:hidden;min-height:0}"
         ".dock .term .out{color:var(--text-dim)}"
+        # v12 W10 — the context-full WARN banner in the dock bar (intentional
+        # addition beyond the mockup) + the maximized dock state.
+        ".dock .dock-warn{font-size:11.5px;color:#ffd9a8;cursor:pointer;"
+        "background:rgba(251,191,36,.12);border:1px solid rgba(251,191,36,.45);"
+        "border-radius:14px;padding:3px 11px}"
+        ".dock .dock-warn:hover{border-color:var(--warning)}"
+        # Maximize still expands the dock to a full-viewport overlay (a deliberate
+        # blow-up); the DEFAULT/restored state is embedded in-flow (above).
+        ".dock.maxd{position:fixed;top:0;left:0;right:0;bottom:0;height:auto;"
+        "margin:0;border-radius:0;z-index:9000}"
+        ".dock.mind{height:46px}"
+        ".dock.mind .dbody{display:none}"
+        # the dock summary reuses the panel split styles (.summary.split → .smat /
+        # .slinks); make it lay out two equal columns like the panel + mirror the
+        # panel's link/row styling (these are scoped to .panel, so re-declare for
+        # the dock).
+        ".dock .dock-summary.split{display:grid;"
+        "grid-template-columns:1.3fr 1fr;gap:2px 32px}"
+        ".dock .dock-summary .smat{min-width:0;display:flex;flex-direction:column}"
+        ".dock .dock-summary .sgoal{font-size:13px;color:var(--text);"
+        "font-weight:600;margin-bottom:6px}"
+        ".dock .dock-summary .row{display:flex;gap:10px;font-size:12px;"
+        "margin-bottom:4px}"
+        ".dock .dock-summary .row .k{color:var(--text-dim);min-width:80px}"
+        ".dock .dock-summary .slinks{display:flex;flex-direction:column;"
+        "min-width:0}"
+        ".dock .dock-summary .slh{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:.5px;color:var(--text-dim);font-weight:700;margin:2px 0}"
+        ".dock .dock-summary .doc{font-size:12px;color:var(--accent);"
+        "display:flex;align-items:center;gap:6px;margin-bottom:2px}"
+        ".dock .dock-summary .doc .role{font-size:9px;text-transform:uppercase;"
+        "color:var(--text-dim);border:1px solid var(--border);border-radius:8px;"
+        "padding:0 5px}"
+        ".dock .dock-summary .bdeliv{font-size:12px;margin-bottom:6px}"
+        ".dock .dock-summary .summ-loading{color:var(--text-dim);"
+        "font-size:11px;font-style:italic}"
+        # the dock read-only body (historical effort) reuses .ro-* (scoped to
+        # .panel .tpane) → re-declare minimal versions for the dock term host.
+        ".dock .dock-term-host .ro-past{font-size:12px}"
+        ".dock .dock-term-host .ro-continue{background:#1f6feb;color:#fff;"
+        "border:0;border-radius:6px;padding:5px 11px;cursor:pointer;"
+        "font-size:12px;margin-bottom:8px}"
+        ".dock .dock-term-host .ro-sec{display:flex;gap:10px;margin-top:6px;"
+        "font-size:12px}"
+        ".dock .dock-term-host .ro-sec .ro-k{color:var(--text-dim);"
+        "min-width:92px}"
+        ".dock .dock-term-host .ro-note{color:var(--text-dim);font-size:11.5px}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -4454,8 +4641,11 @@ def render_project_window_html(project_id: str) -> str:
         # empty when there are no live sessions; populated by renderSessionBar.)
         "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
-        # v12 Wave 2: the Layout-D bottom DOCK chrome — present but INERT (no
-        # transport / xterm attach; buttons disabled + labeled "wired in W10").
+        # v12 W10 (John change #1): the Layout-D effort DOCK is EMBEDDED in the
+        # document flow — rendered here as a normal full-width section inside the
+        # content column (after the board / panel-stack, above the Tasks strip), so
+        # it reads as part of the page (NOT a position:fixed overlay). Hidden until
+        # an effort is selected (display:none); openEffortDock shows it in-flow.
         + dock_chrome
         # v10 Wave 7: the Boneyard panel template (hidden; cloned into #panelStack
         # by openBoneyard()).
@@ -6169,12 +6359,21 @@ function _buildBarTile(s, finished) {
 // link/button) before reaching the tile, so those keep their own behavior.
 function laneTileClick(ev, sessionId) {
   var t = ev && ev.target;
+  var tile = null;
   while (t && t.classList && !t.classList.contains('tile')) {
     if (t.tagName === 'SUMMARY' || t.tagName === 'A' ||
         t.tagName === 'BUTTON' || t.classList.contains('engtog')) {
       return;   // explicit control handles its own click
     }
     t = t.parentNode;
+  }
+  tile = t;
+  // v12 W10: a Layout-D EFFORT tile (headline / minitile, carries
+  // data-effort-id) opens the SINGLE bottom dock bound to that effort. Any other
+  // tile (legacy lane tile with no effort binding) keeps the inline-panel path.
+  if (tile && tile.getAttribute && tile.getAttribute('data-effort-id') != null) {
+    openEffortDock(sessionId, tile);
+    return;
   }
   openPanel(sessionId);
 }
@@ -6259,6 +6458,11 @@ async function newTermSession(lane, backend, opts) {
 // (closePanel — close-to-tile, NON-destructive) + "🗑 Kill" (killPanel,
 // confirm-gated reap that also removes the tile).
 function openPanel(sessionId) {
+  // F1 (W10 Reviewer): never stack a floating panel for a session that is ALREADY
+  // open in the bottom dock — route the click to the dock so there is exactly ONE
+  // live terminal surface per session (the chip + the board effort tile both point
+  // at the same live session; the dock owns it).
+  if (DOCK && DOCK.session_id === sessionId) { openEffortDock(sessionId); return; }
   // A LIVE managed terminal session → attach its PTY (as today). ANY other tile
   // (historical / discovered / imported) → SYNTHESIZE a panel record from its
   // DOM tile so the panel still opens with the split summary + a read-only body.
@@ -6932,6 +7136,19 @@ async function continueSession(sessionId, lane) {
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
   renderSessionBar();
+  // v12 W10 — if the source was opened in the bottom DOCK (the effort surface),
+  // continue IN the dock: re-bind it to the new live session (a NEW tile lands on
+  // the board via refreshBoard, preserving the new-tile-per-session invariant).
+  if (DOCK && DOCK.session_id === sessionId) {
+    refreshBoard();
+    setTimeout(function () {
+      var tile = document.querySelector(
+        '.tile[data-session="' + _cssEsc(sid) + '"]');
+      openEffortDock(sid, tile);
+    }, 300);
+    setTimeout(repopulate, 600);
+    return;
+  }
   // v10.1 FIX 1 — Restart-in-place: the cockpit's only terminal surface is an
   // inline panel in #panelStack. continueSession mints a BRAND-NEW session id,
   // so openPanel(sid) would stack a SECOND panel below the still-open source.
@@ -7282,8 +7499,8 @@ function maximizePanel(sessionId) {
 // cols/rows to the PTY via term_resize (the existing transport endpoint). Uses
 // the xterm fit addon when present; otherwise relies on the onResize hook the
 // mounted terminal already wires to term_resize.
-function _fitPanelTerminal(sessionId) {
-  var p = PANELS[sessionId];
+function _fitPanelTerminal(sessionId, rec) {
+  var p = rec || PANELS[sessionId];
   if (!p || !p.term) return;
   try {
     if (p.fit && p.fit.fit) {
@@ -7570,8 +7787,11 @@ function _flashPendingPasteHint(sessionId) {
 // Mount xterm.js in the panel body host over the Wave-3 transport (UNCHANGED).
 // Prefer the hand-rolled WebSocket (term_ws); fall back to SSE-out (term_stream2)
 // + POST-in (term_input2). Bytes from read_since are decoded str sent as UTF-8.
-function _mountTerminal(sessionId, body) {
-  var w = PANELS[sessionId];
+function _mountTerminal(sessionId, body, rec) {
+  // rec (v12 W10): the panel record to mount onto. Defaults to PANELS[sessionId]
+  // (the inline-panel path). The bottom dock passes its own DOCK record so the
+  // SAME transport + fit + observer logic drives the dock terminal.
+  var w = rec || PANELS[sessionId];
   if (!w) return;
   if (!window.Terminal) {
     body.textContent = 'terminal component failed to load';
@@ -7587,8 +7807,8 @@ function _mountTerminal(sessionId, body) {
   var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
 
   // Fit to the host NOW + shortly after layout settles (xterm starts at 80 cols).
-  _fitPanelTerminal(sessionId);
-  setTimeout(function () { _fitPanelTerminal(sessionId); }, 60);
+  _fitPanelTerminal(sessionId, w);
+  setTimeout(function () { _fitPanelTerminal(sessionId, w); }, 60);
 
   // v10.1 FIX 4 — make _mountTerminal self-sufficient about reflow. The board
   // path wires a ResizeObserver in _wirePanelResize, but the grass mounts never
@@ -7601,7 +7821,7 @@ function _mountTerminal(sessionId, body) {
   // observers). Idempotent for the board (same cols/rows → xterm no-ops).
   if (typeof ResizeObserver !== 'undefined') {
     try { if (w.fitRo && w.fitRo.disconnect) w.fitRo.disconnect(); } catch (e) {}
-    var fro = new ResizeObserver(function () { _fitPanelTerminal(sessionId); });
+    var fro = new ResizeObserver(function () { _fitPanelTerminal(sessionId, w); });
     fro.observe(body);
     w.fitRo = fro;
   }
@@ -7670,6 +7890,456 @@ function _mountTerminal(sessionId, body) {
     };
     ws.onerror = function () { try { ws.close(); } catch (e) {} startSSE(); };
   } catch (e) { startSSE(); }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// v12 Wave 10 — the SINGLE bottom DOCK (Layout-D). Clicking any effort tile opens
+// THIS dock bound to that effort: a title bar (status dot + title + a 3-node
+// stage track lit by current_stage [EV-2] + min/max/close + a distinct
+// Kill -> Boneyard + the context-full warn banner + Advance ->), summary ON TOP
+// (full width, reusing _renderSplitSummary/_loadPanelSummary), a DRAGGABLE
+// vertical splitter, and a FULL-WIDTH terminal whose HEIGHT the user drags. It
+// reuses the WS->SSE transport + xterm mount/fit (the splitter-drag fit is
+// DEBOUNCED so dragging doesn't thrash the terminal). The legacy #panelStack /
+// openPanel surface stays for the live-session bar chips, grass, boneyard, and
+// chain-nav clones — only effort tiles route here.
+// ════════════════════════════════════════════════════════════════════════════
+
+// DOCK: the one bound effort's transient state {session_id, effort_id, lane,
+// current_stage, status, term, transport, fitRo, body, tpane}. Empty/unbound when
+// the dock is closed (no data-effort-id on #effortDock → the negative DOM case).
+var DOCK = null;
+
+function _dockEl() { return document.getElementById('effortDock'); }
+
+// _dockStageRank: map a stage to the count of reached track nodes (presence —
+// research→1, plan→2, build→3). NOT iterating stage_history (EV-2).
+function _dockStageReached(stage) {
+  if (stage === 'build') return 3;
+  if (stage === 'plan' || stage === 'planning') return 2;
+  return 1;  // research / unknown → first node
+}
+
+// _renderDockTrack: build the 3-node Research→Plan→Build track DOM into #dockTrack
+// from current_stage (presence-based). Mirrors the server _render_layoutd_track.
+function _renderDockTrack(stage) {
+  var host = document.getElementById('dockTrack');
+  if (!host) return;
+  host.innerHTML = '';
+  var lanes = ['research', 'plan', 'build'];
+  var curIdx = (stage === 'build') ? 2
+             : (stage === 'plan' || stage === 'planning') ? 1 : 0;
+  var reached = _dockStageReached(stage);
+  for (var i = 0; i < lanes.length; i++) {
+    var node = document.createElement('span');
+    var cls = ['node', lanes[i]];
+    if (i < reached) cls.push('reached');
+    if (i === curIdx) cls.push('current');
+    node.className = cls.join(' ');
+    host.appendChild(node);
+    if (i < lanes.length - 1) {
+      var line = document.createElement('span');
+      line.className = (i + 1 < reached) ? 'line done' : 'line';
+      host.appendChild(line);
+    }
+  }
+  var lbl = document.createElement('span');
+  lbl.className = 'track-lbl';
+  lbl.textContent = (stage === 'plan' || stage === 'planning') ? 'Plan'
+                  : (stage === 'build') ? 'Build' : 'Research';
+  host.appendChild(lbl);
+}
+
+// _fmtDockTime(ms): a short wall-clock label for the metrics line (s / m / h).
+function _fmtDockTime(ms) {
+  ms = ms || 0;
+  var secs = ms / 1000;
+  if (secs < 60) return secs.toFixed(secs < 10 ? 1 : 0) + 's';
+  var mins = secs / 60;
+  if (mins < 60) return mins.toFixed(1) + 'm';
+  return (mins / 60).toFixed(1) + 'h';
+}
+
+// _loadDockMetrics(effortId): fill #dockMetrics with the SELECTED effort's
+// rollup — "Σ <tok> tok · <time> · $<cost>" — from GET /api/rnd/effort_rollup
+// (numbers only; imported/discovered contribute 0, never fabricated). Read-only;
+// best-effort (any error leaves the placeholder, never throws).
+function _loadDockMetrics(effortId) {
+  var el = document.getElementById('dockMetrics');
+  if (!el) return;
+  el.textContent = 'Σ … tok · … · $…';
+  if (!effortId) return;
+  var url = '/api/rnd/effort_rollup?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&effort=' + encodeURIComponent(effortId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!d || !d.ok) return;
+      var tok = d.tokens || 0;
+      var cost = (d.cost_usd || 0).toFixed(2);
+      el.textContent = 'Σ ' + tok + ' tok · '
+        + _fmtDockTime(d.wall_clock_ms) + ' · $' + cost;
+    })
+    .catch(function () {});
+}
+
+// openEffortDock(sessionId, tile): show the bottom dock bound to the clicked
+// effort. Resolves the effort_id + current_stage + lane from the tile's data-*
+// attrs (server-stamped from the effort view), loads the summary ON TOP, and
+// mounts the terminal (live xterm, or a read-only body for a historical effort).
+function openEffortDock(sessionId, tile) {
+  var dock = _dockEl();
+  if (!dock) return;
+  tile = tile || document.querySelector(
+    '.tile[data-session="' + _cssEsc(sessionId) + '"]');
+  var lane = (tile && tile.getAttribute('data-lane')) || '';
+  var stage = (tile && tile.getAttribute('data-current-stage')) || '';
+  var effortId = (tile && tile.getAttribute('data-effort-id')) || sessionId;
+  var light = (tile && tile.getAttribute('data-light')) || 'grey';
+  var em = (tile && tile.getAttribute('data-effort-managed')) === '1';
+  // Tear down any previously-mounted dock terminal/transport first.
+  _dockTeardownTerminal();
+  var s = MANAGED[sessionId] || _synthSessionRecord(sessionId) ||
+          {session_id: sessionId, lane: lane, status: 'idle', label: ''};
+  var status = s.status || (light === 'green' ? 'running'
+             : light === 'amber' ? 'done' : light === 'red' ? 'failed' : 'idle');
+  // Is this a LIVE managed session? W10-R2-03: require RUNNING — a freshly-DONE
+  // session whose MANAGED chip lingers client-side gets the read-only body, never
+  // a transport mounted on a reaped PTY.
+  var live = !!MANAGED[sessionId] && status === 'running';
+
+  // Bind the dock state.
+  DOCK = {session_id: sessionId, effort_id: effortId, lane: lane,
+          current_stage: stage || lane, status: status, live: live,
+          effort_managed: em, term: null, transport: null, fitRo: null,
+          body: null, tpane: null};
+  dock.setAttribute('data-effort-id', effortId);
+  dock.setAttribute('data-session', sessionId);
+  dock.classList.remove('mind', 'maxd');
+  dock.style.display = 'flex';
+
+  // Title bar.
+  var dotEl = document.getElementById('dockDot');
+  if (dotEl) dotEl.className = 'dot ' + _statusColor(status);
+  var titleEl = document.getElementById('dockTitle');
+  if (titleEl) {
+    var skl = _skillForLane(lane);
+    titleEl.textContent = (s.label && s.label.trim())
+      ? s.label : ((lane || 'effort') + (skl ? ' · ' + skl : ''));
+  }
+  var runEl = document.getElementById('dockRun');
+  if (runEl) runEl.style.display = (status === 'running') ? '' : 'none';
+  _renderDockTrack(DOCK.current_stage);
+  // Advance → is shown for an effort whose current stage is not the last (build).
+  var advEl = document.getElementById('dockAdvance');
+  if (advEl) {
+    var atBuild = (DOCK.current_stage === 'build');
+    advEl.style.display = atBuild ? 'none' : '';
+  }
+  // Warn banner hidden until the poll says over_threshold.
+  var warnEl = document.getElementById('dockWarn');
+  if (warnEl) warnEl.style.display = 'none';
+
+  // Summary ON TOP (reuses the panel split-summary loader/renderer).
+  var summHost = document.getElementById('dockSummary');
+  if (summHost) {
+    summHost.innerHTML = '<div class="summ-loading">loading effort summary…</div>';
+    _loadPanelSummary(sessionId, summHost);
+  }
+  // v12 W10 (change #3): the per-effort metrics line (Σ tokens · time · $).
+  _loadDockMetrics(effortId);
+
+  // Terminal BELOW (full width). Live → xterm over the transport; historical →
+  // a read-only body (summary already on top).
+  var host = document.getElementById('dockTermHost');
+  if (host) {
+    host.innerHTML = '';
+    DOCK.body = host;
+    DOCK.tpane = document.getElementById('dockBottom');
+    if (live) {
+      _mountTerminal(sessionId, host, DOCK);   // reuses transport + fit + observer
+    } else {
+      _mountReadOnlyBody(sessionId, host, s);
+    }
+  }
+
+  // Wire the draggable splitter (debounced fit) + start the context-status poll.
+  _wireDockSplitter();
+  _startDockContextPoll();
+  // Fit once the layout has settled.
+  setTimeout(function () { _fitPanelTerminal(sessionId, DOCK); }, 80);
+}
+
+// _dockTeardownTerminal: dispose the dock's xterm + transport + observer (no
+// effect on the session — the PTY keeps running server-side).
+function _dockTeardownTerminal() {
+  if (!DOCK) return;
+  try { if (DOCK.fitRo && DOCK.fitRo.disconnect) DOCK.fitRo.disconnect(); } catch (e) {}
+  try { if (DOCK.transport && DOCK.transport.close) DOCK.transport.close(); } catch (e) {}
+  try { if (DOCK.term && DOCK.term.dispose) DOCK.term.dispose(); } catch (e) {}
+  DOCK.term = null; DOCK.transport = null; DOCK.fitRo = null;
+}
+
+// _wireDockSplitter: drag the .dsplit bar to set the terminal (bottom) height.
+// The fit is DEBOUNCED (requestAnimationFrame-coalesced) so a fast drag does NOT
+// thrash xterm's resize (SK-9) — one fit per animation frame, plus a final fit on
+// pointer-up.
+var _dockSplitWired = false;
+function _wireDockSplitter() {
+  var split = document.getElementById('dockSplit');
+  var dock = _dockEl();
+  if (!split || !dock || _dockSplitWired) return;
+  _dockSplitWired = true;
+  var dragging = false;
+  var raf = 0;
+  function _debouncedFit() {
+    if (raf) return;
+    raf = (window.requestAnimationFrame || function (f) { return setTimeout(f, 16); })(
+      function () { raf = 0; if (DOCK) _fitPanelTerminal(DOCK.session_id, DOCK); });
+  }
+  function _onMove(e) {
+    if (!dragging) return;
+    var y = (e.touches ? e.touches[0].clientY : e.clientY);
+    // v12 W10 (change #1): the dock is EMBEDDED (top-anchored in the flow), so its
+    // HEIGHT = (pointer Y - dock top). When maximized it is a fixed full-viewport
+    // overlay (top-anchored at 0) and the same math holds. Clamp to a sane range.
+    var top = dock.getBoundingClientRect().top;
+    var h = Math.max(200, Math.min(window.innerHeight * 0.95, y - top));
+    dock.style.height = h + 'px';
+    _debouncedFit();
+    if (e.cancelable) e.preventDefault();
+  }
+  function _onUp() {
+    if (!dragging) return;
+    dragging = false;
+    document.removeEventListener('mousemove', _onMove);
+    document.removeEventListener('mouseup', _onUp);
+    document.removeEventListener('touchmove', _onMove);
+    document.removeEventListener('touchend', _onUp);
+    if (DOCK) _fitPanelTerminal(DOCK.session_id, DOCK);   // final crisp fit
+  }
+  function _onDown(e) {
+    dragging = true;
+    document.addEventListener('mousemove', _onMove);
+    document.addEventListener('mouseup', _onUp);
+    document.addEventListener('touchmove', _onMove, {passive: false});
+    document.addEventListener('touchend', _onUp);
+    if (e.cancelable) e.preventDefault();
+  }
+  split.addEventListener('mousedown', _onDown);
+  split.addEventListener('touchstart', _onDown, {passive: false});
+}
+
+// dockMinimize / dockMaximize / dockClose: the dock window controls. Minimize/
+// maximize keep the session running (re-fit on change); close hides + unbinds the
+// dock (does NOT kill — the effort stays, reopen from its tile).
+function dockMinimize() {
+  var dock = _dockEl();
+  if (!dock) return;
+  dock.classList.remove('maxd');
+  dock.classList.toggle('mind');
+  if (!dock.classList.contains('mind') && DOCK)
+    setTimeout(function () { _fitPanelTerminal(DOCK.session_id, DOCK); }, 40);
+}
+function dockMaximize() {
+  var dock = _dockEl();
+  if (!dock) return;
+  dock.classList.remove('mind');
+  dock.classList.toggle('maxd');
+  if (DOCK) {
+    _fitPanelTerminal(DOCK.session_id, DOCK);
+    setTimeout(function () { _fitPanelTerminal(DOCK.session_id, DOCK); }, 60);
+  }
+}
+function dockClose() {
+  var dock = _dockEl();
+  _dockTeardownTerminal();
+  _stopDockContextPoll();
+  if (dock) {
+    dock.style.display = 'none';
+    dock.removeAttribute('data-effort-id');
+    dock.removeAttribute('data-session');
+    dock.classList.remove('mind', 'maxd');
+  }
+  DOCK = null;
+}
+
+// dockAdvance: in-session stage advance for the bound effort. POST
+// /api/rnd/advance_stage — KEEPS the same session (no new session minted, nothing
+// injected into the PTY). On success: relabel the stage track + migrate the tile's
+// zone via a board refresh; the session-id SET is unchanged.
+async function dockAdvance() {
+  if (!DOCK) return;
+  var sid = DOCK.session_id;
+  var payload = {project_id: PROJECT_ID, session: sid};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/advance_stage', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/advance_stage', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[advance error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[advance refused] ' + ((data && (data.reason || data.error))
+      || 'unknown'));
+    return;
+  }
+  var rec = data.session || {};
+  var newStage = rec.current_stage || data.to_stage || DOCK.current_stage;
+  DOCK.current_stage = newStage;
+  _renderDockTrack(newStage);
+  var advEl = document.getElementById('dockAdvance');
+  if (advEl) advEl.style.display = (newStage === 'build') ? 'none' : '';
+  // Refresh the board so the tile migrates zones (its data-current-stage updates);
+  // the SAME session stays bound to the dock.
+  refreshBoard();
+}
+
+// dockKill: deliberate hard-kill of the bound effort → Boneyard. Confirm-gated;
+// reuses the existing term_kill path (reap PTY + worktree, files a boneyard
+// entry), then closes the dock + removes the tile.
+async function dockKill() {
+  if (!DOCK) return;
+  if (!confirm('Kill this effort and send it to the Boneyard? '
+    + 'This ends the session and reaps its worktree.')) return;
+  var sid = DOCK.session_id;
+  try {
+    var r = await _postJson('/api/rnd/term_kill', {session: sid});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_kill', {session: sid});
+    }
+  } catch (e) { /* best-effort; still close the dock */ }
+  if (MANAGED[sid]) delete MANAGED[sid];
+  _KILLED[sid] = true;
+  _removeSessionTile(sid);
+  dockClose();
+  renderSessionBar();
+  refreshBoard();
+}
+
+// dockDelete: v9 TRUE-delete (keep documents) for the bound effort. Reuses the
+// shared deletePanel() (confirm-gated; POST /api/rnd/term_delete → drops the
+// registry record + effort/summary cache, KEEPS the produced docs), then closes
+// the dock. Distinct from dockKill (which reaps the worktree → Boneyard).
+async function dockDelete() {
+  if (!DOCK) return;
+  var sid = DOCK.session_id;
+  await deletePanel(sid);     // confirm + term_delete + tile/board cleanup
+  dockClose();
+}
+
+// ── context-full warn banner (poll → one-click handoff) ─────────────────────
+var _dockPollTimer = null;
+function _startDockContextPoll() {
+  _stopDockContextPoll();
+  // Only a LIVE session can fill its context; a historical effort never warns.
+  if (!DOCK || !DOCK.live) return;
+  var sid = DOCK.session_id;
+  function _poll() {
+    if (!DOCK || DOCK.session_id !== sid) return;
+    var url = '/api/rnd/context_status?session=' + encodeURIComponent(sid)
+      + _tokenQ();
+    fetch(url, _jsonHdrs())
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!DOCK || DOCK.session_id !== sid) return;
+        var warnEl = document.getElementById('dockWarn');
+        if (!warnEl) return;
+        warnEl.style.display = (d && d.ok && d.over_threshold) ? '' : 'none';
+      })
+      .catch(function () {});
+  }
+  _poll();
+  _dockPollTimer = setInterval(_poll, 8000);
+}
+function _stopDockContextPoll() {
+  if (_dockPollTimer) { clearInterval(_dockPollTimer); _dockPollTimer = null; }
+}
+
+// dockHandoffToFresh: the warn-banner one-click action. POST
+// /api/rnd/handoff_to_fresh — continue the effort in a FRESH session that JOINS
+// the same effort (same effort_id); the next prompt is held as a PENDING PASTE
+// (UNSENT). On success, re-bind the dock to the new live session.
+async function dockHandoffToFresh() {
+  if (!DOCK) return;
+  var sid = DOCK.session_id;
+  var payload = {project_id: PROJECT_ID, session: sid};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/handoff_to_fresh', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/handoff_to_fresh', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[handoff error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[handoff refused] ' + ((data && (data.reason || data.error))
+      || 'unknown'));
+    return;
+  }
+  var nr = data.new_session || {};
+  var nsid = nr.session_id;
+  if (nsid) {
+    MANAGED[nsid] = {session_id: nsid, lane: nr.lane || DOCK.lane,
+      backend: '', status: nr.status || 'running', label: nr.label || '',
+      idx: (_laneCounters[nr.lane || DOCK.lane] =
+            (_laneCounters[nr.lane || DOCK.lane] || 0) + 1)};
+    renderSessionBar();
+    refreshBoard();
+    setTimeout(function () {
+      var tile = document.querySelector(
+        '.tile[data-session="' + _cssEsc(nsid) + '"]');
+      openEffortDock(nsid, tile);
+    }, 300);
+  } else {
+    dockClose();
+  }
+}
+
+// newEffort(stage): the "+ New effort" control. Start a NEW effort_managed trio
+// session at the given stage (default research) via the existing term_start path
+// with effort_managed=true, then open the dock bound to it. (term_start tolerates
+// the extra field; the server marks it effort_managed.)
+async function newEffort(stage) {
+  stage = stage || 'research';
+  // v12 W10 (John change #2): start at research OR plan (W6 supports both). The
+  // lane name mirrors the stage (term_start accepts both 'plan' and 'planning').
+  var lane = (stage === 'plan') ? 'plan'
+           : (stage === 'build') ? 'build' : 'research';
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'claude',
+                 effort_managed: true};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_start', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_start', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[new effort error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[new effort refused] ' + ((data && (data.error || data.reason))
+      || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {session_id: sid, lane: rec.lane || lane,
+    backend: rec.backend || 'claude', status: rec.status || 'running',
+    label: rec.label || '',
+    idx: (_laneCounters[rec.lane || lane] =
+          (_laneCounters[rec.lane || lane] || 0) + 1)};
+  renderSessionBar();
+  refreshBoard();
+  setTimeout(function () {
+    var tile = document.querySelector(
+      '.tile[data-session="' + _cssEsc(sid) + '"]');
+    openEffortDock(sid, tile);
+  }, 400);
 }
 // (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
 // stack in the document flow — Wave 5 adds the terminal-pane vertical resize.)
@@ -11493,6 +12163,40 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "observed_bytes": cf.get("observed_bytes", 0),
                         "budget": cf.get("budget", 0),
                     })
+            elif self.path.startswith("/api/rnd/effort_rollup"):
+                # Read-only (v12 W10 fix #3): the SELECTED effort's cost/tokens/
+                # wall-clock rollup, summed over the effort's per-stage job_runner
+                # cost records (effort_view.effort_rollup). The dock summary header
+                # renders "Σ <tok> tok · <time> · $<cost>" from this. SAFE — numbers
+                # only (no worktree/branch). NO mutation, NO model call. AUTH:
+                # ``?token=``. /api/rnd/effort_rollup?pid=<id>&effort=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("pid", [""])[0]
+                       or q.get("project_id", [""])[0] or "").strip()
+                effort = (q.get("effort", [""])[0]
+                          or q.get("session", [""])[0] or "").strip()
+                if not pid or not effort:
+                    self._send_json({"ok": False,
+                                     "error": "pid, effort required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    folder = (proj or {}).get("folder_path", "")
+                    roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0}
+                    try:
+                        roll = _effview.effort_rollup(folder, pid, effort)
+                    except Exception:
+                        pass
+                    self._send_json({
+                        "ok": True,
+                        "tokens": int(roll.get("tokens", 0) or 0),
+                        "cost_usd": float(roll.get("cost_usd", 0.0) or 0.0),
+                        "wall_clock_ms": int(roll.get("wall_clock_ms", 0) or 0),
+                    })
             elif self.path.startswith("/api/rnd/build_deliverable"):
                 # Read-only (v5 Wave 4): resolve the DELIVERABLE one BUILD session
                 # produced — explicit signals only, never fabricated. The build
@@ -12588,6 +13292,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # handoff in the per-project Anchor reference. The bare-PTY launch
             # still works when there is no plan set (no crash; priming skipped).
             _seed_session = (body.get("seed_session", "") or "").strip() or None
+            # v12 Wave 10: the "+ New effort" control starts an effort_managed trio
+            # session (the v12 discriminator — set ONLY by the v12 entrypoints). A
+            # legacy launch omits it (default False), so the legacy paths are
+            # unaffected. Coerced to a real bool.
+            _effort_managed = bool(body.get("effort_managed", False))
             if not pid or not lane:
                 self._send_json({"ok": False,
                                  "error": "project_id and lane required"}, 400)
@@ -12599,7 +13308,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 else:
                     try:
                         rec = _termsess.start_session(pid, lane, backend=backend,
-                                                      label=label)
+                                                      label=label,
+                                                      effort_managed=_effort_managed)
                     except _termsess.TerminalSessionError as exc:
                         self._send_json({"ok": False, "error": str(exc)}, 400)
                     else:

@@ -390,3 +390,90 @@ def effort_for_session(folder_path, project_id, session_id):
             if m.get("session_id") == session_id:
                 return eff
     return None
+
+
+def effort_rollup(folder_path, project_id, effort) -> dict:
+    """Sum one EFFORT's cost/tokens/wall-clock across its stages (v12 W10 fix #3).
+
+    ``effort`` may be an effort dict (from :func:`build_effort_view` /
+    :func:`effort_for_session`) OR a session id (resolved via
+    :func:`effort_for_session`). The rollup sums the ``job_runner`` cost records of
+    every effort pointer-record THIS effort's stages produced — joined per
+    ``(store_lane, session_id)`` via ``effort_history.efforts_for_session_id`` and
+    DEDUPED by ``(store_lane, job_id)`` so a stage referenced from both
+    ``stage_history`` and ``members`` is never double-counted.
+
+    Mirrors the honesty contract of :func:`effort_history.project_effort_rollup`:
+    DISCOVERED (brownfield-imported) efforts contribute ZERO (never fabricated);
+    an effort with no captured cost yet rolls up to honest zeros. Returns
+    ``{"tokens": int, "cost_usd": float, "wall_clock_ms": int}``. Read-only;
+    best-effort — never raises (a per-stage failure is skipped).
+    """
+    import effort_history as _eh
+
+    if isinstance(effort, str):
+        effort = effort_for_session(folder_path, project_id, effort)
+    if not isinstance(effort, dict):
+        return {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0}
+
+    # Collect the (store_lane, session_id) pairs the effort's stages touch. Use
+    # stage_history (carries store_lane) first, then the members (lane). A set
+    # dedups identical pairs.
+    pairs = set()
+    for ent in effort.get("stage_history", []) or []:
+        if not isinstance(ent, dict):
+            continue
+        sid = (ent.get("session_id") or "").strip()
+        if not sid:
+            continue
+        store_lane = (ent.get("store_lane")
+                      or _STORE_LANE_FOR_STAGE.get(ent.get("stage", ""), "")
+                      or "").strip()
+        if store_lane:
+            pairs.add((store_lane, sid))
+    for m in effort.get("members", []) or []:
+        if not isinstance(m, dict):
+            continue
+        sid = (m.get("session_id") or "").strip()
+        if not sid:
+            continue
+        store_lane = (_STORE_LANE_FOR_STAGE.get(m.get("stage", ""), "")
+                      or m.get("lane") or "").strip()
+        if store_lane:
+            pairs.add((store_lane, sid))
+
+    tokens = 0
+    cost_usd = 0.0
+    wall_clock_ms = 0
+    seen = set()  # (store_lane, job_id) — dedup across overlapping pairs
+    for store_lane, sid in pairs:
+        try:
+            recs = _eh.efforts_for_session_id(
+                folder_path, project_id, store_lane, sid)
+        except Exception:
+            recs = []
+        for rec in recs:
+            if not isinstance(rec, dict):
+                continue
+            if _eh.is_discovered(rec):
+                continue  # imported/discovered → never contributes (honesty)
+            key = (store_lane, rec.get("job_id") or id(rec))
+            if key in seen:
+                continue
+            seen.add(key)
+            cost = rec.get("cost") or {}
+            m_tokens = int(cost.get("total_tokens", 0) or 0)
+            if not m_tokens:
+                m_tokens = (int(cost.get("input_tokens", 0) or 0)
+                            + int(cost.get("output_tokens", 0) or 0))
+            tokens += m_tokens
+            wall_clock_ms += int(cost.get("duration_ms", 0) or 0)
+            try:
+                cost_usd += float(cost.get("total_cost_usd", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                pass
+    return {
+        "tokens": tokens,
+        "cost_usd": round(cost_usd, 6),
+        "wall_clock_ms": wall_clock_ms,
+    }

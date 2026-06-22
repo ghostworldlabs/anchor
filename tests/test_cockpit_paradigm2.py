@@ -187,12 +187,13 @@ def server(gui_env):
 
 
 def test_clicking_historical_tile_opens_inline_panel(server, tmp_path):
-    """The core regression: clicking a tile for a NON-LIVE (historical) session
-    must open the inline panel AND the panel must POPULATE with real content
-    (>=1 doc link in .slinks) — proving the panel is reachable (laneTileClick +
-    openPanel no longer dead for historical ids) and not an empty shell, with no
-    JS console errors. Uses a discovered planning session whose MASTER/IMPL docs
-    resolve to real doc-role links.
+    """The core regression (v12 W10 migration): clicking an EFFORT tile for a
+    NON-LIVE (historical) session must open the SINGLE bottom DOCK (replacing the
+    inline-panel stack for efforts) bound to that effort AND its summary region
+    must POPULATE with real content (>=1 doc link in .slinks) — proving the dock
+    is reachable (laneTileClick → openEffortDock no longer dead for historical
+    ids) and not an empty shell, with no JS console errors. Uses a discovered
+    planning session whose MASTER/IMPL docs resolve to real doc-role links.
     """
     pytest.importorskip("playwright.sync_api")
     gui, base, _ = server
@@ -218,14 +219,21 @@ def test_clicking_historical_tile_opens_inline_panel(server, tmp_path):
         assert pg.eval_on_selector_all(".sectionlbl", "e=>e.length") == 2
         assert pg.eval_on_selector_all(".lane-tile", "e=>e.length") >= 1, \
             "no clickable lane tile rendered"
-        assert pg.eval_on_selector_all("#panelStack .panel", "e=>e.length") == 0
+        # the dock starts hidden + UNBOUND (no effort selected → negative case).
+        assert pg.eval_on_selector(
+            "#effortDock", "e=>e.style.display") == "none"
         pg.click(".lane-tile")
-        # the inline panel must appear in #panelStack (the dead-path bug)
-        pg.wait_for_selector("#panelStack .panel", timeout=5000)
-        assert pg.eval_on_selector_all("#panelStack .panel", "e=>e.length") == 1
-        # and it must POPULATE: at least one real doc link in the split summary
-        pg.wait_for_selector("#panelStack .panel .slinks a", timeout=8000)
-        links = pg.eval_on_selector_all("#panelStack .panel .slinks a", "e=>e.length")
-        assert links >= 1, "panel opened but split summary has no doc links (empty shell)"
-        assert not errors, f"JS console errors on panel open: {errors}"
+        # the SINGLE bottom dock opens (the W10 surface for efforts).
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=5000)
+        # and it is BOUND to a real effort (data-effort-id set).
+        assert pg.eval_on_selector(
+            "#effortDock", "e=>e.getAttribute('data-effort-id')"), \
+            "dock opened but not bound to an effort_id"
+        # the summary region (ON TOP) populates with >=1 real doc link.
+        pg.wait_for_selector("#dockSummary .slinks a", timeout=8000)
+        links = pg.eval_on_selector_all("#dockSummary .slinks a", "e=>e.length")
+        assert links >= 1, "dock opened but summary has no doc links (empty shell)"
+        assert not errors, f"JS console errors on dock open: {errors}"
         b.close()

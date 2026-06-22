@@ -163,7 +163,8 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     # wave, wired in W10) is the effort-start entry, and the masthead "Open
     # terminal" still wires the live general-session start path
     # (newTermSession → term_start → terminal_session.start_session).
-    assert "id='newEffortBtn'" in html
+    assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
+    assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     assert "newTermSession('general','claude')" in html
     # Real xterm.js terminal: the vendored library + stylesheet are included and
     # the inline panel mounts xterm directly (new window.Terminal). v4.1: the v2

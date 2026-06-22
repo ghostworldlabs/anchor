@@ -185,6 +185,40 @@
 - **RE-GATE:** 1362 passed, 1 skipped. **Converged. Backend (Waves 1–9) COMPLETE** — next are the UI-gated
   waves W10 (live Layout-D + dock) + W11 (grass/general/boneyard), then W12 (CLI + healthcheck + docs).
 
+## Wave 10 — Wire Layout-D live: effort-view board + bottom dock (UI-gated) — GREEN ✅ (John sign-off pending)
+
+- **EXECUTE:** the board binds to the effort view (`_build_effort_index`/`_effort_data_attrs`; tiles stamp
+  `data-effort-id`+`data-current-stage`); the SINGLE bottom dock goes live — `openEffortDock` (summary-on-top
+  via `_renderSplitSummary`, draggable splitter with rAF-debounced fit, full-width live terminal reusing
+  WS→SSE + xterm), `_renderDockTrack` (EV-2: lights nodes by `current_stage` presence, not stage_history),
+  `dockAdvance`→`/api/rnd/advance_stage` (same session, refreshBoard migrates the tile), context-full warn
+  banner polling `/api/rnd/context_status`→one-click `/api/rnd/handoff_to_fresh`, `dockKill`→Boneyard,
+  `dockDelete` (v9 true-delete), live `+ New effort`. Home rows reflect effort current_stage (cache-only).
+  New `tests/test_layoutd_live_v12.py` (DOM pos/neg + render-smoke) + `tests/test_layoutd_live_playwright_v12.py`
+  (machine-checkable: bind+attach / drag-keeps-attached+echo / Advance-no-mint / warn→handoff).
+- **GATE:** 1370 passed, 1 skipped.
+- **REVIEW (2 independent):** both GO-WITH-NITS, zero formal BLOCKERs; migrated tests verified NOT weakened.
+  R1 **MAJOR F1:** a live session reachable from BOTH the effort tile (→dock) and its session-bar chip
+  (→openPanel) could double-mount (openPanel guarded PANELS, not DOCK). FIXED: `openPanel` routes an
+  already-docked session to `openEffortDock` (one live surface per session) + a Playwright guard test.
+  R2 NITs FIXED: `live` gated on `status==='running'` (never mount a reaped PTY); deterministic warn-banner
+  precondition; build-at-build Advance-hidden test added. **F2 → W11 REQUIREMENT:** the dock "replaces the
+  floating stack" only for EFFORT tiles in W10; `#panelStack`/openPanel stays for grass/boneyard/chain-nav/
+  chips. **W11 must either retire `#panelStack` or the EXECUTION-LOG records the coexistence as final.**
+- **RE-GATE:** 1372 passed after F1 + the 3 NIT fixes.
+- **JOHN UI SIGN-OFF (with 3 refinements, applied):** (1) **EMBED the dock** — it was `position:fixed`
+  floating; now `position:relative` in-flow (reads as part of the page; maximize still expands to full-viewport).
+  (2) **Two new-session controls** — `+ New research` (`#newResearchBtn`) + `+ New plan/build`
+  (`#newPlanBuildBtn`) replacing the single `+ New effort` (an effort can start at research OR plan). (3)
+  **Per-effort metrics** — `effort_view.effort_rollup` + `GET /api/rnd/effort_rollup` render the selected
+  effort's `Σ tok · time · $` in the dock summary. Clarified for John WHERE cost shows: the **masthead**
+  project rollup (`Σ tok · $ · time · sessions`, lifetime/30d) + the **per-effort dock** line; and the
+  **previous-versions** link = the per-zone collapsible **"Hide/Show all N older … sessions"** shelf line.
+  The button rename broke 4 tests asserting `#newEffortBtn` (the full gate caught them, the agent's targeted
+  run did not) — all 4 migrated honestly to the two new buttons. Re-screenshot `_mockups/w10_layoutd_live_screenshot.png`.
+- **FINAL GATE:** 1377 passed, 1 skipped. **Converged + John signed off.**
+
+
 
 
 
