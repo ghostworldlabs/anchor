@@ -162,6 +162,30 @@
 - **RE-GATE:** 1352 passed, 1 skipped. **Converged.** (Lesson: an integration-order bug hid behind
   isolation-only tests + a gate that didn't exercise the wired poll order — the adversarial integration repro caught it.)
 
+## Wave 9 — Effort view-layer: group chains into efforts (NEW effort_view.py) — GREEN ✅ (backend complete)
+
+- **EXECUTE:** NEW `effort_view.py` (stdlib-only, in `dist_manifest.txt`) — `build_effort_view(folder, pid)`
+  groups registry records by `chain_id` → ONE effort per chain (effort_id=root, current_stage=most-advanced,
+  synth stage_history research→plan→build referencing each member's docs+cached summary, SAFE member
+  projections — no worktree/branch); a single-session v12 effort passes through; **rebuilt from the registry
+  each call (derived cache, NOT a stored source); deduped (migration-overlap → one effort, live wins); a
+  deleted member drops (no ghost); read-only (never mutates/reaps)**. `effort_for_session`. `anchor_gui._gather_efforts`
+  delegates; legacy `_gather_project_sessions` retained as fallback. New `tests/test_effort_view_v12.py` +
+  `tests/test_effort_view_drift_v12.py`.
+- **GATE:** 1362 passed, 1 skipped.
+- **REVIEW (2 independent):** both GO-WITH-NITS, zero BLOCKERs. Verified read-only/non-destructive (SC7),
+  dedup (len==1, live wins), drift no-ghost, SAFE projection, stdlib-only + distro green, idempotent.
+  ≥2-agree NIT (EV-1/F1): the Anchor-repo guard was a tautological no-op → REMOVED (read-only purity is the
+  real, tested guarantee; dropped the now-unused `paths` import). F3: added an `effort_id` sort tiebreaker
+  (defined total order). **Accepted NITs:** F2 (per-member docs+summary read twice — bounded O(members), NOT
+  the global-scan perf hazard) left as-is. **EV-2 → W10 REQUIREMENT:** two same-stage members emit duplicate
+  stage_history entries (matches the W9 spec "one entry per member"); **W10's stage-track renderer MUST light
+  nodes from `current_stage` (presence-based) and tolerate duplicate stage labels** (do not iterate
+  stage_history 1:1 for the 3-node track).
+- **RE-GATE:** 1362 passed, 1 skipped. **Converged. Backend (Waves 1–9) COMPLETE** — next are the UI-gated
+  waves W10 (live Layout-D + dock) + W11 (grass/general/boneyard), then W12 (CLI + healthcheck + docs).
+
+
 
 
 

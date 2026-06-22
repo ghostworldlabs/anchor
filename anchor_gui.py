@@ -440,6 +440,7 @@ import preview_server as _preview
 import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
+import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -2310,6 +2311,30 @@ def _gather_project_sessions(folder_path, project_id, efforts_by_lane=None):
     # live managed sessions carry their own v6 parent/chain lineage.
     _attach_build_planning_tie(out)
     return out
+
+
+def _gather_efforts(project_id):
+    """Return the project's EFFORT view (v12 Wave 9) for the render layer.
+
+    Thin accessor over :func:`effort_view.build_effort_view` — groups the
+    project's registry chains AND new single-session efforts into one uniform
+    list of efforts (one per chain, deduped against the migration overlap, no
+    ghost stage for a deleted member), REBUILT from the registry on every call.
+    Consumed by the W10/W11 render layer. The legacy
+    :func:`_gather_project_sessions` is RETAINED as the fallback (not removed).
+
+    Resolves the project's folder from the registry; honest ``[]`` for an unknown
+    project or any failure (never raises — best-effort, like the legacy gather).
+    """
+    try:
+        entry = _rnd.get_project(project_id)
+    except Exception:
+        entry = None
+    folder_path = (entry or {}).get("folder_path", "") if entry else ""
+    try:
+        return _effview.build_effort_view(folder_path, project_id)
+    except Exception:
+        return []
 
 
 def _sv_source_dir(sv) -> str:
