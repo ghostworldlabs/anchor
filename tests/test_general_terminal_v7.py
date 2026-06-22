@@ -259,7 +259,7 @@ def test_open_terminal_button_present(env):
     assert len(found) == 1, "the Open terminal button is not in the header"
     # Its onclick (raw HTML, survives the script strip since it's an attribute)
     # launches a bare general session.
-    assert "newTermSession('general'" in html, \
+    assert "newGeneral('" in html, \
         "Open terminal button does not launch a general session"
     # Human-meaningful label.
     assert "Open terminal" in html
@@ -316,8 +316,8 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
     """End to end in a real browser:
 
       1. Load the project window; click "Open terminal".
-      2. A bare general session starts → an inline panel opens in #panelStack AND
-         a live chip appears in #sessionBar (data-lane='general').
+      2. v12 W11: a bare general session starts → opens in the W10 bottom DOCK
+         (bound to the general session id, terminal attached, no stage track/Advance).
       3. NO new tile is added to any trio board lane column for it.
       4. No JS console errors.
 
@@ -350,21 +350,21 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
         pg.wait_for_selector("#openTermBtn", timeout=8000)
         pg.click("#openTermBtn")
 
-        # 2) A live chip for a GENERAL session appears in the top active strip.
-        chip_sel = "#sessionBar .live-chip[data-lane='general']"
-        pg.wait_for_selector(chip_sel, timeout=8000)
-        assert pg.eval_on_selector_all(chip_sel, "e=>e.length") == 1, \
-            "expected exactly one general chip in the active strip"
-        gsid = pg.eval_on_selector(
-            chip_sel, "e=>e.getAttribute('data-session')")
-        assert gsid, "general chip has no session id"
+        # 2) v12 W11: a bare general session opens in the W10 bottom DOCK (not the
+        #    old #panelStack), bound to the general session id, with its terminal
+        #    attached. (General is NOT a trio effort → no stage track / no Advance.)
+        pg.wait_for_function(
+            "() => document.getElementById('effortDock').style.display === 'flex'",
+            timeout=8000)
+        gsid = pg.eval_on_selector("#effortDock", "e=>e.getAttribute('data-session')")
+        assert gsid, "dock not bound to the general session"
+        pg.wait_for_selector("#dockTermHost .xterm", timeout=8000)
+        # general → no Advance affordance in the dock (suppressed for lane=='general').
+        assert pg.eval_on_selector(
+            "#dockAdvance", "e=>getComputedStyle(e).display") == "none", \
+            "general session should not offer Advance"
 
-        # An inline panel opened for it in the panel stack.
-        pg.wait_for_selector(
-            "#panelStack .panel[data-session='%s']" % gsid, timeout=8000)
-
-        # 3) NO trio BOARD tile was created for the general session (the
-        # session-bar reopen chip is expected + lives outside #kanbanBoard).
+        # 3) NO trio BOARD tile was created for the general session.
         assert pg.eval_on_selector_all(
             "#kanbanBoard .tile[data-session='%s']" % gsid,
             "e=>e.length") == 0, \

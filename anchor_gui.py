@@ -4579,13 +4579,14 @@ def render_project_window_html(project_id: str) -> str:
         "<div class='right'>"
         f"<span class='pri p{pr}'>P{pr}</span>"
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
-        # v7 Wave 4 (#4): "Open terminal" — start a BARE general session (no trio
-        # skill seed) via the existing newTermSession path. It opens an inline
-        # panel + a top-strip chip like any live session and carries the per-panel
-        # Claude/Gemini engine toggle. It is NOT a board lane column (John's choice
-        # B) and never auto-advances. Defaults to Claude; the panel toggle switches.
+        # v7 Wave 4 (#4) → v12 Wave 11: "Open terminal" — start a BARE general
+        # session (no trio skill seed). v12 W11 (SC6): it now opens in the W10
+        # BOTTOM DOCK like any effort (summary-on-top + terminal) instead of a
+        # floating #panelStack panel — but it is NOT a trio effort, so the dock
+        # shows NO stage track and NO Advance. It is NOT a board lane column
+        # (John's choice B) and never auto-advances. Defaults to Claude.
         "<button class='rnd-mini rnd-accent' id='openTermBtn' "
-        "onclick=\"newTermSession('general','claude')\">"
+        "onclick=\"newGeneral('claude')\">"
         "&#9000; Open terminal</button>"
         # v10 Wave 7 (#3): "Boneyard" — open the per-project searchable list of
         # DISCARDED material (hard-killed-w/-material + v9-deleted + deleted-grass
@@ -4640,6 +4641,24 @@ def render_project_window_html(project_id: str) -> str:
         # its panel keeps the chip (reopenable); hard-kill removes it. (No-op /
         # empty when there are no live sessions; populated by renderSessionBar.)
         "<div class='live-session-bar' id='sessionBar'></div>"
+        # v12 Wave 11 — F2 COEXISTENCE (FINAL, recorded per the W10 reviewer's
+        # "F2 → W11 REQUIREMENT"). The W10 bottom dock (#effortDock) is now the
+        # single live surface for EVERY trio/general effort: effort tiles open it,
+        # chain-nav routes to it (openPanel re-routes an already-docked session to
+        # the dock), and General (W11, SC6) opens in it. ``#panelStack`` is NOT
+        # retired — two render surfaces still legitimately mount panels into it,
+        # and both ride on the existing, GREEN panel-manager:
+        #   1. the Grass two-pane WORKBENCH (#grassPanel, openGrassWorkbench) — a
+        #      full-width two-pane idea workbench whose ONE session terminal mounts
+        #      inline; it is its own surface, not an effort tile;
+        #   2. the per-project BONEYARD (#boneyardPanel, openBoneyard) — a
+        #      read-only searchable list; also its own surface.
+        # Both are project-scoped tool panels (not sessions), so they keep using
+        # #panelStack/openPanel; the dock owns the live-session surface. This split
+        # is the deliberate final state (NOT an oversight): retiring #panelStack
+        # would force a rewrite of the grass + boneyard panel hosts with no user
+        # benefit. (openPanel for a chain-nav session still exists but defers to the
+        # dock when that session is already docked — one live surface per session.)
         "<div class='panel-stack' id='panelStack'></div>"
         # v12 W10 (John change #1): the Layout-D effort DOCK is EMBEDDED in the
         # document flow — rendered here as a normal full-width section inside the
@@ -5255,8 +5274,15 @@ function filterGrass() {
   }
 }
 
-// selectGrassIdea(ideaId): load the chosen idea's RIGHT workbench (text +
-// devbar + a terminal pane + refinement history). Marks the row selected.
+// selectGrassIdea(ideaId): load the chosen idea's RIGHT workbench (v12 Wave 11 —
+// the approved one-session-per-idea workbench, _mockups/grass_2_workbench.html).
+// The right pane is: a header (auto-saved indicator + Archive snapshot + Migrate
+// to project ↑), the idea text, an auto-gathered History panel (prior refinements
+// + archived material + linked/exported deliverables), and ONE session terminal +
+// engine toggle. There are NO Research/Plan develop buttons and NO Advance-to-Plan
+// control — the single workbench session advances research→plan IN-SESSION
+// (advance_stage); the grass second-advance is retired for effort_managed ideas.
+// Marks the left-list row selected. (✕→Boneyard stays on the LEFT list row.)
 function selectGrassIdea(ideaId) {
   var panel = document.getElementById('grassPanel');
   if (!panel) return;
@@ -5276,142 +5302,182 @@ function selectGrassIdea(ideaId) {
   if (!work) return;
   work.removeAttribute('data-empty');
   work.setAttribute('data-idea', ideaId);
+  var engLabel = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
   var html = ''
+    // ── workbench header: title + status chip + auto-saved + Archive + Migrate ──
+    + '<div class="ghead">'
+    + '<div class="ghead-main">'
     + '<h3>' + _esc(title || '(untitled idea)')
     + ' <span class="idchip">' + _esc(short) + '</span>'
     + ' <span class="stchip ' + _esc(status) + '">' + _esc(status) + '</span></h3>'
-    + (notes ? '<div class="desc">' + _esc(notes) + '</div>' : '')
-    + '<div class="sub">Develop with a tool — the session is seeded with this '
-    + 'idea’s text + any refinements. Output is saved here with a new id and '
-    + 'is pullable into a Research or Plan run.</div>'
-    + '<div class="devbar"><span class="lbl">Develop:</span>'
-    + '<button class="mini go" data-dev="research">🔬 Research<span class="car">▸</span></button>'
-    + '<button class="mini go" data-dev="plan">📐 Plan<span class="car">▸</span></button>'
+    + '<div class="gsubmeta"><span class="gautosave" title="Finished work is '
+    + 'auto-saved + auto-logged — there is no Save button">'
+    + '<span class="ck">✓</span> auto-saved</span></div>'
+    + '</div>'
+    + '<div class="ghead-actions">'
+    + '<button class="mini garchive-snap" title="Save a point-in-time snapshot of '
+    + 'this idea\'s session work (docs + summary) into a per-idea bundle">'
+    + '📸 Archive snapshot</button>'
+    + '<button class="mini primary gmigrate" title="Migrate this idea\'s work up '
+    + 'into the real project lanes; the idea stays here marked promoted">'
+    + 'Migrate to project ↑</button>'
+    + '</div></div>'
+    // ── idea text ──
+    + '<div class="gidea"><div class="lbl">Idea</div>'
+    + _esc(title || '(untitled idea)')
+    + (notes ? '<div class="gidea-notes">' + _esc(notes) + '</div>' : '')
+    + '</div>'
+    // ── auto-gathered History (prior refinements + archives + deliverables) ──
+    + '<div class="ghist"><div class="h">History around this idea '
+    + '<span class="auto">⟳ gathered automatically</span></div>'
+    + '<div class="ghist-rows"></div></div>'
+    // ── ONE workbench session: engine toggle + a single terminal ──
+    + '<div class="gsession">'
+    + '<div class="gsess-head"><span class="lbl">Workbench session</span>'
     + '<span class="sp"></span>'
-    + '<span class="lbl">Engine</span>'
-    + '<button class="mini gengtog">◆ Claude</button>'
-    + '<button class="mini gexport" title="Copy this idea’s research/plan work up '
-    + 'into real lane tiles; the idea stays here marked promoted">⇪ Export to project</button></div>'
-    // v10 Wave 3 — TWO independent, labeled, collapsible terminal hosts
-    // (research, plan). Each renders COLLAPSED until its Develop button starts/
-    // focuses its (idea, lane) session; collapsing hides the host, never kills.
-    // Each terminal owns its OWN Save-refinement control (.gsave) so a save
-    // targets the bound session for THAT lane — never the last-focused global one.
-    + '<div class="gterms">'
+    + '<div class="gengine"><button class="mini gengtog">' + _esc(engLabel)
+    + '</button></div></div>'
     + '<div class="gterm collapsed" data-lane="research">'
-    + '<div class="tbar"><span class="ic">🔬</span>'
-    + '<span class="lab"><b>Research terminal</b> · not started</span>'
+    + '<div class="tbar"><span class="ic">💬</span>'
+    + '<span class="lab"><b>Session</b> · not started — click Open to seed it '
+    + 'with this idea\'s history</span>'
     + '<span class="sp"></span>'
-    // v10 Wave 4 — Archive (D7): persist THIS session produced docs + summary
-    // into a per-idea bundle that survives kill. DISTINCT from Save (a text
-    // snapshot). Disabled until this lane Develop session is live.
-    + '<button class="mini garchive" data-archive-lane="research" disabled '
-    + 'title="Archive THIS research session\'s produced docs + summary into a '
-    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
-    // v10 Wave 5 — Advance to Plan: push THIS research dev session → a linked
-    // grass PLAN dev session using the SAME paste-NOT-submit seeded handoff as
-    // the project-level advance. Only the research lane carries this control.
-    // Disabled until this research Develop session is live.
-    + '<button class="mini gadvance" data-advance="research" disabled '
-    + 'title="Advance this research to a linked Plan session in the workbench — '
-    + 'the Crucible prompt is pasted UNSENT for you to review and press Enter">'
-    + '➜ Advance to Plan</button>'
-    + '<button class="mini gsave" data-save-lane="research" disabled '
-    + 'title="Save THIS research session\'s output as a new '
-    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
+    + '<button class="mini go gopen" title="Open the seeded workbench session for '
+    + 'this idea">Open session</button>'
     + '<span class="car">▸</span></div>'
     + '<div class="term-host" data-grass-term="research"></div></div>'
-    + '<div class="gterm collapsed" data-lane="plan">'
-    + '<div class="tbar"><span class="ic">📐</span>'
-    + '<span class="lab"><b>Plan terminal</b> · not started</span>'
-    + '<span class="sp"></span>'
-    + '<button class="mini garchive" data-archive-lane="plan" disabled '
-    + 'title="Archive THIS plan session\'s produced docs + summary into a '
-    + 'per-idea bundle (survives kill; available at promotion)">🗄 Archive</button>'
-    + '<button class="mini gsave" data-save-lane="plan" disabled '
-    + 'title="Save THIS plan session\'s output as a new '
-    + 'grass-&lt;id&gt;/dev-N refinement">💾 Save</button>'
-    + '<span class="car">▸</span></div>'
-    + '<div class="term-host" data-grass-term="plan"></div></div>'
-    + '</div>'
-    // v10 Wave 4 — Archived material: the per-idea archive bundles (persisted
-    // docs + summary), newest-first. Empty until the idea is archived.
-    + '<div class="garch"><div class="h">Archived material · saved docs + '
-    + 'summary tied to this idea</div><div class="garch-rows"></div></div>'
-    + '<div class="ghist"><div class="h">Refinement history · pull any version '
-    + 'into another effort</div><div class="ghist-rows"></div></div>';
+    + '</div>';
   work.innerHTML = html;
-  // Wire the devbar — each Develop button TOGGLES its lane's terminal.
-  var dbtns = work.querySelectorAll('button[data-dev]');
-  for (var d = 0; d < dbtns.length; d++) {
-    dbtns[d].onclick = (function (lane) {
-      return function () { toggleGrassTerminal(ideaId, lane); };
-    })(dbtns[d].getAttribute('data-dev'));
-  }
-  // Clicking a terminal's bar toggles that same terminal (collapse/expand) —
-  // independent of the other; never kills the session.
-  var bars = work.querySelectorAll('.gterm .tbar');
-  for (var bi = 0; bi < bars.length; bi++) {
-    bars[bi].onclick = (function (lane) {
-      return function () { toggleGrassTerminal(ideaId, lane); };
-    })(bars[bi].parentNode.getAttribute('data-lane'));
-  }
+  // Engine toggle (Claude/Gemini) — affects the next session opened for this idea.
   var eng = work.querySelector('.gengtog');
   if (eng) eng.onclick = function () {
     _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
     eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
   };
-  var exp = work.querySelector('.gexport');
-  if (exp) exp.onclick = function () { exportGrass(ideaId); };
-  // PER-LANE Save-refinement: each .gterm bar carries its OWN Save button that
-  // saves THAT lane's bound (idea, lane) session — never the last-focused global.
-  // The button lives inside the bar, so stop propagation so a Save click does not
-  // also collapse/expand the terminal. Each starts disabled until its lane's
-  // Develop session is live (enabled in developGrass), and switching ideas resets.
-  var svbtns = work.querySelectorAll('button[data-save-lane]');
-  for (var si = 0; si < svbtns.length; si++) {
-    svbtns[si].disabled = true;
-    svbtns[si].onclick = (function (lane) {
-      return function (ev) {
-        if (ev) ev.stopPropagation();
-        saveGrassRefinement(ideaId, lane);
-      };
-    })(svbtns[si].getAttribute('data-save-lane'));
-  }
-  // v10 Wave 4 — PER-LANE Archive: each .gterm bar carries its OWN Archive button
-  // that archives THAT lane's bound (idea, lane) session's docs + summary into the
-  // idea bundle. Lives inside the bar → stopPropagation so it does not also
-  // collapse/expand. Disabled until its lane's Develop session is live.
-  var arbtns = work.querySelectorAll('button[data-archive-lane]');
-  for (var ai = 0; ai < arbtns.length; ai++) {
-    arbtns[ai].disabled = true;
-    arbtns[ai].onclick = (function (lane) {
-      return function (ev) {
-        if (ev) ev.stopPropagation();
-        archiveGrassSession(ideaId, lane);
-      };
-    })(arbtns[ai].getAttribute('data-archive-lane'));
-  }
-  // v10 Wave 5 — Advance to Plan: the research lane's own control pushes its dev
-  // session → a linked grass PLAN dev session. Lives inside the research bar →
-  // stopPropagation so it does not also collapse/expand. Disabled until the
-  // research Develop session is live (enabled in developGrass).
-  var advbtns = work.querySelectorAll('button[data-advance]');
-  for (var avi = 0; avi < advbtns.length; avi++) {
-    advbtns[avi].disabled = true;
-    advbtns[avi].onclick = (function () {
-      return function (ev) {
-        if (ev) ev.stopPropagation();
-        advanceGrassToPlan(ideaId);
-      };
-    })();
-  }
-  // Both terminal hosts render COLLAPSED + unbound for a freshly selected idea.
+  // Migrate to project ↑ → export_grass_to_project (idea stays, grass_origin).
+  var mig = work.querySelector('.gmigrate');
+  if (mig) mig.onclick = function () { exportGrass(ideaId); };
+  // Archive snapshot → archive the single workbench session's docs + summary.
+  var arc = work.querySelector('.garchive-snap');
+  if (arc) arc.onclick = function () { archiveGrassWorkbench(ideaId); };
+  // Open session — start/focus the ONE seeded workbench session (no R/P split).
+  var openBtn = work.querySelector('.gopen');
+  if (openBtn) openBtn.onclick = function (ev) {
+    if (ev) ev.stopPropagation();
+    openGrassSession(ideaId);
+  };
+  // The terminal bar toggles the single session's collapse (never kills).
+  var bar = work.querySelector('.gterm .tbar');
+  if (bar) bar.onclick = function () { toggleGrassSession(ideaId); };
+  // The single workbench session host starts COLLAPSED + unbound for a fresh idea.
   _grassDevSession = null;
-  _grassLaneSession[ideaId + '::research'] = null;
-  _grassLaneSession[ideaId + '::plan'] = null;
-  _renderGrassArchives(work, rec.archives || []);
-  _renderGrassHistory(work, rec.refinements || []);
+  _grassLaneSession[ideaId + '::workbench'] = null;
+  _renderGrassHistory(work, rec);
+}
+
+// openGrassSession(ideaId): start (or focus) the idea's SINGLE workbench session
+// (v12 Wave 11) — one effort_managed grass-dev session per idea, seeded with the
+// idea text + refinements, advancing research→plan IN-SESSION. POST
+// /api/rnd/grass_workbench. Mounts its xterm in the single terminal host. The
+// idea STAYS in grass. Token-aware. Contained: NOT added to the board/top strip.
+async function openGrassSession(ideaId) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var box = work.querySelector('.gterm[data-lane="research"]');
+  if (box) { box.classList.remove('collapsed'); _setGrassSessionToggle(work, true); }
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, backend: _grassEngine};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/grass_workbench', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/grass_workbench', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[grass session error] ' + e.message); return; }
+  if (!data.ok || !data.session) {
+    alert('[grass session refused] ' + (data.error || 'unknown')); return;
+  }
+  var sid = data.session.session_id;
+  var host = box ? box.querySelector('[data-grass-term]') : null;
+  var lab = box ? box.querySelector('.tbar .lab') : null;
+  if (lab) lab.innerHTML = '<b>Session</b> · ' + _esc(_grassEngine)
+    + ' · seeded with this idea · ' + _esc(sid);
+  if (host) {
+    if (host.getAttribute('data-session') === sid && PANELS[sid]) {
+      host.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    } else {
+      host.setAttribute('data-session', sid);
+      PANELS[sid] = {el: document.getElementById('grassPanel'), body: host, term: null, transport: null};
+      _mountTerminal(sid, host);
+    }
+  }
+  _grassLaneSession[ideaId + '::workbench'] = sid;
+  _grassDevSession = sid;
+  _setGrassSessionToggle(work, true);
+  // Hide the Open button once the session is live (re-clicking the bar toggles).
+  var openBtn = work.querySelector('.gopen');
+  if (openBtn) openBtn.style.display = 'none';
+}
+
+// toggleGrassSession(ideaId): collapse/expand the single workbench terminal. If
+// no session is bound yet, opening it starts the session; collapsing never kills.
+function toggleGrassSession(ideaId) {
+  var work = _grassWork(ideaId);
+  if (!work) return;
+  var box = work.querySelector('.gterm[data-lane="research"]');
+  if (!box) return;
+  if (box.classList.contains('collapsed')) {
+    box.classList.remove('collapsed');
+    _setGrassSessionToggle(work, true);
+    if (!_grassLaneSession[ideaId + '::workbench']) {
+      openGrassSession(ideaId);
+    }
+  } else {
+    box.classList.add('collapsed');
+    _setGrassSessionToggle(work, false);
+  }
+}
+
+// _setGrassSessionToggle(work, open): reflect the single session's caret state.
+function _setGrassSessionToggle(work, open) {
+  if (!work) return;
+  var box = work.querySelector('.gterm[data-lane="research"]');
+  if (box) {
+    var tc = box.querySelector('.tbar .car');
+    if (tc) tc.textContent = open ? '▾' : '▸';
+  }
+}
+
+// archiveGrassWorkbench(ideaId): Archive snapshot — persist the single workbench
+// session's produced docs + summary into a per-idea bundle (survives kill). The
+// idea stays in grass. POST /api/rnd/grass_archive on the workbench session's lane
+// (it advances research→plan in-session, so we archive whichever stage's docs
+// exist — try plan then research). Token-aware; honest when nothing was produced.
+async function archiveGrassWorkbench(ideaId) {
+  var sid = _grassLaneSession[ideaId + '::workbench'] || null;
+  if (!sid) { alert('[archive] open this idea\'s session first'); return; }
+  // The single workbench session's current stage maps to a store lane; the backend
+  // resolves the dev session for the lane, so try both (plan first = most advanced).
+  var done = false;
+  for (var li = 0; li < 2 && !done; li++) {
+    var lane = (li === 0) ? 'plan' : 'research';
+    var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane};
+    var r, data;
+    try {
+      r = await _postJson('/api/rnd/grass_archive', payload);
+      data = await r.json();
+      if (_isUnauthorized(r, data) && setAnchorToken()) {
+        r = await _postJson('/api/rnd/grass_archive', payload);
+        data = await r.json();
+      }
+    } catch (e) { continue; }
+    if (data && data.ok) { done = true; }
+  }
+  await _loadGrassData();
+  var work = _grassWork(ideaId);
+  if (work) _renderGrassHistory(work, _grassData[ideaId] || {});
+  if (!done) alert('[nothing to archive] no docs produced in this session yet');
 }
 
 // _renderGrassArchives(work, archives): render the per-idea Archived-material list
@@ -5453,31 +5519,90 @@ function _renderGrassArchives(work, archives) {
   box.innerHTML = html;
 }
 
-function _renderGrassHistory(work, refs) {
+// _renderGrassHistory(work, rec): v12 Wave 11 — the AUTO-GATHERED History panel
+// for the one-session workbench. Gathers, newest-first, the idea's prior
+// refinements (text snapshots, each pullable into the live session), its archived
+// material (persisted docs + summary), and its exported/linked deliverables — all
+// loaded as the context for the single workbench session. ``rec`` is the idea
+// record from /api/rnd/grass; an absent record yields the honest empty state.
+function _renderGrassHistory(work, rec) {
   var box = work.querySelector('.ghist-rows');
   if (!box) return;
-  if (!refs || !refs.length) {
-    box.innerHTML = '<div class="ghist-empty">No refinements yet — Develop the idea '
-      + 'with Research or Plan to save one.</div>';
-    return;
-  }
+  rec = rec || {};
+  var refs = rec.refinements || [];
+  var archives = rec.archives || [];
+  var exported = rec.exported_to || [];
+  var ideaId = work.getAttribute('data-idea');
   var html = '';
+  // Exported / linked deliverables first (the most concrete outputs).
+  for (var e = 0; e < exported.length; e++) {
+    var ex = exported[e];
+    var docs = ex.docs || [];
+    var dl = '';
+    for (var di = 0; di < docs.length; di++) {
+      var rel = docs[di];
+      var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(rel);
+      dl += '<a class="open alink" target="_blank" href="' + _esc(href) + '">'
+        + _esc(rel.split('/').pop()) + ' ↗</a>';
+    }
+    if (!dl) dl = '<span class="ghnodoc">(no docs)</span>';
+    html += '<div class="hitem deliv"><div class="hbody">'
+      + '<div class="htitle"><span class="kind">migrated → ' + _esc(ex.lane || '')
+      + '</span> <span class="deliv-badge">deliverable</span></div>'
+      + '<div class="hsub">' + dl + '</div></div></div>';
+  }
+  // Archived material (persisted docs + summary).
+  for (var a = 0; a < archives.length; a++) {
+    var ar = archives[a];
+    var alane = ar.lane || '';
+    var asid = ar.session_id || '';
+    var adocs = ar.docs || [];
+    var adl = '';
+    for (var ai = 0; ai < adocs.length; ai++) {
+      var arel = adocs[ai];
+      var ahref = '/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(arel);
+      adl += '<a class="open alink" target="_blank" href="' + _esc(ahref) + '">'
+        + _esc(arel.split('/').pop()) + ' ↗</a>';
+    }
+    if (!adl) adl = '<span class="ghnodoc">(no docs)</span>';
+    var sumhref = '/summary/' + encodeURIComponent(PROJECT_ID) + '/'
+      + encodeURIComponent(alane) + '/' + encodeURIComponent(asid);
+    var sumlink = (ar.has_summary)
+      ? '<a class="open alink" target="_blank" href="' + _esc(sumhref) + '">summary ↗</a>'
+      : '<span class="ghnosum">summary pending</span>';
+    html += '<div class="hitem arch"><div class="hbody">'
+      + '<div class="htitle"><span class="kind">archive · ' + _esc(alane)
+      + '</span></div>'
+      + '<div class="hsub">' + adl + ' ' + sumlink + '</div></div></div>';
+  }
+  // Prior refinements (text snapshots) — each pullable into the live session.
   for (var i = 0; i < refs.length; i++) {
     var r = refs[i];
     var rid = r.refinement_id || '';
     var lbl = r.label || (r.text ? r.text.slice(0, 60) : 'refinement');
-    html += '<div class="hr"><span class="idchip">' + _esc(rid) + '</span> '
-      + _esc(lbl) + '<span class="sp"></span>'
-      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="research">pull into Research…</button>'
-      + '<button class="mini" data-pull="' + _esc(rid) + '" data-lane="plan">pull into Plan…</button></div>';
+    html += '<div class="hitem hr"><div class="hbody">'
+      + '<div class="htitle"><span class="kind">refinement</span> '
+      + '<span class="idchip">' + _esc(rid) + '</span> ' + _esc(lbl) + '</div>'
+      + '</div>'
+      + '<button class="open mini" data-pull="' + _esc(rid)
+      + '">pull into session ↗</button></div>';
+  }
+  if (!html) {
+    box.innerHTML = '<div class="ghist-empty">No prior work yet — open the session '
+      + 'to develop this idea; refinements, archives, and migrated deliverables '
+      + 'will gather here automatically.</div>';
+    return;
   }
   box.innerHTML = html;
+  // Pull a refinement into the LIVE single workbench session (research lane = the
+  // session's starting stage; the in-session advance carries it to plan).
   var pbtns = box.querySelectorAll('button[data-pull]');
-  var ideaId = work.getAttribute('data-idea');
   for (var k = 0; k < pbtns.length; k++) {
-    pbtns[k].onclick = (function (rid, lane) {
-      return function () { pullGrass(ideaId, rid, lane); };
-    })(pbtns[k].getAttribute('data-pull'), pbtns[k].getAttribute('data-lane'));
+    pbtns[k].onclick = (function (rid) {
+      return function () { pullGrass(ideaId, rid, 'research'); };
+    })(pbtns[k].getAttribute('data-pull'));
   }
 }
 
@@ -8029,12 +8154,22 @@ function openEffortDock(sessionId, tile) {
   }
   var runEl = document.getElementById('dockRun');
   if (runEl) runEl.style.display = (status === 'running') ? '' : 'none';
-  _renderDockTrack(DOCK.current_stage);
-  // Advance → is shown for an effort whose current stage is not the last (build).
+  // v12 W11 (SC6): a bare GENERAL session opens in the dock too, but it is NOT a
+  // trio effort — show NO stage track and NO Advance (it never advances). Trio
+  // efforts (research/plan/build) render the 3-node track + Advance as before.
+  var isGeneral = (lane === 'general') || (DOCK.current_stage === '' && lane === 'general');
+  var trackEl = document.getElementById('dockTrack');
+  if (isGeneral) {
+    if (trackEl) trackEl.innerHTML = '';
+  } else {
+    _renderDockTrack(DOCK.current_stage);
+  }
+  // Advance → is shown for a trio effort whose current stage is not the last
+  // (build); hidden for general (no stages) and at build.
   var advEl = document.getElementById('dockAdvance');
   if (advEl) {
     var atBuild = (DOCK.current_stage === 'build');
-    advEl.style.display = atBuild ? 'none' : '';
+    advEl.style.display = (isGeneral || atBuild) ? 'none' : '';
   }
   // Warn banner hidden until the poll says over_threshold.
   var warnEl = document.getElementById('dockWarn');
@@ -8340,6 +8475,40 @@ async function newEffort(stage) {
       '.tile[data-session="' + _cssEsc(sid) + '"]');
     openEffortDock(sid, tile);
   }, 400);
+}
+
+// newGeneral(backend): v12 Wave 11 (SC6). Start a BARE general session (lane
+// 'general' — NOT in LANE_SKILL, so no trio skill seeds) and open it in the W10
+// BOTTOM DOCK like any effort (summary-on-top + a live terminal). It is NOT a trio
+// effort: the dock shows no stage track and no Advance, and it never auto-advances.
+// It is registered (a top-strip chip) but is NOT a board lane column. Token-aware.
+async function newGeneral(backend) {
+  backend = backend || 'claude';
+  var payload = {project_id: PROJECT_ID, lane: 'general', backend: backend};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_start', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_start', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[open terminal error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[open terminal refused] ' + ((data && (data.error || data.reason))
+      || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {session_id: sid, lane: 'general',
+    backend: rec.backend || backend, status: rec.status || 'running',
+    label: rec.label || 'general',
+    idx: (_laneCounters['general'] = (_laneCounters['general'] || 0) + 1)};
+  renderSessionBar();
+  // Open in the dock (no board tile for general → openEffortDock synthesizes the
+  // record from MANAGED; lane 'general' suppresses the track + Advance).
+  setTimeout(function () { openEffortDock(sid, null); }, 200);
 }
 // (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
 // stack in the document flow — Wave 5 adds the terminal-pane vertical resize.)
@@ -13646,6 +13815,33 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 try:
                     rec = _eh.develop_grass_idea(pid, idea_id, lane,
                                                  backend=backend)
+                    self._send_json({"ok": True, "session": rec})
+                except ValueError as ve:
+                    self._send_json({"ok": False, "error": str(ve)}, 400)
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
+
+        elif self.path == "/api/rnd/grass_workbench":
+            # v12 Wave 11 (SC5): open the idea's SINGLE one-session workbench — ONE
+            # stage-carrying effort_managed grass-dev session per idea (no Research/
+            # Plan split). Starts at research (researchPrime seeds) and advances
+            # research→plan IN-SESSION via /api/rnd/advance_stage; the grass
+            # second-advance is gated off for effort_managed ideas (W7). Dedupes/
+            # focuses an existing live workbench session (incl. a pre-v12 idea's
+            # most-advanced lane session — back-compat A10). Auth enforced above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            idea_id = (body.get("idea_id", "") or "").strip()
+            backend = (body.get("backend", "") or "").strip() or None
+            if not pid or not idea_id:
+                self._send_json(
+                    {"ok": False,
+                     "error": "project_id and idea_id required"}, 400)
+            elif _rnd.get_project(pid) is None:
+                self._send_json({"ok": False, "error": "Unknown project"}, 404)
+            else:
+                try:
+                    rec = _eh.develop_grass_workbench(pid, idea_id,
+                                                      backend=backend)
                     self._send_json({"ok": True, "session": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)

@@ -446,41 +446,38 @@ def _parse(html):
     return c.els
 
 
-def test_advance_to_plan_control_renders_on_research_lane_only():
-    """POSITIVE: exactly ONE 'Advance to Plan' control, in the RESEARCH terminal
-    bar (data-advance="research"), a .gadvance button."""
+def test_advance_to_plan_control_retired_from_workbench_v12():
+    """v12 Wave 11 (MIGRATED): the grass workbench no longer renders an
+    Advance-to-Plan control — the ONE-session workbench advances research→plan
+    IN-SESSION (advance_stage). NEGATIVE: no ``data-advance`` control in the
+    selectGrassIdea template (the old per-lane ``data-advance="research"`` bar is
+    gone). The backend ``advance_grass_research_to_plan`` path is retained for
+    LEGACY ideas (tested below + in the v11.1 walks), gated off for v12 efforts."""
     els = _parse(_select_grass_idea_html())
     advs = [d for t, d in els if d.get("data-advance")]
-    assert len(advs) == 1, f"expected exactly one Advance control, got {len(advs)}"
-    assert advs[0].get("data-advance") == "research"
-    assert "gadvance" in (advs[0].get("class") or "").split()
+    assert advs == [], \
+        "the workbench must NOT render an Advance-to-Plan control (v12 W11: " \
+        "research→plan advances in-session)"
 
 
-def test_no_advance_control_on_plan_lane():
-    """NEGATIVE: there is NO 'Advance to Plan' control bound to the plan lane —
-    only the research terminal carries it (you advance FROM research, not plan)."""
-    els = _parse(_select_grass_idea_html())
-    advs = [d for t, d in els if d.get("data-advance")]
-    assert all(d.get("data-advance") != "plan" for d in advs), \
-        "the plan terminal must NOT carry an Advance-to-Plan control"
-
-
-def test_advance_helper_and_endpoint_wired_in_js():
-    """The JS defines advanceGrassToPlan + wires the control to it, and POSTs the
-    grass_advance endpoint; it delivers the prompt as a PENDING PASTE (flashes the
-    unsent hint) and does NOT auto-submit (no term_input in its body)."""
+def test_grass_advance_endpoint_still_wired_for_legacy_v12():
+    """v12 Wave 11 (MIGRATED): the ``/api/rnd/grass_advance`` endpoint is retained
+    (it serves LEGACY ideas + the v11.1 healthcheck walks — gated off for v12
+    effort_managed ideas at the backend). The retired UI helper
+    ``advanceGrassToPlan``/``data-advance`` is no longer wired into the one-session
+    workbench template."""
     import anchor_gui
-    js = anchor_gui._PROJECT_WINDOW_JS
-    assert "async function advanceGrassToPlan(" in js
-    assert "/api/rnd/grass_advance" in js
-    assert "advanceGrassToPlan(ideaId)" in js, "the control must call the helper"
-    m = re.search(r"async function advanceGrassToPlan\(([\s\S]*?)\n\}", js)
-    assert m, "advanceGrassToPlan body not found"
-    advbody = m.group(1)
-    assert "_flashPendingPasteHint" in advbody, \
-        "advance must flash the unsent pending-paste hint"
-    assert "term_input" not in advbody, \
-        "advance must NOT auto-submit the prompt (it is a pending paste)"
+    import inspect
+    # The endpoint route is still REGISTERED in the request handler (server truth;
+    # its HTTP behavior for a legacy idea is exercised by
+    # test_grass_advance_to_plan_over_http_legacy_v12 below). (R1 W11-F-noop fix:
+    # was `... in js or True`, a no-op — the endpoint lives in the handler, not the JS.)
+    assert "/api/rnd/grass_advance" in inspect.getsource(anchor_gui), \
+        "the legacy grass_advance endpoint route must still be registered"
+    # The retired control is NOT wired in the new workbench template.
+    tmpl = _select_grass_idea_html()
+    assert "data-advance" not in tmpl, \
+        "the retired Advance-to-Plan control must not be in the workbench template"
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -510,106 +507,63 @@ def server(env):
         t.join(timeout=5)
 
 
-def test_grass_advance_to_plan_in_browser(server):
-    """Open the grass workbench, Develop Research, produce a research doc, click
-    'Advance to Plan →' → the PLAN terminal opens and the PASTED prompt (a token
-    that appears ONLY in the paste — the REAL research doc path) is visible in the
-    plan terminal AND NOT auto-submitted. Screenshot → _devtest/wave5_grass_advance.png.
-    No JS console errors."""
-    pytest.importorskip("playwright.sync_api")
+def test_grass_advance_to_plan_over_http_legacy_v12(server):
+    """v12 Wave 11 (MIGRATED). The grass workbench's retired ``data-advance`` UI is
+    gone (research→plan now advances IN-SESSION). The LEGACY backend advance path
+    (``/api/rnd/grass_advance`` → ``advance_grass_research_to_plan``) is RETAINED
+    for legacy ideas + the v11.1 healthcheck walks — this asserts it over HTTP
+    (server truth): for a legacy idea, advancing from a research dev session opens a
+    linked grass PLAN dev session whose PENDING PASTE names the real research doc
+    path and is held UNSENT (paste_flushed False). This is the same server contract
+    the retired UI exercised, now verified without the removed two-terminal UI."""
+    import json
+    import urllib.request
     env, base, _ = server
     pid, idea_id = env["pid"], env["idea_id"]
     ts, eh, reg = env["ts"], env["eh"], env["reg"]
 
-    # Pre-create the research dev session + produce a research doc so the advance
-    # has REAL material. The browser flow then advances from it.
+    # A LEGACY (effort_managed==False) research dev session + a produced doc.
     rrec = eh.develop_grass_idea(pid, idea_id, "research", backend="claude")
     rsid = rrec["session_id"]
+    assert not rrec.get("effort_managed"), "legacy develop must be effort_managed False"
     rel = _produce_research_doc(reg, rsid)
-    # The unique paste-only token: the real research doc path. It is NOT in the
-    # echoed phase-1 load+greet seed (that names the skill, not the doc path).
     paste_token = rel
 
-    from playwright.sync_api import sync_playwright
-    _DEVTEST.mkdir(exist_ok=True)
-    shot = _DEVTEST / "wave5_grass_advance.png"
+    # Advance over HTTP (no token set in this fixture → 200).
+    payload = json.dumps({"project_id": pid, "idea_id": idea_id}).encode("utf-8")
+    req = urllib.request.Request(base + "/api/rnd/grass_advance", data=payload,
+                                 method="POST")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    assert data["ok"] is True, data
+    psid = data["session"]["session_id"]
+    assert psid != rsid, "the plan dev session must be distinct"
 
-    with sync_playwright() as p:
-        b = p.chromium.launch()
-        pg = b.new_page()
-        errors = []
-        pg.on("console",
-              lambda m: errors.append(m.text) if m.type == "error" else None)
-        pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    # Server truth: linked + grass_origin + the pending paste names the real doc.
+    prec = reg.get_session(psid)
+    assert prec["parent_session_id"] == rsid
+    assert prec["grass_origin"] == idea_id
+    assert prec["pending_paste"], "the plan session must carry a pending paste"
+    assert paste_token in prec["pending_paste"]
+    assert prec["paste_flushed"] is False
 
-        pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
-        pg.click('[data-grass-tile="1"]')
-        pg.wait_for_selector('#grassPanel .gli', timeout=8000)
-        pg.eval_on_selector('#grassPanel .gli', "e=>e.click()")
-        pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="research"]',
-                             timeout=8000)
-
-        # Develop Research → its dev session binds (re-uses the live one created
-        # above; the backend dedupes on the live (idea, 'research') session).
-        pg.click('#grassPanel button[data-dev="research"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"research\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"research\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=10000)
-        # The research lane's Advance-to-Plan control is now enabled.
-        pg.wait_for_function(
-            "(()=>{var b=document.querySelector('#grassPanel .gterm"
-            "[data-lane=\"research\"] button[data-advance=\"research\"]');"
-            "return b && !b.disabled;})()", timeout=8000)
-
-        # Click Advance → the plan terminal opens + a plan dev session binds.
-        pg.click('#grassPanel .gterm[data-lane="research"] '
-                 'button[data-advance="research"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"plan\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"plan\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=12000)
-        # The plan terminal is OPEN (not collapsed).
-        assert pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="plan"]',
-            "e=>e.classList.contains('collapsed')") is False, \
-            "Advance must open the plan terminal"
-        psid = pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="plan"] [data-grass-term]',
-            "e=>e.getAttribute('data-session')")
-        assert psid and psid != rsid, "plan dev session must be a distinct session"
-
-        # The plan dev session is linked + carries grass_origin (server truth).
-        prec = reg.get_session(psid)
-        assert prec["parent_session_id"] == rsid
-        assert prec["grass_origin"] == idea_id
-        assert prec["pending_paste"], "the plan session must carry a pending paste"
-        assert paste_token in prec["pending_paste"]
-        assert prec["paste_flushed"] is False
-
-        # Drive the greet so the pending paste flushes UNSENT into the PTY, then
-        # wait for the paste-only token to render in the plan terminal.
-        import pty_manager
-        pty_manager.write(psid, GREET_LINE)
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"plan\"] "
-            "[data-grass-term]').innerText.indexOf("
-            + repr(paste_token) + ") !== -1", timeout=12000)
-
-        # RENDERED NEGATIVE: the paste is present but NOT auto-submitted — the
-        # buffer contains the paste WITHOUT a trailing submitting newline.
+    # Drive the greet so the pending paste flushes UNSENT into the PTY. The flush
+    # is wired into terminal_session.read_since — read via the terminal session so
+    # it fires after the greet marker is observed.
+    import pty_manager
+    pty_manager.write(psid, GREET_LINE)
+    full = ""
+    for _ in range(8):
+        ts.read_since(psid, 0)         # triggers _flush_pending_paste after greet
         full = pty_manager.read_since(psid, 0)["text"]
-        assert paste_token in full
-        assert prec["pending_paste"] + "\n" not in full, \
-            "the advance paste must NOT be auto-submitted"
-
-        pg.screenshot(path=str(shot), full_page=True)
-        assert not errors, f"JS console errors: {errors}"
-        b.close()
-
-    assert shot.exists(), "screenshot not written"
+        if paste_token in full:
+            break
+        time.sleep(0.1)
+    assert paste_token in full, "the pending paste must flush into the PTY"
+    # NOT auto-submitted (no trailing submitting newline on the paste body).
+    assert prec["pending_paste"] + "\n" not in full, \
+        "the advance paste must NOT be auto-submitted"
 
     for r in reg.list_sessions(project_id=pid):
         try:
@@ -748,31 +702,26 @@ def test_grass_dev_not_on_top_strip_after_reload_in_browser(server):
         leaked = [c for c in chip_sessions if c in grass_dev_ids]
         assert not leaked, f"grass-dev sessions leaked onto the top strip: {leaked}"
 
-        # The grass workbench's OWN plan terminal still mounts (by session id).
+        # v12 W11 (MIGRATED): the grass workbench is now ONE-session (no plan
+        # lane terminal). Open it and select the idea — the single-session
+        # workbench renders WITHOUT leaking the contained grass-dev sessions onto
+        # the top strip.
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
         pg.click('[data-grass-tile="1"]')
         pg.wait_for_selector('#grassPanel .gli', timeout=8000)
         pg.eval_on_selector('#grassPanel .gli', "e=>e.click()")
-        pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="plan"]',
+        pg.wait_for_selector('#grassPanel .gwork .gterm[data-lane="research"]',
                              timeout=8000)
-        # Re-open the plan dev terminal (it binds to the live plan dev session).
-        pg.click('#grassPanel button[data-dev="plan"]')
-        pg.wait_for_function(
-            "document.querySelector('#grassPanel .gterm[data-lane=\"plan\"] "
-            "[data-grass-term]') && document.querySelector('#grassPanel "
-            ".gterm[data-lane=\"plan\"] [data-grass-term]')"
-            ".getAttribute('data-session')", timeout=10000)
-        bound = pg.eval_on_selector(
-            '#grassPanel .gterm[data-lane="plan"] [data-grass-term]',
-            "e=>e.getAttribute('data-session')")
-        assert bound == psid, "the workbench plan terminal must mount its dev session"
+        # Exactly ONE workbench terminal host (the one-session model).
+        assert pg.eval_on_selector_all(
+            '#grassPanel .gwork [data-grass-term]', "els=>els.length") == 1
 
-        # The top strip STILL has no grass-dev chip after the workbench mount.
+        # The top strip STILL has no grass-dev chip after opening the workbench.
         chip_sessions2 = pg.eval_on_selector_all(
             "#sessionBar [data-session]",
             "els => els.map(e => e.getAttribute('data-session'))")
         assert not [c for c in chip_sessions2 if c in grass_dev_ids], \
-            "grass-dev still must not appear on the top strip after workbench mount"
+            "grass-dev still must not appear on the top strip after workbench open"
 
         pg.screenshot(path=str(shot), full_page=True)
         assert not errors, f"JS console errors: {errors}"

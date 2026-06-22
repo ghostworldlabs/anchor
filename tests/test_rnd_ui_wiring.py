@@ -495,7 +495,7 @@ def test_project_window_has_lane_controls_and_panel_terminal(gui_env):
     # (newTermSession → term_start) is still wired, and the W10 "+ New research"
     # (#newResearchBtn) / "+ New plan/build" (#newPlanBuildBtn) controls are the
     # effort-start entry points.
-    assert "newTermSession('general','claude')" in html
+    assert "newGeneral('claude')" in html
     assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
     assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     assert "/api/rnd/term_start" in html

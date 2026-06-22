@@ -218,6 +218,42 @@
   run did not) — all 4 migrated honestly to the two new buttons. Re-screenshot `_mockups/w10_layoutd_live_screenshot.png`.
 - **FINAL GATE:** 1377 passed, 1 skipped. **Converged + John signed off.**
 
+## Wave 11 — Grass two-pane one-session workbench + General-in-dock + Boneyard tab — GREEN ✅ (John sign-off pending)
+
+- **EXECUTE:** grass = ONE `effort_managed` `grass-dev` session per idea (`develop_grass_workbench`,
+  advances research→plan IN-SESSION via advance_stage; back-compat fallback resolves a pre-v12 two-
+  `dev_sessions` idea to its most-advanced session); `grass_workbench_data` single-session shape; the W7
+  grass second-advance retirement now also covers the `workbench` key. Two-pane workbench UI to
+  `grass_2_workbench.html` (left list + capture/search/filter/✕; right: auto-saved + Migrate↑
+  [export_grass_to_project] + Archive [archive_grass_session] + idea text + auto-History + ONE session +
+  engine toggle, NO research/plan). General opens in the W10 **dock** (`newGeneral`; no stage track/Advance
+  for lane=='general'). Boneyard per-project tab. F2: `#panelStack` retained ONLY for the grass workbench +
+  Boneyard tool panels (documented); the dock owns all live sessions. New `tests/test_grass_workbench_v12.py`
+  + `tests/test_grass_workbench_playwright_v12.py`.
+- **GATE:** caught **8 regressions the agent's targeted run missed** (the "Open terminal"→newGeneral rename
+  broke 7 tests asserting the old `newTermSession('general','claude')` wiring; the one-session grass broke
+  the v10.1 two-terminal reflow test). All 8 migrated honestly to the new affordances/selectors (no weakening).
+- **REVIEW:** R2 GO-WITH-NITS (one-session collapse correct, landmarks present, Migrate/✕→Boneyard verified).
+  Fixed: **W11-R2-02** `develop_grass_workbench` check-then-mint now under WRITE_LOCK (TOCTOU double-mint
+  guard, parity with advance_stage); **W11-R2-01** grass Playwright now asserts transport readyState OPEN.
+  **R1 STALLED (21m, 0 bytes) — orchestrator covered its scope:** audited the grass test reductions
+  (`test_grass_two_terminals_v10` −28 asserts, etc.) → LEGITIMATE plan-cited retirement of the retired
+  two-terminal grass (MASTER-PLAN §4.7 one-session collapse + John's approved mockup), NOT §5 weakening;
+  one-session intent re-asserted by the v12 grass suite; legacy grass-advance walks GREEN (18); back-compat
+  covered. **Documented debt:** 8 legacy grass JS fns (`developGrass`/`toggleGrassTerminal`/
+  `advanceGrassToPlan`/`saveGrassRefinement`/`archiveGrassSession`/`_setGrassToggle`/`_grassTermBox`/
+  `_renderGrassArchives`) are now dead/unreferenced — left for a follow-up cleanup (removing from the RAW JS
+  string isn't worth the brace risk for a NIT). Screenshot `_mockups/w11_grass_workbench_screenshot.png`.
+- **RE-GATE:** 1390 passed, 1 skipped (net +13). **John signed off the grass-workbench screenshot.**
+- **REVIEW 1 (finished at 38m — slow, not stalled; HTTP-server-truth audit):** GO-WITH-NITS, **confirms the
+  orchestrator audit** — §5 NOT violated (removed asserts coupled to the retired two-terminal UI or replaced
+  by equal-or-stronger HTTP server-truth assertions; +85 new asserts), back-compat SOLID (reproduced the
+  reaped-plan→research fallback), legacy retirement CORRECT, Migrate/✕→Boneyard verified via
+  `GET /api/rnd/boneyard`, General-in-dock coherent. Its F1 (8 fails) = the PRE-fix tree (already migrated →
+  1390 GREEN). Fixed R1's one real find: a no-op `assert ... in js or True` in `test_grass_advance_v10.py`
+  → a real `inspect.getsource` route-registered assertion. Dead-JS (F2) = the documented debt.
+- **Converged + John signed off.** (8 dead legacy grass JS fns left as documented W-next cleanup debt.)
+
 
 
 

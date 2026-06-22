@@ -55,7 +55,7 @@ def test_lane_launch_uses_seeded_term_start_not_start_terminal(gui, tmp_path):
     # (a) The seeded ConPTY start path is defined + wired; the surviving live
     #     launch affordance (masthead general session) routes through it.
     assert "function newTermSession" in html
-    assert "newTermSession('general','claude')" in html
+    assert "newGeneral('claude')" in html
     assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
     assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The seeded endpoint is the launch target.
@@ -68,10 +68,12 @@ def test_lane_launch_uses_seeded_term_start_not_start_terminal(gui, tmp_path):
     #     launch no longer routes through it.)
     assert "onclick=\"openTerminal(" not in html
     assert "onclick='openTerminal(" not in html
-    # No live-launch button wires the v2 path.
+    # No live-launch button wires the v2 path. The v12 launch affordances are
+    # newGeneral(...) (masthead general → W10 dock) + newEffort(...) (+ New research
+    # / + New plan/build); none may route through the v2 openTerminal/start_terminal.
     launch_onclicks = re.findall(
-        r"onclick=\"(newTermSession[^\"]*)\"", html)
-    assert launch_onclicks, "no newTermSession launch affordance rendered"
+        r"onclick=\"((?:newGeneral|newEffort)[^\"]*)\"", html)
+    assert launch_onclicks, "no seeded launch affordance (newGeneral/newEffort) rendered"
     for handler in launch_onclicks:
         assert "openTerminal" not in handler
         assert "start_terminal" not in handler

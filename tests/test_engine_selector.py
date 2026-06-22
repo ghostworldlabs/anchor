@@ -300,7 +300,7 @@ def test_project_window_offers_gemini_for_research_only(gui_env, tmp_path):
     # via the per-panel engine toggle (engtog → term_set_engine / switch_engine,
     # gated by lanes.check_engine_allowed). The surviving live launch (masthead
     # general session) defaults to Claude.
-    assert "newTermSession('general','claude')" in html
+    assert "newGeneral('claude')" in html
     # No plan/build Gemini launch affordance is offered.
     assert "newTermSession('plan','gemini')" not in html
     assert "newTermSession('build','gemini')" not in html

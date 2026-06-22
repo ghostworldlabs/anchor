@@ -732,6 +732,137 @@ def develop_grass_idea(project_id: str, idea_id: str, lane: str,
     return record
 
 
+#: v12 Wave 11 — the SINGLE-session grass workbench key. The one-session-per-idea
+#: workbench (the approved ``_mockups/grass_2_workbench.html``) keeps ONE
+#: stage-carrying ``effort_managed`` grass-dev session per idea under this key in
+#: the idea record's ``dev_sessions`` map (so it never collides with the legacy
+#: per-lane ``research``/``plan`` keys a pre-v12 idea may carry, and the
+#: back-compat resolver can find it). It advances research→plan IN-SESSION via
+#: :func:`terminal_session.advance_stage` — it does NOT mint a second grass
+#: session (the grass second-advance is retired for ``effort_managed`` ideas, W7).
+GRASS_WORKBENCH_KEY = "workbench"
+
+
+def _grass_workbench_session(idea: dict):
+    """Resolve the idea's SINGLE workbench session record (v12 Wave 11).
+
+    Returns ``(session_id, registry_record)`` for the idea's one-session
+    workbench, or ``(None, None)`` when none is live. Resolution order
+    (back-compat — A10):
+
+      1. the explicit v12 single-session key (``dev_sessions['workbench']``);
+      2. a pre-v12 idea with two ``dev_sessions`` ``{research, plan}`` → the
+         MOST-ADVANCED live one (``plan`` over ``research``) is surfaced as THE
+         single workbench session (a stage history; no orphan).
+
+    A session is only surfaced when it is LIVE (registry RUNNING); a reaped one
+    yields ``(None, None)`` so the workbench re-mints/focuses cleanly.
+    """
+    dev_map = _grass_dev_sessions(idea)
+    # 1) The v12 single-session key wins when live.
+    wsid = dev_map.get(GRASS_WORKBENCH_KEY) or ""
+    live = _live_grass_dev_session(wsid)
+    if live is not None:
+        return wsid, live
+    # 2) Back-compat: a pre-v12 idea's most-advanced live lane session.
+    for lane in ("plan", "research"):
+        sid = dev_map.get(lane) or ""
+        rec = _live_grass_dev_session(sid)
+        if rec is not None:
+            return sid, rec
+    return None, None
+
+
+def _grass_workbench_session_view(idea: dict):
+    """SAFE single-session projection for :func:`grass_workbench_data` (W11).
+
+    Returns ``{session_id, lane, current_stage, status, label}`` for the idea's
+    one live workbench session (the v12 key or a back-compat most-advanced lane
+    session), or ``None`` when none is live. NEVER carries worktree/branch (the
+    SAFE-projection rule). Best-effort; never raises.
+    """
+    try:
+        sid, rec = _grass_workbench_session(idea)
+    except Exception:
+        sid, rec = None, None
+    if not sid or rec is None:
+        return None
+    return {
+        "session_id": sid,
+        "lane": rec.get("lane", ""),
+        "current_stage": rec.get("current_stage", "") or rec.get("lane", ""),
+        "status": rec.get("status", ""),
+        "label": rec.get("label", ""),
+    }
+
+
+def develop_grass_workbench(project_id: str, idea_id: str,
+                            folder_path=None, backend=None) -> dict:
+    """Open the idea's SINGLE one-session workbench (v12 Wave 11; SC5).
+
+    The v12 grass model: ONE stage-carrying ``effort_managed`` grass-dev session
+    per idea (no Research/Plan split). It starts at the ``research`` lane (so the
+    researchPrime skill seeds) and ADVANCES research→plan IN-SESSION via
+    :func:`terminal_session.advance_stage` — it never mints a second grass session
+    (the legacy grass second-advance is gated off for ``effort_managed`` ideas, W7).
+
+    Dedupe/focus + back-compat (A10):
+      * If the idea already has a LIVE workbench session (the v12 key OR — for a
+        pre-v12 idea — its most-advanced ``{research,plan}`` dev session) it is
+        RETURNED (re-focused), never re-minted.
+      * Only when none is live is a NEW ``effort_managed`` grass-dev session
+        started and the ``dev_sessions['workbench']`` key recorded.
+
+    Seeds the idea text + its refinements (reuses :func:`_grass_develop_seed`).
+    The idea STAYS in grass (copy, never destroy). Returns the workbench session's
+    registry record. Raises ``ValueError`` for an unknown idea.
+    """
+    if folder_path is None:
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            raise ValueError("unknown project: %s" % (project_id,))
+        folder_path = proj.get("folder_path", "")
+    idea = get_grass_idea(folder_path, project_id, idea_id)
+    if idea is None:
+        raise ValueError("grass idea not found: %s" % (idea_id,))
+    jid = idea.get("job_id", idea_id)
+
+    # Atomic check-then-mint (W11-R2-02): hold WRITE_LOCK across the dedupe check,
+    # start_session, AND the dev_sessions['workbench'] record so two near-simultaneous
+    # opens can't both pass the "no live session" check and double-mint a session for
+    # one idea (parity with advance_stage; WRITE_LOCK is a re-entrant RLock, so the
+    # nested acquisitions in start_session/record_effort are safe).
+    with _paths.WRITE_LOCK:
+        # Re-fetch under the lock so the dedupe check sees a key a concurrent open
+        # may have just recorded.
+        idea = get_grass_idea(folder_path, project_id, idea_id) or idea
+        _wsid, live = _grass_workbench_session(idea)
+        if live is not None:
+            return live
+
+        refinements = list_grass_refinements(folder_path, project_id, jid)
+        seed = _grass_develop_seed(idea, refinements)
+        if not seed.strip():
+            raise ValueError("grass idea has no text: %s" % (idea_id,))
+        import terminal_session as _ts
+        label = GRASS_DEV_LABEL_PREFIX + ("idea: " + ((idea.get("title") or "")[:40]))
+        kwargs = {"label": label, "seed_context": seed, "effort_managed": True}
+        if backend is not None:
+            kwargs["backend"] = backend
+        record = _ts.start_session(project_id, "research", **kwargs)
+
+        # Record the single-session key so a re-click focuses THIS session.
+        # Best-effort — a failed annotation never tears down the live session.
+        try:
+            dev_map = _grass_dev_sessions(idea)
+            dev_map[GRASS_WORKBENCH_KEY] = record.get("session_id")
+            record_effort(folder_path, project_id, "grass", jid,
+                          extra={"dev_sessions": dev_map})
+        except Exception:
+            pass
+        return record
+
+
 def _materialize_handoff_into_plan_worktree(folder_path, plan_record, hk):
     """Make the upstream handoff docs READABLE from a grass plan dev worktree.
 
@@ -871,6 +1002,14 @@ def advance_grass_research_to_plan(project_id: str, idea_id: str,
     # 1) Resolve the contained RESEARCH dev session. Honest if absent.
     dev_map = _grass_dev_sessions(idea)
     rsid = dev_map.get("research") or ""
+    # v12 Wave 11: a one-session workbench idea keeps its single session under the
+    # ``workbench`` key (no per-lane ``research`` key). Resolve it as the research
+    # source so the W7 effort_managed retirement gate below catches it (the gate
+    # then early-returns — a v12 effort advances IN-SESSION, never via a second
+    # grass session). A legacy idea (per-lane keys, effort_managed==False) is
+    # unchanged.
+    if not rsid:
+        rsid = dev_map.get(GRASS_WORKBENCH_KEY) or ""
     if not rsid:
         return {"ok": False, "session": None, "research_session_id": "",
                 "reason": "no-research-session"}
@@ -1096,6 +1235,13 @@ def grass_workbench_data(folder_path, project_id: str) -> list:
             # the Export-to-project link (the real lane sessions this idea's work
             # became). Both empty until the idea is developed / exported.
             "dev_sessions": _grass_dev_sessions(eff),
+            # v12 Wave 11: the SINGLE-session workbench shape (SC5). A SAFE
+            # projection (session_id · stage · status — never worktree/branch) of
+            # the idea's one live workbench session: the v12 ``workbench`` key, or
+            # — for a pre-v12 idea with ``{research,plan}`` dev_sessions — its
+            # MOST-ADVANCED live one (back-compat A10; no orphan). ``None`` when
+            # no workbench session is live.
+            "workbench_session": _grass_workbench_session_view(eff),
             "exported_to": list((eff.get("exported_to") or [])),
             # v10 Wave 4: per-idea ARCHIVE bundles (persisted dev docs + summary
             # ref tied to this idea), newest-first. Empty until the idea is
@@ -1238,7 +1384,20 @@ def export_grass_to_project(project_id: str, idea_id: str,
     jid = idea.get("job_id", idea_id)
     title = (idea.get("title") or "").strip()
 
-    dev_map = _grass_dev_sessions(idea)
+    raw_map = _grass_dev_sessions(idea)
+    # v12 Wave 11: the one-session workbench keeps a SINGLE session under the
+    # ``workbench`` key (NOT a per-lane key). Build the per-lane export map from the
+    # legacy per-lane keys PLUS the workbench session filed under the lane matching
+    # its current stage (research → research lane; plan/build → plan lane) so the
+    # one-session model exports just like the legacy per-lane sessions. The
+    # session's per-stage docs persist under their own store lanes; the export
+    # effort carries the joined docs for the chosen lane.
+    dev_map = {k: v for k, v in raw_map.items() if k in PROMOTE_LANES}
+    wsid, wrec = _grass_workbench_session(idea)
+    if wsid:
+        wstage = (wrec or {}).get("current_stage", "") if isinstance(wrec, dict) else ""
+        wlane = "plan" if wstage in ("plan", "build") else "research"
+        dev_map.setdefault(wlane, wsid)
     exported = []
     for lane in PROMOTE_LANES:
         sid = dev_map.get(lane)
@@ -1401,7 +1560,23 @@ def archive_grass_session(project_id: str, idea_id: str, lane: str,
         raise ValueError("grass idea not found: %s" % (idea_id,))
     jid = idea.get("job_id", idea_id)
 
-    sid = _grass_dev_sessions(idea).get(lane)
+    dev_map = _grass_dev_sessions(idea)
+    sid = dev_map.get(lane)
+    if not sid:
+        # v12 Wave 11: the one-session workbench keeps a SINGLE session under the
+        # ``workbench`` key (it advances research→plan in-session, so it is not
+        # filed under a per-lane key). Fall back to it for the Archive snapshot —
+        # the session's docs persist under whichever stage's store lane they were
+        # written in, but archiving records the bundle under the requested lane and
+        # the doc-join resolves the actual persisted docs (so an empty join → the
+        # honest "no-docs" path below). Only archive against the workbench session
+        # for the lane matching its current stage (avoids a duplicate archive under
+        # both research+plan for the same single session).
+        wsid, wrec = _grass_workbench_session(idea)
+        if wsid:
+            cur = (wrec or {}).get("current_stage", "") if isinstance(wrec, dict) else ""
+            if not cur or _resolve_subdir(lane) == _resolve_subdir(cur or "research"):
+                sid = wsid
     if not sid:
         return {"ok": False, "archive": None, "reason": "no-dev-session"}
 
