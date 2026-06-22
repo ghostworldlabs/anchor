@@ -148,8 +148,13 @@ def test_grass_source_chip_reflects_provenance(env):
 def test_empty_grass_board_renders_placeholder(env):
     gui, pid = env["gui"], env["pid"]
     html = gui.render_project_window_html(pid)
-    assert "data-col-lane='grass'" in html
-    # The empty workbench shows an honest "no ideas yet" hint (and the lane tile).
+    # v12 Wave 2 Layout-D: grass is the persistent right-column mini-panel
+    # ("Grass Catcher") + the retained hidden #grassWorkbenchTpl (opened via
+    # openGrassWorkbench). No empty project → both show honest empty states.
+    assert "Grass Catcher" in html
+    assert "openGrassWorkbench()" in html
+    # The Grass mini-panel's honest empty state + the workbench's "No ideas yet".
+    assert "No ideas captured yet" in html
     assert "No ideas yet" in html
 
 

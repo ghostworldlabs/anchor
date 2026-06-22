@@ -363,8 +363,9 @@ def test_workbench_playwright_flow(env):
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
-            # Open the workbench from the grass column tile.
-            pg.click(".grass-tile")
+            # v12 Wave 2 Layout-D: grass is the right-column mini-panel; open the
+            # workbench via its "Open workbench →" control (openGrassWorkbench()).
+            pg.click(".grass-open")
             pg.wait_for_selector("#grassPanel .grass-workbench", timeout=5000)
             # Two idea rows in the list.
             assert pg.eval_on_selector_all("#grassPanel .gli", "e=>e.length") == 2

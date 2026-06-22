@@ -124,19 +124,19 @@ def _get_json(url):
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
 def test_board_html_returns_board_fragment(server):
-    """The endpoint returns the rendered board fragment (the .p2lanes grid) for the
-    project — the SAME server render the page uses (single source of truth)."""
+    """The endpoint returns the rendered board fragment for the project — the SAME
+    server render the page uses (single source of truth). v12 Wave 2: that render
+    is the Layout-D shell (.pgrid.layoutd with the two headline zones)."""
     bundle, base, _ = server
     pid = bundle["pid"]
     status, data = _get_json(f"{base}/api/rnd/board_html?project_id={pid}")
     assert status == 200
     assert data.get("ok") is True
     html = data.get("html") or ""
-    assert "p2lanes" in html, "board fragment missing the .p2lanes grid"
-    # The trio lane-column containers are present (so refreshBoard can swap them).
-    for lane in ("research", "plan", "build"):
-        assert ("cards_%s" % lane) in html, \
-            "board fragment missing the %s column container" % lane
+    assert "pgrid layoutd" in html, "board fragment missing the Layout-D grid"
+    # The two Layout-D zones are present (so refreshBoard can swap them in place).
+    assert html.count("class='sectionlbl'") == 2, \
+        "board fragment missing the two Layout-D headline zones"
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
@@ -184,7 +184,7 @@ def test_board_html_is_token_gated(env, monkeypatch):
         status, data = _get_json(
             f"{base}/api/rnd/board_html?project_id={pid}&token=sekret")
         assert status == 200 and data.get("ok") is True
-        assert "p2lanes" in (data.get("html") or "")
+        assert "pgrid layoutd" in (data.get("html") or "")
     finally:
         srv.shutdown(); srv.server_close(); t.join(timeout=5)
 
@@ -226,10 +226,10 @@ def test_project_window_board_wrapped_in_kanbanboard(env):
     html = gui.render_project_window_html(env["pid"])
     assert ("id='kanbanBoard'" in html) or ('id="kanbanBoard"' in html), \
         "the board is not wrapped in a stable #kanbanBoard container"
-    # The board grid lives INSIDE the container.
+    # The board grid lives INSIDE the container (v12 Wave 2: Layout-D grid).
     idx = html.find("kanbanBoard")
-    assert html.find("p2lanes", idx) > idx, \
-        "the .p2lanes board grid is not inside #kanbanBoard"
+    assert html.find("pgrid layoutd", idx) > idx, \
+        "the Layout-D board grid is not inside #kanbanBoard"
 
 
 def test_refreshboard_defined_and_wired_into_lifecycle():
@@ -259,13 +259,17 @@ def test_refreshboard_defined_and_wired_into_lifecycle():
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
 def test_playwright_started_session_appears_in_column_without_reload(server):
-    """End to end in a real browser, proving refreshBoard brings the lane-column
-    tile in WITHOUT a manual full reload:
+    """End to end in a real browser, proving refreshBoard brings the lane tile in
+    WITHOUT a manual full reload (the still-wired refresh mechanism):
 
-      1. Load the project window (planning column empty).
-      2. Click "+ new plan" to start a planning session via the UI.
-      3. WITHOUT any goto/reload, the tile appears in #cards_plan (refreshBoard
-         re-fetched the server board) — EXACTLY ONE tile (dedupe correct).
+      1. Load the project window (Plan/Build zone empty).
+      2. Start a planning session server-side (the v12 Wave-2 skeleton retires the
+         per-lane '+ New plan run' launcher; the live click-to-start lands in W10,
+         so we start the session via terminal_session and then exercise the wired
+         refreshBoard()).
+      3. Calling refreshBoard() in-page (the wired refresh) — WITHOUT any goto —
+         brings the tile into the Plan/Build zone: EXACTLY ONE tile (dedupe
+         correct), green light.
       4. No JS console errors.
 
     Screenshot saved to _devtest/wave6_instant.png for orchestrator review.
@@ -273,6 +277,7 @@ def test_playwright_started_session_appears_in_column_without_reload(server):
     pytest.importorskip("playwright.sync_api")
     bundle, base, _ = server
     pid = bundle["pid"]
+    import terminal_session as ts
 
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
@@ -283,36 +288,33 @@ def test_playwright_started_session_appears_in_column_without_reload(server):
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
-        # 1) The planning column starts EMPTY (no sessions yet).
+        # 1) The Plan/Build zone starts EMPTY (no sessions yet).
         assert pg.eval_on_selector_all(
-            "#cards_plan .tile", "e=>e.length") == 0, \
-            "planning column not empty before launch"
+            ".pgrid.layoutd .tile[data-lane='plan']", "e=>e.length") == 0, \
+            "Plan/Build zone not empty before launch"
 
-        # 2) Click the "+ New plan run" launcher (newTermSession('plan')). It is
-        #    the .addnew span whose onclick calls newTermSession('plan'); select
-        #    it by that onclick attribute (robust to the visible label).
-        launcher = ".p2col[data-col-lane='plan'] .addnew"
-        pg.wait_for_selector(launcher, timeout=8000)
-        pg.click(launcher)
+        # 2) Start a planning session server-side (W10 wires the click path).
+        sid = ts.start_session(pid, "plan", backend="claude")["session_id"]
 
-        # 3) WITHOUT a reload, a tile for the new planning session appears in
-        #    #cards_plan (refreshBoard pulled the server-rendered board in).
-        pg.wait_for_selector(
-            "#cards_plan .tile[data-live='1']", timeout=8000)
-        n = pg.eval_on_selector_all(
-            "#cards_plan .tile[data-live='1']", "e=>e.length")
+        # 3) Trigger the WIRED refreshBoard() in-page — no goto/reload — and the
+        #    tile appears in the Plan/Build zone (refreshBoard pulled the
+        #    server-rendered Layout-D board in).
+        pg.evaluate("refreshBoard()")
+        sel = '.pgrid.layoutd .tile[data-session="%s"][data-lane="plan"]' % sid
+        pg.wait_for_selector(sel, timeout=8000)
+        n = pg.eval_on_selector_all(sel, "e=>e.length")
         assert n == 1, \
-            "expected EXACTLY ONE live planning-column tile after refreshBoard, got %d" % n
-        # Its light is green (running) and it's in the plan column.
+            "expected EXACTLY ONE Plan/Build tile after refreshBoard, got %d" % n
+        # Its light is green (running).
         assert pg.eval_on_selector(
-            "#cards_plan .tile[data-live='1']",
-            "e=>e.getAttribute('data-light')") == "green", \
-            "the instant tile is not green (running)"
+            sel, "e=>e.getAttribute('data-light')") == "green", \
+            "the refreshed tile is not green (running)"
 
         _DEVTEST.mkdir(exist_ok=True)
         pg.screenshot(path=str(_DEVTEST / "wave6_instant.png"), full_page=True)
 
         assert not errors, f"JS console errors during instant-in-column: {errors}"
+        ts.kill(sid)
         b.close()
 
 

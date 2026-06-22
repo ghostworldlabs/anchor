@@ -149,17 +149,14 @@ def _parse(body):
 
 
 def _col_tiles(body, trio_lane):
-    """The .tile elements inside one lane column (#cards_<lane> slice)."""
-    start = body.find("id='cards_%s'" % trio_lane)
-    if start < 0:
-        start = body.find('id="cards_%s"' % trio_lane)
-    assert start >= 0, "no cards_%s container in body" % trio_lane
-    rest = body[start:]
-    nxt = re.search(r"data-col-lane=", rest[5:])
-    end = (nxt.start() + 5) if nxt else len(rest)
-    seg = rest[:end]
-    return [(classes, attrs) for tag, classes, attrs in _parse(seg)
-            if tag == "div" and "tile" in classes]
+    """The Layout-D board tiles for one trio lane (v12 Wave 2). The 5-col
+    ``#cards_<lane>`` grid is retired — tiles now live in the Research /
+    Plan-Build zones and carry their lane on ``data-lane``. ``plan`` matches the
+    store-form ``planning`` alias too."""
+    aliases = {"plan": {"plan", "planning"}}.get(trio_lane, {trio_lane})
+    return [(classes, attrs) for tag, classes, attrs in _parse(body)
+            if tag == "div" and "tile" in classes
+            and (attrs.get("data-lane") or "") in aliases]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -269,16 +266,18 @@ def test_open_terminal_button_present(env):
 
 
 def test_no_general_board_lane_column(env):
-    """NEGATIVE: the board has EXACTLY the trio + deliverables + grass columns —
-    there is NO 'general' lane column tile container."""
+    """NEGATIVE: v12 Wave 2 Layout-D — no board TILE carries the 'general' lane.
+    (The 5-col grid is retired; tiles live in the Research / Plan-Build zones and
+    carry their lane on ``data-lane``. ``general`` is NOT a board lane.)"""
     gui = env["gui"]
     body = _strip(gui.render_project_window_html(env["pid"]))
-    cols = sorted({a.get("data-col-lane") for tag, c, a in _parse(body)
-                   if a.get("data-col-lane")})
-    assert cols == ["build", "deliverables", "grass", "plan", "research"], \
-        "board columns changed (general must NOT be a board lane): %s" % cols
-    assert "id='cards_general'" not in body and 'id="cards_general"' not in body, \
-        "a general lane column container was rendered"
+    board_lanes = sorted({a.get("data-lane") for tag, c, a in _parse(body)
+                          if "tile" in c and a.get("data-lane")})
+    assert "general" not in board_lanes, \
+        "a general session leaked into a board tile: %s" % board_lanes
+    # and the retired column grid is gone entirely.
+    assert "data-col-lane" not in body, "old lane-column grid still rendered"
+    assert "id='cards_general'" not in body and 'id="cards_general"' not in body
 
 
 def test_general_session_makes_no_trio_board_tile(env):
@@ -337,10 +336,14 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
-        # Baseline: no general column tiles anywhere on the trio board.
+        # Baseline: no trio board tiles anywhere (v12 Wave 2: tiles carry their
+        # lane on data-lane inside #kanbanBoard; the #cards_<lane> grid is
+        # retired. Scope to the board so the session-bar reopen chip — which also
+        # carries `tile lane-tile` — is not counted).
         for lane in ("research", "plan", "build"):
             assert pg.eval_on_selector_all(
-                "#cards_%s .tile" % lane, "e=>e.length") == 0, \
+                "#kanbanBoard .tile[data-lane='%s']" % lane,
+                "e=>e.length") == 0, \
                 "trio board not empty before launch"
 
         # 1) Click the "Open terminal" button.
@@ -360,12 +363,12 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
         pg.wait_for_selector(
             "#panelStack .panel[data-session='%s']" % gsid, timeout=8000)
 
-        # 3) NO trio board column tile was created for the general session.
-        for lane in ("research", "plan", "build", "deliverables"):
-            assert pg.eval_on_selector_all(
-                "#cards_%s .tile[data-session='%s']" % (lane, gsid),
-                "e=>e.length") == 0, \
-                "general session created a %s board tile" % lane
+        # 3) NO trio BOARD tile was created for the general session (the
+        # session-bar reopen chip is expected + lives outside #kanbanBoard).
+        assert pg.eval_on_selector_all(
+            "#kanbanBoard .tile[data-session='%s']" % gsid,
+            "e=>e.length") == 0, \
+            "general session created a board tile"
 
         _DEVTEST.mkdir(exist_ok=True)
         pg.screenshot(path=str(_DEVTEST / "wave4_general.png"), full_page=True)

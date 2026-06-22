@@ -72,7 +72,11 @@ def _parse(body):
 
 # ── POSITIVE: the lane board IS Paradigm 2 (parsed DOM, not grep) ───────────
 
-def test_lane_board_is_paradigm2_grid(gui_env, tmp_path):
+def test_lane_board_is_layoutd(gui_env, tmp_path):
+    """v12 Wave 2: the 5-col .p2lanes grid is RETIRED for Layout D — two headline
+    cards + collapsible shelves of little-tiles + a persistent right column. Each
+    headline/little-tile still carries the legacy ``tile lane-tile`` click hook so
+    the W10 panel wiring binds."""
     gui = gui_env
     import effort_history as eh
     folder = tmp_path / "Multi"
@@ -86,17 +90,20 @@ def test_lane_board_is_paradigm2_grid(gui_env, tmp_path):
                      prompt_seed="Plan it")
     els = _parse(_strip(gui.render_project_window_html(pid)))
     classes = [" ".join(c) for _, c, _ in els]
-    # exactly one .p2lanes board with 5 .p2col columns
-    assert sum("p2lanes" in c.split() for c in classes) == 1
-    assert sum("p2col" in c.split() for c in classes) == 5
-    # genuine tiles exist as elements (not just CSS)
+    # the old grid is gone
+    assert sum("p2lanes" in c.split() for c in classes) == 0
+    assert sum("p2col" in c.split() for c in classes) == 0
+    # Layout-D: two section labels + two headline cards
+    assert sum("sectionlbl" in c.split() for c in classes) == 2
+    assert sum("headline" in c.split() for c in classes) == 2
+    # genuine tiles exist as elements (not just CSS): headline + little-tiles
     tiles = [d for t, c, d in els if "tile" in c]
-    assert tiles, "no .tile elements rendered in the lane board"
-    # each visible (non-previous-sessions) tile carries a status light + click hook
+    assert tiles, "no .tile elements rendered in the Layout-D board"
+    # each tile carries the legacy click hook + a status light
     lit = [d for t, c, d in els if "lane-tile" in c]
     assert lit, "no .lane-tile click targets"
-    assert all("onclick" in d for d in lit), "lane tiles missing click hook"
-    light_classes = [c for t, c, d in els if "lt" in c]
+    assert all("onclick" in d for d in lit), "tiles missing click hook"
+    light_classes = [c for t, c, d in els if "lt" in c or "dot" in c]
     assert any(set(c) & {"green", "amber", "red", "grey"} for c in light_classes)
 
 
@@ -128,21 +135,23 @@ def test_no_old_kanban_multi_lane(gui_env, tmp_path):
     _assert_no_old_lane_markers(_strip(gui.render_project_window_html(pid)))
 
 
-def test_zero_session_project_is_paradigm2_not_old(gui_env, tmp_path):
+def test_zero_session_project_is_layoutd_not_old(gui_env, tmp_path):
     """A brand-new project (the user's exact failing case) renders the empty
-    Paradigm-2 grid, never the old kanban."""
+    Layout-D shell, never the old kanban — and never the retired .p2lanes grid."""
     gui = gui_env
     folder = tmp_path / "Fresh"
     pid = _mkproject(folder, "Fresh")["id"]
     body = _strip(gui.render_project_window_html(pid))
-    assert "p2lanes" in body
-    assert body.count("class='p2col'") + body.count('class="p2col"') == 5
+    assert "p2lanes" not in body
+    assert "class='p2col'" not in body and 'class="p2col"' not in body
+    # two Layout-D zones still render (honest empty headline placeholders)
+    assert body.count("class='sectionlbl'") == 2
     _assert_no_old_lane_markers(body)
 
 
-def test_imported_only_project_is_paradigm2_not_old(gui_env, tmp_path):
+def test_imported_only_project_is_layoutd_not_old(gui_env, tmp_path):
     """A project whose only sessions are DISCOVERED (imported) — the case that
-    looked 100% old before — renders Paradigm-2 tiles, no old kanban."""
+    looked 100% old before — renders Layout-D tiles, no old kanban."""
     gui = gui_env
     folder = tmp_path / "Imp"
     # a discovered planning artifact pair → a discovered session
@@ -155,7 +164,7 @@ def test_imported_only_project_is_paradigm2_not_old(gui_env, tmp_path):
     import brownfield_scan, effort_history as eh
     eh.adopt_discovered(str(folder), pid, brownfield_scan.scan(str(folder)))
     body = _strip(gui.render_project_window_html(pid))
-    assert "p2lanes" in body
+    assert "p2lanes" not in body
     _assert_no_old_lane_markers(body)
     els = _parse(body)
     assert any("tile" in c for _, c, _ in els), "imported session not a tile"
@@ -204,7 +213,9 @@ def test_clicking_historical_tile_opens_inline_panel(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
-        assert pg.eval_on_selector_all(".p2col", "e=>e.length") == 5
+        # v12 Wave 2: Layout-D — two headline zones, no .p2col grid.
+        assert pg.eval_on_selector_all(".p2col", "e=>e.length") == 0
+        assert pg.eval_on_selector_all(".sectionlbl", "e=>e.length") == 2
         assert pg.eval_on_selector_all(".lane-tile", "e=>e.length") >= 1, \
             "no clickable lane tile rendered"
         assert pg.eval_on_selector_all("#panelStack .panel", "e=>e.length") == 0

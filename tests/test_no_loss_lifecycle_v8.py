@@ -254,9 +254,13 @@ def test_killed_session_promotes_to_big_tile_chip_removed(env):
     body = _strip(html)
     assert ('data-session="%s"' % sid) in body, \
         "killed session must appear as a big board tile"
-    # It is a real lane tile (the board-tile class), not a top-strip chip.
+    # It is a real board tile (the lane-tile alias), not a top-strip chip.
+    # v12 Wave 2 Layout-D: the tile is a headline card or a shelf little-tile, so
+    # the class prefix varies (``headline tile lane-tile`` / ``minitile tile
+    # lane-tile``) — match the alias anywhere in the class list.
     tile_re = re.compile(
-        r"<div class='tile lane-tile[^']*'[^>]*data-session=\"%s\"" % re.escape(sid))
+        r"<div class='[^']*\btile lane-tile\b[^']*'[^>]*data-session=\"%s\""
+        % re.escape(sid))
     assert tile_re.search(body), "killed session tile must be a board lane-tile"
 
     # NEGATIVE / POSITIVE on the JS chip-removal: killPanel marks _KILLED and

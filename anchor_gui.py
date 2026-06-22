@@ -1916,6 +1916,10 @@ def _gather_project_efforts(folder_path, project_id):
                 "artifact_path": eff.get("artifact_path", "") if discovered else "",
                 "title": eff.get("title", "") if discovered else "",
                 "kind": eff.get("kind", "") if discovered else "",
+                # real epoch for the Layout-D newest-first cross-lane merge (v12 W2,
+                # Reviewer F1): without this the plan/build merge had no recency key
+                # and demoted the newest build under an older plan.
+                "_eff_created_at": float(eff.get("created_at") or 0.0),
             })
         out[trio_lane] = views
     return out
@@ -2202,12 +2206,14 @@ def _merge_registry_sessions(session_views, trio_lane, reg_by_column):
 def _sv_created_at(sv):
     """Best-effort epoch created_at for a session_view (for the merge sort).
 
-    A registry-sourced view carries ``_reg_created_at``; an effort view does not
-    carry an epoch on the rep (it carries a compact age), so it returns 0.0 and
-    relies on the stable secondary key to preserve effort order."""
+    A registry-sourced view carries ``_reg_created_at``; an effort view carries
+    ``_eff_created_at`` (the effort record's real epoch, v12 W2). Either gives a
+    true recency key for the newest-first / cross-lane merge; 0.0 only if neither."""
     rep = (sv.get("members") or [None])[0]
-    if isinstance(rep, dict) and rep.get("_reg_created_at"):
-        return float(rep.get("_reg_created_at") or 0.0)
+    if isinstance(rep, dict):
+        ts = rep.get("_reg_created_at") or rep.get("_eff_created_at")
+        if ts:
+            return float(ts or 0.0)
     return 0.0
 
 
@@ -2749,6 +2755,443 @@ def _render_kanban_html(folder_path, project_id):
     return board + workbench
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# v12 Wave 2 — Layout-D static skeleton ("ship the look early").
+#
+# Render the approved Layout-D shell per _mockups/dashboard_D_headline_shelf.html
+# — a Latest-Research headline card + a collapsible older-research shelf, a
+# Latest-Plan/Build headline card + its own shelf, a persistent right column
+# (Grass mini-panel + Deliverables panel), a "+ New effort" control, and an
+# INERT bottom dock chrome (summary-on-top + draggable splitter + terminal host,
+# buttons disabled/labeled "wired in W10"). This wave is DRIVEN BY EXISTING DATA
+# (`_gather_project_sessions`, already on master) via a thin adapter — the live
+# effort-view (W9), the bottom-dock terminal/transport (W10), and the
+# advance/handoff interactions are deliberately DEFERRED. The headline cards +
+# little-tiles carry the legacy ``tile lane-tile`` + ``data-session`` hooks so
+# the W10 panel-open wiring (and the existing panel-open tests) still bind.
+# ════════════════════════════════════════════════════════════════════════════
+
+def _layoutd_zones(folder_path, project_id, sessions_by_lane=None):
+    """Map the EXISTING per-lane session views into the Layout-D headline/shelf
+    shape (v12 Wave 2). Pure adapter over :func:`_gather_project_sessions` — no
+    new data source, no model call.
+
+    Returns ``{"research": [session_view, ...], "plan_build": [session_view, ...]}``
+    newest-first, where the RESEARCH zone is the research column's sessions and
+    the PLAN/BUILD zone is the plan + build columns' sessions merged newest-first.
+    In each zone ``[0]`` is the headline (most-recent) and ``[1:]`` are the
+    collapsible-shelf "little tiles". Each ``session_view`` is carried verbatim
+    (``{"session_id", "members": [...], ...}``) so the existing tile helpers
+    (:func:`_session_tile_title` / :func:`_session_light_class` /
+    :func:`_session_state_text`) read it unchanged.
+    """
+    if sessions_by_lane is None:
+        sessions_by_lane = _gather_project_sessions(folder_path, project_id)
+    research = list(sessions_by_lane.get("research", []) or [])
+    plan = list(sessions_by_lane.get("plan", []) or [])
+    build = list(sessions_by_lane.get("build", []) or [])
+    # Merge plan + build newest-first. Effort views don't carry an epoch on the
+    # rep, so use the same best-effort created_at the merge sort uses, stable on
+    # ties (build listed first → slightly newer-leaning, harmless for a skeleton).
+    plan_build = sorted(
+        plan + build, key=lambda sv: -_sv_created_at(sv))
+    return {"research": research, "plan_build": plan_build}
+
+
+def _layoutd_tie_chip(sv):
+    """The build→planning tie (v3, preserved into Layout-D): ``(data_attr, chip)``
+    for a build session view whose ``linked_planning`` was set by
+    :func:`_attach_build_planning_tie`. Returns ``("", "")`` when none. The chip
+    links back to the planning session this build executed on (same markup the v4
+    lane tile emitted, so the tie tests + ``openLinkedPlanning`` still bind)."""
+    tie = sv.get("linked_planning") or {}
+    if not tie.get("session_id"):
+        return "", ""
+    lp_sid = html_lib.escape(tie["session_id"], quote=True)
+    lp_lbl = html_lib.escape(tie.get("label") or "planning")
+    lp_lbl_attr = html_lib.escape(tie.get("label") or "planning", quote=True)
+    data = (f" data-linked-planning=\"{lp_sid}\""
+            f" data-linked-planning-label=\"{lp_lbl_attr}\"")
+    chip = (
+        f"<span class='tiechip' title='Open the planning session this build "
+        f"executed on' onclick=\"openLinkedPlanning(event,'{lp_sid}')\">"
+        f"&#9741; Planning: {lp_lbl} &#9656;</span>")
+    return data, chip
+
+
+def _layoutd_grass_origin_chip(rep, trio_lane):
+    """The board-tile "from grass: <idea>" lineage chip (v10 W4, preserved into
+    Layout-D). Rendered for a plan/build tile whose representative session carries
+    a ``grass_origin`` (the SAFE idea-id field). The label + dead-state are
+    resolved client-side by ``_resolveGrassOriginChips``; here we emit the pending
+    chip with ``data-grass-origin`` + ``data-grass-pending`` exactly as the v10
+    lane tile did. ``""`` when none / not a plan-build lane."""
+    if not isinstance(rep, dict):
+        return ""
+    origin = (rep.get("grass_origin") or "").strip()
+    if not origin or trio_lane not in ("plan", "planning", "build"):
+        return ""
+    origin_attr = html_lib.escape(origin, quote=True)
+    return (
+        f"<span class='grassorigin' data-grass-origin=\"{origin_attr}\" "
+        f"data-grass-pending=\"1\" "
+        f"title='This work traces back to a grass idea — click to open it'>"
+        f"&#127793; from grass</span>")
+
+
+def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane):
+    """Render ONE Layout-D shelf ``.minitile`` from a session view (v12 Wave 2).
+
+    Mockup schema: a ``.minitile`` with a ``.mtop`` (status dot + a stage badge),
+    a ``.mtitle`` (the session's short title), and a ``.mfoot`` (state + age). It
+    ALSO carries the legacy ``tile lane-tile`` + ``data-session`` click hooks so
+    the W10 panel-open wiring (and the panel-open tests) bind to it; the
+    interaction itself is inert this wave (the dock is W10).
+    """
+    members = sv.get("members", []) or []
+    rep = members[0] if members else None
+    if rep is None:
+        return ""
+    light = _session_light_class(rep)
+    sid = sv.get("session_id", "") or ""
+    sid_attr = html_lib.escape(sid, quote=True)
+    lane_attr = html_lib.escape(trio_lane, quote=True)
+    title = html_lib.escape(_session_tile_title(rep))
+    state_cls, state_lbl = _session_state_text(rep)
+    state_lbl = html_lib.escape(state_lbl)
+    age = html_lib.escape(rep.get("age") or "")
+    badge_lane = "build" if trio_lane == "build" else (
+        "plan" if trio_lane in ("plan", "planning") else "research")
+    badge_lbl = badge_lane.capitalize()
+    extra = ""
+    if light == "green":
+        extra = " running"
+    elif light == "red":
+        extra = " failed"
+    foot = (f"<span class='state {html_lib.escape(state_cls)}'>{state_lbl}</span>"
+            + (f"<span class='age'>{age}</span>" if age else "<span></span>"))
+    grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
+    tie_data, tie_chip = _layoutd_tie_chip(sv)
+    return (
+        f"<div class='minitile tile lane-tile{extra}' data-session=\"{sid_attr}\" "
+        f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data} "
+        f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
+        f"<div class='mtop'><span class='dot {light}'></span>"
+        f"<span class='badge {badge_lane}'>{badge_lbl}</span></div>"
+        f"<div class='mtitle'>{title}</div>"
+        f"<div class='mfoot'>{foot}</div>"
+        f"{tie_chip}"
+        f"{grass_chip}"
+        f"</div>"
+    )
+
+
+def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
+                             zone_label):
+    """Render the Layout-D ``.headline`` card for a zone's most-recent session
+    (v12 Wave 2). Mirrors the mockup headline (status dot + stage badge + title +
+    blurb + a 3-node stage track + report/summary links). Carries the legacy
+    ``tile lane-tile`` + ``data-session`` hooks so the W10 panel-open wiring (and
+    the panel-open tests) bind. Inert this wave (the dock is W10).
+    """
+    members = sv.get("members", []) or []
+    rep = members[0] if members else None
+    if rep is None:
+        return ""
+    light = _session_light_class(rep)
+    sid = sv.get("session_id", "") or ""
+    sid_attr = html_lib.escape(sid, quote=True)
+    lane_attr = html_lib.escape(trio_lane, quote=True)
+    title = html_lib.escape(_session_tile_title(rep))
+    state_cls, state_lbl = _session_state_text(rep)
+    blurb = ""
+    if folder_path is not None:
+        blurb = _session_tile_blurb(sv, folder_path, project_id, store_lane)
+    blurb_html = (f"<p class='hblurb'>{html_lib.escape(blurb)}</p>"
+                  if blurb else "")
+    badge_lane = "build" if trio_lane == "build" else (
+        "plan" if trio_lane in ("plan", "planning") else "research")
+    badge_lbl = badge_lane.capitalize()
+    running_cls = " running" if light == "green" else ""
+    running_chip = ("<span style='font-size:11px;color:var(--success)'>"
+                    "&#9679; running</span>" if light == "green" else "")
+    # 3-node stage track: light up the nodes up to (and including) the current
+    # zone/lane (research → first node; plan → first two; build → all three).
+    reached = {"research": 1, "plan": 2, "planning": 2, "build": 3}.get(
+        trio_lane, 1)
+    track = _render_layoutd_track(trio_lane, reached)
+    grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
+    tie_data, tie_chip = _layoutd_tie_chip(sv)
+    return (
+        f"<div class='headline tile lane-tile{running_cls}' "
+        f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "
+        f"data-light=\"{light}\"{tie_data} "
+        f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
+        f"<div class='htop'>"
+        f"<span class='dot {light}'></span>"
+        f"<span class='badge {badge_lane}'>{badge_lbl}</span>"
+        f"{running_chip}{grass_chip}</div>"
+        f"<div class='htitle'>{title}</div>"
+        f"{blurb_html}"
+        f"<div class='hrow'>{track}{tie_chip}</div>"
+        f"</div>"
+    )
+
+
+def _render_layoutd_track(trio_lane, reached):
+    """Render the 3-node Research→Plan→Build stage track for a headline card."""
+    lanes = ("research", "plan", "build")
+    cur_idx = {"research": 0, "plan": 1, "planning": 1, "build": 2}.get(
+        trio_lane, 0)
+    parts = ["<span class='track'>"]
+    for i, ln in enumerate(lanes):
+        node_cls = ["node", ln]
+        if i < reached:
+            node_cls.append("reached")
+        if i == cur_idx:
+            node_cls.append("current")
+        parts.append(f"<span class='{' '.join(node_cls)}'></span>")
+        if i < len(lanes) - 1:
+            line_cls = "line done" if i + 1 < reached else "line"
+            parts.append(f"<span class='{line_cls}'></span>")
+    cur_lbl = {"plan": "Plan", "planning": "Plan", "build": "Build"}.get(
+        trio_lane, "Research")
+    parts.append(f"<span class='track-lbl'>{cur_lbl}</span></span>")
+    return "".join(parts)
+
+
+def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
+                         folder_path, project_id):
+    """Render one Layout-D zone: a section label + the headline card + a
+    collapsible shelf of older "little tiles" (v12 Wave 2). Honest empty state
+    (and NO shelf) when the zone has no sessions.
+    """
+    if not sessions:
+        empty = (
+            f"<div class='sectionlbl'>{section_lbl}</div>"
+            f"<div class='headline' data-empty='1' data-zone='{zone_key}'>"
+            f"<p class='hblurb'>No {html_lib.escape(zone_label.lower())} "
+            f"sessions yet.</p></div>"
+        )
+        return empty
+    head_sv = sessions[0]
+    head_lane = _sv_zone_lane(head_sv, zone_key)
+    store_lane = "planning" if head_lane == "plan" else head_lane
+    headline = _render_layoutd_headline(
+        head_sv, head_lane, project_id, folder_path, store_lane, zone_label)
+    older = sessions[1:]
+    shelf = ""
+    if older:
+        tiles = []
+        for sv in older:
+            ln = _sv_zone_lane(sv, zone_key)
+            sl = "planning" if ln == "plan" else ln
+            tiles.append(_render_layoutd_minitile(
+                sv, ln, project_id, folder_path, sl))
+        n = len(older)
+        shelf_id = f"shelf_{html_lib.escape(zone_key, quote=True)}"
+        tgl_id = f"tgl_{html_lib.escape(zone_key, quote=True)}"
+        label_attr = html_lib.escape(zone_label.lower(), quote=True)
+        shelf = (
+            f"<button class='showall' id='{tgl_id}' "
+            f"onclick=\"toggleShelf('{shelf_id}','{tgl_id}',{n},"
+            f"'{label_attr}')\">&#9662; Hide {n} older "
+            f"{html_lib.escape(zone_label.lower())} sessions</button>"
+            f"<div class='shelf-wrap' id='{shelf_id}'>"
+            f"<div class='shelf'>{''.join(tiles)}</div></div>"
+        )
+    return (
+        f"<div class='sectionlbl'>{section_lbl}</div>"
+        f"{headline}"
+        f"{shelf}"
+    )
+
+
+def _sv_zone_lane(sv, zone_key):
+    """Best-effort trio-lane for a session view inside a Layout-D zone, from the
+    representative member's ``trio_lane`` (the merged plan/build zone holds both)."""
+    if zone_key == "research":
+        return "research"
+    rep = (sv.get("members") or [None])[0]
+    if isinstance(rep, dict):
+        ln = (rep.get("trio_lane") or "").strip()
+        if ln in ("plan", "planning", "build"):
+            return ln
+    return "plan"
+
+
+def _render_layoutd_grass_panel(folder_path, project_id) -> str:
+    """Render the Layout-D right-column Grass mini-panel (v12 Wave 2). Reuses the
+    existing grass data; clicking a row / "Open workbench" opens the existing
+    two-pane workbench (``openGrassWorkbench`` template, retained)."""
+    try:
+        ideas = _eh.grass_workbench_data(folder_path, project_id)
+    except Exception:
+        ideas = []
+    n = len(ideas)
+    rows = []
+    _light = {_eh.GRASS_RAW: "grey", _eh.GRASS_REFINED: "amber",
+              _eh.GRASS_PROMOTED: "green"}
+    for i in ideas[:6]:
+        status = i.get("status", _eh.GRASS_RAW)
+        dot = _light.get(status, "grey")
+        txt = html_lib.escape(i.get("title") or "(untitled idea)")
+        tag = html_lib.escape(_GRASS_STATUS_LABEL.get(status, status))
+        rows.append(
+            f"<div class='idearow' onclick='openGrassWorkbench()'>"
+            f"<span class='dot {dot}'></span><span class='it'>{txt}</span>"
+            f"<span class='tag'>{tag}</span></div>"
+        )
+    if not rows:
+        rows.append("<div class='idea-empty'>No ideas captured yet.</div>")
+    return (
+        "<div class='panel'>"
+        f"<div class='ptitle'>&#127793; Grass Catcher "
+        f"<span class='cnt'>{n} idea{'s' if n != 1 else ''}</span></div>"
+        f"{''.join(rows)}"
+        "<div class='pactions'>"
+        "<button class='btn sm' onclick='addIdea()'>+ capture</button>"
+        # The open-workbench control carries the legacy grass-tile hooks
+        # (``grass-tile`` class + ``data-grass-tile='1'``) so the existing grass
+        # Playwright click targets resolve to the Layout-D mini-panel.
+        "<button class='btn sm primary grass-open grass-tile' "
+        "data-grass-tile='1' data-light='grey' "
+        "onclick='openGrassWorkbench()'>Open workbench &#8594;</button>"
+        "</div></div>"
+    )
+
+
+def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
+    """Render the Layout-D right-column Deliverables panel (v12 Wave 2). Reuses
+    the existing pinned-deliverable data; each row launches via the existing
+    ``launchDeliverable`` JS (carried verbatim, the row keeps the deliv hooks)."""
+    try:
+        pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
+    except Exception:
+        pinned = []
+    rows = []
+    for r in pinned:
+        rel = r.get("artifact_path", "") or ""
+        name = html_lib.escape(r.get("title") or rel or "")
+        raw_type = (r.get("deliverable_type", "") or "").strip().lower()
+        if raw_type not in _deliv.VALID_TYPES:
+            raw_type = _deliv.infer_type(rel)
+        dtype = html_lib.escape(raw_type)
+        rel_attr = html_lib.escape(rel, quote=True)
+        did_attr = html_lib.escape(r.get("job_id", "") or "", quote=True)
+        rows.append(
+            f"<div class='delivrow tile deliv-tile deliv-pinned' "
+            f"data-deliv=\"{rel_attr}\" data-deliv-id=\"{did_attr}\" "
+            f"data-deliv-type=\"{dtype}\" onclick='launchDeliverable(this)'>"
+            f"<span class='dn'>&#8595; <span class='mono'>{name}</span></span>"
+            f"<span class='tag'>{dtype}</span></div>"
+        )
+    if not rows:
+        rows.append(
+            "<div class='idea-empty'>No deliverables pinned yet — a Foreman "
+            "build pins one on GREEN.</div>")
+    return (
+        "<div class='panel'>"
+        f"<div class='ptitle'>&#128230; Deliverables "
+        f"<span class='cnt'>{len(pinned)}</span></div>"
+        f"{''.join(rows)}"
+        "</div>"
+    )
+
+
+def _render_layoutd_html(folder_path, project_id):
+    """Render the v12 Layout-D static skeleton (Wave 2). Driven by EXISTING data
+    (:func:`_gather_project_sessions`) via :func:`_layoutd_zones`; the bottom
+    dock + live wiring arrive in W10. Returns the board fragment (+ the retained
+    hidden grass-workbench template the panel manager clones)."""
+    sessions_by_lane = _gather_project_sessions(folder_path, project_id)
+    zones = _layoutd_zones(folder_path, project_id, sessions_by_lane)
+    research_zone = _render_layoutd_zone(
+        "research", "Research", "&#128300; Latest Research",
+        zones["research"], folder_path, project_id)
+    plan_build_zone = _render_layoutd_zone(
+        "plan_build", "Plan/Build", "&#128208;&#8594;&#128296; Latest Plan / Build",
+        zones["plan_build"], folder_path, project_id)
+    grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
+    deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
+    # The "+ New effort" control. INERT this wave (no advance/start wiring until
+    # W6/W10); explicitly labeled so the look ships honestly.
+    new_effort = (
+        "<div class='neweffort-wrap' style='margin:0 0 18px'>"
+        "<button class='btn primary neweffort' id='newEffortBtn' disabled "
+        "title='Starts an effort at Research (wired in W10)'>"
+        "+ New effort <span style='opacity:.7;font-weight:400'>"
+        "(wired in W10)</span></button></div>"
+    )
+    board = (
+        "<div class='pgrid layoutd'>"
+        "<div class='leftcol'>"
+        f"{new_effort}"
+        f"{research_zone}"
+        f"{plan_build_zone}"
+        "</div>"
+        "<div class='rightcol'>"
+        f"{grass_panel}"
+        f"{deliv_panel}"
+        "</div>"
+        "</div>"
+    )
+    # The full two-pane Grass workbench, kept as a hidden template the panel
+    # manager (openGrassWorkbench) clones into #panelStack (reused unchanged).
+    workbench = (
+        "<div id='grassWorkbenchTpl' style='display:none'>"
+        + _render_grass_workbench(folder_path, project_id)
+        + "</div>"
+    )
+    return board + workbench
+
+
+def _render_layoutd_dock_html() -> str:
+    """Render the Layout-D bottom DOCK chrome (v12 Wave 2) — present but INERT.
+
+    Mirrors the mockup dock: a title bar, a summary-on-top region, a draggable
+    vertical splitter, and a terminal host placeholder. NO transport, NO xterm
+    attach this wave; the control buttons are disabled + labeled "(wired in W10)".
+    Hidden by default (``display:none``); the W10 wiring shows + binds it.
+    """
+    return (
+        "<div class='dock' id='effortDock' data-inert='1' "
+        "style='display:none'>"
+        "<div class='dbar'>"
+        "<span class='dot grey'></span>"
+        "<span class='dtitle' id='dockTitle'>Effort</span>"
+        "<div class='dctrls'>"
+        "<span class='ctl' title='Minimize (wired in W10)'>&#9601;</span>"
+        "<span class='ctl' title='Maximize (wired in W10)'>&#9634;</span>"
+        "<span class='ctl' title='Close' "
+        "onclick=\"document.getElementById('effortDock').style.display='none'\">"
+        "&#10005;</span>"
+        "<button class='btn kill sm' disabled "
+        "title='Kill this effort and send it to the Boneyard (wired in W10)'>"
+        "Kill &#8594; Boneyard</button>"
+        "</div></div>"
+        "<div class='dbody'>"
+        # TOP: summary region (full width), INERT placeholder this wave.
+        "<div class='dtop'>"
+        "<p class='slabel'>Summary</p>"
+        "<div class='dock-summary' id='dockSummary'>"
+        "<span class='summ-loading'>Select an effort &mdash; "
+        "summary loads here (wired in W10).</span>"
+        "</div></div>"
+        # The DRAGGABLE vertical splitter (chrome only this wave).
+        "<div class='dsplit' id='dockSplit' "
+        "title='Drag to resize the terminal height (wired in W10)'></div>"
+        # BOTTOM: terminal host placeholder (no attach this wave).
+        "<div class='dbottom'>"
+        "<p class='slabel'>Live terminal &middot; full width "
+        "&middot; drag the bar above to resize</p>"
+        "<div class='term dock-term-host' id='dockTermHost'>"
+        "<span class='out'>terminal attaches here (wired in W10)</span>"
+        "</div></div>"
+        "</div></div>"
+    )
+
+
 def _safe_dom_id(seg: str) -> str:
     """A DOM-id-safe slug of a session id (which contains ``::`` etc.)."""
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(seg or "")) or "x"
@@ -3176,7 +3619,10 @@ def render_project_window_html(project_id: str) -> str:
         _deliv.backfill_build_deliverables(folder_raw, project_id)
     except Exception:
         pass
-    kanban = _render_kanban_html(folder_raw, project_id)
+    # v12 Wave 2: the Layout-D static skeleton replaces the 5-col .p2lanes board
+    # (driven by the EXISTING data; the bottom dock + live wiring arrive in W10).
+    kanban = _render_layoutd_html(folder_raw, project_id)
+    dock_chrome = _render_layoutd_dock_html()
     status = render_status_line_html(project_id)
     header_rollup = render_header_rollup_html(project_id)
     tasks_html = render_project_tasks_html(project_id)
@@ -3770,6 +4216,138 @@ def render_project_window_html(project_id: str) -> str:
         "opacity:.6}"
         ".panel .pbar .chaincrumb .cc-node.cur{color:var(--text);"
         "border-color:var(--border);background:var(--surface)}"
+        # ── v12 Wave 2: Layout-D static skeleton (mockup dashboard_D_headline_shelf)
+        # Plain single-brace literals (NOT an f-string). Aliases the mockup palette
+        # onto the cockpit vars so the named classes match the approved mockup.
+        ".pgrid.layoutd{display:grid;grid-template-columns:68fr 32fr;gap:20px;"
+        "align-items:start;padding:14px 16px}"
+        "@media(max-width:980px){.pgrid.layoutd{grid-template-columns:1fr} }"
+        ".layoutd .leftcol{min-width:0}.layoutd .rightcol{min-width:0}"
+        ".layoutd .neweffort-wrap{margin:0 0 18px}"
+        ".btn{display:inline-block;background:var(--surface2);"
+        "border:1px solid var(--border);color:var(--text);padding:6px 13px;"
+        "border-radius:7px;font-size:12.5px;cursor:pointer;font-family:inherit}"
+        ".btn:hover{border-color:var(--accent)}"
+        ".btn:disabled{opacity:.6;cursor:default}"
+        ".btn.primary{background:rgba(108,156,252,.16);border-color:var(--accent);"
+        "color:#cfe0ff}"
+        ".btn.kill{background:rgba(248,113,113,.14);"
+        "border-color:rgba(248,113,113,.5);color:#ffb4b4}"
+        ".btn.sm{padding:3px 9px;font-size:11.5px}"
+        ".showall{margin:10px 0 4px;background:transparent;border:none;"
+        "color:var(--accent);font-size:12.5px;cursor:pointer;font-family:inherit;"
+        "display:inline-block}"
+        ".showall:hover{text-decoration:underline}"
+        ".layoutd .sectionlbl{font-size:11px;text-transform:uppercase;"
+        "letter-spacing:1px;color:var(--text-dim);margin:0 0 8px 2px;"
+        "font-weight:700}"
+        ".layoutd .headline{background:var(--surface2);border:1px solid var(--border);"
+        "border-radius:11px;padding:18px 20px;cursor:pointer}"
+        ".layoutd .headline:hover{border-color:var(--accent)}"
+        ".layoutd .headline.running{border-color:rgba(34,197,94,.45)}"
+        ".layoutd .headline .htop{display:flex;align-items:center;gap:10px;"
+        "margin-bottom:10px}"
+        ".layoutd .headline .htitle{font-size:18px;font-weight:600;"
+        "margin:2px 0 6px}"
+        ".layoutd .headline .hblurb{color:var(--text-dim);font-size:13px;"
+        "margin:0 0 14px;max-width:640px}"
+        ".layoutd .headline .hrow{display:flex;align-items:center;gap:14px;"
+        "flex-wrap:wrap;margin-bottom:4px}"
+        ".badge{display:inline-block;text-transform:uppercase;font-size:10px;"
+        "font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:10px;"
+        "border:1px solid}"
+        ".badge.research{color:#6c9cfc;border-color:#6c9cfc;"
+        "background:rgba(108,156,252,.12)}"
+        ".badge.plan{color:#fbbf24;border-color:#fbbf24;"
+        "background:rgba(251,191,36,.12)}"
+        ".badge.build{color:#22c55e;border-color:#22c55e;"
+        "background:rgba(34,197,94,.12)}"
+        ".track{display:inline-flex;align-items:center;gap:0;vertical-align:middle}"
+        ".track .node{width:11px;height:11px;border-radius:50%;"
+        "border:2px solid #4a4f5c;background:transparent;flex:0 0 auto}"
+        ".track .line{width:18px;height:2px;background:#3a3f4c;flex:0 0 auto}"
+        ".track .line.done{background:#4a4f5c}"
+        ".track .node.reached.research{border-color:#6c9cfc;background:#6c9cfc}"
+        ".track .node.reached.plan{border-color:#fbbf24;background:#fbbf24}"
+        ".track .node.reached.build{border-color:#22c55e;background:#22c55e}"
+        ".track .node.current{width:15px;height:15px}"
+        ".track-lbl{font-size:10px;color:var(--text-dim);margin-left:8px;"
+        "text-transform:uppercase;letter-spacing:.5px}"
+        ".layoutd .dot{display:inline-block;width:8px;height:8px;"
+        "border-radius:50%;flex:0 0 auto;background:#5a5f6c}"
+        ".layoutd .dot.green{background:#22c55e}"
+        ".layoutd .dot.amber{background:#fbbf24}"
+        ".layoutd .dot.red{background:#f87171}"
+        ".layoutd .dot.grey{background:#5a5f6c}"
+        # collapsible shelf of "little tiles"
+        ".shelf-wrap{margin:10px 0 4px}"
+        ".shelf-wrap.collapsed{display:none}"
+        ".shelf{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 10px}"
+        ".minitile{flex:0 0 auto;width:185px;background:var(--surface2);"
+        "border:1px solid var(--border);border-radius:9px;padding:11px 12px;"
+        "cursor:pointer}"
+        ".minitile:hover{border-color:var(--accent)}"
+        ".minitile.running{border-color:rgba(34,197,94,.4)}"
+        ".minitile.failed{border-color:rgba(248,113,113,.4)}"
+        ".minitile .mtop{display:flex;align-items:center;gap:7px;"
+        "margin-bottom:8px}"
+        ".minitile .mtitle{font-size:13px;font-weight:500;line-height:1.35;"
+        "margin-bottom:8px;min-height:34px;word-break:break-word}"
+        ".minitile .mfoot{display:flex;align-items:center;"
+        "justify-content:space-between;font-size:11px;color:var(--text-dim)}"
+        # right-column panels (Grass mini + Deliverables)
+        ".layoutd .panel{background:var(--surface);border:1px solid var(--border);"
+        "border-radius:11px;padding:16px;margin-bottom:18px;position:static}"
+        ".layoutd .panel .ptitle{display:flex;align-items:center;gap:8px;"
+        "font-size:14px;font-weight:600;margin-bottom:12px}"
+        ".layoutd .panel .ptitle .cnt{margin-left:auto;color:var(--text-dim);"
+        "font-size:12px;font-weight:400}"
+        ".idearow,.delivrow{display:flex;align-items:center;gap:9px;"
+        "padding:8px 9px;border-radius:7px;background:var(--surface2);"
+        "border:1px solid var(--border);margin-bottom:7px;font-size:12.5px;"
+        "cursor:pointer}"
+        ".idearow:hover,.delivrow:hover{border-color:var(--accent)}"
+        ".idearow .it{flex:1}.delivrow .dn{flex:1}"
+        ".delivrow .dn .mono{color:#cfe0ff;font-family:ui-monospace,Consolas,"
+        "monospace}"
+        ".tag{font-size:10px;text-transform:uppercase;letter-spacing:.4px;"
+        "color:var(--text-dim);background:#1b2030;border:1px solid var(--border);"
+        "border-radius:9px;padding:1px 7px}"
+        ".layoutd .panel .pactions{display:flex;gap:8px;margin-top:10px}"
+        # ── v12 Wave 2: the bottom DOCK chrome (INERT this wave) ─────────────
+        ".dock{position:fixed;bottom:0;left:0;right:0;height:300px;"
+        "background:var(--surface);border-top:2px solid var(--accent);"
+        "box-shadow:0 -8px 30px rgba(0,0,0,.5);display:flex;"
+        "flex-direction:column;z-index:50}"
+        ".dock .dbar{display:flex;align-items:center;gap:14px;padding:9px 20px;"
+        "border-bottom:1px solid var(--border);background:var(--surface2);"
+        "flex:0 0 auto}"
+        ".dock .dbar .dtitle{font-size:14px;font-weight:600}"
+        ".dock .dbar .dctrls{margin-left:auto;display:flex;align-items:center;"
+        "gap:6px}"
+        ".dock .dbar .ctl{width:26px;height:24px;display:inline-flex;"
+        "align-items:center;justify-content:center;background:var(--surface);"
+        "border:1px solid var(--border);border-radius:6px;cursor:pointer;"
+        "font-size:12px;color:var(--text-dim)}"
+        ".dock .dbar .ctl:hover{border-color:var(--accent);color:var(--text)}"
+        ".dock .dbody{display:flex;flex-direction:column;flex:1;min-height:0}"
+        ".dock .dtop{padding:11px 20px;overflow-y:auto;flex:0 0 auto;"
+        "max-height:48%}"
+        ".dock .dsplit{height:11px;flex:0 0 auto;background:var(--surface2);"
+        "border-top:1px solid var(--border);border-bottom:1px solid var(--border);"
+        "cursor:row-resize;display:flex;align-items:center;"
+        "justify-content:center}"
+        ".dock .dsplit::before{content:'';width:48px;height:3px;"
+        "border-radius:2px;background:#565c6b}"
+        ".dock .dsplit:hover::before{background:var(--accent)}"
+        ".dock .dbottom{padding:9px 20px 14px;display:flex;flex-direction:column;"
+        "flex:1;min-height:0}"
+        ".dock .slabel{font-size:10px;text-transform:uppercase;"
+        "letter-spacing:.7px;color:var(--text-dim);font-weight:700;margin:0 0 4px}"
+        ".dock .term{background:#05070c;border:1px solid var(--border);"
+        "border-radius:8px;font-family:ui-monospace,Consolas,monospace;"
+        "font-size:12px;padding:12px 14px;flex:1;overflow-y:auto;min-height:0}"
+        ".dock .term .out{color:var(--text-dim)}"
         "</style></head><body>"
         f"<p><a href='/'>&larr; Back to dashboard</a></p>"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
@@ -3845,6 +4423,9 @@ def render_project_window_html(project_id: str) -> str:
         # empty when there are no live sessions; populated by renderSessionBar.)
         "<div class='live-session-bar' id='sessionBar'></div>"
         "<div class='panel-stack' id='panelStack'></div>"
+        # v12 Wave 2: the Layout-D bottom DOCK chrome — present but INERT (no
+        # transport / xterm attach; buttons disabled + labeled "wired in W10").
+        + dock_chrome
         # v10 Wave 7: the Boneyard panel template (hidden; cloned into #panelStack
         # by openBoneyard()).
         + boneyard_tpl +
@@ -3902,6 +4483,23 @@ function _esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── v12 Wave 2: Layout-D collapsible shelf toggle ──────────────────────────
+// Folds/unfolds a zone's "older sessions" shelf of little tiles. Toggles the
+// .collapsed class (machine-checkable) on the shelf wrapper and updates the
+// "▾ Hide N / ▸ Show all N" caption. Static-skeleton interaction only; the live
+// effort-view wiring + the bottom dock arrive in W10.
+function toggleShelf(id, btnId, n, label) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var collapsed = el.classList.toggle('collapsed');
+  var btn = btnId ? document.getElementById(btnId) : null;
+  if (btn) {
+    btn.textContent = collapsed
+      ? ('▸ Show all ' + n + ' older ' + label + ' sessions')
+      : ('▾ Hide ' + n + ' older ' + label + ' sessions');
+  }
 }
 
 // ── Access token (D4) ──────────────────────────────────────────────────────
@@ -11175,9 +11773,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     return
                 folder_raw = entry.get("folder_path", "")
                 try:
-                    frag = _render_kanban_html(folder_raw, pid)
+                    # v12 Wave 2: the in-place refresh fragment is now the
+                    # Layout-D board (the SAME render the page emits), so a
+                    # refreshBoard() swap keeps the headline/shelf structure.
+                    frag = _render_layoutd_html(folder_raw, pid)
                 except Exception:
-                    frag = ("<div class='p2lanes'><p class='rnd-empty'>"
+                    frag = ("<div class='pgrid layoutd'><p class='rnd-empty'>"
                             "Board unavailable.</p></div>")
                 self._send_json({"ok": True, "html": frag})
             elif self.path.startswith("/api/rnd/projects_html"):

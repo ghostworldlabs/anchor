@@ -489,12 +489,14 @@ def test_build_deliverable_in_lane_and_panel_playwright(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
 
-        # ── project A: lane lists it + panel shows it ──
+        # ── project A: deliverables panel lists it + panel shows it ──
         pg.goto(f"{base}/project/{pidA}", wait_until="networkidle")
-        # Deliverables lane lists the backfilled build deliverable.
-        lane_html = pg.inner_html(".p2lanes")
-        assert "myapp.py" in lane_html, "build deliverable missing from lane"
-        # open the build session's panel (its tile is in the Build column).
+        # v12 Wave 2: the Deliverables panel lives in the Layout-D right column;
+        # the board grid is .pgrid.layoutd (covers left + right columns).
+        lane_html = pg.inner_html(".pgrid.layoutd")
+        assert "myapp.py" in lane_html, \
+            "build deliverable missing from the Deliverables panel"
+        # open the build session's panel (its tile is the Plan/Build headline).
         build_tile = pg.query_selector('.lane-tile[data-lane="build"]')
         assert build_tile, "no build lane tile"
         build_tile.click()

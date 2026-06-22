@@ -59,27 +59,31 @@ def test_real_vN_present_and_discovered_has_no_vN(gui, tmp_path):
 
     html = gui.render_project_window_html(pid)
 
-    # v4.1 cockpit-render: lanes render Paradigm-2 tiles. Real research efforts
-    # keep their version labels (shown in the tile's .lane row).
-    assert ">v2<" in html
-    assert ">v1<" in html
-    # The discovered session's tile is present and honestly marked "imported"
-    # (grey light, no run metrics — never masqueraded as a run).
-    assert "imported" in html
+    # v12 Wave 2 Layout-D: lanes render Layout-D tiles (no vN version labels —
+    # recency is structural: newest = headline, older = shelf minitile). The 2
+    # real research efforts surface as a research headline + a research-shelf
+    # minitile.
+    assert ">v2<" not in html and ">v1<" not in html
+    assert "class='headline" in html
+    assert "minitile" in html
+    # The discovered session's tile is present and honestly grey (no run metrics —
+    # never masqueraded as a run), and the status line still reports it imported.
     assert "data-light=\"grey\"" in html
+    assert "imported" in html   # the status line "(N imported)" honesty marker
 
-    # The discovered session's tile must NOT carry a vN version label. Isolate the
-    # planning-lane tile(s) and assert no version token inside.
+    # The discovered planning session renders as a plan-lane Layout-D tile (the
+    # Plan/Build headline here) carrying NO vN version token and a grey light —
+    # never masqueraded as a run.
     import re
     plan_tiles = re.findall(
-        r"<div class='tile lane-tile[^>]*data-lane=\"plan\"[^>]*>.*?</div></div></div>",
-        html, re.S)
+        r"<div class='(?:headline|minitile) tile lane-tile[^>]*"
+        r"data-lane=\"plan\"[^>]*>[\s\S]*?</div>\s*</div>",
+        html)
     assert plan_tiles, "no planning tile rendered"
     for tile in plan_tiles:
         assert re.search(r">v\d", tile) is None, \
             f"discovered tile has a vN: {tile!r}"
-        # The discovered tile shows the imported state, not a version label.
-        assert "imported" in tile
+        assert "data-light=\"grey\"" in tile
 
 
 def test_tile_and_rollup_show_imported_count(gui, tmp_path):

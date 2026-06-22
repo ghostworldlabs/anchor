@@ -146,17 +146,13 @@ def _parse(body):
 
 
 def _col_tiles(body, trio_lane):
-    start = body.find('id="cards_%s"' % trio_lane)
-    if start < 0:
-        start = body.find("id='cards_%s'" % trio_lane)
-    assert start >= 0, "no cards_%s container in body" % trio_lane
-    rest = body[start:]
-    nxt = re.search(r"data-col-lane=", rest[5:])
-    end = (nxt.start() + 5) if nxt else len(rest)
-    seg = rest[:end]
+    """v12 Wave 2 Layout-D: tiles carry their lane on ``data-lane`` (the 5-col
+    ``#cards_<lane>`` grid is retired). ``plan`` matches ``planning`` too."""
+    aliases = {"plan": {"plan", "planning"}}.get(trio_lane, {trio_lane})
     tiles = []
-    for tag, classes, attrs in _parse(seg):
-        if tag == "div" and "tile" in classes:
+    for tag, classes, attrs in _parse(body):
+        if (tag == "div" and "tile" in classes
+                and (attrs.get("data-lane") or "") in aliases):
             tiles.append((classes, attrs))
     return tiles
 
@@ -493,7 +489,8 @@ def test_grass_contained_export_playwright(env):
                 "#sessionBar [data-session='%s']" % sid1, "e=>e.length")
             assert strip_chips == 0, "develop session leaked into the top strip"
             board_tiles = pg.eval_on_selector_all(
-                "#cards_research .tile[data-session='%s']" % sid1, "e=>e.length")
+                ".tile[data-lane='research'][data-session='%s']" % sid1,
+                "e=>e.length")
             assert board_tiles == 0, "develop session leaked into the board"
 
             # Click Develop AGAIN → FOCUSES the same session (no second one).
@@ -508,10 +505,11 @@ def test_grass_contained_export_playwright(env):
             # idea is marked promoted.
             pg.click("#grassPanel .gwork .gexport")
             pg.wait_for_function(
-                "document.querySelectorAll('#cards_research .tile').length >= 1",
+                "document.querySelectorAll(\".tile[data-lane='research']\")"
+                ".length >= 1",
                 timeout=8000)
             assert pg.eval_on_selector_all(
-                "#cards_research .tile", "e=>e.length") >= 1
+                ".tile[data-lane='research']", "e=>e.length") >= 1
             chip = pg.inner_text("#grassPanel .gwork h3 .stchip")
             assert "promoted" in chip.lower()
 
