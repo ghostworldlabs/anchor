@@ -13234,6 +13234,61 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                          "to_lane": to_lane,
                                          "persisted": hk.get("persisted", [])})
 
+        elif self.path == "/api/rnd/advance_stage":
+            # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME
+            # session (no new session minted, NOTHING injected into the PTY by
+            # default): terminal_session.advance_stage persists+summarizes the
+            # current stage (Wave 5, no reap) and flips current_stage to the next
+            # trio stage. Auth is enforced by the do_POST token middleware above.
+            session = (body.get("session", "")
+                       or body.get("session_id", "") or "").strip()
+            to_stage = (body.get("to_stage", "") or "").strip() or None
+            pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                out = _termsess.advance_stage(
+                    session, to_stage=to_stage, mode="manual", project_id=pid)
+                rec = out.get("record")
+                # SAFE projection of the updated record — NEVER worktree_path /
+                # branch (those must not leak into the page).
+                safe = None
+                if isinstance(rec, dict):
+                    safe = {
+                        "session_id": rec.get("session_id", ""),
+                        "project_id": rec.get("project_id", ""),
+                        "lane": rec.get("lane", ""),
+                        "status": rec.get("status", ""),
+                        "label": rec.get("label", ""),
+                        "kind": rec.get("kind", ""),
+                        "current_stage": rec.get("current_stage", ""),
+                        "effort_id": rec.get("effort_id", ""),
+                        "effort_managed": rec.get("effort_managed", False),
+                        # project stage_history to SAFE fields — drop baseline_ref
+                        # (a git SHA) + store_lane (Reviewer W6-R2-05).
+                        "stage_history": [
+                            {"stage": e.get("stage", ""),
+                             "state": e.get("state", ""),
+                             "started_at": e.get("started_at"),
+                             "ended_at": e.get("ended_at"),
+                             "doc_count": e.get("doc_count", 0),
+                             "summary_ref": e.get("summary_ref")}
+                            for e in (rec.get("stage_history") or [])
+                            if isinstance(e, dict)
+                        ],
+                    }
+                self._send_json({"ok": bool(out.get("ok")),
+                                 "advanced": bool(out.get("advanced")),
+                                 "reason": out.get("reason"),
+                                 "from_stage": out.get("from_stage"),
+                                 "to_stage": out.get("to_stage"),
+                                 "session": safe},
+                                200 if out.get("ok") else 400)
+
         elif self.path == "/api/rnd/finish_to_build":
             # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
             # Mirrors the term_kill auto-advance trigger, but WITHOUT reaping the

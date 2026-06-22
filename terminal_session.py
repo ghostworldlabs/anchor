@@ -532,6 +532,25 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
         except Exception:
             pass
 
+    # v12 Wave 6 (the W5 forward note / R2-2 fix): for a v12 EFFORT, open the
+    # FIRST stage entry at start — record the stage's baseline (the worktree's
+    # current HEAD) and append an OPEN stage_history entry via set_current_stage —
+    # so the first stage has a baseline + an active entry and per-stage doc
+    # attribution / summaries work from stage one (otherwise the first stage's
+    # finish would fall back to the legacy whole-tree diff). Legacy starts
+    # (``effort_managed=False``) are UNCHANGED: no baseline, no stage entry.
+    # Best-effort — a bookkeeping hiccup never tears down a working session.
+    if effort_managed:
+        try:
+            init_stage = _initial_stage_for_lane(lane)
+            if init_stage:
+                store_lane = _store_lane_for_stage(init_stage)
+                baseline = _eh.record_stage_baseline(worktree_path)
+                record = _reg.set_current_stage(
+                    sid, init_stage, store_lane, baseline)
+        except Exception:
+            pass
+
     # v4 Wave 2: remember the engine this session chose so the NEXT session for
     # this project defaults to it. Best-effort (never fails a live session).
     set_last_engine_for_project(project_id, backend)
@@ -896,6 +915,57 @@ def read_since(session_id, cursor=0):
         return {"ok": False, "reason": "unknown-session"}
 
 
+# v12 Wave 6: the trio stage order. ``advance_stage`` resolves the NEXT stage and
+# enforces idempotency (no-op if the current stage is already >= the target).
+_STAGE_ORDER = ("research", "plan", "build")
+
+
+def _stage_rank(stage):
+    """Ordinal of a trio stage (research<plan<build); -1 for an unknown stage."""
+    try:
+        return _STAGE_ORDER.index(stage)
+    except ValueError:
+        return -1
+
+
+def _next_stage(stage):
+    """The trio stage AFTER ``stage`` (research→plan→build), or None at the end."""
+    i = _stage_rank(stage)
+    if i < 0 or i + 1 >= len(_STAGE_ORDER):
+        return None
+    return _STAGE_ORDER[i + 1]
+
+
+def _initial_stage_for_lane(lane):
+    """The starting trio ``current_stage`` for a lane.
+
+    research → ``research``; plan/planning → ``plan``; build → ``build``; a
+    grass-dev (``grass``) effort uses its lane's stage too (grass research/plan
+    dev — defaults to ``research`` when the lane carries no trio stage). A bare
+    ``general`` lane has no trio stage → ``""`` (no stage entry opened).
+    """
+    if lane == "research":
+        return "research"
+    if lane in _PLANNING_LANES:
+        return "plan"
+    if lane == "build":
+        return "build"
+    if lane == "grass":
+        # A grass-dev effort runs a contained research/plan dev session; the
+        # store_lane is "grass" but the stage maps onto the trio (research dev by
+        # default). Wave 6 only needs an OPEN stage entry so per-stage attribution
+        # works from stage one; the grass dev start passes its real lane.
+        return "research"
+    return ""
+
+
+def _store_lane_for_stage(stage):
+    """The on-disk store lane for a trio stage (plan stores under ``planning``)."""
+    if stage == "plan":
+        return "planning"
+    return stage
+
+
 def _active_stage_entry(record):
     """Return the OPEN (``ended_at is None``) ``stage_history`` entry, or None.
 
@@ -967,6 +1037,17 @@ def _persist_current_stage(session_id, project_id=None, record=None):
         store_lane = entry.get("store_lane") or stage
         baseline_ref = entry.get("baseline_ref") or ""
 
+        # v12 Wave 6 (conversation-only case): if this stage wrote NO file but the
+        # work lives entirely in the live PTY conversation, snapshot the transcript
+        # into the worktree (the v11.1 transcript-snapshot path) so the stage-scoped
+        # git diff below captures it as a produced doc, named + tagged (sid, stage).
+        # No live PTY / no meaningful transcript (e.g. seed-only) → no file written
+        # (honest), so a stage that DID write files is unaffected. Best-effort.
+        try:
+            _snapshot_transcript_doc(rec, session_id)
+        except Exception:
+            pass
+
         out = _eh.persist_session_stage_docs(
             folder, project_id, session_id, stage, store_lane,
             worktree_path, baseline_ref)
@@ -987,9 +1068,40 @@ def _persist_current_stage(session_id, project_id=None, record=None):
         except Exception:
             pass
 
+        # Stamp the OPEN stage entry's summary_ref with the stage-summary cache
+        # locator, so the (about-to-close) entry references where its async
+        # summary lands — satisfies MASTER-PLAN §4.3 "summary_ref on the closing
+        # entry" without making generation synchronous (Reviewer W6-R2-01).
+        try:
+            _stamp_stage_summary_ref(session_id, stage, store_lane)
+        except Exception:
+            pass
+
         return out
     except Exception:
         return {"ok": False, "reason": "error", "persisted": []}
+
+
+def _stamp_stage_summary_ref(session_id, stage, store_lane):
+    """Set the OPEN ``stage`` entry's ``summary_ref`` to the stage-summary cache
+    locator so the (about-to-close) entry references its async summary (the
+    MASTER-PLAN §4.3 'summary_ref on the closing entry' contract, W6-R2-01)."""
+    try:
+        rec = _reg.get_session(session_id)
+        if rec is None:
+            return
+        history = [dict(e) for e in (rec.get("stage_history") or [])
+                   if isinstance(e, dict)]
+        changed = False
+        for ent in history:
+            if ent.get("stage") == stage and ent.get("ended_at") is None:
+                ent["summary_ref"] = {"lane": store_lane,
+                                      "session_id": session_id, "stage": stage}
+                changed = True
+        if changed:
+            _reg.update_session(session_id, stage_history=history)
+    except Exception:
+        pass
 
 
 def _bump_stage_doc_count(session_id, stage, count):
@@ -1093,6 +1205,152 @@ def finish_stage(session_id, stage=None, store_lane=None, project_id=None):
     except Exception:
         return {"ok": False, "reason": "error", "session_id": session_id,
                 "docs": {"ok": False, "reason": "error", "persisted": []}}
+
+
+def advance_stage(session_id, to_stage=None, mode="manual", project_id=None,
+                  load_skill=False):
+    """Advance an effort to the next stage IN THE SAME SESSION (v12 Wave 6).
+
+    The continuity-first "Advance" = **relabel + save**: the effort keeps its ONE
+    session, the SAME worktree, and the SAME PTY — Anchor merely persists +
+    summarizes the stage just completed and flips the record to the next stage.
+    **It spawns no new session and, by default, injects NOTHING into the PTY.**
+
+    Mechanics (all under :data:`paths.WRITE_LOCK`, so a manual+auto race yields
+    exactly ONE advance):
+
+      1. Resolve + validate: the session must be a LIVE effort of
+         ``kind in {'trio','grass-dev'}``. ``to_stage`` defaults to the NEXT trio
+         stage after ``current_stage`` (research→plan→build).
+      2. **Idempotent** — if the effort is already at/past ``to_stage``
+         (``current_stage >= to_stage``), this is a NO-OP and returns the current
+         record with ``advanced=False``. (So a manual Advance racing the auto
+         poll under the lock advances once; the loser no-ops.)
+      3. Mark ``effort_managed=True`` (Wave-1 discriminator; idempotent).
+      4. **Finish the current stage** via :func:`finish_stage` (Wave-5: persist
+         the stage-scoped docs + schedule the stage summary, **no reap**, the
+         record stays RUNNING). The current stage entry is opened at effort start
+         (Wave-6 start change) / on the prior advance; if it is somehow absent it
+         is opened defensively here first so the persist is stage-scoped.
+      5. **Record the new stage's baseline** (:func:`effort_history
+         .record_stage_baseline`) + open its stage entry and flip
+         ``current_stage`` + ``lane`` via :func:`session_registry.set_current_stage`.
+      6. **Inject NOTHING into the PTY by default.** ``mode='manual'`` MAY pass
+         ``load_skill=True`` to write ONE skill-load turn (explicit opt-in,
+         default False). ``mode='auto'`` NEVER writes to the PTY.
+
+    Returns the updated registry record (with ``advanced``/``ok`` markers). Never
+    raises — an unknown/ineligible session returns an honest
+    ``{"ok": False, "reason": ...}``.
+    """
+    with _paths.WRITE_LOCK:
+        try:
+            record = _reg.get_session(session_id)
+        except Exception:
+            return {"ok": False, "reason": "error", "session_id": session_id}
+        if record is None:
+            return {"ok": False, "reason": "unknown-session",
+                    "session_id": session_id}
+
+        # Validate: a LIVE trio/grass-dev effort only.
+        if record.get("status") != _reg.STATUS_RUNNING:
+            return {"ok": False, "reason": "not-live",
+                    "session_id": session_id, "record": record}
+        kind = record.get("kind") or ""
+        if kind not in ("trio", "grass-dev"):
+            return {"ok": False, "reason": "not-an-effort",
+                    "session_id": session_id, "record": record}
+
+        if project_id is None:
+            project_id = record.get("project_id") or None
+
+        current_stage = record.get("current_stage") or ""
+        # Resolve the target stage (default = the next trio stage).
+        if not to_stage:
+            to_stage = _next_stage(current_stage)
+        if not to_stage:
+            return {"ok": False, "reason": "no-next-stage",
+                    "session_id": session_id, "record": record}
+
+        # Validate the target is a real trio stage — a garbage to_stage must be an
+        # HONEST error, never a silent "already-advanced" no-op (Reviewer W6-R2-02).
+        if _stage_rank(to_stage) < 0:
+            return {"ok": False, "reason": "invalid-stage",
+                    "session_id": session_id, "record": record}
+        # Single-step only: the spec advances to the NEXT stage; skipping a stage
+        # (e.g. research→build, omitting plan) is rejected (Reviewer W6-R2-03).
+        if _stage_rank(to_stage) > _stage_rank(current_stage) + 1:
+            return {"ok": False, "reason": "invalid-stage-skip",
+                    "session_id": session_id, "record": record}
+
+        # Idempotency: already at/past the target → no-op (the loser of a
+        # manual+auto race). Compares by trio-stage rank.
+        if _stage_rank(current_stage) >= _stage_rank(to_stage):
+            return {"ok": True, "advanced": False, "reason": "already-advanced",
+                    "session_id": session_id, "record": record}
+
+        # Wave-1 discriminator: this effort is now v12-managed.
+        if not record.get("effort_managed"):
+            try:
+                record = _reg.update_session(session_id, effort_managed=True)
+            except Exception:
+                pass
+
+        # Defensive: ensure the CURRENT stage has an open entry so finish_stage is
+        # stage-scoped (it should already, from the Wave-6 start change). Open it
+        # over the live worktree with a fresh baseline only if missing.
+        if _active_stage_entry(record) is None and current_stage:
+            try:
+                wt = record.get("worktree_path", "")
+                baseline = _eh.record_stage_baseline(wt) if wt else ""
+                record = _reg.set_current_stage(
+                    session_id, current_stage,
+                    _store_lane_for_stage(current_stage), baseline)
+            except Exception:
+                pass
+
+        # Finish (persist + summarize) the CURRENT stage — NO reap (Wave 5).
+        finished = finish_stage(session_id, current_stage,
+                                _store_lane_for_stage(current_stage),
+                                project_id=project_id)
+
+        # Open the NEW stage: record its baseline + flip current_stage + lane.
+        new_store_lane = _store_lane_for_stage(to_stage)
+        try:
+            wt = record.get("worktree_path", "")
+            new_baseline = _eh.record_stage_baseline(wt) if wt else ""
+        except Exception:
+            new_baseline = ""
+        try:
+            record = _reg.set_current_stage(
+                session_id, to_stage, new_store_lane, new_baseline)
+        except Exception as exc:
+            return {"ok": False, "reason": "set-stage-failed",
+                    "detail": str(exc), "session_id": session_id,
+                    "finished": finished}
+
+        # PTY injection policy: NOTHING by default. Only an explicit manual
+        # opt-in (load_skill=True) writes ONE skill-load turn; auto NEVER writes.
+        if mode == "manual" and load_skill:
+            try:
+                skill = LANE_SKILL.get(new_store_lane) or LANE_SKILL.get(to_stage)
+                if skill:
+                    _pty.write(session_id,
+                               "Please load the %s skill and continue.\n" % skill)
+                    try:
+                        seeded = list(record.get("seeded_stages") or [])
+                        if to_stage not in seeded:
+                            seeded.append(to_stage)
+                            record = _reg.update_session(
+                                session_id, seeded_stages=seeded)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        return {"ok": True, "advanced": True, "session_id": session_id,
+                "from_stage": current_stage, "to_stage": to_stage,
+                "finished": finished, "record": record}
 
 
 def kill(session_id, project_id=None, _record_boneyard=True):

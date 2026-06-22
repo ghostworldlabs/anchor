@@ -98,6 +98,28 @@
 - **Forward note (W6):** `advance_stage` must OPEN the first stage entry (a fresh effort's `stage_history` is
   still [] → finish_stage falls to legacy whole-tree until the first entry exists). **Converged.**
 
+## Wave 6 — advance_stage: in-session relabel+save + lock + idempotency + endpoint — GREEN ✅
+
+- **EXECUTE:** `terminal_session.advance_stage(sid, to_stage, mode, project_id, load_skill)` — under
+  `paths.WRITE_LOCK`; validates a live `trio`/`grass-dev` effort; idempotent (rank-based no-op on a
+  manual+auto race); `finish_stage` current (W5, no reap) → `record_stage_baseline` + `set_current_stage`
+  flips stage+lane; **ZERO PTY bytes by default** (only `mode='manual' + load_skill=True` writes one turn;
+  `auto` never). `start_session(effort_managed=True)` now OPENS the first stage entry + baseline (the W5/R2-2
+  fix). Conversation-only capture: `_snapshot_transcript_doc` wired into the stage-scoped persist branch.
+  `POST /api/rnd/advance_stage` (token-authed, SAFE projection). New `tests/test_advance_stage_v12.py` +
+  `tests/test_advance_stage_conversation_v12.py`.
+- **GATE:** 1315 passed, 1 skipped.
+- **REVIEW (2 independent):** R1 **GO** (SC1 zero-PTY-injection verified, no deadlock, idempotent, legacy
+  start unchanged, no W7 creep). R2 **BLOCK** with 2 findings — NOT formally ≥2-agree (R1 rated the first a
+  MINOR), but both real + cheap, so FIXED: **W6-R2-02** invalid/garbage `to_stage` was reported `ok:True
+  'already-advanced'` → now an honest `ok:False 'invalid-stage'` (HTTP 400) + reject non-adjacent
+  `'invalid-stage-skip'`; **W6-R2-01** the closing stage entry now gets a `summary_ref` locator
+  (`_stamp_stage_summary_ref`); **W6-R2-05** endpoint projects `stage_history` to SAFE fields (drops
+  `baseline_ref`/`store_lane`). +3 tests. R2 confirmed the core (zero-mint set-equality, zero-PTY-byte,
+  conversation capture) genuinely sound.
+- **RE-GATE:** 1318 passed, 1 skipped. **Converged.**
+
+
 
 
 
