@@ -11440,6 +11440,34 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     except Exception:
                         roles = {}
                     self._send_json({"ok": True, "roles": roles})
+            elif self.path.startswith("/api/rnd/context_status"):
+                # Read-only (v12 Wave 8): the live session's context-fullness
+                # heuristic — the data behind the cockpit's "context getting full"
+                # warn banner + one-click handoff. NO mutation, NO model call.
+                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
+                #   /api/rnd/context_status?session=<sid>
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                sid = (q.get("session", [""])[0]
+                       or q.get("session_id", [""])[0] or "").strip()
+                if not sid:
+                    self._send_json({"ok": False,
+                                     "error": "session required"}, 400)
+                else:
+                    try:
+                        cf = _termsess.context_fullness(sid)
+                    except Exception:
+                        cf = {"ratio": 0.0, "over_threshold": False,
+                              "observed_bytes": 0, "budget": 0}
+                    self._send_json({
+                        "ok": True,
+                        "ratio": cf.get("ratio", 0.0),
+                        "over_threshold": bool(cf.get("over_threshold", False)),
+                        "observed_bytes": cf.get("observed_bytes", 0),
+                        "budget": cf.get("budget", 0),
+                    })
             elif self.path.startswith("/api/rnd/build_deliverable"):
                 # Read-only (v5 Wave 4): resolve the DELIVERABLE one BUILD session
                 # produced — explicit signals only, never fabricated. The build
@@ -11676,6 +11704,23 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # would wrongly mark live ones stale).
                 try:
                     live = list(_termsess._pty.live_sessions())
+                    # v12 Wave 8 — restart recovery MUST run BEFORE reconcile
+                    # (Reviewer W8-R2-01): reconcile_and_advance blanket-marks every
+                    # RUNNING-but-PTY-gone session DONE (no effort exemption), and
+                    # recover only acts on RUNNING records — so recover has to claim
+                    # an ``effort_managed`` effort whose PTY is gone FIRST (persist
+                    # its active stage's worktree docs [no reap], mark the stage entry
+                    # 'interrupted' [≠ done/failed], re-status IDLE so it is honestly
+                    # not-running + reopenable; NEVER auto-spawns/advances) — otherwise
+                    # reconcile would mark it DONE and its uncommitted docs would be
+                    # LOST. Once recover sets it IDLE, the reconcile pass below leaves
+                    # it alone (it only re-statuses RUNNING-but-gone). Best-effort +
+                    # fully guarded: an error here NEVER breaks the read-only list.
+                    try:
+                        _termsess.recover_interrupted_efforts(
+                            live_session_ids=live)
+                    except Exception:
+                        pass
                     _rec_out = _termsess.reconcile_and_advance(
                         live_session_ids=live)
                     # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
@@ -13361,6 +13406,61 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "to_stage": out.get("to_stage"),
                                  "session": safe},
                                 200 if out.get("ok") else 400)
+
+        elif self.path == "/api/rnd/handoff_to_fresh":
+            # v12 Wave 8: the context-relief valve. Continue the effort in a FRESH
+            # session that JOINS the same effort (same effort_id / tile / lineage),
+            # carrying the prior stage's docs + the real next prompt forward via the
+            # v11.1 machinery — held as a PENDING PASTE (UNSENT; NOTHING
+            # auto-submitted). The old session's stage is closed (done); its
+            # worktree is NOT reaped. Auth is enforced by the do_POST token
+            # middleware above (mutating).
+            session = (body.get("session", "")
+                       or body.get("session_id", "")
+                       or body.get("effort_id", "")).strip()
+            pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
+            if not session:
+                self._send_json(
+                    {"ok": False,
+                     "error": "session or effort_id required"}, 400)
+            else:
+                out = _termsess.handoff_to_fresh(session, project_id=pid)
+                if not out.get("ok"):
+                    code = 404 if out.get("reason") == "unknown-session" else 400
+                    self._send_json({"ok": False,
+                                     "reason": out.get("reason"),
+                                     "error": out.get("reason", "handoff failed")},
+                                    code)
+                else:
+                    new_rec = out.get("new_session") or {}
+                    old_rec = out.get("old_session") or {}
+
+                    def _safe(rec):
+                        # SAFE projection — NEVER worktree_path / branch.
+                        if not isinstance(rec, dict):
+                            return None
+                        return {
+                            "session_id": rec.get("session_id", ""),
+                            "project_id": rec.get("project_id", ""),
+                            "lane": rec.get("lane", ""),
+                            "status": rec.get("status", ""),
+                            "kind": rec.get("kind", ""),
+                            "current_stage": rec.get("current_stage", ""),
+                            "effort_id": rec.get("effort_id", ""),
+                            "effort_managed": rec.get("effort_managed", False),
+                            "parent_session_id": rec.get("parent_session_id", ""),
+                            "chain_id": rec.get("chain_id", ""),
+                            "pending_paste": rec.get("pending_paste", ""),
+                            "paste_flushed": rec.get("paste_flushed", False),
+                        }
+
+                    self._send_json({
+                        "ok": True,
+                        "effort_id": out.get("effort_id", ""),
+                        "new_session": _safe(new_rec),
+                        "old_session": _safe(old_rec),
+                        "persisted": out.get("persisted", []),
+                    })
 
         elif self.path == "/api/rnd/finish_to_build":
             # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.

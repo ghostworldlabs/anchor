@@ -1207,6 +1207,98 @@ def finish_stage(session_id, stage=None, store_lane=None, project_id=None):
                 "docs": {"ok": False, "reason": "error", "persisted": []}}
 
 
+# ── v12 Wave 8 — context-fullness heuristic (the warn/handoff trigger) ────────
+#
+# A stdlib-only "is the live context getting full?" signal. We have no token meter
+# for the model running inside the PTY, so we use the live PTY OUTPUT BUFFER as a
+# cheap, monotonically-growing proxy: a long-running session that has produced a
+# lot of output is, to a useful approximation, a session whose conversation
+# context is filling up. The ratio is ``observed_bytes / budget`` (capped at 1.0);
+# ``over_threshold`` is ``ratio >= ANCHOR_CONTEXT_FULL_RATIO`` (default 0.8).
+#
+# This is deliberately a HEURISTIC — it never claims token-exactness. It exists to
+# raise the UI warn banner / enable the one-click handoff (Wave 8), not to gate
+# anything destructive. Best-effort: a dead/unknown session reports 0.0 (honest —
+# we observed nothing), never an exception.
+
+#: The byte budget the observed PTY output is measured against. A full Claude
+#: context is ~200k tokens ≈ a few hundred KB of conversational text; we size the
+#: budget so a genuinely long session crosses the threshold. Overridable via env
+#: for tests (``ANCHOR_CONTEXT_FULL_BUDGET``) so a small seeded buffer can push the
+#: ratio over the line deterministically without writing hundreds of KB.
+CONTEXT_FULL_BUDGET_BYTES = 200_000
+
+#: Fraction of the budget at/above which ``over_threshold`` flips True. Overridable
+#: via ``ANCHOR_CONTEXT_FULL_RATIO`` (a float in 0..1; a bad value falls back).
+CONTEXT_FULL_RATIO = 0.8
+
+
+def _context_budget_bytes():
+    """The byte budget (env-overridable). Falls back to the module default."""
+    raw = os.environ.get("ANCHOR_CONTEXT_FULL_BUDGET")
+    if raw:
+        try:
+            v = int(float(raw))
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return CONTEXT_FULL_BUDGET_BYTES
+
+
+def _context_full_ratio():
+    """The fullness threshold ratio (env-overridable). Falls back to the default."""
+    raw = os.environ.get("ANCHOR_CONTEXT_FULL_RATIO")
+    if raw:
+        try:
+            v = float(raw)
+            if 0.0 < v <= 1.0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return CONTEXT_FULL_RATIO
+
+
+def context_fullness(session_id):
+    """Estimate how "full" a live session's context is (v12 Wave 8).
+
+    A stdlib heuristic over the session's LIVE PTY output buffer: the observed
+    output size is a cheap, monotonically-growing proxy for how much conversation
+    has accumulated. Returns ``{"ratio": float in 0..1, "over_threshold": bool,
+    "observed_bytes": int, "budget": int}`` where:
+
+      - ``ratio`` = ``min(1.0, observed_bytes / budget)``;
+      - ``over_threshold`` = ``ratio >= ANCHOR_CONTEXT_FULL_RATIO`` (default 0.8);
+      - ``observed_bytes`` = the live PTY buffer length (``read_since`` cursor 0);
+      - ``budget`` = :data:`CONTEXT_FULL_BUDGET_BYTES` (env-overridable).
+
+    BEST-EFFORT — never raises. A dead / unknown / un-resolvable session honestly
+    reports ``{"ratio": 0.0, "over_threshold": False, ...}`` (we observed nothing,
+    so we never claim it is full).
+    """
+    budget = _context_budget_bytes()
+    out = {"ratio": 0.0, "over_threshold": False, "observed_bytes": 0,
+           "budget": budget}
+    try:
+        res = _pty.read_since(session_id, 0)
+    except _pty.UnknownSession:
+        return out
+    except Exception:
+        return out
+    text = (res.get("text") or "") if isinstance(res, dict) else ""
+    # Measure BYTES (utf-8) — a UTF-8 char can be >1 byte and the budget is a byte
+    # budget; tolerate an encode failure by falling back to the char length.
+    try:
+        observed = len(text.encode("utf-8", "replace"))
+    except Exception:
+        observed = len(text)
+    ratio = min(1.0, observed / float(budget)) if budget else 0.0
+    out["observed_bytes"] = observed
+    out["ratio"] = ratio
+    out["over_threshold"] = ratio >= _context_full_ratio()
+    return out
+
+
 def advance_stage(session_id, to_stage=None, mode="manual", project_id=None,
                   load_skill=False):
     """Advance an effort to the next stage IN THE SAME SESSION (v12 Wave 6).
@@ -1523,6 +1615,266 @@ def detect_stage_progress(session_id, project_id=None):
             "session_id": session_id,
             "from_stage": current_stage, "to_stage": to_stage,
             "result": res}
+
+
+# ── v12 Wave 8 — context-relief handoff + restart recovery ────────────────────
+
+
+def _to_stage_for_handoff_lane(stage):
+    """The TARGET lane a context-relief handoff continues the SAME stage in.
+
+    A handoff does NOT advance the stage — it continues the effort's current
+    stage in a fresh session. So the new session is started in the SAME stage's
+    store-lane and :func:`prepare_stage_handoff` builds a prompt FOR that stage
+    (research→research, plan/planning→plan, build→build). Defaults to ``research``
+    for an effort with no recorded current stage (a bare/grass-dev start).
+    """
+    if stage == "plan":
+        return "plan"
+    if stage == "build":
+        return "build"
+    return "research"
+
+
+def handoff_to_fresh(effort_id_or_sid, project_id=None):
+    """Continue a full effort in a FRESH session that JOINS the same effort (W8).
+
+    The **context-relief valve** (SC2): when the live context window fills (or the
+    user clicks the warn banner), the effort continues in a brand-new session that
+    carries the SAME ``effort_id`` (same tile / lineage), with the prior stage's
+    docs + summary forward via the proven v11.1 machinery — and **nothing
+    auto-submitted**. Mechanics:
+
+      1. Resolve the OLD session (accepts either a ``session_id`` OR an
+         ``effort_id`` — we take it as the source session to hand off from).
+      2. :func:`finish_stage` the OLD session's current stage (Wave-5: persist the
+         stage-scoped docs + schedule the summary, **NO reap** — the old worktree
+         survives, the record stays as-is until we mark its stage done).
+      3. :func:`prepare_stage_handoff` (v11.1) PERSISTS the produced docs (idempotent
+         with the finish above) and BUILDS the REAL doc-referencing next prompt for
+         the SAME stage.
+      4. :func:`start_session` a FRESH session — inheriting ``effort_id`` (joins the
+         same effort), ``effort_managed=True``, in the SAME stage's lane, linked as a
+         child (``parent_session_id`` → the old sid, so it joins the chain), with the
+         built prompt as a **PENDING PASTE** (held UNSENT until the user presses
+         Enter — the v11.1 contract; NOTHING auto-submitted).
+      5. Mark the OLD session's current stage entry CLOSED (``state='done'``). The
+         OLD worktree is **NOT reaped** (close-keeps-record discipline).
+
+    Returns ``{"ok", "old_session", "new_session", "effort_id", "prompt",
+    "persisted"}`` (the records are the full registry records; the endpoint layer
+    SAFE-projects them). Honest ``{"ok": False, "reason": ...}`` for an unknown /
+    un-resolvable source. Best-effort on the bookkeeping (finish/mark-done) — a
+    hiccup there never aborts the handoff itself.
+    """
+    # (1) Resolve the OLD/source session. ``effort_id_or_sid`` may be either id —
+    # a record's effort_id defaults to its own sid for a fresh effort, so a direct
+    # session_id lookup works for the common case. If it's an effort_id that is NOT
+    # itself a session id, fall back to the newest RUNNING member of that effort.
+    old_sid = effort_id_or_sid
+    rec = None
+    try:
+        rec = _reg.get_session(old_sid)
+    except Exception:
+        rec = None
+    if rec is None:
+        # Treat the arg as an effort_id: find the live (or newest) member.
+        try:
+            members = [r for r in _reg.list_sessions()
+                       if isinstance(r, dict)
+                       and (r.get("effort_id") or r.get("session_id"))
+                       == effort_id_or_sid]
+        except Exception:
+            members = []
+        running = [r for r in members
+                   if r.get("status") == _reg.STATUS_RUNNING]
+        pick = running or members
+        if pick:
+            # newest by created_at (None sorts first → use a safe key)
+            pick.sort(key=lambda r: (r.get("created_at") or 0))
+            rec = pick[-1]
+            old_sid = rec.get("session_id")
+    if rec is None:
+        return {"ok": False, "reason": "unknown-session",
+                "session_id": effort_id_or_sid}
+
+    if project_id is None:
+        project_id = rec.get("project_id") or None
+    if not project_id:
+        return {"ok": False, "reason": "no-project", "session_id": old_sid}
+
+    effort_id = rec.get("effort_id") or old_sid
+    current_stage = rec.get("current_stage") or ""
+    backend = rec.get("backend") or DEFAULT_ENGINE
+    to_lane = _to_stage_for_handoff_lane(current_stage)
+
+    # (2) Finish (persist + summarize) the OLD session's current stage — NO reap.
+    # Best-effort: a finish hiccup must not abort the handoff (the prepare below
+    # also persists, idempotently).
+    try:
+        finish_stage(old_sid, current_stage,
+                     _store_lane_for_stage(current_stage) if current_stage
+                     else None, project_id=project_id)
+    except Exception:
+        pass
+
+    # (3) Build the REAL doc-referencing prompt for the SAME stage (v11.1).
+    try:
+        prep = prepare_stage_handoff(project_id, old_sid, to_lane)
+    except Exception:
+        prep = {"ok": False, "prompt": "", "persisted": []}
+    prompt = (prep.get("prompt") or "") if isinstance(prep, dict) else ""
+    persisted = list((prep.get("persisted") or [])
+                     if isinstance(prep, dict) else [])
+
+    # (4) Start a FRESH session that JOINS the same effort (inherits effort_id),
+    # linked into the old session's chain, with the prompt held as a PENDING
+    # PASTE (UNSENT — nothing auto-submitted, the v11.1 contract).
+    try:
+        new_rec = start_session(
+            project_id, to_lane, backend=backend,
+            parent_session_id=old_sid,
+            paste_prompt=(prompt or None),
+            effort_id=effort_id, effort_managed=True)
+    except TerminalSessionError as exc:
+        return {"ok": False, "reason": "start-failed", "detail": str(exc),
+                "session_id": old_sid}
+
+    # (5) Mark the OLD session's CURRENT stage entry closed (state 'done') WITHOUT
+    # reaping the worktree (close-keeps-record). Best-effort, in place.
+    try:
+        _close_active_stage_entry(old_sid)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "old_session": _reg.get_session(old_sid),
+        "new_session": new_rec,
+        "effort_id": effort_id,
+        "prompt": prompt,
+        "persisted": persisted,
+    }
+
+
+def _close_active_stage_entry(session_id, state="done"):
+    """Stamp the OPEN ``stage_history`` entry closed (``ended_at`` + ``state``).
+
+    Used by the context-relief handoff (``state='done'``) and restart recovery
+    (``state='interrupted'``). Does NOT reap / does NOT touch the worktree — it
+    only closes the bookkeeping entry. Best-effort, in place; returns the updated
+    record or None.
+    """
+    try:
+        rec = _reg.get_session(session_id)
+        if rec is None:
+            return None
+        import time as _time
+        history = [dict(e) for e in (rec.get("stage_history") or [])
+                   if isinstance(e, dict)]
+        changed = False
+        for ent in history:
+            if ent.get("ended_at") is None:
+                ent["ended_at"] = _time.time()
+                ent["state"] = state
+                changed = True
+        if changed:
+            return _reg.update_session(session_id, stage_history=history)
+        return rec
+    except Exception:
+        return None
+
+
+def recover_interrupted_efforts(live_session_ids=None):
+    """Recover effort-managed efforts whose PTY died (boot/reconcile) (v12 W8).
+
+    A crash / restart is NOT a "close": an ``effort_managed`` record whose status
+    is RUNNING but whose PTY is GONE (not in :func:`pty_manager.live_sessions`)
+    has had its work interrupted. For each such effort this:
+
+      - PERSISTS whatever the active stage's worktree holds (Wave-5
+        :func:`finish_stage` path — committed/working/untracked stage-scoped docs;
+        **no reap**, the worktree survives so the stage is reopenable);
+      - marks the active stage entry ``state='interrupted'`` — a literal DISTINCT
+        from ``'done'`` (an orderly stage finish) and ``'failed'`` — and re-statuses
+        the record IDLE (no live process) so it is honestly "not running";
+      - leaves it **reopenable to continue the SAME stage** (a fresh session
+        inheriting ``effort_id`` can be started later — but this NEVER auto-spawns
+        one and NEVER auto-advances; the user reopens it).
+
+    IDEMPOTENT: a stage already marked ``interrupted`` (or with no active entry) is
+    not re-processed. BEST-EFFORT — never raises; a failure on one effort never
+    blocks the others. Reads, never reaps, live members; does NOT touch the Anchor
+    repo (it operates only on per-session worktrees via the persist seam). Returns
+    ``{"ok": True, "recovered": [session_id, ...]}``.
+    """
+    recovered = []
+    try:
+        if live_session_ids is None:
+            try:
+                live = set(_pty.live_sessions())
+            except Exception:
+                live = set()
+        else:
+            live = set(live_session_ids)
+
+        try:
+            records = _reg.list_sessions()
+        except Exception:
+            records = []
+
+        for rec in records:
+            try:
+                if not isinstance(rec, dict):
+                    continue
+                # ONLY v12 efforts — legacy records are owned by reconcile.
+                if not rec.get("effort_managed"):
+                    continue
+                sid = rec.get("session_id")
+                if not sid:
+                    continue
+                # RUNNING-but-PTY-gone is the reconcile-dead / restart state.
+                if rec.get("status") != _reg.STATUS_RUNNING:
+                    continue
+                if sid in live:
+                    continue  # PTY is alive — not interrupted
+
+                entry = _active_stage_entry(rec)
+                # No open stage entry, or already interrupted → idempotent skip.
+                if entry is None:
+                    continue
+                if entry.get("state") == "interrupted":
+                    continue
+
+                project_id = rec.get("project_id") or None
+
+                # Persist whatever the active stage's worktree holds — Wave-5
+                # finish_stage path (NO reap, the worktree survives so the stage
+                # stays reopenable). Best-effort.
+                try:
+                    finish_stage(sid, entry.get("stage"),
+                                 entry.get("store_lane"), project_id=project_id)
+                except Exception:
+                    pass
+
+                # Mark the active stage entry 'interrupted' (≠ done, ≠ failed) +
+                # re-status the record IDLE (no live process). NEVER auto-spawn /
+                # auto-advance — the effort is simply reopenable.
+                try:
+                    _close_active_stage_entry(sid, state="interrupted")
+                except Exception:
+                    pass
+                try:
+                    _reg.update_session(sid, status=_reg.STATUS_IDLE)
+                except Exception:
+                    pass
+
+                recovered.append(sid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return {"ok": True, "recovered": recovered}
 
 
 def kill(session_id, project_id=None, _record_boneyard=True):

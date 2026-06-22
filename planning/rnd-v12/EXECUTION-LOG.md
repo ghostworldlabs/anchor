@@ -141,6 +141,28 @@
   +2 tests. (The rendered-bar Playwright assertion belongs to W10's UI gate, which rebuilds the advance UI.)
 - **RE-GATE:** 1339 passed, 1 skipped. **Converged.** All six server paths gated + legacy walks intact.
 
+## Wave 8 — context-relief handoff (warn + one-click) + restart recovery — GREEN ✅
+
+- **EXECUTE:** `terminal_session.context_fullness` (byte-budget heuristic, env-overridable, honest 0.0),
+  `handoff_to_fresh` (finish_stage current [no reap] → prepare_stage_handoff prompt → start_session with the
+  SAME effort_id + pending paste UNSENT [v11.1 contract] → continues the SAME stage, not an advance; old
+  worktree kept), `recover_interrupted_efforts` (RUNNING-but-PTY-gone effort → persist active stage [no reap]
+  + mark stage `state='interrupted'` [≠done/failed] + re-status IDLE; no auto-spawn/advance; idempotent;
+  legacy-skipped). `GET /api/rnd/context_status` + `POST /api/rnd/handoff_to_fresh` + reconcile wiring. New
+  `tests/test_context_handoff_v12.py` + `tests/test_restart_recovery_v12.py`.
+- **GATE:** 1351 passed, 1 skipped.
+- **REVIEW (2 independent):** R1 GO-WITH-NITS (verified same-stage/effort_id/unsent-paste/recovery in
+  ISOLATION). R2 **BLOCK — W8-R2-01 (real doc-loss, read-only repro):** the GUI poll ran
+  `reconcile_and_advance` BEFORE `recover_interrupted_efforts`; reconcile blanket-marked a PTY-gone effort
+  DONE so recover skipped it → stage never 'interrupted', uncommitted docs LOST. The gate + tests missed it
+  (recover tested only in isolation). FIXED: **reordered** the poll — recover runs FIRST (claims the effort
+  interrupted+IDLE), then reconcile leaves it alone + a GUI-ORDER regression test asserting no doc loss.
+  R1-F1: added the explicit `new_rec['current_stage']=='plan'` (continue-not-advance) assertion. W8-R2-02
+  (handoff not idempotent on double-click) documented as accepted (spec-scoped, one-click endpoint).
+- **RE-GATE:** 1352 passed, 1 skipped. **Converged.** (Lesson: an integration-order bug hid behind
+  isolation-only tests + a gate that didn't exercise the wired poll order — the adversarial integration repro caught it.)
+
+
 
 
 
