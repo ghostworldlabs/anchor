@@ -896,6 +896,205 @@ def read_since(session_id, cursor=0):
         return {"ok": False, "reason": "unknown-session"}
 
 
+def _active_stage_entry(record):
+    """Return the OPEN (``ended_at is None``) ``stage_history`` entry, or None.
+
+    A v12 effort carries an append-only ``stage_history``; the active stage is
+    the (single) entry still open. Pure / read-only. Returns ``None`` for a
+    legacy record (empty history) or when no entry is open.
+    """
+    if not isinstance(record, dict):
+        return None
+    found = None
+    for ent in record.get("stage_history") or []:
+        if isinstance(ent, dict) and ent.get("ended_at") is None:
+            found = ent
+    return found
+
+
+def _persist_current_stage(session_id, project_id=None, record=None):
+    """Persist the session's CURRENT-stage produced docs + schedule its summary.
+
+    THE shared persist+summarize keystone path (v12 Wave 5) that both
+    :func:`finish_stage` and :func:`kill` call, so a stage boundary and a kill
+    persist+summarize identically. It runs against the LIVE worktree and does
+    NOT reap / does NOT mark the record terminal — those are the caller's job.
+
+    Behavior is split on whether this is a v12 EFFORT with a recorded active
+    stage (an open ``stage_history`` entry carrying a ``store_lane``):
+
+      - **v12 effort** — persist ONLY the active stage's produced docs via the
+        Wave-3 :func:`effort_history.persist_session_stage_docs` (baseline-diffed,
+        prior-stage-subtracted), bump the stage entry's ``doc_count``, and
+        schedule the Wave-4 stage-keyed background summary
+        (``summarize_session(stage=...)``).
+      - **legacy / no active stage** — fall back to the EXACT pre-v12
+        :func:`capture_session_docs` (whole-worktree ``persist_session_docs``),
+        so :func:`kill`'s observable behavior on every existing (non-effort)
+        session is byte-identical to before the refactor.
+
+    Best-effort — NEVER raises. Returns the persist result dict in the SAME
+    shape kill already returns/feeds to the Boneyard
+    (``{"ok", "persisted":[rel,...], ...}``).
+    """
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if rec is None:
+            return {"ok": False, "reason": "unknown-session", "persisted": []}
+        if project_id is None:
+            project_id = rec.get("project_id") or None
+
+        entry = _active_stage_entry(rec)
+        # Stage-scoped path ONLY for a v12 effort with a recorded active stage.
+        # Everything else (every legacy/non-effort session — i.e. every existing
+        # kill test) keeps the exact legacy whole-tree capture, so kill is
+        # unchanged.
+        if not entry or not entry.get("store_lane"):
+            return capture_session_docs(session_id, project_id=project_id,
+                                        record=rec)
+
+        worktree_path = rec.get("worktree_path", "")
+        if not worktree_path:
+            return {"ok": False, "reason": "no-worktree", "persisted": []}
+        proj = _rnd.get_project(project_id) if project_id else None
+        if proj is None:
+            return {"ok": False, "reason": "unknown-project", "persisted": []}
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return {"ok": False, "reason": "no-folder", "persisted": []}
+
+        stage = entry.get("stage") or (rec.get("current_stage") or "")
+        store_lane = entry.get("store_lane") or stage
+        baseline_ref = entry.get("baseline_ref") or ""
+
+        out = _eh.persist_session_stage_docs(
+            folder, project_id, session_id, stage, store_lane,
+            worktree_path, baseline_ref)
+
+        # Bump the active stage entry's doc_count (best-effort bookkeeping).
+        try:
+            persisted = list((out or {}).get("persisted", []) or [])
+            if persisted:
+                _bump_stage_doc_count(session_id, stage, len(persisted))
+        except Exception:
+            pass
+
+        # Schedule the Wave-4 stage-keyed background summary (gated on the same
+        # proactive-summary signal; a hard NO-OP in tests/healthcheck).
+        try:
+            _trigger_background_stage_summary(folder, project_id, store_lane,
+                                              session_id, stage)
+        except Exception:
+            pass
+
+        return out
+    except Exception:
+        return {"ok": False, "reason": "error", "persisted": []}
+
+
+def _bump_stage_doc_count(session_id, stage, count):
+    """Set the OPEN ``stage`` entry's ``doc_count`` (best-effort, in place)."""
+    try:
+        rec = _reg.get_session(session_id)
+        if rec is None:
+            return
+        history = [dict(e) for e in (rec.get("stage_history") or [])
+                   if isinstance(e, dict)]
+        changed = False
+        for ent in history:
+            if (ent.get("stage") == stage and ent.get("ended_at") is None):
+                ent["doc_count"] = int(count)
+                changed = True
+        if changed:
+            _reg.update_session(session_id, stage_history=history)
+    except Exception:
+        return
+
+
+def _trigger_background_stage_summary(folder, project_id, store_lane,
+                                      session_id, stage):
+    """Best-effort, NON-BLOCKING: schedule a stage-keyed (Wave-4) session summary.
+
+    Mirrors :func:`_trigger_background_source_summary` (daemon thread + idempotent
+    cache skip + the ``ANCHOR_PROACTIVE_SUMMARY`` gate read directly here so the
+    keystone never imports ``anchor_gui`` — the module cycle). The difference is
+    it threads the ``stage`` into ``summarize_session`` so the cache lands under
+    ``<store_lane>/summaries/<sid>/<stage>/``. A hard NO-OP when proactive summary
+    is disabled (the default in every unit-test / healthcheck context) — so a
+    stubbed context NEVER spawns a live ``claude``.
+    """
+    if not (folder and project_id and store_lane and session_id and stage):
+        return
+    if (os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
+            not in ("1", "true", "yes", "on")):
+        return
+
+    def _run():
+        try:
+            import summarizer as _sm  # lazy: no cycle, optional at import time
+            import effort_history as _eh_local
+            try:
+                if _sm.load_cached(folder, project_id, store_lane,
+                                   session_id, stage=stage) is not None:
+                    return
+            except Exception:
+                pass
+            try:
+                efforts = _eh_local.efforts_for_session_stage(
+                    folder, project_id, session_id, stage)
+            except Exception:
+                efforts = []
+            session = {"session_id": session_id, "lane": store_lane,
+                       "efforts": efforts}
+            _sm.summarize_session(folder, project_id, store_lane, session,
+                                  stage=stage)
+        except Exception:
+            pass
+
+    try:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def finish_stage(session_id, stage=None, store_lane=None, project_id=None):
+    """Persist+summarize a stage at a stage boundary — WITHOUT reaping (v12 W5).
+
+    The non-reaping durability primitive (fixes SK-7). It runs the SAME
+    persist+summarize keystone path :func:`kill` uses (:func:`_persist_current_stage`),
+    against the LIVE worktree, but:
+
+      - does **NOT** reap the PTY or remove the worktree,
+      - does **NOT** mark the registry record terminal (the record stays
+        ``RUNNING``),
+      - records **NO** Boneyard entry (a stage boundary is not a discard).
+
+    ``stage`` / ``store_lane`` are accepted for caller clarity but the
+    authoritative source is the session's OPEN ``stage_history`` entry (so the
+    baseline diff is correct); they are NOT required.
+
+    Best-effort — NEVER raises / NEVER breaks a caller. Returns
+    ``{"ok": True, "session_id", "docs": {...}}`` (``docs`` is the persist
+    result), or an honest ``{"ok": False, "reason": ...}`` when the session can't
+    be resolved.
+    """
+    try:
+        record = _reg.get_session(session_id)
+        if record is None:
+            return {"ok": False, "reason": "unknown-session",
+                    "session_id": session_id, "docs": {"ok": False,
+                    "reason": "unknown-session", "persisted": []}}
+        if project_id is None:
+            project_id = record.get("project_id") or None
+        docs_out = _persist_current_stage(session_id, project_id=project_id,
+                                          record=record)
+        return {"ok": True, "session_id": session_id, "docs": docs_out}
+    except Exception:
+        return {"ok": False, "reason": "error", "session_id": session_id,
+                "docs": {"ok": False, "reason": "error", "persisted": []}}
+
+
 def kill(session_id, project_id=None, _record_boneyard=True):
     """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
@@ -941,8 +1140,18 @@ def kill(session_id, project_id=None, _record_boneyard=True):
 
     # v8 KEYSTONE: capture + persist the session's produced docs into the MAIN
     # project BEFORE the worktree is reaped (after which they'd be gone forever).
-    docs_out = capture_session_docs(session_id, project_id=project_id,
-                                    record=record)
+    #
+    # v12 Wave 5: this now routes through the SHARED persist+summarize keystone
+    # (:func:`_persist_current_stage`) that :func:`finish_stage` also calls — so a
+    # stage boundary and a kill persist identically. For a v12 effort with a
+    # recorded active stage it persists ONLY that stage's docs (Wave-3) and
+    # schedules the stage-keyed summary (Wave-4); for every legacy/non-effort
+    # session (i.e. every existing kill test) it falls back to the EXACT pre-v12
+    # whole-tree :func:`capture_session_docs`, so kill's observable behavior here
+    # — the persisted doc set fed to the worktree-removal + the Boneyard below —
+    # is byte-identical to before the refactor. Best-effort (never blocks kill).
+    docs_out = _persist_current_stage(session_id, project_id=project_id,
+                                      record=record)
 
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)

@@ -80,6 +80,25 @@
   clean MISS (no crash) on old caches, correct store_lane resolution, lock-key safe, scope = summarizer.py only.
 - **DOCSTRING-ONLY FIX** (no re-gate needed for a comment). **Converged.**
 
+## Wave 5 — finish_stage non-reaping durability refactor (regression-only) — GREEN ✅
+
+- **EXECUTE:** new `terminal_session.finish_stage(sid, stage, store_lane, project_id)` (persist+summarize the
+  current stage against the LIVE worktree; NO reap, NO terminal, NO boneyard; best-effort) + shared primitive
+  `_persist_current_stage` (splits on the open `stage_history` entry: v12 effort → W3 stage-scoped persist +
+  W4 stage summary; legacy/no-open-stage → exact pre-v12 `capture_session_docs`). `kill` changed by ONE line
+  (`capture_session_docs` → `_persist_current_stage`) — observable behavior byte-identical (persist set,
+  boneyard 'killed', worktree reap, terminal status, return dict). `_trigger_background_stage_summary` reads
+  the `ANCHOR_PROACTIVE_SUMMARY` gate directly (never imports anchor_gui). New `tests/test_finish_stage_noreap_v12.py`.
+- **GATE:** 1304 passed, 1 skipped (the only run-of-record).
+- **REVIEW (2 independent):** both GO-WITH-NITS, zero BLOCKERs. Kill verified byte-identical; finish_stage
+  non-destructive; idempotent (content-addressed persist + doc_count SET not increment); summary seam threads
+  stage + never poisons cache; honest no-op on unknown/legacy. Nits all optional (plan said "kill calls
+  finish_stage" but impl calls the shared primitive per MASTER-PLAN §4.3 — better; `_active_stage_entry`
+  returns last-open if >1 open, but the one-open invariant holds). No code fix needed.
+- **Forward note (W6):** `advance_stage` must OPEN the first stage entry (a fresh effort's `stage_history` is
+  still [] → finish_stage falls to legacy whole-tree until the first entry exists). **Converged.**
+
+
 
 
 
