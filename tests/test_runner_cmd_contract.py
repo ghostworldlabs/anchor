@@ -152,3 +152,48 @@ def test_shape_only_resolution_unchanged_when_no_prompt(jr):
     gemini = jr.resolve_runner_cmd(backend="gemini")
     assert gemini[0] == "gemini" and "--skip-trust" in gemini
     assert "--approval-mode" in gemini
+
+
+# ── Gandalf read-only contract (permission_mode override) ─────────────────────
+# Gandalf is an ADVISOR: it analyzes a project and emits its read as the final
+# message; it writes NO file, so it must run claude READ-ONLY (plan), never
+# acceptEdits — otherwise an analysis could edit the user's real repo. These pin
+# the permission_mode threading + that Gandalf's Stage A uses it.
+
+def test_research_default_permission_is_accept_edits(jr):
+    """Default (no override) research argv keeps the write-capable acceptEdits."""
+    argv = jr.build_backend_argv("claude", SEED, OUT, False)
+    i = argv.index("--permission-mode")
+    assert argv[i + 1] == "acceptEdits"
+
+
+def test_permission_mode_plan_is_read_only(jr):
+    """permission_mode='plan' → read-only argv (no acceptEdits anywhere)."""
+    argv = jr.build_backend_argv("claude", SEED, OUT, False, permission_mode="plan")
+    i = argv.index("--permission-mode")
+    assert argv[i + 1] == "plan"
+    assert "acceptEdits" not in argv
+
+
+def test_resolve_runner_cmd_threads_permission_mode(jr):
+    """resolve_runner_cmd forwards permission_mode to the builder on the real path."""
+    argv = jr.resolve_runner_cmd(backend="claude", prompt=SEED, output_dir=OUT,
+                                 gated=False, permission_mode="plan")
+    assert "plan" in argv and "acceptEdits" not in argv
+
+
+def test_gandalf_stage_a_launches_read_only(jr, monkeypatch):
+    """Gandalf's Stage A MUST launch claude with permission_mode='plan' (read-only)."""
+    import importlib
+    import gandalf
+    importlib.reload(gandalf)
+    captured = {}
+
+    def fake_launch(*a, **k):
+        captured.update(k)
+        raise RuntimeError("stop-after-capture")
+
+    monkeypatch.setattr(gandalf._jr, "launch", fake_launch)
+    gandalf._run_stage_a("/some/project")  # swallows the error → (None, "launch-failed")
+    assert captured.get("permission_mode") == "plan", \
+        "Gandalf Stage A must run read-only (plan), never acceptEdits"

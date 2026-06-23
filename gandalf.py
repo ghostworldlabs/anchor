@@ -236,8 +236,13 @@ def _run_stage_a(folder_path, env=None):
     folder = str(folder_path)
     prompt = _build_prompt(folder)
     try:
+        # READ-ONLY: Gandalf is an advisor — it analyzes the project and emits its
+        # read as the final message; it writes NO file. ``permission_mode="plan"``
+        # ensures claude can NEVER edit the analyzed project (acceptEdits would let
+        # it). ``output_dir=folder`` grants READ access to explore the project.
         rec = _jr.launch("research", cwd=folder, prompt=prompt,
-                         output_dir=folder, env=(env or None))
+                         output_dir=folder, env=(env or None),
+                         permission_mode="plan")
     except Exception:
         return None, "launch-failed"
     jid = rec["job_id"]

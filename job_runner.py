@@ -283,7 +283,7 @@ def _shlex_split(raw: str) -> list:
     return shlex.split(raw, posix=(os.name != "nt"))
 
 
-def _build_claude_argv(prompt, output_dir, gated) -> list:
+def _build_claude_argv(prompt, output_dir, gated, permission_mode=None) -> list:
     """Build a VALID ``claude`` argv for a real (override-unset) launch.
 
     Verified-real claude flags only (claude --help): ``-p`` (print/headless),
@@ -319,8 +319,12 @@ def _build_claude_argv(prompt, output_dir, gated) -> list:
                  else "acceptEdits"]
         # Prompt is NOT placed on argv for gated lanes — it arrives on stdin.
     else:
-        # Research: minimal write-capable mode; the seed is the prompt on argv.
-        argv += ["--permission-mode", "acceptEdits"]
+        # Research: ``acceptEdits`` lets a trio skill write its report into the
+        # output dir. A READ-ONLY caller (the Gandalf advisor — it writes NO file,
+        # only emits its analysis as the final message) passes
+        # ``permission_mode="plan"`` so claude can NEVER edit the analyzed project.
+        # The seed is the prompt on argv.
+        argv += ["--permission-mode", permission_mode or "acceptEdits"]
         if prompt:
             argv.append(prompt)
     return argv
@@ -348,7 +352,7 @@ def _build_gemini_argv(prompt, output_dir, gated) -> list:
     return argv
 
 
-def build_backend_argv(backend, prompt, output_dir, gated) -> list:
+def build_backend_argv(backend, prompt, output_dir, gated, permission_mode=None) -> list:
     """Build the VALID production argv for a backend + lane shape.
 
     Used only on the override-UNSET (real-CLI) path. Dispatches to the
@@ -357,11 +361,12 @@ def build_backend_argv(backend, prompt, output_dir, gated) -> list:
     """
     if backend == BACKEND_GEMINI:
         return _build_gemini_argv(prompt, output_dir, gated)
-    return _build_claude_argv(prompt, output_dir, gated)
+    return _build_claude_argv(prompt, output_dir, gated, permission_mode=permission_mode)
 
 
 def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND,
-                       prompt=None, output_dir=None, gated=False) -> list:
+                       prompt=None, output_dir=None, gated=False,
+                       permission_mode=None) -> list:
     """Resolve the runner command as an argv list, honoring the engine backend.
 
     Resolution order (CRITICAL — the test indirection must always win):
@@ -394,7 +399,8 @@ def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND,
             argv = argv + [prompt]
     elif prompt is not None:
         # Real launch: construct a valid per-backend argv from scratch.
-        argv = build_backend_argv(backend, prompt, output_dir, gated)
+        argv = build_backend_argv(backend, prompt, output_dir, gated,
+                                  permission_mode=permission_mode)
     else:
         # Shape-only resolution (no prompt): return the per-backend default base.
         if backend == BACKEND_GEMINI:
@@ -427,7 +433,8 @@ def _stream_json_user_turn(text: str) -> str:
 
 def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
-           prompt=None, output_dir=None, gated=False) -> dict:
+           prompt=None, output_dir=None, gated=False,
+           permission_mode=None) -> dict:
     """Launch a server-owned job. Returns the job record.
 
     The record holds at least ``{job_id, lane, pid, status, log_path, backend}``.
@@ -470,7 +477,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     lp.write_text("", encoding="utf-8")
 
     argv = resolve_runner_cmd(extra_args, backend=backend, prompt=prompt,
-                              output_dir=output_dir, gated=gated)
+                              output_dir=output_dir, gated=gated,
+                              permission_mode=permission_mode)
 
     full_env = dict(os.environ)
     if env:
