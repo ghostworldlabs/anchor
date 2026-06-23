@@ -15232,6 +15232,24 @@ class _ExclusiveThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
         super().server_bind()
 
 
+class _PosixExclusiveThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
+    """ThreadingHTTPServer that claims single-ownership of its port on POSIX.
+
+    share-distro v1 Wave 2 (MASTER-PLAN decision #6 — POSIX single-instance
+    guard). macOS/Linux have no ``SO_EXCLUSIVEADDRUSE``; instead the guard simply
+    leaves ``SO_REUSEADDR`` **OFF** (``allow_reuse_address = False``) for the real
+    fixed port. A second Anchor binding the same port then fails with
+    ``EADDRINUSE`` — which ``paths.classify_bind_error`` maps to a clean
+    ``exit(0)`` in ``main`` (exactly the Windows ``SO_EXCLUSIVEADDRUSE`` parity:
+    one mechanism, no pidfile). Used ONLY for the real fixed-port path on
+    non-Windows (see ``make_server``); the ephemeral ``port=0`` path is unaffected.
+    """
+
+    # HTTPServer sets this to 1 (SO_REUSEADDR). Force it off so a duplicate bind
+    # on the same fixed port raises EADDRINUSE instead of silently sharing it.
+    allow_reuse_address = False
+
+
 class _QuietThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
     """Plain ThreadingHTTPServer for the ephemeral ``port=0`` path (tests /
     health check) that also quiets benign client-disconnect errors — so a
@@ -15258,8 +15276,14 @@ def make_server(host="127.0.0.1", port=8777):
     behavior so OS-assigned ports are unaffected.
     """
     if _paths.use_exclusive_bind(host, port):
+        # Windows real fixed port → SO_EXCLUSIVEADDRUSE single-owner guard.
         server_cls = _ExclusiveThreadingHTTPServer
+    elif _paths.use_posix_exclusive_bind(host, port):
+        # POSIX real fixed port → SO_REUSEADDR OFF so a duplicate bind raises
+        # EADDRINUSE → classify_bind_error → clean exit(0) (Wave-2 parity).
+        server_cls = _PosixExclusiveThreadingHTTPServer
     else:
+        # Ephemeral port=0 (tests / health check) → unchanged default behavior.
         server_cls = _QuietThreadingHTTPServer
     return _paths.bind_with_retry(
         lambda: server_cls((host, port), AnchorHandler)

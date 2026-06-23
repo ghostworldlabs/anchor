@@ -338,3 +338,31 @@ def use_exclusive_bind(host, port) -> bool:
         return int(port) != 0
     except (TypeError, ValueError):
         return False
+
+
+def use_posix_exclusive_bind(host, port) -> bool:
+    """Predicate: should this bind claim EXCLUSIVE ownership on **non-Windows**?
+
+    share-distro v1 Wave 2 (MASTER-PLAN decision #6 — POSIX single-instance
+    guard). POSIX has no ``SO_EXCLUSIVEADDRUSE``; instead the guard simply
+    leaves ``SO_REUSEADDR`` **off** for the real fixed port so a second bind
+    fails with ``EADDRINUSE`` (which :func:`classify_bind_error` then maps to a
+    clean ``exit(0)`` — parity with the Windows guard). This is True only for the
+    real fixed-port path off Windows:
+
+      - we are NOT on Windows, AND
+      - ``port`` is a concrete non-zero port (the tests / health check bind
+        ``port=0`` for an OS-assigned ephemeral port and must NOT go exclusive,
+        or every ephemeral bind across the suite would lose ``SO_REUSEADDR``).
+
+    Pure / side-effect-free so it unit-tests without opening a socket. ONE locked
+    mechanism (no pidfile), reusing the existing ``classify_bind_error`` seam.
+    """
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        return False
+    try:
+        return int(port) != 0
+    except (TypeError, ValueError):
+        return False

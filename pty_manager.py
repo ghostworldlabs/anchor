@@ -69,13 +69,31 @@ MAX_BUFFER_CHARS = 200_000
 def select_backend():
     """Return a backend instance per ``ANCHOR_PTY_BACKEND`` (read at call time).
 
-    ``stub`` → :class:`StubBackend`; anything else (incl. unset) →
-    :class:`PywinptyBackend`. Kept tiny/pure so the selection is unit-testable.
+    Selection (read at call time so it is unit-testable):
+
+    - ``ANCHOR_PTY_BACKEND=stub`` → :class:`StubBackend` (forced; every test).
+    - unset on **Windows** → :class:`PywinptyBackend` (the real ConPTY backend).
+    - unset on **non-Windows** (macOS / Linux) → :class:`PosixPtyBackend` (the
+      stdlib ``pty`` backend — share-distro v1 Wave 1, decision #4 cross-platform
+      terminals).
+    - anything else set → the platform default (pywinpty on Windows, posix
+      elsewhere) — only the literal ``stub`` forces the stub.
+
+    Kept tiny/pure so the selection is unit-testable on any host.
     """
     raw = os.environ.get(BACKEND_ENV)
     if raw and raw.strip().lower() == STUB_BACKEND:
         return StubBackend()
-    return PywinptyBackend()
+    if sys.platform == "win32":
+        return PywinptyBackend()
+    return PosixPtyBackend()
+
+
+#: Backwards/alias name used by the share-distro plan + its done-whens. The
+#: public seam is :func:`select_backend`; ``_select_backend`` is an alias so the
+#: two names refer to the SAME selector (no forked logic).
+def _select_backend():
+    return select_backend()
 
 
 # ── Stub backend — deterministic in-memory pty-able fake child ────────────────
@@ -319,6 +337,253 @@ class PywinptyBackend:
         proc = winpty.PtyProcess.spawn(
             argv, cwd=cwd, env=env, dimensions=(24, 80))
         return _PywinptyChild(proc)
+
+
+# ── POSIX backend — real PTY via the stdlib `pty` (macOS / Linux) ─────────────
+#
+# share-distro v1 Wave 1 (MASTER-PLAN decision #4 — cross-platform terminals).
+# On macOS/Linux a real interactive terminal runs over the stdlib ``pty`` module
+# (no native dependency — pywinpty is Windows-only and this backend never needs
+# it). The child is a real subprocess attached to a pty master fd; a daemon
+# reader thread drains the master fd into the same bounded, cursor-stable buffer
+# the other backends use, so the start/write/read_since/resize/kill/live_sessions
+# contract is byte-for-byte identical from the manager's point of view.
+#
+# Every POSIX-only module call goes through an INJECTED seam (``_posix`` /
+# ``_io_seam``) so the logic is unit-testable on the Windows gate by injecting
+# fakes (a faked ``pty.openpty`` / ``os.read`` / ``os.write`` / ``select``) —
+# without calling a real POSIX syscall. The seam defaults to the real stdlib
+# modules at runtime on a POSIX host.
+
+
+def _default_posix_seam():
+    """Return the real stdlib POSIX seam used at runtime on macOS/Linux.
+
+    Imported lazily so this never executes (and never fails) on Windows at
+    import time. Tests inject a FAKE seam instead of calling this.
+    """
+    import fcntl
+    import os as _os
+    import pty
+    import select as _select
+    import signal
+    import struct
+    import subprocess as _subprocess
+    import termios
+
+    return {
+        "openpty": pty.openpty,
+        "read": _os.read,
+        "write": _os.write,
+        "close": _os.close,
+        "select": _select.select,
+        "set_nonblocking": (lambda fd: fcntl.fcntl(
+            fd, fcntl.F_SETFL,
+            fcntl.fcntl(fd, fcntl.F_GETFL) | _os.O_NONBLOCK)),
+        "ws_ioctl": (lambda fd, cols, rows: fcntl.ioctl(
+            fd, termios.TIOCSWINSZ,
+            struct.pack("HHHH", int(rows), int(cols), 0, 0))),
+        "Popen": _subprocess.Popen,
+        "killpg": _os.killpg,
+        "getpgid": _os.getpgid,
+        "setsid": _os.setsid,
+        "SIGKILL": signal.SIGKILL,
+    }
+
+
+class _PosixChild:
+    """A real POSIX pty child driven through an injectable stdlib ``pty`` seam.
+
+    The subprocess is started in its own session/process-group and attached to a
+    pty slave fd; a daemon reader thread drains the pty MASTER fd into a bounded
+    cumulative buffer (same absolute-cursor contract as the stub/pywinpty
+    children). ``write`` writes onto the master fd; ``resize`` issues a
+    ``TIOCSWINSZ`` ioctl; ``kill`` signals the whole process group (tree-reap)
+    and stops the reader.
+
+    All POSIX module calls are taken from ``seam`` (dependency injection), so the
+    class is exercisable on Windows with fakes — no real syscall is required.
+    """
+
+    def __init__(self, cmd, cwd=None, env=None, seam=None):
+        self._seam = seam or _default_posix_seam()
+        self.cmd = cmd
+        self.cwd = cwd
+        self.env = env
+        self._buf = ""
+        self._total = 0
+        self._dropped = 0
+        self._lock = threading.RLock()
+        self.cols = 80
+        self.rows = 24
+        self._closed = False
+        self.reaped = False
+        self._proc = None
+        self.pid = None
+        self._master_fd = None
+        self._slave_fd = None
+        self._start()
+
+    # --- lifecycle ---
+    def _start(self):
+        seam = self._seam
+        master_fd, slave_fd = seam["openpty"]()
+        self._master_fd = master_fd
+        self._slave_fd = slave_fd
+        argv = self.cmd if isinstance(self.cmd, (list, tuple)) else [self.cmd]
+        argv = [str(a) for a in argv]
+        # Start the child in its own session so ``kill`` can signal the whole
+        # process group (real `claude` spawns `node` grandchildren).
+        preexec = seam.get("setsid")
+        proc = seam["Popen"](
+            argv,
+            cwd=self.cwd,
+            env=self.env,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            preexec_fn=preexec,
+            close_fds=True,
+        )
+        self._proc = proc
+        self.pid = getattr(proc, "pid", None)
+        # The slave fd is owned by the child now; close our copy so EOF surfaces
+        # on the master when the child exits.
+        try:
+            seam["close"](slave_fd)
+            self._slave_fd = None
+        except Exception:
+            pass
+        # Non-blocking master so the reader loop never wedges.
+        try:
+            setnb = seam.get("set_nonblocking")
+            if setnb is not None:
+                setnb(master_fd)
+        except Exception:
+            pass
+        self._reader = threading.Thread(target=self._drain, daemon=True)
+        self._reader.start()
+
+    def _drain(self):
+        seam = self._seam
+        while True:
+            if self._closed:
+                break
+            try:
+                rlist, _, _ = seam["select"]([self._master_fd], [], [], 0.05)
+            except Exception:
+                break
+            if not rlist:
+                if self._closed:
+                    break
+                continue
+            try:
+                data = seam["read"](self._master_fd, 4096)
+            except (OSError, BlockingIOError):
+                # EAGAIN on a non-blocking fd with nothing ready; loop.
+                continue
+            except Exception:
+                break
+            if not data:  # EOF — the child exited and closed its slave end.
+                break
+            text = data if isinstance(data, str) else data.decode(
+                "utf-8", "replace")
+            with self._lock:
+                self._append(text)
+
+    def _append(self, text):
+        if not text:
+            return
+        self._buf += text
+        self._total += len(text)
+        excess = len(self._buf) - MAX_BUFFER_CHARS
+        if excess > 0:
+            self._buf = self._buf[excess:]
+            self._dropped += excess
+
+    def is_alive(self):
+        if self._closed:
+            return False
+        proc = self._proc
+        if proc is None:
+            return False
+        try:
+            return proc.poll() is None
+        except Exception:
+            return False
+
+    def kill(self):
+        with self._lock:
+            self._closed = True
+            self.reaped = True
+        seam = self._seam
+        pid = self.pid
+        # Signal the whole process group (tree-reap) — best-effort.
+        if pid is not None and seam.get("killpg") and seam.get("getpgid"):
+            try:
+                seam["killpg"](seam["getpgid"](pid), seam["SIGKILL"])
+            except Exception:
+                pass
+        proc = self._proc
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        # Close the master fd so the reader's select/read unblocks and exits.
+        if self._master_fd is not None:
+            try:
+                seam["close"](self._master_fd)
+            except Exception:
+                pass
+
+    # --- io ---
+    def write(self, data):
+        if data is None:
+            return
+        if self._closed:
+            return
+        raw = data if isinstance(data, (bytes, bytearray)) else \
+            str(data).encode("utf-8")
+        try:
+            self._seam["write"](self._master_fd, raw)
+        except Exception:
+            pass
+
+    def read_since(self, cursor):
+        with self._lock:
+            start = max(int(cursor), self._dropped)
+            if start >= self._total:
+                return "", self._total
+            return self._buf[start - self._dropped:], self._total
+
+    def resize(self, cols, rows):
+        self.cols = int(cols)
+        self.rows = int(rows)
+        ws = self._seam.get("ws_ioctl")
+        if ws is not None and self._master_fd is not None:
+            try:
+                ws(self._master_fd, int(cols), int(rows))
+            except Exception:
+                pass
+
+
+class PosixPtyBackend:
+    """Real POSIX (macOS/Linux) terminal backend over the stdlib ``pty``.
+
+    Stdlib only — no native dependency. ``seam`` is an optional dependency
+    injection of the POSIX module calls (defaults to the real stdlib seam at
+    runtime); tests pass a FAKE seam so the backend's logic runs on the Windows
+    gate without a real syscall.
+    """
+
+    name = "posix"
+
+    def __init__(self, seam=None):
+        self._seam = seam
+
+    def start(self, cmd, cwd=None, env=None):
+        return _PosixChild(cmd, cwd=cwd, env=env, seam=self._seam)
 
 
 # ── Manager core ──────────────────────────────────────────────────────────────
