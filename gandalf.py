@@ -71,7 +71,11 @@ HOST_CMD_ENV = "ANCHOR_GANDALF_HOST_CMD"
 #: Gandalf-specific — NOT summarizer's 60s. An honest degraded run on timeout,
 #: never a hang.
 TIMEOUT_ENV = "ANCHOR_GANDALF_TIMEOUT"
-DEFAULT_TIMEOUT = 600.0
+# 900s (was 600): a real run on a LARGE repo (aurora) landed at ~515s with
+# run-to-run variance that tripped the old 600s ceiling. The run is a background
+# daemon (never blocks a render), so a generous default just lets big repos finish;
+# override per-run via ANCHOR_GANDALF_TIMEOUT.
+DEFAULT_TIMEOUT = 900.0
 
 #: Project-root subdir holding the served run artifacts (NOT under .anchor, which
 #: /artifact rejects). One ``run-<ts>/`` per run.
