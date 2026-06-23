@@ -133,8 +133,17 @@ def test_dom_positive_layoutd_shell(gui_env, tmp_path):
     # there are two shelf wrappers (toggle target) — at least one with minitiles.
     shelves = [d for t, c, d in els if "shelf-wrap" in c]
     assert shelves, "no collapsible shelf rendered"
+    # John tweak: the older-runs shelves render COLLAPSED on first load (the
+    # headline cards stay visible). Every shelf-wrap carries .collapsed, and its
+    # toggle caption reads "Show all" (not "Hide").
+    assert all("collapsed" in (d.get("class") or "").split() for d in shelves), \
+        "older-runs shelves must render COLLAPSED by default"
     showall = [d for t, c, d in els if "showall" in c]
     assert showall, "no shelf 'Hide/Show all' toggle control"
+    # collapsed default → the toggle caption reads "Show all", never "Hide".
+    assert "Show all" in body, "collapsed shelf toggle must read 'Show all'"
+    assert "Hide" not in body, \
+        "no shelf toggle should read 'Hide' when collapsed by default"
     minitiles = [d for t, c, d in els if "minitile" in c]
     assert minitiles, "no shelf little-tiles rendered"
 
@@ -254,5 +263,10 @@ def test_grass_mini_panel_has_collapse_toggle():
     assert "id='grassMiniTog'" in html and "toggleGrassMini(" in html, \
         "grass panel missing the collapse toggle"
     assert "id='grassMiniList'" in html, "grass idea list not in a collapsible container"
+    # John tweak: the Grass idea list is COLLAPSED on first load (server-rendered
+    # .collapsed + the ▸ caret) so the dashboard is minimal with no flash.
+    assert "grass-mini-list collapsed" in html, \
+        "grass idea list must render COLLAPSED by default"
+    assert "&#9656;</span>" in html, "collapsed grass caret (▸) missing"
     assert "openGrassWorkbench()" in html, "Open-workbench must stay reachable"
     assert "function toggleGrassMini" in ag._PROJECT_WINDOW_JS, "toggle JS missing"

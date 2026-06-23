@@ -74,8 +74,19 @@ boneyard.py
 # stored source of truth, and never mutates a live member.
 effort_view.py
 
+# ── Gandalf integration v1 "honest project read" module ────────────────────
+# Stdlib-only: gandalf (the two-stage engine — Stage A model via the runner seam,
+# Stage B Gandalf's own Tier-1 HOST via the ANCHOR_GANDALF_HOST_CMD seam) uses only
+# json / os / subprocess / time / pathlib + the existing paths / job_runner /
+# summarizer seams. ``node`` (the Stage-B host) is an EXTERNAL CLI through a seam,
+# like git/gh — never a Python dependency.
+gandalf.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
+# Gandalf the White wizard mark (white robes/staff; the Gandalf tab icon + served
+# by /vendor/brand/). Pure-data SVG, no dependency.
+vendor/brand/gandalf-white-icon.svg
 
 # ── Vendored, dependency-free assets (KaTeX for the report viewer) ──────────
 vendor/katex/katex.min.js

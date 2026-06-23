@@ -6,6 +6,20 @@
 > (NOTE: this is a SESSION handoff for the human/assistant — distinct from the product's
 > auto-generated `HANDOFF.md` artifact that Anchor writes into trio worktrees.)
 
+## Gandalf integration v1 (branch `gandalf-integration`, in progress 2026-06-22)
+
+- A SEPARATE branch off master `7c2f51f` (v12). Gives each project an honest "what's really
+  going on here" read by invoking the **existing** Gandalf skill through Anchor's runner seam
+  (Stage A model → RAW draft) then grading it with Gandalf's own Tier-1 host (Stage B, the
+  `ANCHOR_GANDALF_HOST_CMD`/`node` seam → GRADED output). New stdlib-only `gandalf.py`; a
+  white-wizard **Gandalf tab** in the project right column ABOVE Grass; endpoints
+  `GET /api/rnd/gandalf` + `POST /api/rnd/gandalf_run`; CLI `rnd gandalf <pid>`;
+  `check_gandalf_surface` in the healthcheck (both seams stubbed). Frozen design +
+  4-wave plan in `planning/gandalf-v1/`. **Waves 1+2 (backend) + 3 (UI tab) + 4 (CLI/HC/distro/docs)
+  built.** Deploy note: first-scan auto-runs ONE Gandalf per newly-registered project once
+  proactive summary is on; a manual real-`claude -p` live-smoke is a deploy checklist item (not a
+  pytest gate). NOT merged / NOT deployed — awaiting John's sign-off + a screenshot of the tab.
+
 ## TL;DR — what the next session must do
 
 - **v12 "Efforts" is BUILT — NOT merged, NOT deployed.** All 12 waves are GREEN on branch

@@ -576,6 +576,31 @@ def _streamjson_runner_cmd() -> "str | None":
     return None
 
 
+def _gandalf_draft_runner_cmd() -> "str | None":
+    """Path to the STUB Stage-A runner (``tests/stub_gandalf_draft.py``).
+
+    Emits a canned Gandalf RAW draft (a result-envelope NDJSON line) so the
+    Gandalf surface check never invokes real ``claude``. Returns a
+    ``python <abs path>`` command string, or ``None`` if the stub is absent (the
+    check then degrades gracefully instead of risking a live CLI)."""
+    stub = ANCHOR_DIR / "tests" / "stub_gandalf_draft.py"
+    if stub.is_file():
+        return f"{sys.executable} {stub}"
+    return None
+
+
+def _gandalf_host_cmd() -> "str | None":
+    """Path to the STUB Stage-B host (``tests/stub_gandalf_host.py``).
+
+    Emits a canned GRADED ``advisor-output.json`` so the Gandalf surface check
+    never invokes real ``node`` / the real Skill-Foundry host. Returns a
+    ``python <abs path>`` command string, or ``None`` when absent."""
+    stub = ANCHOR_DIR / "tests" / "stub_gandalf_host.py"
+    if stub.is_file():
+        return f"{sys.executable} {stub}"
+    return None
+
+
 def check_rnd_v2_surface(report: Report, server_proc, rnd_env: dict):
     """Exercise the v2 R&D surface on the throwaway server (stubbed runner).
 
@@ -3807,6 +3832,164 @@ def _git_commit_in(repo: Path, msg: str = "hc commit") -> bool:
         return False
 
 
+def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
+    """Exercise the Gandalf v1 "honest project read" surface — FULLY STUBBED.
+
+    Gandalf gives each project an honest "what's really going on here" read via a
+    two-stage engine: Stage A (the model, through ``ANCHOR_RUNNER_CMD``) emits the
+    RAW draft; Stage B (Gandalf's own Tier-1 HOST, through
+    ``ANCHOR_GANDALF_HOST_CMD``) grades it. Both seams are stubbed here
+    (``ANCHOR_RUNNER_CMD`` → ``tests/stub_gandalf_draft.py`` emitting a canned RAW
+    draft; ``ANCHOR_GANDALF_HOST_CMD`` → ``tests/stub_gandalf_host.py`` emitting a
+    canned GRADED advisor-output) — NEVER real claude / real node / network. The
+    walk:
+
+      (1) ``run_gandalf`` on a temp project → the 3 artifacts
+          (``report.md`` + ``exec-summary.md`` + ``advisor-output.json``) under
+          ``<folder>/gandalf/run-<ts>/`` AND a newest-first SAFE index record;
+          ``list_runs`` returns it with a non-empty verdict + no absolute paths.
+      (2) a SECOND ``run_gandalf`` appends a 2nd newest-first entry (history
+          accumulates); ``run_gandalf_if_absent`` no-ops when a run exists.
+      (3) an ERROR run — point the HOST stub at a forced failure
+          (``STUB_GANDALF_HOST_FAIL``) → an honest ``ok:false`` record with a
+          reason, NO fabricated verdict, never raised.
+
+    ``ANCHOR_PROACTIVE_SUMMARY`` stays OFF. Every forced env var
+    (``ANCHOR_RUNNER_CMD`` / ``ANCHOR_GANDALF_HOST_CMD`` / ``ANCHOR_GANDALF_SKILL_DIR``
+    / ``ANCHOR_PROACTIVE_SUMMARY`` + the host-fail knob) is snapshotted and RESTORED
+    in ``finally``; the temp project + data dirs go into ``rnd_env['v3_temp_dirs']``.
+    Nothing binds ``:8777`` / touches real data / reaches the network. A sub-step
+    that genuinely can't run (no git, no stub) is recorded honestly as skipped."""
+    name = "Gandalf surface"
+    draft_cmd = _gandalf_draft_runner_cmd()
+    host_cmd = _gandalf_host_cmd()
+    if not draft_cmd or not host_cmd:
+        report.check(name, True,
+                     "skipped (no Gandalf stubs; live claude/node avoided)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_host = os.environ.get("ANCHOR_GANDALF_HOST_CMD")
+    prev_skill = os.environ.get("ANCHOR_GANDALF_SKILL_DIR")
+    prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
+    prev_hostfail = os.environ.get("STUB_GANDALF_HOST_FAIL")
+    os.environ["ANCHOR_RUNNER_CMD"] = draft_cmd
+    os.environ["ANCHOR_GANDALF_HOST_CMD"] = host_cmd
+    os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)  # OFF
+    os.environ.pop("STUB_GANDALF_HOST_FAIL", None)
+
+    pid = None
+    try:
+        import rnd_registry as _rnd
+        import gandalf as _gandalf
+
+        # Point the skill dir at a NON-existent path so the prompt builder reads no
+        # real SKILL.md (the stub draft runner ignores the prompt anyway).
+        no_skill = Path(_tf.mkdtemp(prefix="anchor-hc-gandalf-skill-"))
+        os.environ["ANCHOR_GANDALF_SKILL_DIR"] = str(no_skill)
+        rnd_env.setdefault("v3_temp_dirs", []).append(no_skill)
+
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-gandalf-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc gandalf probe\n\nR&D project managed by Anchor.\n",
+            encoding="utf-8")
+        _git_init_repo(proj_folder)  # best-effort; gandalf does not require git
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " gandalf",
+                                str(proj_folder), scaffold=False)
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        fp = str(proj_folder)
+        steps.append(("register gandalf project", bool(pid), str(pid)))
+
+        # ── (1) run → 3 artifacts + index + list_runs shape ───────────────────
+        try:
+            out = _gandalf.run_gandalf(fp, pid)
+            run_id = out.get("run_id", "")
+            run_dir = proj_folder / "gandalf" / run_id
+            arts = all((run_dir / f).is_file() for f in
+                       ("report.md", "exec-summary.md", "advisor-output.json"))
+            runs = _gandalf.list_runs(fp, pid)
+            shape_ok = (len(runs) == 1 and runs[0].get("ok") is True
+                        and bool(runs[0].get("verdict")))
+            # SAFE projection: no absolute paths leak.
+            no_abs = True
+            for v in runs[0].values():
+                if isinstance(v, str) and (":\\" in v or fp in v):
+                    no_abs = False
+            steps.append((
+                "run_gandalf → 3 artifacts + SAFE index record",
+                bool(out.get("ok") and arts and shape_ok and no_abs),
+                f"ok={out.get('ok')} artifacts={arts} shape={shape_ok} "
+                f"no_abs={no_abs}"))
+        except Exception as e:
+            steps.append(("run_gandalf", False, f"{type(e).__name__}: {e}"))
+
+        # ── (2) a 2nd run appends; run_gandalf_if_absent no-ops ───────────────
+        try:
+            _gandalf.run_gandalf(fp, pid)
+            runs2 = _gandalf.list_runs(fp, pid)
+            appended = len(runs2) == 2
+            # newest-first: the 2nd run's ts >= the older one's.
+            newest_first = True
+            if len(runs2) == 2:
+                t0, t1 = runs2[0].get("ts"), runs2[1].get("ts")
+                if isinstance(t0, (int, float)) and isinstance(t1, (int, float)):
+                    newest_first = t0 >= t1
+            absent = _gandalf.run_gandalf_if_absent(fp, pid)
+            noop = bool(absent.get("skipped")) and len(
+                _gandalf.list_runs(fp, pid)) == 2
+            steps.append((
+                "2nd run appends (newest-first) + run_gandalf_if_absent no-ops",
+                bool(appended and newest_first and noop),
+                f"count={len(runs2)} newest_first={newest_first} noop={noop}"))
+        except Exception as e:
+            steps.append(("2nd run / if-absent", False,
+                          f"{type(e).__name__}: {e}"))
+
+        # ── (3) an ERROR run recorded honestly (host forced to fail) ──────────
+        try:
+            os.environ["STUB_GANDALF_HOST_FAIL"] = "1"
+            err = _gandalf.run_gandalf(fp, pid)
+            os.environ.pop("STUB_GANDALF_HOST_FAIL", None)
+            runs3 = _gandalf.list_runs(fp, pid)
+            err_rec = runs3[0] if runs3 else {}
+            honest = (err.get("ok") is False and bool(err.get("reason"))
+                      and err_rec.get("ok") is False
+                      and not err_rec.get("verdict")
+                      and err_rec.get("report_rel") is None)
+            steps.append((
+                "host-failure → honest error run (ok:false + reason, no verdict)",
+                bool(honest),
+                f"ok={err.get('ok')} reason={err.get('reason','')!r} "
+                f"rec_ok={err_rec.get('ok')}"))
+        except Exception as e:
+            os.environ.pop("STUB_GANDALF_HOST_FAIL", None)
+            steps.append(("error run", False, f"{type(e).__name__}: {e}"))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        for var, prev in (("ANCHOR_RUNNER_CMD", prev_runner),
+                          ("ANCHOR_GANDALF_HOST_CMD", prev_host),
+                          ("ANCHOR_GANDALF_SKILL_DIR", prev_skill),
+                          ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive),
+                          ("STUB_GANDALF_HOST_FAIL", prev_hostfail)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
 def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
     """Exercise the v12 "Efforts" R&D surface — FULLY STUBBED.
 
@@ -4625,6 +4808,7 @@ def main():
         check_rnd_v11_surface(report, server_proc, rnd_env)
         check_rnd_v11_1_surface(report, server_proc, rnd_env)
         check_rnd_v12_surface(report, server_proc, rnd_env)
+        check_gandalf_surface(report, server_proc, rnd_env)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

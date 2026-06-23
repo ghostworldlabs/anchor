@@ -465,19 +465,20 @@ def test_grass_mini_panel_collapse_toggle(server, tmp_path):
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
         pg.wait_for_selector("#grassMiniTog", timeout=8000)
-        # starts EXPANDED (no .collapsed)
-        assert pg.eval_on_selector(
-            "#grassMiniList", "e=>e.classList.contains('collapsed')") is False
-        pg.click("#grassMiniTog")
+        # John tweak: starts COLLAPSED on first load (minimal dashboard).
         assert pg.eval_on_selector(
             "#grassMiniList", "e=>e.classList.contains('collapsed')") is True, \
-            "caret did not collapse the grass idea list"
+            "grass idea list must start COLLAPSED by default"
         # Open-workbench stays reachable even when collapsed.
         assert pg.eval_on_selector_all(".grass-open", "e=>e.length") >= 1
         pg.click("#grassMiniTog")
         assert pg.eval_on_selector(
             "#grassMiniList", "e=>e.classList.contains('collapsed')") is False, \
-            "second click did not expand"
+            "caret did not expand the grass idea list"
+        pg.click("#grassMiniTog")
+        assert pg.eval_on_selector(
+            "#grassMiniList", "e=>e.classList.contains('collapsed')") is True, \
+            "second click did not collapse"
         b.close()
     import terminal_session as ts
     try: ts.kill(rec["session_id"])

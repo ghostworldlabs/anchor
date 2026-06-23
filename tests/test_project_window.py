@@ -203,10 +203,14 @@ def test_most_recent_plus_previous_sessions_expander(gui, tmp_path):
     body = re.sub(r"<style[\s\S]*?</style>", "", html)
     body = re.sub(r"<script[\s\S]*?</script>", "", body)
     # The two plan sessions land in the Plan/Build zone: ONE prominent headline +
-    # ONE little-tile in the collapsible shelf ("Hide 1 older plan/build sessions").
+    # ONE little-tile in the collapsible shelf. John tweak: the older-runs shelf
+    # is COLLAPSED on first load, so the toggle reads "Show all 1 older …" and the
+    # wrapper carries .collapsed (the headline card stays visible).
     board = body[body.find("pgrid layoutd"):body.find("grassWorkbenchTpl")]
-    assert "Hide 1 older plan/build sessions" in board, \
-        "no Plan/Build shelf toggle for the older session"
+    assert "Show all 1 older plan/build sessions" in board, \
+        "no Plan/Build shelf toggle for the older session (collapsed default)"
+    assert "shelf-wrap collapsed" in board, \
+        "older-runs shelf must render COLLAPSED by default"
     # Exactly two session tiles in the Plan/Build zone (1 headline + 1 minitile) —
     # proving a multi-file session is ONE tile, not N per-file cards.
     pb_tiles = re.findall(

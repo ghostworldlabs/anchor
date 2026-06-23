@@ -73,6 +73,9 @@ advance/handoff/dock are interactive live ops with NO CLI form):
     python3 anchor.py rnd efforts <project_id>               # the project's efforts (id - current_stage - status - stage count)
     python3 anchor.py rnd effort <project_id> --session <id>  # one effort's ordered stage_history (SAFE: no worktree/branch/baseline)
     python3 anchor.py rnd effort-deliverable <project_id> --session <id>  # the build-stage resolved deliverable (honest unresolved)
+
+Gandalf v1 inspection mirror (read-only; run/re-run is interactive — NO CLI form):
+    python3 anchor.py rnd gandalf <project_id>               # the project's Gandalf reads (verdict + chips + report path), newest-first
 """
 
 import json, os, re, sys
@@ -1154,6 +1157,22 @@ def rnd_boneyard(project_id, search=None):
     return _bone.list_entries(folder, project_id)
 
 
+def rnd_gandalf(project_id):
+    """CLI mirror of ``gandalf.list_runs`` (Gandalf v1).
+
+    READ-ONLY: returns the project's Gandalf run history — the honest "what's
+    really going on here" reads — NEWEST-FIRST, as SAFE projections (never an
+    absolute path; only ``ts · run_id · verdict · cross_model · degraded · ok ·
+    report_rel · exec_rel · advisor_rel · reason?``). This NEVER runs the model /
+    the host (run/re-run is interactive, no CLI form) — it reads the internal
+    index only. Honest-absent: ``[]`` when no Gandalf read has happened yet.
+    Raises ``KeyError`` for an unknown project.
+    """
+    import gandalf as _gandalf
+    _proj, folder = _rnd_resolve(project_id)
+    return _gandalf.list_runs(folder, project_id)
+
+
 def rnd_next_prompt(project_id, session_id):
     """CLI mirror — the generated next-stage handoff prompt for a session (v10).
 
@@ -1877,6 +1896,37 @@ def _rnd_cli(args):
                       f"id={e.get('entry_id','')}")
                 for r in docs:
                     print(f"      · {r}")
+
+        elif sub == "gandalf":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd gandalf <project_id>")
+                return
+            runs = rnd_gandalf(pos[0])
+            if not runs:
+                print(f"No Gandalf read yet for {pos[0]}.")
+                return
+            print(f"{len(runs)} Gandalf read(s) for {pos[0]} (newest-first):")
+            for r in runs:
+                ts = r.get("ts")
+                try:
+                    when = (datetime.fromtimestamp(float(ts))
+                            .strftime("%Y-%m-%d %H:%M")) if ts else "?"
+                except (TypeError, ValueError, OSError):
+                    when = "?"
+                if r.get("ok"):
+                    chips = ("single-family" if not r.get("cross_model")
+                             else "cross-model")
+                    if r.get("degraded"):
+                        chips += ", degraded"
+                    verdict = r.get("verdict", "") or "(no verdict)"
+                    print(f"  - {when}  [{chips}]  {verdict}")
+                    rep = r.get("report_rel")
+                    if rep:
+                        print(f"      report: {rep}")
+                else:
+                    print(f"  - {when}  [ERROR]  "
+                          f"did not complete: {r.get('reason','unknown')}")
 
         elif sub == "next-prompt":
             pos = _positionals()

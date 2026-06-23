@@ -441,6 +441,7 @@ import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
+import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -937,6 +938,11 @@ def discover_and_adopt(project_id: str) -> dict:
     # so an expanded session accordion serves a ready cache rather than a
     # "generating…" fallback. Background + gated like the project summary.
     _trigger_project_session_summaries(folder, project_id)
+    # Gandalf v1 (decision #4): on first scan ONLY, kick off the honest project
+    # read. first-run-ONLY (check-and-set BEFORE scheduling — no TOCTOU) + gated
+    # by _PROACTIVE_SUMMARY_ENABLED (off in tests) + background daemon. Never
+    # blocks the rescan/render path.
+    _trigger_gandalf_first_scan(folder, project_id)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
             "sibling_adopt": sibling, "marker": marker}
 
@@ -985,6 +991,112 @@ def _trigger_project_summary(folder_path, project_id, force: bool = False):
         threading.Thread(target=_run, daemon=True).start()
     except Exception:
         pass
+
+
+# ── Gandalf integration (v1) — proactive first-scan + manual re-run ───────────
+# Per-project locks/guards live in-process (a server owns its subprocess jobs).
+# ``_GANDALF_FIRSTSCAN_LOCKS`` serializes the first-scan check-and-set so two
+# concurrent rescans can't both schedule the first run (TOCTOU double-fire).
+# ``_GANDALF_INFLIGHT`` tracks projects with a scheduled-but-not-finished run so
+# the manual endpoint won't pile up duplicate runs. Both keyed by project_id.
+_GANDALF_LOCKS_GUARD = threading.Lock()
+_GANDALF_FIRSTSCAN_LOCKS = {}
+_GANDALF_INFLIGHT = set()
+_GANDALF_INFLIGHT_GUARD = threading.Lock()
+
+
+def _gandalf_firstscan_lock(project_id):
+    """Return the per-project first-scan lock (created once)."""
+    with _GANDALF_LOCKS_GUARD:
+        lk = _GANDALF_FIRSTSCAN_LOCKS.get(project_id)
+        if lk is None:
+            lk = threading.Lock()
+            _GANDALF_FIRSTSCAN_LOCKS[project_id] = lk
+        return lk
+
+
+def _gandalf_runner_env():
+    """Snapshot the runner-seam env at trigger time (mirror of the summary
+    triggers) so a late daemon thread uses the runner configured NOW. Also
+    forwards the Gandalf-specific seams so a forwarded job grades through the
+    same host/skill/timeout."""
+    return {k: v for k, v in os.environ.items()
+            if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
+            or k.startswith("FAKE_") or k.startswith("ANCHOR_GANDALF_")}
+
+
+def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False):
+    """Schedule a Gandalf run in a daemon thread WITHOUT blocking the caller.
+
+    Mirrors ``_trigger_project_summary``: snapshots the runner-seam env at
+    trigger time and forwards it to the spawned job, runs in a background daemon
+    thread, swallows all errors. Per-project in-flight guard prevents a duplicate
+    pile-up.
+
+    - ``manual=True`` (the explicit ``POST /api/rnd/gandalf_run``) is NOT gated by
+      ``_PROACTIVE_SUMMARY_ENABLED`` — a manual re-run is always honored.
+    - ``first_scan=True`` is the proactive register/open/rescan hook: gated by the
+      module flag (off in tests) AND first-run-ONLY via ``run_gandalf_if_absent``.
+
+    Returns ``True`` if a run was scheduled, ``False`` if suppressed (gate off, or
+    already in-flight).
+    """
+    if first_scan and not _PROACTIVE_SUMMARY_ENABLED:
+        return False
+    # In-flight guard: at most one scheduled-but-unfinished run per project.
+    with _GANDALF_INFLIGHT_GUARD:
+        if project_id in _GANDALF_INFLIGHT:
+            return False
+        _GANDALF_INFLIGHT.add(project_id)
+
+    runner_env = _gandalf_runner_env()
+
+    def _run():
+        try:
+            if first_scan:
+                _gandalf.run_gandalf_if_absent(folder_path, project_id,
+                                               env=(runner_env or None))
+            else:
+                _gandalf.run_gandalf(folder_path, project_id,
+                                     env=(runner_env or None))
+        except Exception:
+            pass
+        finally:
+            with _GANDALF_INFLIGHT_GUARD:
+                _GANDALF_INFLIGHT.discard(project_id)
+
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+        return True
+    except Exception:
+        with _GANDALF_INFLIGHT_GUARD:
+            _GANDALF_INFLIGHT.discard(project_id)
+        return False
+
+
+def _trigger_gandalf_first_scan(folder_path, project_id):
+    """First-scan hook (register/open/rescan). First-run-ONLY, no TOCTOU.
+
+    Check-and-set under a per-project lock BEFORE scheduling: if a prior Gandalf
+    run already exists OR a first-scan run is already in-flight, do nothing.
+    Otherwise schedule exactly one. Gated by ``_PROACTIVE_SUMMARY_ENABLED`` (off
+    in tests) so a bare register/open never spawns a model job. Never raises.
+    """
+    if not _PROACTIVE_SUMMARY_ENABLED:
+        return False
+    lk = _gandalf_firstscan_lock(project_id)
+    with lk:
+        try:
+            if _gandalf.list_runs(folder_path, project_id):
+                return False  # a prior run exists — not a first scan
+        except Exception:
+            return False
+        # check-and-set the in-flight set under the SAME first-scan lock so two
+        # concurrent rescans can't both pass the prior-run check and schedule.
+        with _GANDALF_INFLIGHT_GUARD:
+            if project_id in _GANDALF_INFLIGHT:
+                return False
+        return _trigger_gandalf(folder_path, project_id, first_scan=True)
 
 
 def _trigger_session_summary(folder_path, project_id, lane, session,
@@ -3107,12 +3219,15 @@ def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
         shelf_id = f"shelf_{html_lib.escape(zone_key, quote=True)}"
         tgl_id = f"tgl_{html_lib.escape(zone_key, quote=True)}"
         label_attr = html_lib.escape(zone_label.lower(), quote=True)
+        # John tweak: the OLDER-runs shelf starts COLLAPSED on first load (the
+        # headline card stays visible). Server-render the collapsed class + the
+        # "Show all" caption so there is no flash of expanded content before JS.
         shelf = (
             f"<button class='showall' id='{tgl_id}' "
             f"onclick=\"toggleShelf('{shelf_id}','{tgl_id}',{n},"
-            f"'{label_attr}')\">&#9662; Hide {n} older "
+            f"'{label_attr}')\">&#9656; Show all {n} older "
             f"{html_lib.escape(zone_label.lower())} sessions</button>"
-            f"<div class='shelf-wrap' id='{shelf_id}'>"
+            f"<div class='shelf-wrap collapsed' id='{shelf_id}'>"
             f"<div class='shelf'>{''.join(tiles)}</div></div>"
         )
     return (
@@ -3133,6 +3248,151 @@ def _sv_zone_lane(sv, zone_key):
         if ln in ("plan", "planning", "build"):
             return ln
     return "plan"
+
+
+def _gandalf_ts_label(ts) -> str:
+    """Format a Gandalf run's unix ts as ``YYYY-MM-DD HH:MM`` (honest empty)."""
+    try:
+        return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OSError):
+        return ""
+
+
+def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
+    """Render the Layout-D right-column Gandalf mini-panel (Gandalf v1 Wave 3).
+
+    The white-wizard "what's really going on here" read. Reads ``gandalf.list_runs``
+    ONLY (the internal index — NEVER a model call on render). Header = the
+    white-wizard icon + "Gandalf" + a Re-run button (``gandalfRun(PROJECT_ID)``).
+    Run history newest-first; each row = the one-line verdict + ts + grade chips
+    (a SPECULATIVE/PROMISING floor chip + a single-family/Error chip as applicable).
+    Clicking a row inline-expands its exec-summary (fetched from ``exec_rel`` via
+    the traversal-safe ``/artifact`` route) with [Full report] + [raw JSON] links.
+    A degraded/error run renders an HONEST row (reason text, NO dead links).
+    Honest empty state ("No Gandalf read yet" + a Run button) before the first run.
+    Sits ABOVE Grass in the right column (decision #5). HTML f-string (double
+    braces); the panel JS lives in the RAW ``_PROJECT_WINDOW_JS``.
+    """
+    try:
+        runs = _gandalf.list_runs(folder_path, project_id)
+    except Exception:
+        runs = []
+    n = len(runs)
+    pid_q = html_lib.escape(str(project_id), quote=True)
+    icon = (
+        f"<img class='gicon' src='/vendor/brand/gandalf-white-icon.svg?v={BUILD_ID}' "
+        "alt='Gandalf the White'>")
+
+    if not runs:
+        # Honest empty state — no fabricated rows; a single Run control.
+        body = (
+            "<div class='gandalf-empty' data-gandalf-empty='1'>"
+            "No Gandalf read yet."
+            "<button class='btn sm primary gandalf-run' "
+            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Run</button>"
+            "</div>")
+        return (
+            "<div class='panel gandalf-panel' id='gandalfPanel'>"
+            "<div class='ptitle gandalf-head'>"
+            f"{icon}<span class='gt'>Gandalf</span>"
+            "<button class='btn sm gandalf-run gandalf-rerun' "
+            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
+            f"{body}</div>")
+
+    rows = []
+    for r in runs:
+        run_id = html_lib.escape(str(r.get("run_id") or ""), quote=True)
+        ok = bool(r.get("ok"))
+        verdict = r.get("verdict") or ""
+        ts_lbl = html_lib.escape(_gandalf_ts_label(r.get("ts")))
+        report_rel = r.get("report_rel") or ""
+        exec_rel = r.get("exec_rel") or ""
+        adv_rel = r.get("advisor_rel") or ""
+
+        # Verdict / honest-error one-liner.
+        if ok:
+            vtxt = html_lib.escape(verdict or "(no verdict)")
+            vcls = "verdict"
+        else:
+            reason = html_lib.escape(str(r.get("reason") or "unknown"))
+            vtxt = ("Run did not complete &mdash; " + reason)
+            vcls = "verdict err"
+
+        # Grade chips. The v1 honesty floor: Tier-1 elevations land SPECULATIVE,
+        # single-family is cross_model:false. An error run gets a single Error chip.
+        chips = []
+        if not ok:
+            chips.append("<span class='chip deg'>Error</span>")
+        else:
+            if r.get("cross_model"):
+                chips.append("<span class='chip prom'>Promising</span>")
+            else:
+                chips.append("<span class='chip spec'>Speculative</span>")
+                chips.append("<span class='chip sf'>single-family</span>")
+            if r.get("degraded"):
+                chips.append("<span class='chip deg'>degraded</span>")
+        chips_html = "".join(chips)
+
+        # SAFE links — only when the artifact rel paths exist (an error run has
+        # none → NO dead links, per the mockup).
+        exec_attr = html_lib.escape(exec_rel, quote=True)
+        links = ""
+        if ok and (report_rel or adv_rel):
+            link_parts = []
+            if report_rel:
+                href = (f"/artifact/{pid_q}?path="
+                        + url_quote(report_rel, safe=''))
+                link_parts.append(
+                    f"<a href='{href}' target='_blank' rel='noopener'>"
+                    "&#128196; Full report</a>")
+            if adv_rel:
+                ahref = (f"/artifact/{pid_q}?path="
+                         + url_quote(adv_rel, safe=''))
+                link_parts.append(
+                    f"<a href='{ahref}' target='_blank' rel='noopener'>"
+                    "{ } raw JSON</a>")
+            links = "<div class='glinks'>" + "".join(link_parts) + "</div>"
+
+        # The expandable body: only OK runs with an exec-summary carry one (fetched
+        # lazily on first expand via gandalfToggleRun → /artifact). John tweak: an
+        # ERROR run is NOT expandable — drop its caret + onclick (the failure reason
+        # already shows in the row line; clicking opened an empty body box). OK runs
+        # keep the expand caret + onclick.
+        body_attr = (f" data-exec-rel='{exec_attr}'" if (ok and exec_rel) else "")
+        if ok:
+            rows.append(
+                f"<div class='grun' data-run='{run_id}'{body_attr} "
+                "onclick='gandalfToggleRun(this)'>"
+                "<div class='grtop'><span class='gcaret'>&#9656;</span>"
+                f"<span class='{vcls}'>{vtxt}</span></div>"
+                "<div class='gmeta'>"
+                f"<span class='gts'>{ts_lbl}</span>{chips_html}</div>"
+                "<div class='gbody' onclick='event.stopPropagation()'>"
+                f"<div class='gexec'></div>{links}</div>"
+                "</div>")
+        else:
+            # Non-expandable error row: no caret, no onclick, no body box.
+            rows.append(
+                f"<div class='grun err-row' data-run='{run_id}'>"
+                f"<div class='grtop'><span class='{vcls}'>{vtxt}</span></div>"
+                "<div class='gmeta'>"
+                f"<span class='gts'>{ts_lbl}</span>{chips_html}</div>"
+                "</div>")
+
+    # John tweak: the run list is collapsible IN THE HEADER (caret toggle, mirrors
+    # the grass-mini pattern) and starts COLLAPSED on first load (server-rendered
+    # .collapsed + the ▸ caret) so there is no flash of expanded content before JS.
+    return (
+        "<div class='panel gandalf-panel' id='gandalfPanel'>"
+        "<div class='ptitle gandalf-head'>"
+        "<span class='gmini-tog' id='gandalfRunsTog' title='Collapse / expand the "
+        "run list' onclick='toggleGandalfRuns(this)'>&#9656;</span>"
+        f"{icon}<span class='gt'>Gandalf</span>"
+        f"<span class='cnt'>{n} read{'s' if n != 1 else ''}</span>"
+        "<button class='btn sm gandalf-run gandalf-rerun' "
+        f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
+        f"<div class='gruns collapsed' id='gandalfRuns'>{''.join(rows)}</div>"
+        "</div>")
 
 
 def _render_layoutd_grass_panel(folder_path, project_id) -> str:
@@ -3160,15 +3420,17 @@ def _render_layoutd_grass_panel(folder_path, project_id) -> str:
     if not rows:
         rows.append("<div class='idea-empty'>No ideas captured yet.</div>")
     # The idea list is collapsible IN THE TILE (caret toggle) — fold the open items
-    # away while keeping +capture / Open-workbench reachable; default expanded.
+    # away while keeping +capture / Open-workbench reachable. John tweak: default
+    # COLLAPSED (server-rendered .collapsed + the ▸ caret) so the first-load
+    # dashboard is minimal with no flash of expanded content before JS.
     return (
         "<div class='panel'>"
         "<div class='ptitle'>"
         "<span class='gmini-tog' id='grassMiniTog' title='Collapse / expand the "
-        "idea list' onclick='toggleGrassMini(this)'>&#9662;</span> "
+        "idea list' onclick='toggleGrassMini(this)'>&#9656;</span> "
         "&#127793; Grass Catcher "
         f"<span class='cnt'>{n} idea{'s' if n != 1 else ''}</span></div>"
-        f"<div class='grass-mini-list' id='grassMiniList'>{''.join(rows)}</div>"
+        f"<div class='grass-mini-list collapsed' id='grassMiniList'>{''.join(rows)}</div>"
         "<div class='pactions'>"
         "<button class='btn sm' onclick='addIdea()'>+ capture</button>"
         # The open-workbench control carries the legacy grass-tile hooks
@@ -3239,6 +3501,7 @@ def _render_layoutd_html(folder_path, project_id):
     plan_build_zone = _render_layoutd_zone(
         "plan_build", "Plan/Build", "&#128208;&#8594;&#128296; Latest Plan / Build",
         zones["plan_build"], folder_path, project_id, effort_index=effort_index)
+    gandalf_panel = _render_layoutd_gandalf_panel(folder_path, project_id)
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
     # v12 W10 (John change #2): TWO explicit start controls — "+ New research"
@@ -3264,6 +3527,7 @@ def _render_layoutd_html(folder_path, project_id):
         f"{plan_build_zone}"
         "</div>"
         "<div class='rightcol'>"
+        f"{gandalf_panel}"
         f"{grass_panel}"
         f"{deliv_panel}"
         "</div>"
@@ -4483,6 +4747,55 @@ def render_project_window_html(project_id: str) -> str:
         "color:var(--text-dim);background:#1b2030;border:1px solid var(--border);"
         "border-radius:9px;padding:1px 7px}"
         ".layoutd .panel .pactions{display:flex;gap:8px;margin-top:10px}"
+        # ── Gandalf v1 Wave 3: the white-wizard read panel (ABOVE Grass) ─────
+        ".gandalf-panel .gandalf-head{display:flex;align-items:center;gap:9px}"
+        ".gandalf-panel .gandalf-head .gicon{width:24px;height:24px;"
+        "border-radius:6px;flex:0 0 auto}"
+        ".gandalf-panel .gandalf-head .gt{font-weight:600}"
+        ".gandalf-panel .gandalf-head .cnt{margin-left:auto;color:var(--text-dim);"
+        "font-size:12px;font-weight:400}"
+        ".gandalf-panel .gandalf-rerun{margin-left:8px}"
+        ".gandalf-panel .gandalf-empty{padding:14px 6px;text-align:center;"
+        "color:var(--text-dim);font-size:12.5px;display:flex;flex-direction:column;"
+        "align-items:center;gap:10px}"
+        ".gandalf-panel .gruns{display:flex;flex-direction:column;gap:2px}"
+        ".gandalf-panel .gruns.collapsed{display:none}"
+        ".gandalf-panel .grun.err-row{cursor:default}"
+        ".gandalf-panel .grun.err-row:hover{background:transparent}"
+        ".gandalf-panel .grun{padding:9px 10px;border-radius:8px;cursor:pointer}"
+        ".gandalf-panel .grun:hover{background:var(--surface2)}"
+        ".gandalf-panel .grun.open{background:var(--surface2)}"
+        ".gandalf-panel .grun .grtop{display:flex;align-items:flex-start;gap:8px}"
+        ".gandalf-panel .grun .gcaret{color:var(--text-dim);font-size:11px;"
+        "margin-top:3px;flex:0 0 auto}"
+        ".gandalf-panel .grun.open .gcaret{transform:rotate(90deg)}"
+        ".gandalf-panel .grun .verdict{flex:1;font-weight:500;font-size:12.5px;"
+        "line-height:1.4;color:var(--text)}"
+        ".gandalf-panel .grun .verdict.err{color:#ffb4b4;font-weight:400}"
+        ".gandalf-panel .grun .gmeta{display:flex;gap:6px;align-items:center;"
+        "margin-top:5px;flex-wrap:wrap;padding-left:19px}"
+        ".gandalf-panel .grun .gts{font-size:11px;color:var(--text-dim)}"
+        ".gandalf-panel .grun .chip{font-size:9.5px;font-weight:700;"
+        "letter-spacing:.3px;padding:2px 7px;border-radius:999px;"
+        "text-transform:uppercase}"
+        ".gandalf-panel .grun .chip.spec{background:rgba(251,191,36,.16);"
+        "color:#fbbf24}"
+        ".gandalf-panel .grun .chip.prom{background:rgba(108,156,252,.16);"
+        "color:#9bc0ff}"
+        ".gandalf-panel .grun .chip.sf{background:#1b2030;color:var(--text-dim);"
+        "border:1px solid var(--border)}"
+        ".gandalf-panel .grun .chip.deg{background:rgba(248,113,113,.16);"
+        "color:#ffb4b4}"
+        ".gandalf-panel .grun .gbody{display:none;margin-top:9px;padding:10px 11px;"
+        "margin-left:19px;background:var(--surface);border:1px solid var(--border);"
+        "border-radius:8px;font-size:12.5px;color:var(--text-dim);"
+        "line-height:1.5;white-space:pre-wrap;word-break:break-word}"
+        ".gandalf-panel .grun.open .gbody{display:block}"
+        ".gandalf-panel .grun .glinks{margin-top:9px;display:flex;gap:12px;"
+        "white-space:normal}"
+        ".gandalf-panel .grun .glinks a{font-size:12px;color:var(--accent);"
+        "text-decoration:none;font-weight:600}"
+        ".gandalf-panel .grun .glinks a:hover{text-decoration:underline}"
         # ── v12 Wave 2: the bottom DOCK chrome (INERT this wave) ─────────────
         # v12 W10 (John change #1): the dock is EMBEDDED in the document flow — a
         # normal full-width section at the bottom of the project content (NOT a
@@ -4755,6 +5068,16 @@ function toggleShelf(id, btnId, n, label) {
 // items fold away; +capture / Open-workbench stay reachable). Default expanded.
 function toggleGrassMini(el) {
   var list = document.getElementById('grassMiniList');
+  if (!list) return;
+  var collapsed = list.classList.toggle('collapsed');
+  if (el) el.innerHTML = collapsed ? '&#9656;' : '&#9662;';  // ▸ / ▾
+}
+
+// John tweak: collapse / expand the right-column Gandalf run list IN THE HEADER
+// (mirrors toggleGrassMini). The list starts COLLAPSED on first load so the
+// dashboard is minimal; clicking the header caret shows/hides the run history.
+function toggleGandalfRuns(el) {
+  var list = document.getElementById('gandalfRuns');
   if (!list) return;
   var collapsed = list.classList.toggle('collapsed');
   if (el) el.innerHTML = collapsed ? '&#9656;' : '&#9662;';  // ▸ / ▾
@@ -5171,6 +5494,185 @@ async function _doBoneyardSearch() {
     for (var i = 0; i < entries.length; i++) html += _boneyardEntryHtml(entries[i]);
     list.innerHTML = html;
   } catch (e) { /* read-only; leave the current list on a transient error */ }
+}
+
+// ── Gandalf v1 Wave 3 — the white-wizard read panel ─────────────────────────
+// The right-column Gandalf panel (ABOVE Grass) shows the project's Gandalf run
+// history newest-first (rendered server-side from gandalf.list_runs — the index,
+// never a model call). Three interactions live here:
+//   * gandalfToggleRun(el)  — expand/collapse a run row; on first expand fetch
+//                             the exec-summary via the traversal-safe /artifact
+//                             route (data-exec-rel) and show it inline. An error
+//                             run carries no exec-rel → no fetch, no dead link.
+//   * gandalfRun(pid)       — POST /api/rnd/gandalf_run {project_id}; schedules a
+//                             fresh run (token-aware _postJson). On {scheduled}
+//                             we poll the read endpoint until a NEW run lands,
+//                             then re-render the rows in place (no page bounce).
+// Read-only render; only the explicit Re-run mutates (and only schedules).
+function gandalfToggleRun(el) {
+  if (!el) return;
+  var open = el.classList.toggle('open');
+  if (!open) return;
+  var rel = el.getAttribute('data-exec-rel') || '';
+  var host = el.querySelector('.gexec');
+  if (!rel || !host) return;
+  if (host.getAttribute('data-loaded') === '1') return;
+  host.setAttribute('data-loaded', '1');
+  host.textContent = 'Loading executive summary…';
+  var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
+    + '?path=' + encodeURIComponent(rel);
+  fetch(href, _jsonHdrs()).then(function (r) {
+    if (!r.ok) throw new Error('artifact ' + r.status);
+    return r.text();
+  }).then(function (txt) {
+    host.textContent = txt || '(empty executive summary)';
+  }).catch(function () {
+    host.textContent = '(executive summary unavailable)';
+  });
+}
+
+var _gandalfPolling = false;
+function gandalfRun(pid) {
+  pid = pid || PROJECT_ID;
+  var btns = document.querySelectorAll('#gandalfPanel .gandalf-run');
+  for (var i = 0; i < btns.length; i++) { btns[i].disabled = true; }
+  var before = _gandalfRunCount();
+  _postJson('/api/rnd/gandalf_run', {project_id: pid}).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (data) {
+      if (_isUnauthorized(r, data)) {
+        if (setAnchorToken()) return gandalfRun(pid);
+        return;
+      }
+      if (!data || !data.ok) {
+        _gandalfReenable(btns);
+        return;
+      }
+      // Scheduled — poll the read endpoint until a new run appears, then refresh.
+      _gandalfPollForNew(pid, before, btns, 0);
+    });
+  }).catch(function () { _gandalfReenable(btns); });
+}
+
+function _gandalfRunCount() {
+  return document.querySelectorAll('#gandalfPanel .grun').length;
+}
+function _gandalfReenable(btns) {
+  for (var i = 0; i < btns.length; i++) { btns[i].disabled = false; }
+}
+function _gandalfPollForNew(pid, before, btns, tries) {
+  if (tries > 60) { _gandalfReenable(btns); return; }
+  _gandalfPolling = true;
+  fetch('/api/rnd/gandalf?project_id=' + encodeURIComponent(pid) + _tokenQ(),
+        _jsonHdrs()).then(function (r) {
+    return r.json();
+  }).then(function (data) {
+    var runs = (data && data.runs) || [];
+    if (runs.length > before) {
+      _gandalfRenderRuns(runs);
+      _gandalfPolling = false;
+      return;
+    }
+    setTimeout(function () {
+      _gandalfPollForNew(pid, before, btns, tries + 1);
+    }, 500);
+  }).catch(function () {
+    setTimeout(function () {
+      _gandalfPollForNew(pid, before, btns, tries + 1);
+    }, 500);
+  });
+}
+
+// Re-render the run rows in place from a list_runs payload (client mirror of the
+// server-side _render_layoutd_gandalf_panel row markup).
+function _gandalfRenderRuns(runs) {
+  var host = document.getElementById('gandalfRuns');
+  var panel = document.getElementById('gandalfPanel');
+  if (!panel) return;
+  // refresh the count chip + re-enable the buttons.
+  var cnt = panel.querySelector('.gandalf-head .cnt');
+  if (cnt) cnt.textContent = runs.length + ' read' + (runs.length === 1 ? '' : 's');
+  var btns = panel.querySelectorAll('.gandalf-run');
+  for (var b = 0; b < btns.length; b++) { btns[b].disabled = false; }
+  if (!host) return;
+  var html = '';
+  for (var i = 0; i < runs.length; i++) html += _gandalfRunHtml(runs[i]);
+  host.innerHTML = html;
+  // A Re-run was an explicit user action → reveal the (now refreshed) run list
+  // and sync the header caret to the expanded glyph.
+  host.classList.remove('collapsed');
+  var tog = document.getElementById('gandalfRunsTog');
+  if (tog) tog.innerHTML = '&#9662;';  // ▾
+}
+
+function _gandalfTs(ts) {
+  if (ts == null) return '';
+  try {
+    var d = new Date(ts * 1000);
+    if (isNaN(d.getTime())) return '';
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+      + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  } catch (e) { return ''; }
+}
+
+function _gandalfRunHtml(r) {
+  r = r || {};
+  var ok = !!r.ok;
+  var runId = String(r.run_id || '');
+  var ts = _gandalfTs(r.ts);
+  var chips = '';
+  if (!ok) {
+    chips = '<span class="chip deg">Error</span>';
+  } else {
+    if (r.cross_model) {
+      chips = '<span class="chip prom">Promising</span>';
+    } else {
+      chips = '<span class="chip spec">Speculative</span>'
+        + '<span class="chip sf">single-family</span>';
+    }
+    if (r.degraded) chips += '<span class="chip deg">degraded</span>';
+  }
+  var vtxt, vcls;
+  if (ok) {
+    vtxt = _esc(r.verdict || '(no verdict)');
+    vcls = 'verdict';
+  } else {
+    vtxt = 'Run did not complete &mdash; ' + _esc(r.reason || 'unknown');
+    vcls = 'verdict err';
+  }
+  var links = '';
+  if (ok && (r.report_rel || r.advisor_rel)) {
+    var parts = '';
+    if (r.report_rel) {
+      parts += '<a href="/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(r.report_rel)
+        + '" target="_blank" rel="noopener">&#128196; Full report</a>';
+    }
+    if (r.advisor_rel) {
+      parts += '<a href="/artifact/' + encodeURIComponent(PROJECT_ID)
+        + '?path=' + encodeURIComponent(r.advisor_rel)
+        + '" target="_blank" rel="noopener">{ } raw JSON</a>';
+    }
+    links = '<div class="glinks">' + parts + '</div>';
+  }
+  // John tweak: an ERROR run is NOT expandable (no caret, no onclick, no body
+  // box) — its reason already shows in the row line. OK runs keep the expand.
+  if (!ok) {
+    return '<div class="grun err-row" data-run="' + _esc(runId) + '">'
+      + '<div class="grtop"><span class="' + vcls + '">' + vtxt + '</span></div>'
+      + '<div class="gmeta"><span class="gts">' + _esc(ts) + '</span>' + chips
+      + '</div></div>';
+  }
+  var relAttr = (r.exec_rel)
+    ? ' data-exec-rel="' + _esc(r.exec_rel) + '"' : '';
+  return '<div class="grun" data-run="' + _esc(runId) + '"' + relAttr
+    + ' onclick="gandalfToggleRun(this)">'
+    + '<div class="grtop"><span class="gcaret">&#9656;</span>'
+    + '<span class="' + vcls + '">' + vtxt + '</span></div>'
+    + '<div class="gmeta"><span class="gts">' + _esc(ts) + '</span>' + chips
+    + '</div>'
+    + '<div class="gbody" onclick="event.stopPropagation()">'
+    + '<div class="gexec"></div>' + links + '</div></div>';
 }
 
 // ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
@@ -12457,6 +12959,38 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
+            elif self.path.startswith("/api/rnd/gandalf"):
+                # Read-only (Gandalf v1): the project's Gandalf run history —
+                # newest-first SAFE projections (verdict · chips · report/exec
+                # rel paths; NEVER absolute paths). NO mutation, NO model call.
+                # AUTH: ``?token=`` (read-only GET; back-compat when no token
+                # set), mirroring /api/rnd/grass. Project-scoped.
+                #   /api/rnd/gandalf?project_id=<id>
+                # NOTE: this GET prefix must NOT match the POST /api/rnd/gandalf_run.
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False,
+                                     "error": "project_id required"}, 400)
+                elif _unsafe_path_seg(pid):
+                    self._send_json({"ok": False, "error": "bad pid"}, 400)
+                else:
+                    proj = _rnd.get_project(pid)
+                    if proj is None:
+                        self._send_json({"ok": False,
+                                         "error": "Unknown project"}, 404)
+                    else:
+                        folder = proj.get("folder_path", "")
+                        try:
+                            runs = _gandalf.list_runs(folder, pid)
+                        except Exception:
+                            runs = []
+                        self._send_json({"ok": True, "runs": runs})
             elif self.path.startswith("/api/rnd/boneyard"):
                 # Read-only (v10 Wave 7): the project's per-project Boneyard — a
                 # searchable list of DISCARDED material (hard-killed sessions w/
@@ -14300,6 +14834,28 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                          "advanced_from": source,
                                          "to_lane": to_lane,
                                          "persisted": hk.get("persisted", [])})
+
+        elif self.path == "/api/rnd/gandalf_run":
+            # Gandalf v1 (Wave 2): MANUAL re-run. Schedule a fresh two-stage
+            # Gandalf run in a daemon thread and return immediately
+            # ({ok, scheduled}). NOT module-flag-gated (manual is explicit); a
+            # per-project in-flight guard prevents duplicate pile-up. Auth is
+            # enforced by the do_POST token middleware above.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _unsafe_path_seg(pid):
+                self._send_json({"ok": False, "error": "bad pid"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    scheduled = _trigger_gandalf(folder, pid, manual=True)
+                    self._send_json({"ok": True, "scheduled": bool(scheduled)})
 
         elif self.path == "/api/rnd/advance_stage":
             # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME

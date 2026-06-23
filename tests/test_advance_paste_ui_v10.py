@@ -192,8 +192,18 @@ def test_advance_shows_prompt_pasted_unsent_in_browser(server):
         assert new_sid, "advance did not create a planning session"
 
         # The new planning record carries the pending paste (the NEXT-PROMPT body).
-        prec = reg.get_session(new_sid)
-        prompt = prec.get("pending_paste") or ""
+        # NOTE (race): terminal_session.start_session registers the record FIRST
+        # (so it appears in list_sessions) and then sets pending_paste in a SEPARATE
+        # update_session call — so there is a brief window where the record exists
+        # but pending_paste is not yet written. Poll for the pending_paste to land
+        # rather than reading once (intent unchanged: the advance HOLDS the prompt).
+        prompt = ""
+        for _ in range(80):
+            prec = reg.get_session(new_sid)
+            prompt = prec.get("pending_paste") or ""
+            if prompt:
+                break
+            time.sleep(0.05)
         assert prompt, "advanced planning session has no pending paste"
         assert "research/run-1/REPORT.md" in prompt, \
             "pending paste should reference the real research doc"
