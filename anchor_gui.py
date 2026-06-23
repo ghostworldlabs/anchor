@@ -4917,6 +4917,15 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini' id='openBoneyardBtn' "
         "onclick=\"openBoneyard()\" title='Discarded material (searchable)'>"
         "&#9760; Boneyard</button>"
+        # Self-service access-token control. Visible only when the server has an
+        # ANCHOR_TOKEN configured (auth on); clicking re-prompts (setAnchorToken)
+        # and reloads so every read retries with the new token. A stale/missing
+        # token on a fresh origin would otherwise leave the panels silently empty.
+        "<button class='rnd-mini' id='tokenBtn' "
+        "onclick=\"if(setAnchorToken())location.reload();\" "
+        "title='Set or clear the Anchor access token' "
+        f"style='display:{'inline-block' if _paths.expected_token() else 'none'}'>"
+        "&#128273;</button>"
         # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
         # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
         # (a token-gated read). Unlinked → a "Link GitHub" button (linkGithub());
@@ -5032,6 +5041,33 @@ _PROJECT_WINDOW_JS = r"""
 // NO console drawer, NO live-terminals bar, NO loose cost-rollup / deliverables
 // section — those v3 leftovers were removed. Plain RAW string (single braces).
 // ════════════════════════════════════════════════════════════════════════════
+
+// ── Global 401 auto-reprompt (self-service token) ───────────────────────────
+// A fresh origin (e.g. a laptop on the tailnet IP) has no token in this origin's
+// localStorage, so every token-gated read-API GET returns 401 and the dynamic
+// panels come up EMPTY. Wrap window.fetch so a 401 (when auth is on, and not
+// already prompting) re-prompts for the token and reloads — every read then
+// retries with the new token via the existing ?token=/X-Anchor-Token senders.
+// Non-401 responses pass through UNCHANGED (the body/stream is never touched).
+(function () {
+  if (window.__anchorFetchWrapped) return;
+  window.__anchorFetchWrapped = true;
+  var _origFetch = window.fetch.bind(window);
+  var prompting = false;
+  window.fetch = function () {
+    return _origFetch.apply(null, arguments).then(function (resp) {
+      if (resp && resp.status === 401 && window.ANCHOR_AUTH_REQUIRED && !prompting) {
+        prompting = true;
+        try {
+          if (setAnchorToken()) { location.reload(); }
+        } finally {
+          prompting = false;
+        }
+      }
+      return resp;
+    });
+  };
+})();
 
 function _esc(s) {
   // FULL HTML escaping (defense-in-depth). Escapes &, <, > AND BOTH quote chars
@@ -9718,6 +9754,9 @@ def generate_html(projects, tasks, inbox):
     # the page can prompt for the token ONCE on first load — never the token value
     # itself (GET is unauthenticated; embedding the secret would leak it).
     auth_required_js = "true" if _paths.expected_token() else "false"
+    # Initial visibility of the masthead 🔑 token control — shown only when the
+    # server has an ANCHOR_TOKEN configured (auth on), invisible otherwise.
+    auth_token_btn_display = "inline-block" if _paths.expected_token() else "none"
 
     # ── Health banner ──
     # If the most recent health report flagged issues, show a banner at the top.
@@ -10757,6 +10796,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </div>
       <div class="mh-spacer"></div>
+      <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     </div>
     <!-- Dashboard view -->
@@ -11110,6 +11150,33 @@ function setAnchorToken() {{
 window.addEventListener('DOMContentLoaded', function () {{
     if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) {{ setAnchorToken(); }}
 }});
+
+// ── Global 401 auto-reprompt (self-service token) ──
+// A fresh origin (e.g. a laptop on the tailnet IP) has no token in this origin's
+// localStorage → token-gated reads return 401 and dynamic content comes up empty.
+// Wrap window.fetch so a 401 (auth on, not already prompting) re-prompts for the
+// token and reloads — every read then retries with the new token. Non-401
+// responses pass through UNCHANGED (the body/stream is never touched).
+// /api/version is public (returns 200) so the cache-bust poll never trips this.
+(function () {{
+    if (window.__anchorFetchWrapped) return;
+    window.__anchorFetchWrapped = true;
+    const _origFetch = window.fetch.bind(window);
+    let prompting = false;
+    window.fetch = function () {{
+        return _origFetch.apply(null, arguments).then(function (resp) {{
+            if (resp && resp.status === 401 && window.ANCHOR_AUTH_REQUIRED && !prompting) {{
+                prompting = true;
+                try {{
+                    if (setAnchorToken()) {{ location.reload(); }}
+                }} finally {{
+                    prompting = false;
+                }}
+            }}
+            return resp;
+        }});
+    }};
+}})();
 
 async function apiCall(endpoint, body) {{
     // Retry once on network failure — the server may have briefly paused

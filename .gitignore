@@ -41,3 +41,4 @@ test_write.txt
 # Foreman orchestration state (transient build artifact, not product)
 foreman-checkpoint.json
 _devtest/
+gandalf/

@@ -1,0 +1,329 @@
+"""Self-service access-token controls — the 🔑 button + the global 401
+auto-reprompt fetch wrapper, in BOTH the project window and the home dashboard.
+
+THE PROBLEM (root cause, pre-fixed): ``ANCHOR_TOKEN`` gates the read-API GETs.
+The browser supplies it from ``localStorage['anchor_token']`` (PER-ORIGIN). On a
+fresh origin (a laptop hitting the tailnet IP) localStorage has no/stale token →
+every panel-loading GET returns 401 → the dynamic panels come up EMPTY → looks
+like a "different/broken layout." This adds (A) a VISIBLE 🔑 token control in
+each page's header that re-prompts + reloads, and (B) a global ``window.fetch``
+wrapper that auto-re-prompts on a 401 read (when auth is on) so a stale token
+self-heals.
+
+Coverage:
+  * Rendered-DOM: the 🔑 token control is present in BOTH pages, wired to
+    setAnchorToken()+reload, and its initial visibility tracks
+    ``_paths.expected_token()`` (visible when auth is on, hidden when off).
+  * The fetch wrapper source is present in BOTH pages, guarded by
+    ``window.__anchorFetchWrapped``, only reloads on a 401 when auth is on.
+  * Playwright (DEV-ONLY): on BOTH pages ``window.__anchorFetchWrapped === true``,
+    and a fetch that returns 401 (forced via a route intercept) invokes the
+    token-prompt path (``window.prompt`` stubbed).
+
+Hermetic: temp data dir + a registered stub project; the Playwright cases set
+``ANCHOR_TOKEN`` so auth is ON. NEVER binds :8777; no network.
+"""
+import importlib
+import re
+import subprocess
+import threading
+import time
+from html.parser import HTMLParser
+from pathlib import Path
+
+import pytest
+
+
+def _git(repo, *args):
+    return subprocess.run(["git", "-C", str(repo), *args],
+                          capture_output=True, text=True)
+
+
+def _have_git():
+    try:
+        return subprocess.run(["git", "--version"],
+                              capture_output=True).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+pytestmark = pytest.mark.skipif(not _have_git(), reason="git not on PATH")
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    """Tmp data dir + a registered project; the stack reloaded against the env.
+
+    ``token`` (an ANCHOR_TOKEN value or None) is parametrized by the auth-on/off
+    cases via ``request.param`` indirection where needed; the base fixture is
+    auth-OFF (no token), and individual tests reload paths with a token set."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+
+    for mod in ("paths", "job_runner", "pty_manager", "rnd_registry",
+                "effort_history", "sessions", "anchor_marker",
+                "session_registry", "worktrees", "lanes", "summarizer",
+                "report_viewer", "handoff", "boneyard", "terminal_session"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    import rnd_registry
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "initial")
+
+    proj = rnd_registry.add_project("TokenTemp", str(repo), scaffold=False)
+    pid = proj["id"]
+
+    bundle = {"gui": gui, "repo": repo, "pid": pid, "data": data,
+              "monkeypatch": monkeypatch}
+    yield bundle
+    try:
+        import pty_manager
+        pty_manager._reset_live_table_for_tests()
+    except Exception:
+        pass
+
+
+def _reload_with_token(env, token):
+    """Reload paths + anchor_gui with ANCHOR_TOKEN set/cleared; return the gui."""
+    if token is None:
+        env["monkeypatch"].delenv("ANCHOR_TOKEN", raising=False)
+    else:
+        env["monkeypatch"].setenv("ANCHOR_TOKEN", token)
+    import paths
+    importlib.reload(paths)
+    gui = importlib.reload(env["gui"])
+    env["gui"] = gui
+    return gui
+
+
+def _home_html(gui):
+    projects, tasks, inbox = gui.gather_all()
+    return gui.generate_html(projects, tasks, inbox)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Rendered-DOM: the 🔑 token control present in BOTH pages
+# ════════════════════════════════════════════════════════════════════════════
+
+class _Collector(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.els = []
+
+    def handle_starttag(self, tag, attrs):
+        self.els.append((tag, dict(attrs)))
+
+
+def _token_button(html):
+    """Return the parsed (tag, attrs) for #tokenBtn, or None."""
+    c = _Collector()
+    c.feed(html)
+    for tag, attrs in c.els:
+        if attrs.get("id") == "tokenBtn":
+            return (tag, attrs)
+    return None
+
+
+def test_project_window_has_token_control(env):
+    """The project window header renders a #tokenBtn 🔑 control wired to
+    setAnchorToken()+reload."""
+    gui, pid = env["gui"], env["pid"]
+    html = gui.render_project_window_html(pid)
+    btn = _token_button(html)
+    assert btn is not None, "project window must render #tokenBtn"
+    tag, attrs = btn
+    assert tag == "button"
+    assert "setAnchorToken()" in (attrs.get("onclick") or "")
+    assert "location.reload()" in (attrs.get("onclick") or "")
+    assert "&#128273;" in html or "\U0001f511" in html  # the key glyph 🔑
+
+
+def test_home_has_token_control(env):
+    """The home dashboard masthead renders a #tokenBtn 🔑 control wired to
+    setAnchorToken()+reload."""
+    gui = env["gui"]
+    html = _home_html(gui)
+    btn = _token_button(html)
+    assert btn is not None, "home page must render #tokenBtn"
+    tag, attrs = btn
+    assert tag == "button"
+    assert "setAnchorToken()" in (attrs.get("onclick") or "")
+    assert "location.reload()" in (attrs.get("onclick") or "")
+    assert "&#128273;" in html or "\U0001f511" in html  # the key glyph 🔑
+
+
+def test_token_control_visibility_tracks_auth_project_window(env):
+    """The project-window #tokenBtn is hidden (display:none) when auth is OFF and
+    visible (inline-block) when ANCHOR_TOKEN is configured."""
+    # auth OFF (base fixture has no token)
+    gui = _reload_with_token(env, None)
+    btn = _token_button(gui.render_project_window_html(env["pid"]))
+    assert btn is not None
+    assert "display:none" in (btn[1].get("style") or ""), \
+        "token control must be hidden when auth is off"
+    # auth ON
+    gui = _reload_with_token(env, "s3cret")
+    btn = _token_button(gui.render_project_window_html(env["pid"]))
+    assert btn is not None
+    assert "display:inline-block" in (btn[1].get("style") or ""), \
+        "token control must be visible when auth is on"
+    _reload_with_token(env, None)
+
+
+def test_token_control_visibility_tracks_auth_home(env):
+    """The home #tokenBtn is hidden when auth is OFF and visible when on."""
+    gui = _reload_with_token(env, None)
+    btn = _token_button(_home_html(gui))
+    assert btn is not None
+    assert "display:none" in (btn[1].get("style") or ""), \
+        "token control must be hidden when auth is off"
+    gui = _reload_with_token(env, "s3cret")
+    btn = _token_button(_home_html(gui))
+    assert btn is not None
+    assert "display:inline-block" in (btn[1].get("style") or ""), \
+        "token control must be visible when auth is on"
+    _reload_with_token(env, None)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# The global fetch wrapper source is present + guarded in BOTH pages
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_fetch_wrapper_present_project_window(env):
+    """The project window installs the guarded global fetch wrapper that reloads
+    on a 401 only when auth is on."""
+    js = env["gui"]._PROJECT_WINDOW_JS
+    assert "window.__anchorFetchWrapped" in js
+    assert "if (window.__anchorFetchWrapped) return;" in js
+    # 401 + auth-on gate + reprompt + reload.
+    m = re.search(r"status === 401", js)
+    assert m, "wrapper must check status === 401"
+    seg = js[m.start():m.start() + 400]
+    assert "ANCHOR_AUTH_REQUIRED" in seg
+    assert "setAnchorToken()" in seg
+    assert "location.reload()" in seg
+
+
+def test_fetch_wrapper_present_home(env):
+    """The home dashboard installs the guarded global fetch wrapper too."""
+    html = _home_html(env["gui"])
+    assert "window.__anchorFetchWrapped" in html
+    assert "if (window.__anchorFetchWrapped) return;" in html
+    m = re.search(r"status === 401", html)
+    assert m, "wrapper must check status === 401"
+    seg = html[m.start():m.start() + 400]
+    assert "ANCHOR_AUTH_REQUIRED" in seg
+    assert "setAnchorToken()" in seg
+    assert "location.reload()" in seg
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# Playwright (DEV-ONLY): wrapper installed + a 401 triggers the prompt path
+# ════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def server_authed(env):
+    """A running server with ANCHOR_TOKEN set (auth ON), on a free port != 8777."""
+    gui = _reload_with_token(env, "s3cret")
+    srv = gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    assert port != 8777
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield env, f"http://127.0.0.1:{port}", port
+    finally:
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        time.sleep(0.15)
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        t.join(timeout=5)
+        _reload_with_token(env, None)
+
+
+def _drive_browser(base, path):
+    """Open ``base+path`` with window.prompt stubbed, assert the fetch wrapper is
+    installed, force a 401 on a token-gated read via a route intercept, and assert
+    the prompt path fired. Returns nothing; raises on failure."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        # Pre-seed a token so the DOMContentLoaded one-time prompt does NOT fire
+        # (we want to observe ONLY the 401-triggered re-prompt). Also stub
+        # window.prompt to record calls and return null (cancel) so the wrapper
+        # does NOT reload (which would detach the page).
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token','s3cret');"
+            "window.__promptCalls = [];"
+            "window.prompt = function(){ window.__promptCalls.push(1); "
+            "return null; };")
+        errors = []
+        # The forced 401 (below) intentionally logs a benign "Failed to load
+        # resource ... 401" network console error — that is the condition we are
+        # FORCING, not a JS fault. Exclude it; keep every other console error.
+        def _record_error(m):
+            if m.type != "error":
+                return
+            if "401" in m.text and "load resource" in m.text.lower():
+                return
+            errors.append(m.text)
+        pg.on("console", _record_error)
+        pg.goto(base + path, wait_until="domcontentloaded")
+
+        # (A) the wrapper is installed.
+        assert pg.evaluate("window.__anchorFetchWrapped === true"), \
+            "the global fetch wrapper must be installed on this page"
+
+        # (B) a 401 read triggers the prompt path. Force ANY fetch from inside the
+        # page to a sentinel URL to return 401, then call fetch and assert the
+        # stubbed prompt fired (the wrapper saw 401 + auth-on → setAnchorToken →
+        # window.prompt). The stub returns null (cancel) so no reload happens.
+        pg.route("**/__force401__", lambda route: route.fulfill(
+            status=401, content_type="application/json",
+            body='{"error":"unauthorized"}'))
+        before = pg.evaluate("window.__promptCalls.length")
+        pg.evaluate(
+            "() => fetch('/__force401__').catch(function(){})")
+        # The wrapper's .then runs after the response resolves; poll briefly.
+        pg.wait_for_function(
+            "window.__promptCalls.length > %d" % before, timeout=5000)
+        after = pg.evaluate("window.__promptCalls.length")
+        assert after > before, \
+            "a 401 read must trigger the token re-prompt (window.prompt)"
+
+        assert not errors, f"JS console errors: {errors}"
+        b.close()
+
+
+def test_fetch_wrapper_401_prompts_project_window(server_authed):
+    """Project window: wrapper installed + a forced 401 triggers window.prompt."""
+    pytest.importorskip("playwright.sync_api")
+    env, base, _ = server_authed
+    _drive_browser(base, f"/project/{env['pid']}")
+
+
+def test_fetch_wrapper_401_prompts_home(server_authed):
+    """Home dashboard: wrapper installed + a forced 401 triggers window.prompt."""
+    pytest.importorskip("playwright.sync_api")
+    _env, base, _ = server_authed
+    _drive_browser(base, "/")
