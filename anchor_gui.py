@@ -4066,6 +4066,11 @@ def render_project_window_html(project_id: str) -> str:
     pid_js = json.dumps(project_id)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
+        # Without width=device-width a laptop/PWA browser falls back to a ~980px
+        # layout viewport, scales the page up, and trips the .pgrid.layoutd
+        # max-width:980px breakpoint → the right column collapses to a full-width
+        # stack. The home page already has this; the project window was missing it.
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
         f"<title>{name} — Anchor R&amp;D</title>"
         # Vendored REAL xterm.js terminal (canvas), served like KaTeX. xterm.css
         # styles the terminal grid mounted inside each live inline panel. (The v2
