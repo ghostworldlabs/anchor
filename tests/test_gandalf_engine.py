@@ -1,0 +1,227 @@
+"""Wave 1 — the two-stage Gandalf engine + store + index.
+
+Hermetic: temp ANCHOR_DATA_DIR (job records), a temp project folder (the
+artifacts live at PROJECT ROOT ``gandalf/run-<ts>/``; the index under
+``.anchor/projects/<id>/gandalf/index.json``), BOTH seams stubbed —
+``ANCHOR_RUNNER_CMD`` → ``stub_gandalf_draft.py`` (a canned RAW draft in a
+result envelope) and ``ANCHOR_GANDALF_HOST_CMD`` → ``stub_gandalf_host.py`` (a
+canned GRADED advisor-output.json). NEVER real claude / real node / :8777.
+Stdlib only.
+"""
+import importlib
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+_TESTS = Path(__file__).resolve().parent
+DRAFT_STUB = (_TESTS / "stub_gandalf_draft.py").as_posix()
+HOST_STUB = (_TESTS / "stub_gandalf_host.py").as_posix()
+
+
+@pytest.fixture
+def gandalf(tmp_path, monkeypatch):
+    """A fresh gandalf module wired to the two stubs + a temp data dir."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data_dir))
+    # Stage A: the runner stub emits a canned RAW draft.
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"{sys.executable} {DRAFT_STUB}")
+    # Stage B: the host stub reads stdin, emits a canned GRADED output.
+    monkeypatch.setenv("ANCHOR_GANDALF_HOST_CMD",
+                       f"{sys.executable} {HOST_STUB}")
+    # Proactive summary OFF; no real skill dir needed (SKILL.md is read
+    # best-effort and degrades to a bare protocol when absent).
+    monkeypatch.setenv("ANCHOR_PROACTIVE_SUMMARY", "")
+    monkeypatch.setenv("ANCHOR_GANDALF_SKILL_DIR", str(tmp_path / "no-skill"))
+    import paths
+    importlib.reload(paths)
+    import job_runner
+    importlib.reload(job_runner)
+    import summarizer
+    importlib.reload(summarizer)
+    import gandalf
+    yield importlib.reload(gandalf)
+
+
+@pytest.fixture
+def project(tmp_path):
+    folder = tmp_path / "proj"
+    folder.mkdir()
+    (folder / "README.md").write_text("# A project\n", encoding="utf-8")
+    return folder, "pid-1"
+
+
+# ── happy path ───────────────────────────────────────────────────────────────
+
+def test_run_creates_artifacts_and_index(gandalf, project):
+    folder, pid = project
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is True
+    run_id = out["run_id"]
+
+    run_dir = folder / "gandalf" / run_id
+    assert (run_dir / "report.md").is_file()
+    assert (run_dir / "exec-summary.md").is_file()
+    advisor = run_dir / "advisor-output.json"
+    assert advisor.is_file()
+    graded = json.loads(advisor.read_text(encoding="utf-8"))
+    # The 9 required top-level keys survived the host → store round-trip.
+    for k in ("schema_version", "cross_model", "degraded", "reasoning",
+              "verdict", "findings", "nitpicks", "elevations", "risk_labels"):
+        assert k in graded
+
+    # The internal index lives under .anchor (NOT served) and has one record.
+    idx = folder / ".anchor" / "projects" / pid / "gandalf" / "index.json"
+    assert idx.is_file()
+    runs = json.loads(idx.read_text(encoding="utf-8"))
+    assert isinstance(runs, list) and len(runs) == 1
+    assert runs[0]["run_id"] == run_id
+
+    listed = gandalf.list_runs(str(folder), pid)
+    assert len(listed) == 1
+    rec = listed[0]
+    assert rec["ok"] is True
+    assert rec["verdict"]  # cleaned top-level verdict, non-empty
+    assert rec["report_rel"] == f"gandalf/{run_id}/report.md"
+    assert rec["exec_rel"] == f"gandalf/{run_id}/exec-summary.md"
+
+
+def test_list_runs_safe_projection_no_absolute_paths(gandalf, project):
+    folder, pid = project
+    gandalf.run_gandalf(str(folder), pid)
+    for rec in gandalf.list_runs(str(folder), pid):
+        for v in rec.values():
+            if isinstance(v, str):
+                # No absolute paths leak (no drive prefix / leading slash).
+                assert not v.startswith("/")
+                assert ":\\" not in v
+                assert str(folder) not in v
+
+
+def test_one_line_verdict_is_cleaned_top_level_verdict(gandalf, project):
+    folder, pid = project
+    out = gandalf.run_gandalf(str(folder), pid)
+    # The stub host's default verdict text, cleaned by short_summary_text.
+    assert "broadly sound" in out["verdict"]
+    assert out["degraded"] is False  # the stub host did not compute degradation
+    assert out["cross_model"] is False
+
+
+def test_degraded_and_cross_model_carried_from_graded(gandalf, project,
+                                                      monkeypatch):
+    folder, pid = project
+    monkeypatch.setenv("STUB_GANDALF_HOST_DEGRADED", "1")
+    monkeypatch.setenv("STUB_GANDALF_HOST_CROSSMODEL", "1")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is True
+    assert out["degraded"] is True
+    assert out["cross_model"] is True
+    rec = gandalf.list_runs(str(folder), pid)[0]
+    assert rec["degraded"] is True
+    assert rec["cross_model"] is True
+
+
+# ── accumulation + first-scan idempotence ────────────────────────────────────
+
+def test_second_run_appends_newest_first(gandalf, project):
+    folder, pid = project
+    first = gandalf.run_gandalf(str(folder), pid)
+    second = gandalf.run_gandalf(str(folder), pid)
+    runs = gandalf.list_runs(str(folder), pid)
+    assert len(runs) == 2
+    # Newest-first: the second run is index 0.
+    assert runs[0]["run_id"] == second["run_id"]
+    assert runs[1]["run_id"] == first["run_id"]
+
+
+def test_if_absent_noops_when_a_run_exists(gandalf, project):
+    folder, pid = project
+    gandalf.run_gandalf(str(folder), pid)
+    out = gandalf.run_gandalf_if_absent(str(folder), pid)
+    assert out.get("skipped") is True
+    assert len(gandalf.list_runs(str(folder), pid)) == 1
+
+
+def test_if_absent_runs_when_none_exist(gandalf, project):
+    folder, pid = project
+    out = gandalf.run_gandalf_if_absent(str(folder), pid)
+    assert out["ok"] is True
+    assert out.get("skipped") is not True
+    assert len(gandalf.list_runs(str(folder), pid)) == 1
+
+
+# ── honest degrade paths ─────────────────────────────────────────────────────
+
+def test_stage_a_unparseable_draft_is_error_run(gandalf, project, monkeypatch):
+    folder, pid = project
+    monkeypatch.setenv("STUB_GANDALF_DRAFT", "UNPARSEABLE")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is False
+    assert out.get("reason")
+    assert "unparseable" in out["reason"]
+    # An honest error row is still recorded so the tab can show it.
+    runs = gandalf.list_runs(str(folder), pid)
+    assert len(runs) == 1
+    assert runs[0]["ok"] is False
+    assert runs[0]["report_rel"] is None  # no dead links
+    assert runs[0]["verdict"] == ""       # no fabricated verdict
+
+
+def test_stage_b_host_failure_is_error_run(gandalf, project, monkeypatch):
+    folder, pid = project
+    monkeypatch.setenv("STUB_GANDALF_HOST_FAIL", "1")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is False
+    assert "host-nonzero-exit" in (out.get("reason") or "")
+    runs = gandalf.list_runs(str(folder), pid)
+    assert runs[0]["ok"] is False
+    assert runs[0]["report_rel"] is None
+
+
+def test_stage_b_unparseable_output_is_error_run(gandalf, project, monkeypatch):
+    folder, pid = project
+    monkeypatch.setenv("STUB_GANDALF_HOST_BADJSON", "1")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is False
+    assert "unparseable" in (out.get("reason") or "")
+
+
+def test_absent_host_is_honest_error(gandalf, project, monkeypatch):
+    folder, pid = project
+    # Point the host seam at a nonexistent executable → host-unavailable.
+    monkeypatch.setenv("ANCHOR_GANDALF_HOST_CMD",
+                       "this-binary-does-not-exist-anchor-gandalf")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is False
+    assert out.get("reason") in ("host-unavailable", "host-spawn-failed")
+
+
+def test_run_gandalf_never_raises(gandalf, project, monkeypatch):
+    folder, pid = project
+    # Even a totally broken runner cmd must degrade, not raise.
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD",
+                       "this-runner-does-not-exist-anchor-gandalf")
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is False
+
+
+# ── balanced-JSON extraction unit ────────────────────────────────────────────
+
+def test_last_balanced_json_picks_last_object(gandalf):
+    text = ('Some preamble {"a": 1} and then the real draft '
+            '{"reasoning": "r", "verdict": "v", "findings": [], '
+            '"nitpicks": [], "elevations": []}')
+    obj = gandalf._last_balanced_json(text)
+    assert obj["verdict"] == "v"
+
+
+def test_last_balanced_json_ignores_braces_in_strings(gandalf):
+    text = '{"verdict": "a } brace inside a string", "ok": true}'
+    obj = gandalf._last_balanced_json(text)
+    assert obj["verdict"] == "a } brace inside a string"
+
+
+def test_last_balanced_json_none_on_no_object(gandalf):
+    assert gandalf._last_balanced_json("no json here at all") is None

@@ -390,8 +390,18 @@ def test_playwright_kill_no_loss_lifecycle(env):
                 "document.querySelectorAll("
                 "'#sessionBar .live-chip[data-session=\"%s\"]').length === 0" % sid,
                 timeout=8000)
-            # A big board lane tile for the killed session remains.
+            # A big board lane tile for the killed session remains. John tweak:
+            # older-runs shelves render COLLAPSED by default, and the killed
+            # session can land in a collapsed shelf (the durable-doc DISCOVERED
+            # build session becomes the headline) — so wait for the tile ATTACHED,
+            # then expand any collapsed shelf hosting it so it is interactable.
             tile_sel = '#kanbanBoard .lane-tile[data-session="%s"]' % sid
+            pg.wait_for_selector(tile_sel, state="attached", timeout=8000)
+            pg.eval_on_selector(
+                tile_sel,
+                "el => { var w = el.closest('.shelf-wrap');"
+                " if (w && w.classList.contains('collapsed'))"
+                " w.classList.remove('collapsed'); }")
             pg.wait_for_selector(tile_sel, timeout=8000)
 
             # v12 W10: clicking the big EFFORT tile opens the SINGLE bottom DOCK;

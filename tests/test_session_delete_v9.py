@@ -494,9 +494,18 @@ def test_playwright_delete_tile_gone_and_stays_gone(server):
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
 
         # The finished session's tile is on the board (data-session selector).
+        # John tweak: older-runs shelves render COLLAPSED by default and this tile
+        # can land in one (a persisted-doc DISCOVERED session becomes the headline)
+        # — wait for it ATTACHED, then expand its host shelf so it is clickable.
         tile_sel = '.tile[data-session="%s"]' % sid
-        pg.wait_for_selector(tile_sel, timeout=8000)
+        pg.wait_for_selector(tile_sel, state="attached", timeout=8000)
         assert pg.eval_on_selector_all(tile_sel, "e=>e.length") >= 1
+        pg.eval_on_selector(
+            tile_sel,
+            "el => { var w = el.closest('.shelf-wrap');"
+            " if (w && w.classList.contains('collapsed'))"
+            " w.classList.remove('collapsed'); }")
+        pg.wait_for_selector(tile_sel, timeout=8000)
 
         # v12 W10: clicking the EFFORT tile opens the SINGLE bottom DOCK; assert
         # the red ✕ delete control there, distinct from Kill -> Boneyard.

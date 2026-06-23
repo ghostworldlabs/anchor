@@ -84,30 +84,36 @@ def test_shelf_toggle_flips_collapsed_class(server, tmp_path):
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="domcontentloaded")
 
-        # the research shelf wrapper + its toggle.
-        pg.wait_for_selector("#shelf_research", timeout=5000)
+        # the research shelf wrapper + its toggle. The shelf starts COLLAPSED
+        # (display:none) so wait for it ATTACHED (in the DOM), not visible.
+        pg.wait_for_selector("#shelf_research", state="attached", timeout=5000)
+        pg.wait_for_selector("#tgl_research", timeout=5000)
         toggle = pg.query_selector("#tgl_research")
         assert toggle is not None, "no research shelf toggle rendered"
 
-        # starts EXPANDED (mockup default): no .collapsed class.
+        # John tweak: starts COLLAPSED on first load (the headline card stays
+        # visible; only the OLDER-runs shelf is folded). The caption reads
+        # "Show all".
         collapsed0 = pg.eval_on_selector(
             "#shelf_research", "e => e.classList.contains('collapsed')")
-        assert collapsed0 is False, "shelf should start expanded"
+        assert collapsed0 is True, "shelf should start COLLAPSED by default"
+        cap0 = pg.eval_on_selector("#tgl_research", "e => e.textContent")
+        assert "Show all" in cap0, f"collapsed-default caption wrong: {cap0!r}"
 
-        # click → collapses (class added).
+        # click → expands (class removed), caption flips to "Hide".
         toggle.click()
         collapsed1 = pg.eval_on_selector(
             "#shelf_research", "e => e.classList.contains('collapsed')")
-        assert collapsed1 is True, "click did not collapse the shelf"
+        assert collapsed1 is False, "click did not expand the shelf"
         cap1 = pg.eval_on_selector("#tgl_research", "e => e.textContent")
-        assert "Show all" in cap1, f"caption not updated on collapse: {cap1!r}"
+        assert "Hide" in cap1, f"caption not updated on expand: {cap1!r}"
 
-        # click again → expands (class removed).
+        # click again → collapses (class added), caption back to "Show all".
         toggle.click()
         collapsed2 = pg.eval_on_selector(
             "#shelf_research", "e => e.classList.contains('collapsed')")
-        assert collapsed2 is False, "second click did not expand the shelf"
+        assert collapsed2 is True, "second click did not collapse the shelf"
         cap2 = pg.eval_on_selector("#tgl_research", "e => e.textContent")
-        assert "Hide" in cap2, f"caption not restored on expand: {cap2!r}"
+        assert "Show all" in cap2, f"caption not restored on collapse: {cap2!r}"
 
         b.close()
