@@ -270,6 +270,8 @@ def _run_stage_b(raw_draft):
             input=payload,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_timeout(),
         )
     except FileNotFoundError:

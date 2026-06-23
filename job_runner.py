@@ -496,6 +496,12 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         env=full_env,
         bufsize=1,
         text=True,
+        # The runner emits UTF-8 (claude -p stream-json, em-dashes / smart quotes /
+        # ☢ etc.). Without an explicit encoding, text mode uses the Windows locale
+        # (cp1252) and mojibakes every non-ASCII char at capture time. Decode UTF-8
+        # (replace any stray byte rather than crash the reader thread).
+        encoding="utf-8",
+        errors="replace",
         creationflags=creationflags,
     )
 
