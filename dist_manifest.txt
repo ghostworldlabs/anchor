@@ -100,6 +100,13 @@ vendor/katex/fonts/**
 vendor/xterm/**
 vendor/anchor-term/**
 
+# ── Vendored bundled skills (researchPrime / crucible / foreman / gandalf) ──
+# Generated AT BUILD TIME by vendor_skills.vendor_all into the export dest (git
+# archive of each env-injected source + denylist + host-path/PII scrub). Listed
+# here so the deny-by-default stager keeps them. The generator itself ships too.
+vendor/bundled-skills/**
+vendor_skills.py
+
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml
 dist_manifest.txt

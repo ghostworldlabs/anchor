@@ -110,6 +110,15 @@ def _is_denied(rel: Path) -> bool:
 _WIN_DEV_RE = re.compile(
     r"[A-Za-z]:\\(?:[^\s\"'<>|]*\\)?dev\\[^\s\"'<>|]*",
 )
+# Windows user-profile paths (a drive letter, the Users dir, an account, then a
+# further segment — any drive). Scrubbed so a vendored file (esp. SOURCES.md,
+# which records the host source repo path) never embeds the build host's
+# user-profile tree — the distro scanner's user-profile-path detector runs over
+# vendor/ too, so this must be scrubbed.
+_WIN_USER_RE = re.compile(
+    r"[A-Za-z]:\\Users\\[^\s\"'<>|]*",
+    re.IGNORECASE,
+)
 # POSIX home paths: /Users/<u>/... and /home/<u>/...
 _POSIX_HOME_RE = re.compile(
     r"/(?:Users|home)/[^/\s\"'<>|]+(?:/[^\s\"'<>|]*)?",
@@ -129,6 +138,7 @@ _BINARY_SUFFIXES = {
 
 def _scrub_text(text: str) -> str:
     text = _WIN_DEV_RE.sub("<path>", text)
+    text = _WIN_USER_RE.sub("<path>", text)
     text = _POSIX_HOME_RE.sub("<path>", text)
     text = _EMAIL_RE.sub("<email>", text)
     return text

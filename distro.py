@@ -270,6 +270,55 @@ _USERPATH_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Build-host / dev-tree paths the _USERPATH_RE above does NOT catch. The
+# user-profile detector only fires on ``<drive>\Users\<account>\<seg>``; a
+# project checked out under a ``dev\`` tree (no Users segment) or a POSIX
+# ``/Users/<u>/<seg>`` / ``/home/<u>/<seg>`` home path leaks the build host's
+# tree without ever touching the Users dir. These are caught here. Detection by
+# PATTERN — no real host path literal is stored. NOTE: vendored files are
+# already host-path-SCRUBBED by vendor_skills, so this (like the generic
+# entropy heuristic) is applied ONLY to first-party / non-vendored files.
+#
+# Windows dev tree: a drive letter then ``\dev\`` directly, or ``…\dev\``
+# nested under any path, then a further concrete segment (the LEAF, captured so
+# a documented-placeholder leaf can be allowlisted, like the user-profile
+# ``example`` account). The leaf charclass excludes path-adjacent prose
+# punctuation (backtick / paren / comma / colon / period / quote) so a captured
+# leaf is the bare directory name. Requires a path segment AFTER ``dev`` so the
+# bare word "dev" in prose never matches.
+_WIN_DEVPATH_RE = re.compile(
+    r"[A-Za-z]:\\(?:[^\s\"'<>|]*\\)?dev\\(?P<leaf>[^\s\"'<>|/\\`(),:;.]+)",
+)
+# POSIX home paths: /Users/<u>/<seg> and /home/<u>/<seg>. Requires a concrete
+# user segment AND a further path segment so the bare prefix "/home/" or
+# "/Users/" (mentioned in prose) does not match. The first segment under the
+# home root (the username) is captured as the leaf for allowlisting.
+_POSIX_HOMEPATH_RE = re.compile(
+    r"/(?:Users|home)/(?P<leaf>[^/\s\"'<>|`(),:;]+)/[^\s\"'<>|]+",
+)
+
+# Documented-placeholder / project-own host-path leaf names that are NOT a real
+# personal build-tree leak even though they sit under ``dev\`` / a home dir.
+# This mirrors ``_USERPATH_ALLOWED_ACCOUNTS`` — detection is by PATTERN; only
+# these explicit doc placeholders + the project's OWN root name are exempt. The
+# canonical build root (``C:\dev\Anchor``) is the project's own folder, used
+# throughout the code as the illustrative example path. Any OTHER leaf (e.g. a
+# private ``secret``-named dir under a dev tree) is flagged.
+# NOTE on the trio/skill-source leaves: ``C:\dev\trio`` / ``C:\dev\Skill
+# Foundry`` are the author's OWN trio/Gandalf source repos, referenced in
+# comments + a default-dir constant as documented examples (the live sources are
+# always env-injected, never hardcoded for the build). They are genericized over
+# the FINAL shipped surface in Wave 11; for now they are documented-own-tree
+# references, not third-party PII, and are allowlisted here.
+_HOSTPATH_ALLOWED_LEAVES = frozenset({
+    "anchor",     # the project's own root (C:\dev\Anchor) — REPO_ROOT.name
+    "example",    # doc placeholder (mirrors _USERPATH_ALLOWED_ACCOUNTS)
+    "...",        # ellipsis placeholder in docstring examples
+    "<path>",     # the vendor-scrub genericized token
+    "trio",       # author's own trio source repo (doc/comment; W11 genericizes)
+    "skill",      # author's own "Skill Foundry" source (doc/comment; W11)
+})
+
 # Any concrete email literal (generic RFC-ish shape). Detection is by PATTERN;
 # the personal address is NOT stored — it is caught here like any other email,
 # then NON-personal addresses are filtered out via the allowlist.
@@ -420,8 +469,20 @@ def _scan_text(rel: str, text: str):
     for m in _TOKEN_VALUE_RE.finditer(text):
         yield (rel, "secret-token-literal", _redact(m.group(0)))
 
-    # GENERIC high-entropy detector — first-party files only.
+    # GENERIC high-entropy detector + BUILD-HOST-PATH detector — first-party
+    # (non-vendored) files only. Vendored skill files are host-path-scrubbed by
+    # vendor_skills, so applying these to vendor/ would (a) false-fail on the
+    # scrubbed-but-incidental and (b) be redundant; the concrete-PII detectors
+    # above (email / Windows user-profile / token shapes) still run everywhere.
     if not _is_vendored(rel):
+        for m in _WIN_DEVPATH_RE.finditer(text):
+            if m.group("leaf").lower() in _HOSTPATH_ALLOWED_LEAVES:
+                continue
+            yield (rel, "build-host-path", _snip(m.group(0)))
+        for m in _POSIX_HOMEPATH_RE.finditer(text):
+            if m.group("leaf").lower() in _HOSTPATH_ALLOWED_LEAVES:
+                continue
+            yield (rel, "build-host-path", _snip(m.group(0)))
         for m in _GENERIC_ENTROPY_RE.finditer(text):
             run = m.group(0)
             if run.lower() in _PLACEHOLDER_VALUES:
@@ -707,19 +768,29 @@ def build_distro(root: Path | None = None,
                  output_dir: Path | None = None,
                  manifest_path: Path | None = None,
                  emit_readme_file: bool = True,
-                 cleanup_on_fail: bool = True):
+                 cleanup_on_fail: bool = True,
+                 vendor_skills_: bool = True,
+                 vendor_sources=None):
     """Build a data-free export into ``output_dir`` and scan it.
 
     Steps:
       1. Select shippable files (deny-by-default, manifest is the truth).
       2. Stage them into ``output_dir`` (created; existing contents replaced).
-      3. Emit README.md (AC3).
-      4. Run the no-personal-data scan over the staged set.
+      3. GENERATE the vendored bundled skills into the export (via
+         ``vendor_skills.vendor_all`` — ``git archive`` of each env-injected
+         source + denylist + host-path/PII scrub) when ``vendor_skills_`` is
+         True. The generated files are NOT copied from ``root`` (they don't
+         exist there); they are produced directly into the export and scanned
+         like everything else. The manifest entry ``vendor/bundled-skills/**``
+         is what KEEPS them (deny-by-default).
+      4. Emit README.md (AC3).
+      5. Run the no-personal-data scan over the staged set.
          - Any hit -> raise :class:`PersonalDataError` naming the file(s);
            the staging dir is torn down (``cleanup_on_fail``) so nothing leaks.
 
     Returns a report dict on success:
-      ``{"staging": Path, "files": [relpaths...], "readme": Path}``.
+      ``{"staging": Path, "files": [relpaths...], "readme": Path,
+         "vendored_skills": <vendor_all report or None>}``.
 
     Never publishes/pushes — produces a local export dir only.
     """
@@ -742,6 +813,25 @@ def build_distro(root: Path | None = None,
         shutil.copy2(src, dst)
         staged_pairs.append((rel, dst))
 
+    # Generate the vendored bundled skills INTO the export (not copied from
+    # root). Honest SKIP when a source env is unset (vendor_all returns those in
+    # its "skipped" list — never a hardcoded real-path fallback). The produced
+    # files are added to the staged set + report so they are both kept AND
+    # scanned (they must pass the same clean-scan gate as everything else).
+    vendor_report = None
+    if vendor_skills_:
+        import vendor_skills  # local import: keeps distro importable if absent
+        vendor_report = vendor_skills.vendor_all(output_dir, sources=vendor_sources)
+        bundle_root = output_dir / "vendor" / "bundled-skills"
+        if bundle_root.exists():
+            for p in sorted(bundle_root.rglob("*")):
+                if not p.is_file():
+                    continue
+                rel = p.relative_to(output_dir).as_posix()
+                staged_pairs.append((rel, p))
+                if rel not in selected:
+                    selected.append(rel)
+
     readme_path = emit_readme(output_dir) if emit_readme_file else None
 
     # Scan the staged set (NOT the source tree) — what we'd actually ship. The
@@ -760,6 +850,7 @@ def build_distro(root: Path | None = None,
         "staging": output_dir,
         "files": selected,
         "readme": readme_path,
+        "vendored_skills": vendor_report,
     }
 
 

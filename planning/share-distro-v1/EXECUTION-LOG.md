@@ -36,3 +36,11 @@
 - Agent note: the literal jane@uni.edu in the test file tripped distro's repo-wide PII scan → PII strings
   assembled at runtime (the tests/test_distro_scan.py convention). LESSON: never run two heavy pytest
   suites at once (it flakes timing-sensitive tests).
+
+## Wave 4 — distro host-path detector + build_distro vendoring — GREEN (2026-06-23)
+- distro.py: build-host-path detector (_WIN_DEVPATH_RE C:\...\dev\<leaf> + _POSIX_HOMEPATH_RE /Users//home/,
+  pattern-only, non-vendored files; leaf-allowlist for the repo's own anchor/trio/skill refs) — closes the
+  157-host-path leak the existing _USERPATH_RE (Users-only) missed. build_distro now generates the vendored
+  skills (vendor_skills.vendor_all) into the export + scans them under the same clean gate. Manifest allow-lists
+  vendor/bundled-skills/** + vendor_skills.py. +13 tests (distro -k = 103). In-scope vendor_skills scrub fix
+  (genericize C:\Users\<acct>\ too). Authoritative full gate: see below.
