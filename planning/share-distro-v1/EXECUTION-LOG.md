@@ -49,3 +49,11 @@
 - starter/ headers-only skeletons (DASHBOARD/INBOX/PROJECTS/SAVED/CANCELLED/WEEKLY_REVIEW + domains/*) that
   parse to ZERO entries via the real parsers + scan clean (no PII). Manifest allow-lists starter/**.
   +11 tests. Full gate below.
+
+## Wave 6 — onboard.py core (skills-install + scaffold + token) — GREEN (2026-06-23)
+- onboard.py (stdlib): detect_prereqs · install_skills (COPY default, symlink opt-in, refuse-don't-clobber
+  via _OURS_MARKER, partial-install rollback, resumable) · scaffold_anchor (only-if-absent) · generate_token
+  (secrets.token_urlsafe → out-of-tree <data_dir>/.anchor/onboard-token, chmod 600, idempotent, never printed)
+  · main(). NO service yet (W7). Manifest ships onboard.py. +8 tests. Default data dir ~/.anchor (token
+  genuinely out-of-tree). Repo scan stays clean after onboard. Full gate below.
+- PAUSED here (John) after Wave 6. NEXT: Wave 7 — service seam (ANCHOR_SERVICE_CMD) + foreground fallback + rollback (stubbed).

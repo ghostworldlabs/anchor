@@ -107,6 +107,11 @@ vendor/anchor-term/**
 vendor/bundled-skills/**
 vendor_skills.py
 
+# ── Distro installer (Wave 6; stdlib-only; skills-install + scaffold + token) ─
+# The collaborator's bring-up entry: COPY-default skill install, only-if-absent
+# scaffold, out-of-tree token. Ships so a fresh clone can `python onboard.py`.
+onboard.py
+
 # ── Starter Anchor templates (Wave 5; headers-only, zero data) ─────────────
 # A fresh, data-free Anchor to scaffold from: the 6 top-level markdown files +
 # domains/* with the real heading skeleton but ZERO task/project/inbox entries.
