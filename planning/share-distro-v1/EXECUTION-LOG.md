@@ -44,3 +44,8 @@
   skills (vendor_skills.vendor_all) into the export + scans them under the same clean gate. Manifest allow-lists
   vendor/bundled-skills/** + vendor_skills.py. +13 tests (distro -k = 103). In-scope vendor_skills scrub fix
   (genericize C:\Users\<acct>\ too). Authoritative full gate: see below.
+
+## Wave 5 — starter Anchor templates — GREEN (2026-06-23)
+- starter/ headers-only skeletons (DASHBOARD/INBOX/PROJECTS/SAVED/CANCELLED/WEEKLY_REVIEW + domains/*) that
+  parse to ZERO entries via the real parsers + scan clean (no PII). Manifest allow-lists starter/**.
+  +11 tests. Full gate below.

@@ -107,6 +107,12 @@ vendor/anchor-term/**
 vendor/bundled-skills/**
 vendor_skills.py
 
+# ── Starter Anchor templates (Wave 5; headers-only, zero data) ─────────────
+# A fresh, data-free Anchor to scaffold from: the 6 top-level markdown files +
+# domains/* with the real heading skeleton but ZERO task/project/inbox entries.
+# Parses cleanly through the real parsers to an empty state; carries no PII.
+starter/**
+
 # ── Packaging / dev metadata ───────────────────────────────────────────────
 pyproject.toml
 dist_manifest.txt
