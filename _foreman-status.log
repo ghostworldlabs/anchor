@@ -1,0 +1,8 @@
+[16:46:20] === FOREMAN LIVE RUN ===
+[16:46:20] project: C:\dev\Anchor
+[16:46:20] reviewers=2 fixIterCap=3 maxWaves=∞ maxWallClock=∞min git=true branch=foreman/run
+[16:46:20] binding: headless `claude -p … --permission-mode acceptEdits --allowedTools Bash,Edit,Write,Read,Glob,Grep` (cwd=project); ground truth = orchestrator gate
+[16:46:20] lock: acquired C:\dev\Anchor\.foreman\run.lock (pid 103460)
+[16:46:20] contract: 5 wave(s) · gate "pytest" (pyproject.toml (pytest configured))
+[16:46:20] !! runProject THREW: HaltError: refusing to start on an unexpectedly dirty working tree — refusing to start on an unexpectedly dirty working tree
+[16:46:20] === DONE === status=THREW · waves=none · stoppedAt=- · agent_calls=0 · denials=0 · est_cost=$0.0000 (subscription equiv) · out_tokens=0

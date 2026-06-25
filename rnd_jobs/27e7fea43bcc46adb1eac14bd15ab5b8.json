@@ -1,0 +1,21 @@
+{
+  "job_id": "27e7fea43bcc46adb1eac14bd15ab5b8",
+  "lane": "research",
+  "pid": 82900,
+  "status": "failed",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\27e7fea43bcc46adb1eac14bd15ab5b8.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2211\\test_single_instance_returns_s0\\P",
+  "started_at": 1782366885.1462524,
+  "exit_code": 1,
+  "session_id": "4a37f385-d213-409b-83f0-a5b8701eae23",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.0,
+    "duration_ms": 1695,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "session_id": "4a37f385-d213-409b-83f0-a5b8701eae23"
+  },
+  "finished_at": 1782366888.1138928
+}
