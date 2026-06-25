@@ -14,6 +14,7 @@ dev = ["pytest"]
 terminal = ["pywinpty>=2.0; sys_platform == 'win32'"]
 
 [tool.pytest.ini_options]
+addopts = "-v"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
