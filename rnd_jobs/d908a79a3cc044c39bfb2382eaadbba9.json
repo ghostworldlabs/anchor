@@ -1,0 +1,12 @@
+{
+  "job_id": "d908a79a3cc044c39bfb2382eaadbba9",
+  "lane": "research",
+  "pid": 123364,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\d908a79a3cc044c39bfb2382eaadbba9.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2184\\test_linked_task_with_quote_an0\\P",
+  "started_at": 1782349937.9217527,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

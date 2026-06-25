@@ -1,0 +1,12 @@
+{
+  "job_id": "b6b6fd68a0654fadb227923428353b3e",
+  "lane": "research",
+  "pid": 141876,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\b6b6fd68a0654fadb227923428353b3e.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2184\\test_window_manager_no_leaked_0\\P",
+  "started_at": 1782349935.4523873,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

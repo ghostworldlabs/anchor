@@ -1,0 +1,12 @@
+{
+  "job_id": "dfb49a28e2bd465eb7d968ba235c72ee",
+  "lane": "research",
+  "pid": 67976,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\dfb49a28e2bd465eb7d968ba235c72ee.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2183\\test_window_manager_wires_wave0\\P",
+  "started_at": 1782349604.423664,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

@@ -1,0 +1,12 @@
+{
+  "job_id": "c6e672c6d7a74f4c8870fb6954d7a546",
+  "lane": "research",
+  "pid": 71568,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\c6e672c6d7a74f4c8870fb6954d7a546.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2184\\test_linked_tasks_strip_reflec0\\P",
+  "started_at": 1782349927.068046,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

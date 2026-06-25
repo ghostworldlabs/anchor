@@ -2623,7 +2623,8 @@ def _render_boneyard_entry_html(view) -> str:
     if links:
         rows = "".join(
             f"<a class='bydoc' href='{html_lib.escape(l['href'], quote=True)}' "
-            f"target='_blank' rel='noopener'>{html_lib.escape(l['name'])}</a>"
+            f"target='anchor_report_window' rel='noopener'>"
+            f"{html_lib.escape(l['name'])}</a>"
             for l in links)
         docs_html = (f"<div class='bydocs'><div class='h'>Documents</div>"
                      f"{rows}</div>")
@@ -3340,17 +3341,19 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         if ok and (report_rel or adv_rel):
             link_parts = []
             if report_rel:
+                # v13 W1: &render=1 → the route serves the rendered Reader page;
+                # the named window keeps every report open in ONE tab.
                 href = (f"/artifact/{pid_q}?path="
-                        + url_quote(report_rel, safe=''))
+                        + url_quote(report_rel, safe='') + "&render=1")
                 link_parts.append(
-                    f"<a href='{href}' target='_blank' rel='noopener'>"
-                    "&#128196; Full report</a>")
+                    f"<a href='{href}' target='anchor_report_window' "
+                    "rel='noopener'>&#128196; Full report</a>")
             if adv_rel:
                 ahref = (f"/artifact/{pid_q}?path="
                          + url_quote(adv_rel, safe=''))
                 link_parts.append(
-                    f"<a href='{ahref}' target='_blank' rel='noopener'>"
-                    "{ } raw JSON</a>")
+                    f"<a href='{ahref}' target='anchor_report_window' "
+                    "rel='noopener'>{ } raw JSON</a>")
             links = "<div class='glinks'>" + "".join(link_parts) + "</div>"
 
         # The expandable body: only OK runs with an exec-summary carry one (fetched
@@ -5482,7 +5485,8 @@ function _boneyardEntryHtml(e) {
   if (links.length) {
     for (var i = 0; i < links.length; i++) {
       docsInner += '<a class="bydoc" href="' + _esc(links[i].href)
-        + '" target="_blank" rel="noopener">' + _esc(links[i].name) + '</a>';
+        + '" target="anchor_report_window" rel="noopener">'
+        + _esc(links[i].name) + '</a>';
     }
   } else {
     docsInner = '<span class="none">No documents.</span>';
@@ -5550,6 +5554,66 @@ async function _doBoneyardSearch() {
 //                             we poll the read endpoint until a NEW run lands,
 //                             then re-render the rows in place (no page bounce).
 // Read-only render; only the explicit Re-run mutates (and only schedules).
+//
+// v13 Wave 1 — a tiny self-contained markdown→HTML renderer exposed as
+// `marked.parse`. NO external library, NO CDN, NO compiled asset (honors
+// Anchor's stdlib-only / vendored-assets-only rule); it mirrors
+// report_viewer.markdown_to_html's feature set (#headings, **bold**, *italic*,
+// `code`, fenced ``` blocks, - lists, [links](url)) and is XSS-safe — every text
+// segment is HTML-escaped BEFORE inline formatting is applied. Used to render the
+// Gandalf inline exec-summary as clean structured HTML instead of plain text.
+var marked = (function () {
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function inline(t) {
+    // t arrives ALREADY HTML-escaped; layer inline markdown on top.
+    t = t.replace(/`([^`]+)`/g, function (m, c) { return '<code>' + c + '</code>'; });
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
+    t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="anchor_report_window" rel="noopener noreferrer">$1</a>');
+    return t;
+  }
+  function parse(md) {
+    var lines = String(md == null ? '' : md).split('\n');
+    var out = [], i = 0, inCode = false, codeBuf = [], listOpen = false;
+    function closeList() { if (listOpen) { out.push('</ul>'); listOpen = false; } }
+    while (i < lines.length) {
+      var line = lines[i], s = line.trim();
+      if (s.indexOf('```') === 0) {
+        if (inCode) {
+          out.push('<pre><code>' + codeBuf.join('\n') + '</code></pre>');
+          codeBuf = []; inCode = false;
+        } else { closeList(); inCode = true; }
+        i++; continue;
+      }
+      if (inCode) { codeBuf.push(esc(line)); i++; continue; }
+      if (!s) { closeList(); i++; continue; }
+      var h = s.match(/^(#{1,6})\s+(.*)$/);
+      if (h) {
+        closeList();
+        var lv = h[1].length;
+        out.push('<h' + lv + '>' + inline(esc(h[2])) + '</h' + lv + '>');
+        i++; continue;
+      }
+      if (/^[-*+]\s+/.test(s)) {
+        if (!listOpen) { out.push('<ul>'); listOpen = true; }
+        out.push('<li>' + inline(esc(s.replace(/^[-*+]\s+/, ''))) + '</li>');
+        i++; continue;
+      }
+      closeList();
+      out.push('<p>' + inline(esc(s)) + '</p>');
+      i++;
+    }
+    if (inCode) out.push('<pre><code>' + codeBuf.join('\n') + '</code></pre>');
+    closeList();
+    return out.join('\n');
+  }
+  return { parse: parse };
+})();
+
 function gandalfToggleRun(el) {
   if (!el) return;
   var open = el.classList.toggle('open');
@@ -5566,7 +5630,14 @@ function gandalfToggleRun(el) {
     if (!r.ok) throw new Error('artifact ' + r.status);
     return r.text();
   }).then(function (txt) {
-    host.textContent = txt || '(empty executive summary)';
+    // v13 W1 — render the markdown exec-summary as clean HTML (structured
+    // lists / bold) instead of dumping plain text.
+    if (txt) {
+      try { host.innerHTML = marked.parse(txt); }
+      catch (e) { host.textContent = txt; }
+    } else {
+      host.textContent = '(empty executive summary)';
+    }
   }).catch(function () {
     host.textContent = '(executive summary unavailable)';
   });
@@ -5685,14 +5756,15 @@ function _gandalfRunHtml(r) {
   if (ok && (r.report_rel || r.advisor_rel)) {
     var parts = '';
     if (r.report_rel) {
+      // v13 W1 — &render=1 opens the rendered Reader page in the unified window.
       parts += '<a href="/artifact/' + encodeURIComponent(PROJECT_ID)
-        + '?path=' + encodeURIComponent(r.report_rel)
-        + '" target="_blank" rel="noopener">&#128196; Full report</a>';
+        + '?path=' + encodeURIComponent(r.report_rel) + '&render=1'
+        + '" target="anchor_report_window" rel="noopener">&#128196; Full report</a>';
     }
     if (r.advisor_rel) {
       parts += '<a href="/artifact/' + encodeURIComponent(PROJECT_ID)
         + '?path=' + encodeURIComponent(r.advisor_rel)
-        + '" target="_blank" rel="noopener">{ } raw JSON</a>';
+        + '" target="anchor_report_window" rel="noopener">{ } raw JSON</a>';
     }
     links = '<div class="glinks">' + parts + '</div>';
   }
@@ -6065,14 +6137,16 @@ function _renderGrassArchives(work, archives) {
       var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
         + '?path=' + encodeURIComponent(rel);
       var nm = rel.split('/').pop();
-      doclinks += '<a class="alink" target="_blank" href="' + _esc(href) + '">'
+      doclinks += '<a class="alink" target="anchor_report_window" href="'
+        + _esc(href) + '">'
         + _esc(nm) + '</a>';
     }
     if (!doclinks) doclinks = '<span class="garch-nodoc">(no docs)</span>';
     var sumhref = '/summary/' + encodeURIComponent(PROJECT_ID) + '/'
       + encodeURIComponent(lane) + '/' + encodeURIComponent(sid);
     var sumlink = (a.has_summary)
-      ? '<a class="alink" target="_blank" href="' + _esc(sumhref) + '">summary</a>'
+      ? '<a class="alink" target="anchor_report_window" href="' + _esc(sumhref)
+        + '">summary</a>'
       : '<span class="garch-nosum">summary pending</span>';
     html += '<div class="ar"><span class="lnchip">' + _esc(lane) + '</span> '
       + doclinks + '<span class="sp"></span>' + sumlink + '</div>';
@@ -6104,7 +6178,8 @@ function _renderGrassHistory(work, rec) {
       var rel = docs[di];
       var href = '/artifact/' + encodeURIComponent(PROJECT_ID)
         + '?path=' + encodeURIComponent(rel);
-      dl += '<a class="open alink" target="_blank" href="' + _esc(href) + '">'
+      dl += '<a class="open alink" target="anchor_report_window" href="'
+        + _esc(href) + '">'
         + _esc(rel.split('/').pop()) + ' ↗</a>';
     }
     if (!dl) dl = '<span class="ghnodoc">(no docs)</span>';
@@ -6124,14 +6199,16 @@ function _renderGrassHistory(work, rec) {
       var arel = adocs[ai];
       var ahref = '/artifact/' + encodeURIComponent(PROJECT_ID)
         + '?path=' + encodeURIComponent(arel);
-      adl += '<a class="open alink" target="_blank" href="' + _esc(ahref) + '">'
+      adl += '<a class="open alink" target="anchor_report_window" href="'
+        + _esc(ahref) + '">'
         + _esc(arel.split('/').pop()) + ' ↗</a>';
     }
     if (!adl) adl = '<span class="ghnodoc">(no docs)</span>';
     var sumhref = '/summary/' + encodeURIComponent(PROJECT_ID) + '/'
       + encodeURIComponent(alane) + '/' + encodeURIComponent(asid);
     var sumlink = (ar.has_summary)
-      ? '<a class="open alink" target="_blank" href="' + _esc(sumhref) + '">summary ↗</a>'
+      ? '<a class="open alink" target="anchor_report_window" href="' + _esc(sumhref)
+        + '">summary ↗</a>'
       : '<span class="ghnosum">summary pending</span>';
     html += '<div class="hitem arch"><div class="hbody">'
       + '<div class="htitle"><span class="kind">archive · ' + _esc(alane)
@@ -8045,7 +8122,8 @@ function _renderSplitSummary(summary, roles, lane, buildDeliv) {
     if (buildDeliv.resolved && buildDeliv.deliverable) {
       var bd = buildDeliv.deliverable;
       L.push('<div class="bdeliv resolved"><span class="k">Deliverable</span>'
-        + '<a class="doc" href="' + _esc(bd.href || '#') + '" target="_blank" '
+        + '<a class="doc" href="' + _esc(bd.href || '#')
+        + '" target="anchor_report_window" '
         + 'rel="noopener">' + _esc(bd.name || bd.path || 'deliverable')
         + '<span class="role">' + _esc(bd.type || '') + '</span></a></div>');
     } else {
@@ -8078,7 +8156,8 @@ function _renderSplitSummary(summary, roles, lane, buildDeliv) {
   for (var role in roles) {
     if (!roles.hasOwnProperty(role)) continue;
     var lk = roles[role];
-    var html = '<a class="doc" href="' + _esc(lk.href) + '" target="_blank" '
+    var html = '<a class="doc" href="' + _esc(lk.href)
+      + '" target="anchor_report_window" '
       + 'rel="noopener">' + _esc(lk.label || role)
       + '<span class="role">' + _esc(role) + '</span></a>';
     if ((groups.two || []).indexOf(role) >= 0) secondary.push(html);
@@ -13186,7 +13265,26 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                 else:
                     data, ctype = asset
-                    self._send_bytes(data, ctype)
+                    # v13 Wave 1 — rich markdown rendering for report links. With
+                    # ?render=1 a MARKDOWN artifact is served as a fully rendered
+                    # Reader page (the EXISTING report_viewer markdown logic +
+                    # vendored KaTeX), so the Gandalf "Full report" link opens rich
+                    # HTML in the unified anchor_report_window instead of raw text.
+                    # Without the flag the raw bytes are served (UNCHANGED) — so the
+                    # inline exec-summary fetch still gets raw md to render
+                    # client-side via marked.parse, and every other /artifact
+                    # consumer keeps its current raw behavior. Non-markdown is
+                    # always raw, even with render=1.
+                    want_render = (q.get("render", [""])[0] or "").strip()
+                    if want_render and "markdown" in (ctype or ""):
+                        try:
+                            md_text = data.decode("utf-8", "replace")
+                            title = Path(rel).name or "Report"
+                            self._send_html(_rv.reader_html(md_text, title))
+                        except Exception:
+                            self._send_bytes(data, ctype)
+                    else:
+                        self._send_bytes(data, ctype)
             elif self.path.startswith("/project/"):
                 # Per-project window (Wave 3 basic view + 4-state status line).
                 # Opening a brownfield project DISCOVERS + ADOPTS its on-disk

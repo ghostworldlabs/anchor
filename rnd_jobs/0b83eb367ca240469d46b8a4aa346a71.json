@@ -1,0 +1,21 @@
+{
+  "job_id": "0b83eb367ca240469d46b8a4aa346a71",
+  "lane": "research",
+  "pid": 126272,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\0b83eb367ca240469d46b8a4aa346a71.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2184\\test_grass_column_renders_in_w0\\P",
+  "started_at": 1782349909.1290932,
+  "exit_code": 0,
+  "session_id": "62678808-879f-4f0a-bc21-c5fca766ed8f",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.20055800000000001,
+    "duration_ms": 19081,
+    "input_tokens": 4933,
+    "output_tokens": 1000,
+    "total_tokens": 5933,
+    "session_id": "62678808-879f-4f0a-bc21-c5fca766ed8f"
+  },
+  "finished_at": 1782349930.1710885
+}

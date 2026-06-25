@@ -416,10 +416,13 @@ def test_summary_panel_renders_doc_links_and_effort(gui, tmp_path):
     _discovered_planning_session(gui, folder, pid)
     html = gui.render_project_window_html(pid)
 
-    # The split renderer wires doc links to the existing routes, opening them in a
-    # NEW TAB (the only new tab). The role links resolve from session_doc_roles.
+    # The split renderer wires doc links to the existing routes, opening them in
+    # the UNIFIED named report window (v13 W1 — report links go to
+    # target="anchor_report_window" so they refresh ONE tab instead of spawning
+    # endless new tabs). The role links resolve from session_doc_roles.
     assert "function _renderSplitSummary" in html
-    assert "target=\"_blank\"" in html or "target=\\\"_blank\\\"" in html
+    assert ('target="anchor_report_window"' in html
+            or 'target=\\"anchor_report_window\\"' in html)
     assert "/api/rnd/session_doc_roles" in html
     # Effort rendering: tokens + wall-clock; imported honestly shows no metrics.
     assert "wall-clock" in html
