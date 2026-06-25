@@ -6707,7 +6707,9 @@ async function launchDeliverable(btn) {
     } else if (dtype === 'doc') {
       if (msg) msg.textContent = 'opened';
       btn.disabled = false;
-      if (data.href) window.open(data.href, '_blank');
+      // v13 W1 — a launched DOC deliverable is a report-style document: open it
+      // in the unified named window so it refreshes one tab, not many.
+      if (data.href) window.open(data.href, 'anchor_report_window');
     } else if (dtype === 'skill' || dtype === 'tool') {
       if (msg) msg.textContent = dtype + ': ' + (data.status || '?');
       btn.disabled = false;
@@ -6745,7 +6747,11 @@ async function stopDeliverable(btn) {
   }
 }
 
-function openReport(href) { window.open(href, '_blank'); }
+// v13 W1 — unified report-link target: a report/artifact link refreshes the
+// ONE named window (anchor_report_window) instead of spawning an endless trail
+// of throwaway tabs. Used by the done-effort report links + discovered-artifact
+// links (onclick="openReport(...)").
+function openReport(href) { window.open(href, 'anchor_report_window'); }
 
 // ── Lifecycle header actions (token-aware via _postJson) ────────────────────
 function _lifecycle(url, payload, reload) {
