@@ -1,3 +1,0 @@
-{"type": "system", "subtype": "init", "session_id": "stub"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Anchor is a productivity system that manages markdown task files for a researcher, tracking projects and deadlines."}]}, "session_id": "stub"}
-{"type": "result", "subtype": "success", "is_error": false, "result": "Anchor is a productivity system that manages markdown task files for a researcher, tracking projects and deadlines.", "total_cost_usd": 0.0, "usage": {"input_tokens": 1, "output_tokens": 1}, "duration_ms": 1, "session_id": "stub"}

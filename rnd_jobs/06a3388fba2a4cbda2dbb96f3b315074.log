@@ -1,3 +1,0 @@
-{"type": "system", "subtype": "init", "session_id": "stub"}
-{"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "The v7 board integrates live sessions into lane columns."}]}, "session_id": "stub"}
-{"type": "result", "subtype": "success", "is_error": false, "result": "The v7 board integrates live sessions into lane columns.", "total_cost_usd": 0.0, "usage": {"input_tokens": 1, "output_tokens": 1}, "duration_ms": 1, "session_id": "stub"}
