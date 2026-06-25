@@ -1,0 +1,23 @@
+{
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "kind": "project",
+  "title": "Anchor — Productivity System for J.C. Liechty",
+  "claims": [
+    "Anchor is J.C. Liechty's single-folder productivity and R&D control system that turns markdown task/project files into a live local dashboard and lets him run each project's Research → Plan → Build trio as durable, reopenable \"efforts\" with persisted docs, summaries, and deliverables.",
+    "It exists to keep that trio work honest and continuous — surfacing real status, lineage, and a candid \"what's really going on here\" read per project — so nothing produced in a session is lost or misrepresented.",
+    "Anchor is a single-folder, markdown-backed personal productivity system for J.C. Liechty that tracks tasks, projects, and ideas through a persistent local web dashboard.",
+    "Its R&D control surface turns each project into a cockpit that runs the Research→Plan→Build trio as durable, summarized, reopenable \"efforts\" — with honest stage handoffs, persisted documents, and a Gandalf \"what's really going on here\" reality-check read."
+  ],
+  "sources": [
+    "CLAUDE.md",
+    "planning\\gandalf-v1\\IMPLEMENTATION-PLAN.md",
+    "planning\\gandalf-v1\\MASTER-PLAN.md",
+    "planning\\rnd-v12\\MASTER-PLAN.md",
+    "planning\\rnd-v12\\IMPLEMENTATION-PLAN.md"
+  ],
+  "generated_at": 1782250519.4894452,
+  "runs": 2,
+  "markdown": "# Anchor — Productivity System for J.C. Liechty\n\n*Project summary · validated, cached*\n\n## Objective\n\nAnchor is J.C. Liechty's single-folder productivity and R&D control system that turns markdown task/project files into a live local dashboard and lets him run each project's Research → Plan → Build trio as durable, reopenable \"efforts\" with persisted docs, summaries, and deliverables. It exists to keep that trio work honest and continuous — surfacing real status, lineage, and a candid \"what's really going on here\" read per project — so nothing produced in a session is lost or misrepresented. Anchor is a single-folder, markdown-backed personal productivity system for J.C. Liechty that tracks tasks, projects, and ideas through a persistent local web dashboard. Its R&D control surface turns each project into a cockpit that runs the Research→Plan→Build trio as durable, summarized, reopenable \"efforts\" — with honest stage handoffs, persisted documents, and a Gandalf \"what's really going on here\" reality-check read.\n",
+  "summary_text": "Anchor is J.C. Liechty's single-folder productivity and R&D control system that turns markdown task/project files into a live local dashboard and lets him run each project's Research → Plan → Build trio as durable, reopenable \"efforts\" with persisted docs, summaries, and deliverables. It exists to keep that trio work honest and continuous — surfacing real status, lineage, and a candid \"what's really going on here\" read per project — so nothing produced in a session is lost or misrepresented. Anchor is a single-folder, markdown-backed personal productivity system for J.C. Liechty that tracks tasks, projects, and ideas through a persistent local web dashboard. Its R&D control surface turns each project into a cockpit that runs the Research→Plan→Build trio as durable, summarized, reopenable \"efforts\" — with honest stage handoffs, persisted documents, and a Gandalf \"what's really going on here\" reality-check read.",
+  "schema_version": 3
+}

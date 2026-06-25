@@ -1,0 +1,20 @@
+{
+  "job_id": "f737c7082d294ab29b1b428ff27fb38d",
+  "lane": "research",
+  "pid": 3220,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\f737c7082d294ab29b1b428ff27fb38d.log",
+  "cwd": "C:\\dev\\Anchor",
+  "started_at": 1781223978.7589445,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude",
+  "project_id": "2fe37f39157f4c7aa3e2523baa41f40f",
+  "folder_path": "C:\\dev\\Anchor",
+  "skill": "researchPrime",
+  "output_dir": "C:\\dev\\Anchor\\.anchor\\projects\\2fe37f39157f4c7aa3e2523baa41f40f\\research",
+  "gates": false,
+  "mutates_tree": false,
+  "terminal": true,
+  "prompt_seed": "Run the researchPrime skill for project 'Anchor' (folder C:\\dev\\Anchor). Write all research artifacts under the project-scoped output directory C:\\dev\\Anchor\\.anchor\\projects\\2fe37f39157f4c7aa3e2523baa41f40f\\research. This lane runs to completion with no interactive gate; do not mutate the working tree. If the folder C:\\dev\\Anchor already contains a project or codebase, treat this as a brownfield investigation: first inventory what already exists (source layout, dependencies, build/test setup, docs) and what has already been done (prior research, plans, partial builds, TODOs), then produce a research report that orients a brand-new owner — what the project is, its current state, what's done vs. outstanding, and the key risks/unknowns to resolve before further work."
+}

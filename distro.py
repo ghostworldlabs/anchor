@@ -854,6 +854,44 @@ def build_distro(root: Path | None = None,
     }
 
 
+def publish_distro(dest: Path | None = None, remote_cmd: str | None = None) -> dict:
+    """Build, scan-gate, and push to a private GitHub repository.
+
+    Aborts BEFORE any git or push operations if the scan fails.
+    """
+    import subprocess
+    import os
+
+    gh_cmd = remote_cmd or os.environ.get("ANCHOR_GH_CMD")
+    if not gh_cmd and not shutil.which("gh"):
+        print("Manual path: 'gh' CLI not found. Please push manually.")
+        gh_available = False
+    else:
+        gh_available = True
+
+    # The clean-scan GATE. Raises PersonalDataError on failure.
+    report = build_distro(output_dir=dest, emit_readme_file=True, cleanup_on_fail=False)
+    staging = report["staging"]
+
+    if not gh_available:
+        return {"status": "manual", "staging": staging}
+
+    # git init + commit
+    subprocess.run(["git", "init"], cwd=staging, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=staging, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=staging, check=True, capture_output=True)
+
+    # gh repo create --private + push
+    if gh_cmd:
+        cmd_parts = gh_cmd.split()
+        subprocess.run(cmd_parts + ["repo", "create", "--private"], cwd=staging, check=True, capture_output=True)
+        subprocess.run(cmd_parts + ["push"], cwd=staging, check=True, capture_output=True)
+    else:
+        subprocess.run(["gh", "repo", "create", "--private", "--source=.", "--remote=origin", "--push"], cwd=staging, check=True, capture_output=True)
+
+    return {"status": "published", "staging": staging}
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def _main(argv=None):

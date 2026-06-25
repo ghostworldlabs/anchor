@@ -4849,6 +4849,54 @@ def main():
     sys.exit(0)
 
 
-if __name__ == "__main__":
-    main()
+def check_onboard_surface():
+    """Wave 12: hermetic regression walk for onboard/distro."""
+    import os, tempfile, shutil
+    import distro
+    import onboard
+    import tests.test_publish_distro as tp
+    
+    # Save env
+    saved_env = {k: os.environ.get(k) for k in [
+        "ANCHOR_SKILLS_HOME", "ANCHOR_SERVICE_CMD", "ANCHOR_FOREGROUND_CMD", 
+        "ANCHOR_GH_CMD", "HOME", "USERPROFILE"
+    ]}
+    
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            
+            # Setup seams
+            os.environ["ANCHOR_SKILLS_HOME"] = str(tmp / "skills")
+            
+            # 1. Distro export
+            res = distro.build_distro(output_dir=tmp / "export", emit_readme_file=True, cleanup_on_fail=False)
+            assert (tmp / "export" / "distro.py").exists(), "export failed"
+            
+            # 2. Onboard
+            os.environ["ANCHOR_DATA_DIR"] = str(tmp / "data")
+            os.environ["ANCHOR_BUNDLED_SKILLS_DIR"] = str(tmp / "export" / "vendor" / "bundled-skills")
+            os.environ["ANCHOR_SERVICE_CMD"] = sys.executable + " -c 'import sys; sys.exit(0)'"
+            
+            tok = onboard.generate_token()
+            assert Path(tok["path"]).exists(), "token gen failed"
+            
+            # onboard register
+            with open(tok["path"], "r") as f:
+                val = f.read().strip()
+            reg = onboard.register_service(val)
+            assert reg["status"] == "registered"
+            
+    finally:
+        # Restore env
+        for k, v in saved_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
+    return True
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())

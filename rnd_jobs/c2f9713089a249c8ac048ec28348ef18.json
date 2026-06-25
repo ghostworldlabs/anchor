@@ -1,0 +1,21 @@
+{
+  "job_id": "c2f9713089a249c8ac048ec28348ef18",
+  "lane": "research",
+  "pid": 33880,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\c2f9713089a249c8ac048ec28348ef18.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez",
+  "started_at": 1782039606.318667,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "project_id": "618709161ba44adf9115d3e04a5fa000",
+  "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez",
+  "skill": "researchPrime",
+  "output_dir": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez\\.anchor\\projects\\618709161ba44adf9115d3e04a5fa000\\research",
+  "gates": false,
+  "mutates_tree": false,
+  "terminal": true,
+  "prompt_seed": "Run the researchPrime skill for project '__healthcheck__ rnd probe' (folder C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez). Write all research artifacts under the project-scoped output directory C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez\\.anchor\\projects\\618709161ba44adf9115d3e04a5fa000\\research. This lane runs to completion with no interactive gate; do not mutate the working tree. If the folder C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-fozjd2ez already contains a project or codebase, treat this as a brownfield investigation: first inventory what already exists (source layout, dependencies, build/test setup, docs) and what has already been done (prior research, plans, partial builds, TODOs), then produce a research report that orients a brand-new owner — what the project is, its current state, what's done vs. outstanding, and the key risks/unknowns to resolve before further work.",
+  "finished_at": 1782039606.656256
+}

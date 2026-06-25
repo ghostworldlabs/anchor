@@ -6,12 +6,12 @@
 <!-- Carry-forward note: the four tasks below were frozen in Axmra DASHBOARD.md on 2026-04-09. Verify each is still relevant; cancel any that have aged out. -->
 - [x] Make KSA and Utah versions of pitch decks — Priority: 2 — energy: high — [commercial] — Notes: Carried from Axmra freeze 2026-04-07 — verify still relevant
 - [x] Shepherd KU edit of answer deck (Jeffery + Ed) — Priority: 2 — energy: med — [commercial] — Notes: Carried from Axmra freeze 2026-04-07 — verify still relevant
-- [ ] Microphenomics next steps — Priority: 2 — energy: med — [commercial] — Notes: Carried from Axmra freeze 2026-04-07 — coordinate with Keith Cheng
-- [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
+- [ ] Get Walt to issue NextGen Shares — Priority: 2 — energy: med — [commercial]
 - [x] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
 - [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial]
 - [x] Respond to Cliffort — Priority: 1 — energy: med — [commercial]
 - [x] Review Archty PSU Patent and Respond to Matthew and Marco — Priority: 1 — energy: med — [commercial]
+- [ ] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
 
 
 ## Nexia Impact / Axmra Capital
@@ -30,7 +30,6 @@
 - **Next Steps:**
   - [x] Reach out to David Leavitt (Thursday 4/9) re: getting a response from Aaron — DONE
   - [x] Help shepherd the KU edit of the answer deck (Jeffery and Ed made it)
-  - [ ] Work through the Microphenomics next steps, help coordinate
 
 ## OpX Redo
 - **Status:** Active — TOP PRIORITY (academic + commercial crossover)
@@ -43,7 +42,6 @@
 - **Status:** Pending — timing dependent
 - **Priority:** 3
 - **Next Steps:**
-  - [ ] Talk with Hassan about getting Archty into Axmra at the right time
 
 ## NextGen Nuclear Power (Winding Down)
 - **Status:** Winding down

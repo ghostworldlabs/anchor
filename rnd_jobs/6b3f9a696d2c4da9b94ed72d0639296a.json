@@ -1,0 +1,13 @@
+{
+  "job_id": "6b3f9a696d2c4da9b94ed72d0639296a",
+  "lane": "research",
+  "pid": 26808,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\6b3f9a696d2c4da9b94ed72d0639296a.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v5-proj-asiy5k4w",
+  "started_at": 1781953219.432383,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "finished_at": 1781953219.4682572
+}

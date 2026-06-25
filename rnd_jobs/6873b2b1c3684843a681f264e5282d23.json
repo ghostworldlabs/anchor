@@ -1,0 +1,21 @@
+{
+  "job_id": "6873b2b1c3684843a681f264e5282d23",
+  "lane": "research",
+  "pid": 48644,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\6873b2b1c3684843a681f264e5282d23.log",
+  "cwd": "C:\\dev\\Skill Foundry",
+  "started_at": 1782017991.3256814,
+  "exit_code": 0,
+  "session_id": "160cd84d-7797-430a-9e8b-f762af6c162a",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.2881515,
+    "duration_ms": 46483,
+    "input_tokens": 4893,
+    "output_tokens": 3543,
+    "total_tokens": 8436,
+    "session_id": "160cd84d-7797-430a-9e8b-f762af6c162a"
+  },
+  "finished_at": 1782018039.5144715
+}

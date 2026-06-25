@@ -1,0 +1,13 @@
+{
+  "job_id": "a9da212a61e24802bcb6f4613ff0af27",
+  "lane": "research",
+  "pid": 112428,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\a9da212a61e24802bcb6f4613ff0af27.log",
+  "cwd": "C:\\dev\\Agentic-Home",
+  "started_at": 1782000820.737715,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "finished_at": 1782000867.2587466
+}

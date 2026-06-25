@@ -1,0 +1,13 @@
+{
+  "job_id": "6973fbe2eeb44494bcf27f382a5721e8",
+  "lane": "research",
+  "pid": 22188,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\6973fbe2eeb44494bcf27f382a5721e8.log",
+  "cwd": "C:\\dev\\MBA Teaching AI",
+  "started_at": 1781700664.4660985,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "finished_at": 1781700684.3346999
+}

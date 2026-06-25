@@ -1,0 +1,12 @@
+{
+  "job_id": "52641dbc381d40a2b06eb119b2a8552c",
+  "lane": "research",
+  "pid": 136284,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\52641dbc381d40a2b06eb119b2a8552c.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2177\\test_close_then_reopen_is_fres0\\P",
+  "started_at": 1782278915.784244,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

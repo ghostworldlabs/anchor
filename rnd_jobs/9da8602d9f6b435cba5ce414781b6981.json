@@ -1,0 +1,19 @@
+{
+  "job_id": "9da8602d9f6b435cba5ce414781b6981",
+  "lane": "research",
+  "pid": 45048,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\9da8602d9f6b435cba5ce414781b6981.log",
+  "cwd": "C:\\dev\\Anchor",
+  "started_at": 1781141264.0442622,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "project_id": "227eb089706140388b829776d87e57c8",
+  "folder_path": "C:\\dev\\Anchor",
+  "skill": "researchPrime",
+  "output_dir": "C:\\dev\\Anchor\\.anchor\\projects\\227eb089706140388b829776d87e57c8\\research",
+  "gates": false,
+  "mutates_tree": false,
+  "finished_at": 1781141934.4383469
+}

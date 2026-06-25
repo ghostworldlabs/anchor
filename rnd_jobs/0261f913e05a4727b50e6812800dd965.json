@@ -1,0 +1,13 @@
+{
+  "job_id": "0261f913e05a4727b50e6812800dd965",
+  "lane": "research",
+  "pid": 97300,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\0261f913e05a4727b50e6812800dd965.log",
+  "cwd": "C:\\dev\\Skill Foundry",
+  "started_at": 1782017989.1385744,
+  "exit_code": 0,
+  "session_id": null,
+  "backend": "claude",
+  "finished_at": 1782018029.402592
+}

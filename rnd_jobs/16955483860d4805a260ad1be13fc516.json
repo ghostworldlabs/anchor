@@ -1,0 +1,21 @@
+{
+  "job_id": "16955483860d4805a260ad1be13fc516",
+  "lane": "research",
+  "pid": 64408,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\16955483860d4805a260ad1be13fc516.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v6-proj-echem6p_",
+  "started_at": 1781780417.0717142,
+  "exit_code": 0,
+  "session_id": "stub",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.0,
+    "duration_ms": 1,
+    "input_tokens": 1,
+    "output_tokens": 1,
+    "total_tokens": 2,
+    "session_id": "stub"
+  },
+  "finished_at": 1781780417.1010563
+}

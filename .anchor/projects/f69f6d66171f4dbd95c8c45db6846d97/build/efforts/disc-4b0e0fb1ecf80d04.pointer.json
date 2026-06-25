@@ -1,0 +1,11 @@
+{
+  "job_id": "disc-4b0e0fb1ecf80d04",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "build",
+  "created_at": 1782017886.5818183,
+  "source": "discovered",
+  "kind": "execlog",
+  "title": "Anchor R&D Surface v11.1 — \"Handoff Always Primes\" — Execution Log",
+  "artifact_path": "planning/rnd-v11.1/EXECUTION-LOG.md",
+  "status": "imported"
+}

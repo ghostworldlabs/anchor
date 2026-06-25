@@ -1,0 +1,21 @@
+{
+  "job_id": "363970b13a23408385c989defdcc7043",
+  "lane": "research",
+  "pid": 117628,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\363970b13a23408385c989defdcc7043.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v7-proj-macyu00f",
+  "started_at": 1782039643.069635,
+  "exit_code": 0,
+  "session_id": "stub",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.0,
+    "duration_ms": 1,
+    "input_tokens": 1,
+    "output_tokens": 1,
+    "total_tokens": 2,
+    "session_id": "stub"
+  },
+  "finished_at": 1782039643.102131
+}

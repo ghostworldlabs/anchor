@@ -1,0 +1,12 @@
+{
+  "job_id": "6e7882ddbade42c795f766161c77aa83",
+  "lane": "research",
+  "pid": 133056,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\6e7882ddbade42c795f766161c77aa83.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-2176\\test_rescan_path_bootstraps0\\rescanme",
+  "started_at": 1782276535.927954,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

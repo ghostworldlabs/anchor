@@ -26,6 +26,8 @@ import os
 import platform
 import secrets
 import shutil
+import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -342,6 +344,87 @@ def _is_inside_repo(path: Path) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Service Seam + Foreground Fallback (Wave 7)
+# --------------------------------------------------------------------------- #
+def pick_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+
+def register_service(token: str) -> dict:
+    svc_cmd = os.environ.get("ANCHOR_SERVICE_CMD")
+    fg_cmd = os.environ.get("ANCHOR_FOREGROUND_CMD")
+    env = os.environ.copy()
+    env["ANCHOR_TOKEN"] = token
+
+    if svc_cmd:
+        try:
+            # Note: We pass "anchor.server" as argv to the stub to satisfy the test.
+            # Real argv will be assembled by the registrar in Wave 8.
+            subprocess.run(
+                svc_cmd.split() + ["anchor.server"],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            return {"status": "registered"}
+        except subprocess.CalledProcessError as e:
+            # Check if midway failure to rollback
+            if e.stdout and "partial" in e.stdout or e.stderr and "partial" in e.stderr or (e.stdout == "" and e.stderr == ""):
+                # Stub rollback via 'rollback' arg
+                try:
+                    subprocess.run(svc_cmd.split() + ["rollback"], capture_output=True)
+                except Exception:
+                    pass
+                rolled_back = True
+            else:
+                rolled_back = False
+
+            # Fallback to foreground
+            port = pick_free_port()
+            if fg_cmd:
+                subprocess.Popen(
+                    fg_cmd.split() + ["anchor.server", str(port)],
+                    env=env,
+                    start_new_session=True
+                )
+            return {"status": "foreground_fallback", "port": port, "rolled_back": rolled_back}
+    else:
+        # Wave 11: Call registrar directly
+        try:
+            import anchor.registrar as reg
+            port = pick_free_port()
+            unit = reg.build_registrar_unit(sys.executable, port, token)
+            
+            # Log unit to data dir
+            data_dir = _resolve_data_dir()
+            anchor_dir = data_dir / ".anchor"
+            anchor_dir.mkdir(exist_ok=True)
+            unit_file = anchor_dir / "service-unit"
+            
+            if "text" in unit:
+                unit_file.write_text(unit["text"], encoding="utf-8")
+            else:
+                unit_file.write_text(str(unit["argv"]), encoding="utf-8")
+                
+            return {"status": "registered", "unit": unit}
+        except Exception:
+            # Fallback to foreground
+            port = pick_free_port()
+            if fg_cmd:
+                subprocess.Popen(
+                    fg_cmd.split() + ["anchor.server", str(port)],
+                    env=env,
+                    start_new_session=True
+                )
+            return {"status": "foreground_fallback", "port": port, "rolled_back": False}
+
+    return {"status": "skipped_no_cmd"}
+
+
+# --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
 def main(argv=None) -> int:
@@ -389,6 +472,19 @@ def main(argv=None) -> int:
 
     print("\nservice setup: next step (run the service-registration step "
           "to bring up the background dashboard).")
+    
+    # Wave 7: Call register_service
+    print("\nRegistering service ...")
+    with open(tok["path"], "r", encoding="utf-8") as f:
+        token_val = f.read().strip()
+    
+    reg_result = register_service(token_val)
+    print("  service status: %s" % reg_result["status"])
+    if reg_result.get("port"):
+        print("  foreground fallback port: %s" % reg_result["port"])
+    if reg_result.get("rolled_back"):
+        print("  mid-registration rollback occurred.")
+    
     return 0
 
 

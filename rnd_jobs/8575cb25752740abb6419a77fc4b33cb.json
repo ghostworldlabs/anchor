@@ -1,0 +1,12 @@
+{
+  "job_id": "8575cb25752740abb6419a77fc4b33cb",
+  "lane": "research",
+  "pid": 107884,
+  "status": "running",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\8575cb25752740abb6419a77fc4b33cb.log",
+  "cwd": "C:\\Users\\john\\AppData\\Local\\Temp\\pytest-of-john\\pytest-1923\\test_prepare_persists_multiple0\\repo",
+  "started_at": 1782103344.2003534,
+  "exit_code": null,
+  "session_id": null,
+  "backend": "claude"
+}

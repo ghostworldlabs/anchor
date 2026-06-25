@@ -1,0 +1,21 @@
+{
+  "job_id": "f03deb87f6b7436a954058a1654efcd1",
+  "lane": "research",
+  "pid": 128600,
+  "status": "failed",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\f03deb87f6b7436a954058a1654efcd1.log",
+  "cwd": "C:\\dev\\Anchor",
+  "started_at": 1782153994.0966618,
+  "exit_code": 1,
+  "session_id": "fbb30f55-274a-49ac-b56e-78b9cdf24896",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.0006550000000000001,
+    "duration_ms": 3511,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "session_id": "fbb30f55-274a-49ac-b56e-78b9cdf24896"
+  },
+  "finished_at": 1782154002.7686298
+}

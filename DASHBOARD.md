@@ -26,7 +26,7 @@
 - [x] **Reconcile Clifford Intro 11:30 vs. Calder 11:00–12:00** — Priority: 1 — energy: low — [commercial] — Notes: 30-min overlap. Either reschedule Clifford or step out of Calder call at 11:30
 - [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
 - [ ] Get the finances up to date and get the budget sorted — Priority: 1 — energy: med — [family]
-- [ ] Get Walt to issue NextGen Shares — Priority: 1 — energy: med — [commercial]
+- [ ] Get Walt to issue NextGen Shares — Priority: 2 — energy: med — [commercial]
 - [ ] Get Milo Trust assigned to my trust — Priority: 1 — energy: med — [family]
 - [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 1 — energy: med — [family]
 - [x] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
@@ -35,14 +35,16 @@
 - [x] Respond to Cliffort — Priority: 1 — energy: med — [commercial]
 - [x] Review Archty PSU Patent and Respond to Matthew and Marco — Priority: 1 — energy: med — [commercial]
 - [ ] Sort out Archty Tax Bill Deleware — Priority: 2 — energy: med — [academic]
-- [ ] Get TAs lined up for Fall — Priority: 1 — energy: med — [academic]
+- [x] Get TAs lined up for Fall — Priority: 1 — energy: med — [academic]
 - [ ] Add a memorization and math training tool to GWL/Anchor — Priority: 1 — energy: med — [personal]
+- [x] Give Rick NYU Oral Exam tool/framework — Priority: 1 — energy: med — [academic]
+- [ ] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
 
 
 ### P1 (carried — Mon/Tue)
-- [ ] Find BYU Med School Person in charge of access — Priority: 1 — energy: med — [commercial] — Notes: Evan, Brandon's dad, said there was a young guy from Harvard system tasked with access ...
+- [ ] Find BYU Med School Person in charge of access — Priority: 2 — energy: med — [commercial] — Notes: Evan, Brandon's dad, said there was a young guy from Harvard system tasked with access ...
 - [x] Come up with a way of graphically representing the structure of the brain of an agent — Priority: 1 — energy: med — [commercial]
-- [ ] Work with Brian on Global Pharma Deck — Priority: 1 — energy: med — [commercial]
+- [ ] Work with Brian on Global Pharma Deck — Priority: 2 — energy: med — [commercial]
 - [ ] Compare PSU ID Watch Dog and Geico ID Protection — Priority: 1 — energy: low — [personal]
 - [ ] Get login details for Other Retirement Fund Account Nick Accordino — Priority: 1 — energy: low — [personal]
 - [ ] Get a Fire Proof Safe — Priority: 1 — energy: low — [personal]

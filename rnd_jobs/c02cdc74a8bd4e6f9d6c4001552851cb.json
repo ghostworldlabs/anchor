@@ -1,0 +1,21 @@
+{
+  "job_id": "c02cdc74a8bd4e6f9d6c4001552851cb",
+  "lane": "research",
+  "pid": 20624,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\c02cdc74a8bd4e6f9d6c4001552851cb.log",
+  "cwd": "C:\\dev\\Mathematics Problems\\Transformer Math",
+  "started_at": 1781732522.4816563,
+  "exit_code": 0,
+  "session_id": "515967c6-f29d-4dd0-8c03-2ad3004695c0",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.1856605,
+    "duration_ms": 13713,
+    "input_tokens": 5031,
+    "output_tokens": 611,
+    "total_tokens": 5642,
+    "session_id": "515967c6-f29d-4dd0-8c03-2ad3004695c0"
+  },
+  "finished_at": 1781732537.2056866
+}

@@ -1,0 +1,21 @@
+{
+  "job_id": "62e1ba451c2f4ba5b76abf996edfd052",
+  "lane": "research",
+  "pid": 119492,
+  "status": "done",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\62e1ba451c2f4ba5b76abf996edfd052.log",
+  "cwd": "C:\\dev\\MBA Teaching AI",
+  "started_at": 1782240791.4043822,
+  "exit_code": 0,
+  "session_id": "d72efa5e-60e8-4c9d-9b22-1b372854fefe",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 1.9391905,
+    "duration_ms": 373464,
+    "input_tokens": 8260,
+    "output_tokens": 25096,
+    "total_tokens": 33356,
+    "session_id": "d72efa5e-60e8-4c9d-9b22-1b372854fefe"
+  },
+  "finished_at": 1782241166.1759963
+}

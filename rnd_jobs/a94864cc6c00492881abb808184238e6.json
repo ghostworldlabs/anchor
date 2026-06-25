@@ -1,0 +1,21 @@
+{
+  "job_id": "a94864cc6c00492881abb808184238e6",
+  "lane": "research",
+  "pid": 102880,
+  "status": "failed",
+  "log_path": "C:\\dev\\Anchor\\rnd_jobs\\a94864cc6c00492881abb808184238e6.log",
+  "cwd": "C:\\dev\\Agentic-Home",
+  "started_at": 1782153968.2164872,
+  "exit_code": 1,
+  "session_id": "ca8e47ed-f292-4892-8982-2ae4dadba1cc",
+  "backend": "claude",
+  "cost": {
+    "total_cost_usd": 0.0007210000000000001,
+    "duration_ms": 13211,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "session_id": "ca8e47ed-f292-4892-8982-2ae4dadba1cc"
+  },
+  "finished_at": 1782153987.7575667
+}
