@@ -5,13 +5,13 @@
 
 ## Wave 1 — Gandalf Markdown & Unified Report Links (UI Polish)
 **Goal:** Render Gandalf reports with rich markdown and unify report links to open in a dedicated tab.
-- [ ] **Gandalf Markdown Rendering:** Update `anchor_gui.py` (`_render_layoutd_gandalf_panel`) and `_PROJECT_WINDOW_JS` to use `marked.parse` for rendering the `exec-summary.md` and full `report.md`. Ensure that when a user clicks a Gandalf run row, the inline-expansion renders clean HTML.
-- [ ] **Unified Tab Target:** In `anchor_gui.py`, identify all `<a>` tags pointing to reports (e.g. `artifact` or `download` links for `.md` / `.pdf` files) and set their target to `target="anchor_report_window"`.
-- [ ] **Verify:** Ensure clicking report links doesn't spawn endless new tabs, but rather refreshes the `anchor_report_window`. Ensure Gandalf inline expansion shows structured lists/bold text instead of plain text.
+- [x] **Gandalf Markdown Rendering:** Update `anchor_gui.py` (`_render_layoutd_gandalf_panel`) and `_PROJECT_WINDOW_JS` to use `marked.parse` for rendering the `exec-summary.md` and full `report.md`. Ensure that when a user clicks a Gandalf run row, the inline-expansion renders clean HTML.
+- [x] **Unified Tab Target:** In `anchor_gui.py`, identify all `<a>` tags pointing to reports (e.g. `artifact` or `download` links for `.md` / `.pdf` files) and set their target to `target="anchor_report_window"`.
+- [x] **Verify:** Ensure clicking report links doesn't spawn endless new tabs, but rather refreshes the `anchor_report_window`. Ensure Gandalf inline expansion shows structured lists/bold text instead of plain text.
 
 ## Wave 2 — File Upload Mechanism
 **Goal:** Allow users to upload files via the UI to their project or dashboard workspace.
-- [ ] **UI Elements:** Add a `<input type="file" id="global-upload">` and "Upload File" button in both `_render_dashboard_html` and the project window layout in `anchor_gui.py`.
+- [ ] **UI Elements:** Add a `<input type="file" id="global-upload">` and "Upload File" button in both `generate_html` and the project window layout in `anchor_gui.py`.
 - [ ] **Backend Endpoint:** Implement `do_POST` routing for `/api/upload` in `anchor_gui.py`.
 - [ ] **Routing Logic:** If `project_id` is provided, save to `C:\dev\Anchor\.anchor\projects\<project_id>\uploads\`. If `project_id` is `__dashboard__` or `dev`, route to `C:\dev\Anchor\dev\`.
 - [ ] **Verify:** Upload a test text file from both the project view and the dashboard view. Ensure the files appear in the correct server-side directories.
