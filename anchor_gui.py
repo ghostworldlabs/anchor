@@ -3286,7 +3286,7 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
     n = len(runs)
     pid_q = html_lib.escape(str(project_id), quote=True)
     icon = (
-        f"<img class='gicon' src='/vendor/brand/gandalf-white-icon.svg?v={BUILD_ID}' "
+        f"<img class='gicon' src='/vendor/brand/gandalf-icon-v5.jpg?v={BUILD_ID}' "
         "alt='Gandalf the White'>")
 
     if not runs:
@@ -11016,6 +11016,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
+          <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report', '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/zombie_radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Radar</button>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -12885,6 +12886,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_response(404)
                     self.end_headers()
+            elif self.path.startswith("/zombie_radar.jpg"):
+                jpg_path = ANCHOR_DIR / "zombie_radar.jpg"
+                if jpg_path.exists():
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(jpg_path.read_bytes())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
             elif self.path.startswith("/anchor-touch.png"):
                 png_path = ANCHOR_DIR / "anchor-touch.png"
                 if png_path.exists():
@@ -13324,6 +13336,25 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     with _GANDALF_INFLIGHT_GUARD:
                         status = _GANDALF_INFLIGHT.get(pid, None)
                     self._send_json({"ok": True, "status": status})
+            elif self.path.startswith("/api/rnd/zombie_hunter_report"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                try:
+                    import json
+                    reg_file = ANCHOR_DIR / "session_registry.json"
+                    reg = json.loads(reg_file.read_text('utf-8')) if reg_file.exists() else {}
+                except Exception:
+                    reg = {}
+                html = "<html><head><title>Zombie Hunter Radar Report</title>"
+                html += "<style>body { font-family: system-ui; background: #0f0f0f; color: #eee; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { padding: 8px; border: 1px solid #333; text-align: left; }</style>"
+                html += "</head><body><h1>&#128142; Zombie Hunter Radar</h1>"
+                html += "<h2>Active Swarms / Sessions</h2><table><tr><th>ID</th><th>Type</th><th>Status</th><th>Last Ping</th></tr>"
+                for sid, sdata in reg.items():
+                    html += f"<tr><td>{sid}</td><td>{sdata.get('type', 'Unknown')}</td><td>{sdata.get('status', 'Unknown')}</td><td>{sdata.get('last_ping', 'N/A')}</td></tr>"
+                html += "</table></body></html>"
+                self.wfile.write(html.encode("utf-8"))
+                return
             elif self.path.startswith("/api/rnd/boneyard"):
                 # Read-only (v10 Wave 7): the project's per-project Boneyard — a
                 # searchable list of DISCARDED material (hard-killed sessions w/
