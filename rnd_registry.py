@@ -249,6 +249,16 @@ def add_project(name: str, folder_path, priority: int = 2,
 
 def get_project(project_id: str):
     """Return the entry for ``project_id`` or ``None``."""
+    if project_id == "__dashboard__":
+        return {
+            "id": "__dashboard__",
+            "name": "Workspace Root (dev)",
+            "folder_path": str(_paths.data_dir().parent.parent),
+            "state": "active",
+            "priority": 1,
+            "group": "",
+            "notes": "Global general terminal and grasscatcher."
+        }
     return load_registry().get(project_id)
 
 

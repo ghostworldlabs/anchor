@@ -7,4 +7,3 @@
 
 - BACKUP HEALTH FAIL [2026-05-11] - 1 red finding(s): synthetic failure injected via -ForceFail (alerting-channel test)
   (see C:\dev\Agentic-Home\logs\backup\health-LATEST.txt - run `& 'C:\dev\Agentic-Home\scripts\backup-healthcheck.ps1'` to re-check)
-- 2026-06-26: __healthcheck__ inbox idea

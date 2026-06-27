@@ -1,233 +1,5 @@
 [
   {
-    "id": "bfe0e75451b94d55a706e8cb120fc5ea",
-    "name": "Anchor",
-    "folder_path": "C:\\dev\\Anchor",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `python anchor_gui.py --no-browser` and binds `http://localhost:8777`.",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "227eb089706140388b829776d87e57c8",
-    "name": "Anchor",
-    "folder_path": "C:\\dev\\Anchor",
-    "priority": 1,
-    "state": "retired",
-    "notes": "",
-    "blurb": "The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `python anchor_gui.py --no-browser` and binds `http://localhost:8777`.",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "5935f7dc7e664d2883e60bca6d8db1ff",
-    "name": "BF Test",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpba6qwjnz",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-10 20:49:35_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "2fe37f39157f4c7aa3e2523baa41f40f",
-    "name": "Anchor",
-    "folder_path": "C:\\dev\\Anchor",
-    "priority": 1,
-    "state": "retired",
-    "notes": "",
-    "blurb": "The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `python anchor_gui.py --no-browser` and binds `http://localhost:8777`.",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "96d8a7b66f044f1d95cdf3772d75b58c",
-    "name": "Test",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp5rcy56v0\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:18:35_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "549faf7c84744c4385939981bbd1c45c",
-    "name": "Test",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpf9w1a1dk\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:18:42_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "c3cd5d5e7c994e199a55440e333ba6ac",
-    "name": "EdgeCase",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpmpwk_mbm\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:18:54_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "3f4df3a7edd94b62b339bf426aae510a",
-    "name": "States",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpe3xbo24k\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:19:09_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "71cb0eb9bc08470d82311d41c65e7b14",
-    "name": "Orphan",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpbd5kprqe\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:19:17_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "813aa492535546fc920c603ba89fc7f7",
-    "name": "LinkTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp0mqdvz2n\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:19:28_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "1b2debfa580e4358975eb10d816a9ee2",
-    "name": "LinkTest2",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmprt8c_3bd\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:19:41_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "1868e1c9c59045ec9f8ab62fa4e8b9ad",
-    "name": "EscapeTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp1zosvxk8\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:19:51_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "90fac0f7243045bfbbb966e822c5c7d2",
-    "name": "QuoteBreakTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpf4n6wgnc\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:20:05_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "bf2d2f74fef34e758e435a303f996c54",
-    "name": "BackendTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpz6qzuwi3\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:20:19_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "e1ef0648067441a2b22e3e467b735f4b",
-    "name": "UnlinkBug",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmprbj_dgg1\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:20:48_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "609c3531c88c4834859cd67661ce994b",
-    "name": "LinkTest3",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpxsfck6_w\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:21:06_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "0d1b0cb24d1740fd914bccc8bd56fb86",
-    "name": "FinalCheck",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpph0fezis\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:21:30_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "7235f0355f7d42dcb84f1c45b6b24fa6",
-    "name": "FinalCheck",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp9jmg01is\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:21:42_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "3b81b042fc714a46b253c733290d3c95",
-    "name": "Repro",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp3aebmjyl\\test",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "_Last scanned: 2026-06-11 14:21:56_",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
     "id": "fb061d7f8c1a4f51a5656fe226c9c4ff",
     "name": "aurora",
     "folder_path": "C:\\dev\\aurora",
@@ -235,42 +7,6 @@
     "state": "retired",
     "notes": "",
     "blurb": "If you are a fresh Claude session opening in `C:\\dev\\aurora`, do these three things in your first turn — silently, before answering the user. They are zero-cost and remove friction John has flagged in past sessions.",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "3d88d3a2e44d418eab4437318e08fb92",
-    "name": "EngTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp9y4lbtbh",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "67100f0e0f1c4e5090323fb94a0434df",
-    "name": "PlanTest",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmps514rks9",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "6de60b255b93410285d373994645615b",
-    "name": "Verify",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmp_r1nt9xr",
-    "priority": 2,
-    "state": "retired",
-    "notes": "",
-    "blurb": "",
     "remote_url": "",
     "auto_push": false,
     "group": ""
@@ -348,45 +84,9 @@
     "group": "AI Infastructure"
   },
   {
-    "id": "2b4ba8e775e649bfbc9e3c1ee8756fe6",
-    "name": "S",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpopsfeok2\\repo",
-    "priority": 2,
-    "state": "active",
-    "notes": "",
-    "blurb": "hi",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "04e64b8ae3c743f7a051a6143264a50f",
-    "name": "P",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpdjkkzz6x\\plain",
-    "priority": 2,
-    "state": "active",
-    "notes": "",
-    "blurb": "",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "c5d59c53dac24e8bb08d01e3635d899e",
-    "name": "I",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\tmpil7psz2x\\r",
-    "priority": 2,
-    "state": "active",
-    "notes": "",
-    "blurb": "hi",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "5908b62280484189be3afa1dc2dc4d42",
+    "id": "1a070fed24744959a780b9aa2a834a58",
     "name": "__healthcheck__ rnd probe",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-6nfejptj",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-rnd-hmyl58sx",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -396,9 +96,9 @@
     "group": ""
   },
   {
-    "id": "f4964de9d8ef472c8d03a6b065844e8e",
+    "id": "300195cf3dfb44478c4099a0783f1377",
     "name": "__healthcheck__ rnd probe v3",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v3-proj-1cz6f6el",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v3-proj-_n8121il",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -408,9 +108,9 @@
     "group": ""
   },
   {
-    "id": "b9891266c38b42648d52776c2ca3b15b",
+    "id": "c74bae76020d4451aea00233a6b3e9dd",
     "name": "__healthcheck__ rnd probe v4",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v4-proj-fhzg93na",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v4-proj-p9byeatg",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -420,9 +120,9 @@
     "group": ""
   },
   {
-    "id": "f77f5725427f4293af6fb3a32dc3fa8b",
+    "id": "6f44cf2431b44b1f9bdf245beff4e29f",
     "name": "__healthcheck__ rnd probe v5",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v5-proj-n6r3bml8",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v5-proj-p8_rawca",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -432,9 +132,9 @@
     "group": ""
   },
   {
-    "id": "90043a27cc394164a21af698e9bfef53",
+    "id": "cf3057571c254cd7a74935798fec70aa",
     "name": "__healthcheck__ rnd probe v6",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v6-proj-pu30s7iq",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v6-proj-jeywqh6s",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -444,9 +144,9 @@
     "group": ""
   },
   {
-    "id": "57bced2000504c60906eea6f48fc0a85",
+    "id": "de9e7b8ea33044d1acd51510cb62b72b",
     "name": "__healthcheck__ rnd probe v7",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v7-proj-tqypm9bn",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v7-proj-dbt26zkk",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -456,21 +156,21 @@
     "group": ""
   },
   {
-    "id": "56b5f5e99f374486a431c130c33f16ae",
+    "id": "fca5c5a50f9f4b34a6f99db991d6df08",
     "name": "__healthcheck__ rnd probe v8",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v8-proj-nmnqjn75",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v8-proj-f_6445w8",
     "priority": 2,
     "state": "active",
     "notes": "",
     "blurb": "R&D project managed by Anchor.",
-    "remote_url": "file:///C:/Users/john/AppData/Local/Temp/anchor-hc-v8-bare-3so9_zeo/bare.git",
+    "remote_url": "file:///C:/Users/john/AppData/Local/Temp/anchor-hc-v8-bare-3esu9fe_/bare.git",
     "auto_push": true,
     "group": ""
   },
   {
-    "id": "81d020e1b4244440a6e970f7a2502447",
+    "id": "569cd2c6d91e45c19f00648cd903390c",
     "name": "__healthcheck__ rnd probe v9",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-proj-6bojmt72",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-proj-r2r9phnx",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -480,9 +180,9 @@
     "group": ""
   },
   {
-    "id": "10511ab87ecc4a8faf24fef560859145",
+    "id": "d28c49934b9a4d038d85ba3b73059307",
     "name": "__healthcheck__ rnd probe v9 move",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-670kjyf5\\research\\tidy-proj",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-v4xmgd0g\\research\\tidy-proj",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -492,7 +192,7 @@
     "group": "research"
   },
   {
-    "id": "66ba58774b0d4036a1ec0d1e26be8040",
+    "id": "255d5286bfa949f08d2f813ed6d91c4f",
     "name": "__healthcheck__ rnd probe v9 anchor",
     "folder_path": "C:\\dev\\Anchor",
     "priority": 2,
@@ -504,9 +204,9 @@
     "group": ""
   },
   {
-    "id": "38f21465a6aa4037aa5d16d9dc40e88e",
+    "id": "258c998b35744b72ac41f968d5595a08",
     "name": "__healthcheck__ rnd probe v9 live",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-670kjyf5\\live-proj",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-v4xmgd0g\\live-proj",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -516,9 +216,9 @@
     "group": ""
   },
   {
-    "id": "5b00784f5f92413594725fb307cc1d69",
+    "id": "ba49ea530eec41d3abef219a030e9d2f",
     "name": "__healthcheck__ rnd probe v9 rb",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-670kjyf5\\rb-proj",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v9-root-v4xmgd0g\\rb-proj",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -528,9 +228,9 @@
     "group": ""
   },
   {
-    "id": "19322567441e493d89e9fdaee1d064e8",
+    "id": "d45befc250b14768ba5a7e3eb4a1be16",
     "name": "__healthcheck__ rnd probe v10",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v10-proj-uou9oepz",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v10-proj-1ob8xd7w",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -540,9 +240,9 @@
     "group": ""
   },
   {
-    "id": "beda7d5505e840688f999b96f021c084",
+    "id": "160c0ee826a2498ba8895729bdbcb84c",
     "name": "__healthcheck__ rnd probe v11",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v11-proj-3i3zma_v",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v11-proj-40eqke_g",
     "priority": 2,
     "state": "active",
     "notes": "",
@@ -552,21 +252,9 @@
     "group": ""
   },
   {
-    "id": "f133608dd23a406d8a4eaa8f3a5ee792",
+    "id": "a088f9d11764410d91870e2bdcbacd4b",
     "name": "__healthcheck__ rnd probe v11.1",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v11_1-proj-khhbc80t",
-    "priority": 2,
-    "state": "active",
-    "notes": "",
-    "blurb": "R&D project managed by Anchor.",
-    "remote_url": "",
-    "auto_push": false,
-    "group": ""
-  },
-  {
-    "id": "52ad3ddc9c314f0c930c5e939eae7c8b",
-    "name": "__healthcheck__ rnd probe v12",
-    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v12-proj-ijqxbo_k",
+    "folder_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v11_1-proj-_5enad4u",
     "priority": 2,
     "state": "active",
     "notes": "",

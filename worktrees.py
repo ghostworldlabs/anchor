@@ -122,12 +122,10 @@ def _is_git_repo(folder) -> bool:
     if not folder:
         return False
     try:
-        if not Path(folder).exists():
-            return False
+        git_dir = Path(folder) / ".git"
+        return git_dir.exists()
     except (OSError, ValueError):
         return False
-    ok, _rc, out, _err = _git(folder, ["rev-parse", "--is-inside-work-tree"])
-    return ok and out.strip() == "true"
 
 
 def _repo_for_project(project_id: str):
@@ -153,6 +151,8 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
     ``{"ok": False, "reason": ..., "detail": ...}`` (unknown project, not a git
     repo, git failure) — never raises.
     """
+    if project_id == "__dashboard__":
+        return {"ok": True, "path": str(base) if base else _paths.data_dir().parent.as_posix(), "branch": "dashboard-root"}
     folder = _repo_for_project(project_id)
     if folder is None:
         return {"ok": False, "reason": "unknown-project",

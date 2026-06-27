@@ -20,14 +20,14 @@
         "rel": "planning/calendar-v1/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor Calendar v1 — Implementation Plan (Foreman-ready)",
-        "mtime": 1782006570.8566945,
+        "mtime": 1782533628.8087673,
         "lane": "planning"
       },
       {
         "rel": "planning/calendar-v1/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor Calendar v1 — MASTER PLAN",
-        "mtime": 1782004604.188359,
+        "mtime": 1782533628.8097413,
         "lane": "planning"
       },
       {
@@ -119,6 +119,20 @@
         "kind": "plan-doc",
         "title": "Anchor R&D Surface v12 — \"Efforts\" (continuity-first single-session trio) · MASTER PLAN",
         "mtime": 1782154168.6129048,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/rnd-v13/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Anchor R&D v13 — Implementation Plan (Foreman-ready)",
+        "mtime": 1782536278.7463646,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/rnd-v13/MASTER-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Anchor R&D v13: Dashboard Polish, File Uploads & Gemini Integration",
+        "mtime": 1782533628.8124037,
         "lane": "planning"
       },
       {
@@ -232,6 +246,20 @@
         "title": "Anchor R&D Surface v9 — \"Tidy\" — Master Plan (frozen design)",
         "mtime": 1781701462.7768397,
         "lane": "planning"
+      },
+      {
+        "rel": "planning/share-distro-v1/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Shareable Anchor Distro + `/onboard` — Implementation Plan (Foreman-ready, Stage-2 Shark-converged)",
+        "mtime": 1782533628.813688,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/share-distro-v1/MASTER-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Shareable Anchor Distro + `/onboard` — MASTER PLAN (FROZEN, Shark-converged)",
+        "mtime": 1782533628.814194,
+        "lane": "planning"
       }
     ],
     "build": [
@@ -239,14 +267,14 @@
         "rel": "foreman-checkpoint.json",
         "kind": "foreman-checkpoint",
         "title": "foreman-checkpoint",
-        "mtime": 1781205907.1505444,
+        "mtime": 1782535204.7865763,
         "lane": "build"
       },
       {
         "rel": "foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1782154168.6110923,
+        "mtime": 1782533628.7902844,
         "lane": "build"
       },
       {
@@ -267,14 +295,14 @@
         "rel": "planning/calendar-v1/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Anchor Calendar v1 — Execution Log",
-        "mtime": 1782006579.8237627,
+        "mtime": 1782533628.8087673,
         "lane": "build"
       },
       {
         "rel": "planning/calendar-v1/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1782006582.0231655,
+        "mtime": 1782533628.810245,
         "lane": "build"
       },
       {
@@ -310,6 +338,13 @@
         "kind": "execlog",
         "title": "Anchor R&D Surface v12 — \"Efforts\" — Execution Log",
         "mtime": 1782154168.6110923,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/rnd-v13/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Anchor R&D Surface v13 — Dashboard Polish, File Uploads & Gemini Integration — Execution Log",
+        "mtime": 1782533628.8118904,
         "lane": "build"
       },
       {
@@ -367,6 +402,20 @@
         "title": "Anchor R&D Surface v9 — \"Tidy\" — Execution Log",
         "mtime": 1781701462.776047,
         "lane": "build"
+      },
+      {
+        "rel": "planning/share-distro-v1/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Shareable Anchor Distro + /onboard — Execution Log",
+        "mtime": 1782533628.8131852,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/share-distro-v1/foreman.config.json",
+        "kind": "foreman-config",
+        "title": "foreman.config",
+        "mtime": 1782533628.8149304,
+        "lane": "build"
       }
     ],
     "deliverables": [],
@@ -375,7 +424,7 @@
         "rel": "SAVED_FOR_LATER.md",
         "kind": "idea-doc",
         "title": "Saved for Later",
-        "mtime": 1782212405.2209165,
+        "mtime": 1782533628.778195,
         "lane": "grass"
       },
       {
@@ -383,6 +432,13 @@
         "kind": "idea-doc",
         "title": "Crucible/Foreman → Gemini adapter — scoping notes (for a future trio run)",
         "mtime": 1781026219.579206,
+        "lane": "grass"
+      },
+      {
+        "rel": "starter/SAVED_FOR_LATER.md",
+        "kind": "idea-doc",
+        "title": "Saved for Later",
+        "mtime": 1782533628.8203945,
         "lane": "grass"
       }
     ]
@@ -401,40 +457,46 @@
       "mtime": 1782239897.9019163
     },
     {
+      "rel": "gandalf/run-1782279397583/report.md",
+      "kind": "report-doc",
+      "title": "Gandalf read",
+      "mtime": 1782279397.584229
+    },
+    {
       "rel": "planning/anchor-as-app/00-PLAN.md",
       "kind": "plan-md",
       "title": "researchPrime — Phase 1 PLAN (frozen)",
-      "mtime": 1781566855.865144
+      "mtime": 1782533628.7950492
     },
     {
       "rel": "planning/anchor-as-app/00b-PLAN-mobile.md",
       "kind": "plan-md",
       "title": "researchPrime — Phase 1 PLAN addendum: iPhone / iPad (frozen)",
-      "mtime": 1781575220.486589
+      "mtime": 1782533628.7950492
     },
     {
       "rel": "planning/calendar-research/run-2026-06-15/00-PLAN.md",
       "kind": "plan-md",
       "title": "researchPrime — PLAN (frozen) · Anchor two-way calendar integration",
-      "mtime": 1781568103.377634
+      "mtime": 1782533628.7992363
     },
     {
       "rel": "planning/calendar-research/run-2026-06-17/00-PLAN.md",
       "kind": "plan-md",
       "title": "researchPrime PLAN — Anchor Calendar: best-in-class OPTIONS survey",
-      "mtime": 1781727492.4328394
+      "mtime": 1782533628.8037424
     }
   ],
   "counts": {
     "research": 0,
-    "planning": 33,
-    "build": 19,
+    "planning": 37,
+    "build": 22,
     "deliverables": 0,
-    "grass": 2,
-    "docs": 6,
-    "total": 60
+    "grass": 3,
+    "docs": 7,
+    "total": 69
   },
-  "generated_at": 1782250490.4757242,
+  "generated_at": 1782539090.6554167,
   "root": "C:\\dev\\Anchor",
   "truncated": false,
   "stage_links": [

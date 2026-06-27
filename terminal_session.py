@@ -325,6 +325,19 @@ def _resolve_grass_origin_from_chain(parent_id, parent_rec):
 _UNSET = object()
 
 
+def _resolve_engine_cmd(engine: str) -> str:
+    """Resolve the executable name for a given engine backend."""
+    if engine == _reg.BACKEND_GEMINI:
+        import shutil, os
+        if shutil.which("gemini"): return "gemini"
+        if shutil.which("agy"): return "agy"
+        agy_path = r"C:\Users\john\AppData\Local\agy\bin\agy.exe"
+        if os.path.exists(agy_path):
+            return agy_path
+        return "agy"
+    return engine
+
+
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   parent_session_id=None, paste_prompt=None, grass_origin=None,
                   effort_id=None, effort_managed=False):
@@ -442,9 +455,11 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     worktree_path = wt["path"]
     branch = wt["branch"]
 
+    cmd = _resolve_engine_cmd(backend)
+
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
     try:
-        pty_sid = _pty.start([backend], cwd=worktree_path)
+        pty_sid = _pty.start([cmd], cwd=worktree_path)
     except Exception as exc:
         # Roll back the worktree so a failed launch leaves nothing behind.
         try:
@@ -778,9 +793,11 @@ def switch_engine(session_id, engine, seed_context=None):
     except _pty.UnknownSession:
         pass
 
+    cmd = _resolve_engine_cmd(engine)
+
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
     try:
-        pty_sid = _pty.start([engine], cwd=worktree_path)
+        pty_sid = _pty.start([cmd], cwd=worktree_path)
     except Exception as exc:
         # Relaunch failed: leave the record CONSISTENT. The old PTY is already
         # reaped, so mark the session IDLE (no live process) but keep its prior

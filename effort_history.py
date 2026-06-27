@@ -2292,11 +2292,7 @@ def _git(folder: Path, *args, check=False, timeout=30) -> subprocess.CompletedPr
 
 
 def _is_git_repo(folder: Path) -> bool:
-    try:
-        r = _git(folder, "rev-parse", "--is-inside-work-tree")
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return r.returncode == 0 and r.stdout.strip() == "true"
+    return (folder / ".git").exists()
 
 
 def _is_anchor_repo(folder: Path, code: Path) -> bool:

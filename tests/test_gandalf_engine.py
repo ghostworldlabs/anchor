@@ -225,3 +225,80 @@ def test_last_balanced_json_ignores_braces_in_strings(gandalf):
 
 def test_last_balanced_json_none_on_no_object(gandalf):
     assert gandalf._last_balanced_json("no json here at all") is None
+
+
+# ── Wave 1 ContextSizer & Dynamic Router ──────────────────────────────────────
+
+def test_scan_project_context_respects_anchorignore(gandalf, tmp_path):
+    folder = tmp_path / "context_proj"
+    folder.mkdir()
+    
+    # Create some files with known content size
+    (folder / "file1.txt").write_text("12345678", encoding="utf-8") # 8 bytes
+    (folder / "file2.log").write_text("1234567890", encoding="utf-8") # 10 bytes
+    
+    # Create ignored files
+    (folder / ".git").mkdir()
+    (folder / ".git" / "gitfile").write_text("1234567890", encoding="utf-8")
+    
+    (folder / "node_modules").mkdir()
+    (folder / "node_modules" / "modfile").write_text("1234567890", encoding="utf-8")
+    
+    # Create .anchorignore
+    (folder / ".anchorignore").write_text("*.log\n# comment\n", encoding="utf-8")
+    
+    # Total non-ignored bytes = 8 bytes (file1.txt). file2.log is ignored by .anchorignore.
+    # .git/gitfile and node_modules/modfile are ignored by default skip logic.
+    val = gandalf.scan_project_context(str(folder))
+    assert val == 8 / 4.0 # 2.0
+
+
+def test_dynamic_router_overrides_when_exceeds_max(gandalf, project, monkeypatch):
+    folder, pid = project
+    
+    # Set ANCHOR_FRONTIER_MAX to a very small value to force override
+    monkeypatch.setenv("ANCHOR_FRONTIER_MAX", "1")
+    
+    # Let's inspect the launched environment in test by monkeypatching job_runner.launch
+    launched_envs = []
+    orig_launch = gandalf._jr.launch
+    def mock_launch(*args, **kwargs):
+        # Capture env
+        launched_envs.append(kwargs.get("env"))
+        return orig_launch(*args, **kwargs)
+    
+    monkeypatch.setattr(gandalf._jr, "launch", mock_launch)
+    
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is True
+    
+    assert len(launched_envs) == 1
+    env = launched_envs[0]
+    assert env is not None
+    assert env.get("GEMINI_MODEL") == "gemini-1.5-pro"
+    assert env.get("TRIO_MODEL") == "gemini-1.5-pro"
+
+
+def test_dynamic_router_no_override_under_max(gandalf, project, monkeypatch):
+    folder, pid = project
+    
+    # Set ANCHOR_FRONTIER_MAX to a very large value to prevent override
+    monkeypatch.setenv("ANCHOR_FRONTIER_MAX", "1000000")
+    
+    launched_envs = []
+    orig_launch = gandalf._jr.launch
+    def mock_launch(*args, **kwargs):
+        launched_envs.append(kwargs.get("env"))
+        return orig_launch(*args, **kwargs)
+        
+    monkeypatch.setattr(gandalf._jr, "launch", mock_launch)
+    
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is True
+    
+    assert len(launched_envs) == 1
+    env = launched_envs[0]
+    if env is not None:
+        assert env.get("GEMINI_MODEL") is None
+        assert env.get("TRIO_MODEL") is None
+

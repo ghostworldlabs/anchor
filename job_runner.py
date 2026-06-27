@@ -58,11 +58,11 @@ RUNNER_CMD_ENV = "ANCHOR_RUNNER_CMD"
 #: prompt + output-dir + permission flags appropriate to the lane (research is
 #: non-gated and takes the prompt on argv; plan/build are gated and take the
 #: prompt as a stream-json user message on stdin).
+#: prompt as a stream-json user message on stdin).
 DEFAULT_RUNNER_CMD = "claude -p --output-format stream-json"
 
-#: Engine backends. Claude is the default and runs on all lanes; Gemini is a
-#: portable read-only engine offered ONLY for the research lane (policy enforced
-#: in ``lanes.launch_lane``). The runner command for each is resolved by
+#: Engine backends. Claude is the default for all core tasks. Gemini is supported
+#: via the Gandalf architecture integration (or specifically configured lanes). The runner command for each is resolved by
 #: :func:`resolve_runner_cmd`. ``ANCHOR_RUNNER_CMD`` (the test indirection point)
 #: ALWAYS wins, regardless of backend, so the mock runner drives every test.
 BACKEND_CLAUDE = "claude"

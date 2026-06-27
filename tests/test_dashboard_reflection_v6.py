@@ -273,11 +273,13 @@ def server(env):
         srv.shutdown(); srv.server_close(); t.join(timeout=5)
 
 
-def test_home_dashboard_reflects_activity_and_refreshes_in_place(server, tmp_path):
+def test_home_dashboard_reflects_activity_and_refreshes_in_place(server, tmp_path, monkeypatch):
     """Real browser: the home R&D row shows the objective + running/activity
     reflection (not just a dot); then a background summary update + a
     projects_html refresh updates the row in place; no JS console errors. Saves
     _devtest/wave7_dashboard.png for orchestrator review."""
+    import terminal_session as ts
+    monkeypatch.setattr(ts, "reconcile_and_advance", lambda *args, **kwargs: {})
     pytest.importorskip("playwright.sync_api")
     (gui, rnd, summ, sreg), base, _ = server
     folder = tmp_path / "Live"

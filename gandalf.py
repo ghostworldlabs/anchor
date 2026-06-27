@@ -41,6 +41,7 @@ with ``GANDALF_INDEX_SCHEMA_VERSION``, written under ``paths.WRITE_LOCK``.
 Stdlib only. No third-party imports.
 """
 
+import fnmatch
 import json
 import os
 import subprocess
@@ -106,6 +107,90 @@ _REQUIRED_TOP_KEYS = (
 
 #: How many bytes of SKILL.md to embed in the Stage-A prompt (bounded).
 _MAX_SKILL_BYTES = 64 * 1024
+
+
+# ── ContextSizer / Ignore Helpers (Wave 1) ──────────────────────────────────
+
+def _load_anchorignore(folder_path) -> list:
+    """Read .anchorignore patterns if present."""
+    ignore_path = Path(folder_path) / ".anchorignore"
+    patterns = []
+    if ignore_path.is_file():
+        try:
+            with open(ignore_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+        except OSError:
+            pass
+    return patterns
+
+
+def _should_ignore(rel_path: Path, patterns: list) -> bool:
+    """Determine if a relative path matches any ignore pattern or standard skip dirs."""
+    parts_lower = [p.lower() for p in rel_path.parts]
+    for skip in {".git", ".anchor", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache", ".anchorignore", "gandalf"}:
+        if skip in parts_lower:
+            return True
+
+    rel_str = rel_path.as_posix()
+    rel_str_lower = rel_str.lower()
+
+    for pattern in patterns:
+        clean_pat = pattern.rstrip('/')
+        clean_pat_lower = clean_pat.lower()
+
+        # Check components of the path
+        for part in rel_path.parts:
+            part_lower = part.lower()
+            if fnmatch.fnmatch(part, clean_pat) or fnmatch.fnmatch(part_lower, clean_pat_lower):
+                return True
+
+        # Check full relative path
+        if fnmatch.fnmatch(rel_str, clean_pat) or fnmatch.fnmatch(rel_str_lower, clean_pat_lower):
+            return True
+        if fnmatch.fnmatch(rel_str, pattern) or fnmatch.fnmatch(rel_str_lower, pattern.lower()):
+            return True
+
+    return False
+
+
+def scan_project_context(folder_path) -> float:
+    """Recursively scan the directory (respecting .anchorignore) and compute total_bytes / 4."""
+    root = Path(folder_path).resolve()
+    if not root.is_dir():
+        return 0.0
+
+    patterns = _load_anchorignore(folder_path)
+    total_bytes = 0
+
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        try:
+            rel_dirpath = Path(dirpath).resolve().relative_to(root)
+        except (ValueError, OSError):
+            continue
+
+        # Prune directories in-place
+        keep_dirs = []
+        for d in dirnames:
+            rel_d = rel_dirpath / d
+            if not _should_ignore(rel_d, patterns):
+                keep_dirs.append(d)
+        dirnames[:] = keep_dirs
+
+        for fname in filenames:
+            rel_file = rel_dirpath / fname
+            if _should_ignore(rel_file, patterns):
+                continue
+
+            fpath = Path(dirpath) / fname
+            try:
+                total_bytes += fpath.stat().st_size
+            except OSError:
+                pass
+
+    return total_bytes / 4.0
 
 
 # ── Path helpers ─────────────────────────────────────────────────────────────
@@ -483,7 +568,7 @@ def _add_gitignore_best_effort(folder_path) -> None:
 
 # ── Public engine ────────────────────────────────────────────────────────────
 
-def run_gandalf(folder_path, project_id, *, force=False, env=None) -> dict:
+def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None) -> dict:
     """Run one full two-stage Gandalf analysis and store the result.
 
     Stage A (model, through ``ANCHOR_RUNNER_CMD``) → the RAW draft → Stage B (the
@@ -504,9 +589,25 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None) -> dict:
     run_id = "run-" + str(int(ts * 1000))
     run_rel = f"{GANDALF_DIRNAME}/{run_id}"
 
-    draft, reason = _run_stage_a(folder, env=env)
+    if status_cb: status_cb("Reading files (Stage A)...")
+
+    # Wave 1: ContextSizer & Dynamic Router
+    context_size = scan_project_context(folder)
+    frontier_max_str = os.environ.get("ANCHOR_FRONTIER_MAX", "100000").strip()
+    try:
+        frontier_max = float(frontier_max_str)
+    except ValueError:
+        frontier_max = 100000.0
+
+    actual_env = dict(env) if env is not None else {}
+    if context_size > frontier_max:
+        actual_env["GEMINI_MODEL"] = "gemini-1.5-pro"
+        actual_env["TRIO_MODEL"] = "gemini-1.5-pro"
+
+    draft, reason = _run_stage_a(folder, env=actual_env)
     graded = None
     if draft is not None:
+        if status_cb: status_cb("Synthesizing (Stage B)...")
         graded, reason = _run_stage_b(draft)
 
     ok = graded is not None
@@ -568,7 +669,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None) -> dict:
     return out
 
 
-def run_gandalf_if_absent(folder_path, project_id, env=None) -> dict:
+def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None) -> dict:
     """First-scan idempotent: run Gandalf ONLY if no prior run exists.
 
     Returns ``{ok:True, skipped:True}`` when a prior run is present (no model
@@ -579,7 +680,7 @@ def run_gandalf_if_absent(folder_path, project_id, env=None) -> dict:
             return {"ok": True, "skipped": True, "reason": "prior-run-exists"}
     except Exception:
         pass
-    return run_gandalf(folder_path, project_id, env=env)
+    return run_gandalf(folder_path, project_id, env=env, status_cb=status_cb)
 
 
 # ── Read seams (SAFE projections — never absolute paths) ─────────────────────

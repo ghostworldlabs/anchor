@@ -722,6 +722,8 @@ _BRAND_CONTENT_TYPES = {
     ".svg": "image/svg+xml",
     ".png": "image/png",
     ".ico": "image/x-icon",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
 }
 
 
@@ -997,12 +999,11 @@ def _trigger_project_summary(folder_path, project_id, force: bool = False):
 # Per-project locks/guards live in-process (a server owns its subprocess jobs).
 # ``_GANDALF_FIRSTSCAN_LOCKS`` serializes the first-scan check-and-set so two
 # concurrent rescans can't both schedule the first run (TOCTOU double-fire).
-# ``_GANDALF_INFLIGHT`` tracks projects with a scheduled-but-not-finished run so
-# the manual endpoint won't pile up duplicate runs. Both keyed by project_id.
+# Track in-flight Gandalf runs per-project to prevent duplicates and expose status.
 _GANDALF_LOCKS_GUARD = threading.Lock()
 _GANDALF_FIRSTSCAN_LOCKS = {}
-_GANDALF_INFLIGHT = set()
 _GANDALF_INFLIGHT_GUARD = threading.Lock()
+_GANDALF_INFLIGHT = {}
 
 
 def _gandalf_firstscan_lock(project_id):
@@ -1047,30 +1048,34 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
     with _GANDALF_INFLIGHT_GUARD:
         if project_id in _GANDALF_INFLIGHT:
             return False
-        _GANDALF_INFLIGHT.add(project_id)
+        _GANDALF_INFLIGHT[project_id] = "Starting..."
 
     runner_env = _gandalf_runner_env()
 
     def _run():
+        def _cb(msg):
+            with _GANDALF_INFLIGHT_GUARD:
+                if project_id in _GANDALF_INFLIGHT:
+                    _GANDALF_INFLIGHT[project_id] = msg
         try:
             if first_scan:
                 _gandalf.run_gandalf_if_absent(folder_path, project_id,
-                                               env=(runner_env or None))
+                                               env=(runner_env or None), status_cb=_cb)
             else:
                 _gandalf.run_gandalf(folder_path, project_id,
-                                     env=(runner_env or None))
+                                     env=(runner_env or None), status_cb=_cb)
         except Exception:
             pass
         finally:
             with _GANDALF_INFLIGHT_GUARD:
-                _GANDALF_INFLIGHT.discard(project_id)
+                _GANDALF_INFLIGHT.pop(project_id, None)
 
     try:
         threading.Thread(target=_run, daemon=True).start()
         return True
     except Exception:
         with _GANDALF_INFLIGHT_GUARD:
-            _GANDALF_INFLIGHT.discard(project_id)
+            _GANDALF_INFLIGHT.pop(project_id, None)
         return False
 
 
@@ -2864,7 +2869,7 @@ def _render_kanban_html(folder_path, project_id):
             cards = _render_lane_sessions(
                 session_views, store_lane, project_id, trio_lane, folder_path)
         # The "+ new <lane>" launcher. Research offers an engine choice (Claude
-        # default + Gemini); plan/build are Claude-only via the seeded ConPTY path
+        # default + Gemini); plan/build default to Gemini via the seeded ConPTY path
         # (newTermSession → term_start → terminal_session.start_session);
         # deliverables are config-driven (no launch); grass gets manual add +
         # promote-from-INBOX.
@@ -2879,8 +2884,8 @@ def _render_kanban_html(folder_path, project_id):
             )
         elif trio_lane == "research":
             add = (
-                "<span class='addnew' onclick=\"newTermSession('research','claude')\">"
-                "+ New research run (Claude)</span> "
+                "<span class='addnew' onclick=\"newTermSession('research','gemini')\">"
+                "+ New research run (Gemini)</span> "
                 "<span class='addnew' onclick=\"newTermSession('research','gemini')\">"
                 "Gemini</span>"
             )
@@ -3564,6 +3569,7 @@ def _render_layoutd_dock_html() -> str:
         "<div class='dbar'>"
         "<span class='dot grey' id='dockDot'></span>"
         "<span class='dtitle' id='dockTitle'>Effort</span>"
+        "<span id='dockEngTog' style='margin-left:8px;'></span>"
         # The 3-node stage track (filled by JS from current_stage — EV-2).
         "<span class='track' id='dockTrack'></span>"
         "<span class='dockrun' id='dockRun' style='display:none;font-size:11px;"
@@ -3958,24 +3964,13 @@ def render_project_window_html(project_id: str) -> str:
     time rollup. Returns a standalone HTML page; all engine/user content is
     HTML-escaped (XSS-safe).
     """
-    if project_id == "__dashboard__":
-        entry = {
-            "id": "__dashboard__",
-            "name": "Dashboard Workbench",
-            "folder_path": str(ANCHOR_DIR / "dev"),
-            "state": "active",
-            "priority": 1,
-            "domain": "personal",
-            "notes": "Global general terminal and grasscatcher."
-        }
-    else:
-        entry = _rnd.get_project(project_id)
-        if entry is None:
-            return ("<!doctype html><html><head><meta charset='utf-8'>"
-                    "<title>Project not found</title></head><body>"
-                    "<h1>Project not found</h1>"
-                    f"<p>No R&amp;D project with id "
-                    f"{html_lib.escape(project_id)}.</p>"
+    entry = _rnd.get_project(project_id)
+    if entry is None:
+        return ("<!doctype html><html><head><meta charset='utf-8'>"
+                "<title>Project not found</title></head><body>"
+                "<h1>Project not found</h1>"
+                f"<p>No R&amp;D project with id "
+                f"{html_lib.escape(project_id)}.</p>"
                     "<p><a href='/'>&larr; Back to dashboard</a></p>"
                     "</body></html>")
         # Surface path-missing on read.
@@ -4022,6 +4017,11 @@ def render_project_window_html(project_id: str) -> str:
     is_active = state_raw in ("active", "path-missing")
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
+    
+    upload_id = f"upload_{project_id}"
+    upload_btn = (f"<label class='rnd-mini' style='cursor:pointer; display:inline-block' title='Upload a file to this project folder'>&#8673; Upload"
+                  f"<input type='file' id='{upload_id}' style='display:none' onchange=\"handleGlobalUpload('{upload_id}', '{pid_attr}')\" /></label>")
+
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
                   f"title='Re-scan the folder for trio artifacts'>Rescan</button>")
@@ -4030,6 +4030,7 @@ def render_project_window_html(project_id: str) -> str:
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
             f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
             f"{rescan_btn}"
+            f"{upload_btn}"
             f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
             f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
@@ -4039,6 +4040,7 @@ def render_project_window_html(project_id: str) -> str:
         lifecycle = (
             f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
             f"{rescan_btn}"
+            f"{upload_btn}"
             f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
             f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
         )
@@ -4908,7 +4910,7 @@ def render_project_window_html(project_id: str) -> str:
         "min-width:92px}"
         ".dock .dock-term-host .ro-note{color:var(--text-dim);font-size:11.5px}"
         "</style></head><body>"
-        f"<p><a href='/'>&larr; Back to dashboard</a></p>"
+        f"{'' if project_id == '__dashboard__' else '<p><a href=\\"/\\">&larr; Back to dashboard</a></p>'}"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
         # ── Lifecycle header ──
         "<div class='dhead'>"
@@ -5039,7 +5041,8 @@ def render_project_window_html(project_id: str) -> str:
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
-        "<script>" + cache_bust_script() + "</script>"
+        "<script>" + cache_bust_script() + "</script>\n"
+        + (f"<script>window.addEventListener('DOMContentLoaded', function() {{ setTimeout(function() {{ var sid = {json.dumps([s['session_id'] for s in _sessreg.list_sessions(project_id) if s.get('lane') == 'general' and s.get('status') == 'running'][:1])}; if (sid.length > 0) {{ openEffortDock(sid[0], null); }} else {{ var btn = document.getElementById('openTermBtn'); if (btn) btn.click(); }} }}, 300); }});</script>" if project_id == "__dashboard__" else "") +
         "</body></html>"
     )
 
@@ -5407,7 +5410,7 @@ async function promoteGrass(ideaId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'gemini',
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -5658,7 +5661,11 @@ var _gandalfPolling = false;
 function gandalfRun(pid) {
   pid = pid || PROJECT_ID;
   var btns = document.querySelectorAll('#gandalfPanel .gandalf-run');
-  for (var i = 0; i < btns.length; i++) { btns[i].disabled = true; }
+  for (var i = 0; i < btns.length; i++) { 
+    btns[i].disabled = true;
+    btns[i].setAttribute('data-og', btns[i].textContent);
+    btns[i].textContent = 'Running...';
+  }
   var before = _gandalfRunCount();
   _postJson('/api/rnd/gandalf_run', {project_id: pid}).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (data) {
@@ -5680,20 +5687,34 @@ function _gandalfRunCount() {
   return document.querySelectorAll('#gandalfPanel .grun').length;
 }
 function _gandalfReenable(btns) {
-  for (var i = 0; i < btns.length; i++) { btns[i].disabled = false; }
+  for (var i = 0; i < btns.length; i++) { 
+    btns[i].disabled = false;
+    var og = btns[i].getAttribute('data-og');
+    if (og) btns[i].textContent = og;
+  }
 }
 function _gandalfPollForNew(pid, before, btns, tries) {
-  if (tries > 60) { _gandalfReenable(btns); return; }
+  if (tries > 240) { _gandalfReenable(btns); return; } // up to 2 mins
   _gandalfPolling = true;
-  fetch('/api/rnd/gandalf?project_id=' + encodeURIComponent(pid) + _tokenQ(),
+  fetch('/api/rnd/gandalf_status?project_id=' + encodeURIComponent(pid) + _tokenQ(),
         _jsonHdrs()).then(function (r) {
     return r.json();
   }).then(function (data) {
-    var runs = (data && data.runs) || [];
-    if (runs.length > before) {
-      _gandalfRenderRuns(runs);
-      _gandalfPolling = false;
+    var status = data && data.status;
+    if (!status) {
+      // Run finished. Fetch runs to update UI.
+      fetch('/api/rnd/gandalf?project_id=' + encodeURIComponent(pid) + _tokenQ(),
+            _jsonHdrs()).then(r => r.json()).then(gdata => {
+        var runs = (gdata && gdata.runs) || [];
+        _gandalfRenderRuns(runs);
+        _gandalfPolling = false;
+      }).catch(() => { _gandalfPolling = false; _gandalfReenable(btns); });
       return;
+    }
+    var dots = ".".repeat((tries % 3) + 1);
+    for (var i = 0; i < btns.length; i++) {
+        if (!btns[i].getAttribute('data-og')) btns[i].setAttribute('data-og', btns[i].textContent);
+        btns[i].textContent = status + dots;
     }
     setTimeout(function () {
       _gandalfPollForNew(pid, before, btns, tries + 1);
@@ -5806,7 +5827,7 @@ function _gandalfRunHtml(r) {
 // Tabs + search scope the left list; selecting a .gli loads the right workbench;
 // Develop starts a SEEDED live session in the workbench terminal; a saved
 // refinement appears in the history (grass-<id>/dev-N) and is pullable.
-var _grassEngine = 'claude';   // workbench engine toggle (research can use gemini)
+var _grassEngine = 'gemini';   // workbench engine toggle (research can use gemini)
 var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
 var _grassDevSession = null;    // the active Develop session id (for Save refinement)
 // v10 Wave 3 — per-(idea,lane) develop session id, so each of the TWO terminal
@@ -7169,9 +7190,9 @@ function openLinkedPlanning(ev, planningSid) {
 }
 
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
-// then refresh the bar and open its inline panel. backend defaults to claude.
+// then refresh the bar and open its inline panel. backend defaults to gemini.
 async function newTermSession(lane, backend, opts) {
-  backend = backend || 'claude';
+  backend = backend || 'gemini';
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
   // Wave 6 seam: a seed hint (the source session id) rides into term_start so
   // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
@@ -7299,7 +7320,7 @@ function openPanel(sessionId) {
   sp.className = 'sp';
   // Per-session engine toggle (◆ Claude / ✦ Gemini). Chosen once; flipping POSTs
   // term_set_engine to relaunch this LIVE session on the other engine in the same
-  // worktree. Research can switch freely; plan/build stay Claude-only (the server
+  // worktree. Research can switch freely; plan/build allow Gemini (the server
   // also enforces this). Historical/non-live sessions have no process to switch,
   // so the toggle is omitted there.
   var engEl = null;
@@ -7733,11 +7754,11 @@ function _cssEsc(s) {
 }
 
 // _buildEngineToggle(sessionId, s): the ◆ Claude / ✦ Gemini toggle for the panel
-// bar. The currently-selected engine (s.backend, default claude) is highlighted;
+// bar. The currently-selected engine (s.backend, default gemini) is highlighted;
 // clicking the OTHER engine POSTs term_set_engine (relaunch in the same worktree)
 // and updates the record + toggle on success. Returns the .engtog element.
 function _buildEngineToggle(sessionId, s) {
-  var cur = (s && s.backend) || 'claude';
+  var cur = (s && s.backend) || 'gemini';
   var tog = document.createElement('span');
   tog.className = 'engtog';
   tog.title = 'Chosen once; flip to switch this session to the other engine.';
@@ -7760,7 +7781,7 @@ function _buildEngineToggle(sessionId, s) {
 // setSessionEngine(sessionId, engine, tog): flip a LIVE session to the other
 // engine via /api/rnd/term_set_engine (relaunch in the same worktree). On success
 // update the MANAGED record + the toggle's on-state; on refusal (e.g. plan/build
-// is Claude-only) alert and leave the toggle unchanged.
+// is invalid) alert and leave the toggle unchanged.
 async function setSessionEngine(sessionId, engine, tog) {
   var r, data;
   try {
@@ -7817,7 +7838,18 @@ async function switchTerminalEngine(sessionId, engine, tog) {
     }
   }
   // Re-sync the registry shortly (the relaunch mints a fresh PTY in the worktree).
-  setTimeout(repopulate, 600);
+  setTimeout(function() {
+    if (typeof DOCK !== 'undefined' && DOCK && DOCK.session_id === sessionId) {
+      openEffortDock(sessionId);
+    } else {
+      var w = PANELS[sessionId];
+      if (w && w.body) {
+        _closePanel(sessionId);
+        setTimeout(function() { openPanel(sessionId); }, 100);
+      }
+    }
+    repopulate();
+  }, 600);
 }
 
 // _mountReadOnlyBody (v5 Wave 2): a NON-live (done/historical) session has no
@@ -7945,7 +7977,7 @@ async function continueSession(sessionId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'gemini',
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -8005,7 +8037,7 @@ async function advanceSession(sourceId, toLane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'gemini',
     status: rec.status || 'running', label: rec.label || '',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || sourceId,
     idx: (_laneCounters[rec.lane || toLane] = (_laneCounters[rec.lane || toLane] || 0) + 1)
@@ -8551,7 +8583,7 @@ function _addAutoBuildTile(rec) {
   var sid = rec.session_id;
   var lane = rec.lane || 'build';
   MANAGED[sid] = {
-    session_id: sid, lane: lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: lane, backend: rec.backend || 'gemini',
     status: rec.status || 'running', label: rec.label || 'auto · from plan',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || '',
     auto_from_plan: true,
@@ -8806,6 +8838,11 @@ function _loadDockMetrics(effortId) {
 function openEffortDock(sessionId, tile) {
   var dock = _dockEl();
   if (!dock) return;
+  try {
+    if (window.parent && window.parent.document.getElementById('dashboard-workbench-details')) {
+      window.parent.document.getElementById('dashboard-workbench-details').open = true;
+    }
+  } catch(e) {}
   tile = tile || document.querySelector(
     '.tile[data-session="' + _cssEsc(sessionId) + '"]');
   var lane = (tile && tile.getAttribute('data-lane')) || '';
@@ -8842,6 +8879,11 @@ function openEffortDock(sessionId, tile) {
     var skl = _skillForLane(lane);
     titleEl.textContent = (s.label && s.label.trim())
       ? s.label : ((lane || 'effort') + (skl ? ' · ' + skl : ''));
+  }
+  var engEl = document.getElementById('dockEngTog');
+  if (engEl) {
+    engEl.innerHTML = '';
+    if (live) engEl.appendChild(_buildEngineToggle(sessionId, s));
   }
   var runEl = document.getElementById('dockRun');
   if (runEl) runEl.style.display = (status === 'running') ? '' : 'none';
@@ -9136,7 +9178,7 @@ async function newEffort(stage) {
   // lane name mirrors the stage (term_start accepts both 'plan' and 'planning').
   var lane = (stage === 'plan') ? 'plan'
            : (stage === 'build') ? 'build' : 'research';
-  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'claude',
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'gemini',
                  effort_managed: true};
   var r, data;
   try {
@@ -9214,7 +9256,7 @@ async function handleGlobalUpload(inputId, projectId) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Anchor-Token": window.localStorage.getItem('anchorToken') || ''
+        "X-Anchor-Token": _anchorToken()
       },
       body: JSON.stringify(body)
     });
@@ -10974,7 +11016,6 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
-          <a class="btn btn-sm" href="/project/__dashboard__" style="font-size:11px;padding:4px 10px;background:var(--surface2);text-decoration:none;color:var(--text)">&#128421; Dashboard Workbench</a>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -11018,6 +11059,19 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
         {"".join(top_task_row(t) for t in top_tasks)}
       </div>
+
+      <!-- Dashboard Workbench Tile -->
+      <!-- Dashboard Workbench Tile -->
+      <details id="dashboard-workbench-details" style="margin: 20px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface);">
+        <summary style="padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; list-style: none;">
+          <span class="rnd-dot rnd-active" aria-hidden="true" style="margin:0; width:10px; height:10px; background:var(--accent); border-radius:50%; display:inline-block;"></span>
+          &#128421; Dashboard Workbench
+          <span style="color: var(--text-dim); margin-left: auto; font-size: 12px;">&#9662; Click to expand</span>
+        </summary>
+        <div style="border-top: 1px solid var(--border); background: var(--bg);">
+          <iframe src="/project/__dashboard__" style="width:100%; height:1100px; border:none; border-bottom-left-radius:6px; border-bottom-right-radius:6px; display:block;"></iframe>
+        </div>
+      </details>
 
       <!-- R&D Projects (home dashboard section) -->
       <div class="section-header" style="display:flex;align-items:center;gap:8px">
@@ -12235,32 +12289,32 @@ function rndFolderInit() {{
 window.addEventListener('DOMContentLoaded', rndFolderInit);
 
 // --- Wave 2: File Upload (Dashboard) ---
-async function handleGlobalUpload(inputId, projectId) {
+async function handleGlobalUpload(inputId, projectId) {{
   var input = document.getElementById(inputId);
   if (!input || !input.files || input.files.length === 0) return;
   var file = input.files[0];
   var reader = new FileReader();
-  reader.onload = async function() {
+  reader.onload = async function() {{
     var base64 = reader.result.split(',')[1];
-    var body = { filename: file.name, content_b64: base64, project_id: projectId };
-    var res = await fetch("/api/upload", {
+    var body = {{ filename: file.name, content_b64: base64, project_id: projectId }};
+    var res = await fetch("/api/upload", {{
       method: "POST",
-      headers: {
+      headers: {{
         "Content-Type": "application/json",
-        "X-Anchor-Token": window.localStorage.getItem('anchorToken') || ''
-      },
+        "X-Anchor-Token": _anchorToken()
+      }},
       body: JSON.stringify(body)
-    });
-    if (res.ok) {
+    }});
+    if (res.ok) {{
       alert("Uploaded successfully: " + file.name);
       input.value = "";
-    } else {
+    }} else {{
       var data = await res.json();
       alert("Upload failed: " + (data.error || "Unknown error"));
-    }
-  };
+    }}
+  }};
   reader.readAsDataURL(file);
-}
+}}
 
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
@@ -13256,6 +13310,20 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             runs = []
                         self._send_json({"ok": True, "runs": runs})
+            elif self.path.startswith("/api/rnd/gandalf_status"):
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                pid = (q.get("project_id", [""])[0]
+                       or q.get("pid", [""])[0]
+                       or q.get("id", [""])[0] or "").strip()
+                if not pid:
+                    self._send_json({"ok": False, "error": "project_id required"}, 400)
+                else:
+                    with _GANDALF_INFLIGHT_GUARD:
+                        status = _GANDALF_INFLIGHT.get(pid, None)
+                    self._send_json({"ok": True, "status": status})
             elif self.path.startswith("/api/rnd/boneyard"):
                 # Read-only (v10 Wave 7): the project's per-project Boneyard — a
                 # searchable list of DISCARDED material (hard-killed sessions w/
@@ -13749,7 +13817,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if project_id == "__dashboard__" or project_id == "dev" or not project_id:
                     upload_dir = ANCHOR_DIR / "dev"
                 else:
-                    upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
+                    entry = _rnd.get_project(project_id)
+                    if entry and entry.get("folder_path"):
+                        upload_dir = Path(entry["folder_path"])
+                    else:
+                        upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
                     
                 upload_dir.mkdir(parents=True, exist_ok=True)
                 dest_path = upload_dir / filename
@@ -14514,7 +14586,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": True, "session": rec})
 
         elif self.path == "/api/rnd/switch_terminal_engine":
-            # Wave 4: toggle engine (Claude ↔ Gemini) with graceful suspension and summary context handoff.
+            # Wave 4: toggle engine (Gemini ↔ Claude) with graceful suspension and summary context handoff.
             # Token-gated by the do_POST middleware above.
             session = (body.get("session", "") or body.get("session_id", "") or "").strip()
             engine = (body.get("engine", "") or "").strip()
