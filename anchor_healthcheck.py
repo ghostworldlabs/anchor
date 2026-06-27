@@ -4715,7 +4715,7 @@ def cleanup_stale_processes(report: Report):
             ps_cmd = f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue).StartTime.ToString('o')"
             r = subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, creationflags=getattr(__import__('subprocess'), 'CREATE_NO_WINDOW', 0),
             )
             start_str = r.stdout.strip()
             if not start_str:

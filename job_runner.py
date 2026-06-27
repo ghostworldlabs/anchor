@@ -340,13 +340,18 @@ def _build_gemini_argv(prompt, output_dir, gated) -> list:
     the skill write its report; ``plan`` is read-only and would block it), and
     ``--include-directories <dir>`` (NOT ``--output-dir``) to grant access to the
     output dir.
-
-    Gemini is research-only (non-gated) per policy, so there is no gated branch.
     """
-    argv = ["gemini", "--skip-trust", "-p"]
-    if prompt:
-        argv.append(prompt)
-    argv += ["--output-format", "stream-json", "--approval-mode", "auto_edit"]
+    argv = ["gemini", "--skip-trust"]
+    if gated:
+        argv += ["-p", " "]
+        argv += ["--approval-mode", "plan" if gated == "plan" else "auto_edit"]
+    else:
+        argv += ["-p"]
+        if prompt:
+            argv.append(prompt)
+        argv += ["--approval-mode", "auto_edit"]
+
+    argv += ["--output-format", "stream-json"]
     if output_dir:
         argv += ["--include-directories", str(output_dir)]
     return argv
@@ -383,11 +388,6 @@ def resolve_runner_cmd(extra_args=None, backend=DEFAULT_BACKEND,
        supplied (e.g. an engine-selector test inspecting only the command SHAPE),
        fall back to the per-backend default command constant so its shape is
        observable. ``extra_args`` are appended in both sub-cases.
-
-    Rationale for the shape: the dead flags ``--skill``/``--output-dir``/
-    ``--prompt-seed`` are GONE (they are not real CLI flags — that was the bug).
-    A research lane delivers its natural-language seed as the prompt; a gated
-    lane delivers it on stdin (see :func:`build_backend_argv`).
     """
     override = os.environ.get(RUNNER_CMD_ENV)
     if override and override.strip():
@@ -481,6 +481,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
                               permission_mode=permission_mode)
 
     full_env = dict(os.environ)
+    if backend == BACKEND_GEMINI:
+        full_env["TRIO_DRIVER"] = "gemini-cli-native"
     if env:
         full_env.update(env)
 
@@ -634,13 +636,17 @@ def _parse_result_envelope(line: str):
     else (plain content lines) is ignored cheaply.
     """
     s = line.strip()
-    if not s.startswith("{") or '"result"' not in s:
+    if not s.startswith("{"):
+        return None
+    if '"result"' not in s and '"stats"' not in s:
         return None
     try:
         obj = json.loads(s)
     except (json.JSONDecodeError, ValueError):
         return None
-    if not isinstance(obj, dict) or obj.get("type") != "result":
+    if not isinstance(obj, dict):
+        return None
+    if obj.get("type") != "result" and "stats" not in obj:
         return None
     return obj
 
@@ -655,6 +661,28 @@ def _cost_from_envelope(env: dict) -> dict:
     usage = env.get("usage") or {}
     inp = usage.get("input_tokens") or 0
     out = usage.get("output_tokens") or 0
+
+    # Gemini stats parsing
+    stats = env.get("stats") or {}
+    models = stats.get("models") or {}
+    if models:
+        for model_name, model_stats in models.items():
+            if not isinstance(model_stats, dict):
+                continue
+            tokens = model_stats.get("tokens") or {}
+            inp_val = tokens.get("input") or tokens.get("prompt")
+            if inp_val is not None:
+                inp = inp_val
+            out_val = tokens.get("candidates")
+            if out_val is not None:
+                out = out_val
+
+            api = model_stats.get("api") or {}
+            latency = api.get("totalLatencyMs")
+            if latency is not None:
+                env["duration_ms"] = latency
+            break
+
     try:
         inp = int(inp)
     except (TypeError, ValueError):

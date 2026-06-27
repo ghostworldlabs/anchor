@@ -33,6 +33,48 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+import subprocess
+if sys.platform == "win32":
+    _orig_run = getattr(subprocess, "run", None)
+    _orig_popen = subprocess.Popen
+    _orig_check_output = getattr(subprocess, "check_output", None)
+    _orig_call = getattr(subprocess, "call", None)
+    _orig_check_call = getattr(subprocess, "check_call", None)
+
+    def _inject(kwargs):
+        if "creationflags" not in kwargs:
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+    def _patched_run(*args, **kwargs):
+        _inject(kwargs)
+        return _orig_run(*args, **kwargs)
+
+    class _PatchedPopen(_orig_popen):
+        def __init__(self, *args, **kwargs):
+            _inject(kwargs)
+            super().__init__(*args, **kwargs)
+
+    def _patched_check_output(*args, **kwargs):
+        _inject(kwargs)
+        return _orig_check_output(*args, **kwargs)
+
+    def _patched_call(*args, **kwargs):
+        _inject(kwargs)
+        return _orig_call(*args, **kwargs)
+
+    def _patched_check_call(*args, **kwargs):
+        _inject(kwargs)
+        return _orig_check_call(*args, **kwargs)
+
+    if _orig_run:
+        subprocess.run = _patched_run
+    subprocess.Popen = _PatchedPopen
+    if _orig_check_output:
+        subprocess.check_output = _patched_check_output
+    if _orig_call:
+        subprocess.call = _patched_call
+    if _orig_check_call:
+        subprocess.check_call = _patched_check_call
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Benign daemon-thread teardown classifier
@@ -210,6 +252,16 @@ def _reap_leaked_streams_and_servers():
                       and _looks_like_server_or_stream(t)]
             if leaked:
                 _best_effort_stop_servers(leaked)
+
+            # Wait for any leaked background summarize_session threads to finish
+            # before the next test starts, to prevent their subprocesses from
+            # inheriting the next test's monkeypatched STUB_SUMMARIZER_COUNTER.
+            for t in after:
+                if t not in before and t.is_alive():
+                    qual = getattr(getattr(t, "_target", None), "__qualname__", "")
+                    if "summarize_session" in qual:
+                        t.join(timeout=5.0)
+
             # Reset the shared live tables regardless of detected leaks — a
             # cheap idempotent guard against cross-test session/port bleed.
             _best_effort_reset_live_tables()

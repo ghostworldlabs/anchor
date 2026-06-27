@@ -101,6 +101,22 @@ def _drop_stdin_sink(job_id: str) -> None:
 
 # ── Parsing: stream-json AskUserQuestion → prompt-box record ─────────────────
 
+def _find_ask_user_question(obj):
+    found = []
+    if isinstance(obj, dict):
+        if obj.get("name") == "AskUserQuestion":
+            found.append(obj)
+        elif isinstance(obj.get("function"), dict) and obj["function"].get("name") == "AskUserQuestion":
+            found.append(obj)
+        else:
+            for v in obj.values():
+                found.extend(_find_ask_user_question(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_find_ask_user_question(item))
+    return found
+
+
 def parse_event(event) -> list:
     """Parse one stream-json event (dict or JSON str) → prompt-box records.
 
@@ -134,23 +150,25 @@ def parse_event(event) -> list:
             return []
     if not isinstance(event, dict):
         return []
-    if event.get("type") != "assistant":
-        return []
-    message = event.get("message") or {}
-    content = message.get("content")
-    if not isinstance(content, list):
-        return []
 
     records = []
-    for block in content:
-        if not isinstance(block, dict):
+    blocks = _find_ask_user_question(event)
+    for block in blocks:
+        tool_use_id = block.get("id") or block.get("tool_use_id")
+        input_data = block.get("input") or block.get("args") or block.get("arguments")
+        if not input_data and isinstance(block.get("function"), dict):
+            input_data = block["function"].get("arguments")
+        
+        if isinstance(input_data, str):
+            try:
+                input_data = json.loads(input_data)
+            except Exception:
+                pass
+                
+        if not isinstance(input_data, dict):
             continue
-        if block.get("type") != "tool_use":
-            continue
-        if block.get("name") != ASK_TOOL_NAME:
-            continue
-        tool_use_id = block.get("id")
-        questions = ((block.get("input") or {}).get("questions")) or []
+            
+        questions = input_data.get("questions") or []
         for q_index, q in enumerate(questions):
             if not isinstance(q, dict):
                 continue

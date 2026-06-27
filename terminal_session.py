@@ -726,14 +726,15 @@ def queue_paste(session_id, text):
     return True
 
 
-def switch_engine(session_id, engine):
+def switch_engine(session_id, engine, seed_context=None):
     """Toggle a live session to the other engine, keeping its identity.
 
     Reaps the current session's PTY child (keeping the SAME ``session_id``,
     worktree, branch, lane, and label), launches a NEW PTY on ``engine`` in the
-    SAME worktree, re-applies the lane's skill seed ONCE on the new engine, and
-    updates the registry record's ``backend`` (+ ``seeded``/``seed_text``). The
-    project's last_engine is updated to ``engine`` on success.
+    SAME worktree, re-applies the lane's skill seed ONCE on the new engine (incorporating
+    ``seed_context`` if provided), and updates the registry record's ``backend``
+    (+ ``seeded``/``seed_text``). The project's last_engine is updated to ``engine``
+    on success.
 
     Identity is preserved: the new PTY (which the manager mints under its own
     opaque id) is rebound under the EXISTING ``session_id`` (the same trick
@@ -807,7 +808,7 @@ def switch_engine(session_id, engine):
         seeded=False, seed_text="")
 
     # 5) Re-apply the lane seed ONCE on the new engine (same discipline as start).
-    seed_text = seed_for_lane(lane)
+    seed_text = seed_for_lane(lane, seed_context=seed_context)
     if seed_text:
         try:
             _pty.write(session_id, seed_text)
@@ -824,6 +825,56 @@ def switch_engine(session_id, engine):
     if project_id is not None:
         set_last_engine_for_project(project_id, engine)
     return record
+
+
+def suspend_session(session_id) -> str:
+    """Gracefully suspend a live session: snapshot PTY transcript, persist, and summarize.
+
+    Returns the generated summary text (or "" on failure). Never raises.
+    """
+    try:
+        record = _reg.get_session(session_id)
+        if record is None:
+            return ""
+
+        project_id = record.get("project_id")
+        lane = record.get("lane")
+        if not project_id or not lane:
+            return ""
+
+        proj = _rnd.get_project(project_id)
+        if proj is None:
+            return ""
+        folder = proj.get("folder_path", "")
+        if not folder:
+            return ""
+
+        # 1) Snapshot the current PTY transcript into the worktree.
+        # This reads the live PTY buffer before it is reaped.
+        _snapshot_transcript_doc(record, session_id)
+
+        # 2) Persist the transcript doc to the main folder and record it as an effort.
+        capture_session_docs(session_id, project_id=project_id, record=record)
+
+        # 3) Load the session with aggregated member files.
+        import summarizer as _sm
+        store_lane = _eh._resolve_subdir(lane)
+        session = _sm._find_session(folder, project_id, store_lane, session_id)
+        if not session:
+            return ""
+
+        # 4) Run the summarizer (force=True to regenerate).
+        summary = _sm.summarize_session(folder, project_id, store_lane, session, force=True)
+        if not summary:
+            return ""
+
+        # 5) Extract the summary text.
+        claims = summary.get("claims", [])
+        if claims:
+            return "Here is a summary of what was done so far:\n" + "\n".join("- " + c for c in claims)
+        return summary.get("markdown", "") or ""
+    except Exception:
+        return ""
 
 
 def attach(session_id):

@@ -66,7 +66,7 @@ DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
 #: research AND the bare ``general`` exploration lane (v7 Wave 6). The trio
 #: lanes plan/build stay Claude-only (Crucible/Foreman are Claude Code engines
 #: Gemini can't run); ``general`` seeds no skill, so either engine is fine.
-GEMINI_LANES = frozenset((LANE_RESEARCH, "general"))
+GEMINI_LANES = frozenset((LANE_RESEARCH, "general", LANE_PLAN, LANE_BUILD))
 
 
 class EngineNotAllowedError(ValueError):

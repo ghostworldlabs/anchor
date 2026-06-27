@@ -322,20 +322,17 @@ def test_playwright_started_session_appears_in_column_without_reload(server):
 # ITEM 2 — Gemini allowed on the bare `general` lane (research-only elsewhere)
 # ════════════════════════════════════════════════════════════════════════════
 
-def test_gemini_engine_policy_general_allowed_plan_build_refused(env):
-    """The lane→engine policy: Gemini is allowed for `general` AND `research`,
-    still REFUSED for `plan` / `build`. Claude is allowed everywhere."""
+def test_gemini_engine_policy_general_plan_build_allowed(env):
+    """The lane→engine policy: Gemini is allowed for `general`, `research`,
+    `plan`, and `build`. Claude is allowed everywhere."""
     import lanes
     importlib.reload(lanes)
 
-    # Gemini ALLOWED on general (the new follow-up) — no exception raised.
+    # Gemini ALLOWED everywhere now.
     lanes.check_engine_allowed("general", lanes.BACKEND_GEMINI)
-    # Gemini still ALLOWED on research (unchanged).
     lanes.check_engine_allowed("research", lanes.BACKEND_GEMINI)
-    # Gemini still REFUSED on plan / build (Crucible / Foreman are Claude-only).
     for lane in ("plan", "build"):
-        with pytest.raises(lanes.EngineNotAllowedError):
-            lanes.check_engine_allowed(lane, lanes.BACKEND_GEMINI)
+        lanes.check_engine_allowed(lane, lanes.BACKEND_GEMINI)
     # Claude allowed everywhere (sanity).
     for lane in ("general", "research", "plan", "build"):
         lanes.check_engine_allowed(lane, lanes.BACKEND_CLAUDE)
@@ -343,10 +340,10 @@ def test_gemini_engine_policy_general_allowed_plan_build_refused(env):
 
 def test_general_in_gemini_lanes_set(env):
     """``general`` is a member of the GEMINI_LANES allow-set (and research is too),
-    while plan/build are NOT."""
+    and now plan/build are TOO."""
     import lanes
     importlib.reload(lanes)
     assert "general" in lanes.GEMINI_LANES
     assert lanes.LANE_RESEARCH in lanes.GEMINI_LANES
-    assert lanes.LANE_PLAN not in lanes.GEMINI_LANES
-    assert lanes.LANE_BUILD not in lanes.GEMINI_LANES
+    assert lanes.LANE_PLAN in lanes.GEMINI_LANES
+    assert lanes.LANE_BUILD in lanes.GEMINI_LANES

@@ -132,21 +132,24 @@ def test_research_gemini_launches_and_records_engine(env, tmp_path):
     job_runner.wait(rec["job_id"], timeout=30)
 
 
-def test_plan_gemini_refused_with_clear_policy_error(env, tmp_path):
+def test_plan_gemini_allowed_launches(env, tmp_path):
     lanes = env
+    import job_runner
     proj = _mkproject(tmp_path / "pg", "Beta")
-    with pytest.raises(lanes.EngineNotAllowedError) as ei:
-        lanes.launch_lane(proj["id"], "plan", backend="gemini")
-    assert ei.value.lane == "plan"
-    assert ei.value.backend == "gemini"
-    assert "Gemini" in str(ei.value) and "Research" in str(ei.value)
+    rec = lanes.launch_lane(proj["id"], "plan", backend="gemini",
+                            extra_args=["--lines", "1"])
+    assert rec["backend"] == "gemini"
+    job_runner.wait(rec["job_id"], timeout=30)
 
 
-def test_build_gemini_refused(env, tmp_path):
+def test_build_gemini_allowed_launches(env, tmp_path):
     lanes = env
+    import job_runner
     proj = _mkproject(tmp_path / "bg", "Gamma")
-    with pytest.raises(lanes.EngineNotAllowedError):
-        lanes.launch_lane(proj["id"], "build", backend="gemini")
+    rec = lanes.launch_lane(proj["id"], "build", backend="gemini",
+                            extra_args=["--lines", "1"])
+    assert rec["backend"] == "gemini"
+    job_runner.wait(rec["job_id"], timeout=30)
 
 
 def test_claude_works_on_all_three_lanes(env, tmp_path):
@@ -264,16 +267,18 @@ def test_endpoint_research_gemini_ok(server, tmp_path):
     job_runner.wait(body["job_id"], timeout=30)
 
 
-def test_endpoint_build_gemini_clean_error(server, tmp_path):
+def test_endpoint_build_gemini_ok(server, tmp_path):
     gui, base = server
+    import job_runner
     proj = _mkproject(tmp_path / "ep_bg", "Zeta")
     code, body = _post(base + "/api/rnd/launch_lane",
                        {"project_id": proj["id"], "lane": "build",
                         "backend": "gemini"})
-    # Clean JSON error, NOT a 500.
-    assert code == 400
-    assert body["ok"] is False
-    assert body["reason"] == "engine-not-allowed"
+    assert code == 200
+    assert body["ok"] is True
+    assert body["job_id"]
+    assert body["backend"] == "gemini"
+    job_runner.wait(body["job_id"], timeout=30)
 
 
 def test_endpoint_default_backend_is_claude(server, tmp_path):

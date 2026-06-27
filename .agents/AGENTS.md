@@ -647,3 +647,9 @@ The dashboard has these views (toggled by `showView()` in JS):
 - **Markdown files are the source of truth.** No database, no lock files. Everything is plain text.
 - **No external dependencies (one declared exception).** Python stdlib only, EXCEPT the v3 terminal subsystem's optional `pywinpty` (`import winpty`, LAZY, in `pty_manager.py` ONLY; `pip install .[terminal]`). It degrades gracefully if absent. `distro.py`'s import scan enforces this — it refuses any other native/third-party import in product code. Must run on any machine with Python 3.8+ (terminals require Windows + the optional extra).
 - **All files must remain accessible** from Cowork, Claude Code, or any CLI tool. No binary formats, no compiled assets.
+
+# Explicit Driver Initialization Rule
+When running ANY agentic skill via a CLI or script (e.g., Foreman, Crucible, Gandalf, ResearchPrime), NEVER rely on hardcoded tool defaults that bypass proper transport error handling (like raw `claude` binaries). ALWAYS explicitly set the transport driver and active model environment variables to match the current session. For example, if running inside Antigravity CLI, always set `TRIO_DRIVER="gemini-cli"` and `CRUCIBLE_AGENT_LIVE="1"` alongside the corresponding `GEMINI_MODEL="gemini-X"` so that rate limits and transient network errors are caught and gracefully retried by the underlying reliability wrappers, rather than crashing the skill.
+
+# Silent Background Tools Rule
+Agents must never use the terminal `run_command` tool for simple file reads, writes, `list_dir`, or `grep` searches. Always strictly prioritize the native silent background tools (`view_file`, `grep_search`, `list_dir`) to prevent spawning visible PowerShell windows that steal focus and disrupt the user's typing.

@@ -358,5 +358,56 @@
     "effort_id": "cb9168d697404b6c946e4ad0bcd75fa6",
     "effort_managed": false,
     "grass_origin": ""
+  },
+  {
+    "session_id": "866504b45f42469b9a0e8e14c44af412",
+    "project_id": "52ad3ddc9c314f0c930c5e939eae7c8b",
+    "lane": "planning",
+    "backend": "claude",
+    "worktree_path": "C:\\Users\\john\\AppData\\Local\\Temp\\anchor-hc-v12-wt-0s92fctx\\866504b45f42469b9a0e8e14c44af412",
+    "branch": "anchor/session/866504b45f42469b9a0e8e14-a6185e7f69ddfce1",
+    "status": "running",
+    "created_at": 1782472186.5378191,
+    "label": "",
+    "seeded": true,
+    "seed_text": "Load the researchPrime skill now. Once it is loaded and ready, greet me EXACTLY once with this single line and nothing else: \"✓ researchPrime loaded — what would you like to do?\" Then stop and wait for my next message. Do not repeat this greeting.\n",
+    "parent_session_id": "",
+    "chain_id": "866504b45f42469b9a0e8e14c44af412",
+    "pending_paste": "",
+    "paste_flushed": false,
+    "kind": "trio",
+    "current_stage": "plan",
+    "stage_history": [
+      {
+        "stage": "research",
+        "store_lane": "research",
+        "started_at": 1782472187.6474128,
+        "ended_at": 1782472200.4746146,
+        "baseline_ref": "ceb657b4b19b8c6f7829516cc66cff77d8650ae3",
+        "seeded": false,
+        "summary_ref": {
+          "lane": "research",
+          "session_id": "866504b45f42469b9a0e8e14c44af412",
+          "stage": "research"
+        },
+        "doc_count": 1,
+        "state": "done"
+      },
+      {
+        "stage": "plan",
+        "store_lane": "planning",
+        "started_at": 1782472200.4746146,
+        "ended_at": null,
+        "baseline_ref": "ae29212fc126719a340d1f9d381d9311675f7dcc",
+        "seeded": false,
+        "summary_ref": null,
+        "doc_count": 0,
+        "state": "active"
+      }
+    ],
+    "seeded_stages": [],
+    "effort_id": "866504b45f42469b9a0e8e14c44af412",
+    "effort_managed": true,
+    "grass_origin": ""
   }
 ]

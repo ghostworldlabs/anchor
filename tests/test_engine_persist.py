@@ -189,15 +189,15 @@ def test_switch_engine_unknown_session_and_backend(env):
 
 
 def test_switch_engine_policy_refusal_leaves_session_intact(env):
-    """gemini on a plan lane is refused BEFORE the live PTY is touched."""
+    """gemini on a plan lane is now allowed and does not raise an error."""
     ts, pty, reg = env["ts"], env["pty"], env["reg"]
     rec = ts.start_session(env["pid"], "plan", backend="claude")
     sid = rec["session_id"]
-    with pytest.raises(ts.TerminalSessionError):
-        ts.switch_engine(sid, "gemini")
-    # Session untouched: still claude, still RUNNING, PTY still live.
+    # Switch is allowed
+    new = ts.switch_engine(sid, "gemini")
+    assert new["backend"] == "gemini"
     after = reg.get_session(sid)
-    assert after["backend"] == "claude"
+    assert after["backend"] == "gemini"
     assert after["status"] == reg.STATUS_RUNNING
     assert sid in pty.live_sessions()
 

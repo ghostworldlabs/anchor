@@ -187,9 +187,9 @@ def test_unknown_project_and_engine_policy(env):
     ts = env["ts"]
     with pytest.raises(ts.TerminalSessionError):
         ts.start_session("no-such-pid", "plan", backend="claude")
-    # Gemini is research-only; plan/build refuse it.
-    with pytest.raises(ts.TerminalSessionError):
-        ts.start_session(env["pid"], "plan", backend="gemini")
+    # Gemini is now allowed on plan/build.
+    rec_plan = ts.start_session(env["pid"], "plan", backend="gemini")
+    assert rec_plan["backend"] == "gemini"
     with pytest.raises(ts.TerminalSessionError):
         ts.start_session(env["pid"], "plan", backend="bogus")
     # Gemini on research is allowed.

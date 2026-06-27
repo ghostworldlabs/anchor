@@ -7739,7 +7739,7 @@ function _buildEngineToggle(sessionId, s) {
     b.onclick = function (e) {
       e.stopPropagation();
       if (eng === ((MANAGED[sessionId] || {}).backend || cur)) return;  // already on it
-      setSessionEngine(sessionId, eng, tog);
+      switchTerminalEngine(sessionId, eng, tog);
     };
     tog.appendChild(b);
   });
@@ -7769,6 +7769,40 @@ async function setSessionEngine(sessionId, engine, tog) {
     var bs = tog.querySelectorAll('b');
     for (var i = 0; i < bs.length; i++) {
       bs[i].className = (bs[i].getAttribute('data-engine') === engine) ? 'on' : '';
+    }
+  }
+  // Re-sync the registry shortly (the relaunch mints a fresh PTY in the worktree).
+  setTimeout(repopulate, 600);
+}
+
+// switchTerminalEngine(sessionId, engine, tog): hot-swap the terminal session to the other
+// engine with suspend & summarize. POSTs /api/rnd/switch_terminal_engine.
+async function switchTerminalEngine(sessionId, engine, tog) {
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/switch_terminal_engine', {session: sessionId, engine: engine});
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/switch_terminal_engine', {session: sessionId, engine: engine});
+      data = await r.json();
+    }
+  } catch (e) { alert('[engine switch error] ' + e.message); return; }
+  if (!data || !data.ok) {
+    alert('[engine switch refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  if (MANAGED[sessionId]) MANAGED[sessionId].backend = engine;
+  if (tog) {
+    var bs = tog.querySelectorAll('b');
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].className = (bs[i].getAttribute('data-engine') === engine) ? 'on' : '';
+    }
+  }
+  if (!data.context_loaded) {
+    var p = PANELS[sessionId];
+    var lab = p && p.tpane ? p.tpane.querySelector('.lab') : null;
+    if (lab) {
+      lab.innerHTML += ' <span style="color:var(--rnd-amber,#d97706);font-size:0.85em;margin-left:8px;">⚠️ Context summary not loaded</span>';
     }
   }
   // Re-sync the registry shortly (the relaunch mints a fresh PTY in the worktree).
@@ -14379,6 +14413,36 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": str(exc)}, 400)
                 else:
                     self._send_json({"ok": True, "session": rec})
+
+        elif self.path == "/api/rnd/switch_terminal_engine":
+            # Wave 4: toggle engine (Claude ↔ Gemini) with graceful suspension and summary context handoff.
+            # Token-gated by the do_POST middleware above.
+            session = (body.get("session", "") or body.get("session_id", "") or "").strip()
+            engine = (body.get("engine", "") or "").strip()
+            if not session or not engine:
+                self._send_json({"ok": False,
+                                 "error": "session and engine required"}, 400)
+            elif engine not in _termsess.VALID_BACKENDS:
+                self._send_json({"ok": False,
+                                 "error": "invalid engine (expected claude|gemini)",
+                                 "reason": "invalid-engine"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                try:
+                    # 1) Suspend & Summarize
+                    summary_text = _termsess.suspend_session(session)
+                    # 2) Switch engine and inject summary
+                    rec = _termsess.switch_engine(session, engine, seed_context=summary_text)
+                    self._send_json({
+                        "ok": True,
+                        "session": rec,
+                        "context_loaded": bool(summary_text)
+                    })
+                except _termsess.TerminalSessionError as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 400)
 
         elif self.path == "/api/rnd/term_resize":
             session = (body.get("session", "") or "").strip()

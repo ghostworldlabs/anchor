@@ -18,7 +18,7 @@
 
 ## Wave 3 — Dashboard Workbench (General Terminal & Grasscatcher)
 **Goal:** Expose "General Terminal" and "Grasscatcher" features directly on the main dashboard (`/`).
-- [ ] **Dashboard Grasscatcher:** Update `anchor_gui.py` (`_render_dashboard_html`) to embed the Grasscatcher panel (`_render_grass_column_tile` / `_render_grass_workbench`). Map this to a dummy project ID like `__dashboard__`.
+- [ ] **Dashboard Grasscatcher:** Update `anchor_gui.py` (`generate_html`) to embed the Grasscatcher panel (`_render_grass_column_tile` / `_render_grass_workbench`). Map this to a dummy project ID like `__dashboard__`.
 - [ ] **Dashboard Terminal:** Update the dashboard layout to include a general terminal UI panel. 
 - [ ] **Backend Support:** Ensure `rnd_registry.py` or `effort_history.py` can handle a `__dashboard__` project ID gracefully without polluting the actual project registry. Ensure `terminal_session.py` can launch a `general` lane for `__dashboard__`.
 - [ ] **Verify:** Add an idea to the dashboard Grasscatcher. Open the dashboard General Terminal. Restart server and ensure they persist.
