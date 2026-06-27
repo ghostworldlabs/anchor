@@ -3958,21 +3958,32 @@ def render_project_window_html(project_id: str) -> str:
     time rollup. Returns a standalone HTML page; all engine/user content is
     HTML-escaped (XSS-safe).
     """
-    entry = _rnd.get_project(project_id)
-    if entry is None:
-        return ("<!doctype html><html><head><meta charset='utf-8'>"
-                "<title>Project not found</title></head><body>"
-                "<h1>Project not found</h1>"
-                f"<p>No R&amp;D project with id "
-                f"{html_lib.escape(project_id)}.</p>"
-                "<p><a href='/'>&larr; Back to dashboard</a></p>"
-                "</body></html>")
-    # Surface path-missing on read.
-    eff = _rnd.list_projects()
-    for e in eff:
-        if e["id"] == project_id:
-            entry = e
-            break
+    if project_id == "__dashboard__":
+        entry = {
+            "id": "__dashboard__",
+            "name": "Dashboard Workbench",
+            "folder_path": str(ANCHOR_DIR / "dev"),
+            "state": "active",
+            "priority": 1,
+            "domain": "personal",
+            "notes": "Global general terminal and grasscatcher."
+        }
+    else:
+        entry = _rnd.get_project(project_id)
+        if entry is None:
+            return ("<!doctype html><html><head><meta charset='utf-8'>"
+                    "<title>Project not found</title></head><body>"
+                    "<h1>Project not found</h1>"
+                    f"<p>No R&amp;D project with id "
+                    f"{html_lib.escape(project_id)}.</p>"
+                    "<p><a href='/'>&larr; Back to dashboard</a></p>"
+                    "</body></html>")
+        # Surface path-missing on read.
+        eff = _rnd.list_projects()
+        for e in eff:
+            if e["id"] == project_id:
+                entry = e
+                break
     inst = open_project_instance(project_id)
     folder_raw = entry.get("folder_path", "")
     name = html_lib.escape(entry.get("name", ""))
@@ -9190,6 +9201,34 @@ async function newGeneral(backend) {
   // record from MANAGED; lane 'general' suppresses the track + Advance).
   setTimeout(function () { openEffortDock(sid, null); }, 200);
 }
+// --- Wave 2: File Upload ---
+async function handleGlobalUpload(inputId, projectId) {
+  var input = document.getElementById(inputId);
+  if (!input || !input.files || input.files.length === 0) return;
+  var file = input.files[0];
+  var reader = new FileReader();
+  reader.onload = async function() {
+    var base64 = reader.result.split(',')[1];
+    var body = { filename: file.name, content_b64: base64, project_id: projectId };
+    var res = await fetch("/api/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Anchor-Token": window.localStorage.getItem('anchorToken') || ''
+      },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      alert("Uploaded successfully: " + file.name);
+      input.value = "";
+    } else {
+      var data = await res.json();
+      alert("Upload failed: " + (data.error || "Unknown error"));
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
 // (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
 // stack in the document flow — Wave 5 adds the terminal-pane vertical resize.)
 """
@@ -10920,6 +10959,11 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </div>
       <div class="mh-spacer"></div>
+      <!-- Wave 2: Global File Upload -->
+      <label class="btn btn-sm" style="margin-right:10px; cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px; display:inline-block">
+          &#8673; Upload File
+          <input type="file" id="global-upload" style="display:none" onchange="handleGlobalUpload('global-upload', '__dashboard__')" />
+      </label>
       <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     </div>
@@ -10930,6 +10974,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
+          <a class="btn btn-sm" href="/project/__dashboard__" style="font-size:11px;padding:4px 10px;background:var(--surface2);text-decoration:none;color:var(--text)">&#128421; Dashboard Workbench</a>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -12188,6 +12233,35 @@ function rndFolderInit() {{
     }}
 }}
 window.addEventListener('DOMContentLoaded', rndFolderInit);
+
+// --- Wave 2: File Upload (Dashboard) ---
+async function handleGlobalUpload(inputId, projectId) {
+  var input = document.getElementById(inputId);
+  if (!input || !input.files || input.files.length === 0) return;
+  var file = input.files[0];
+  var reader = new FileReader();
+  reader.onload = async function() {
+    var base64 = reader.result.split(',')[1];
+    var body = { filename: file.name, content_b64: base64, project_id: projectId };
+    var res = await fetch("/api/upload", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Anchor-Token": window.localStorage.getItem('anchorToken') || ''
+      },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      alert("Uploaded successfully: " + file.name);
+      input.value = "";
+    } else {
+      var data = await res.json();
+      alert("Upload failed: " + (data.error || "Unknown error"));
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
 function demoteTask(b64) {{ apiCall('/api/demote_task', {{text: dec(b64)}}); }}
 
@@ -13659,6 +13733,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
             text = body.get("text", "")
             ok = mark_done(text)
             self._send_json({"ok": ok, "message": f"Marked done: {text}" if ok else f"Not found: {text}"})
+
+        elif self.path == "/api/upload":
+            project_id = body.get("project_id", "__dashboard__")
+            filename = body.get("filename", "")
+            content_b64 = body.get("content_b64", "")
+            
+            if not filename or not content_b64:
+                self._send_json({"ok": False, "error": "missing filename or content"})
+                return
+                
+            import base64
+            try:
+                file_data = base64.b64decode(content_b64)
+                if project_id == "__dashboard__" or project_id == "dev" or not project_id:
+                    upload_dir = ANCHOR_DIR / "dev"
+                else:
+                    upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
+                    
+                upload_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = upload_dir / filename
+                dest_path.write_bytes(file_data)
+                
+                self._send_json({"ok": True, "message": f"Uploaded {filename} successfully."})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)})
 
         elif self.path == "/api/undone":
             text = body.get("text", "")
