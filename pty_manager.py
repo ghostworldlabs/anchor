@@ -621,6 +621,8 @@ def _get(session_id):
         raise UnknownSession(session_id)
     return child
 
+class SpawnCapReached(Exception):
+    pass
 
 def start(cmd, cwd=None, env=None):
     """Start a PTY child for ``cmd`` and return its ``session_id``.
@@ -628,6 +630,13 @@ def start(cmd, cwd=None, env=None):
     The backend is selected per ``ANCHOR_PTY_BACKEND`` at call time. ``cmd`` may
     be a string or an argv list. Returns a fresh opaque session id.
     """
+    import job_runner
+    import os
+    cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 5))
+    total_live = len(_LIVE) + len(job_runner._LIVE)
+    if total_live >= cap:
+        raise SpawnCapReached(f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
+
     crypt_token = uuid.uuid4().hex
     if env is None:
         env = dict(os.environ)

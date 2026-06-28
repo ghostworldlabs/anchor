@@ -178,7 +178,7 @@ class _LiveJob:
     """Runtime handle for a job owned by *this* server process."""
 
     __slots__ = ("job_id", "proc", "ring", "reader", "log_path", "lock", "done",
-                 "gated")
+                 "gated", "_h_job")
 
     def __init__(self, job_id, proc, log_path, gated=False):
         self.job_id = job_id
@@ -1133,6 +1133,13 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     """
     folder_path = str(folder_path)
     with _paths.WRITE_LOCK:
+        # 0) Global spawn cap.
+        import pty_manager
+        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 5))
+        total_live = len(_LIVE) + len(pty_manager._LIVE)
+        if total_live >= cap:
+            raise LaneBusyError("spawn-cap-reached", message=f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
+
         # 1) Same-lane within-project serialization.
         _gc_lane_slot(project_id, lane)
         same = _ACTIVE_LANE.get((project_id, lane))
