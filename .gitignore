@@ -10,6 +10,10 @@ logs/*.md
 logs/*.log
 logs/*.bak*
 health_reports/*.md
+# Stray test-output dumps (e.g. `pytest ... > pytest_failures.txt`) — never product
+pytest_failures.txt
+pytest_*.txt
+*.pytest.log
 
 # Data and Binaries (Large/Sensitive)
 Summary for PSU/
