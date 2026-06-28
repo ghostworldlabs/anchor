@@ -331,7 +331,7 @@ def _resolve_engine_cmd(engine: str) -> str:
         import shutil, os
         if shutil.which("gemini"): return "gemini"
         if shutil.which("agy"): return "agy"
-        agy_path = r"C:\Users\john\AppData\Local\agy\bin\agy.exe"
+        agy_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "agy", "bin", "agy.exe")
         if os.path.exists(agy_path):
             return agy_path
         return "agy"
