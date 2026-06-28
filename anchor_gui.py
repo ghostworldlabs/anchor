@@ -3367,12 +3367,18 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         # already shows in the row line; clicking opened an empty body box). OK runs
         # keep the expand caret + onclick.
         body_attr = (f" data-exec-rel='{exec_attr}'" if (ok and exec_rel) else "")
+        # The (x) retire/archive control on EACH tile — drops the run via
+        # /api/rnd/gandalf_archive and removes the tile on success. stopPropagation
+        # so it never toggles the row open.
+        retire = (
+            "<span class='gretire' title='Retire / archive this run' "
+            f"onclick=\"gandalfArchiveRun(event, '{run_id}')\">&times;</span>")
         if ok:
             rows.append(
                 f"<div class='grun' data-run='{run_id}'{body_attr} "
                 "onclick='gandalfToggleRun(this)'>"
                 "<div class='grtop'><span class='gcaret'>&#9656;</span>"
-                f"<span class='{vcls}'>{vtxt}</span></div>"
+                f"<span class='{vcls}'>{vtxt}</span>{retire}</div>"
                 "<div class='gmeta'>"
                 f"<span class='gts'>{ts_lbl}</span>{chips_html}</div>"
                 "<div class='gbody' onclick='event.stopPropagation()'>"
@@ -3382,11 +3388,21 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
             # Non-expandable error row: no caret, no onclick, no body box.
             rows.append(
                 f"<div class='grun err-row' data-run='{run_id}'>"
-                f"<div class='grtop'><span class='{vcls}'>{vtxt}</span></div>"
+                f"<div class='grtop'><span class='{vcls}'>{vtxt}</span>{retire}</div>"
                 "<div class='gmeta'>"
                 f"<span class='gts'>{ts_lbl}</span>{chips_html}</div>"
                 "</div>")
 
+    # "Clear failed" — bulk-retire every failed/error run. Rendered ONLY when at
+    # least one failed run exists (POST /api/rnd/gandalf_clear_failed).
+    n_failed = sum(1 for r in runs if not bool(r.get("ok")))
+    clear_failed_btn = ""
+    if n_failed:
+        clear_failed_btn = (
+            "<button class='btn sm gandalf-clear-failed' "
+            "title='Retire all failed runs' "
+            f"onclick=\"gandalfClearFailed('{pid_q}')\">&#10005; "
+            f"Clear failed ({n_failed})</button>")
     # John tweak: the run list is collapsible IN THE HEADER (caret toggle, mirrors
     # the grass-mini pattern) and starts COLLAPSED on first load (server-rendered
     # .collapsed + the ▸ caret) so there is no flash of expanded content before JS.
@@ -3397,6 +3413,7 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         "run list' onclick='toggleGandalfRuns(this)'>&#9656;</span>"
         f"{icon}<span class='gt'>Gandalf</span>"
         f"<span class='cnt'>{n} read{'s' if n != 1 else ''}</span>"
+        f"{clear_failed_btn}"
         "<button class='btn sm gandalf-run gandalf-rerun' "
         f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
         f"<div class='gruns collapsed' id='gandalfRuns'>{''.join(rows)}</div>"
@@ -4793,6 +4810,15 @@ def render_project_window_html(project_id: str) -> str:
         ".gandalf-panel .grun .verdict{flex:1;font-weight:500;font-size:12.5px;"
         "line-height:1.4;color:var(--text)}"
         ".gandalf-panel .grun .verdict.err{color:#ffb4b4;font-weight:400}"
+        # The (x) retire/archive control on each tile (hover-revealed).
+        ".gandalf-panel .grun .gretire{flex:0 0 auto;margin-top:1px;width:18px;"
+        "height:18px;line-height:18px;text-align:center;border-radius:4px;"
+        "color:var(--text-dim);font-size:14px;cursor:pointer;opacity:0;"
+        "transition:opacity .12s,background .12s}"
+        ".gandalf-panel .grun:hover .gretire{opacity:.7}"
+        ".gandalf-panel .grun .gretire:hover{opacity:1;background:rgba(248,113,113,.18);"
+        "color:#ffb4b4}"
+        ".gandalf-panel .gandalf-clear-failed{margin-left:8px;color:#ffb4b4}"
         ".gandalf-panel .grun .gmeta{display:flex;gap:6px;align-items:center;"
         "margin-top:5px;flex-wrap:wrap;padding-left:19px}"
         ".gandalf-panel .grun .gts{font-size:11px;color:var(--text-dim)}"
@@ -5741,6 +5767,11 @@ function _gandalfRenderRuns(runs) {
   var html = '';
   for (var i = 0; i < runs.length; i++) html += _gandalfRunHtml(runs[i]);
   host.innerHTML = html;
+  // Drop the "Clear failed" control if no failed rows remain after the refresh.
+  if (!host.querySelectorAll('.grun.err-row').length) {
+    var cf = panel.querySelector('.gandalf-clear-failed');
+    if (cf && cf.parentNode) cf.parentNode.removeChild(cf);
+  }
   // A Re-run was an explicit user action → reveal the (now refreshed) run list
   // and sync the header caret to the expanded glyph.
   host.classList.remove('collapsed');
@@ -5800,11 +5831,15 @@ function _gandalfRunHtml(r) {
     }
     links = '<div class="glinks">' + parts + '</div>';
   }
+  // The (x) retire/archive control — mirrors the server-rendered .gretire span.
+  var retire = '<span class="gretire" title="Retire / archive this run"'
+    + ' onclick="gandalfArchiveRun(event, \'' + _esc(runId) + '\')">&times;</span>';
   // John tweak: an ERROR run is NOT expandable (no caret, no onclick, no body
   // box) — its reason already shows in the row line. OK runs keep the expand.
   if (!ok) {
     return '<div class="grun err-row" data-run="' + _esc(runId) + '">'
-      + '<div class="grtop"><span class="' + vcls + '">' + vtxt + '</span></div>'
+      + '<div class="grtop"><span class="' + vcls + '">' + vtxt + '</span>'
+      + retire + '</div>'
       + '<div class="gmeta"><span class="gts">' + _esc(ts) + '</span>' + chips
       + '</div></div>';
   }
@@ -5813,11 +5848,67 @@ function _gandalfRunHtml(r) {
   return '<div class="grun" data-run="' + _esc(runId) + '"' + relAttr
     + ' onclick="gandalfToggleRun(this)">'
     + '<div class="grtop"><span class="gcaret">&#9656;</span>'
-    + '<span class="' + vcls + '">' + vtxt + '</span></div>'
+    + '<span class="' + vcls + '">' + vtxt + '</span>' + retire + '</div>'
     + '<div class="gmeta"><span class="gts">' + _esc(ts) + '</span>' + chips
     + '</div>'
     + '<div class="gbody" onclick="event.stopPropagation()">'
     + '<div class="gexec"></div>' + links + '</div></div>';
+}
+
+// Retire/archive ONE run: POST /api/rnd/gandalf_archive {project_id, run_id};
+// on success remove the tile from the view (no page bounce). stopPropagation so
+// the click never toggles the row open.
+function gandalfArchiveRun(ev, runId) {
+  if (ev) { ev.stopPropagation(); if (ev.preventDefault) ev.preventDefault(); }
+  if (!runId) return;
+  _postJson('/api/rnd/gandalf_archive',
+            {project_id: PROJECT_ID, run_id: runId}).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (data) {
+      if (_isUnauthorized(r, data)) {
+        if (setAnchorToken()) return gandalfArchiveRun(null, runId);
+        return;
+      }
+      if (!data || !data.ok) return;
+      var row = document.querySelector(
+        '#gandalfPanel .grun[data-run="' + runId + '"]');
+      if (row && row.parentNode) row.parentNode.removeChild(row);
+      _gandalfRefreshCount();
+    });
+  }).catch(function () {});
+}
+
+// Clear ALL failed runs: POST /api/rnd/gandalf_clear_failed {project_id}; on
+// success refetch + re-render the (now failed-free) run list.
+function gandalfClearFailed(pid) {
+  pid = pid || PROJECT_ID;
+  _postJson('/api/rnd/gandalf_clear_failed', {project_id: pid}).then(function (r) {
+    return r.json().catch(function () { return {}; }).then(function (data) {
+      if (_isUnauthorized(r, data)) {
+        if (setAnchorToken()) return gandalfClearFailed(pid);
+        return;
+      }
+      if (!data || !data.ok) return;
+      fetch('/api/rnd/gandalf?project_id=' + encodeURIComponent(pid) + _tokenQ(),
+            _jsonHdrs()).then(function (r2) { return r2.json(); })
+        .then(function (gdata) {
+          _gandalfRenderRuns((gdata && gdata.runs) || []);
+        }).catch(function () {});
+    });
+  }).catch(function () {});
+}
+
+// Sync the header count chip + drop the "Clear failed" button when no failed
+// rows remain (after a single retire).
+function _gandalfRefreshCount() {
+  var panel = document.getElementById('gandalfPanel');
+  if (!panel) return;
+  var rows = panel.querySelectorAll('.grun');
+  var cnt = panel.querySelector('.gandalf-head .cnt');
+  if (cnt) cnt.textContent = rows.length + ' read' + (rows.length === 1 ? '' : 's');
+  if (!panel.querySelectorAll('.grun.err-row').length) {
+    var cf = panel.querySelector('.gandalf-clear-failed');
+    if (cf && cf.parentNode) cf.parentNode.removeChild(cf);
+  }
 }
 
 // ── Grass B+C hybrid idea workbench (v5 Wave 5) ─────────────────────────────
@@ -15297,6 +15388,57 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     folder = proj.get("folder_path", "")
                     scheduled = _trigger_gandalf(folder, pid, manual=True)
                     self._send_json({"ok": True, "scheduled": bool(scheduled)})
+
+        elif self.path == "/api/rnd/gandalf_archive":
+            # Archive/retire ONE Gandalf run: drop it from the index + remove its
+            # artifact dir (gandalf.delete_run). Mutating; auth enforced by the
+            # do_POST token middleware above. Project-scoped + path-seg guarded.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            run_id = (body.get("run_id", "") or "").strip()
+            if not pid or not run_id:
+                self._send_json({"ok": False,
+                                 "error": "project_id and run_id required"}, 400)
+            elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
+                self._send_json({"ok": False, "error": "bad pid/run_id"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        res = _gandalf.delete_run(folder, pid, run_id)
+                    except Exception:
+                        res = {"ok": False, "removed": False}
+                    self._send_json({"ok": bool(res.get("ok")),
+                                     "removed": bool(res.get("removed"))},
+                                    200 if res.get("ok") else 500)
+
+        elif self.path == "/api/rnd/gandalf_clear_failed":
+            # Bulk-retire every FAILED Gandalf run (gandalf.clear_failed_runs);
+            # completed runs are retained. Mutating; auth enforced by the do_POST
+            # token middleware above. Project-scoped.
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            if not pid:
+                self._send_json({"ok": False,
+                                 "error": "project_id required"}, 400)
+            elif _unsafe_path_seg(pid):
+                self._send_json({"ok": False, "error": "bad pid"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False,
+                                     "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        res = _gandalf.clear_failed_runs(folder, pid)
+                    except Exception:
+                        res = {"ok": False, "removed": 0}
+                    self._send_json({"ok": bool(res.get("ok")),
+                                     "removed": int(res.get("removed") or 0)},
+                                    200 if res.get("ok") else 500)
 
         elif self.path == "/api/rnd/advance_stage":
             # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME
