@@ -5198,7 +5198,11 @@ def render_project_window_html(project_id: str) -> str:
         + _PROJECT_WINDOW_JS +
         "</script>"
         "<script>" + cache_bust_script() + "</script>\n"
-        + (f"<script>window.addEventListener('DOMContentLoaded', function() {{ setTimeout(function() {{ var sid = {json.dumps([s['session_id'] for s in _sessreg.list_sessions(project_id) if s.get('lane') == 'general' and s.get('status') == 'running'][:1])}; if (sid.length > 0) {{ openEffortDock(sid[0], null); }} else {{ var btn = document.getElementById('openTermBtn'); if (btn) btn.click(); }} }}, 300); }});</script>" if project_id == "__dashboard__" else "") +
+        # Dashboard no longer auto-opens the workbench/effort dock on load (John's
+        # preference): the prior __dashboard__ DOMContentLoaded auto-open (effort
+        # dock or terminal-button click) was removed. The dock opens only on an
+        # explicit user click now.
+        + "" +
         "</body></html>"
     )
 
