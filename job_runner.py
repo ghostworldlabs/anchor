@@ -485,6 +485,9 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         full_env["TRIO_DRIVER"] = "gemini-cli-native"
     if env:
         full_env.update(env)
+    
+    crypt_token = uuid.uuid4().hex
+    full_env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
 
     # On Windows, create a new process group so the whole tree is reapable and
     # signals/kills target the group. taskkill /T handles tree reap regardless,
@@ -519,6 +522,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     with _LIVE_LOCK:
         _LIVE[job_id] = live
 
+    # Wrap the subprocess in a Job Object with KILL_ON_JOB_CLOSE (Windows only)
+    if os.name == "nt":
+        try:
+            import proc_probe
+            live._h_job = proc_probe.attach_to_job_object(proc.pid)
+        except Exception:
+            live._h_job = None
+
     # For a gated lane, deliver the initial prompt as a stream-json user turn on
     # stdin and register the (kept-open) pipe with the gate adapter so a later
     # answer writes into the SAME session. Deferred import avoids a cycle.
@@ -534,6 +545,12 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
             # the reader thread + finalize still record the terminal status.
             pass
 
+    try:
+        import proc_probe
+        proc_create_time = proc_probe.creation_time(proc.pid)
+    except Exception:
+        proc_create_time = None
+
     rec = {
         "job_id": job_id,
         "lane": lane,
@@ -545,6 +562,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "exit_code": None,
         "session_id": None,
         "backend": backend,
+        "crypt_token": crypt_token,
+        "proc_create_time": proc_create_time,
     }
     _write_record(rec)
 
@@ -718,6 +737,16 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     duration onto the record regardless of the terminal status (a cancelled
     job may still have emitted a partial result envelope before the kill).
     """
+    with _LIVE_LOCK:
+        live = _LIVE.get(job_id)
+    if live and getattr(live, "_h_job", None) is not None:
+        try:
+            import proc_probe
+            proc_probe.close_handle(live._h_job)
+            live._h_job = None
+        except Exception:
+            pass
+
     with _paths.WRITE_LOCK:
         rec = load_record(job_id)
         if rec is None:

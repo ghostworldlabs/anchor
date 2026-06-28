@@ -60,7 +60,8 @@ LANE_RESEARCH = "research"
 LANE_DELIVERABLES = "deliverables"
 #: Grass Catchers lane — discovered idea-docs (future-work, not active trio runs).
 LANE_GRASS = "grass"
-LANES = (LANE_RESEARCH, LANE_PLANNING, LANE_BUILD, LANE_DELIVERABLES, LANE_GRASS)
+LANE_GANDALF = "gandalf"
+LANES = (LANE_RESEARCH, LANE_PLANNING, LANE_BUILD, LANE_DELIVERABLES, LANE_GRASS, LANE_GANDALF)
 
 # Build-provenance filenames (exact, case-insensitive).
 _BUILD_FILES = frozenset({"foreman-checkpoint.json", "foreman.config.json"})

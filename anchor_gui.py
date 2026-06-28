@@ -1047,8 +1047,12 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
     # In-flight guard: at most one scheduled-but-unfinished run per project.
     with _GANDALF_INFLIGHT_GUARD:
         if project_id in _GANDALF_INFLIGHT:
-            return False
-        _GANDALF_INFLIGHT[project_id] = "Starting..."
+            rec = _GANDALF_INFLIGHT[project_id]
+            if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
+                _GANDALF_INFLIGHT.pop(project_id, None)
+            else:
+                return False
+        _GANDALF_INFLIGHT[project_id] = {"status": "Starting...", "ts": time.time()}
 
     runner_env = _gandalf_runner_env()
 
@@ -1056,7 +1060,7 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
         def _cb(msg):
             with _GANDALF_INFLIGHT_GUARD:
                 if project_id in _GANDALF_INFLIGHT:
-                    _GANDALF_INFLIGHT[project_id] = msg
+                    _GANDALF_INFLIGHT[project_id] = {"status": msg, "ts": time.time()}
         try:
             if first_scan:
                 _gandalf.run_gandalf_if_absent(folder_path, project_id,
@@ -1100,7 +1104,11 @@ def _trigger_gandalf_first_scan(folder_path, project_id):
         # concurrent rescans can't both pass the prior-run check and schedule.
         with _GANDALF_INFLIGHT_GUARD:
             if project_id in _GANDALF_INFLIGHT:
-                return False
+                rec = _GANDALF_INFLIGHT[project_id]
+                if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
+                    _GANDALF_INFLIGHT.pop(project_id, None)
+                else:
+                    return False
         return _trigger_gandalf(folder_path, project_id, first_scan=True)
 
 
@@ -13334,24 +13342,31 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "project_id required"}, 400)
                 else:
                     with _GANDALF_INFLIGHT_GUARD:
-                        status = _GANDALF_INFLIGHT.get(pid, None)
+                        rec = _GANDALF_INFLIGHT.get(pid, None)
+                        if isinstance(rec, dict):
+                            if time.time() - rec.get("ts", 0) > 1800:
+                                _GANDALF_INFLIGHT.pop(pid, None)
+                                status = None
+                            else:
+                                status = rec.get("status")
+                        else:
+                            status = rec
                     self._send_json({"ok": True, "status": status})
             elif self.path.startswith("/api/rnd/zombie_hunter_report"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
                 try:
-                    reg_file = ANCHOR_DIR / "session_registry.json"
-                    reg = json.loads(reg_file.read_text('utf-8')) if reg_file.exists() else {}
+                    import session_registry
+                    rep_file = session_registry.anchor_dir() / "zombie_hunter_last.json"
+                    report_data = json.loads(rep_file.read_text('utf-8')) if rep_file.exists() else {"status": "No report yet"}
                 except Exception:
-                    reg = {}
-                html = "<html><head><title>Zombie Hunter Radar Report</title>"
-                html += "<style>body { font-family: system-ui; background: #0f0f0f; color: #eee; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { padding: 8px; border: 1px solid #333; text-align: left; }</style>"
-                html += "</head><body><h1>&#128142; Zombie Hunter Radar</h1>"
-                html += "<h2>Active Swarms / Sessions</h2><table><tr><th>ID</th><th>Type</th><th>Status</th><th>Last Ping</th></tr>"
-                for sid, sdata in reg.items():
-                    html += f"<tr><td>{sid}</td><td>{sdata.get('type', 'Unknown')}</td><td>{sdata.get('status', 'Unknown')}</td><td>{sdata.get('last_ping', 'N/A')}</td></tr>"
-                html += "</table></body></html>"
+                    report_data = {"error": "Failed to read report"}
+                html = "<html><head><title>Zombie Hunter Radar</title>"
+                html += "<style>body { font-family: system-ui; background: #0f0f0f; color: #eee; padding: 20px; }</style>"
+                html += "</head><body><h1>&#128142; Zombie Hunter Radar Report</h1>"
+                html += "<pre>" + json.dumps(report_data, indent=2) + "</pre>"
+                html += "</body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
             elif self.path.startswith("/api/rnd/boneyard"):
@@ -15752,6 +15767,35 @@ def main():
     if not no_browser:
         # Open browser after a short delay
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+
+    try:
+        import job_runner
+        job_runner.reconcile_on_startup()
+    except Exception as e:
+        _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
+
+    try:
+        import preview_server
+        preview_server.reap_orphans()
+    except Exception as e:
+        _logger.error(f"preview_server.reap_orphans failed: {e}")
+
+    try:
+        import worktrees
+        import pty_manager
+        worktrees.reap_orphans(set(pty_manager._LIVE.keys()))
+    except Exception as e:
+        _logger.error(f"worktrees.reap_orphans failed: {e}")
+
+    try:
+        if os.environ.get("ANCHOR_ZOMBIE_HUNTER") == "1":
+            import zombie_hunter
+            import pty_manager
+            def _live_provider():
+                return set(pty_manager._LIVE.keys())
+            zombie_hunter.start_hunter(_live_provider)
+    except Exception as e:
+        _logger.error(f"zombie_hunter.start_hunter failed: {e}")
 
     try:
         server.serve_forever()

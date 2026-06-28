@@ -208,6 +208,23 @@ def _normalize(record: dict) -> dict:
     # entrypoints; legacy records (incl. the v6/v8/v10/v11 healthcheck walks)
     # normalize to False.
     effort_managed = bool(record.get("effort_managed", False))
+    # ── zombie-hunter v2: process-identity fields (all back-compat) ─────────
+    # The sweeper records the spawned PID + that PID's creation time + a
+    # per-session crypt token at spawn, so a later sweep can prove a still-live
+    # PID is OUR process (creation-time match) and not a recycled PID. Every
+    # pre-existing record (none of these keys) normalizes to None/None/"" with
+    # no crash — NEVER killable (the sweeper abstains on a missing identity).
+    pid_raw = record.get("pid")
+    try:
+        pid = int(pid_raw) if pid_raw is not None and pid_raw != "" else None
+    except (TypeError, ValueError):
+        pid = None
+    pct = record.get("proc_create_time")
+    try:
+        proc_create_time = float(pct) if pct is not None else None
+    except (TypeError, ValueError):
+        proc_create_time = None
+    crypt_token = record.get("crypt_token", "") or ""
     return {
         "session_id": sid,
         "project_id": record.get("project_id", ""),
@@ -252,6 +269,10 @@ def _normalize(record: dict) -> dict:
         # session (back-compat default ""). It is just an idea id — SAFE to carry
         # in the board / chain projections (NEVER worktree_path/branch).
         "grass_origin": record.get("grass_origin", "") or "",
+        # zombie-hunter v2: process-identity fields (see derivation above).
+        "pid": pid,
+        "proc_create_time": proc_create_time,
+        "crypt_token": crypt_token,
     }
 
 
@@ -281,7 +302,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      worktree_path="", branch="", status=STATUS_IDLE,
                      label="", session_id=None, parent_session_id="",
                      chain_id=None, grass_origin="",
-                     effort_id=None, effort_managed=False) -> dict:
+                     effort_id=None, effort_managed=False,
+                     pid=None, proc_create_time=None, crypt_token="") -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
@@ -317,6 +339,10 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             # entrypoints; legacy callers leave it False).
             "effort_id": effort_id or sid,
             "effort_managed": bool(effort_managed),
+            # zombie-hunter v2: process-identity fields (back-compat None/"").
+            "pid": pid,
+            "proc_create_time": proc_create_time,
+            "crypt_token": crypt_token or "",
         })
         reg[sid] = record
         _save_sessions(reg)
@@ -512,7 +538,9 @@ def update_session(session_id: str, **fields) -> dict:
                "grass_origin",
                # v12 Wave 1: effort stage fields.
                "kind", "current_stage", "stage_history", "seeded_stages",
-               "effort_id", "effort_managed"}
+               "effort_id", "effort_managed",
+               # zombie-hunter v2: process-identity fields.
+               "pid", "proc_create_time", "crypt_token"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:

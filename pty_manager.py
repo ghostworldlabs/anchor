@@ -264,6 +264,15 @@ class _PywinptyChild:
         # block on a join (it's a daemon).
         with self._lock:
             self._closed = True
+
+        if getattr(self, "_h_job", None) is not None:
+            try:
+                import proc_probe
+                proc_probe.close_handle(self._h_job)
+                self._h_job = None
+            except Exception:
+                pass
+
         pid = self.pid
         try:
             self._proc.terminate(force=True)
@@ -336,7 +345,16 @@ class PywinptyBackend:
         # pywinpty wants dimensions as (rows, cols); default to 24x80.
         proc = winpty.PtyProcess.spawn(
             argv, cwd=cwd, env=env, dimensions=(24, 80))
-        return _PywinptyChild(proc)
+        child = _PywinptyChild(proc)
+        if sys.platform == "win32" and child.pid:
+            try:
+                import proc_probe
+                child._h_job = proc_probe.attach_to_job_object(child.pid)
+            except Exception:
+                child._h_job = None
+        else:
+            child._h_job = None
+        return child
 
 
 # ── POSIX backend — real PTY via the stdlib `pty` (macOS / Linux) ─────────────
@@ -610,8 +628,24 @@ def start(cmd, cwd=None, env=None):
     The backend is selected per ``ANCHOR_PTY_BACKEND`` at call time. ``cmd`` may
     be a string or an argv list. Returns a fresh opaque session id.
     """
+    crypt_token = uuid.uuid4().hex
+    if env is None:
+        env = dict(os.environ)
+    else:
+        env = dict(env)
+    env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
+
     backend = select_backend()
     child = backend.start(cmd, cwd=cwd, env=env)
+    
+    try:
+        import proc_probe
+        child.crypt_token = crypt_token
+        child.proc_create_time = proc_probe.creation_time(getattr(child, "pid", None)) if getattr(child, "pid", None) else None
+    except Exception:
+        child.crypt_token = crypt_token
+        child.proc_create_time = None
+
     sid = uuid.uuid4().hex
     with _TABLE_LOCK:
         _LIVE[sid] = child

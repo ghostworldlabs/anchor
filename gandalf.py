@@ -589,6 +589,17 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     run_id = "run-" + str(int(ts * 1000))
     run_rel = f"{GANDALF_DIRNAME}/{run_id}"
 
+    try:
+        import session_registry
+        session_registry.register_session(
+            project_id=pid,
+            lane="gandalf",
+            status=session_registry.STATUS_RUNNING,
+            session_id=run_id
+        )
+    except Exception:
+        pass
+
     if status_cb: status_cb("Reading files (Stage A)...")
 
     # Wave 1: ContextSizer & Dynamic Router
@@ -652,6 +663,8 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         "report_rel": report_rel,
         "exec_rel": exec_rel,
         "advisor_rel": (f"{run_rel}/{ADVISOR_OUTPUT_JSON}" if ok else None),
+        "session_id": run_id,
+        "status": "done" if ok else "failed",
     }
     if not ok:
         record["reason"] = reason or "unknown"
@@ -660,6 +673,13 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         _append_index(folder, pid, record)
     except Exception:
         # Even if the index write somehow fails, return the honest result.
+        pass
+
+    try:
+        import session_registry
+        st = session_registry.STATUS_DONE if ok else session_registry.STATUS_FAILED
+        session_registry.update_session(run_id, status=st)
+    except Exception:
         pass
 
     out = dict(record)
@@ -722,3 +742,17 @@ def get_run(folder_path, project_id, run_id) -> dict:
         if str(r.get("run_id") or "") == str(run_id):
             return _safe_run_view(r)
     return None
+
+def delete_run(folder_path, project_id, run_id) -> bool:
+    """Remove a run from the index by run_id."""
+    with _paths.WRITE_LOCK:
+        runs = _load_index(folder_path, project_id)
+        filtered = [r for r in runs if str(r.get("run_id") or "") != str(run_id)]
+        if len(filtered) == len(runs):
+            return False
+        p = _index_path(folder_path, project_id)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(filtered, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+        return True
