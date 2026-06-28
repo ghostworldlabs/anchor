@@ -610,8 +610,35 @@ def start(cmd, cwd=None, env=None):
     The backend is selected per ``ANCHOR_PTY_BACKEND`` at call time. ``cmd`` may
     be a string or an argv list. Returns a fresh opaque session id.
     """
+    # ── zombie-hunter Phase 1: capture process identity at spawn ───────────
+    # Mint a per-session crypt token and inject it into the child's environment
+    # as ANCHOR_SESSION_ID_CRYPT_TOKEN. After the child has a real pid, record
+    # that pid's OS creation time. The (token, pid, proc_create_time) triple is
+    # stored on the child so terminal_session can persist it into the registry,
+    # letting the sweeper later prove a still-live pid is OUR process (creation-
+    # time match) and not a recycled pid. A stub/backend with no pid leaves
+    # proc_create_time None — the sweeper then abstains (safe), never kills.
+    crypt_token = uuid.uuid4().hex
+    if env is None:
+        env = dict(os.environ)
+    else:
+        env = dict(env)
+    env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
+
     backend = select_backend()
     child = backend.start(cmd, cwd=cwd, env=env)
+
+    child.crypt_token = crypt_token
+    pid = getattr(child, "pid", None)
+    if pid:
+        try:
+            import proc_probe
+            child.proc_create_time = proc_probe.creation_time(pid)
+        except Exception:
+            child.proc_create_time = None
+    else:
+        child.proc_create_time = None
+
     sid = uuid.uuid4().hex
     with _TABLE_LOCK:
         _LIVE[sid] = child

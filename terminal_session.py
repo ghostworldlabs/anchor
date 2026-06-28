@@ -472,10 +472,18 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # 3) Reuse the pty id AS the registry session_id (ONE id per session).
     #    pty_manager mints its own opaque id; rebind it to our chosen sid so the
     #    registry, worktree and PTY all key off a single id.
+    child_pid = None
+    child_proc_create_time = None
+    child_crypt_token = ""
     with _pty._TABLE_LOCK:
         child = _pty._LIVE.pop(pty_sid, None)
         if child is not None:
             _pty._LIVE[sid] = child
+            # zombie-hunter Phase 1: lift the spawn-captured process identity
+            # off the PTY child so it persists into the registry record below.
+            child_pid = getattr(child, "pid", None)
+            child_proc_create_time = getattr(child, "proc_create_time", None)
+            child_crypt_token = getattr(child, "crypt_token", "")
 
     # 4) Register the session. If THIS fails (after the PTY is started+rebound),
     #    roll back BOTH the PTY and the worktree so nothing is left as an orphan
@@ -499,6 +507,10 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             # ``effort_managed`` stored exactly as passed (the v12 discriminator).
             effort_id=(effort_id or sid),
             effort_managed=bool(effort_managed),
+            # zombie-hunter Phase 1: persist the spawn-captured process identity.
+            pid=child_pid,
+            proc_create_time=child_proc_create_time,
+            crypt_token=child_crypt_token,
         )
     except Exception as exc:
         try:
