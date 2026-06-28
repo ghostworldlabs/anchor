@@ -13341,7 +13341,6 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
                 try:
-                    import json
                     reg_file = ANCHOR_DIR / "session_registry.json"
                     reg = json.loads(reg_file.read_text('utf-8')) if reg_file.exists() else {}
                 except Exception:
