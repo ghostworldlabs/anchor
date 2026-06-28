@@ -825,6 +825,20 @@ def _bootstrap_project_best_effort(folder, project_name) -> None:
         pass  # bootstrap is best-effort; never block registration/open/rescan
 
 
+def resolve_project_dir(parent_path, name: str) -> Path:
+    """Computes the on-disk project directory and prevents double-nesting.
+
+    If parent_path already ends with name (case/sep-insensitive),
+    do NOT append name again.
+    """
+    p_str = str(parent_path).replace('\\', '/').rstrip('/')
+    n_str = str(name).replace('\\', '/').strip('/')
+    parent = Path(p_str).expanduser()
+    if parent.name.lower() == n_str.lower():
+        return parent
+    return parent / n_str
+
+
 def create_new_folder_project(name: str, parent_path, priority: int = 2,
                               git_init: bool = False) -> dict:
     """+ New Project / create-new-folder mode.
@@ -835,7 +849,7 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
     """
     with WRITE_LOCK:
         parent = Path(parent_path).expanduser()
-        folder = parent / name
+        folder = resolve_project_dir(parent, name)
         folder.mkdir(parents=True, exist_ok=True)
         git_done = _maybe_git_init(folder) if git_init else False
         # v8 Wave 1: always bootstrap (starter CLAUDE.md + git-init if absent) so
@@ -3506,6 +3520,98 @@ def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
     )
 
 
+def _load_gitignore(folder_path) -> list:
+    """Read .gitignore patterns from the project root if present, plus .anchorignore."""
+    ignore_path = Path(folder_path) / ".gitignore"
+    patterns = []
+    if ignore_path.is_file():
+        try:
+            with open(ignore_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+        except OSError:
+            pass
+    anchorignore_path = Path(folder_path) / ".anchorignore"
+    if anchorignore_path.is_file():
+        try:
+            with open(anchorignore_path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        patterns.append(line)
+        except OSError:
+            pass
+    return patterns
+
+
+def _should_ignore_file(rel_path: Path, patterns: list) -> bool:
+    """Determine if a relative path matches any ignore pattern or standard skip dirs.
+
+    Reuses the existing logic shape from gandalf.py.
+    """
+    import fnmatch
+    parts_lower = [p.lower() for p in rel_path.parts]
+    for skip in {".git", ".anchor", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache"}:
+        if skip in parts_lower:
+            return True
+
+    rel_str = rel_path.as_posix()
+    rel_str_lower = rel_str.lower()
+
+    for pattern in patterns:
+        clean_pat = pattern.rstrip('/')
+        if not clean_pat:
+            continue
+        clean_pat_lower = clean_pat.lower()
+
+        # Check components of the path
+        for part in rel_path.parts:
+            part_lower = part.lower()
+            if fnmatch.fnmatch(part, clean_pat) or fnmatch.fnmatch(part_lower, clean_pat_lower):
+                return True
+
+        # Check full relative path and patterns
+        if fnmatch.fnmatch(rel_str, clean_pat) or fnmatch.fnmatch(rel_str_lower, clean_pat_lower):
+            return True
+        if fnmatch.fnmatch(rel_str, pattern) or fnmatch.fnmatch(rel_str_lower, pattern.lower()):
+            return True
+
+        # Support directory-specific patterns like "dir/*" or "dir/"
+        if pattern.endswith('/'):
+            if rel_str_lower.startswith(clean_pat_lower + '/'):
+                return True
+        if clean_pat.startswith('*') and fnmatch.fnmatch(rel_str_lower, '*' + clean_pat_lower):
+            return True
+
+    return False
+
+
+def _render_layoutd_files_panel(folder_path, project_id) -> str:
+    """Render the Layout-D right-column Project Files panel (v13 Wave 3)."""
+    pid_attr = html_lib.escape(project_id, quote=True)
+    return (
+        "<div class='panel'>"
+        "<div class='ptitle'>"
+        "&#128194; Files "
+        f"<span class='path' id='projectFilesPath' style='font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace;margin-left:6px'>/</span>"
+        "</div>"
+        f"<div class='files-list' id='projectFilesList' style='max-height:250px;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:6px'>"
+        "<div class='idea-empty'>Loading files...</div>"
+        "</div>"
+        f"<div class='files-preview' id='projectFilesPreviewContainer' style='display:none'>"
+        "<div class='files-preview-header' style='display:flex;align-items:center'>"
+        "<span class='files-preview-title' id='projectFilesPreviewTitle' style='font-size:12.5px;font-weight:700;color:var(--accent)'>Preview</span>"
+        "<button class='files-preview-close' onclick='closeProjectFilesPreview()' style='margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px'>&times;</button>"
+        "</div>"
+        "<pre class='files-preview-body' id='projectFilesPreviewCode' style='margin-top:6px;padding:8px;background:var(--surface2);border-radius:4px;overflow-x:auto;max-height:200px;font-size:11px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap'></pre>"
+        "</div>"
+        f"<script>window.addEventListener('DOMContentLoaded', function() {{ loadProjectFiles('{pid_attr}', ''); }});</script>"
+        "</div>"
+    )
+
+
 def _render_layoutd_html(folder_path, project_id):
     """Render the v12 Layout-D board (Wave 2 skeleton, wired LIVE in W10).
 
@@ -3529,6 +3635,7 @@ def _render_layoutd_html(folder_path, project_id):
     gandalf_panel = _render_layoutd_gandalf_panel(folder_path, project_id)
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
+    files_panel = _render_layoutd_files_panel(folder_path, project_id)
     # v12 W10 (John change #2): TWO explicit start controls — "+ New research"
     # starts an effort at the Research stage, "+ New plan/build" starts one at the
     # Plan stage (W6 supports starting at research OR plan). Both go through
@@ -3555,6 +3662,7 @@ def _render_layoutd_html(folder_path, project_id):
         f"{gandalf_panel}"
         f"{grass_panel}"
         f"{deliv_panel}"
+        f"{files_panel}"
         "</div>"
         "</div>"
     )
@@ -3988,8 +4096,8 @@ def render_project_window_html(project_id: str) -> str:
                 "<h1>Project not found</h1>"
                 f"<p>No R&amp;D project with id "
                 f"{html_lib.escape(project_id)}.</p>"
-                    "<p><a href='/'>&larr; Back to dashboard</a></p>"
-                    "</body></html>")
+                "<p><a href=\"/\" target=\"_top\">&larr; Back to dashboard</a></p>"
+                "</body></html>")
         # Surface path-missing on read.
         eff = _rnd.list_projects()
         for e in eff:
@@ -4037,7 +4145,7 @@ def render_project_window_html(project_id: str) -> str:
     
     upload_id = f"upload_{project_id}"
     upload_btn = (f"<label class='rnd-mini' style='cursor:pointer; display:inline-block' title='Upload a file to this project folder'>&#8673; Upload"
-                  f"<input type='file' id='{upload_id}' style='display:none' onchange=\"handleGlobalUpload('{upload_id}', '{pid_attr}')\" /></label>")
+                  f"<input type='file' id='{upload_id}' style='display:none' multiple webkitdirectory onchange=\"handleGlobalUpload('{upload_id}', '{pid_attr}')\" /></label>")
 
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
@@ -4097,6 +4205,7 @@ def render_project_window_html(project_id: str) -> str:
         + "</div>"
     )
     pid_js = json.dumps(project_id)
+    back_link_normal = '<p><a href="/" target="_top">&larr; Back to dashboard</a></p>'
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         # Without width=device-width a laptop/PWA browser falls back to a ~980px
@@ -4935,8 +5044,29 @@ def render_project_window_html(project_id: str) -> str:
         ".dock .dock-term-host .ro-sec .ro-k{color:var(--text-dim);"
         "min-width:92px}"
         ".dock .dock-term-host .ro-note{color:var(--text-dim);font-size:11.5px}"
+        ".file-item{display:flex;align-items:center;gap:8px;padding:6px 12px;"
+        "border-bottom:1px solid var(--border);font-size:12px}"
+        ".file-item.dir-item{cursor:pointer;color:var(--accent)}"
+        ".file-item.dir-item:hover{background:var(--surface2)}"
+        ".file-item.file-item-clickable{cursor:pointer}"
+        ".file-item.file-item-clickable:hover{background:var(--surface2)}"
+        ".file-item .icon{font-size:14px}"
+        ".file-item .file-size{margin-left:auto;color:var(--text-dim);font-size:11px;"
+        "font-family:ui-monospace,Consolas,monospace}"
+        ".files-preview{margin-top:12px;background:#0d0e12;border:1px solid var(--border);"
+        "border-radius:8px;padding:12px}"
+        ".files-preview-header{display:flex;align-items:center;justify-content:space-between;"
+        "border-bottom:1px solid var(--border);padding-bottom:8px;margin-bottom:8px}"
+        ".files-preview-title{font-size:13px;font-weight:600;color:var(--accent);"
+        "font-family:ui-monospace,Consolas,monospace;word-break:break-all}"
+        ".files-preview-close{cursor:pointer;color:var(--text-dim);font-size:16px;"
+        "background:none;border:none;padding:0 4px;margin-left:auto}"
+        ".files-preview-close:hover{color:var(--text)}"
+        ".files-preview-body{margin:0;font-family:ui-monospace,Consolas,monospace;"
+        "font-size:12px;color:var(--text);white-space:pre-wrap;overflow:auto;"
+        "max-height:300px;background:#161b22;padding:10px;border-radius:6px}"
         "</style></head><body>"
-        f"{'' if project_id == '__dashboard__' else '<p><a href=\\"/\\">&larr; Back to dashboard</a></p>'}"
+        f"{'' if project_id == '__dashboard__' else back_link_normal}"
         f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
         # ── Lifecycle header ──
         "<div class='dhead'>"
@@ -5068,7 +5198,11 @@ def render_project_window_html(project_id: str) -> str:
         + _PROJECT_WINDOW_JS +
         "</script>"
         "<script>" + cache_bust_script() + "</script>\n"
-        + (f"<script>window.addEventListener('DOMContentLoaded', function() {{ setTimeout(function() {{ var sid = {json.dumps([s['session_id'] for s in _sessreg.list_sessions(project_id) if s.get('lane') == 'general' and s.get('status') == 'running'][:1])}; if (sid.length > 0) {{ openEffortDock(sid[0], null); }} else {{ var btn = document.getElementById('openTermBtn'); if (btn) btn.click(); }} }}, 300); }});</script>" if project_id == "__dashboard__" else "") +
+        # Dashboard no longer auto-opens the workbench/effort dock on load (John's
+        # preference): the prior __dashboard__ DOMContentLoaded auto-open (effort
+        # dock or terminal-button click) was removed. The dock opens only on an
+        # explicit user click now.
+        + "" +
         "</body></html>"
     )
 
@@ -9338,32 +9472,168 @@ async function newGeneral(backend) {
 async function handleGlobalUpload(inputId, projectId) {
   var input = document.getElementById(inputId);
   if (!input || !input.files || input.files.length === 0) return;
-  var file = input.files[0];
-  var reader = new FileReader();
-  reader.onload = async function() {
-    var base64 = reader.result.split(',')[1];
-    var body = { filename: file.name, content_b64: base64, project_id: projectId };
-    var res = await fetch("/api/upload", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Anchor-Token": _anchorToken()
-      },
-      body: JSON.stringify(body)
+  
+  function readAsB64(file) {
+    return new Promise(function(resolve, reject) {
+      var r = new FileReader();
+      r.onload = function() {
+        resolve(r.result.split(',')[1]);
+      };
+      r.onerror = reject;
+      r.readAsDataURL(file);
     });
-    if (res.ok) {
-      alert("Uploaded successfully: " + file.name);
-      input.value = "";
-    } else {
-      var data = await res.json();
-      alert("Upload failed: " + (data.error || "Unknown error"));
+  }
+
+  var filesPayload = [];
+  for (var i = 0; i < input.files.length; i++) {
+    var file = input.files[i];
+    var path = file.webkitRelativePath || file.name;
+    try {
+      var base64 = await readAsB64(file);
+      filesPayload.push({ path: path, content_b64: base64 });
+    } catch (e) {
+      alert("Failed to read file: " + file.name);
+      return;
     }
-  };
-  reader.readAsDataURL(file);
+  }
+
+  var body = { project_id: projectId, files: filesPayload };
+  var res = await fetch("/api/rnd/upload_batch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Anchor-Token": _anchorToken()
+    },
+    body: JSON.stringify(body)
+  });
+  if (res.ok) {
+    alert("Uploaded " + filesPayload.length + " files successfully.");
+    input.value = "";
+  } else {
+    var data = await res.json();
+    alert("Upload failed: " + (data.error || "Unknown error"));
+  }
 }
 
 // (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
 // stack in the document flow — Wave 5 adds the terminal-pane vertical resize.)
+
+// --- Wave 3: Project Files Viewer ---
+var currentFilesPath = "";
+
+async function loadProjectFiles(projectId, path) {
+  currentFilesPath = path || "";
+  var listEl = document.getElementById("projectFilesList");
+  var pathEl = document.getElementById("projectFilesPath");
+  if (!listEl) return;
+  
+  listEl.innerHTML = "<div class='idea-empty'>Loading files...</div>";
+  if (pathEl) {
+    pathEl.textContent = currentFilesPath ? "/" + currentFilesPath : "/";
+  }
+  
+  try {
+    var token = (typeof _anchorToken === 'function') ? _anchorToken() : '';
+    var url = "/api/rnd/project_files?project_id=" + encodeURIComponent(projectId) + "&path=" + encodeURIComponent(currentFilesPath);
+    if (token) {
+      url += "&token=" + encodeURIComponent(token);
+    }
+    var res = await fetch(url);
+    var data = await res.json();
+    if (!data.ok) {
+      listEl.innerHTML = "<div class='idea-empty' style='color:var(--danger)'>Error: " + _esc(data.error) + "</div>";
+      return;
+    }
+    
+    var html = "";
+    // Back folder if we are in a subdirectory
+    if (currentFilesPath) {
+      var parts = currentFilesPath.split("/");
+      parts.pop();
+      var parentPath = parts.join("/");
+      html += "<div class='file-item dir-item' onclick=\"loadProjectFiles('" + escapeJs(projectId) + "', '" + escapeJs(parentPath) + "')\">" +
+        "<span class='icon'>&#128194;</span> <span class='mono'>..</span>" +
+      "</div>";
+    }
+    
+    // Render directories
+    data.dirs.forEach(function(d) {
+      var name = d.split("/").pop();
+      html += "<div class='file-item dir-item' onclick=\"loadProjectFiles('" + escapeJs(projectId) + "', '" + escapeJs(d) + "')\">" +
+        "<span class='icon'>&#128193;</span> <span class='mono'>" + _esc(name) + "/</span>" +
+      "</div>";
+    });
+    
+    // Render files
+    data.files.forEach(function(f) {
+      var sizeStr = formatBytes(f.size);
+      html += "<div class='file-item file-item-clickable' onclick=\"previewProjectFile('" + escapeJs(projectId) + "', '" + escapeJs(f.path) + "')\">" +
+        "<span class='icon'>&#128196;</span> <span class='mono'>" + _esc(f.name) + "</span>" +
+        "<span class='file-size'>" + sizeStr + "</span>" +
+      "</div>";
+    });
+    
+    if (data.dirs.length === 0 && data.files.length === 0 && !currentFilesPath) {
+      listEl.innerHTML = "<div class='idea-empty'>No files found.</div>";
+    } else {
+      listEl.innerHTML = html;
+    }
+  } catch (err) {
+    listEl.innerHTML = "<div class='idea-empty' style='color:var(--danger)'>Failed to fetch files: " + _esc(err.message) + "</div>";
+  }
+}
+
+async function previewProjectFile(projectId, path) {
+  var previewContainer = document.getElementById("projectFilesPreviewContainer");
+  var previewTitle = document.getElementById("projectFilesPreviewTitle");
+  var previewCode = document.getElementById("projectFilesPreviewCode");
+  if (!previewContainer || !previewTitle || !previewCode) return;
+  
+  var name = path.split("/").pop();
+  previewTitle.textContent = "Loading " + name + "...";
+  previewCode.textContent = "Loading file content...";
+  previewContainer.style.display = "block";
+  
+  try {
+    var token = (typeof _anchorToken === 'function') ? _anchorToken() : '';
+    var url = "/api/rnd/project_file_content?project_id=" + encodeURIComponent(projectId) + "&path=" + encodeURIComponent(path);
+    if (token) {
+      url += "&token=" + encodeURIComponent(token);
+    }
+    var res = await fetch(url);
+    var data = await res.json();
+    if (!data.ok) {
+      previewTitle.textContent = "Error";
+      previewCode.textContent = "Error: " + data.error;
+      return;
+    }
+    
+    previewTitle.textContent = name + " (" + formatBytes(data.size) + ")";
+    previewCode.textContent = data.content;
+  } catch (err) {
+    previewTitle.textContent = "Error";
+    previewCode.textContent = "Failed to load content: " + err.message;
+  }
+}
+
+function closeProjectFilesPreview() {
+  var previewContainer = document.getElementById("projectFilesPreviewContainer");
+  if (previewContainer) {
+    previewContainer.style.display = "none";
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  var k = 1024;
+  var sizes = ['B', 'KB', 'MB', 'GB'];
+  var i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function escapeJs(s) {
+  return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
 """
 
 
@@ -11095,7 +11365,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <!-- Wave 2: Global File Upload -->
       <label class="btn btn-sm" style="margin-right:10px; cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px; display:inline-block">
           &#8673; Upload File
-          <input type="file" id="global-upload" style="display:none" onchange="handleGlobalUpload('global-upload', '__dashboard__')" />
+          <input type="file" id="global-upload" style="display:none" multiple webkitdirectory onchange="handleGlobalUpload('global-upload', '__dashboard__')" />
       </label>
       <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
@@ -11107,7 +11377,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
-          <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report', '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/zombie_radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Radar</button>
+          <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/vendor/brand/zombie-hunter-radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Hunter</button>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -11383,7 +11653,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <button type="button" class="btn btn-sm btn-outline" id="npModeExistingBtn" onclick="npSetMode('existing')">Select existing</button>
     </div>
     <label>Project name</label>
-    <input type="text" id="npName" placeholder="Project name" oninput="npNameEdited()" />
+    <input type="text" id="npName" placeholder="Project name" oninput="npNameEdited(); npUpdatePreview()" />
     <label>Priority</label>
     <select id="npPriority">
       <option value="1">P1 — Top Tier</option>
@@ -11393,7 +11663,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     <!-- Create-new-folder mode -->
     <div id="npNewFolderFields">
       <label>Parent path</label>
-      <input type="text" id="npParentPath" placeholder="e.g. C:\\dev" />
+      <input type="text" id="npParentPath" placeholder="e.g. C:\\dev" oninput="npUpdatePreview()" />
+      <div id="npPreviewPath" style="font-size:11px;color:var(--text-dim);margin-top:4px;font-style:italic"></div>
       <label style="display:flex;align-items:center;gap:6px;margin-top:6px">
         <input type="checkbox" id="npGitInit" /> Initialize git repo
       </label>
@@ -11823,7 +12094,10 @@ function openNewProject() {{
     _npMode = 'new_folder';
     npSetMode('new_folder');
     document.getElementById('npName').value = '';
-    document.getElementById('npParentPath').value = '';
+    document.getElementById('npParentPath').value = 'C:\\\\dev';
+    if (document.getElementById('npPreviewPath')) {{
+        document.getElementById('npPreviewPath').textContent = '';
+    }}
     document.getElementById('npFolderPath').value = '';
     document.getElementById('npGitInit').checked = false;
     _npCurrentPath = null;
@@ -11835,6 +12109,32 @@ function openNewProject() {{
 // Called on every keystroke in the name field: a manual edit clears the
 // auto-suggest flag so later folder selections never clobber the user's text.
 function npNameEdited() {{ _npAutoName = false; }}
+
+function npUpdatePreview() {{
+    const parentInput = document.getElementById('npParentPath');
+    const nameInput = document.getElementById('npName');
+    const previewEl = document.getElementById('npPreviewPath');
+    if (!previewEl) return;
+    
+    const parentVal = (parentInput.value || '').trim();
+    const nameVal = (nameInput.value || '').trim();
+    if (!parentVal || !nameVal) {{
+        previewEl.textContent = '';
+        return;
+    }}
+    
+    let normalizedParent = parentVal.replace(/[\\\\/]+$/, '');
+    let lastSegment = normalizedParent.split(/[\\\\/]/).pop() || '';
+    
+    let resolved;
+    if (lastSegment.toLowerCase() === nameVal.toLowerCase()) {{
+        resolved = normalizedParent;
+    }} else {{
+        const sep = parentVal.includes('/') ? '/' : '\\\\';
+        resolved = normalizedParent + sep + nameVal;
+    }}
+    previewEl.innerHTML = 'Preview: <b>' + escHtml(resolved) + '</b>';
+}}
 
 // Auto-suggest the project name from a selected folder's basename, but ONLY if
 // the field is empty or still holds a prior auto-suggestion (never overwrite a
@@ -11848,6 +12148,7 @@ function npSuggestName(path) {{
     if (!base) return;
     nameEl.value = base;
     _npAutoName = true;
+    npUpdatePreview();
 }}
 
 // Last path segment (drive-letter and trailing-separator aware), e.g.
@@ -12384,28 +12685,47 @@ window.addEventListener('DOMContentLoaded', rndFolderInit);
 async function handleGlobalUpload(inputId, projectId) {{
   var input = document.getElementById(inputId);
   if (!input || !input.files || input.files.length === 0) return;
-  var file = input.files[0];
-  var reader = new FileReader();
-  reader.onload = async function() {{
-    var base64 = reader.result.split(',')[1];
-    var body = {{ filename: file.name, content_b64: base64, project_id: projectId }};
-    var res = await fetch("/api/upload", {{
-      method: "POST",
-      headers: {{
-        "Content-Type": "application/json",
-        "X-Anchor-Token": _anchorToken()
-      }},
-      body: JSON.stringify(body)
+  
+  function readAsB64(file) {{
+    return new Promise(function(resolve, reject) {{
+      var r = new FileReader();
+      r.onload = function() {{
+        resolve(r.result.split(',')[1]);
+      }};
+      r.onerror = reject;
+      r.readAsDataURL(file);
     }});
-    if (res.ok) {{
-      alert("Uploaded successfully: " + file.name);
-      input.value = "";
-    }} else {{
-      var data = await res.json();
-      alert("Upload failed: " + (data.error || "Unknown error"));
+  }}
+
+  var filesPayload = [];
+  for (var i = 0; i < input.files.length; i++) {{
+    var file = input.files[i];
+    var path = file.webkitRelativePath || file.name;
+    try {{
+      var base64 = await readAsB64(file);
+      filesPayload.push({{ path: path, content_b64: base64 }});
+    }} catch (e) {{
+      alert("Failed to read file: " + file.name);
+      return;
     }}
-  }};
-  reader.readAsDataURL(file);
+  }}
+
+  var body = {{ project_id: projectId, files: filesPayload }};
+  var res = await fetch("/api/rnd/upload_batch", {{
+    method: "POST",
+    headers: {{
+      "Content-Type": "application/json",
+      "X-Anchor-Token": _anchorToken()
+    }},
+    body: JSON.stringify(body)
+  }});
+  if (res.ok) {{
+    alert("Uploaded " + filesPayload.length + " files successfully.");
+    input.value = "";
+  }} else {{
+    var data = await res.json();
+    alert("Upload failed: " + (data.error || "Unknown error"));
+  }}
 }}
 
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
@@ -13161,6 +13481,203 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             prop = {"has_plan_set": False}
                         self._send_json({"ok": True, **prop})
+            elif self.path.startswith("/api/rnd/project_files"):
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                project_id = (q.get("project_id", [""])[0] or "").strip()
+                path_param = (q.get("path", [""])[0] or "").strip()
+                recursive_param = (q.get("recursive", [""])[0] or "").strip().lower() == "true"
+
+                if not project_id:
+                    self._send_json({"ok": False, "error": "project_id required"}, 400)
+                    return
+                if _unsafe_path_seg(project_id):
+                    self._send_json({"ok": False, "error": "invalid project_id"}, 400)
+                    return
+
+                proj = _rnd.get_project(project_id)
+                if proj is None:
+                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
+                    return
+
+                project_root = Path(proj["folder_path"]).resolve()
+
+                # Traversal check
+                p = Path(path_param) if path_param else Path(".")
+                if p.is_absolute() or ".." in p.parts:
+                    self._send_json({"ok": False, "error": "Path traversal detected"}, 400)
+                    return
+
+                target_path = (project_root / p).resolve()
+                try:
+                    target_path.relative_to(project_root)
+                except ValueError:
+                    self._send_json({"ok": False, "error": "Path containment check failed"}, 400)
+                    return
+
+                if not target_path.exists():
+                    self._send_json({"ok": False, "error": "Path not found"}, 404)
+                    return
+                if not target_path.is_dir():
+                    self._send_json({"ok": False, "error": "Not a directory"}, 400)
+                    return
+
+                patterns = _load_gitignore(project_root)
+                dirs_list = []
+                files_list = []
+
+                if recursive_param:
+                    import os
+                    for root, dirs, files in os.walk(target_path):
+                        # Filter ignored directories in-place to prevent scanning them
+                        dirs_to_keep = []
+                        for d in dirs:
+                            full_d = Path(root) / d
+                            try:
+                                resolved_d = full_d.resolve()
+                                resolved_d.relative_to(project_root)
+                                rel_d = full_d.relative_to(project_root)
+                                if not _should_ignore_file(rel_d, patterns):
+                                    dirs_to_keep.append(d)
+                            except (ValueError, OSError):
+                                continue
+                        dirs[:] = dirs_to_keep
+
+                        for file in files:
+                            full_f = Path(root) / file
+                            try:
+                                resolved_f = full_f.resolve()
+                                resolved_f.relative_to(project_root)
+                                rel_f = full_f.relative_to(project_root)
+                                if not _should_ignore_file(rel_f, patterns):
+                                    stat = full_f.stat()
+                                    files_list.append({
+                                        "name": rel_f.as_posix(),
+                                        "path": rel_f.as_posix(),
+                                        "size": stat.st_size,
+                                        "mtime": stat.st_mtime
+                                    })
+                            except (ValueError, OSError):
+                                continue
+
+                        for d in dirs:
+                            full_d = Path(root) / d
+                            try:
+                                rel_d = full_d.relative_to(project_root)
+                                dirs_list.append(rel_d.as_posix())
+                            except (ValueError, OSError):
+                                continue
+                else:
+                    try:
+                        for entry in sorted(target_path.iterdir(), key=lambda x: x.name.lower()):
+                            try:
+                                # Strict symlink containment check
+                                resolved_entry = entry.resolve()
+                                resolved_entry.relative_to(project_root)
+                            except (ValueError, OSError):
+                                continue
+
+                            rel_entry = entry.relative_to(project_root)
+                            if _should_ignore_file(rel_entry, patterns):
+                                continue
+
+                            if entry.is_dir():
+                                dirs_list.append(rel_entry.as_posix())
+                            elif entry.is_file():
+                                try:
+                                    stat = entry.stat()
+                                    files_list.append({
+                                        "name": rel_entry.name,
+                                        "path": rel_entry.as_posix(),
+                                        "size": stat.st_size,
+                                        "mtime": stat.st_mtime
+                                    })
+                                except OSError:
+                                    continue
+                    except PermissionError:
+                        self._send_json({"ok": False, "error": "permission-denied"}, 403)
+                        return
+                    except OSError as exc:
+                        self._send_json({"ok": False, "error": f"os-error: {exc}"}, 500)
+                        return
+
+                self._send_json({
+                    "ok": True,
+                    "path": p.as_posix() if path_param else "",
+                    "dirs": sorted(dirs_list, key=lambda x: x.lower()),
+                    "files": sorted(files_list, key=lambda x: x["name"].lower())
+                })
+
+            elif self.path.startswith("/api/rnd/project_file_content"):
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                project_id = (q.get("project_id", [""])[0] or "").strip()
+                path_param = (q.get("path", [""])[0] or "").strip()
+
+                if not project_id or not path_param:
+                    self._send_json({"ok": False, "error": "project_id and path required"}, 400)
+                    return
+                if _unsafe_path_seg(project_id):
+                    self._send_json({"ok": False, "error": "invalid project_id"}, 400)
+                    return
+
+                proj = _rnd.get_project(project_id)
+                if proj is None:
+                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
+                    return
+
+                project_root = Path(proj["folder_path"]).resolve()
+
+                # Traversal check
+                p = Path(path_param)
+                if p.is_absolute() or ".." in p.parts:
+                    self._send_json({"ok": False, "error": "Path traversal detected"}, 400)
+                    return
+
+                target_path = (project_root / p).resolve()
+                try:
+                    target_path.relative_to(project_root)
+                except ValueError:
+                    self._send_json({"ok": False, "error": "Path containment check failed"}, 400)
+                    return
+
+                if not target_path.exists():
+                    self._send_json({"ok": False, "error": "File not found"}, 404)
+                    return
+                if not target_path.is_file():
+                    self._send_json({"ok": False, "error": "Not a file"}, 400)
+                    return
+
+                patterns = _load_gitignore(project_root)
+                if _should_ignore_file(p, patterns):
+                    self._send_json({"ok": False, "error": "Access denied (file is ignored)"}, 403)
+                    return
+
+                # Size cap check: 1 MB limit
+                SIZE_CAP = 1 * 1024 * 1024
+                try:
+                    stat = target_path.stat()
+                    if stat.st_size > SIZE_CAP:
+                        self._send_json({"ok": False, "error": f"File exceeds size limit of {SIZE_CAP} bytes"}, 400)
+                        return
+
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+
+                    self._send_json({
+                        "ok": True,
+                        "path": path_param,
+                        "content": content,
+                        "size": stat.st_size
+                    })
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": f"Failed to read file: {exc}"}, 500)
+                    return
+
             elif self.path.startswith("/api/rnd/session_summary"):
                 # Read-only structured SESSION summary as JSON (v3 Wave 6): the
                 # in-place accordion fetches this instead of navigating to the
@@ -13428,21 +13945,132 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         status = _GANDALF_INFLIGHT.get(pid, None)
                     self._send_json({"ok": True, "status": status})
             elif self.path.startswith("/api/rnd/zombie_hunter_report"):
+                # Auth gate (defense-in-depth): the radar report exposes process
+                # metadata (PIDs / session ids). Token-gated like the other
+                # read-API GET routes; a no-op when ANCHOR_TOKEN is unset (local
+                # single-user), enforced in remote mode. The dashboard button
+                # passes ?token= via _anchorToken().
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                import zombie_hunter
+                import pty_manager
+                import subprocess
+                import sys
+                import json
+                from datetime import datetime
+
+                # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
+                report_path = zombie_hunter._last_report_path()
+                is_stale = True
+                report_data = None
+
+                if report_path.exists():
+                    try:
+                        report_data = json.loads(report_path.read_text("utf-8"))
+                        swept_at = report_data.get("swept_at", 0)
+                        mtime = report_path.stat().st_mtime
+                        now = time.time()
+                        if abs(now - mtime) < 60 and abs(now - swept_at) < 60:
+                            is_stale = False
+                    except Exception:
+                        is_stale = True
+
+                # Observe phase: classify processes using the dry-run sweep (apply=False).
+                # This is read-only (NO kills, NO registry updates) and writes/refreshes zombie_hunter_last.json.
+                if is_stale:
+                    try:
+                        live_ids = pty_manager.live_sessions()
+                        report = zombie_hunter.sweep(live_session_ids=live_ids, apply=False)
+                        zombie_hunter._persist_report(report)
+                    except Exception:
+                        pass
+
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.end_headers()
-                try:
-                    reg_file = ANCHOR_DIR / "session_registry.json"
-                    reg = json.loads(reg_file.read_text('utf-8')) if reg_file.exists() else {}
-                except Exception:
-                    reg = {}
-                html = "<html><head><title>Zombie Hunter Radar Report</title>"
-                html += "<style>body { font-family: system-ui; background: #0f0f0f; color: #eee; padding: 20px; } table { width: 100%; border-collapse: collapse; } th, td { padding: 8px; border: 1px solid #333; text-align: left; }</style>"
-                html += "</head><body><h1>&#128142; Zombie Hunter Radar</h1>"
-                html += "<h2>Active Swarms / Sessions</h2><table><tr><th>ID</th><th>Type</th><th>Status</th><th>Last Ping</th></tr>"
-                for sid, sdata in reg.items():
-                    html += f"<tr><td>{sid}</td><td>{sdata.get('type', 'Unknown')}</td><td>{sdata.get('status', 'Unknown')}</td><td>{sdata.get('last_ping', 'N/A')}</td></tr>"
-                html += "</table></body></html>"
+
+                html = "<html><head><title>Zombie Hunter Report</title>"
+                html += "<style>"
+                html += "body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0c; color: #e4e4e7; padding: 30px; margin: 0; }"
+                html += ".container { max-width: 900px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }"
+                html += "h1 { margin-top: 0; color: #fafafa; font-size: 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #27272a; padding-bottom: 12px; }"
+                html += "h2 { color: #f4f4f5; font-size: 18px; margin-top: 24px; margin-bottom: 12px; }"
+                html += "table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 16px; }"
+                html += "th { background: #27272a; color: #a1a1aa; font-weight: 500; text-align: left; padding: 10px 12px; font-size: 14px; border-bottom: 2px solid #3f3f46; }"
+                html += "td { padding: 10px 12px; border-bottom: 1px solid #27272a; font-size: 14px; color: #d4d4d8; }"
+                html += ".badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 600; }"
+                html += ".badge-info { background: #1e3a8a; color: #93c5fd; }"
+                html += ".badge-warning { background: #78350f; color: #fde047; }"
+                html += ".badge-danger { background: #7f1d1d; color: #fca5a5; }"
+                html += ".badge-success { background: #064e3b; color: #6ee7b7; }"
+                html += ".badge-secondary { background: #27272a; color: #d4d4d8; }"
+                html += "pre { font-family: monospace; font-size: 13px; background: #09090b; padding: 16px; border: 1px solid #27272a; border-radius: 6px; overflow-x: auto; max-height: 500px; color: #4ade80; }"
+                html += ".meta { font-size: 13px; color: #71717a; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; background: #202024; padding: 10px 16px; border-radius: 6px; }"
+                html += ".meta-label { font-weight: bold; color: #a1a1aa; }"
+                html += "</style></head><body>"
+                html += "<div class='container'>"
+                html += "<h1>&#129503; Zombie Hunter Radar</h1>"
+
+                if not is_stale and report_data:
+                    swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
+                    html += f"<div class='meta'>"
+                    html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-success'>Cached Sweep Report</span></div>"
+                    html += f"<div><span class='meta-label'>Swept At:</span> {swept_time_str}</div>"
+                    html += f"</div>"
+
+                    html += "<h2>Sweep Status Summary</h2>"
+                    html += "<table>"
+                    html += "<tr><th>Category</th><th>Count</th><th>Description</th></tr>"
+
+                    killed_cnt = len(report_data.get("killed", []))
+                    alive_cnt = len(report_data.get("alive", []))
+                    abst_cnt = len(report_data.get("abstained", []))
+                    reap_d_cnt = len(report_data.get("reaped_dead", []))
+                    reap_r_cnt = len(report_data.get("reaped_recycled", []))
+
+                    html += f"<tr><td><span class='badge badge-danger'>Orphaned (Pending Kill)</span></td><td>{killed_cnt}</td><td>Process is ours, running, but no longer attached.</td></tr>"
+                    html += f"<tr><td><span class='badge badge-success'>Alive (Attached)</span></td><td>{alive_cnt}</td><td>Process is ours, running, and actively attached.</td></tr>"
+                    html += f"<tr><td><span class='badge badge-warning'>Abstained (Manual Review)</span></td><td>{abst_cnt}</td><td>Identity missing or incomplete. Never auto-killed.</td></tr>"
+                    html += f"<tr><td><span class='badge badge-secondary'>Reaped (Dead)</span></td><td>{reap_d_cnt}</td><td>Process exited naturally. Registry updated.</td></tr>"
+                    html += f"<tr><td><span class='badge badge-secondary'>Reaped (Recycled PID)</span></td><td>{reap_r_cnt}</td><td>PID recycled by another process. Registry updated, new process spared.</td></tr>"
+                    html += "</table>"
+
+                    # Detail lists if any
+                    for cat_name, cat_list, badge_class in [
+                        ("Orphaned (Pending Kill) Session IDs", report_data.get("killed", []), "badge-danger"),
+                        ("Active/Attached Session IDs", report_data.get("alive", []), "badge-success"),
+                        ("Abstained Session IDs", report_data.get("abstained", []), "badge-warning")
+                    ]:
+                        if cat_list:
+                            html += f"<h2>{cat_name}</h2>"
+                            html += "<ul>"
+                            for sid in cat_list:
+                                html += f"<li><code>{sid}</code></li>"
+                            html += "</ul>"
+                else:
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    html += f"<div class='meta'>"
+                    html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-warning'>Live Process Query Fallback</span></div>"
+                    html += f"<div><span class='meta-label'>Query Time:</span> {now_str} (Sweep report stale or absent)</div>"
+                    html += f"</div>"
+
+                    html += "<h2>System Process List</h2>"
+                    cmd_output = ""
+                    try:
+                        if sys.platform.startswith("win"):
+                            creationflags = 0x08000000  # CREATE_NO_WINDOW
+                            res = subprocess.run(["tasklist"], capture_output=True, text=True, creationflags=creationflags, timeout=10)
+                            cmd_output = res.stdout
+                        else:
+                            res = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+                            cmd_output = res.stdout
+                    except Exception as e:
+                        cmd_output = f"Error running fallback process query: {e}"
+
+                    html += f"<pre>{html_lib.escape(cmd_output)}</pre>"
+
+                html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
             elif self.path.startswith("/api/rnd/boneyard"):
@@ -13922,6 +14550,77 @@ class AnchorHandler(BaseHTTPRequestHandler):
             text = body.get("text", "")
             ok = mark_done(text)
             self._send_json({"ok": ok, "message": f"Marked done: {text}" if ok else f"Not found: {text}"})
+
+        elif self.path == "/api/rnd/upload_batch":
+            project_id = body.get("project_id", "__dashboard__")
+            files = body.get("files", [])
+            
+            if not isinstance(files, list):
+                self._send_json({"ok": False, "error": "files must be a list"})
+                return
+                
+            if project_id == "__dashboard__" or project_id == "dev" or not project_id:
+                upload_dir = ANCHOR_DIR / "dev"
+            else:
+                entry = _rnd.get_project(project_id)
+                if entry and entry.get("folder_path"):
+                    upload_dir = Path(entry["folder_path"])
+                else:
+                    upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
+            
+            upload_dir = upload_dir.resolve()
+            
+            import base64
+            import tempfile
+            import os
+            
+            try:
+                for file_info in files:
+                    rel_path_str = file_info.get("path", "")
+                    content_b64 = file_info.get("content_b64", "")
+                    
+                    if not rel_path_str or content_b64 is None:
+                        self._send_json({"ok": False, "error": "missing path or content_b64 for a file"})
+                        return
+                    
+                    p = Path(rel_path_str)
+                    if p.is_absolute() or os.path.isabs(rel_path_str):
+                        self._send_json({"ok": False, "error": f"Absolute paths not allowed: {rel_path_str}"})
+                        return
+                    
+                    for part in p.parts:
+                        if part == ".." or part == ".":
+                            self._send_json({"ok": False, "error": f"Path traversal/invalid directory name: {rel_path_str}"})
+                            return
+                    
+                    dest_path = (upload_dir / p).resolve()
+                    try:
+                        dest_path.relative_to(upload_dir)
+                        if dest_path == upload_dir:
+                            self._send_json({"ok": False, "error": "Cannot overwrite project root directory"})
+                            return
+                    except ValueError:
+                        self._send_json({"ok": False, "error": f"Path containment check failed for {rel_path_str}"})
+                        return
+                        
+                    file_data = base64.b64decode(content_b64)
+                    
+                    parent_dir = dest_path.parent
+                    parent_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(parent_dir))
+                    try:
+                        with os.fdopen(tmp_fd, 'wb') as tmp_file:
+                            tmp_file.write(file_data)
+                        os.replace(tmp_name, dest_path)
+                    except Exception:
+                        if os.path.exists(tmp_name):
+                            os.unlink(tmp_name)
+                        raise
+                        
+                self._send_json({"ok": True, "message": f"Uploaded {len(files)} files successfully."})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)})
 
         elif self.path == "/api/upload":
             project_id = body.get("project_id", "__dashboard__")
