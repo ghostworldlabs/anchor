@@ -44,6 +44,7 @@ Stdlib only. No third-party imports.
 import fnmatch
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -722,3 +723,78 @@ def get_run(folder_path, project_id, run_id) -> dict:
         if str(r.get("run_id") or "") == str(run_id):
             return _safe_run_view(r)
     return None
+
+
+# ── Write seams — archive/retire ─────────────────────────────────────────────
+
+def _rewrite_index(folder_path, project_id, runs) -> bool:
+    """Atomically overwrite the index with ``runs`` (already filtered). Caller
+    holds ``paths.WRITE_LOCK``. Honest False on a write error."""
+    p = _index_path(folder_path, project_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(runs, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+        return True
+    except OSError:
+        return False
+
+
+def _remove_run_artifacts(folder_path, run_id) -> None:
+    """Best-effort: remove the ``<folder>/gandalf/run-<id>/`` artifact dir for a
+    retired run. Never raises (regenerable analysis)."""
+    rid = str(run_id or "")
+    if not rid or _unsafe_seg(rid):
+        return
+    try:
+        run_dir = _runs_dir(folder_path) / rid
+        if run_dir.is_dir():
+            shutil.rmtree(run_dir, ignore_errors=True)
+    except OSError:
+        pass
+
+
+def _unsafe_seg(seg: str) -> bool:
+    """Reject a path-segment that could traverse (defense-in-depth on run_id)."""
+    s = str(seg or "")
+    return (not s) or ("/" in s) or ("\\" in s) or (".." in s)
+
+
+def delete_run(folder_path, project_id, run_id) -> dict:
+    """Archive/retire ONE Gandalf run: drop its record from the internal index
+    and best-effort remove its on-disk ``gandalf/run-<id>/`` artifact dir.
+
+    Returns ``{ok, removed}`` — ``removed`` is False when no record matched the
+    id (idempotent). Written atomically under ``paths.WRITE_LOCK``. Never raises.
+    """
+    rid = str(run_id or "")
+    if not rid:
+        return {"ok": False, "removed": False, "reason": "run_id required"}
+    with _paths.WRITE_LOCK:
+        runs = _load_index(folder_path, project_id)
+        kept = [r for r in runs if str(r.get("run_id") or "") != rid]
+        removed = len(kept) != len(runs)
+        if removed and not _rewrite_index(folder_path, project_id, kept):
+            return {"ok": False, "removed": False, "reason": "index-write-failed"}
+        if removed:
+            _remove_run_artifacts(folder_path, rid)
+    return {"ok": True, "removed": bool(removed)}
+
+
+def clear_failed_runs(folder_path, project_id) -> dict:
+    """Bulk-retire every FAILED run (``ok:false`` — status failed/error) from the
+    index, leaving completed runs untouched, and best-effort remove their artifact
+    dirs. Returns ``{ok, removed}`` (count cleared). Atomic; never raises."""
+    with _paths.WRITE_LOCK:
+        runs = _load_index(folder_path, project_id)
+        failed = [r for r in runs if not bool(r.get("ok"))]
+        kept = [r for r in runs if bool(r.get("ok"))]
+        if not failed:
+            return {"ok": True, "removed": 0}
+        if not _rewrite_index(folder_path, project_id, kept):
+            return {"ok": False, "removed": 0, "reason": "index-write-failed"}
+        for r in failed:
+            _remove_run_artifacts(folder_path, str(r.get("run_id") or ""))
+    return {"ok": True, "removed": len(failed)}

@@ -315,3 +315,135 @@ def test_two_concurrent_first_scans_schedule_at_most_one(env, monkeypatch):
     assert results.count(True) <= 1
     runs = _wait_runs(gandalf, repo, pid, n=1)
     assert len(runs) == 1  # exactly one run, never two
+
+
+# ── archive / clear-failed (feat/gandalf-archive-ui) ─────────────────────────
+
+def _failed_record(rid, reason="boom"):
+    return {"run_id": rid, "ts": time.time(), "ok": False, "verdict": "",
+            "degraded": True, "cross_model": False, "report_rel": None,
+            "exec_rel": None, "advisor_rel": None, "reason": reason}
+
+
+def test_archive_removes_run_from_index(server):
+    """POST /api/rnd/gandalf_archive drops the targeted run from the index AND
+    removes its on-disk artifact dir."""
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+    out = gandalf.run_gandalf(str(repo), pid)
+    run_id = out["run_id"]
+    run_dir = repo / "gandalf" / run_id
+    assert run_dir.is_dir()  # artifacts written for the OK run
+    assert len(gandalf.list_runs(str(repo), pid)) == 1
+
+    status, body = _post(f"{base}/api/rnd/gandalf_archive",
+                         {"project_id": pid, "run_id": run_id})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["removed"] is True
+    assert gandalf.list_runs(str(repo), pid) == []
+    assert not run_dir.exists()  # artifact dir gone
+
+
+def test_archive_unknown_run_idempotent(server):
+    """Archiving an id that isn't present is a no-op (ok, removed:false)."""
+    env, base, _ = server
+    pid = env["pid"]
+    status, body = _post(f"{base}/api/rnd/gandalf_archive",
+                         {"project_id": pid, "run_id": "run-nope-123"})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["removed"] is False
+
+
+def test_archive_requires_fields(server):
+    _, base, _ = server
+    status, body = _post(f"{base}/api/rnd/gandalf_archive", {"run_id": "x"})
+    assert status == 400
+    assert body["ok"] is False
+
+
+def test_archive_unknown_project_404(server):
+    _, base, _ = server
+    status, _ = _post(f"{base}/api/rnd/gandalf_archive",
+                      {"project_id": "nope-xyz", "run_id": "run-1"})
+    assert status == 404
+
+
+def test_clear_failed_removes_failed_keeps_ok(server):
+    """POST /api/rnd/gandalf_clear_failed retires every failed run while leaving
+    completed runs intact."""
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+    # One real (OK) run + two injected failed records.
+    ok_out = gandalf.run_gandalf(str(repo), pid)
+    gandalf._append_index(str(repo), pid, _failed_record("run-fail-1"))
+    gandalf._append_index(str(repo), pid, _failed_record("run-fail-2"))
+    runs = gandalf.list_runs(str(repo), pid)
+    assert len(runs) == 3
+    assert sum(1 for r in runs if not r["ok"]) == 2
+
+    status, body = _post(f"{base}/api/rnd/gandalf_clear_failed",
+                         {"project_id": pid})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["removed"] == 2
+
+    remaining = gandalf.list_runs(str(repo), pid)
+    assert len(remaining) == 1
+    assert remaining[0]["ok"] is True
+    assert remaining[0]["run_id"] == ok_out["run_id"]
+
+
+def test_clear_failed_noop_when_none(server):
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+    gandalf.run_gandalf(str(repo), pid)
+    status, body = _post(f"{base}/api/rnd/gandalf_clear_failed",
+                         {"project_id": pid})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["removed"] == 0
+    assert len(gandalf.list_runs(str(repo), pid)) == 1
+
+
+def test_archive_token_gate(env, monkeypatch):
+    """With a token set, the mutating archive route is 401 unauthed, 200 authed."""
+    monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+    import paths
+    importlib.reload(paths)
+    gui = importlib.reload(env["gui"])
+    srv = gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        pid = env["pid"]
+        status, _ = _post(f"{base}/api/rnd/gandalf_archive",
+                          {"project_id": pid, "run_id": "run-1"})
+        assert status == 401
+        status, body = _post(f"{base}/api/rnd/gandalf_archive",
+                             {"project_id": pid, "run_id": "run-1"},
+                             token="s3cret")
+        assert status == 200
+        assert body["ok"] is True
+    finally:
+        srv.shutdown()
+        time.sleep(0.15)
+        srv.server_close()
+        t.join(timeout=5)
+
+
+def test_panel_html_contains_retire_control(env):
+    """The rendered Gandalf panel carries the (x) retire control + the Clear-failed
+    button when a failed run is present."""
+    gui, repo, pid, gandalf = (env["gui"], env["repo"], env["pid"],
+                               env["gandalf"])
+    gandalf.run_gandalf(str(repo), pid)
+    gandalf._append_index(str(repo), pid, _failed_record("run-fail-x"))
+    html = gui._render_layoutd_gandalf_panel(str(repo), pid)
+    assert "gretire" in html
+    assert "gandalfArchiveRun(event" in html
+    assert "gandalf-clear-failed" in html
+    assert "gandalfClearFailed(" in html
