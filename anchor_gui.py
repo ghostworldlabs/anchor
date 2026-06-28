@@ -4143,9 +4143,19 @@ def render_project_window_html(project_id: str) -> str:
     p1on = " rnd-pr-on" if pr == 1 else ""
     p2on = " rnd-pr-on" if pr == 2 else ""
     
-    upload_id = f"upload_{project_id}"
-    upload_btn = (f"<label class='rnd-mini' style='cursor:pointer; display:inline-block' title='Upload a file to this project folder'>&#8673; Upload"
-                  f"<input type='file' id='{upload_id}' style='display:none' multiple webkitdirectory onchange=\"handleGlobalUpload('{upload_id}', '{pid_attr}')\" /></label>")
+    files_id = f"upload_files_{project_id}"
+    folder_id = f"upload_folder_{project_id}"
+    # Destination name for the upload success alert; injected as a JS global so we
+    # avoid escaping pitfalls in inline event-handler attributes. The `</`->`<\/`
+    # replacement keeps a project name containing "</script>" from breaking out.
+    _upload_name_js = json.dumps(entry.get("name", "")).replace("</", "<\\/")
+    upload_btn = (
+        f"<button type='button' class='rnd-mini' onclick=\"document.getElementById('{files_id}').click()\" title='Upload files (ctrl+click to multi-select)'>&#8673; Files</button>"
+        f"<input type='file' id='{files_id}' style='display:none' multiple onchange=\"handleGlobalUpload('{files_id}', '{pid_attr}')\" />"
+        f"<button type='button' class='rnd-mini' onclick=\"document.getElementById('{folder_id}').click()\" title='Upload a folder (recursive)'>&#128193; Folder</button>"
+        f"<input type='file' id='{folder_id}' style='display:none' webkitdirectory onchange=\"handleGlobalUpload('{folder_id}', '{pid_attr}')\" />"
+        f"<span class='rnd-mini' style='cursor:default; border-style:dashed' ondragover='handleUploadDragOver(event)' ondragleave='handleUploadDragLeave(event)' ondrop=\"handleUploadDrop(event, '{pid_attr}')\" title='Drag files or a folder here'>&#8615; Drop</span>"
+        f"<script>window._anchorUploadName = {_upload_name_js};</script>")
 
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
@@ -9468,51 +9478,142 @@ async function newGeneral(backend) {
   // record from MANAGED; lane 'general' suppresses the track + Advance).
   setTimeout(function () { openEffortDock(sid, null); }, 200);
 }
-// --- Wave 2: File Upload ---
-async function handleGlobalUpload(inputId, projectId) {
-  var input = document.getElementById(inputId);
-  if (!input || !input.files || input.files.length === 0) return;
-  
-  function readAsB64(file) {
-    return new Promise(function(resolve, reject) {
-      var r = new FileReader();
-      r.onload = function() {
-        resolve(r.result.split(',')[1]);
-      };
-      r.onerror = reject;
-      r.readAsDataURL(file);
-    });
-  }
+// --- Wave 2: File Upload (multi-file + folder + drag-drop) ---
+function _anchorReadB64(file) {
+  return new Promise(function(resolve, reject) {
+    var r = new FileReader();
+    r.onload = function() { resolve(r.result.split(',')[1]); };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
 
+function _anchorUploadDest(projectId) {
+  if (projectId === '__dashboard__') return "the dev inbox (C:\\dev\\Anchor\\dev)";
+  if (typeof window._anchorUploadName === 'string' && window._anchorUploadName) return window._anchorUploadName;
+  return "project " + projectId;
+}
+
+// Unified upload core. `items` is an array of { file, path } where path is the
+// destination-relative path (leading slashes stripped). All three controls
+// (multi-file picker, folder picker, drag-drop) funnel through here.
+async function _anchorDoUpload(items, projectId) {
+  if (!items || !items.length) return;
   var filesPayload = [];
-  for (var i = 0; i < input.files.length; i++) {
-    var file = input.files[i];
-    var path = file.webkitRelativePath || file.name;
+  for (var i = 0; i < items.length; i++) {
+    var rel = String(items[i].path || items[i].file.name).replace(/^\/+/, '');
     try {
-      var base64 = await readAsB64(file);
-      filesPayload.push({ path: path, content_b64: base64 });
+      var base64 = await _anchorReadB64(items[i].file);
+      filesPayload.push({ path: rel, content_b64: base64 });
     } catch (e) {
-      alert("Failed to read file: " + file.name);
+      alert("Failed to read file: " + rel);
       return;
     }
   }
-
-  var body = { project_id: projectId, files: filesPayload };
   var res = await fetch("/api/rnd/upload_batch", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-Anchor-Token": _anchorToken()
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ project_id: projectId, files: filesPayload })
   });
   if (res.ok) {
-    alert("Uploaded " + filesPayload.length + " files successfully.");
-    input.value = "";
+    alert("Uploaded " + filesPayload.length + " file(s) to " + _anchorUploadDest(projectId) + ".");
+    if (typeof loadProjectFiles === 'function') {
+      loadProjectFiles(projectId, (typeof currentFilesPath !== 'undefined' ? currentFilesPath : ''));
+    }
   } else {
     var data = await res.json();
     alert("Upload failed: " + (data.error || "Unknown error"));
   }
+}
+
+async function handleGlobalUpload(inputId, projectId) {
+  var input = document.getElementById(inputId);
+  if (!input || !input.files || input.files.length === 0) return;
+  var items = [];
+  for (var i = 0; i < input.files.length; i++) {
+    var file = input.files[i];
+    items.push({ file: file, path: file.webkitRelativePath || file.name });
+  }
+  await _anchorDoUpload(items, projectId);
+  input.value = "";
+}
+
+// Recurse a dropped FileSystemEntry, collecting every File with its full
+// relative path. readEntries() returns results in batches, so it must be
+// called repeatedly until it yields an empty array.
+function _anchorWalkEntry(entry, prefix, out) {
+  return new Promise(function(resolve) {
+    if (entry.isFile) {
+      entry.file(function(file) {
+        out.push({ file: file, path: prefix ? (prefix + "/" + entry.name) : entry.name });
+        resolve();
+      }, function() { resolve(); });
+    } else if (entry.isDirectory) {
+      var reader = entry.createReader();
+      var dirPrefix = prefix ? (prefix + "/" + entry.name) : entry.name;
+      var all = [];
+      var readBatch = function() {
+        reader.readEntries(function(results) {
+          if (!results || !results.length) {
+            var chain = Promise.resolve();
+            all.forEach(function(child) {
+              chain = chain.then(function() { return _anchorWalkEntry(child, dirPrefix, out); });
+            });
+            chain.then(resolve);
+          } else {
+            for (var m = 0; m < results.length; m++) all.push(results[m]);
+            readBatch();
+          }
+        }, function() { resolve(); });
+      };
+      readBatch();
+    } else {
+      resolve();
+    }
+  });
+}
+
+function handleUploadDragOver(ev) {
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '2px solid var(--accent)';
+}
+
+function handleUploadDragLeave(ev) {
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '';
+}
+
+async function handleUploadDrop(ev, projectId) {
+  ev.preventDefault();
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '';
+  var dt = ev.dataTransfer;
+  if (!dt) return;
+  // Collect entries synchronously BEFORE any await (the DataTransfer is cleared
+  // once the event handler yields).
+  var entries = [];
+  if (dt.items && dt.items.length && dt.items[0].webkitGetAsEntry) {
+    for (var i = 0; i < dt.items.length; i++) {
+      var en = dt.items[i].webkitGetAsEntry();
+      if (en) entries.push(en);
+    }
+  }
+  var items = [];
+  if (entries.length) {
+    for (var j = 0; j < entries.length; j++) {
+      await _anchorWalkEntry(entries[j], "", items);
+    }
+  } else if (dt.files && dt.files.length) {
+    for (var k = 0; k < dt.files.length; k++) {
+      items.push({ file: dt.files[k], path: dt.files[k].name });
+    }
+  }
+  await _anchorDoUpload(items, projectId);
 }
 
 // (v3 floating-window drag/resize helpers removed in v4 Wave 4: inline panels
@@ -11362,11 +11463,14 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </div>
       <div class="mh-spacer"></div>
-      <!-- Wave 2: Global File Upload -->
-      <label class="btn btn-sm" style="margin-right:10px; cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px; display:inline-block">
-          &#8673; Upload File
-          <input type="file" id="global-upload" style="display:none" multiple webkitdirectory onchange="handleGlobalUpload('global-upload', '__dashboard__')" />
-      </label>
+      <!-- Wave 2: Global File Upload — multi-file + folder + drag-drop -->
+      <div style="display:inline-flex; align-items:center; gap:6px; margin-right:10px">
+        <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px" onclick="document.getElementById('global-upload-files').click()">&#8673; Choose files</button>
+        <input type="file" id="global-upload-files" style="display:none" multiple onchange="handleGlobalUpload('global-upload-files', '__dashboard__')" />
+        <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px" onclick="document.getElementById('global-upload-folder').click()">&#128193; Choose folder</button>
+        <input type="file" id="global-upload-folder" style="display:none" webkitdirectory onchange="handleGlobalUpload('global-upload-folder', '__dashboard__')" />
+        <div id="global-upload-drop" style="font-size:11px; color:var(--text-dim); border:1px dashed var(--border); border-radius:6px; padding:4px 10px; cursor:default" ondragover="handleUploadDragOver(event)" ondragleave="handleUploadDragLeave(event)" ondrop="handleUploadDrop(event, '__dashboard__')" title="Drag files or a folder here to upload">&#8615; Drop files / folder</div>
+      </div>
       <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     </div>
@@ -12681,51 +12785,142 @@ function rndFolderInit() {{
 }}
 window.addEventListener('DOMContentLoaded', rndFolderInit);
 
-// --- Wave 2: File Upload (Dashboard) ---
-async function handleGlobalUpload(inputId, projectId) {{
-  var input = document.getElementById(inputId);
-  if (!input || !input.files || input.files.length === 0) return;
-  
-  function readAsB64(file) {{
-    return new Promise(function(resolve, reject) {{
-      var r = new FileReader();
-      r.onload = function() {{
-        resolve(r.result.split(',')[1]);
-      }};
-      r.onerror = reject;
-      r.readAsDataURL(file);
-    }});
-  }}
+// --- Wave 2: File Upload (Dashboard) — multi-file + folder + drag-drop ---
+function _anchorReadB64(file) {{
+  return new Promise(function(resolve, reject) {{
+    var r = new FileReader();
+    r.onload = function() {{ resolve(r.result.split(',')[1]); }};
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  }});
+}}
 
+function _anchorUploadDest(projectId) {{
+  if (projectId === '__dashboard__') return "the dev inbox (C:\\\\dev\\\\Anchor\\\\dev)";
+  if (typeof window._anchorUploadName === 'string' && window._anchorUploadName) return window._anchorUploadName;
+  return "project " + projectId;
+}}
+
+// Unified upload core. `items` is an array of {{ file, path }} where path is the
+// destination-relative path (leading slashes stripped). All three controls
+// (multi-file picker, folder picker, drag-drop) funnel through here.
+async function _anchorDoUpload(items, projectId) {{
+  if (!items || !items.length) return;
   var filesPayload = [];
-  for (var i = 0; i < input.files.length; i++) {{
-    var file = input.files[i];
-    var path = file.webkitRelativePath || file.name;
+  for (var i = 0; i < items.length; i++) {{
+    var rel = String(items[i].path || items[i].file.name).replace(/^\\/+/, '');
     try {{
-      var base64 = await readAsB64(file);
-      filesPayload.push({{ path: path, content_b64: base64 }});
+      var base64 = await _anchorReadB64(items[i].file);
+      filesPayload.push({{ path: rel, content_b64: base64 }});
     }} catch (e) {{
-      alert("Failed to read file: " + file.name);
+      alert("Failed to read file: " + rel);
       return;
     }}
   }}
-
-  var body = {{ project_id: projectId, files: filesPayload }};
   var res = await fetch("/api/rnd/upload_batch", {{
     method: "POST",
     headers: {{
       "Content-Type": "application/json",
       "X-Anchor-Token": _anchorToken()
     }},
-    body: JSON.stringify(body)
+    body: JSON.stringify({{ project_id: projectId, files: filesPayload }})
   }});
   if (res.ok) {{
-    alert("Uploaded " + filesPayload.length + " files successfully.");
-    input.value = "";
+    alert("Uploaded " + filesPayload.length + " file(s) to " + _anchorUploadDest(projectId) + ".");
+    if (typeof loadProjectFiles === 'function') {{
+      loadProjectFiles(projectId, (typeof currentFilesPath !== 'undefined' ? currentFilesPath : ''));
+    }}
   }} else {{
     var data = await res.json();
     alert("Upload failed: " + (data.error || "Unknown error"));
   }}
+}}
+
+async function handleGlobalUpload(inputId, projectId) {{
+  var input = document.getElementById(inputId);
+  if (!input || !input.files || input.files.length === 0) return;
+  var items = [];
+  for (var i = 0; i < input.files.length; i++) {{
+    var file = input.files[i];
+    items.push({{ file: file, path: file.webkitRelativePath || file.name }});
+  }}
+  await _anchorDoUpload(items, projectId);
+  input.value = "";
+}}
+
+// Recurse a dropped FileSystemEntry, collecting every File with its full
+// relative path. readEntries() returns results in batches, so it must be
+// called repeatedly until it yields an empty array.
+function _anchorWalkEntry(entry, prefix, out) {{
+  return new Promise(function(resolve) {{
+    if (entry.isFile) {{
+      entry.file(function(file) {{
+        out.push({{ file: file, path: prefix ? (prefix + "/" + entry.name) : entry.name }});
+        resolve();
+      }}, function() {{ resolve(); }});
+    }} else if (entry.isDirectory) {{
+      var reader = entry.createReader();
+      var dirPrefix = prefix ? (prefix + "/" + entry.name) : entry.name;
+      var all = [];
+      var readBatch = function() {{
+        reader.readEntries(function(results) {{
+          if (!results || !results.length) {{
+            var chain = Promise.resolve();
+            all.forEach(function(child) {{
+              chain = chain.then(function() {{ return _anchorWalkEntry(child, dirPrefix, out); }});
+            }});
+            chain.then(resolve);
+          }} else {{
+            for (var m = 0; m < results.length; m++) all.push(results[m]);
+            readBatch();
+          }}
+        }}, function() {{ resolve(); }});
+      }};
+      readBatch();
+    }} else {{
+      resolve();
+    }}
+  }});
+}}
+
+function handleUploadDragOver(ev) {{
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '2px solid var(--accent)';
+}}
+
+function handleUploadDragLeave(ev) {{
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '';
+}}
+
+async function handleUploadDrop(ev, projectId) {{
+  ev.preventDefault();
+  var dz = ev.currentTarget;
+  if (dz && dz.style) dz.style.outline = '';
+  var dt = ev.dataTransfer;
+  if (!dt) return;
+  // Collect entries synchronously BEFORE any await (the DataTransfer is cleared
+  // once the event handler yields).
+  var entries = [];
+  if (dt.items && dt.items.length && dt.items[0].webkitGetAsEntry) {{
+    for (var i = 0; i < dt.items.length; i++) {{
+      var en = dt.items[i].webkitGetAsEntry();
+      if (en) entries.push(en);
+    }}
+  }}
+  var items = [];
+  if (entries.length) {{
+    for (var j = 0; j < entries.length; j++) {{
+      await _anchorWalkEntry(entries[j], "", items);
+    }}
+  }} else if (dt.files && dt.files.length) {{
+    for (var k = 0; k < dt.files.length; k++) {{
+      items.push({{ file: dt.files[k], path: dt.files[k].name }});
+    }}
+  }}
+  await _anchorDoUpload(items, projectId);
 }}
 
 function promoteTask(b64) {{ apiCall('/api/promote_task', {{text: dec(b64)}}); }}
