@@ -3440,7 +3440,6 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
     return (
         "<div class='panel gandalf-panel' id='gandalfPanel'>"
         "<div class='ptitle gandalf-head'>"
-        "<span class='gpanel-tog' id='gandalfPanelTog' title='Collapse / expand Gandalf panel' onclick='toggleGandalfPanel(this)'>&#9662;</span>"
         "<span class='gmini-tog' id='gandalfRunsTog' title='Collapse / expand the "
         "run list' onclick='toggleGandalfRuns(this)'>&#9656;</span>"
         f"{icon}<span class='gt'>Gandalf</span>"
@@ -4197,8 +4196,7 @@ def render_project_window_html(project_id: str) -> str:
         f"<span>&#8681; Drop files &amp; folders here to upload (any mix)</span>"
         "</div>"
         "<div class='upload-browse-wrap'>"
-        f"<button type='button' class='btn-browse' onclick=\"document.getElementById('{files_id}').click()\" title='Open your file explorer — shift/ctrl-click to select multiple files'>&#8681; Browse files</button>"
-        f"<button type='button' class='btn-browse' onclick=\"document.getElementById('{folder_id}').click()\" title='Open your file explorer to pick a folder'>&#128193; Folder</button>"
+        f"<button type='button' class='btn-browse' onclick=\"document.getElementById('{files_id}').click()\" title='Open your file explorer — shift/ctrl-click to select multiple files (drag a folder onto the drop zone above for whole folders)'>&#8681; Browse</button>"
         f"<input type='file' id='{files_id}' style='display:none' multiple onchange=\"handleGlobalUpload('{files_id}', '{pid_attr}')\" />"
         f"<input type='file' id='{folder_id}' style='display:none' webkitdirectory onchange=\"handleGlobalUpload('{folder_id}', '{pid_attr}')\" />"
         "</div>"
@@ -11698,17 +11696,6 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </div>
       <div class="mh-spacer"></div>
-      <!-- Wave 2: Global File Upload — multi-file + folder + drag-drop -->
-      <div class="upload-unified" style="display:inline-flex; align-items:center; gap:8px; border:1px dashed var(--border); border-radius:6px; padding:4px 8px; background:rgba(0,0,0,0.15); margin-right:10px">
-        <div class="upload-dropzone" ondragover="handleUploadDragOver(event)" ondragleave="handleUploadDragLeave(event)" ondrop="handleUploadDrop(event, '__dashboard__')" style="font-size:11.5px; color:var(--text-dim); cursor:default; padding:2px 6px; border-radius:4px" title="Drag files or a folder here to upload">&#8681; Drop files &amp; folders here to upload (any mix)</div>
-        <div style="width:1px; height:16px; background:var(--border)"></div>
-        <div class="upload-browse-wrap" style="position:relative">
-          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="document.getElementById('global-upload-files').click()" title="Open your file explorer — shift/ctrl-click to select multiple files">&#8681; Browse files</button>
-          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="document.getElementById('global-upload-folder').click()" title="Open your file explorer to pick a folder">&#128193; Folder</button>
-        </div>
-        <input type="file" id="global-upload-files" style="display:none" multiple onchange="handleGlobalUpload('global-upload-files', '__dashboard__')" />
-        <input type="file" id="global-upload-folder" style="display:none" webkitdirectory onchange="handleGlobalUpload('global-upload-folder', '__dashboard__')" />
-      </div>
       <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
     </div>
@@ -14840,8 +14827,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                     f"<span class='badge badge-danger'>Orphaned</span> {pause_badge}"
                                     f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>{resume_btn}")
                             else:
-                                state_html = "<span class='badge badge-success'>Attached</span>"
-                                
+                                state_html = (
+                                    "<span class='badge badge-success'>Attached</span> "
+                                    f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>")
+
                             html += f"<tr id='row-{sid}'>"
                             html += f"<td>{html_lib.escape(lane)}</td>"
                             html += f"<td title='{html_lib.escape(sid)}'><code>{html_lib.escape(short_sid)}</code></td>"
