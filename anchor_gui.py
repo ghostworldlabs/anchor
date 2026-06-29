@@ -14342,8 +14342,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         is_stale = True
 
                 # Observe phase: classify processes using the dry-run sweep (apply=False).
-                # This is read-only (NO kills, NO registry updates) and writes/refreshes zombie_hunter_last.json.
-                if is_stale:
+                # This is read-only (NO kills, NO registry updates) and writes/refreshes
+                # zombie_hunter_last.json. Only refresh a STALE-but-PRESENT report; when the
+                # report file is ABSENT we deliberately fall through to the live-process
+                # fallback below (do NOT synthesize a cached report), so a fresh install with
+                # no daemon sweep yet still shows real OS processes.
+                if is_stale and report_path.exists():
                     try:
                         live_ids = pty_manager.live_sessions()
                         report = zombie_hunter.sweep(live_session_ids=live_ids, apply=False)
