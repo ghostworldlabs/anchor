@@ -3324,7 +3324,7 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         return (
             "<div class='panel gandalf-panel' id='gandalfPanel'>"
             "<div class='ptitle gandalf-head'>"
-            "<span class='gpanel-tog' id='gandalfPanelTog' title='Collapse / expand Gandalf panel' onclick='toggleGandalfPanel(this)'>&#9662;</span>"
+            ""
             f"{icon}<span class='gt'>Gandalf</span>"
             "<button class='btn sm gandalf-run gandalf-rerun' "
             f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
@@ -14788,13 +14788,13 @@ function killSession(sessionId, btn) {
   }
   
   const payload = {
-    job_id: sessionId
+    session_id: sessionId
   };
   if (token) {
     payload.token = token;
   }
-  
-  fetch('/api/rnd/cancel_job', {
+
+  fetch('/api/rnd/zombie_kill', {
     method: 'POST',
     headers: headers,
     body: JSON.stringify(payload)
@@ -14814,7 +14814,8 @@ function killSession(sessionId, btn) {
       const row = document.getElementById("row-" + sessionId);
       if (row) {
         row.style.transition = "opacity 0.5s ease";
-        row.style.opacity = "0.3";
+        row.style.opacity = "0";
+        setTimeout(function () { if (row && row.parentNode) row.parentNode.removeChild(row); }, 550);
       }
     } else {
       alert("Failed to kill session: " + (data.error || "unknown error"));
@@ -16095,6 +16096,35 @@ function startZombieTerminal(btn) {
                     "job_id": job_id,
                     "status": (out or {}).get("status"),
                 })
+
+        elif self.path == "/api/rnd/zombie_kill":
+            # Kill an orphaned swarm/terminal session by its SESSION id. The swarm
+            # & owner view lists session_registry records, so it passes a
+            # session_id (NOT a job_runner job_id) — cancel_job's _jr.load_record
+            # would 404 on it. Here we tree-kill the recorded PID directly and mark
+            # the registry record CANCELLED so it drops out of the running list and
+            # never reappears on refresh. Idempotent; clean 404 for an unknown id.
+            # Auth is enforced by the mutating-POST middleware above.
+            import proc_probe
+            sid = (body.get("session_id", "") or body.get("session", "")
+                   or body.get("job_id", "") or "").strip()
+            rec = _sessreg.get_session(sid) if sid else None
+            if rec is None:
+                self._send_json({"ok": False, "error": f"unknown session: {sid}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                pid = rec.get("pid")
+                killed = False
+                try:
+                    if pid not in (None, ""):
+                        killed = bool(proc_probe.tree_kill(int(pid)))
+                except Exception:
+                    killed = False
+                try:
+                    _sessreg.update_session(sid, status=_sessreg.STATUS_CANCELLED)
+                except Exception:
+                    pass
+                self._send_json({"ok": True, "session_id": sid, "killed": killed})
 
         elif self.path == "/api/rnd/gandalf_cancel":
             project_id = (body.get("project_id", "") or "").strip()
