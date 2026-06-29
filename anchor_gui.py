@@ -4197,11 +4197,8 @@ def render_project_window_html(project_id: str) -> str:
         f"<span>&#8681; Drop files &amp; folders here to upload (any mix)</span>"
         "</div>"
         "<div class='upload-browse-wrap'>"
-        f"<button type='button' class='btn-browse' onclick=\"toggleBrowseMenu(event, '{pid_attr}')\">Browse...</button>"
-        f"<div class='browse-menu' id='browseMenu_{pid_attr}' style='display:none'>"
-        f"<div onclick=\"document.getElementById('{files_id}').click()\">Browse files</div>"
-        f"<div onclick=\"document.getElementById('{folder_id}').click()\">Browse folder</div>"
-        "</div>"
+        f"<button type='button' class='btn-browse' onclick=\"document.getElementById('{files_id}').click()\" title='Open your file explorer — shift/ctrl-click to select multiple files'>&#8681; Browse files</button>"
+        f"<button type='button' class='btn-browse' onclick=\"document.getElementById('{folder_id}').click()\" title='Open your file explorer to pick a folder'>&#128193; Folder</button>"
         f"<input type='file' id='{files_id}' style='display:none' multiple onchange=\"handleGlobalUpload('{files_id}', '{pid_attr}')\" />"
         f"<input type='file' id='{folder_id}' style='display:none' webkitdirectory onchange=\"handleGlobalUpload('{folder_id}', '{pid_attr}')\" />"
         "</div>"
@@ -11706,11 +11703,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div class="upload-dropzone" ondragover="handleUploadDragOver(event)" ondragleave="handleUploadDragLeave(event)" ondrop="handleUploadDrop(event, '__dashboard__')" style="font-size:11.5px; color:var(--text-dim); cursor:default; padding:2px 6px; border-radius:4px" title="Drag files or a folder here to upload">&#8681; Drop files &amp; folders here to upload (any mix)</div>
         <div style="width:1px; height:16px; background:var(--border)"></div>
         <div class="upload-browse-wrap" style="position:relative">
-          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="toggleBrowseMenu(event, 'dashboard')">Browse...</button>
-          <div class="browse-menu" id="browseMenu_dashboard" style="display:none; position:absolute; bottom:100%; right:0; margin-bottom:6px; background:var(--surface2); border:1px solid var(--border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.5); z-index:1000; width:120px; text-align:left">
-            <div onclick="document.getElementById('global-upload-files').click()" style="padding:6px 10px; font-size:11px; cursor:pointer">Browse files</div>
-            <div onclick="document.getElementById('global-upload-folder').click()" style="padding:6px 10px; font-size:11px; cursor:pointer; border-top:1px solid var(--border)">Browse folder</div>
-          </div>
+          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="document.getElementById('global-upload-files').click()" title="Open your file explorer — shift/ctrl-click to select multiple files">&#8681; Browse files</button>
+          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="document.getElementById('global-upload-folder').click()" title="Open your file explorer to pick a folder">&#128193; Folder</button>
         </div>
         <input type="file" id="global-upload-files" style="display:none" multiple onchange="handleGlobalUpload('global-upload-files', '__dashboard__')" />
         <input type="file" id="global-upload-folder" style="display:none" webkitdirectory onchange="handleGlobalUpload('global-upload-folder', '__dashboard__')" />
@@ -13317,8 +13311,65 @@ function addTaskDomain(domain) {{
 }}
 </script>
 <script>{cache_bust_script()}</script>
+<script>{_ORPHAN_ALERT_JS}</script>
 </body>
 </html>'''
+
+
+# ── Orphan-swarm alert banner (dashboard) ───────────────────────────────
+# Polls /api/rnd/orphan_check; when a NEW orphan session appears (one we have
+# not alerted on before) it shows a dismissible, click-through banner that opens
+# the Zombie Hunter report. NOT a pest: an orphan we've already alerted on is
+# never re-alerted (tracked in localStorage); the set is pruned to currently
+# present orphans so a freshly-spawned orphan re-alerts but a still-unkilled one
+# does not. Plain (non-f) string — its braces are literal JS.
+_ORPHAN_ALERT_JS = r'''
+(function () {
+  function _zhTok() { try { return (typeof _anchorToken === 'function') ? (_anchorToken() || '') : ''; } catch (e) { return ''; } }
+  function _zhGet() { try { return JSON.parse(localStorage.getItem('zombieAlertedOrphans') || '[]'); } catch (e) { return []; } }
+  function _zhSet(a) { try { localStorage.setItem('zombieAlertedOrphans', JSON.stringify(a)); } catch (e) {} }
+  function _zhBanner(n) {
+    if (document.getElementById('zhOrphanBanner')) return;
+    var tok = _zhTok();
+    var url = '/api/rnd/zombie_hunter_report' + (tok ? ('?token=' + encodeURIComponent(tok)) : '');
+    var b = document.createElement('div');
+    b.id = 'zhOrphanBanner';
+    b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fee2e2;padding:10px 16px;display:flex;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+    var msg = document.createElement('span');
+    msg.style.cssText = 'flex:1';
+    msg.innerHTML = '<span style="font-size:16px;margin-right:6px">&#9888;</span>' + n + ' orphaned swarm' + (n > 1 ? 's' : '') + ' detected and paused — review in Zombie Hunter.';
+    var go = document.createElement('button');
+    go.textContent = 'Review';
+    go.style.cssText = 'background:#fee2e2;color:#7f1d1d;border:none;border-radius:4px;padding:5px 12px;font-weight:600;cursor:pointer';
+    go.onclick = function () { window.open(url, '_blank'); if (b.parentNode) b.parentNode.removeChild(b); };
+    var x = document.createElement('button');
+    x.innerHTML = '&times;';
+    x.title = 'Dismiss';
+    x.style.cssText = 'background:transparent;color:#fee2e2;border:none;font-size:18px;cursor:pointer;line-height:1';
+    x.onclick = function () { if (b.parentNode) b.parentNode.removeChild(b); };
+    b.appendChild(msg); b.appendChild(go); b.appendChild(x);
+    document.body.appendChild(b);
+  }
+  function _zhPoll() {
+    var tok = _zhTok();
+    fetch('/api/rnd/orphan_check' + (tok ? ('?token=' + encodeURIComponent(tok)) : ''), { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok || !Array.isArray(d.orphans)) return;
+        var cur = d.orphans;
+        var alerted = _zhGet();
+        var fresh = cur.filter(function (s) { return alerted.indexOf(s) < 0; });
+        var pruned = alerted.filter(function (s) { return cur.indexOf(s) >= 0; });
+        if (fresh.length > 0) { _zhBanner(cur.length); pruned = pruned.concat(fresh); }
+        _zhSet(pruned);
+      })
+      .catch(function () {});
+  }
+  if (document.readyState !== 'loading') { _zhPoll(); }
+  else { window.addEventListener('DOMContentLoaded', _zhPoll); }
+  setInterval(_zhPoll, 45000);
+})();
+'''
 
 
 # ── HTTP Server ────────────────────────────────────────────────────────
@@ -14545,6 +14596,34 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         if st:
                             statuses[_pid] = st
                 self._send_json({"ok": True, "statuses": statuses})
+            elif self.path.startswith("/api/rnd/orphan_check"):
+                # Lightweight read-only poll for the dashboard's orphan-swarm
+                # alert banner: returns the session_ids of RUNNING sessions
+                # currently classified ORPHANED (verdict "kill"). Token-gated
+                # like the other read-API GETs; a no-op when ANCHOR_TOKEN unset.
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                import zombie_hunter
+                import pty_manager
+                try:
+                    live_ids = set(pty_manager.live_sessions())
+                except Exception:
+                    live_ids = set()
+                orphans = []
+                try:
+                    for rec in _sessreg.list_sessions(status="running"):
+                        sid = rec.get("session_id", "")
+                        try:
+                            verdict = zombie_hunter.classify(rec, live_ids)
+                        except Exception:
+                            verdict = "kill" if (sid and sid not in live_ids) else "alive"
+                        if verdict == "kill" and sid:
+                            orphans.append(sid)
+                except Exception:
+                    pass
+                self._send_json({"ok": True, "orphans": orphans})
+
             elif self.path.startswith("/api/rnd/zombie_hunter_report"):
                 # Auth gate (defense-in-depth): the radar report exposes process
                 # metadata (PIDs / session ids). Token-gated like the other
@@ -14617,7 +14696,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 html += ".meta-label { font-weight: bold; color: #a1a1aa; }"
                 html += "</style></head><body>"
                 html += "<div class='container'>"
-                html += "<h1><img src=\"/vendor/brand/zombie-hunter-radar.jpg\" style=\"width:32px;height:32px;border-radius:6px;vertical-align:middle;\" /> &#129503; Zombie Hunter Radar</h1>"
+                html += "<h1><img src=\"/vendor/brand/zombie-hunter-radar.jpg\" style=\"width:32px;height:32px;border-radius:6px;vertical-align:middle;\" /> Zombie Hunter Radar</h1>"
 
                 if not is_stale and report_data:
                     swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
