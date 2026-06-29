@@ -958,6 +958,8 @@ _PROACTIVE_SUMMARY_ENABLED = (
     os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
     in ("1", "true", "yes", "on"))
 
+_zombie_hunter_started = False
+
 
 def _trigger_project_summary(folder_path, project_id, force: bool = False):
     """Kick off proactive project-summary generation WITHOUT blocking the caller.
@@ -14535,6 +14537,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     "status": (out or {}).get("status"),
                 })
 
+        elif self.path == "/api/rnd/gandalf_cancel":
+            project_id = (body.get("project_id", "") or "").strip()
+            if not project_id:
+                self._send_json({"ok": False, "error": "missing project_id"}, 400)
+            else:
+                cancelled = _gandalf.cancel_gandalf_run(project_id)
+                self._send_json({
+                    "ok": True,
+                    "project_id": project_id,
+                    "cancelled": cancelled,
+                })
+
         # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
         elif self.path == "/api/rnd/preview_start":
             # Spin up an EPHEMERAL preview of the project's deliverable web app
@@ -15870,7 +15884,7 @@ def resolve_bind_host():
 
 
 def main():
-    global _server_instance, _PROACTIVE_SUMMARY_ENABLED
+    global _server_instance, _PROACTIVE_SUMMARY_ENABLED, _zombie_hunter_started
     # The live server proactively (re)generates the cached project summary on
     # rescan/discovery (Wave 5). Unit tests leave this off (default) so importing
     # the module never spawns a background model job.
@@ -15960,7 +15974,8 @@ def main():
         _logger.error(f"worktrees.reap_orphans failed: {e}")
 
     try:
-        if os.environ.get("ANCHOR_ZOMBIE_HUNTER") == "1":
+        if "PYTEST_CURRENT_TEST" not in os.environ and not _zombie_hunter_started:
+            _zombie_hunter_started = True
             import zombie_hunter
             import pty_manager
             def _live_provider():

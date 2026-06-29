@@ -62,6 +62,11 @@ STATUS_NEEDS_ATTENTION = "needs-attention"
 STATUS_DONE = "done"
 STATUS_FAILED = "failed"
 STATUS_IDLE = "idle"
+#: A run that was actively cancelled (tree-killed) in flight — a finished,
+#: non-running terminal state. Mirrors ``job_runner.STATUS_CANCELLED`` so the
+#: Gandalf active-cancel path (Wave 1) can stamp the session honestly instead of
+#: having ``_normalize`` coerce the unknown status to ``idle``.
+STATUS_CANCELLED = "cancelled"
 
 #: Every recognized status.
 VALID_STATUSES = {
@@ -70,6 +75,7 @@ VALID_STATUSES = {
     STATUS_DONE,
     STATUS_FAILED,
     STATUS_IDLE,
+    STATUS_CANCELLED,
 }
 
 #: Terminal statuses — a session in one of these has no live process and is

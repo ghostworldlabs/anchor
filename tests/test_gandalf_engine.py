@@ -302,3 +302,84 @@ def test_dynamic_router_no_override_under_max(gandalf, project, monkeypatch):
         assert env.get("GEMINI_MODEL") is None
         assert env.get("TRIO_MODEL") is None
 
+
+def test_gandalf_finally_reset(gandalf, project, monkeypatch):
+    """An exception inside run_gandalf still leaves the registry record failed (finally-reset)."""
+    folder, pid = project
+    # Mock scan_project_context to raise an exception
+    def broken_scan(*args, **kwargs):
+        raise RuntimeError("Simulated crash")
+    monkeypatch.setattr(gandalf, "scan_project_context", broken_scan)
+    
+    import session_registry
+    
+    # Execute
+    with pytest.raises(RuntimeError):
+        gandalf.run_gandalf(str(folder), pid)
+        
+    # Verify that the session registered was updated off STATUS_RUNNING
+    runs = session_registry.list_sessions(project_id=pid)
+    assert len(runs) == 1
+    assert runs[0]["status"] == session_registry.STATUS_FAILED
+
+
+def test_gandalf_index_cap(gandalf, project):
+    """_append_index enforces the cap (newest N)."""
+    folder, pid = project
+    # Run 25 times
+    for i in range(25):
+        gandalf.run_gandalf(str(folder), pid)
+    # Verify only 20 runs remain in list
+    runs = gandalf.list_runs(str(folder), pid)
+    assert len(runs) == 20
+
+
+def test_gandalf_cancel(gandalf, project, monkeypatch):
+    """cancel_run terminates the in-flight run and updates registry + index to cancelled."""
+    folder, pid = project
+    import time
+    import threading
+    import job_runner
+    import session_registry
+    
+    # Mock wait to sleep to simulate long Stage A execution
+    def slow_wait(jid, timeout=None):
+        time.sleep(10)
+        return {"status": "done"}
+    monkeypatch.setattr(job_runner, "wait", slow_wait)
+    
+    run_id_holder = []
+    
+    def run_thread():
+        out = gandalf.run_gandalf(str(folder), pid)
+        run_id_holder.append(out)
+        
+    t = threading.Thread(target=run_thread)
+    t.start()
+    
+    # Wait for the run_id to be registered and active
+    active_id = None
+    for _ in range(50):
+        time.sleep(0.05)
+        with gandalf._ACTIVE_RUNS_LOCK:
+            if gandalf._ACTIVE_RUNS:
+                active_id = list(gandalf._ACTIVE_RUNS.keys())[0]
+                break
+    assert active_id is not None
+    
+    # Call cancel
+    assert gandalf.cancel_run(active_id) is True
+    
+    # Wait for the thread to finish
+    t.join(timeout=5)
+    
+    # Verify status in session_registry is cancelled
+    rec = session_registry.get_session(active_id)
+    assert rec["status"] == "cancelled"
+    
+    # Verify index record is cancelled
+    runs = gandalf.list_runs(str(folder), pid)
+    assert len(runs) == 1
+    assert runs[0]["ok"] is False
+    assert "cancelled" in runs[0]["reason"]
+

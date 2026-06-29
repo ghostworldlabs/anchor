@@ -447,11 +447,59 @@ def test_cancel_route(server):
     assert status == 200
     assert body["ok"] is True
     
+    # Verify process was terminated
+    # Give a tiny bit of time
+    time.sleep(0.5)
+    assert proc.poll() is not None
+
+
+def test_gandalf_cancel_route(server):
+    """POST /api/rnd/gandalf_cancel cancels a Gandalf run by project_id."""
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+
+    # Try cancelling when nothing is running
+    status, body = _post(f"{base}/api/rnd/gandalf_cancel", {"project_id": pid})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["cancelled"] is False
+
+    # Fake the active run in active runs dict and session registry
+    import session_registry
+    session_id = "run-cancel-proj-123"
+    session_registry.register_session(
+        project_id=pid,
+        lane="gandalf",
+        status=session_registry.STATUS_RUNNING,
+        session_id=session_id
+    )
+
+    import subprocess
+    import os
+    if os.name == "nt":
+        proc = subprocess.Popen(["cmd.exe", "/c", "pause"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    else:
+        proc = subprocess.Popen(["sleep", "60"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    gandalf._ACTIVE_RUNS[session_id] = {
+        "job_id": None,
+        "proc": proc,
+        "cancelled": False,
+        "folder": str(repo),
+        "project_id": pid,
+        "index_recorded": False,
+    }
+
+    # Call gandalf_cancel
+    status, body = _post(f"{base}/api/rnd/gandalf_cancel", {"project_id": pid})
+    assert status == 200
+    assert body["ok"] is True
+    assert body["cancelled"] is True
+
     # Verify status in session_registry is cancelled
     rec = session_registry.get_session(session_id)
     assert rec["status"] == "cancelled"
-    
+
     # Verify process was terminated
-    # Give a tiny bit of time
     time.sleep(0.5)
     assert proc.poll() is not None

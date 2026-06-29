@@ -45,12 +45,22 @@ import fnmatch
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 import paths as _paths
 import job_runner as _jr
 import summarizer as _summarizer
+
+
+# ── Active-run registry (Wave 1: active cancel) ──────────────────────────────
+#: In-flight Gandalf runs, keyed by run_id → {"job_id", "proc", "cancelled"}.
+#: Mutated only under ``_ACTIVE_RUNS_LOCK``. ``run_gandalf`` registers a run on
+#: start and pops it in its ``finally``; ``cancel_run`` flips ``cancelled`` and
+#: tree-kills the live Stage-A job / Stage-B subprocess.
+_ACTIVE_RUNS: dict = {}
+_ACTIVE_RUNS_LOCK = threading.Lock()
 
 
 # ── Constants / seams ────────────────────────────────────────────────────────
@@ -316,7 +326,7 @@ def _last_balanced_json(text: str):
 
 # ── Stage A — run the model, recover the raw draft ───────────────────────────
 
-def _run_stage_a(folder_path, env=None):
+def _run_stage_a(folder_path, env=None, run_id=None):
     """Run Stage A → ``(raw_draft_dict, reason)``.
 
     On any failure (job failed/timed-out, no parseable JSON) returns
@@ -325,18 +335,30 @@ def _run_stage_a(folder_path, env=None):
     folder = str(folder_path)
     prompt = _build_prompt(folder)
     try:
-        # READ-ONLY: Gandalf is an advisor — it analyzes the project and emits its
-        # read as the final message; it writes NO file. ``permission_mode="plan"``
-        # ensures claude can NEVER edit the analyzed project (acceptEdits would let
-        # it). ``output_dir=folder`` grants READ access to explore the project.
         rec = _jr.launch("research", cwd=folder, prompt=prompt,
                          output_dir=folder, env=(env or None),
                          permission_mode="plan")
     except Exception:
         return None, "launch-failed"
     jid = rec["job_id"]
+    if run_id:
+        with _ACTIVE_RUNS_LOCK:
+            if run_id in _ACTIVE_RUNS:
+                if _ACTIVE_RUNS[run_id]["cancelled"]:
+                    try:
+                        _jr.cancel(jid)
+                    except Exception:
+                        pass
+                    return None, "cancelled"
+                _ACTIVE_RUNS[run_id]["job_id"] = jid
     _jr.wait(jid, timeout=_timeout())
+    if run_id:
+        with _ACTIVE_RUNS_LOCK:
+            if run_id in _ACTIVE_RUNS and _ACTIVE_RUNS[run_id]["cancelled"]:
+                return None, "cancelled"
     final = _jr.load_record(jid) or {}
+    if final.get("status") == "cancelled":
+        return None, "cancelled"
     if final.get("status") != _jr.STATUS_DONE:
         return None, "stage-a-run-failed:" + str(final.get("status") or "unknown")
     lines = _jr.all_lines(jid)
@@ -349,7 +371,7 @@ def _run_stage_a(folder_path, env=None):
 
 # ── Stage B — run the host, recover the graded output ────────────────────────
 
-def _run_stage_b(raw_draft):
+def _run_stage_b(raw_draft, run_id=None):
     """Run Stage B (the host) on the raw draft → ``(graded_dict, reason)``.
 
     Feeds the raw draft on stdin, captures the graded advisor-output.json on
@@ -358,29 +380,69 @@ def _run_stage_b(raw_draft):
     """
     argv = _host_cmd_argv()
     payload = json.dumps(raw_draft, ensure_ascii=False)
+    if run_id:
+        with _ACTIVE_RUNS_LOCK:
+            if run_id in _ACTIVE_RUNS and _ACTIVE_RUNS[run_id]["cancelled"]:
+                return None, "cancelled"
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             argv,
-            input=payload,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            errors="replace",
-            timeout=_timeout(),
+            errors="replace"
         )
     except FileNotFoundError:
         return None, "host-unavailable"
     except (OSError, subprocess.SubprocessError):
         return None, "host-spawn-failed"
+
+    if run_id:
+        with _ACTIVE_RUNS_LOCK:
+            if run_id in _ACTIVE_RUNS:
+                if _ACTIVE_RUNS[run_id]["cancelled"]:
+                    try:
+                        import proc_probe
+                        proc_probe.tree_kill(proc.pid)
+                    except Exception:
+                        pass
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    return None, "cancelled"
+                _ACTIVE_RUNS[run_id]["proc"] = proc
+
+    try:
+        stdout, stderr = proc.communicate(input=payload, timeout=_timeout())
     except subprocess.TimeoutExpired:
+        try:
+            import proc_probe
+            proc_probe.tree_kill(proc.pid)
+        except Exception:
+            pass
+        try:
+            proc.kill()
+        except Exception:
+            pass
         return None, "host-timeout"
+    except Exception:
+        return None, "host-spawn-failed"
+
+    if run_id:
+        with _ACTIVE_RUNS_LOCK:
+            if run_id in _ACTIVE_RUNS and _ACTIVE_RUNS[run_id]["cancelled"]:
+                return None, "cancelled"
+
     if proc.returncode != 0:
-        err = (proc.stderr or "").strip().splitlines()
+        err = (stderr or "").strip().splitlines()
         reason = "host-nonzero-exit"
         if err:
             reason += ":" + err[-1][:200]
         return None, reason
-    graded = _last_balanced_json(proc.stdout or "")
+    graded = _last_balanced_json(stdout or "")
     if not isinstance(graded, dict):
         return None, "host-unparseable-output"
     missing = [k for k in _REQUIRED_TOP_KEYS if k not in graded]
@@ -393,128 +455,62 @@ def _run_stage_b(raw_draft):
 
 def _one_line_verdict(graded) -> str:
     """The cleaned one-line verdict (pinned to the top-level ``verdict`` field)."""
-    if not isinstance(graded, dict):
-        return ""
-    verdict = graded.get("verdict") or ""
-    return _summarizer.short_summary_text(str(verdict))
+    val = graded.get("verdict") or ""
+    # Strip any markdown / formatting.
+    val = val.replace("*", "").replace("`", "").strip()
+    return val[:200]
 
 
 def _severity_rank(item) -> int:
-    order = {"critical": 0, "major": 1, "minor": 2}
-    return order.get(str((item or {}).get("severity") or "").lower(), 3)
+    """Helper: order findings/nitpicks/elevations by severity."""
+    r = item.get("severity") or ""
+    if r == "critical":
+        return 4
+    if r == "high":
+        return 3
+    if r == "medium":
+        return 2
+    return 1
 
 
 def _render_full_report(graded, *, run_id="", when=None) -> str:
-    """Render the full graded schema as readable markdown. Defensive .get()."""
-    g = graded if isinstance(graded, dict) else {}
-    lines = ["# Gandalf read"]
-    if run_id:
+    """Render the full markdown report."""
+    date_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when or time.time()))
+    lines = [
+        f"# Gandalf Read Report — {run_id or 'run'}\n",
+        f"*Generated:* {date_str}\n",
+        f"## Verdict\n**{_one_line_verdict(graded)}**\n",
+        "## Reasoning\n",
+        str(graded.get("reasoning") or ""),
+        "\n## Findings & Risks\n",
+    ]
+    findings = sorted(graded.get("findings") or [], key=_severity_rank, reverse=True)
+    if not findings:
+        lines.append("*No major findings.*")
+    for f in findings:
+        sev = (f.get("severity") or "info").upper()
+        lines.append(f"### [{sev}] {f.get('title') or 'Finding'}")
+        lines.append(str(f.get("description") or ""))
+        remedy = f.get("remedy")
+        if remedy:
+            lines.append(f"\n*Remedy:* {remedy}")
         lines.append("")
-        lines.append(f"> Run `{run_id}`"
-                     + (f" · {time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}"
-                        if when else ""))
-    verdict = str(g.get("verdict") or "").strip()
-    if verdict:
-        lines += ["", "## Verdict", "", verdict]
-    chips = []
-    if g.get("degraded"):
-        chips.append("degraded")
-    chips.append("cross_model:" + ("true" if g.get("cross_model") else "false"))
-    lines += ["", "## Honesty", "", "- " + " · ".join(chips)]
-    reasoning = str(g.get("reasoning") or "").strip()
-    if reasoning:
-        lines += ["", "## Reasoning", "", reasoning]
-
-    findings = [f for f in (g.get("findings") or []) if isinstance(f, dict)]
-    if findings:
-        lines += ["", "## Findings", ""]
-        for f in sorted(findings, key=_severity_rank):
-            sev = str(f.get("severity") or "").strip()
-            kind = str(f.get("kind") or "").strip()
-            rung = str(f.get("rung") or "").strip()
-            tag = " · ".join(x for x in (kind, sev, rung) if x)
-            fid = str(f.get("id") or "").strip()
-            head = f"- **{fid}**" + (f" ({tag})" if tag else "")
-            lines.append(head)
-            v = str(f.get("verdict") or "").strip()
-            if v:
-                lines.append(f"  - {v}")
-
-    elevations = [e for e in (g.get("elevations") or []) if isinstance(e, dict)]
-    if elevations:
-        lines += ["", "## Elevations", ""]
-        for e in elevations:
-            eid = str(e.get("id") or "").strip()
-            tier = str(e.get("tier") or "").strip()
-            val = str(e.get("value_if_true") or "").strip()
-            tag = " · ".join(x for x in (tier, val) if x)
-            head = f"- **{eid}**" + (f" ({tag})" if tag else "")
-            lines.append(head)
-            v = str(e.get("verdict") or "").strip()
-            if v:
-                lines.append(f"  - {v}")
-
-    nitpicks = [n for n in (g.get("nitpicks") or []) if isinstance(n, dict)]
-    if nitpicks:
-        lines += ["", "## Nitpicks", ""]
-        for n in nitpicks:
-            nid = str(n.get("id") or "").strip()
-            v = str(n.get("verdict") or "").strip()
-            lines.append(f"- **{nid}** {v}".rstrip())
-
-    risk = [r for r in (g.get("risk_labels") or []) if isinstance(r, dict)]
-    if risk:
-        lines += ["", "## Risk labels", ""]
-        for r in risk:
-            leg = str(r.get("leg") or "").strip()
-            tier = str(r.get("tier") or "").strip()
-            lines.append(f"- {leg}: {tier}".rstrip())
-
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines)
 
 
 def _render_exec_summary(graded, *, run_id="", when=None) -> str:
-    """Render the executive summary: verdict + top findings-by-severity + top
-    elevations. Defensive .get() everywhere."""
-    g = graded if isinstance(graded, dict) else {}
-    lines = ["# Gandalf — executive summary"]
-    if run_id:
-        lines.append("")
-        lines.append(f"> Run `{run_id}`"
-                     + (f" · {time.strftime('%Y-%m-%d %H:%M', time.localtime(when))}"
-                        if when else ""))
-    verdict = str(g.get("verdict") or "").strip()
-    if verdict:
-        lines += ["", "## Verdict", "", verdict]
-    chips = []
-    if g.get("degraded"):
-        chips.append("degraded")
-    chips.append("cross_model:" + ("true" if g.get("cross_model") else "false"))
-    lines += ["", "_" + " · ".join(chips) + "_"]
-
-    findings = [f for f in (g.get("findings") or []) if isinstance(f, dict)]
-    top = sorted(findings, key=_severity_rank)[:5]
-    if top:
-        lines += ["", "## Top findings", ""]
-        for f in top:
-            sev = str(f.get("severity") or "").strip()
-            fid = str(f.get("id") or "").strip()
-            v = str(f.get("verdict") or "").strip()
-            head = f"- **{fid}**" + (f" ({sev})" if sev else "")
-            if v:
-                head += f" — {v}"
-            lines.append(head)
-
-    elevations = [e for e in (g.get("elevations") or []) if isinstance(e, dict)][:5]
-    if elevations:
-        lines += ["", "## Top elevations", ""]
-        for e in elevations:
-            eid = str(e.get("id") or "").strip()
-            v = str(e.get("verdict") or "").strip()
-            head = f"- **{eid}**" + (f" — {v}" if v else "")
-            lines.append(head)
-
-    return "\n".join(lines) + "\n"
+    """Render the executive summary markdown (inline dashboard)."""
+    lines = [
+        f"**Verdict:** {_one_line_verdict(graded)}\n",
+        "### Key Findings\n",
+    ]
+    findings = sorted(graded.get("findings") or [], key=_severity_rank, reverse=True)[:3]
+    if not findings:
+        lines.append("*No major findings.*")
+    for f in findings:
+        sev = (f.get("severity") or "info").upper()
+        lines.append(f"- **[{sev}]** {f.get('title') or 'Finding'}")
+    return "\n".join(lines)
 
 
 # ── Index store ──────────────────────────────────────────────────────────────
@@ -542,6 +538,16 @@ def _append_index(folder_path, project_id, record: dict) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         runs = _load_index(folder_path, project_id)
         runs.insert(0, record)
+        
+        # Cap / auto-prune to newest N (default 20, or env-override)
+        max_runs_str = os.environ.get("ANCHOR_GANDALF_MAX_RUNS", "20").strip()
+        try:
+            max_runs = int(max_runs_str)
+        except ValueError:
+            max_runs = 20
+        if max_runs > 0:
+            runs = runs[:max_runs]
+            
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(runs, indent=2, ensure_ascii=False),
                        encoding="utf-8")
@@ -569,23 +575,10 @@ def _add_gitignore_best_effort(folder_path) -> None:
 # ── Public engine ────────────────────────────────────────────────────────────
 
 def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None) -> dict:
-    """Run one full two-stage Gandalf analysis and store the result.
-
-    Stage A (model, through ``ANCHOR_RUNNER_CMD``) → the RAW draft → Stage B (the
-    host, through ``ANCHOR_GANDALF_HOST_CMD``) → the GRADED advisor-output. Render
-    ``report.md`` + ``exec-summary.md``, write them + ``advisor-output.json`` to
-    ``<folder>/gandalf/run-<ts>/``, append a SAFE record to the internal index.
-
-    Returns a dict carrying at least ``{ok, run_id, ts, reason?}``. On a Stage-A
-    or Stage-B failure an honest **error run** is recorded (``ok:false`` + a
-    ``reason``, no fabricated verdict) and still appended to the index so the tab
-    can show the honest failed row. NEVER raises to the caller. ``force`` is
-    accepted for signature parity (every call is a fresh run — history accumulates).
-    """
+    """Run one full two-stage Gandalf analysis and store the result."""
     folder = str(folder_path)
     pid = str(project_id)
     ts = time.time()
-    # A run id stable + filesystem-safe: run-<unix-ms>.
     run_id = "run-" + str(int(ts * 1000))
     run_rel = f"{GANDALF_DIRNAME}/{run_id}"
 
@@ -600,101 +593,143 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     except Exception:
         pass
 
-    if status_cb: status_cb("Reading files (Stage A)...")
+    with _ACTIVE_RUNS_LOCK:
+        # folder/project_id are carried so cancel_run can record the cancelled
+        # outcome into the index without waiting for this worker to unwind.
+        _ACTIVE_RUNS[run_id] = {
+            "job_id": None, "proc": None, "cancelled": False,
+            "folder": folder, "project_id": pid, "index_recorded": False,
+        }
 
-    # Wave 1: ContextSizer & Dynamic Router
-    context_size = scan_project_context(folder)
-    frontier_max_str = os.environ.get("ANCHOR_FRONTIER_MAX", "100000").strip()
-    try:
-        frontier_max = float(frontier_max_str)
-    except ValueError:
-        frontier_max = 100000.0
-
-    actual_env = dict(env) if env is not None else {}
-    if context_size > frontier_max:
-        actual_env["GEMINI_MODEL"] = "gemini-1.5-pro"
-        actual_env["TRIO_MODEL"] = "gemini-1.5-pro"
-
-    draft, reason = _run_stage_a(folder, env=actual_env)
+    ok = False
+    reason = "unknown"
     graded = None
-    if draft is not None:
-        if status_cb: status_cb("Synthesizing (Stage B)...")
-        graded, reason = _run_stage_b(draft)
+    
+    try:
+        # Check if cancelled early
+        with _ACTIVE_RUNS_LOCK:
+            is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+        if is_cancelled:
+            reason = "cancelled"
+        else:
+            if status_cb: status_cb("Reading files (Stage A)...")
 
-    ok = graded is not None
+            # Wave 1: ContextSizer & Dynamic Router
+            context_size = scan_project_context(folder)
+            frontier_max_str = os.environ.get("ANCHOR_FRONTIER_MAX", "100000").strip()
+            try:
+                frontier_max = float(frontier_max_str)
+            except ValueError:
+                frontier_max = 100000.0
 
-    report_rel = None
-    exec_rel = None
-    verdict = ""
-    degraded = True
-    cross_model = False
+            actual_env = dict(env) if env is not None else {}
+            if context_size > frontier_max:
+                actual_env["GEMINI_MODEL"] = "gemini-1.5-pro"
+                actual_env["TRIO_MODEL"] = "gemini-1.5-pro"
 
-    if ok:
-        verdict = _one_line_verdict(graded)
-        degraded = bool(graded.get("degraded"))
-        cross_model = bool(graded.get("cross_model"))
+            draft, reason = _run_stage_a(folder, env=actual_env, run_id=run_id)
+            
+            with _ACTIVE_RUNS_LOCK:
+                is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+            if is_cancelled:
+                reason = "cancelled"
+            elif draft is not None:
+                if status_cb: status_cb("Synthesizing (Stage B)...")
+                graded, reason = _run_stage_b(draft, run_id=run_id)
+
+            with _ACTIVE_RUNS_LOCK:
+                is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+            if is_cancelled:
+                reason = "cancelled"
+
+        ok = (graded is not None) and (reason != "cancelled")
+
+        report_rel = None
+        exec_rel = None
+        verdict = ""
+        degraded = True
+        cross_model = False
+
+        if ok:
+            verdict = _one_line_verdict(graded)
+            degraded = bool(graded.get("degraded"))
+            cross_model = bool(graded.get("cross_model"))
+            try:
+                run_dir = _runs_dir(folder) / run_id
+                run_dir.mkdir(parents=True, exist_ok=True)
+                report_md = _render_full_report(graded, run_id=run_id, when=ts)
+                exec_md = _render_exec_summary(graded, run_id=run_id, when=ts)
+                (run_dir / REPORT_MD).write_text(report_md, encoding="utf-8")
+                (run_dir / EXEC_SUMMARY_MD).write_text(exec_md, encoding="utf-8")
+                (run_dir / ADVISOR_OUTPUT_JSON).write_text(
+                    json.dumps(graded, indent=2, ensure_ascii=False),
+                    encoding="utf-8")
+                report_rel = f"{run_rel}/{REPORT_MD}"
+                exec_rel = f"{run_rel}/{EXEC_SUMMARY_MD}"
+                _add_gitignore_best_effort(folder)
+            except OSError as exc:
+                ok = False
+                reason = "artifact-write-failed:" + str(exc)[:160]
+                report_rel = None
+                exec_rel = None
+
+        record = {
+            "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
+            "run_id": run_id,
+            "ts": ts,
+            "ok": bool(ok),
+            "verdict": verdict,
+            "degraded": bool(degraded),
+            "cross_model": bool(cross_model),
+            "report_rel": report_rel,
+            "exec_rel": exec_rel,
+            "advisor_rel": (f"{run_rel}/{ADVISOR_OUTPUT_JSON}" if ok else None),
+            "session_id": run_id,
+            "status": "cancelled" if reason == "cancelled" else ("done" if ok else "failed"),
+        }
+        if not ok:
+            record["reason"] = reason or "unknown"
+
+        # If cancel_run already recorded the cancelled outcome in the index
+        # (the worker may still be unwinding a killed Stage-A/B), don't write a
+        # duplicate record for the same run_id.
+        already_recorded = False
+        with _ACTIVE_RUNS_LOCK:
+            r = _ACTIVE_RUNS.get(run_id)
+            if r and r.get("index_recorded"):
+                already_recorded = True
+        if not already_recorded:
+            try:
+                _append_index(folder, pid, record)
+            except Exception:
+                # Even if the index write somehow fails, return the honest result.
+                pass
+
+        out = dict(record)
+        out["ok"] = bool(ok)
+        if not ok:
+            out["reason"] = reason or "unknown"
+        return out
+
+    finally:
         try:
-            run_dir = _runs_dir(folder) / run_id
-            run_dir.mkdir(parents=True, exist_ok=True)
-            report_md = _render_full_report(graded, run_id=run_id, when=ts)
-            exec_md = _render_exec_summary(graded, run_id=run_id, when=ts)
-            (run_dir / REPORT_MD).write_text(report_md, encoding="utf-8")
-            (run_dir / EXEC_SUMMARY_MD).write_text(exec_md, encoding="utf-8")
-            (run_dir / ADVISOR_OUTPUT_JSON).write_text(
-                json.dumps(graded, indent=2, ensure_ascii=False),
-                encoding="utf-8")
-            report_rel = f"{run_rel}/{REPORT_MD}"
-            exec_rel = f"{run_rel}/{EXEC_SUMMARY_MD}"
-            _add_gitignore_best_effort(folder)
-        except OSError as exc:
-            ok = False
-            reason = "artifact-write-failed:" + str(exc)[:160]
-            report_rel = None
-            exec_rel = None
+            import session_registry
+            with _ACTIVE_RUNS_LOCK:
+                is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+            if is_cancelled or reason == "cancelled":
+                st = "cancelled"
+            else:
+                st = session_registry.STATUS_DONE if ok else session_registry.STATUS_FAILED
+            session_registry.update_session(run_id, status=st)
+        except Exception:
+            pass
 
-    record = {
-        "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
-        "run_id": run_id,
-        "ts": ts,
-        "ok": bool(ok),
-        "verdict": verdict,
-        "degraded": bool(degraded),
-        "cross_model": bool(cross_model),
-        "report_rel": report_rel,
-        "exec_rel": exec_rel,
-        "advisor_rel": (f"{run_rel}/{ADVISOR_OUTPUT_JSON}" if ok else None),
-        "session_id": run_id,
-        "status": "done" if ok else "failed",
-    }
-    if not ok:
-        record["reason"] = reason or "unknown"
-
-    try:
-        _append_index(folder, pid, record)
-    except Exception:
-        # Even if the index write somehow fails, return the honest result.
-        pass
-
-    try:
-        import session_registry
-        st = session_registry.STATUS_DONE if ok else session_registry.STATUS_FAILED
-        session_registry.update_session(run_id, status=st)
-    except Exception:
-        pass
-
-    out = dict(record)
-    out["ok"] = bool(ok)
-    if not ok:
-        out["reason"] = reason or "unknown"
-    return out
+        with _ACTIVE_RUNS_LOCK:
+            _ACTIVE_RUNS.pop(run_id, None)
 
 
 def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None) -> dict:
-    """First-scan idempotent: run Gandalf ONLY if no prior run exists.
-
-    Returns ``{ok:True, skipped:True}`` when a prior run is present (no model
-    call), else delegates to :func:`run_gandalf`. Never raises.
-    """
+    """First-scan idempotent: run Gandalf ONLY if no prior run exists."""
     try:
         if _load_index(folder_path, project_id):
             return {"ok": True, "skipped": True, "reason": "prior-run-exists"}
@@ -726,12 +761,7 @@ def _safe_run_view(record: dict) -> dict:
 
 
 def list_runs(folder_path, project_id) -> list:
-    """Newest-first SAFE projections of the project's Gandalf runs.
-
-    Each: ``ts · run_id · verdict · cross_model · degraded · ok · report_rel ·
-    exec_rel · advisor_rel · reason?`` — NEVER an absolute path. Normalizes
-    older/missing-schema records with honest defaults. Read-only; never raises.
-    """
+    """Newest-first SAFE projections of the project's Gandalf runs."""
     runs = _load_index(folder_path, project_id)
     return [_safe_run_view(r) for r in runs]
 
@@ -743,6 +773,7 @@ def get_run(folder_path, project_id, run_id) -> dict:
             return _safe_run_view(r)
     return None
 
+
 def delete_run(folder_path, project_id, run_id) -> bool:
     """Remove a run from the index by run_id."""
     with _paths.WRITE_LOCK:
@@ -750,9 +781,113 @@ def delete_run(folder_path, project_id, run_id) -> bool:
         filtered = [r for r in runs if str(r.get("run_id") or "") != str(run_id)]
         if len(filtered) == len(runs):
             return False
+        
+        # Also remove the run directory on disk if it exists
+        try:
+            run_dir = _runs_dir(folder_path) / run_id
+            if run_dir.is_dir():
+                shutil.rmtree(str(run_dir), ignore_errors=True)
+        except Exception:
+            pass
+
         p = _index_path(folder_path, project_id)
         tmp = p.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(filtered, indent=2, ensure_ascii=False),
                        encoding="utf-8")
         tmp.replace(p)
         return True
+
+
+def cancel_run(run_id: str) -> bool:
+    """Active cancel (tree-kill) an in-flight Gandalf run."""
+    with _ACTIVE_RUNS_LOCK:
+        run = _ACTIVE_RUNS.get(run_id)
+        if not run:
+            try:
+                import session_registry
+                rec = session_registry.get_session(run_id)
+                if rec and rec.get("status") == session_registry.STATUS_RUNNING:
+                    session_registry.update_session(run_id, status="cancelled")
+            except Exception:
+                pass
+            return False
+
+        run["cancelled"] = True
+
+        # 1) If in Stage A (job_runner job is active)
+        job_id = run.get("job_id")
+        if job_id:
+            try:
+                import job_runner
+                job_runner.cancel(job_id)
+            except Exception:
+                pass
+
+        # 2) If in Stage B (subprocess is active)
+        proc = run.get("proc")
+        if proc:
+            try:
+                pid = proc.pid
+                if pid:
+                    import proc_probe
+                    proc_probe.tree_kill(pid)
+            except Exception:
+                pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+        # Update the session registry record to cancelled
+        try:
+            import session_registry
+            session_registry.update_session(run_id, status="cancelled")
+        except Exception:
+            pass
+
+        # Record the cancelled outcome in the gandalf index now (Wave 1: active
+        # cancel "records the cancelled outcome"). The worker thread may still be
+        # unwinding a tree-killed child, so record here and mark it so the worker
+        # does not write a duplicate record for the same run_id.
+        folder = run.get("folder")
+        pid = run.get("project_id")
+        if folder and pid:
+            try:
+                _append_index(folder, pid, {
+                    "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
+                    "run_id": run_id,
+                    "ts": time.time(),
+                    "ok": False,
+                    "verdict": "",
+                    "degraded": True,
+                    "cross_model": False,
+                    "report_rel": None,
+                    "exec_rel": None,
+                    "advisor_rel": None,
+                    "session_id": run_id,
+                    "status": "cancelled",
+                    "reason": "cancelled",
+                })
+                run["index_recorded"] = True
+            except Exception:
+                pass
+
+        return True
+
+
+def cancel_gandalf_run(project_id) -> bool:
+    """Look up the running run by project_id and cancel it."""
+    target_run_id = None
+    with _ACTIVE_RUNS_LOCK:
+        for run_id, run in _ACTIVE_RUNS.items():
+            if str(run.get("project_id")) == str(project_id):
+                target_run_id = run_id
+                break
+    if target_run_id:
+        # Cancel the run (which tree-kills via job_runner.cancel and proc.kill)
+        cancelled = cancel_run(target_run_id)
+        # Clear the in-flight entry
+        with _ACTIVE_RUNS_LOCK:
+            _ACTIVE_RUNS.pop(target_run_id, None)
+        return cancelled
+    return False

@@ -221,21 +221,13 @@ _hunter_lock = threading.Lock()
 def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
     """Start the background sweep daemon. Returns the thread, or ``None``.
 
-    OFF by default: ``enabled`` defaults to ``os.environ[ANCHOR_ZOMBIE_HUNTER]
-    == "1"``. If not enabled, return ``None`` and do nothing (the sweeper must
-    NOT auto-kill until explicitly armed).
-
-    When enabled, start exactly ONE daemon thread (a module global guards
-    against a second concurrent daemon; a second call is a no-op returning the
-    existing thread). The loop calls ``sweep(live_ids_provider())`` every
-    ``interval_sec`` seconds, swallowing+logging any exception so the loop never
-    dies. ``live_ids_provider`` is a zero-arg callable returning the set of
-    currently-attached session ids.
+    By default, starting is enabled (runs in dry-run mode, apply=False, unless
+    ANCHOR_ZOMBIE_HUNTER == "1").
     """
     global _hunter_thread, _stop_event
 
     if enabled is None:
-        enabled = os.environ.get(HUNTER_ENV) == "1"
+        enabled = True
     if not enabled:
         return None
 
@@ -250,7 +242,8 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
             # Sweep immediately on start, then every interval until stopped.
             while not stop.is_set():
                 try:
-                    sweep(live_ids_provider())
+                    apply_kills = os.environ.get(HUNTER_ENV) == "1"
+                    sweep(live_ids_provider(), apply=apply_kills)
                 except Exception as exc:  # never let the loop die
                     try:
                         print(f"[zombie_hunter] sweep error: {exc!r}")

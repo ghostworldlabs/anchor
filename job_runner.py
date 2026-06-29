@@ -117,6 +117,16 @@ TERMINAL_STATUSES = frozenset(
     (STATUS_DONE, STATUS_CANCELLED, STATUS_INTERRUPTED, STATUS_FAILED)
 )
 
+#: Lane stamped on the ``session_registry`` record we mint for every spawned job
+#: (zombie-hunter v2). Each job is a "swarm" sub-agent; registering it under this
+#: lane — with the SAME identity (pid / proc_create_time / crypt_token) we already
+#: persist on the job record — is what makes the otherwise-invisible swarm child
+#: SWEEPABLE by ``zombie_hunter`` (DESIGN.md coverage gap: the identity used to
+#: live only in the job store, never in ``session_registry`` where the hunter
+#: looks). The hunter ABSTAINS on any record missing this identity, so a launch
+#: that failed to stamp it is never mis-killed.
+SWARM_LANE = "swarm"
+
 # ── In-memory live job table ────────────────────────────────────────────────
 # Maps job_id -> a _LiveJob holding the Popen, reader thread, and ring buffer.
 # Only live (this-process) jobs appear here; persisted records on disk are the
@@ -551,6 +561,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     except Exception:
         proc_create_time = None
 
+    # zombie-hunter v2: mint a sweepable session_registry record for this swarm
+    # child, stamping the SAME identity (pid / proc_create_time / crypt_token) the
+    # hunter's classify needs. Done here, at the single spawn site, so EVERY job
+    # (direct launch() or launch_guarded()) participates. Cleared on exit by
+    # _finalize/cancel via _mirror_session_status (the finally-reset).
+    _register_swarm_session(job_id, proc.pid, proc_create_time, crypt_token,
+                            cwd=cwd)
+
     rec = {
         "job_id": job_id,
         "lane": lane,
@@ -728,6 +746,70 @@ def _cost_from_envelope(env: dict) -> dict:
     }
 
 
+# ── Swarm-job session registration (zombie-hunter v2) ────────────────────────
+#
+# Every job we spawn is a "swarm" sub-agent. Historically its identity
+# (pid / proc_create_time / crypt_token) was written ONLY to the job store, so
+# ``zombie_hunter.sweep`` — which reads ``session_registry.load_sessions()`` —
+# could not see it (DESIGN.md gap). These two helpers close that gap: we mint a
+# RUNNING session_registry record at spawn carrying the SAME identity, then clear
+# it out of RUNNING when the job exits (the gandalf finally-reset analog) so a
+# finished OR crashed swarm child is never left looking orphaned.
+
+def _register_swarm_session(job_id, pid, proc_create_time, crypt_token,
+                            cwd=None) -> None:
+    """Register a spawned swarm job in ``session_registry`` (hunter-sweepable).
+
+    Stamps the EXACT identity ``zombie_hunter.classify`` requires — ``pid``,
+    ``proc_create_time`` (from the existing ``proc_probe`` reading taken at
+    spawn), and the per-job ``crypt_token`` — keyed by the ``job_id`` as the
+    session id. Best-effort: a registry failure must NEVER block a launch (so the
+    job still runs; the hunter simply ABSTAINS on the un-stamped record).
+    """
+    try:
+        import session_registry as _sr
+        _sr.register_session(
+            project_id="",
+            lane=SWARM_LANE,
+            status=_sr.STATUS_RUNNING,
+            session_id=job_id,
+            worktree_path=str(cwd) if cwd else "",
+            pid=pid,
+            proc_create_time=proc_create_time,
+            crypt_token=crypt_token or "",
+        )
+    except Exception:  # pragma: no cover - registry is best-effort
+        pass
+
+
+def _mirror_session_status(job_id, job_status) -> None:
+    """Mirror a swarm job's terminal status onto its session record.
+
+    Maps the job's terminal status to a session status and clears the session
+    OUT of RUNNING so the hunter no longer treats it as a sweep candidate
+    (DONE→done, FAILED→failed, CANCELLED→cancelled, INTERRUPTED→idle). This is
+    the job-runner analog of the gandalf ``finally`` reset. Best-effort and
+    idempotent: a ``KeyError`` (no session was registered for this job — e.g. a
+    legacy/pre-existing record) or any other registry error is swallowed.
+    """
+    try:
+        import session_registry as _sr
+    except Exception:  # pragma: no cover
+        return
+    target = {
+        STATUS_DONE: _sr.STATUS_DONE,
+        STATUS_FAILED: _sr.STATUS_FAILED,
+        STATUS_CANCELLED: _sr.STATUS_CANCELLED,
+        STATUS_INTERRUPTED: _sr.STATUS_IDLE,
+    }.get(job_status, _sr.STATUS_IDLE)
+    try:
+        _sr.update_session(job_id, status=target)
+    except KeyError:
+        pass  # no swarm session registered for this job — nothing to mirror.
+    except Exception:  # pragma: no cover - registry is best-effort
+        pass
+
+
 def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     """Record the terminal status once the process exits.
 
@@ -762,11 +844,16 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
             rec["exit_code"] = exit_code
             rec.setdefault("finished_at", time.time())
             _write_record(rec)
+            # Clear the swarm session out of RUNNING to match (finally-reset).
+            _mirror_session_status(job_id, rec.get("status"))
             return
         rec["exit_code"] = exit_code
         rec["finished_at"] = time.time()
         rec["status"] = STATUS_DONE if exit_code == 0 else STATUS_FAILED
         _write_record(rec)
+    # Mirror the terminal status onto the swarm session (gandalf finally analog),
+    # OUTSIDE the write lock the registry takes its own lock internally.
+    _mirror_session_status(job_id, STATUS_DONE if exit_code == 0 else STATUS_FAILED)
 
 
 # ── Tail / long-poll ─────────────────────────────────────────────────────────
@@ -955,8 +1042,10 @@ def liveness_check(job_id: str) -> dict:
         # unless the pid is truly gone; mark interrupted to be safe.
     if _pid_alive(rec.get("pid")):
         return rec
-    return _update_record(job_id, status=STATUS_INTERRUPTED,
-                          finished_at=time.time())
+    out = _update_record(job_id, status=STATUS_INTERRUPTED,
+                         finished_at=time.time())
+    _mirror_session_status(job_id, STATUS_INTERRUPTED)
+    return out
 
 
 def reconcile_on_startup() -> list:
@@ -980,6 +1069,7 @@ def reconcile_on_startup() -> list:
         if not _pid_alive(rec.get("pid")):
             _update_record(jid, status=STATUS_INTERRUPTED,
                            finished_at=time.time())
+            _mirror_session_status(jid, STATUS_INTERRUPTED)
             changed.append(jid)
     return changed
 
@@ -1005,6 +1095,9 @@ def cancel(job_id: str) -> dict:
     # Set the terminal status FIRST so the reader's _finalize() does not clobber
     # it with done/failed when the pipe closes after the kill.
     _update_record(job_id, status=STATUS_CANCELLED)
+    # Clear the swarm session out of RUNNING immediately (covers the no-live-reader
+    # case where _finalize never runs — e.g. cancelling a job from a prior process).
+    _mirror_session_status(job_id, STATUS_CANCELLED)
 
     if pid:
         _tree_kill(pid)

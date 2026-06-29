@@ -272,10 +272,8 @@ def test_start_hunter_enabled_starts_and_stops(registry_env):
 def test_start_hunter_env_arms(registry_env, monkeypatch):
     zhmod = registry_env["zh"]
     zhmod.stop_hunter()
-    # Default enabled is read from ANCHOR_ZOMBIE_HUNTER == "1".
+    # Default is enabled now (runs in dry-run mode).
     monkeypatch.delenv("ANCHOR_ZOMBIE_HUNTER", raising=False)
-    assert zhmod.start_hunter(lambda: set(), interval_sec=0.02) is None
-    monkeypatch.setenv("ANCHOR_ZOMBIE_HUNTER", "1")
     try:
         t = zhmod.start_hunter(lambda: set(), interval_sec=0.02)
         assert t is not None and t.is_alive()

@@ -253,7 +253,7 @@ def get_project(project_id: str):
         return {
             "id": "__dashboard__",
             "name": "Workspace Root (dev)",
-            "folder_path": str(_paths.data_dir().parent.parent),
+            "folder_path": str(_paths.data_dir().parent),
             "state": "active",
             "priority": 1,
             "group": "",

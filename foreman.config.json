@@ -1,10 +1,18 @@
 {
-  "project": "zombie-hunter",
+  "project": "anchor-v1",
   "docs": {
-    "description": "planning/crucible/MASTER-PLAN.md",
-    "plan": "planning/crucible/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/crucible/EXECUTION-LOG.md"
+    "description": "planning/anchor-v1/DESIGN.md",
+    "plan": "planning/anchor-v1/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/anchor-v1/EXECUTION-LOG.md"
   },
-  "test_command": "python -m pytest -v",
-  "notes": "Zombie Hunter background build."
+  "test_command": "python -m pytest -v tests/test_zombie_hunter.py tests/test_session_registry.py tests/test_gandalf_endpoints.py tests/test_gandalf_engine.py tests/test_cancel_liveness.py tests/test_worktrees.py",
+  "git": {
+    "enabled": true,
+    "branch": "feat/zombie-hunter-v2"
+  },
+  "budget": {
+    "max_waves_per_run": 4,
+    "max_fix_iters_per_wave": 4
+  },
+  "notes": "Project dir = worktree ROOT C:/dev/Anchor-zombie (the CODE ROOT agy edits: anchor_gui.py, gandalf.py, job_runner.py, ... and tests/). agy runs with cwd=root and --add-dir root, so docs/test paths are root-relative. Focused test_command (tests/test_*.py are root-relative). Do NOT touch the live service C:/dev/Anchor. Deploy + arming ANCHOR_ZOMBIE_HUNTER=1 + zero-orphan acceptance demo are John-gated and OUT of this run. NOTE: this replaces the prior zombie-hunter config that pointed at planning/crucible/."
 }
