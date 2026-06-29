@@ -10119,6 +10119,21 @@ def generate_html(projects, tasks, inbox):
             <button class="save-later-btn" onclick="saveForLater('{b64}')" title="Save for later">&#128337;</button>
         </div>'''
 
+    # Map a dashboard project NAME → its R&D registry id, so a card can carry a
+    # data-project-id that the Gandalf-status poller matches against the bulk
+    # /api/rnd/gandalf_status_all map (keyed by R&D project_id). Best-effort: a
+    # registry read failure leaves the map empty (cards simply carry no id and
+    # never show a Gandalf badge). Last writer wins on a duplicate name.
+    _gandalf_name_to_pid = {}
+    try:
+        for _e in _rnd.list_projects(include_archived=False, include_future=False,
+                                     include_retired=False):
+            _nm = (_e.get("name") or "").strip().lower()
+            if _nm and _e.get("id"):
+                _gandalf_name_to_pid[_nm] = _e["id"]
+    except Exception:
+        _gandalf_name_to_pid = {}
+
     # Build project cards
     def project_card(p):
         effort = p.get("effort", "high")
@@ -10128,10 +10143,15 @@ def generate_html(projects, tasks, inbox):
             tier_btn = f'<button class="demote-btn" onclick="demoteProject(\'{b64p}\')">&#8595; P2</button>'
         else:
             tier_btn = f'<button class="promote-btn" onclick="promoteProject(\'{b64p}\')">&#8593; P1</button>'
-        return f'''<div class="card priority-{p["priority"]}{' has-deadline' if p.get('due') else ''}">
+        # Bridge to the R&D project id (if this dashboard project is registered),
+        # so the dashboard Gandalf-status poller can target this exact card.
+        _gpid = _gandalf_name_to_pid.get((p["name"] or "").strip().lower(), "")
+        gpid_attr = f' data-project-id="{esc(_gpid)}"' if _gpid else ""
+        return f'''<div class="card priority-{p["priority"]}{' has-deadline' if p.get('due') else ''}"{gpid_attr}>
             <div class="card-main">
                 <div class="card-top">
                     <h3>{esc(p["name"])}</h3>
+                    <span class="gandalf-card-status" hidden aria-live="polite"><span class="gcs-spin"></span><span class="gcs-text"></span></span>
                     {f'<span class="due-badge">{esc(p["due"])}</span>' if p.get("due") else ""}
                     <span class="effort-badge {effort}">{effort}</span>
                     <span class="domain-tag {p["domain"]}">{esc(p["domain"])}</span>
@@ -10546,6 +10566,24 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .card-grid.expanded .card-main {{ width: 100%; }}
 .card-grid.expanded .card h3 {{ white-space: normal; }}
 .card-grid.expanded .next-text {{ white-space: normal; }}
+
+/* Gandalf in-flight status badge on a dashboard project card. Hidden until the
+   bulk poller finds an active run for this card's project, then shows a small
+   spinner + short status text (e.g. "Gandalf: running…"). */
+.gandalf-card-status {{
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 9px; font-weight: 600; letter-spacing: 0.2px;
+    padding: 1px 7px 1px 6px; border-radius: 999px; white-space: nowrap;
+    background: rgba(192,132,252,0.14); color: var(--writing);
+    border: 1px solid rgba(192,132,252,0.30);
+}}
+.gandalf-card-status[hidden] {{ display: none; }}
+.gandalf-card-status .gcs-spin {{
+    width: 8px; height: 8px; border-radius: 50%;
+    border: 1.5px solid rgba(192,132,252,0.35); border-top-color: var(--writing);
+    animation: gcs-spin 0.8s linear infinite; flex-shrink: 0;
+}}
+@keyframes gcs-spin {{ to {{ transform: rotate(360deg); }} }}
 
 /* Tasks */
 .task-list {{ margin-bottom: 24px; }}
@@ -11668,6 +11706,94 @@ function rndRowsRefresh() {{
 setInterval(rndRowsRefresh, 15000);
 document.addEventListener('visibilitychange', function () {{
     if (document.visibilityState === 'visible') rndRowsRefresh();
+}});
+
+// ── Gandalf in-flight status on dashboard project cards ──
+// One bulk poll (/api/rnd/gandalf_status_all) drives the per-card badge instead
+// of N single-project requests. Each card carrying a data-project-id is matched
+// against the returned project_id-to-status map: a match shows a spinner + the
+// short status text; a card no longer in the map is cleared. The interval runs
+// only while the tab is visible AND at least one run is in-flight — it idles
+// (interval cleared) otherwise and is woken by a slow keep-alive probe / a
+// visibility change, so it never leaks intervals and never polls in the dark.
+var _gandalfCardTimer = null;
+var _gandalfCardProbe = null;
+function _gandalfCardTokenQ() {{
+    try {{ var t = _anchorToken(); return t ? ('?token=' + encodeURIComponent(t)) : ''; }}
+    catch (e) {{ return ''; }}
+}}
+function _gandalfCardApply(statuses) {{
+    var any = false;
+    var cards = document.querySelectorAll('.card[data-project-id]');
+    for (var i = 0; i < cards.length; i++) {{
+        var card = cards[i];
+        var pid = card.getAttribute('data-project-id');
+        var badge = card.querySelector('.gandalf-card-status');
+        if (!badge) continue;
+        var st = statuses && Object.prototype.hasOwnProperty.call(statuses, pid)
+                 ? statuses[pid] : null;
+        if (st) {{
+            any = true;
+            var txt = badge.querySelector('.gcs-text');
+            if (txt) txt.textContent = 'Gandalf: ' + st;
+            badge.title = 'Gandalf: ' + st;
+            badge.hidden = false;
+        }} else {{
+            badge.hidden = true;
+            var txt2 = badge.querySelector('.gcs-text');
+            if (txt2) txt2.textContent = '';
+        }}
+    }}
+    return any;
+}}
+function _gandalfCardTick() {{
+    if (document.visibilityState !== 'visible'
+        || !document.querySelector('.card[data-project-id]')) {{
+        _gandalfCardStop();
+        return;
+    }}
+    fetch('/api/rnd/gandalf_status_all' + _gandalfCardTokenQ(), {{cache: 'no-store'}})
+      .then(function (r) {{ return r.ok ? r.json() : null; }})
+      .then(function (d) {{
+          if (!d || !d.ok) return;
+          var any = _gandalfCardApply(d.statuses || {{}});
+          if (!any) _gandalfCardStop();   // nothing in-flight → idle the poller
+      }})
+      .catch(function () {{}});            // silent no-op
+}}
+function _gandalfCardStart() {{
+    if (_gandalfCardTimer) return;        // already polling — don't stack intervals
+    if (document.visibilityState !== 'visible'
+        || !document.querySelector('.card[data-project-id]')) return;
+    _gandalfCardTick();                   // immediate first paint
+    _gandalfCardTimer = setInterval(_gandalfCardTick, 1000);
+}}
+function _gandalfCardStop() {{
+    if (_gandalfCardTimer) {{ clearInterval(_gandalfCardTimer); _gandalfCardTimer = null; }}
+}}
+// Slow keep-alive: while idle, probe occasionally so a run STARTED after the
+// poller went quiet re-arms the 1s loop (single probe; re-uses the same fetch).
+function _gandalfCardProbeTick() {{
+    if (_gandalfCardTimer) return;        // already active
+    if (document.visibilityState !== 'visible'
+        || !document.querySelector('.card[data-project-id]')) return;
+    fetch('/api/rnd/gandalf_status_all' + _gandalfCardTokenQ(), {{cache: 'no-store'}})
+      .then(function (r) {{ return r.ok ? r.json() : null; }})
+      .then(function (d) {{
+          if (d && d.ok && d.statuses && Object.keys(d.statuses).length) {{
+              _gandalfCardApply(d.statuses);
+              _gandalfCardStart();
+          }}
+      }})
+      .catch(function () {{}});
+}}
+window.addEventListener('DOMContentLoaded', function () {{
+    _gandalfCardStart();
+    _gandalfCardProbe = setInterval(_gandalfCardProbeTick, 8000);
+}});
+document.addEventListener('visibilitychange', function () {{
+    if (document.visibilityState === 'visible') _gandalfCardStart();
+    else _gandalfCardStop();
 }});
 
 // ── Modal helpers ──
@@ -13298,7 +13424,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             ideas = []
                         self._send_json({"ok": True, "ideas": ideas})
-            elif self.path.startswith("/api/rnd/gandalf"):
+            elif (self.path.startswith("/api/rnd/gandalf")
+                  and not self.path.startswith("/api/rnd/gandalf_status")):
                 # Read-only (Gandalf v1): the project's Gandalf run history —
                 # newest-first SAFE projections (verdict · chips · report/exec
                 # rel paths; NEVER absolute paths). NO mutation, NO model call.
@@ -13330,7 +13457,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             runs = []
                         self._send_json({"ok": True, "runs": runs})
-            elif self.path.startswith("/api/rnd/gandalf_status"):
+            elif (self.path.startswith("/api/rnd/gandalf_status")
+                  and not self.path.startswith("/api/rnd/gandalf_status_all")):
                 if not self._term_token_ok():
                     self._send_json({"ok": False, "error": "unauthorized"}, 401)
                     return
@@ -13352,6 +13480,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         else:
                             status = rec
                     self._send_json({"ok": True, "status": status})
+            elif self.path.startswith("/api/rnd/gandalf_status_all"):
+                # BULK in-flight status for ALL projects with a live Gandalf run —
+                # one request the dashboard polls instead of N single-project
+                # calls. Returns {ok, statuses:{project_id: status_string}} for
+                # every project currently in-flight; finished/absent projects are
+                # simply omitted. Mirrors the single endpoint's token gate, ok/err
+                # envelope, and the >30-min staleness sweep.
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                statuses = {}
+                now = time.time()
+                with _GANDALF_INFLIGHT_GUARD:
+                    for _pid, rec in list(_GANDALF_INFLIGHT.items()):
+                        if isinstance(rec, dict):
+                            if now - rec.get("ts", 0) > 1800:
+                                _GANDALF_INFLIGHT.pop(_pid, None)
+                                continue
+                            st = rec.get("status")
+                        else:
+                            st = rec
+                        if st:
+                            statuses[_pid] = st
+                self._send_json({"ok": True, "statuses": statuses})
             elif self.path.startswith("/api/rnd/zombie_hunter_report"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -14494,6 +14646,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                  "error": f"unknown session: {session}",
                                  "reason": "unknown-session"}, 404)
             else:
+                rec = _termsess.get_session(session)
+                if rec and rec.get("lane") == "gandalf":
+                    cancelled = _gandalf.cancel_run(session)
+                    self._send_json({"ok": True, "result": {"ok": True, "cancelled": cancelled}})
+                    return
                 # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
                 # DONE transition that may auto-advance to build.
                 #
@@ -14506,7 +14663,6 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # plan. So: kill (persists docs + sets STATUS_DONE + reaps), THEN
                 # capture the now-persisted plan set, THEN auto-advance (idempotent
                 # on parent_session_id; no plan ⇒ no advance). Best-effort.
-                rec = _termsess.get_session(session)
                 pid_for_advance = rec.get("project_id") if rec else None
                 # v12 Wave 7 — RETIREMENT MAP (Shark C1/C3): a v12 EFFORT
                 # advances IN-SESSION (advance_stage / detect_stage_progress) and
@@ -15312,6 +15468,22 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     folder = proj.get("folder_path", "")
                     scheduled = _trigger_gandalf(folder, pid, manual=True)
                     self._send_json({"ok": True, "scheduled": bool(scheduled)})
+
+        elif self.path == "/api/rnd/gandalf_delete":
+            pid = (body.get("project_id", "") or body.get("id", "")).strip()
+            run_id = (body.get("run_id", "") or body.get("session_id", "")).strip()
+            if not pid or not run_id:
+                self._send_json({"ok": False, "error": "project_id and run_id required"}, 400)
+            elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
+                self._send_json({"ok": False, "error": "bad project_id or run_id"}, 400)
+            else:
+                proj = _rnd.get_project(pid)
+                if proj is None:
+                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
+                else:
+                    folder = proj.get("folder_path", "")
+                    deleted = _gandalf.delete_run(folder, pid, run_id)
+                    self._send_json({"ok": True, "deleted": bool(deleted)})
 
         elif self.path == "/api/rnd/advance_stage":
             # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME

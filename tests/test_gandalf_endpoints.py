@@ -315,3 +315,143 @@ def test_two_concurrent_first_scans_schedule_at_most_one(env, monkeypatch):
     assert results.count(True) <= 1
     runs = _wait_runs(gandalf, repo, pid, n=1)
     assert len(runs) == 1  # exactly one run, never two
+
+
+def test_delete_route(server, monkeypatch):
+    """POST /api/rnd/gandalf_delete token-gated delete route test."""
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+    # Run once to populate index
+    gandalf.run_gandalf(str(repo), pid)
+    runs = gandalf.list_runs(str(repo), pid)
+    assert len(runs) == 1
+    run_id = runs[0]["run_id"]
+
+    # Without token (when token is set) -> 401
+    monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+    import paths
+    importlib.reload(paths)
+    status, body = _post(f"{base}/api/rnd/gandalf_delete", {"project_id": pid, "run_id": run_id})
+    assert status == 401
+    
+    # With valid token -> 200, deleted
+    status, body = _post(f"{base}/api/rnd/gandalf_delete", {"project_id": pid, "run_id": run_id}, token="s3cret")
+    assert status == 200
+    assert body["ok"] is True
+    assert body["deleted"] is True
+    
+    # Verify index has no runs left
+    assert gandalf.list_runs(str(repo), pid) == []
+
+
+# ── GET bulk in-flight status (dashboard card badges) ────────────────────────
+
+def test_status_all_empty(server):
+    """With nothing in-flight the bulk endpoint returns ok + an empty map."""
+    _, base, _ = server
+    status, body = _get(f"{base}/api/rnd/gandalf_status_all")
+    assert status == 200
+    assert body["ok"] is True
+    assert body["statuses"] == {}
+
+
+def test_status_all_reports_inflight_then_clears(server):
+    """A project with a live in-flight record surfaces in the bulk map keyed by
+    project_id; once popped it disappears."""
+    env, base, _ = server
+    gui, pid = env["gui"], env["pid"]
+    with gui._GANDALF_INFLIGHT_GUARD:
+        gui._GANDALF_INFLIGHT[pid] = {"status": "Reading the codebase…",
+                                      "ts": time.time()}
+    try:
+        status, body = _get(f"{base}/api/rnd/gandalf_status_all")
+        assert status == 200
+        assert body["ok"] is True
+        assert body["statuses"].get(pid) == "Reading the codebase…"
+    finally:
+        with gui._GANDALF_INFLIGHT_GUARD:
+            gui._GANDALF_INFLIGHT.pop(pid, None)
+    # After the run finishes (record popped) the project drops out of the map.
+    status, body = _get(f"{base}/api/rnd/gandalf_status_all")
+    assert status == 200
+    assert pid not in body["statuses"]
+
+
+def test_status_all_skips_and_sweeps_stale(server):
+    """A stale (>30 min) in-flight record is omitted AND swept from the dict."""
+    env, base, _ = server
+    gui, pid = env["gui"], env["pid"]
+    with gui._GANDALF_INFLIGHT_GUARD:
+        gui._GANDALF_INFLIGHT[pid] = {"status": "zombie", "ts": time.time() - 3600}
+    status, body = _get(f"{base}/api/rnd/gandalf_status_all")
+    assert status == 200
+    assert body["ok"] is True
+    assert pid not in body["statuses"]
+    with gui._GANDALF_INFLIGHT_GUARD:
+        assert pid not in gui._GANDALF_INFLIGHT  # swept
+
+
+def test_status_all_token_gate(env, monkeypatch):
+    """With a token configured, an unauthed bulk GET is 401; an authed one 200."""
+    monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+    import paths
+    importlib.reload(paths)
+    gui = importlib.reload(env["gui"])
+    srv = gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        status, _ = _get(f"{base}/api/rnd/gandalf_status_all")
+        assert status == 401
+        status, body = _get(f"{base}/api/rnd/gandalf_status_all?token=s3cret")
+        assert status == 200
+        assert body["ok"] is True
+        assert body["statuses"] == {}
+    finally:
+        srv.shutdown()
+        time.sleep(0.15)
+        srv.server_close()
+        t.join(timeout=5)
+
+
+def test_cancel_route(server):
+    """POST /api/rnd/term_kill for a Gandalf run cancels it."""
+    env, base, _ = server
+    pid, repo, gandalf = env["pid"], env["repo"], env["gandalf"]
+    
+    # Fake the active run in active runs dict and session registry
+    import session_registry
+    session_id = "run-cancel-test-123"
+    session_registry.register_session(
+        project_id=pid,
+        lane="gandalf",
+        status=session_registry.STATUS_RUNNING,
+        session_id=session_id
+    )
+    
+    # Put in active runs
+    import subprocess
+    import os
+    # Spawn a dummy sleep process to kill
+    if os.name == "nt":
+        proc = subprocess.Popen(["cmd.exe", "/c", "pause"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    else:
+        proc = subprocess.Popen(["sleep", "60"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+    gandalf._ACTIVE_RUNS[session_id] = {"job_id": None, "proc": proc, "cancelled": False}
+    
+    # Call term_kill
+    status, body = _post(f"{base}/api/rnd/term_kill", {"session": session_id})
+    assert status == 200
+    assert body["ok"] is True
+    
+    # Verify status in session_registry is cancelled
+    rec = session_registry.get_session(session_id)
+    assert rec["status"] == "cancelled"
+    
+    # Verify process was terminated
+    # Give a tiny bit of time
+    time.sleep(0.5)
+    assert proc.poll() is not None

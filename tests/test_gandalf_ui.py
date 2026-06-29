@@ -104,7 +104,7 @@ def test_render_smoke_brace_balanced_and_panel_present(gui_env, tmp_path):
     assert isinstance(html, str) and html.strip()
     assert html.count("{") == html.count("}"), (
         f"brace imbalance: {html.count('{')} open vs {html.count('}')} close")
-    for landmark in ("id='gandalfPanel'", "gandalf-white-icon.svg", "gandalfRun(",
+    for landmark in ("id='gandalfPanel'", "gandalf-icon-v5.jpg", "gandalfRun(",
                      "gandalfToggleRun", "toggleGandalfRuns", "id='gandalfRunsTog'"):
         assert landmark in html, f"missing Gandalf landmark: {landmark!r}"
 
@@ -135,7 +135,7 @@ def test_dom_positive_panel_above_grass_with_rows(gui_env, tmp_path):
 
     # Header: the white-wizard icon + a Re-run button.
     imgs = [d for t, c, d in els if t == "img" and "gicon" in c]
-    assert imgs and "gandalf-white-icon.svg" in imgs[0].get("src", "")
+    assert imgs and "gandalf-icon-v5.jpg" in imgs[0].get("src", "")
     reruns = [d for t, c, d in els if "gandalf-rerun" in c]
     assert reruns, "no Re-run button"
 
@@ -236,6 +236,48 @@ def test_dom_negative_error_run_has_reason_no_dead_links(gui_env, tmp_path):
         "error run row must NOT wire gandalfToggleRun"
     assert "gcaret" not in err_seg.group(0), \
         "error run row must NOT render an expand caret"
+
+
+# ── 4. DASHBOARD CARD — Gandalf in-flight badge + bulk poller wiring ─────────
+
+def _sample_project(name="Alpha", **over):
+    p = {"name": name, "domain": "academic", "priority": 1, "status": "active",
+         "effort": "high", "due": "", "next": "", "collabs": "", "notes": ""}
+    p.update(over)
+    return p
+
+
+def test_dashboard_card_has_gandalf_badge_and_controller(gui_env):
+    """The dashboard project card carries the (hidden) Gandalf status badge and
+    the page wires the bulk-status poller against the new endpoint."""
+    gui = gui_env
+    html = gui.generate_html([_sample_project()], [], [])
+    assert isinstance(html, str) and html.strip()
+    # Brace balance — the giant f-string must stay balanced after the edit.
+    assert html.count("{") == html.count("}"), "brace imbalance in generate_html"
+    # The badge element is present on the card (hidden until a run is in-flight).
+    assert "gandalf-card-status" in html
+    assert "gcs-text" in html and "gcs-spin" in html
+    # The JS controller + the bulk endpoint are wired into the page.
+    assert "/api/rnd/gandalf_status_all" in html
+    for fn in ("_gandalfCardStart", "_gandalfCardStop", "_gandalfCardTick",
+               "_gandalfCardApply"):
+        assert fn in html, f"missing dashboard Gandalf controller fn: {fn}"
+
+
+def test_dashboard_card_carries_project_id_for_registered_project(gui_env, tmp_path):
+    """A dashboard project whose NAME matches a registered R&D project gets a
+    data-project-id on its card so the poller can target it; an unknown name
+    gets none."""
+    gui = gui_env
+    proj = _mkproject(tmp_path / "Bridged", "Bridged")
+    pid = proj["id"]
+    html = gui.generate_html(
+        [_sample_project("Bridged"), _sample_project("Unregistered-XYZ")], [], [])
+    assert f'data-project-id="{pid}"' in html, \
+        "registered project card must carry its R&D project_id"
+    # The unknown project gets a card but no data-project-id attribute.
+    assert "Unregistered-XYZ" in html
 
 
 def test_list_runs_safe_projection_no_abs_paths(gui_env, tmp_path):
