@@ -637,6 +637,14 @@ def start(cmd, cwd=None, env=None):
     if total_live >= cap:
         raise SpawnCapReached(f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
 
+    # ── zombie-hunter Phase 1: capture process identity at spawn ───────────
+    # Mint a per-session crypt token and inject it into the child's environment
+    # as ANCHOR_SESSION_ID_CRYPT_TOKEN. After the child has a real pid, record
+    # that pid's OS creation time. The (token, pid, proc_create_time) triple is
+    # stored on the child so terminal_session can persist it into the registry,
+    # letting the sweeper later prove a still-live pid is OUR process (creation-
+    # time match) and not a recycled pid. A stub/backend with no pid leaves
+    # proc_create_time None — the sweeper then abstains (safe), never kills.
     crypt_token = uuid.uuid4().hex
     if env is None:
         env = dict(os.environ)
@@ -646,13 +654,16 @@ def start(cmd, cwd=None, env=None):
 
     backend = select_backend()
     child = backend.start(cmd, cwd=cwd, env=env)
-    
-    try:
-        import proc_probe
-        child.crypt_token = crypt_token
-        child.proc_create_time = proc_probe.creation_time(getattr(child, "pid", None)) if getattr(child, "pid", None) else None
-    except Exception:
-        child.crypt_token = crypt_token
+
+    child.crypt_token = crypt_token
+    pid = getattr(child, "pid", None)
+    if pid:
+        try:
+            import proc_probe
+            child.proc_create_time = proc_probe.creation_time(pid)
+        except Exception:
+            child.proc_create_time = None
+    else:
         child.proc_create_time = None
 
     sid = uuid.uuid4().hex

@@ -4567,6 +4567,24 @@ def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
                 _rnd.remove_project(pid)
             except Exception:
                 pass
+        # Belt-and-suspenders NAME sweep: remove ANY ``__healthcheck__ rnd probe``
+        # project still in the live registry — including ones LEAKED by a prior run
+        # that was killed before its teardown reached this point. Without this, a
+        # crashed/interrupted run left its synthetic project behind and it rendered
+        # as a permanent "ungrouped" dashboard tile (the v3..v12 leak John saw).
+        # Scoped strictly to the synthetic name prefix, so a REAL project (which can
+        # never start with ``__healthcheck__``) is never touched.
+        try:
+            for entry in _rnd.list_projects(
+                    include_archived=True, include_future=True,
+                    include_retired=True, with_effective_state=False):
+                if str(entry.get("name", "")).startswith(SYNTHETIC_RND_NAME):
+                    try:
+                        _rnd.remove_project(entry["id"])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
     except Exception:
         pass
     # Best-effort: remove ANY session_registry rows + preview records keyed to a

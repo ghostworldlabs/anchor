@@ -272,8 +272,18 @@ def test_start_hunter_enabled_starts_and_stops(registry_env):
 def test_start_hunter_env_arms(registry_env, monkeypatch):
     zhmod = registry_env["zh"]
     zhmod.stop_hunter()
-    # Default is enabled now (runs in dry-run mode).
+    # When ANCHOR_ZOMBIE_HUNTER is unset, starting is enabled by default (runs in dry-run mode).
     monkeypatch.delenv("ANCHOR_ZOMBIE_HUNTER", raising=False)
+    try:
+        t = zhmod.start_hunter(lambda: set(), interval_sec=0.02)
+        assert t is not None and t.is_alive()
+    finally:
+        zhmod.stop_hunter()
+    if t:
+        t.join(timeout=5)
+
+    # When ANCHOR_ZOMBIE_HUNTER is "1", starting is also enabled.
+    monkeypatch.setenv("ANCHOR_ZOMBIE_HUNTER", "1")
     try:
         t = zhmod.start_hunter(lambda: set(), interval_sec=0.02)
         assert t is not None and t.is_alive()
@@ -296,3 +306,129 @@ def test_proc_probe_real_process():
     assert proc_probe.creation_time(999999999) is None
     # We are obviously alive.
     assert proc_probe.is_alive(os.getpid()) is True
+
+
+# ── Phase 1: spawn captures process identity (so classify stops ABSTAINing) ────
+#
+# These lock the ONE missing piece of the zombie engine: the spawn path now
+# mints a crypt token, injects it into the child env, and (once the child has a
+# pid) records that pid's creation time, then persists the triple into the
+# registry via terminal_session. Before Phase 1 every RUNNING record had no
+# identity, so ``classify`` returned ABSTAIN for everything. Hermetic: a fake
+# pid-bearing backend + a faked ``proc_probe.creation_time`` — no real OS spawn,
+# no real claude/agy process, no git worktree.
+
+
+def _reload_identity_stack(data_dir, monkeypatch):
+    """Reload the dependency stack against a temp ANCHOR_DATA_DIR (stub PTY)."""
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    import paths
+    importlib.reload(paths)
+    import pty_manager
+    importlib.reload(pty_manager)
+    import rnd_registry
+    importlib.reload(rnd_registry)
+    import session_registry
+    importlib.reload(session_registry)
+    import worktrees
+    importlib.reload(worktrees)
+    import lanes
+    importlib.reload(lanes)
+    import terminal_session
+    importlib.reload(terminal_session)
+    import zombie_hunter
+    importlib.reload(zombie_hunter)
+    return pty_manager, rnd_registry, session_registry, terminal_session, zombie_hunter
+
+
+def test_pty_start_captures_token_pid_and_create_time(tmp_path, monkeypatch):
+    """pty_manager.start mints a token, injects it into the child env, and (with
+    a pid) records the create time — all stored on the child object."""
+    pty, _rnd, _reg, _ts, _zh = _reload_identity_stack(tmp_path / "data", monkeypatch)
+    import proc_probe
+
+    class _PidStubBackend:
+        name = "pidstub"
+
+        def start(self, cmd, cwd=None, env=None):
+            child = pty._StubChild(cmd, cwd=cwd, env=env)
+            child.pid = 4242            # a real backend would carry the OS pid
+            child.spawn_env = env       # capture the injected env for assertion
+            return child
+
+    monkeypatch.setattr(pty, "select_backend", lambda: _PidStubBackend())
+    monkeypatch.setattr(proc_probe, "creation_time", lambda pid: 111222.5)
+
+    sid = pty.start(["claude"], cwd=str(tmp_path))
+    child = pty._LIVE[sid]
+    # Identity is captured on the child …
+    assert child.crypt_token and len(child.crypt_token) == 32
+    assert child.pid == 4242
+    assert child.proc_create_time == 111222.5
+    # … and the SAME token was injected into the spawned child's environment.
+    assert child.spawn_env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] == child.crypt_token
+
+
+def test_pty_start_stub_without_pid_is_abstain_safe(tmp_path, monkeypatch):
+    """A child with no pid still gets a token, but proc_create_time stays None —
+    so classify ABSTAINs (never kills). This is the safe default for the stub."""
+    pty, _rnd, _reg, _ts, zh = _reload_identity_stack(tmp_path / "data", monkeypatch)
+    sid = pty.start(["claude"], cwd=str(tmp_path))
+    child = pty._LIVE[sid]
+    assert child.crypt_token                       # token always minted
+    assert getattr(child, "pid", None) is None     # stub has no OS pid
+    assert child.proc_create_time is None
+    rec = {"session_id": sid, "status": _reg_status_running(),
+           "pid": None, "proc_create_time": child.proc_create_time,
+           "crypt_token": child.crypt_token}
+    assert zh.classify(rec, {sid}, probe=FakeProbe()) == "abstain"
+
+
+def _reg_status_running():
+    import session_registry
+    return session_registry.STATUS_RUNNING
+
+
+def test_start_session_persists_identity_and_classify_is_non_abstain(tmp_path, monkeypatch):
+    """End-to-end glue: start_session → register_session persists the spawn
+    identity, and zombie_hunter.classify on that record is NON-ABSTAIN
+    (ALIVE when attached, KILL when orphaned)."""
+    pty, rnd, reg, ts, zh = _reload_identity_stack(tmp_path / "data", monkeypatch)
+    import proc_probe
+
+    # Fake pid-bearing backend + deterministic create-time (no real spawn).
+    class _PidStubBackend:
+        name = "pidstub"
+
+        def start(self, cmd, cwd=None, env=None):
+            child = pty._StubChild(cmd, cwd=cwd, env=env)
+            child.pid = 5150
+            child.spawn_env = env
+            return child
+
+    monkeypatch.setattr(pty, "select_backend", lambda: _PidStubBackend())
+    monkeypatch.setattr(proc_probe, "creation_time", lambda pid: 777000.0)
+
+    # Fake the worktree so the test needs no git (identity capture is the SUT).
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    monkeypatch.setattr(ts._wt, "create_worktree",
+                        lambda project_id, sid: {"ok": True, "path": str(wt), "branch": "b"})
+    monkeypatch.setattr(ts._wt, "remove_worktree", lambda *a, **k: None)
+
+    proj = rnd.add_project("Temp", str(tmp_path / "repo"), scaffold=False)
+    record = ts.start_session(proj["id"], "plan", backend="claude")
+    sid = record["session_id"]
+
+    # The PERSISTED registry record now carries the full identity triple.
+    stored = reg.get_session(sid)
+    assert stored["crypt_token"] and len(stored["crypt_token"]) == 32
+    assert stored["pid"] == 5150
+    assert stored["proc_create_time"] == 777000.0
+
+    # classify is no longer forced to ABSTAIN: attached -> alive, orphaned -> kill.
+    probe = FakeProbe({5150: 777000.0})
+    assert zh.classify(stored, {sid}, probe=probe) == "alive"
+    assert zh.classify(stored, set(), probe=probe) == "kill"

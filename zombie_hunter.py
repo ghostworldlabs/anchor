@@ -223,6 +223,13 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
 
     By default, starting is enabled (runs in dry-run mode, apply=False, unless
     ANCHOR_ZOMBIE_HUNTER == "1").
+
+    When enabled, start exactly ONE daemon thread (a module global guards
+    against a second concurrent daemon; a second call is a no-op returning the
+    existing thread). The loop calls ``sweep(live_ids_provider(), apply=...)`` every
+    ``interval_sec`` seconds, swallowing+logging any exception so the loop never
+    dies. ``live_ids_provider`` is a zero-arg callable returning the set of
+    currently-attached session ids.
     """
     global _hunter_thread, _stop_event
 
