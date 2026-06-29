@@ -884,10 +884,10 @@ def cancel_gandalf_run(project_id) -> bool:
                 target_run_id = run_id
                 break
     if target_run_id:
-        # Cancel the run (which tree-kills via job_runner.cancel and proc.kill)
-        cancelled = cancel_run(target_run_id)
-        # Clear the in-flight entry
-        with _ACTIVE_RUNS_LOCK:
-            _ACTIVE_RUNS.pop(target_run_id, None)
-        return cancelled
+        # Flip the cancelled flag + tree-kill (Stage-A job / Stage-B proc). Do NOT
+        # pop _ACTIVE_RUNS here: the run_gandalf worker still reads the cancelled
+        # flag to bail out, and its finally is what pops the entry and finalizes the
+        # session registry. Popping early KeyErrors that finally (stuck "running")
+        # and races the worker's cancel check (job runs to completion).
+        return cancel_run(target_run_id)
     return False
