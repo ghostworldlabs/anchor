@@ -1058,6 +1058,20 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
     Returns ``True`` if a run was scheduled, ``False`` if suppressed (gate off, or
     already in-flight).
     """
+    # The dashboard pseudo-project's folder_path resolves to the whole dev tree
+    # (data_dir().parent = C:\dev), an incoherent heterogeneous scope that makes
+    # Gandalf emit a generic, uninformative verdict (and blow past the frontier
+    # cap). Scope the dashboard run to the real dashboard inbox — where global
+    # uploads actually land (ANCHOR_DIR/dev) — so the report is about real
+    # dashboard content. Contained to the Gandalf trigger; the registry
+    # folder_path other code reads is left untouched.
+    if project_id == "__dashboard__":
+        _inbox = ANCHOR_DIR / "dev"
+        try:
+            _inbox.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        folder_path = str(_inbox)
     if first_scan and not _PROACTIVE_SUMMARY_ENABLED:
         return False
     # In-flight guard: at most one scheduled-but-unfinished run per project.
@@ -7311,6 +7325,12 @@ async function repopulate() {
     // v9 Wave 1: a TRUE-DELETED session is GONE (registry record removed); never
     // re-add it even if an in-flight fetch raced the delete and still saw it.
     if (_DELETED[s.session_id]) continue;
+    // Phantom-tile fix (belt-and-braces; server already filters these): a Gandalf
+    // run (lane 'gandalf') and the Zombie-Hunter terminal (lane 'zombie'; legacy
+    // records lane 'general' + label 'zombie-hunter') are NOT cockpit terminals —
+    // never paint a tile, live OR greyed-finished. Real general-tab terminals
+    // (lane 'general', no zombie-hunter label) are unaffected.
+    if (s.lane === 'gandalf' || s.lane === 'zombie' || s.label === 'zombie-hunter') continue;
     var lane = s.lane || 'session';
     if (_isTerminalStatus(s.status)) {
       // v6 Wave 4: a TERMINAL session (a deliberate hard-kill marks the registry
@@ -13303,6 +13323,13 @@ function addTaskDomain(domain) {{
 </html>'''
 
 
+# Timestamp captured at module load = THIS server process's start. orphan_check
+# only banners on orphans whose session record was created at/after this, so a
+# restart's leftover prior-instance sessions never trigger a false alert. Safe
+# default semantics: any record predating this (or with no timestamp) is excluded.
+_SERVER_BOOT_TS = time.time()
+
+
 # ── Orphan-swarm alert banner (dashboard) ───────────────────────────────
 # Polls /api/rnd/orphan_check; when a NEW orphan session appears (one we have
 # not alerted on before) it shows a dismissible, click-through banner that opens
@@ -14605,7 +14632,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             verdict = zombie_hunter.classify(rec, live_ids)
                         except Exception:
                             verdict = "kill" if (sid and sid not in live_ids) else "alive"
-                        if verdict == "kill" and sid:
+                        # Only alert on orphans born DURING THIS server's life.
+                        # After a restart, prior-instance 'running' records whose
+                        # backend survived classify as 'kill' against an empty
+                        # live set — those are not a fresh runaway swarm, so the
+                        # startup banner must not fire for them (the zombie report
+                        # still lists any true survivor). _SERVER_BOOT_TS defaults
+                        # to 0.0, so a record with no timestamp never spuriously
+                        # alerts.
+                        if (verdict == "kill" and sid
+                                and float(rec.get("created_at") or 0) >= _SERVER_BOOT_TS):
                             orphans.append(sid)
                 except Exception:
                     pass
@@ -15388,6 +15424,17 @@ function startZombieTerminal(btn) {
                     # second line). Nothing else consumes this projection for
                     # grass-dev sessions (the chain breadcrumb uses chain_members).
                     if _eh.is_grass_dev_label(r.get("label")):
+                        continue
+                    # Phantom-tile fix: a Gandalf run registers a lane='gandalf'
+                    # status/cancel record, and the Zombie-Hunter terminal runs
+                    # under lane='zombie' (legacy records: lane='general',
+                    # label='zombie-hunter'). NONE of these are cockpit terminals
+                    # — exclude them so they never paint a workstation tile. The
+                    # label clause clears ALREADY-PERSISTED zombie records that
+                    # still carry lane='general'. Real general-tab terminals
+                    # (lane='general', no zombie-hunter label) are unaffected.
+                    if (r.get("lane") in ("gandalf", "zombie")
+                            or r.get("label") == "zombie-hunter"):
                         continue
                     safe.append({
                         "session_id": r.get("session_id"),
@@ -16488,7 +16535,7 @@ function startZombieTerminal(btn) {
             try:
                 rec = _termsess.start_session(
                     project_id="__dashboard__",
-                    lane="general",
+                    lane="zombie",
                     backend=backend,
                     label="zombie-hunter",
                     seed_context=briefing
@@ -17877,6 +17924,22 @@ def main():
         worktrees.reap_orphans(set(pty_manager._LIVE.keys()))
     except Exception as e:
         _logger.error(f"worktrees.reap_orphans failed: {e}")
+
+    try:
+        # Purge leaked synthetic health-check probe projects. The daily
+        # healthcheck task creates "__healthcheck__ rnd probe vN" projects and
+        # tears them down in a finally, but a hard-kill (e.g. its 10-min Task
+        # Scheduler limit) skips teardown, leaving them as bogus R&D dashboard
+        # project tiles. Remove any such record at boot so they never accumulate.
+        _purged = 0
+        for _p in _rnd.list_projects():
+            if str(_p.get("name", "")).startswith("__healthcheck__"):
+                if _rnd.remove_project(_p.get("id", "")):
+                    _purged += 1
+        if _purged:
+            _logger.info(f"purged {_purged} leaked __healthcheck__ probe project(s)")
+    except Exception as e:
+        _logger.error(f"healthcheck-probe purge failed: {e}")
 
     try:
         if "PYTEST_CURRENT_TEST" not in os.environ and not _zombie_hunter_started:

@@ -1228,8 +1228,15 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     with _paths.WRITE_LOCK:
         # 0) Global spawn cap.
         import pty_manager
-        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 5))
-        total_live = len(_LIVE) + len(pty_manager._LIVE)
+        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 16))
+        # Count only GENUINELY-LIVE entries. Finished jobs linger in _LIVE (only
+        # cleared on a test reset) and dead PTY children linger in pty_manager
+        # _LIVE, so a raw len() count permanently locks out new spawns after a
+        # few cumulative runs until a restart. _holder_is_active is already used
+        # under this same WRITE_LOCK by _gc_lane_slot, so it is safe here.
+        live_jobs = sum(1 for jid in list(_LIVE.keys()) if _holder_is_active(jid))
+        live_ptys = sum(1 for c in pty_manager._LIVE.values() if c.is_alive())
+        total_live = live_jobs + live_ptys
         if total_live >= cap:
             raise LaneBusyError("spawn-cap-reached", message=f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
 

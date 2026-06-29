@@ -632,8 +632,17 @@ def start(cmd, cwd=None, env=None):
     """
     import job_runner
     import os
-    cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 5))
-    total_live = len(_LIVE) + len(job_runner._LIVE)
+    cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 16))
+    # Count only GENUINELY-LIVE entries. Dead PTY children and completed
+    # job_runner jobs linger in their _LIVE tables (pty entries are removed only
+    # on kill(); job entries only on a test reset), so a raw len() count
+    # permanently locks out EVERY new session after a handful of cumulative
+    # runs — until a process restart. Filtering to live means finished work
+    # frees budget immediately.
+    live_ptys = sum(1 for c in _LIVE.values() if c.is_alive())
+    live_jobs = sum(1 for jid in list(job_runner._LIVE.keys())
+                    if job_runner._holder_is_active(jid))
+    total_live = live_ptys + live_jobs
     if total_live >= cap:
         raise SpawnCapReached(f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
 
