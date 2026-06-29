@@ -3324,10 +3324,12 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         return (
             "<div class='panel gandalf-panel' id='gandalfPanel'>"
             "<div class='ptitle gandalf-head'>"
+            "<span class='gpanel-tog' id='gandalfPanelTog' title='Collapse / expand Gandalf panel' onclick='toggleGandalfPanel(this)'>&#9662;</span>"
             f"{icon}<span class='gt'>Gandalf</span>"
             "<button class='btn sm gandalf-run gandalf-rerun' "
             f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
-            f"{body}</div>")
+            f"<div class='gandalf-panel-body' id='gandalfPanelBody'>{body}</div>"
+            "</div>")
 
     rows = []
     for r in runs:
@@ -3367,8 +3369,12 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         # none → NO dead links, per the mockup).
         exec_attr = html_lib.escape(exec_rel, quote=True)
         links = ""
+        link_parts = []
+        if ok and exec_rel:
+            link_parts.append(
+                f"<span class='genlarge' onclick=\"enlargeGandalfRun(event, this)\" style='cursor:pointer;color:var(--accent);margin-right:12px;font-size:11px'>&#10530; Enlarge</span>"
+            )
         if ok and (report_rel or adv_rel):
-            link_parts = []
             if report_rel:
                 # v13 W1: &render=1 → the route serves the rendered Reader page;
                 # the named window keeps every report open in ONE tab.
@@ -3383,6 +3389,7 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
                 link_parts.append(
                     f"<a href='{ahref}' target='anchor_report_window' "
                     "rel='noopener'>{ } raw JSON</a>")
+        if link_parts:
             links = "<div class='glinks'>" + "".join(link_parts) + "</div>"
 
         # The expandable body: only OK runs with an exec-summary carry one (fetched
@@ -3433,6 +3440,7 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
     return (
         "<div class='panel gandalf-panel' id='gandalfPanel'>"
         "<div class='ptitle gandalf-head'>"
+        "<span class='gpanel-tog' id='gandalfPanelTog' title='Collapse / expand Gandalf panel' onclick='toggleGandalfPanel(this)'>&#9662;</span>"
         "<span class='gmini-tog' id='gandalfRunsTog' title='Collapse / expand the "
         "run list' onclick='toggleGandalfRuns(this)'>&#9656;</span>"
         f"{icon}<span class='gt'>Gandalf</span>"
@@ -3440,7 +3448,9 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         f"{clear_failed_btn}"
         "<button class='btn sm gandalf-run gandalf-rerun' "
         f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
+        f"<div class='gandalf-panel-body' id='gandalfPanelBody'>"
         f"<div class='gruns collapsed' id='gandalfRuns'>{''.join(rows)}</div>"
+        "</div>"
         "</div>")
 
 
@@ -3522,10 +3532,14 @@ def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
             "<div class='idea-empty'>No deliverables pinned yet — a Foreman "
             "build pins one on GREEN.</div>")
     return (
-        "<div class='panel'>"
-        f"<div class='ptitle'>&#128230; Deliverables "
-        f"<span class='cnt'>{len(pinned)}</span></div>"
-        f"{''.join(rows)}"
+        "<div class='panel deliverables-panel'>"
+        "<details open class='deliv-details'>"
+        f"<summary class='ptitle' style='cursor:pointer; outline:none'>"
+        f"<span class='disc-caret' style='font-size:11px; transition:transform 0.12s; display:inline-block; margin-right:4px'>&#9662;</span>"
+        f"&#128230; Deliverables <span class='cnt'>{len(pinned)}</span>"
+        f"</summary>"
+        f"<div class='deliv-body' style='margin-top:8px'>{''.join(rows)}</div>"
+        "</details>"
         "</div>"
     )
 
@@ -3601,23 +3615,41 @@ def _should_ignore_file(rel_path: Path, patterns: list) -> bool:
 def _render_layoutd_files_panel(folder_path, project_id) -> str:
     """Render the Layout-D right-column Project Files panel (v13 Wave 3)."""
     pid_attr = html_lib.escape(project_id, quote=True)
+    try:
+        project_root = Path(folder_path).resolve()
+        patterns = _load_gitignore(project_root)
+        count = 0
+        for entry in project_root.iterdir():
+            try:
+                resolved_entry = entry.resolve()
+                resolved_entry.relative_to(project_root)
+                rel_entry = entry.relative_to(project_root)
+                if not _should_ignore_file(rel_entry, patterns):
+                    count += 1
+            except (ValueError, OSError):
+                continue
+    except Exception:
+        count = 0
+
     return (
-        "<div class='panel'>"
-        "<div class='ptitle'>"
-        "&#128194; Files "
+        "<div class='panel files-panel'>"
+        "<details class='files-details' id='projectFilesDetails' ontoggle='onProjectFilesToggle(this)'>"
+        "<summary class='ptitle' style='cursor:pointer; outline:none'>"
+        "<span class='disc-caret' style='font-size:11px; transition:transform 0.12s; display:inline-block; margin-right:4px'>&#9656;</span>"
+        f"&#128194; Imported files ({count}) "
         f"<span class='path' id='projectFilesPath' style='font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace;margin-left:6px'>/</span>"
-        "</div>"
-        f"<div class='files-list' id='projectFilesList' style='max-height:250px;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:6px'>"
+        "</summary>"
+        f"<div class='files-list' id='projectFilesList' style='max-height:250px;overflow-y:auto;background:rgba(0,0,0,0.15);border-radius:6px;margin-top:8px'>"
         "<div class='idea-empty'>Loading files...</div>"
         "</div>"
-        f"<div class='files-preview' id='projectFilesPreviewContainer' style='display:none'>"
+        f"<div class='files-preview' id='projectFilesPreviewContainer' style='display:none;margin-top:8px'>"
         "<div class='files-preview-header' style='display:flex;align-items:center'>"
         "<span class='files-preview-title' id='projectFilesPreviewTitle' style='font-size:12.5px;font-weight:700;color:var(--accent)'>Preview</span>"
         "<button class='files-preview-close' onclick='closeProjectFilesPreview()' style='margin-left:auto;background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px'>&times;</button>"
         "</div>"
         "<pre class='files-preview-body' id='projectFilesPreviewCode' style='margin-top:6px;padding:8px;background:var(--surface2);border-radius:4px;overflow-x:auto;max-height:200px;font-size:11px;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap'></pre>"
         "</div>"
-        f"<script>window.addEventListener('DOMContentLoaded', function() {{ loadProjectFiles('{pid_attr}', ''); }});</script>"
+        "</details>"
         "</div>"
     )
 
@@ -4160,12 +4192,22 @@ def render_project_window_html(project_id: str) -> str:
     # replacement keeps a project name containing "</script>" from breaking out.
     _upload_name_js = json.dumps(entry.get("name", "")).replace("</", "<\\/")
     upload_btn = (
-        f"<button type='button' class='rnd-mini' onclick=\"document.getElementById('{files_id}').click()\" title='Upload files (ctrl+click to multi-select)'>&#8673; Files</button>"
+        "<div class='upload-container'>"
+        f"<div class='upload-dropzone' ondragover='handleUploadDragOver(event)' ondragleave='handleUploadDragLeave(event)' ondrop=\"handleUploadDrop(event, '{pid_attr}')\" title='Drag files or a folder here to upload'>"
+        f"<span>&#8681; Drop files &amp; folders here to upload (any mix)</span>"
+        "</div>"
+        "<div class='upload-browse-wrap'>"
+        f"<button type='button' class='btn-browse' onclick=\"toggleBrowseMenu(event, '{pid_attr}')\">Browse...</button>"
+        f"<div class='browse-menu' id='browseMenu_{pid_attr}' style='display:none'>"
+        f"<div onclick=\"document.getElementById('{files_id}').click()\">Browse files</div>"
+        f"<div onclick=\"document.getElementById('{folder_id}').click()\">Browse folder</div>"
+        "</div>"
         f"<input type='file' id='{files_id}' style='display:none' multiple onchange=\"handleGlobalUpload('{files_id}', '{pid_attr}')\" />"
-        f"<button type='button' class='rnd-mini' onclick=\"document.getElementById('{folder_id}').click()\" title='Upload a folder (recursive)'>&#128193; Folder</button>"
         f"<input type='file' id='{folder_id}' style='display:none' webkitdirectory onchange=\"handleGlobalUpload('{folder_id}', '{pid_attr}')\" />"
-        f"<span class='rnd-mini' style='cursor:default; border-style:dashed' ondragover='handleUploadDragOver(event)' ondragleave='handleUploadDragLeave(event)' ondrop=\"handleUploadDrop(event, '{pid_attr}')\" title='Drag files or a folder here'>&#8615; Drop</span>"
-        f"<script>window._anchorUploadName = {_upload_name_js};</script>")
+        "</div>"
+        f"<script>window._anchorUploadName = {_upload_name_js};</script>"
+        "</div>"
+    )
 
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
@@ -4245,6 +4287,35 @@ def render_project_window_html(project_id: str) -> str:
         "*{box-sizing:border-box}"
         "body{font-family:system-ui,Segoe UI,sans-serif;background:var(--bg);"
         "color:var(--text);margin:0;padding:24px;line-height:1.5}"
+        ".gandalf-panel-body.collapsed{display:none}"
+        ".gpanel-tog{color:var(--text-dim);font-size:12px;cursor:pointer;flex:0 0 auto;transition:transform 0.15s ease;display:inline-block}"
+        ".gpanel-tog.collapsed-caret{transform:rotate(-90deg)}"
+        ".gandalf-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:10000;align-items:center;justify-content:center}"
+        ".gandalf-overlay.open{display:flex}"
+        ".gandalf-modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:80vw;height:80vh;max-width:80vw;max-height:80vh;display:flex;flex-direction:column;position:relative}"
+        ".gandalf-modal-close{position:absolute;top:12px;right:18px;font-size:24px;cursor:pointer;color:var(--text-dim);transition:color .1s}"
+        ".gandalf-modal-close:hover{color:var(--text)}"
+        ".gandalf-modal-body{flex:1;overflow-y:auto;font-size:14px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word;padding-right:8px}"
+        ".gandalf-panel .grun .glinks .genlarge{font-weight:600}"
+        ".gandalf-panel .grun .glinks .genlarge:hover{text-decoration:underline}"
+        "details.deliv-details summary::-webkit-details-marker{display:none}"
+        "details.deliv-details summary{list-style:none}"
+        "details.deliv-details[open] summary .disc-caret{transform:rotate(0deg)}"
+        "details.deliv-details:not([open]) summary .disc-caret{transform:rotate(-90deg)}"
+        "details.files-details summary::-webkit-details-marker{display:none}"
+        "details.files-details summary{list-style:none}"
+        "details.files-details[open] summary .disc-caret{transform:rotate(90deg)}"
+        "details.files-details:not([open]) summary .disc-caret{transform:rotate(0deg)}"
+        ".upload-container{display:inline-flex;flex-direction:column;gap:6px;border:1px dashed var(--border);border-radius:8px;padding:12px;background:rgba(0,0,0,0.1);max-width:320px;vertical-align:middle}"
+        ".upload-unified{vertical-align:middle}"
+        ".upload-dropzone{border:2px dashed rgba(108,156,252,0.3);border-radius:6px;padding:16px 12px;text-align:center;font-size:12px;color:var(--text-dim);cursor:default;transition:background-color 0.15s,border-color 0.15s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}"
+        ".upload-dropzone.dragover{background:rgba(108,156,252,0.15);border-color:var(--accent);color:var(--text)}"
+        ".upload-browse-wrap{position:relative;display:flex;justify-content:center;margin-top:4px}"
+        ".btn-browse{background:var(--surface2);color:var(--text);border:1px solid var(--border);padding:4px 12px;font-size:11.5px;border-radius:6px;cursor:pointer;transition:border-color 0.12s}"
+        ".btn-browse:hover{border-color:var(--accent)}"
+        ".browse-menu{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.5);z-index:1000;width:120px;text-align:left;overflow:hidden}"
+        ".browse-menu div{padding:8px 12px;font-size:11.5px;color:var(--text);cursor:pointer;transition:background 0.1s}"
+        ".browse-menu div:hover{background:rgba(108,156,252,0.15);color:var(--accent)}"
         "a{color:var(--accent)}"
         ".dash{background:var(--surface);border:1px solid var(--border);"
         "border-radius:12px;overflow:hidden;margin-top:12px}"
@@ -5341,6 +5412,7 @@ function setAnchorToken() {
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   repopulate();
+  try { initGandalfPanelCollapse(); } catch(e){}
   // v8 Wave 3: render the GitHub link / auto-push header controls from the
   // current remote_status (read-only GET; never a model call / network).
   try { renderRemoteControls(); } catch (e) {}
@@ -8649,9 +8721,18 @@ async function refreshBoard() {
     if (!r || !r.ok) return;
     var data = await r.json();
     if (!data || !data.ok || typeof data.html !== 'string') return;
+    var filesOpen = false;
+    var detailEl = document.getElementById('projectFilesDetails');
+    if (detailEl) {
+      filesOpen = detailEl.open;
+    }
     var board = document.getElementById('kanbanBoard');
     if (!board) return;                    // guard: container absent
     board.innerHTML = data.html;
+    var newDetailEl = document.getElementById('projectFilesDetails');
+    if (newDetailEl && filesOpen) {
+      newDetailEl.open = true;
+    }
     // v10 Wave 4 FIX 2/3: the swapped-in board re-emits "from grass" chip stubs;
     // resolve them (label/dead-state) against the loaded grass data. If grass
     // data isn't loaded yet, fetch it (which itself re-resolves on completion).
@@ -9509,6 +9590,26 @@ function _anchorUploadDest(projectId) {
 // (multi-file picker, folder picker, drag-drop) funnel through here.
 async function _anchorDoUpload(items, projectId) {
   if (!items || !items.length) return;
+
+  var folders = new Set();
+  var fileCount = 0;
+  for (var i = 0; i < items.length; i++) {
+    var p = items[i].path || "";
+    if (p.indexOf('/') !== -1) {
+      var parts = p.split('/');
+      parts.pop();
+      folders.add(parts.join('/'));
+    }
+    fileCount++;
+  }
+  var folderCount = folders.size;
+  var stagingMsg = fileCount + " file(s)" + (folderCount ? " across " + folderCount + " folder(s)" : "") + " ready";
+
+  var dz = document.querySelector('.upload-dropzone');
+  if (dz) {
+    dz.innerHTML = "&#9203; Staging: " + stagingMsg + "...";
+  }
+
   var filesPayload = [];
   for (var i = 0; i < items.length; i++) {
     var rel = String(items[i].path || items[i].file.name).replace(/^\/+/, '');
@@ -9517,6 +9618,7 @@ async function _anchorDoUpload(items, projectId) {
       filesPayload.push({ path: rel, content_b64: base64 });
     } catch (e) {
       alert("Failed to read file: " + rel);
+      if (dz) dz.innerHTML = "&#8681; Drop files &amp; folders here to upload (any mix)";
       return;
     }
   }
@@ -9536,6 +9638,9 @@ async function _anchorDoUpload(items, projectId) {
   } else {
     var data = await res.json();
     alert("Upload failed: " + (data.error || "Unknown error"));
+  }
+  if (dz) {
+    dz.innerHTML = "&#8681; Drop files &amp; folders here to upload (any mix)";
   }
 }
 
@@ -9590,18 +9695,18 @@ function handleUploadDragOver(ev) {
   ev.preventDefault();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '2px solid var(--accent)';
+  if (dz) dz.classList.add('dragover');
 }
 
 function handleUploadDragLeave(ev) {
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '';
+  if (dz) dz.classList.remove('dragover');
 }
 
 async function handleUploadDrop(ev, projectId) {
   ev.preventDefault();
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '';
+  if (dz) dz.classList.remove('dragover');
   var dt = ev.dataTransfer;
   if (!dt) return;
   // Collect entries synchronously BEFORE any await (the DataTransfer is cleared
@@ -9745,6 +9850,91 @@ function formatBytes(bytes) {
 function escapeJs(s) {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
 }
+
+// ── Gandalf output modal + panel toggle helpers ──
+function enlargeGandalfRun(ev, el) {
+  if (ev) { ev.stopPropagation(); if (ev.preventDefault) ev.preventDefault(); }
+  var grun = el.closest('.grun');
+  if (!grun) return;
+  var gexec = grun.querySelector('.gexec');
+  if (!gexec) return;
+  var contentHtml = gexec.innerHTML || '';
+  
+  var overlay = document.getElementById('gandalfEnlargeOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'gandalfEnlargeOverlay';
+    overlay.className = 'gandalf-overlay';
+    overlay.onclick = function(e) {
+      if (e.target === overlay) {
+        overlay.classList.remove('open');
+      }
+    };
+    document.body.appendChild(overlay);
+  }
+  
+  overlay.innerHTML = '<div class="gandalf-modal">' +
+    '<span class="gandalf-modal-close" onclick="closeGandalfEnlarge()">&times;</span>' +
+    '<div class="gandalf-modal-body">' + contentHtml + '</div>' +
+    '</div>';
+  overlay.classList.add('open');
+}
+
+function closeGandalfEnlarge() {
+  var overlay = document.getElementById('gandalfEnlargeOverlay');
+  if (overlay) {
+    overlay.classList.remove('open');
+  }
+}
+
+function toggleGandalfPanel(el) {
+  var body = document.getElementById('gandalfPanelBody');
+  if (!body) return;
+  var collapsed = body.classList.toggle('collapsed');
+  if (el) {
+    if (collapsed) {
+      el.classList.add('collapsed-caret');
+    } else {
+      el.classList.remove('collapsed-caret');
+    }
+  }
+  try { localStorage.setItem('gandalfPanelCollapsed', collapsed ? 'true' : 'false'); } catch(e){}
+}
+
+function initGandalfPanelCollapse() {
+  try {
+    var isCollapsed = localStorage.getItem('gandalfPanelCollapsed') === 'true';
+    if (isCollapsed) {
+      var body = document.getElementById('gandalfPanelBody');
+      var tog = document.getElementById('gandalfPanelTog');
+      if (body) body.classList.add('collapsed');
+      if (tog) tog.classList.add('collapsed-caret');
+    }
+  } catch (e) {}
+}
+
+// ── Files panel toggle + browse helpers ──
+function onProjectFilesToggle(el) {
+  if (el && el.open) {
+    loadProjectFiles(PROJECT_ID, currentFilesPath);
+  }
+}
+
+function toggleBrowseMenu(ev, suffix) {
+  if (ev) ev.stopPropagation();
+  var menu = document.getElementById('browseMenu_' + suffix);
+  if (!menu) return;
+  var show = menu.style.display === 'none';
+  var all = document.querySelectorAll('.browse-menu');
+  for (var i = 0; i < all.length; i++) all[i].style.display = 'none';
+  if (show) {
+    menu.style.display = 'block';
+  }
+}
+document.addEventListener('click', function() {
+  var all = document.querySelectorAll('.browse-menu');
+  for (var i = 0; i < all.length; i++) all[i].style.display = 'none';
+});
 """
 
 
@@ -11512,12 +11702,18 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       </div>
       <div class="mh-spacer"></div>
       <!-- Wave 2: Global File Upload — multi-file + folder + drag-drop -->
-      <div style="display:inline-flex; align-items:center; gap:6px; margin-right:10px">
-        <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px" onclick="document.getElementById('global-upload-files').click()">&#8673; Choose files</button>
+      <div class="upload-unified" style="display:inline-flex; align-items:center; gap:8px; border:1px dashed var(--border); border-radius:6px; padding:4px 8px; background:rgba(0,0,0,0.15); margin-right:10px">
+        <div class="upload-dropzone" ondragover="handleUploadDragOver(event)" ondragleave="handleUploadDragLeave(event)" ondrop="handleUploadDrop(event, '__dashboard__')" style="font-size:11.5px; color:var(--text-dim); cursor:default; padding:2px 6px; border-radius:4px" title="Drag files or a folder here to upload">&#8681; Drop files &amp; folders here to upload (any mix)</div>
+        <div style="width:1px; height:16px; background:var(--border)"></div>
+        <div class="upload-browse-wrap" style="position:relative">
+          <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:2px 8px; font-size:11.5px; border-radius:4px" onclick="toggleBrowseMenu(event, 'dashboard')">Browse...</button>
+          <div class="browse-menu" id="browseMenu_dashboard" style="display:none; position:absolute; bottom:100%; right:0; margin-bottom:6px; background:var(--surface2); border:1px solid var(--border); border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.5); z-index:1000; width:120px; text-align:left">
+            <div onclick="document.getElementById('global-upload-files').click()" style="padding:6px 10px; font-size:11px; cursor:pointer">Browse files</div>
+            <div onclick="document.getElementById('global-upload-folder').click()" style="padding:6px 10px; font-size:11px; cursor:pointer; border-top:1px solid var(--border)">Browse folder</div>
+          </div>
+        </div>
         <input type="file" id="global-upload-files" style="display:none" multiple onchange="handleGlobalUpload('global-upload-files', '__dashboard__')" />
-        <button type="button" class="btn btn-sm" style="cursor:pointer; background:var(--surface2); color:var(--text); border:1px solid var(--border); padding:4px 10px; font-size:12px; border-radius:6px" onclick="document.getElementById('global-upload-folder').click()">&#128193; Choose folder</button>
         <input type="file" id="global-upload-folder" style="display:none" webkitdirectory onchange="handleGlobalUpload('global-upload-folder', '__dashboard__')" />
-        <div id="global-upload-drop" style="font-size:11px; color:var(--text-dim); border:1px dashed var(--border); border-radius:6px; padding:4px 10px; cursor:default" ondragover="handleUploadDragOver(event)" ondragleave="handleUploadDragLeave(event)" ondrop="handleUploadDrop(event, '__dashboard__')" title="Drag files or a folder here to upload">&#8615; Drop files / folder</div>
       </div>
       <button id="tokenBtn" onclick="if(setAnchorToken())location.reload();" title="Set or clear the Anchor access token" style="display:{auth_token_btn_display};margin-right:10px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">&#128273;</button>
       <div class="mh-pill">Powered by NextGen Nuclear <svg class="gwl-rad" width="12" height="12" viewBox="0 0 24 24" style="vertical-align:middle" role="img" aria-label="radiation"><circle cx="12" cy="12" r="2.6" fill="#22c55e"/><path fill="#22c55e" d="M13.6 14.77L17.5 21.53A11 11 0 0 1 6.5 21.53L10.4 14.77A3.2 3.2 0 0 0 13.6 14.77ZM8.8 12L1 12A11 11 0 0 1 6.5 2.47L10.4 9.23A3.2 3.2 0 0 0 8.8 12ZM13.6 9.23L17.5 2.47A11 11 0 0 1 23 12L15.2 12A3.2 3.2 0 0 0 13.6 9.23Z"/></svg></div>
@@ -12269,6 +12465,22 @@ function closeModal(id) {{
     document.getElementById(id).classList.remove('open');
 }}
 
+function toggleBrowseMenu(ev, suffix) {{
+  if (ev) ev.stopPropagation();
+  var menu = document.getElementById('browseMenu_' + suffix);
+  if (!menu) return;
+  var show = menu.style.display === 'none';
+  var all = document.querySelectorAll('.browse-menu');
+  for (var i = 0; i < all.length; i++) all[i].style.display = 'none';
+  if (show) {{
+    menu.style.display = 'block';
+  }}
+}}
+document.addEventListener('click', function() {{
+  var all = document.querySelectorAll('.browse-menu');
+  for (var i = 0; i < all.length; i++) all[i].style.display = 'none';
+}});
+
 function openEditTask(t) {{
     document.getElementById('editTaskOld').value = t.text;
     document.getElementById('editTaskText').value = t.text;
@@ -12751,7 +12963,7 @@ function _rndEnsureFolderIn(list, name) {{
     folder.innerHTML =
         '<div class="rnd-folder-head" role="button" tabindex="0" '
         + 'title="Collapse / expand folder">'
-        + '<span class="rnd-tw" aria-hidden="true">\\u25BE</span>'
+        + '<span class="rnd-tw" aria-hidden="true">\u25BE</span>'
         + '<span class="rnd-fname"></span>'
         + '<span class="rnd-fcount">(0)</span>'
         + '<span class="rnd-fsp"></span>'
@@ -12942,14 +13154,35 @@ function _anchorUploadDest(projectId) {{
 // (multi-file picker, folder picker, drag-drop) funnel through here.
 async function _anchorDoUpload(items, projectId) {{
   if (!items || !items.length) return;
+
+  var folders = new Set();
+  var fileCount = 0;
+  for (var i = 0; i < items.length; i++) {{
+    var p = items[i].path || "";
+    if (p.indexOf('/') !== -1) {{
+      var parts = p.split('/');
+      parts.pop();
+      folders.add(parts.join('/'));
+    }}
+    fileCount++;
+  }}
+  var folderCount = folders.size;
+  var stagingMsg = fileCount + " file(s)" + (folderCount ? " across " + folderCount + " folder(s)" : "") + " ready";
+
+  var dz = document.querySelector('.upload-dropzone');
+  if (dz) {{
+    dz.innerHTML = "&#9203; Staging: " + stagingMsg + "...";
+  }}
+
   var filesPayload = [];
   for (var i = 0; i < items.length; i++) {{
-    var rel = String(items[i].path || items[i].file.name).replace(/^\\/+/, '');
+    var rel = String(items[i].path || items[i].file.name).replace(/^\/+/, '');
     try {{
       var base64 = await _anchorReadB64(items[i].file);
       filesPayload.push({{ path: rel, content_b64: base64 }});
     }} catch (e) {{
       alert("Failed to read file: " + rel);
+      if (dz) dz.innerHTML = "&#8681; Drop files &amp; folders here to upload (any mix)";
       return;
     }}
   }}
@@ -12969,6 +13202,9 @@ async function _anchorDoUpload(items, projectId) {{
   }} else {{
     var data = await res.json();
     alert("Upload failed: " + (data.error || "Unknown error"));
+  }}
+  if (dz) {{
+    dz.innerHTML = "&#8681; Drop files &amp; folders here to upload (any mix)";
   }}
 }}
 
@@ -13023,18 +13259,18 @@ function handleUploadDragOver(ev) {{
   ev.preventDefault();
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '2px solid var(--accent)';
+  if (dz) dz.classList.add('dragover');
 }}
 
 function handleUploadDragLeave(ev) {{
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '';
+  if (dz) dz.classList.remove('dragover');
 }}
 
 async function handleUploadDrop(ev, projectId) {{
   ev.preventDefault();
   var dz = ev.currentTarget;
-  if (dz && dz.style) dz.style.outline = '';
+  if (dz) dz.classList.remove('dragover');
   var dt = ev.dataTransfer;
   if (!dt) return;
   // Collect entries synchronously BEFORE any await (the DataTransfer is cleared
