@@ -14441,6 +14441,157 @@ class AnchorHandler(BaseHTTPRequestHandler):
 
                     html += f"<pre>{html_lib.escape(cmd_output)}</pre>"
 
+                # ── Swarm & Owner View ────────────────────────────────────────
+                # NOTE: _sessreg / _rnd are the MODULE-LEVEL aliases (imported at top).
+                # Do NOT re-import them locally here — a local `import ... as _rnd`
+                # makes _rnd function-local for ALL of do_GET, breaking earlier routes
+                # in this method with UnboundLocalError.
+                try:
+                    live_ids = set(pty_manager.live_sessions())
+                except Exception:
+                    live_ids = set()
+
+                running_records = []
+                try:
+                    running_records = _sessreg.list_sessions(status="running")
+                except Exception:
+                    pass
+
+                # Group by OWNER (project title, or project_id, or "(unowned)")
+                groups = {}
+                for rec in running_records:
+                    proj_id = rec.get("project_id", "")
+                    if proj_id:
+                        proj = _rnd.get_project(proj_id)
+                        owner = proj.get("name") if (proj and proj.get("name")) else proj_id
+                    else:
+                        owner = "(unowned)"
+                    
+                    if owner not in groups:
+                        groups[owner] = []
+                    groups[owner].append(rec)
+
+                # Add new section Swarm & Owner View
+                html += "<h2>Swarm & Owner View</h2>"
+                html += "<style>"
+                html += ".btn-kill { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 8px; }"
+                html += ".btn-kill:hover { background: #991b1b; }"
+                html += ".btn-kill:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+                html += ".owner-heading { color: #f4f4f5; font-size: 16px; margin-top: 20px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #27272a; font-weight: bold; }"
+                html += "</style>"
+
+                if not running_records:
+                    html += "<p style='color: #a1a1aa; font-style: italic;'>No active swarms or sessions.</p>"
+                else:
+                    sorted_owners = sorted(groups.keys(), key=lambda o: (o == "(unowned)", o.lower()))
+                    for owner in sorted_owners:
+                        html += f"<div class='owner-heading'>Owner: {html_lib.escape(owner)}</div>"
+                        html += "<table>"
+                        html += "<thead><tr><th>Swarm/Lane</th><th>Session</th><th>PID</th><th>Backend</th><th>Status</th><th>State</th></tr></thead>"
+                        html += "<tbody>"
+                        for rec in groups[owner]:
+                            sid = rec.get("session_id", "")
+                            short_sid = sid[:8]
+                            lane = rec.get("lane", "")
+                            pid = rec.get("pid")
+                            pid_str = str(pid) if pid is not None else ""
+                            backend = rec.get("backend", "")
+                            status = rec.get("status", "")
+                            
+                            try:
+                                is_orphaned = (zombie_hunter.classify(rec, live_ids) == "kill")
+                            except Exception:
+                                is_orphaned = (sid not in live_ids)
+                                
+                            if is_orphaned:
+                                state_html = f"<span class='badge badge-danger'>Orphaned</span> <button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>"
+                            else:
+                                state_html = "<span class='badge badge-success'>Attached</span>"
+                                
+                            html += f"<tr id='row-{sid}'>"
+                            html += f"<td>{html_lib.escape(lane)}</td>"
+                            html += f"<td title='{html_lib.escape(sid)}'><code>{html_lib.escape(short_sid)}</code></td>"
+                            html += f"<td>{html_lib.escape(pid_str)}</td>"
+                            html += f"<td><code>{html_lib.escape(backend)}</code></td>"
+                            html += f"<td><span class='badge badge-success'>{html_lib.escape(status)}</span></td>"
+                            html += f"<td>{state_html}</td>"
+                            html += "</tr>"
+                        html += "</tbody>"
+                        html += "</table>"
+
+                html += "<script>"
+                html += """
+function getAnchorToken() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const tok = params.get('token');
+    if (tok) return tok;
+  } catch(e) {}
+  try {
+    return localStorage.getItem('anchor_token') || '';
+  } catch(e) {
+    return '';
+  }
+}
+function killSession(sessionId, btn) {
+  if (!confirm("Are you sure you want to kill session " + sessionId + "?")) {
+    return;
+  }
+  btn.disabled = true;
+  btn.innerText = "Killing...";
+  
+  const token = getAnchorToken();
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['X-Anchor-Token'] = token;
+  }
+  
+  const payload = {
+    job_id: sessionId
+  };
+  if (token) {
+    payload.token = token;
+  }
+  
+  fetch('/api/rnd/cancel_job', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(payload)
+  })
+  .then(response => {
+    if (response.ok) {
+      return response.json();
+    }
+    throw new Error("HTTP error " + response.status);
+  })
+  .then(data => {
+    if (data.ok) {
+      btn.innerText = "Killed";
+      btn.className = "badge badge-secondary";
+      btn.style.border = "none";
+      btn.disabled = true;
+      const row = document.getElementById("row-" + sessionId);
+      if (row) {
+        row.style.transition = "opacity 0.5s ease";
+        row.style.opacity = "0.3";
+      }
+    } else {
+      alert("Failed to kill session: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Kill";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Kill";
+  });
+}
+"""
+                html += "</script>"
+
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
