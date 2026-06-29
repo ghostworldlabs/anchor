@@ -14617,7 +14617,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 html += ".meta-label { font-weight: bold; color: #a1a1aa; }"
                 html += "</style></head><body>"
                 html += "<div class='container'>"
-                html += "<h1>&#129503; Zombie Hunter Radar</h1>"
+                html += "<h1><img src=\"/vendor/brand/zombie-hunter-radar.jpg\" style=\"width:32px;height:32px;border-radius:6px;vertical-align:middle;\" /> &#129503; Zombie Hunter Radar</h1>"
 
                 if not is_stale and report_data:
                     swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
@@ -14713,6 +14713,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 html += ".btn-kill { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 8px; }"
                 html += ".btn-kill:hover { background: #991b1b; }"
                 html += ".btn-kill:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+                html += ".btn-start { background: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s; }"
+                html += ".btn-start:hover { background: #1e40af; }"
+                html += ".btn-start:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
                 html += ".owner-heading { color: #f4f4f5; font-size: 16px; margin-top: 20px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #27272a; font-weight: bold; }"
                 html += "</style>"
 
@@ -14825,8 +14828,57 @@ function killSession(sessionId, btn) {
     btn.innerText = "Kill";
   });
 }
+function startZombieTerminal(btn) {
+  btn.disabled = true;
+  btn.innerText = "Starting terminal...";
+  
+  const token = getAnchorToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Anchor-Token'] = token;
+  
+  const payload = {};
+  if (token) payload.token = token;
+  
+  fetch('/api/rnd/zombie_terminal_start', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(payload)
+  })
+  .then(response => {
+    if (response.ok) return response.json();
+    throw new Error("HTTP error " + response.status);
+  })
+  .then(data => {
+    if (data.ok && data.session_id) {
+      const iframe = document.getElementById('terminal-iframe');
+      const placeholder = document.getElementById('terminal-placeholder');
+      const tokenQuery = token ? ('&token=' + encodeURIComponent(token)) : '';
+      iframe.src = '/zombie_terminal?session=' + encodeURIComponent(data.session_id) + tokenQuery;
+      placeholder.style.display = 'none';
+      iframe.style.display = 'block';
+    } else {
+      alert("Failed to start terminal: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Start Terminal";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Start Terminal";
+  });
+}
 """
                 html += "</script>"
+
+                html += "<h2>Zombie-Hunter Terminal</h2>"
+                html += "<div id='terminal-container' style='background:#0c0e14; border:1px solid #27272a; border-radius:8px; padding:16px; margin-top:12px; margin-bottom:24px; min-height:100px; display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
+                html += "  <div id='terminal-placeholder' style='text-align:center;'>"
+                html += "    <p style='color:#a1a1aa; font-size:14px; margin-bottom:12px;'>Start an interactive, seeded terminal session with an agent to investigate and manage zombie processes.</p>"
+                html += "    <button class='btn-start' onclick='startZombieTerminal(this)'>Start Terminal</button>"
+                html += "  </div>"
+                html += "  <iframe id='terminal-iframe' style='width:100%; height:450px; border:none; display:none; border-radius:6px;'></iframe>"
+                html += "</div>"
 
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
@@ -14974,6 +15026,134 @@ function killSession(sessionId, btn) {
                             self._send_bytes(data, ctype)
                     else:
                         self._send_bytes(data, ctype)
+            elif self.path.startswith("/zombie_terminal"):
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                q = parse_qs(urlparse(self.path).query)
+                sid = (q.get("session", [""])[0] or "").strip()
+                token = (q.get("token", [""])[0] or "").strip()
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                
+                html = """<!DOCTYPE html>
+<html>
+<head>
+  <title>Zombie Hunter Terminal</title>
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+  <script src="/vendor/xterm/xterm.js"></script>
+  <style>
+    body {
+      background: #0c0e14;
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #terminal {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script>
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session');
+      const token = params.get('token') || '';
+      
+      if (!sessionId) {
+        document.getElementById('terminal').textContent = 'Error: session parameter required';
+        return;
+      }
+      
+      const term = new Terminal({
+        convertEol: true,
+        fontSize: 12,
+        theme: { background: '#0c0e14' },
+        scrollback: 5000
+      });
+      term.open(document.getElementById('terminal'));
+      
+      function fitTerminal() {
+        const cols = Math.floor(window.innerWidth / 7.2) || 80;
+        const rows = Math.floor(window.innerHeight / 17) || 24;
+        term.resize(cols, rows);
+        
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['X-Anchor-Token'] = token;
+        
+        const body = { session: sessionId, cols: cols, rows: rows };
+        if (token) body.token = token;
+        
+        fetch('/api/rnd/term_resize', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body)
+        }).catch(err => console.error('resize error:', err));
+      }
+      
+      window.addEventListener('resize', fitTerminal);
+      setTimeout(fitTerminal, 100);
+      
+      term.onData(function (d) {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['X-Anchor-Token'] = token;
+        
+        const body = { session: sessionId, data: d };
+        if (token) body.token = token;
+        
+        fetch('/api/rnd/term_input2', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body)
+        }).catch(err => console.error('input error:', err));
+      });
+      
+      const tq = token ? ('&token=' + encodeURIComponent(token)) : '';
+      const wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+      const wsUrl = wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
+      
+      let sseStarted = false;
+      function startSSE() {
+        if (sseStarted) return;
+        sseStarted = true;
+        const sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
+        const es = new EventSource(sseUrl);
+        es.addEventListener('output', function (ev) {
+          try {
+            const p = JSON.parse(ev.data);
+            if (p.text) term.write(p.text);
+          } catch (e) {}
+        });
+        es.addEventListener('done', function () {
+          try { es.close(); } catch (e) {}
+        });
+      }
+      
+      try {
+        const ws = new WebSocket(wsUrl);
+        ws.onmessage = function (ev) { term.write(ev.data); };
+        ws.onclose = function () {
+          if (!sseStarted) startSSE();
+        };
+        ws.onerror = function () {
+          try { ws.close(); } catch (e) {}
+          startSSE();
+        };
+      } catch (e) {
+        startSSE();
+      }
+    })();
+  </script>
+</body>
+</html>"""
+                self.wfile.write(html.encode("utf-8"))
             elif self.path.startswith("/project/"):
                 # Per-project window (Wave 3 basic view + 4-state status line).
                 # Opening a brownfield project DISCOVERS + ADOPTS its on-disk
@@ -16029,6 +16209,129 @@ function killSession(sessionId, btn) {
                         if handoff_info is not None:
                             resp["handoff"] = handoff_info
                         self._send_json(resp)
+
+        elif self.path == "/api/rnd/zombie_terminal_start":
+            import shutil
+            import zombie_hunter
+            import pty_manager
+
+            backend = "claude"
+            if not shutil.which("claude"):
+                backend = "gemini"
+
+            try:
+                live_ids = set(pty_manager.live_sessions())
+            except Exception:
+                live_ids = set()
+
+            report_path = zombie_hunter._last_report_path()
+            report_data = None
+            if report_path.exists():
+                try:
+                    report_data = json.loads(report_path.read_text("utf-8"))
+                except Exception:
+                    pass
+
+            if not report_data:
+                try:
+                    report_data = zombie_hunter.sweep(live_session_ids=list(live_ids), apply=False)
+                except Exception:
+                    report_data = {}
+
+            running_records = []
+            try:
+                running_records = _sessreg.list_sessions(status="running")
+            except Exception:
+                pass
+
+            session_briefs = []
+            orphaned_ids = []
+            for rec in running_records:
+                sid = rec.get("session_id", "")
+                lane_name = rec.get("lane", "")
+                pid = rec.get("pid")
+                rec_backend = rec.get("backend", "")
+                proj_id = rec.get("project_id", "")
+                
+                owner = "(unowned)"
+                if proj_id:
+                    proj = _rnd.get_project(proj_id)
+                    if proj and proj.get("name"):
+                        owner = proj["name"]
+                    else:
+                        owner = proj_id
+
+                try:
+                    classification = zombie_hunter.classify(rec, live_ids)
+                except Exception:
+                    classification = "kill" if sid not in live_ids else "alive"
+                    
+                if classification == "kill":
+                    orphaned_ids.append(sid)
+                    cls_str = "ORPHANED (Pending Kill)"
+                elif classification == "alive":
+                    cls_str = "ALIVE (Attached)"
+                else:
+                    cls_str = classification.upper()
+                    
+                session_briefs.append(
+                    f"- Session ID: {sid}\n  Lane: {lane_name}\n  PID: {pid}\n  Backend: {rec_backend}\n  Owner Project: {owner}\n  Classification: {cls_str}"
+                )
+
+            briefing = "# ZOMBIE-HUNTER LIVE BRIEFING\n\n"
+            briefing += "You are the user's zombie-hunting assistant inside Anchor.\n"
+            briefing += "Your role is to help the user investigate the current swarm/owner/orphan state of the terminal sessions, "
+            briefing += "and when the user confirms, cancel (kill) orphaned sessions.\n\n"
+
+            if orphaned_ids:
+                briefing += "## Orphaned Sessions (Pending Kill)\n"
+                briefing += "These are orphaned sessions that can be killed:\n"
+                for oid in orphaned_ids:
+                    briefing += f"- `{oid}`\n"
+                briefing += "\n"
+            else:
+                briefing += "No orphaned sessions detected.\n\n"
+
+            briefing += "## Sweep Report Summary\n"
+            if report_data:
+                swept_time_str = "unknown"
+                try:
+                    from datetime import datetime
+                    swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    pass
+                briefing += f"- Swept At: {swept_time_str}\n"
+                briefing += f"- Killed count (orphaned): {len(report_data.get('killed', []))}\n"
+                briefing += f"- Alive count (attached): {len(report_data.get('alive', []))}\n"
+                briefing += f"- Abstained count (manual): {len(report_data.get('abstained', []))}\n"
+                briefing += f"- Reaped (dead): {len(report_data.get('reaped_dead', []))}\n"
+                briefing += f"- Reaped (recycled): {len(report_data.get('reaped_recycled', []))}\n"
+            else:
+                briefing += "No sweep report data available.\n"
+            briefing += "\n"
+
+            briefing += "## Running Sessions Details\n"
+            if session_briefs:
+                briefing += "\n".join(session_briefs)
+            else:
+                briefing += "No running sessions found in the registry."
+
+            try:
+                rec = _termsess.start_session(
+                    project_id="__dashboard__",
+                    lane="general",
+                    backend=backend,
+                    label="zombie-hunter",
+                    seed_context=briefing
+                )
+            except _termsess.TerminalSessionError as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 400)
+            else:
+                self._send_json({
+                    "ok": True,
+                    "session_id": rec.get("session_id"),
+                    "backend": rec.get("backend")
+                })
 
         elif self.path == "/api/rnd/term_kill":
             session = (body.get("session", "") or "").strip()
