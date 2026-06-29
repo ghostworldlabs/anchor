@@ -56,6 +56,74 @@ LAST_REPORT_NAME = "zombie_hunter_last.json"
 HUNTER_ENV = "ANCHOR_ZOMBIE_HUNTER"
 
 
+# ── Orphan PAUSE bookkeeping ────────────────────────────────────────────────
+# An orphaned (detached) session keeps burning CPU until the user decides to
+# kill it. We FREEZE such a process while it waits (proc_probe.suspend) so it
+# can't do further work, and track which PIDs we've frozen so we never
+# double-suspend (NtSuspendProcess is counted — every suspend needs a matching
+# resume). PAUSE is reversible: :func:`resume_pid` un-freezes; a kill calls
+# :func:`forget_pid`. In-memory only (a server restart leaves an orphan frozen,
+# which is acceptable — it was already slated to die).
+_PAUSED_PIDS: set = set()
+_PAUSE_LOCK = threading.Lock()
+
+
+def pause_orphan(pid) -> bool:
+    """Freeze an orphaned process ONCE. No-op if already frozen. Best-effort.
+
+    HARD GUARD: never freezes anything under pytest (``PYTEST_CURRENT_TEST``) —
+    tests render the report with synthetic PIDs against the real probe, and a
+    synthetic PID could collide with a real process. Production only.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    with _PAUSE_LOCK:
+        if pid in _PAUSED_PIDS:
+            return True
+        if proc_probe.suspend(pid):
+            _PAUSED_PIDS.add(pid)
+            return True
+    return False
+
+
+def resume_pid(pid) -> bool:
+    """Un-freeze a paused process and stop tracking it. Best-effort."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    ok = proc_probe.resume(pid)
+    with _PAUSE_LOCK:
+        _PAUSED_PIDS.discard(pid)
+    return ok
+
+
+def is_paused(pid) -> bool:
+    """Whether we have this PID frozen."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    with _PAUSE_LOCK:
+        return pid in _PAUSED_PIDS
+
+
+def forget_pid(pid) -> None:
+    """Drop a PID from the paused set (called after a kill — no resume needed)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return
+    with _PAUSE_LOCK:
+        _PAUSED_PIDS.discard(pid)
+
+
 def classify(record, live_session_ids, probe=proc_probe, tol=2.0) -> str:
     """Pure verdict for one session ``record``. Returns a verdict string.
 

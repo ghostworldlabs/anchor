@@ -14713,6 +14713,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 html += ".btn-kill { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 8px; }"
                 html += ".btn-kill:hover { background: #991b1b; }"
                 html += ".btn-kill:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+                html += ".btn-resume { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 6px; }"
+                html += ".btn-resume:hover { background: #065f46; }"
+                html += ".btn-resume:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
                 html += ".btn-start { background: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s; }"
                 html += ".btn-start:hover { background: #1e40af; }"
                 html += ".btn-start:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
@@ -14743,7 +14746,20 @@ class AnchorHandler(BaseHTTPRequestHandler):
                                 is_orphaned = (sid not in live_ids)
                                 
                             if is_orphaned:
-                                state_html = f"<span class='badge badge-danger'>Orphaned</span> <button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>"
+                                # FREEZE the orphan while it waits to be killed so
+                                # it stops burning CPU (pytest-guarded inside).
+                                paused = False
+                                try:
+                                    paused = zombie_hunter.pause_orphan(pid)
+                                except Exception:
+                                    paused = False
+                                pause_badge = ("<span class='badge badge-warning' title='Process frozen while it waits to be killed'>Paused</span> "
+                                               if paused else "")
+                                resume_btn = (f" <button class='btn-resume' onclick=\"resumeSession('{sid}', this)\">Resume</button>"
+                                              if paused else "")
+                                state_html = (
+                                    f"<span class='badge badge-danger'>Orphaned</span> {pause_badge}"
+                                    f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>{resume_btn}")
                             else:
                                 state_html = "<span class='badge badge-success'>Attached</span>"
                                 
@@ -14827,6 +14843,36 @@ function killSession(sessionId, btn) {
     alert("Error communicating with server: " + err.message);
     btn.disabled = false;
     btn.innerText = "Kill";
+  });
+}
+function resumeSession(sessionId, btn) {
+  btn.disabled = true;
+  btn.innerText = "Resuming...";
+  const token = getAnchorToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) { headers['X-Anchor-Token'] = token; }
+  const payload = { session_id: sessionId };
+  if (token) { payload.token = token; }
+  fetch('/api/rnd/zombie_resume', {
+    method: 'POST', headers: headers, body: JSON.stringify(payload)
+  })
+  .then(response => { if (response.ok) return response.json(); throw new Error("HTTP error " + response.status); })
+  .then(data => {
+    if (data.ok) {
+      btn.innerText = "Resumed";
+      btn.disabled = true;
+      btn.className = "badge badge-secondary";
+      btn.style.border = "none";
+    } else {
+      alert("Failed to resume session: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Resume";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Resume";
   });
 }
 function startZombieTerminal(btn) {
@@ -16124,7 +16170,32 @@ function startZombieTerminal(btn) {
                     _sessreg.update_session(sid, status=_sessreg.STATUS_CANCELLED)
                 except Exception:
                     pass
+                try:
+                    import zombie_hunter
+                    zombie_hunter.forget_pid(pid)
+                except Exception:
+                    pass
                 self._send_json({"ok": True, "session_id": sid, "killed": killed})
+
+        elif self.path == "/api/rnd/zombie_resume":
+            # Un-freeze an orphan that was auto-paused in the report while it
+            # waited to be killed (the swarm & owner view's Resume button). Acts
+            # by session_id. Clean 404 for an unknown id; auth enforced above.
+            sid = (body.get("session_id", "") or body.get("session", "")).strip()
+            rec = _sessreg.get_session(sid) if sid else None
+            if rec is None:
+                self._send_json({"ok": False, "error": f"unknown session: {sid}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                pid = rec.get("pid")
+                resumed = False
+                try:
+                    if pid not in (None, ""):
+                        import zombie_hunter
+                        resumed = bool(zombie_hunter.resume_pid(pid))
+                except Exception:
+                    resumed = False
+                self._send_json({"ok": True, "session_id": sid, "resumed": resumed})
 
         elif self.path == "/api/rnd/gandalf_cancel":
             project_id = (body.get("project_id", "") or "").strip()

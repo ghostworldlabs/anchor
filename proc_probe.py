@@ -161,6 +161,72 @@ def tree_kill(pid: int) -> bool:
         return False
 
 
+# 0x0800 = PROCESS_SUSPEND_RESUME — the only right we need to (un)freeze a tree.
+_PROCESS_SUSPEND_RESUME = 0x0800
+
+
+def suspend(pid: int) -> bool:
+    """Best-effort FREEZE a process (all its threads) so it stops consuming CPU
+    while it waits to be killed. Cross-platform: Windows uses the undocumented
+    ``ntdll!NtSuspendProcess`` (stdlib ``ctypes`` only — no psutil); POSIX uses
+    ``SIGSTOP``. Returns ``True`` on success, never raises. Idempotent at the OS
+    level is NOT guaranteed (NtSuspendProcess is counted), so callers should
+    track which PIDs they've already suspended and pair every suspend with a
+    later :func:`resume`.
+    """
+    if not pid or int(pid) <= 0:
+        return False
+    if _IS_WINDOWS:
+        try:
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(
+                _PROCESS_SUSPEND_RESUME, False, int(pid))
+            if not h:
+                return False
+            try:
+                return ctypes.windll.ntdll.NtSuspendProcess(h) == 0
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return False
+    try:
+        import os
+        import signal
+        os.kill(int(pid), signal.SIGSTOP)
+        return True
+    except Exception:
+        return False
+
+
+def resume(pid: int) -> bool:
+    """Best-effort UNFREEZE a process suspended by :func:`suspend`. Windows uses
+    ``ntdll!NtResumeProcess``; POSIX uses ``SIGCONT``. Returns ``True`` on
+    success, never raises.
+    """
+    if not pid or int(pid) <= 0:
+        return False
+    if _IS_WINDOWS:
+        try:
+            import ctypes
+            h = ctypes.windll.kernel32.OpenProcess(
+                _PROCESS_SUSPEND_RESUME, False, int(pid))
+            if not h:
+                return False
+            try:
+                return ctypes.windll.ntdll.NtResumeProcess(h) == 0
+            finally:
+                ctypes.windll.kernel32.CloseHandle(h)
+        except Exception:
+            return False
+    try:
+        import os
+        import signal
+        os.kill(int(pid), signal.SIGCONT)
+        return True
+    except Exception:
+        return False
+
+
 def attach_to_job_object(pid_or_handle):
     """Wrap the given PID or process handle in a Job Object with KILL_ON_JOB_CLOSE.
     
