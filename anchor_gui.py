@@ -14621,12 +14621,22 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 import zombie_hunter
                 import pty_manager
                 try:
-                    live_ids = set(pty_manager.live_sessions())
+                    attached = set(pty_manager.live_sessions())
                 except Exception:
-                    live_ids = set()
+                    attached = set()
                 orphans = []
                 try:
-                    for rec in _sessreg.list_sessions(status="running"):
+                    running_recs = _sessreg.list_sessions(status="running")
+                    # (#1, safety-critical) An orphan is a RUNNING session with NO
+                    # LIVE OWNER — not merely one absent from the PTY-attached set.
+                    # Broaden "attached" to the full live-owner set (attached ∪
+                    # job-owned ∪ parent-owned) so a legit, work-doing session with
+                    # no open browser stream is never falsely flagged as a runaway.
+                    try:
+                        live_ids = zombie_hunter.live_owner_ids(attached, records=running_recs)
+                    except Exception:
+                        live_ids = attached
+                    for rec in running_recs:
                         sid = rec.get("session_id", "")
                         try:
                             verdict = zombie_hunter.classify(rec, live_ids)
@@ -14785,15 +14795,25 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # makes _rnd function-local for ALL of do_GET, breaking earlier routes
                 # in this method with UnboundLocalError.
                 try:
-                    live_ids = set(pty_manager.live_sessions())
+                    attached = set(pty_manager.live_sessions())
                 except Exception:
-                    live_ids = set()
+                    attached = set()
 
                 running_records = []
                 try:
                     running_records = _sessreg.list_sessions(status="running")
                 except Exception:
                     pass
+
+                # (#1, safety-critical) This view marks orphans AND FREEZES them
+                # (pause_orphan). Use the full live-owner discriminator so a legit
+                # work-doing session with no open stream is never frozen/killed:
+                # an orphan has NO live owner (not job-owned, not parent-owned),
+                # not merely "no attached PTY stream".
+                try:
+                    live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+                except Exception:
+                    live_ids = attached
 
                 # Group by OWNER (project title, or project_id, or "(unowned)")
                 groups = {}
@@ -16459,9 +16479,9 @@ function startZombieTerminal(btn) {
                 backend = "gemini"
 
             try:
-                live_ids = set(pty_manager.live_sessions())
+                attached = set(pty_manager.live_sessions())
             except Exception:
-                live_ids = set()
+                attached = set()
 
             report_path = zombie_hunter._last_report_path()
             report_data = None
@@ -16473,7 +16493,7 @@ function startZombieTerminal(btn) {
 
             if not report_data:
                 try:
-                    report_data = zombie_hunter.sweep(live_session_ids=list(live_ids), apply=False)
+                    report_data = zombie_hunter.sweep(live_session_ids=list(attached), apply=False)
                 except Exception:
                     report_data = {}
 
@@ -16482,6 +16502,14 @@ function startZombieTerminal(btn) {
                 running_records = _sessreg.list_sessions(status="running")
             except Exception:
                 pass
+
+            # (#1, safety-critical) Classify against the full live-owner set so a
+            # legit work-doing session with no open stream is not briefed as an
+            # orphan: attached ∪ job-owned ∪ parent-owned.
+            try:
+                live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+            except Exception:
+                live_ids = attached
 
             session_briefs = []
             orphaned_ids = []
@@ -17936,6 +17964,31 @@ def main():
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
 
     try:
+        # (#1, safety-critical) Reconcile managed-terminal-session registry
+        # "running" records by PROCESS liveness on boot: a record whose recorded
+        # PID no longer resolves to a live process is reconciled to a terminal
+        # (idle) status, so a stale prior-instance "running" record can never feed
+        # the startup orphan banner. Liveness is by PROCESS, not by attached
+        # stream — a record with a live PID (genuine work OR a true orphan the
+        # banner/daemon handles) is LEFT running; only dead PIDs are reconciled.
+        import session_registry as _sr_boot
+        import proc_probe as _pp_boot
+        _alive_pids = set()
+        for _rec in _sr_boot.list_sessions(status="running"):
+            _sid = _rec.get("session_id")
+            _pid = _rec.get("pid")
+            if not _sid or not _pid:
+                continue
+            try:
+                if _pp_boot.creation_time(_pid) is not None:
+                    _alive_pids.add(_sid)
+            except Exception:
+                pass
+        _sr_boot.reconcile(live_session_ids=_alive_pids)
+    except Exception as e:
+        _logger.error(f"session_registry boot reconcile failed: {e}")
+
+    try:
         import preview_server
         preview_server.reap_orphans()
     except Exception as e:
@@ -17970,7 +18023,15 @@ def main():
             import zombie_hunter
             import pty_manager
             def _live_provider():
-                return set(pty_manager._LIVE.keys())
+                # (#1, safety-critical) The daemon KILLS verdict==kill sessions
+                # when armed (ANCHOR_ZOMBIE_HUNTER=1). Hand it the full live-owner
+                # set, not just the PTY-attached one, so a legit job-owned /
+                # parent-owned session is never reaped for lacking a browser stream.
+                attached = set(pty_manager._LIVE.keys())
+                try:
+                    return zombie_hunter.live_owner_ids(attached)
+                except Exception:
+                    return attached
             zombie_hunter.start_hunter(_live_provider)
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")

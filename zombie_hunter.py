@@ -170,6 +170,79 @@ def classify(record, live_session_ids, probe=proc_probe, tol=2.0) -> str:
     return VERDICT_KILL
 
 
+# ── Orphan discriminator — the "live owner" set ─────────────────────────────
+# (#1, safety-critical) A registered-RUNNING session is a true orphan only if it
+# is identity-alive AND has NO LIVE OWNER. Being attached to a PTY/browser stream
+# is just ONE kind of owner: a session is equally NOT-orphaned when an
+# actively-running owning job backs it, or when a live parent session owns it. So
+# the set we hand to :func:`classify` as "attached/live" must be broadened from
+# the bare ``pty_manager.live_sessions()`` to the full live-owner set. Without
+# this, a legit, work-doing swarm/lane session with no OPEN browser stream falls
+# out of the attached set and is classed ``kill`` → false banner / false freeze /
+# (with the daemon armed) a false kill. The line is **live owner**, never
+# "effort-bound" — binding to an effort must NOT neuter the hunter.
+
+def live_owner_ids(attached_ids, records=None, job_active=None):
+    """Expand an attached/streaming session-id set to every session with a LIVE OWNER.
+
+    ``attached_ids`` — the base set of sessions with a live PTY/browser stream
+                       (e.g. ``set(pty_manager.live_sessions())``).
+    ``records``      — the RUNNING session records to consider; defaults to
+                       ``session_registry.list_sessions(status="running")``.
+    ``job_active``   — callable ``session_id -> bool`` reporting whether an
+                       actively-running OWNING JOB backs the session; defaults to
+                       ``job_runner._holder_is_active`` (the session_id IS the
+                       job_id for a swarm/lane job). Injectable for tests.
+
+    A session counts as OWNED when it is attached, OR an owning job is active,
+    OR (transitively) its ``parent_session_id`` has a live owner. Returns a NEW
+    set that is always a superset of ``attached_ids``. Best-effort: any probe
+    failure degrades to "not owned via that path", never raises.
+    """
+    owners = set(attached_ids or ())
+
+    if job_active is None:
+        try:
+            import job_runner
+            job_active = job_runner._holder_is_active
+        except Exception:  # pragma: no cover - defensive against an import cycle
+            job_active = lambda _sid: False
+
+    if records is None:
+        try:
+            records = session_registry.list_sessions(status="running")
+        except Exception:
+            records = []
+
+    by_id = {}
+    for rec in records or []:
+        sid = rec.get("session_id")
+        if not sid:
+            continue
+        by_id[sid] = rec
+        if sid in owners:
+            continue
+        try:
+            if job_active(sid):
+                owners.add(sid)
+        except Exception:  # pragma: no cover - a probe failure is "not owned"
+            pass
+
+    # Transitive parent ownership: a child of a live owner is itself owned.
+    # Iterate to a fixpoint (bounded by the record count — small).
+    changed = True
+    while changed:
+        changed = False
+        for sid, rec in by_id.items():
+            if sid in owners:
+                continue
+            parent = rec.get("parent_session_id")
+            if parent and parent in owners:
+                owners.add(sid)
+                changed = True
+    return owners
+
+
 # ── Report persistence ──────────────────────────────────────────────────────
 
 def _last_report_path():
