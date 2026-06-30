@@ -12,7 +12,13 @@
 - The Foreman build runs Claude-driver + Gemini swarm sub-agents via `agy-dispatch`
   (locked #10 decision) and writes each wave's run summary into this planning folder.
 
-test-command: python -m pytest -v tests/test_zombie_hunter.py tests/test_swarm_zombie_coverage.py tests/test_cancel_liveness.py tests/test_session_registry.py tests/test_history.py tests/test_session_continue.py tests/test_effort_view_v12.py tests/test_context_handoff_v12.py tests/test_deliverables.py tests/test_build_deliverable.py tests/test_engine_persist.py tests/test_engine_selector.py tests/test_lanes_concurrency.py tests/test_terminal_session.py tests/test_terminal_seed.py tests/test_gandalf_endpoints.py tests/test_gandalf_engine.py tests/test_worktrees.py --deselect tests/test_session_continue.py::test_historical_panel_shows_summary_and_continue_works --deselect tests/test_build_deliverable.py::test_build_deliverable_in_lane_and_panel_playwright
+test-command: python -m pytest -v tests/test_zombie_hunter.py tests/test_swarm_zombie_coverage.py tests/test_cancel_liveness.py tests/test_session_registry.py tests/test_history.py tests/test_session_continue.py tests/test_effort_view_v12.py tests/test_context_handoff_v12.py tests/test_deliverables.py tests/test_build_deliverable.py tests/test_engine_persist.py tests/test_engine_selector.py tests/test_lanes_concurrency.py tests/test_terminal_session.py tests/test_terminal_seed.py tests/test_gandalf_endpoints.py tests/test_gandalf_engine.py tests/test_worktrees.py tests/test_*_w[0-9].py --deselect tests/test_session_continue.py::test_historical_panel_shows_summary_and_continue_works --deselect tests/test_build_deliverable.py::test_build_deliverable_in_lane_and_panel_playwright
+
+> **Per-wave test files (W3 amendment):** each wave's NEW deterministic STUB-GATE tests
+> must live in a file named `tests/test_<topic>_w<N>.py` so the `tests/test_*_w[0-9].py`
+> glob auto-collects them (the gate runs through a shell, so globs expand). This prevents
+> the static-list HALT that fired when Wave 3 added `test_resume_backend_w3.py`. Tests
+> that fit an already-listed file may instead be appended there.
 
 > **Gate scope note (Stage-2 build finalization):** the plan's gate is a fast (~82 s),
 > deterministic, wave-covering subset, not the full suite — the full `pytest` run times
