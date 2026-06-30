@@ -32,6 +32,7 @@ error dict, never a crash). Stdlib only; the native PTY dep is isolated in
 import json
 import os
 import re
+import threading
 import uuid
 from pathlib import Path, PurePosixPath
 
@@ -173,6 +174,14 @@ SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
 #: case-insensitively on the stable, skill-independent tail of the greet line.
 GREET_MARKER = "what would you like to do?"
 
+#: Neutral framing for an extra ``seed_context`` payload folded onto a lane seed.
+#: Replaces the old hard-coded "promoted from Grass Catchers" wording, which was
+#: WRONG for every non-grass use of ``seed_context`` — engine-switch handoffs
+#: (v13 Wave 7), stage advances, etc. Callers that genuinely ARE a grass promote
+#: (or want any other framing) pass their own ``context_label`` to
+#: :func:`seed_for_lane`.
+DEFAULT_SEED_CONTEXT_LABEL = "Here is the context to work on"
+
 
 def _default_seed_text(skill):
     """The one-time opening instruction: load the skill, confirm, greet once.
@@ -191,7 +200,7 @@ def _default_seed_text(skill):
     ).format(skill=skill)
 
 
-def seed_for_lane(lane, seed_context=None):
+def seed_for_lane(lane, seed_context=None, context_label=None):
     """Return the one-time seed text for ``lane`` (env-overridable), or ``None``.
 
     Resolution order (so tests can pin a deterministic value):
@@ -207,6 +216,13 @@ def seed_for_lane(lane, seed_context=None):
     into a Research/Plan session. It is folded onto whatever seed was resolved
     above (including an env override, so the promote path stays deterministic in
     tests) so the SINGLE opening turn loads the lane skill AND carries the idea.
+
+    ``context_label`` (v13 Wave 7) is the framing prefix for that folded payload.
+    When omitted it defaults to the neutral :data:`DEFAULT_SEED_CONTEXT_LABEL`
+    ("Here is the context to work on") — NOT the old hard-coded "promoted from
+    Grass Catchers" wording, which mislabeled every non-grass ``seed_context`` use
+    (engine-switch handoffs, stage advances). A grass-promote caller (or any other)
+    can pass an accurate label of its own.
     """
     base = None
     per_lane = os.environ.get(SEED_ENV_LANE_PREFIX + str(lane).upper())
@@ -223,12 +239,12 @@ def seed_for_lane(lane, seed_context=None):
     ctx = (seed_context or "").strip()
     if not ctx:
         return base
-    # Fold the idea onto the lane seed as one combined opening turn. If the lane
-    # had no skill seed (None), the context alone becomes the opening turn.
-    suffix = (
-        "Here is the idea to work on (promoted from Grass Catchers): "
-        "{ctx}\n"
-    ).format(ctx=ctx)
+    # Fold the payload onto the lane seed as one combined opening turn. If the
+    # lane had no skill seed (None), the context alone becomes the opening turn.
+    # The framing is caller-supplied (``context_label``) and defaults to a neutral
+    # label — never the old grass-specific wording for a non-grass payload.
+    label = (context_label or DEFAULT_SEED_CONTEXT_LABEL).strip().rstrip(":")
+    suffix = "{label}: {ctx}\n".format(label=label, ctx=ctx)
     if base is None:
         return suffix
     # Drop a trailing newline on the base so the two parts arrive as ONE turn.
@@ -761,6 +777,138 @@ def queue_paste(session_id, text):
     return True
 
 
+# ── v13 Wave 7: model-switch handoff ────────────────────────────────────────
+
+#: The git-ignored, ephemeral handoff doc written into the worktree on an engine
+#: switch so the new engine opens with the prior engine's context.
+SWITCH_HANDOFF_FILENAME = "SWITCH-HANDOFF.md"
+#: Hard ceiling (seconds) on the best-effort source summary. A wedged source
+#: engine MUST NOT block the swap, so the summary runs in a daemon thread joined
+#: for at most this long; on timeout the summary is skipped and the swap proceeds.
+SWITCH_SUMMARY_TIMEOUT = 5.0
+#: Keep the carried-over digest a sane size for one opening turn.
+SWITCH_SUMMARY_MAX_CHARS = 6000
+#: Accurate framing for the switch handoff payload (NOT the old grass wording).
+SWITCH_CONTEXT_LABEL = (
+    "Here is a summary of the session so far, carried over from the previous "
+    "engine — continue from here"
+)
+
+
+def _generate_switch_summary(session_id, record):
+    """Best-effort context digest of the live session for an engine switch.
+
+    Reads the source session's live PTY transcript (``read_since(sid, 0)``),
+    cleans it, and returns a bounded digest (or ``""``). NEVER raises. This is the
+    potentially-slow step :func:`switch_engine` runs UNDER A TIMEOUT (via
+    :func:`_switch_handoff_summary`) so a wedged source engine can never block the
+    swap. Kept as a module-level seam so tests can stub it (healthy / hanging).
+    """
+    try:
+        try:
+            out = _pty.read_since(session_id, 0)
+        except _pty.UnknownSession:
+            return ""  # no live PTY → nothing to carry over
+        raw = (out.get("text") or "") if isinstance(out, dict) else ""
+        seed_text = (record or {}).get("seed_text") or "" if isinstance(record, dict) else ""
+        body = _clean_transcript_text(raw, seed_text=seed_text)
+        if not body:
+            return ""
+        if len(body) > SWITCH_SUMMARY_MAX_CHARS:
+            body = body[-SWITCH_SUMMARY_MAX_CHARS:]
+        return body.strip()
+    except Exception:
+        return ""
+
+
+def _switch_handoff_summary(session_id, record, timeout=SWITCH_SUMMARY_TIMEOUT):
+    """Run :func:`_generate_switch_summary` bounded by ``timeout`` seconds.
+
+    Generated in a DAEMON thread and joined for at most ``timeout`` — so a source
+    engine wedged in summary generation NEVER blocks the engine switch: on timeout
+    (or any error) this returns ``""`` and the caller proceeds with the swap.
+    """
+    result = {"text": ""}
+
+    def _worker():
+        try:
+            result["text"] = _generate_switch_summary(session_id, record) or ""
+        except Exception:
+            result["text"] = ""
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        # Wedged source engine → skip the summary, proceed with the swap.
+        return ""
+    return (result["text"] or "").strip()
+
+
+def _gitignore_in_worktree(worktree_path, name):
+    """Best-effort: ensure ``name`` is git-ignored within the worktree WITHOUT
+    touching any tracked file.
+
+    Appends ``name`` to the worktree's git ``info/exclude`` (resolved to the
+    COMMON git dir for a linked worktree, which is where git reads exclude
+    patterns from). Idempotent; never raises.
+    """
+    try:
+        wt = Path(worktree_path)
+        dotgit = wt / ".git"
+        gitdir = None
+        if dotgit.is_file():
+            # Linked worktree: ``.git`` is a file ``gitdir: <path>``.
+            txt = dotgit.read_text(encoding="utf-8", errors="replace").strip()
+            if txt.lower().startswith("gitdir:"):
+                ref = txt.split(":", 1)[1].strip()
+                p = Path(ref)
+                gitdir = p if p.is_absolute() else (wt / ref).resolve()
+        elif dotgit.is_dir():
+            gitdir = dotgit
+        if gitdir is None or not gitdir.exists():
+            return
+        # For a linked worktree, exclude patterns live in the COMMON git dir.
+        commondir_file = gitdir / "commondir"
+        if commondir_file.is_file():
+            cd = commondir_file.read_text(encoding="utf-8").strip()
+            cp = Path(cd)
+            gitdir = cp if cp.is_absolute() else (gitdir / cd).resolve()
+        info = gitdir / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        excl = info / "exclude"
+        existing = excl.read_text(encoding="utf-8") if excl.exists() else ""
+        if name not in existing.split():
+            sep = "" if (not existing or existing.endswith("\n")) else "\n"
+            excl.write_text(existing + sep + name + "\n", encoding="utf-8")
+    except Exception:
+        return
+
+
+def _write_switch_handoff(worktree_path, text):
+    """Write the git-ignored :data:`SWITCH_HANDOFF_FILENAME` into the worktree.
+
+    Returns the absolute path written (str) or ``None`` (no worktree / failure).
+    Never raises. The file is marked git-ignored within the worktree so it is
+    never committed/persisted as a tracked artifact (it is ephemeral context).
+    """
+    try:
+        wt = Path(worktree_path)
+        if not wt.is_dir():
+            return None
+        dest = wt / SWITCH_HANDOFF_FILENAME
+        header = (
+            "# Engine-switch handoff\n\n"
+            "_Ephemeral, git-ignored context carried into the new engine on a "
+            "mid-session model switch._\n\n"
+        )
+        dest.write_text(header + (text or "").strip() + "\n", encoding="utf-8")
+        _gitignore_in_worktree(wt, SWITCH_HANDOFF_FILENAME)
+        return str(dest)
+    except Exception:
+        return None
+
+
 def switch_engine(session_id, engine, seed_context=None):
     """Toggle a live session to the other engine, keeping its identity.
 
@@ -775,6 +923,15 @@ def switch_engine(session_id, engine, seed_context=None):
     opaque id) is rebound under the EXISTING ``session_id`` (the same trick
     :func:`start_session` uses), so the registry, worktree and PTY keep keying
     off one id — no orphan PTY and no orphan worktree.
+
+    v13 Wave 7 — MODEL-SWITCH HANDOFF: BEFORE reaping the source PTY, a
+    best-effort, ``SWITCH_SUMMARY_TIMEOUT``-bounded context summary of the live
+    session is generated (an explicit ``seed_context`` still wins). A wedged
+    source engine cannot block the swap — on timeout the summary is skipped and
+    the switch proceeds. The summary is written to a git-ignored
+    :data:`SWITCH_HANDOFF_FILENAME` in the worktree and folded into the NEW
+    engine's opening seed (labelled :data:`SWITCH_CONTEXT_LABEL`, NOT the old
+    grass wording) so the new engine opens with the prior engine's context.
 
     On a relaunch FAILURE the record is rolled back to its prior, consistent
     state (original backend/seed restored, no half-killed live PTY left behind,
@@ -806,6 +963,16 @@ def switch_engine(session_id, engine, seed_context=None):
     # Enforce the lane/engine policy BEFORE touching the live PTY — a refused
     # switch (e.g. gemini on a plan/build lane) leaves the session exactly as-is.
     _check_engine_allowed(lane, engine)
+
+    # v13 W7: BEFORE reaping the source PTY, capture a best-effort, time-bounded
+    # handoff summary off the LIVE session (the PTY is still attached here). An
+    # explicit caller ``seed_context`` wins; otherwise generate it from the live
+    # transcript. A wedged source engine cannot block the swap — the generator is
+    # joined for at most SWITCH_SUMMARY_TIMEOUT and skipped on timeout.
+    handoff_text = (seed_context or "").strip()
+    if not handoff_text:
+        handoff_text = _switch_handoff_summary(
+            session_id, record, timeout=SWITCH_SUMMARY_TIMEOUT)
 
     # 1) Reap the current PTY child (tolerate an already-dead/unknown one).
     try:
@@ -844,8 +1011,17 @@ def switch_engine(session_id, engine, seed_context=None):
         session_id, backend=engine, status=_reg.STATUS_RUNNING,
         seeded=False, seed_text="")
 
-    # 5) Re-apply the lane seed ONCE on the new engine (same discipline as start).
-    seed_text = seed_for_lane(lane, seed_context=seed_context)
+    # 4b) v13 W7: write the git-ignored SWITCH-HANDOFF.md and fold it into the new
+    #     engine's opening seed so it carries the prior engine's context. Skipped
+    #     cleanly when there was no summary (wedged/timed-out source engine).
+    if handoff_text:
+        _write_switch_handoff(worktree_path, handoff_text)
+
+    # 5) Re-apply the lane seed ONCE on the new engine (same discipline as start),
+    #    folding in the W7 handoff context under an accurate label.
+    seed_text = seed_for_lane(
+        lane, seed_context=(handoff_text or None),
+        context_label=SWITCH_CONTEXT_LABEL)
     if seed_text:
         try:
             _pty.write(session_id, seed_text)
