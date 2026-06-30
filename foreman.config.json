@@ -5,7 +5,7 @@
     "plan": "planning/crucible-improve-2026-06-30/IMPLEMENTATION-PLAN.md",
     "execution_log": "planning/crucible-improve-2026-06-30/EXECUTION-LOG.md"
   },
-  "test_command": "python -m pytest -q",
+  "test_command": "python -m pytest -v",
   "git": {
     "enabled": true,
     "branch": "foreman/crucible-improve-2026-06-30"
