@@ -1,18 +1,18 @@
 {
-  "project": "anchor-v1",
+  "project": "anchor-crucible-improve-2026-06-30",
   "docs": {
-    "description": "planning/anchor-v1/DESIGN.md",
-    "plan": "planning/anchor-v1/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/anchor-v1/EXECUTION-LOG.md"
+    "description": "planning/crucible-improve-2026-06-30/MASTER-PLAN.md",
+    "plan": "planning/crucible-improve-2026-06-30/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/crucible-improve-2026-06-30/EXECUTION-LOG.md"
   },
-  "test_command": "python -m pytest -v tests/test_zombie_hunter.py tests/test_session_registry.py tests/test_gandalf_endpoints.py tests/test_gandalf_engine.py tests/test_cancel_liveness.py tests/test_worktrees.py",
+  "test_command": "python -m pytest -q",
   "git": {
     "enabled": true,
-    "branch": "feat/zombie-hunter-v2"
+    "branch": "foreman/crucible-improve-2026-06-30"
   },
   "budget": {
-    "max_waves_per_run": 4,
+    "max_waves_per_run": 9,
     "max_fix_iters_per_wave": 4
   },
-  "notes": "Project dir = worktree ROOT C:/dev/Anchor-zombie (the CODE ROOT agy edits: anchor_gui.py, gandalf.py, job_runner.py, ... and tests/). agy runs with cwd=root and --add-dir root, so docs/test paths are root-relative. Focused test_command (tests/test_*.py are root-relative). Do NOT touch the live service C:/dev/Anchor. Deploy + arming ANCHOR_ZOMBIE_HUNTER=1 + zero-orphan acceptance demo are John-gated and OUT of this run. NOTE: this replaces the prior zombie-hunter config that pointed at planning/crucible/."
+  "notes": "Project dir = isolated worktree ROOT C:/dev/anchor-build-crucible (off master HEAD 40b9ac6; the CODE ROOT Foreman edits: anchor_gui.py, terminal_session.py, zombie_hunter.py, pty_manager.py, gandalf.py, ... and tests/). Plan declares test-command: python -m pytest -q (governs the gate). Do NOT touch the live service at C:/dev/Anchor (dirty, service-owned). Deploy = John merges this branch to master + elevated 'nssm restart anchor'. UI waves (4,5,6,8,9) + #1 live banner finish on Playwright+screenshot+John sign-off (the v4 rule)."
 }
