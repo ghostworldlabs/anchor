@@ -3145,6 +3145,38 @@ def _layoutd_grass_origin_chip(rep, trio_lane):
         f"&#127793; from grass</span>")
 
 
+def _layoutd_resume_control(sv, rep, trio_lane):
+    """The "Resume as session" control for a DISCOVERED/brownfield effort tile
+    (crucible-improve #6 UI, W4). A discovered effort has no managed Anchor
+    session — its tile otherwise only opens the on-disk artifact (read-only), so
+    there is no way to *carry it on*. This control drives ``resumeDiscovered`` →
+    ``continueSession`` → ``POST /api/rnd/continue_session``, whose
+    :func:`_build_continue_seed` SYNTHESIZES a warm seed from the documents on disk
+    for a discovered effort (W3 #6 backend — the detected phase, the trio skill,
+    the enumerated doc list) before calling ``terminal_session.start_session``. So
+    clicking it opens a WARM live session (skill loaded, docs read, oriented), not
+    a cold terminal. Returns ``""`` for a non-discovered tile — those resume via
+    the opened panel's "Continue in a live session" button instead.
+
+    SAFE: emits only the ``session_id`` + the trio lane (never ``worktree_path`` /
+    ``branch``). ``stopPropagation`` keeps the click off the tile's
+    ``laneTileClick`` so it resumes rather than merely opening the read-only panel.
+    """
+    if not isinstance(rep, dict) or not rep.get("discovered"):
+        return ""
+    sid = (sv.get("session_id") or "") if isinstance(sv, dict) else ""
+    if not sid:
+        return ""
+    sid_attr = html_lib.escape(sid, quote=True)
+    lane_attr = html_lib.escape(trio_lane or "", quote=True)
+    return (
+        f"<button class='resume-disc' type='button' data-session=\"{sid_attr}\" "
+        f"data-lane=\"{lane_attr}\" title='Resume this discovered effort as a warm "
+        f"live session — the trio skill loads and the on-disk docs orient the turn' "
+        f"onclick=\"resumeDiscovered(event,'{sid_attr}','{lane_attr}')\">"
+        f"&#9654; Resume as session</button>")
+
+
 #: trio-lane → the trio STAGE it represents (for the EV-2 stage-track fallback
 #: when a tile has no live effort-view entry, e.g. a discovered/imported tile).
 _LANE_TO_STAGE = {"research": "research", "plan": "plan", "planning": "plan",
@@ -3240,6 +3272,9 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane,
     tie_data, tie_chip = _layoutd_tie_chip(sv)
     em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
     eff_data = _effort_data_attrs(sid, effort_index, fallback_lane=trio_lane)
+    # W4 #6 UI — a discovered/brownfield shelf tile also carries the "Resume as
+    # session" control (same warm-resume path as the headline); "" otherwise.
+    resume_ctl = _layoutd_resume_control(sv, rep, trio_lane)
     return (
         f"<div class='minitile tile lane-tile{extra}' data-session=\"{sid_attr}\" "
         f"data-lane=\"{lane_attr}\" data-light=\"{light}\"{tie_data}{em_data}"
@@ -3251,6 +3286,7 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane,
         f"<div class='mfoot'>{foot}</div>"
         f"{tie_chip}"
         f"{grass_chip}"
+        f"{resume_ctl}"
         f"</div>"
     )
 
@@ -3301,6 +3337,9 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     tie_data, tie_chip = _layoutd_tie_chip(sv)
     em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
     eff_data = _effort_data_attrs(sid, effort_index, fallback_lane=trio_lane)
+    # W4 #6 UI — a discovered/brownfield headline carries a "Resume as session"
+    # control (warm resume via the W3 synthesized seed); "" for a managed tile.
+    resume_ctl = _layoutd_resume_control(sv, rep, trio_lane)
     return (
         f"<div class='headline tile lane-tile{running_cls}' "
         f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "
@@ -3312,7 +3351,7 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
         f"{running_chip}{grass_chip}</div>"
         f"<div class='htitle'>{title}</div>"
         f"{blurb_html}"
-        f"<div class='hrow'>{track}{tie_chip}</div>"
+        f"<div class='hrow'>{track}{tie_chip}{resume_ctl}</div>"
         f"</div>"
     )
 
@@ -3377,12 +3416,16 @@ def _render_layoutd_zone(zone_key, zone_label, section_lbl, sessions,
         # John tweak: the OLDER-runs shelf starts COLLAPSED on first load (the
         # headline card stays visible). Server-render the collapsed class + the
         # "Show all" caption so there is no flash of expanded content before JS.
+        # W4 #3 render — the shelf IS the "previous efforts" expander: it renders
+        # ONLY when a zone holds >1 effort (the latest is the headline, the rest
+        # sit behind this expander). The ``prev-efforts`` class is the stable hook
+        # for that contract (present iff >1).
         shelf = (
-            f"<button class='showall' id='{tgl_id}' "
+            f"<button class='showall prev-efforts' id='{tgl_id}' "
             f"onclick=\"toggleShelf('{shelf_id}','{tgl_id}',{n},"
             f"'{label_attr}')\">&#9656; Show all {n} older "
             f"{html_lib.escape(zone_label.lower())} sessions</button>"
-            f"<div class='shelf-wrap collapsed' id='{shelf_id}'>"
+            f"<div class='shelf-wrap prev-efforts collapsed' id='{shelf_id}'>"
             f"<div class='shelf'>{''.join(tiles)}</div></div>"
         )
     return (
@@ -5040,6 +5083,14 @@ def render_project_window_html(project_id: str) -> str:
         "margin:0 0 14px;max-width:640px}"
         ".layoutd .headline .hrow{display:flex;align-items:center;gap:14px;"
         "flex-wrap:wrap;margin-bottom:4px}"
+        # W4 #6 UI — the "Resume as session" control on a discovered/brownfield
+        # tile (an accent pill; a minitile's sits below its foot row).
+        ".resume-disc{font-size:11px;font-weight:600;color:var(--accent);"
+        "background:rgba(108,156,252,.12);border:1px solid var(--accent);"
+        "border-radius:20px;padding:3px 11px;cursor:pointer;margin-top:6px}"
+        ".resume-disc:hover{background:rgba(108,156,252,.22)}"
+        ".minitile .resume-disc{display:inline-block;margin-top:7px;"
+        "font-size:10.5px;padding:2px 9px}"
         ".badge{display:inline-block;text-transform:uppercase;font-size:10px;"
         "font-weight:700;letter-spacing:.5px;padding:2px 8px;border-radius:10px;"
         "border:1px solid}"
@@ -8395,6 +8446,19 @@ function _renderPastSession(summary) {
     out.push('<div class="ro-note"><i>No files recorded for this session.</i></div>');
   }
   return out.join('');
+}
+
+// resumeDiscovered(ev, sessionId, lane): W4 (#6 UI) — resume a DISCOVERED/
+// brownfield effort tile as a WARM live session. A discovered effort has no
+// managed session, so we reuse the continueSession path: POST
+// /api/rnd/continue_session with the discovered session id as the source. The
+// server's _build_continue_seed SYNTHESIZES a warm seed from the on-disk docs
+// (W3 #6 backend — detected phase + trio skill + doc list), so start_session
+// opens with the skill loaded and the documents read, not a cold terminal.
+// stopPropagation so the tile's read-only panel does not also open underneath.
+function resumeDiscovered(ev, sessionId, lane) {
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  continueSession(sessionId, lane);
 }
 
 // continueSession(sessionId, lane): v5 Wave 2 — POST /api/rnd/continue_session
