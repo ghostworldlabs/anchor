@@ -1327,6 +1327,91 @@ def _auto_push_on_finish(project_id):
 _MAX_CONTINUE_SEED_CHARS = 4000
 
 
+#: Trio/store lane → the trio skill a resumed effort should load (W3 #6 backend).
+_RESUME_LANE_SKILL = {
+    "research": "researchPrime",
+    "plan": "Crucible",
+    "planning": "Crucible",
+    "build": "Foreman",
+}
+
+
+def _resume_skill_for_lane(lane: str) -> str:
+    """The trio skill a resumed effort in ``lane`` should load (W3 #6 backend).
+
+    Maps a trio/store lane to its skill — research→researchPrime, plan→Crucible,
+    build→Foreman. Returns ``""`` for an unknown lane (honest — no skill claimed).
+    """
+    return _RESUME_LANE_SKILL.get((lane or "").strip(), "")
+
+
+def _detect_resume_phase(store_lane: str, doc_rels) -> str:
+    """Detect the phase a discovered effort is at from its on-disk docs (W3 #6).
+
+    Reads only the document filenames (NO model call) and returns a human phase
+    label so a synthesized resume seed orients the turn:
+
+      - planning: an IMPLEMENTATION-PLAN → ``"implementation plan (Stage 2)"``; a
+        MASTER-PLAN → ``"master plan (Stage 1)"``; a NORTH-STAR → ``"intake /
+        North Star (Stage 0)"``; else ``"planning"``.
+      - build: an EXECUTION-LOG present → ``"build in progress"``; else ``"build"``.
+      - research: ``"research investigation"``.
+
+    Falls back to the store-lane name for an unknown lane. Never raises.
+    """
+    blob = " ".join(str(r or "").upper().replace("\\", "/")
+                    for r in (doc_rels or []))
+    sl = (store_lane or "").strip()
+    if sl == "planning":
+        if "IMPLEMENTATION-PLAN" in blob:
+            return "implementation plan (Stage 2)"
+        if "MASTER-PLAN" in blob:
+            return "master plan (Stage 1)"
+        if "NORTH-STAR" in blob:
+            return "intake / North Star (Stage 0)"
+        return "planning"
+    if sl == "build":
+        if "EXECUTION-LOG" in blob:
+            return "build in progress"
+        return "build"
+    if sl == "research":
+        return "research investigation"
+    return sl or "work"
+
+
+def _synthesize_discovered_seed(lane, store_lane, members):
+    """Synthesize a resume seed for a DISCOVERED/brownfield effort (W3 #6 backend).
+
+    When a discovered effort has NO registry record and NO cached summary, the
+    seed is built from the documents on disk so the resumed turn opens WARM, not
+    cold: the detected phase, the trio skill to load, and the enumerated document
+    list. Returns a list of seed-text blocks (the caller appends them to the seed
+    ``parts``); ``[]`` when there are no documents to synthesize from.
+    """
+    docs = []
+    for m in members or []:
+        rel = (m.get("artifact_path") or "").strip().replace("\\", "/")
+        if not rel:
+            continue
+        docs.append((rel, (m.get("title") or "").strip()))
+    if not docs:
+        return []
+    skill = _resume_skill_for_lane(lane) or _resume_skill_for_lane(store_lane)
+    phase = _detect_resume_phase(store_lane, [r for r, _ in docs])
+    blocks = ["Lane: " + str(lane) + " · Phase: " + phase]
+    if skill:
+        blocks.append("Skill to load: " + skill)
+    doc_lines = ["Documents on disk (read these first to recover context):"]
+    for rel, title in docs:
+        doc_lines.append("- " + rel + ((" — " + title) if title else ""))
+    blocks.append("\n".join(doc_lines))
+    blocks.append(
+        "Read the documents listed above to recover the full context, then load "
+        "the " + (skill or "appropriate trio") + " skill and continue the "
+        + phase + " work where it left off.")
+    return blocks
+
+
 def _build_continue_seed(folder_path, project_id, lane, source_session_id):
     """Build the seed_context text for "Continue in a live session" (v5 Wave 2).
 
@@ -1385,7 +1470,12 @@ def _build_continue_seed(folder_path, project_id, lane, source_session_id):
             if labels:
                 parts.append("Files produced: " + ", ".join(labels))
     else:
-        # No cached summary — fall back to the live session record's intent.
+        # No cached summary. Resolve the source session from disk. For a
+        # DISCOVERED/brownfield effort (no registry record AND no cached summary),
+        # SYNTHESIZE an orienting seed from the documents on disk — the detected
+        # phase, the trio skill to load, and the enumerated document list (W3 #6
+        # backend) — so the resumed turn opens WARM, not cold. Otherwise fall back
+        # to the session record's bare intent (its title).
         session = None
         try:
             for s in _sessions.list_sessions(folder_path, project_id, lane):
@@ -1395,9 +1485,30 @@ def _build_continue_seed(folder_path, project_id, lane, source_session_id):
         except Exception:
             session = None
         if session:
-            asked = (session.get("title") or "").strip()
-            if asked:
-                parts.append("Originally: " + asked)
+            members = session.get("member_files", []) or []
+            discovered = bool(members) and all(
+                _eh.is_discovered(m) for m in members)
+            synth = []
+            if discovered:
+                try:
+                    synth = _synthesize_discovered_seed(
+                        lane, store_lane, members)
+                except Exception:
+                    synth = []
+            if synth:
+                # Replace the generic "here is its summary" lead-in with a
+                # discovered-specific one — there is genuinely no prior session
+                # summary; the context below is synthesized from on-disk docs.
+                parts[0] = ("This is a brownfield/discovered effort in the "
+                            + str(lane) + " lane being resumed as a live "
+                            "session. There is no prior Anchor session summary, "
+                            "so this orienting context is synthesized from the "
+                            "documents already on disk:")
+                parts.extend(synth)
+            else:
+                asked = (session.get("title") or "").strip()
+                if asked:
+                    parts.append("Originally: " + asked)
 
     text = "\n\n".join(p for p in parts if p and p.strip()).strip()
     # If we never resolved any real prior context (only the lead-in line), return

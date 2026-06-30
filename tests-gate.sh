@@ -2,7 +2,14 @@
 # Foreman gate wrapper — runs under git-bash so the per-wave glob expands
 # (cmd.exe, which Foreman's spawnSync uses, does NOT expand globs). nullglob
 # means a non-matching wave glob disappears instead of erroring pytest.
-cd "$(dirname "$0")" || exit 2
+# Resolve our own directory with pure bash builtins (no external `dirname` —
+# the orchestrator's spawn PATH may not include git's coreutils, so shelling
+# out to `dirname` made the gate non-hermetic and crashed it on PATH-strip).
+_self="${BASH_SOURCE[0]:-$0}"
+_dir="${_self%/*}"
+if [ "$_dir" != "$_self" ] && [ -n "$_dir" ]; then
+  cd "$_dir" || exit 2
+fi
 shopt -s nullglob
 exec python -m pytest -v \
   tests/test_zombie_hunter.py tests/test_swarm_zombie_coverage.py tests/test_cancel_liveness.py \

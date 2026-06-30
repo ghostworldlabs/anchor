@@ -47,6 +47,14 @@ _STORE_LANE_FOR_STAGE = {
     "build": "build",
 }
 
+# Inverse of ``_STORE_LANE_FOR_STAGE`` — the trio stage a store-lane represents
+# (used to fold DISCOVERED/brownfield store-lane efforts into the view, W3 #3).
+_STAGE_FOR_STORE_LANE = {
+    "research": "research",
+    "planning": "plan",
+    "build": "build",
+}
+
 # The registry statuses that mean a session has a LIVE process.
 _LIVE_STATUSES = frozenset((_reg.STATUS_RUNNING,))
 
@@ -305,6 +313,102 @@ def _is_single_session_effort(members: list) -> bool:
     return bool(members[0].get("stage_history"))
 
 
+def _efforts_from_discovered(folder_path, project_id) -> list:
+    """Fold DISCOVERED/brownfield efforts into the effort view (W3 #3 data).
+
+    A brownfield project's on-disk artifacts are adopted as DISCOVERED effort
+    pointer-records (``effort_history.adopt_discovered``) and grouped — by parent
+    directory — into sessions by ``sessions.list_sessions``. They never enter the
+    managed ``session_registry``, so :func:`build_effort_view` (registry-only)
+    would otherwise miss them and the legacy tile gather would surface each as a
+    LOOSE singleton. This promotes each discovered SESSION to ONE first-class
+    effort — its documents grouped as members, NOT one effort per file.
+
+    A discovered doc that is actually a PERSISTED managed-session document (it
+    carries a ``session_id`` — the v8/v12 persist keystone tags those) is ALREADY
+    represented by its registry effort, so any session containing such a member is
+    SKIPPED here to avoid a duplicate. READ-ONLY; best-effort — never raises.
+    """
+    try:
+        import sessions as _sessions
+        import effort_history as _eh
+    except Exception:
+        return []
+    out = []
+    for trio_lane, store_lane in (("research", "research"),
+                                  ("plan", "planning"), ("build", "build")):
+        stage = _STAGE_FOR_STORE_LANE.get(store_lane, store_lane)
+        try:
+            sess_list = _sessions.list_sessions(folder_path, project_id, trio_lane)
+        except Exception:
+            continue
+        for s in sess_list:
+            members = s.get("member_files", []) or []
+            if not members:
+                continue
+            # DISCOVERED (brownfield) sessions only — a run session is not folded.
+            if not all(_eh.is_discovered(m) for m in members):
+                continue
+            # A persisted managed-session doc (carries session_id) is already its
+            # registry effort — skip the whole session to avoid a duplicate.
+            if any((m.get("session_id") or "") for m in members):
+                continue
+            sid = s.get("session_id") or ""
+            if not sid:
+                continue
+            try:
+                created = float(s.get("timestamp") or 0.0)
+            except (TypeError, ValueError):
+                created = 0.0
+            docs = []
+            member_proj = []
+            for m in members:
+                rel = (m.get("artifact_path") or "").strip().replace("\\", "/")
+                title = (m.get("title") or "").strip()
+                doc = {"label": title or rel, "rel": rel}
+                if rel:
+                    docs.append(doc)
+                member_proj.append({
+                    "session_id": "",
+                    "stage": stage,
+                    "lane": store_lane,
+                    "kind": m.get("kind") or "",
+                    "status": m.get("status") or "imported",
+                    "label": title or rel,
+                    "created_at": _created_at(m),
+                    "live": False,
+                    "discovered": True,
+                    "docs": [doc] if rel else [],
+                    "summary_ref": "",
+                })
+            history = [{
+                "stage": stage,
+                "session_id": "",
+                "store_lane": store_lane,
+                "status": "imported",
+                "state": "done",
+                "live": False,
+                "doc_count": len(docs),
+                "docs": docs,
+                "summary_ref": "",
+            }]
+            out.append({
+                "effort_id": sid,
+                "chain_id": sid,
+                "kind": "imported",
+                "current_stage": stage,
+                "status": "imported",
+                "live": False,
+                "created_at": created,
+                "stage_history": history,
+                "members": member_proj,
+                "effort_managed": False,
+                "discovered": True,
+                "provenance": "imported",
+            })
+    return out
+
+
 def build_effort_view(folder_path, project_id) -> list:
     """Group a project's registry records into a list of efforts, ONE per chain.
 
@@ -360,6 +464,20 @@ def build_effort_view(folder_path, project_id) -> list:
         except Exception:
             continue
         efforts.append(eff)
+    # W3 #3 — fold brownfield/DISCOVERED efforts in as first-class efforts (their
+    # docs grouped as members, not loose singletons). Discovered ids are ``dir::…``
+    # — a namespace disjoint from managed session ids — so a collision with a
+    # registry effort is not expected, but is guarded by id all the same.
+    seen_ids = {e.get("effort_id") for e in efforts}
+    seen_ids |= {e.get("chain_id") for e in efforts}
+    try:
+        for de in _efforts_from_discovered(folder_path, project_id):
+            if de.get("effort_id") in seen_ids or de.get("chain_id") in seen_ids:
+                continue
+            efforts.append(de)
+            seen_ids.add(de.get("effort_id"))
+    except Exception:
+        pass
     # Newest-first by the effort's (root) created_at; effort_id as a stable
     # tiebreaker so equal-created_at efforts have a DEFINED total order (F3).
     efforts.sort(key=lambda e: (-float(e.get("created_at") or 0.0),
