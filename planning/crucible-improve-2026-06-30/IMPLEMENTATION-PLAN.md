@@ -118,10 +118,24 @@ W8's substrate. Each wave ships independently on merge; no big-bang.
   **`Kill→Boneyard`** (archive + reap, better icon). Remove the redundant `🗑` `.hardkill`
   and `✕` `.delete` (`anchor_gui.py:4705-4722`); update JS listeners + CSS selectors in
   lockstep. (No OS process suspension — `×` performs a graceful stop, not `SuspendThread`.)
+- **#5/#13 durability (W6 amendment) — close must be WARM-resumable, not just worktree-
+  preserving.** Build-time discovery: `_build_continue_seed` reads cache/main-persisted
+  docs ONLY (never the worktree), and the boot orphan-reaper deletes a no-live-PTY
+  worktree on restart — so a bare "preserve worktree" close reopens COLD and loses the
+  work. Therefore `close_session` MUST, before returning: (a) `capture_session_docs(...)`
+  to persist produced docs to main (like `kill`) so they survive the boot reaper and the
+  resume seed can read them; and (b) schedule the same best-effort/idempotent
+  session-summary hook `finish`/`kill` use, so `_build_continue_seed` finds a cached
+  summary and the W3 resume opens WARM. Also teach `worktrees.reap_orphans` + its boot
+  caller (`anchor_gui.py:~18243`) to KEEP worktrees whose registry record is
+  `STATUS_IDLE` (parked/reopenable), not only those with a live PTY.
 - **STUB GATE:** after `×`, the session's PTY is reaped BUT the worktree + registry record
   persist (status reopenable), and a subsequent resume reopens it via W3; the panel
   exposes exactly close-`×` + `Kill→Boneyard`; `Kill→Boneyard` reaps + archives to the
-  boneyard index.
+  boneyard index. **PLUS (amendment):** the REAL `_build_continue_seed` (not a hand-fed
+  `seed_context`) yields a NON-EMPTY warm seed for the closed managed session; close
+  persists the session's docs to main (they survive a simulated reaper pass); and a
+  `STATUS_IDLE` worktree is NOT removed by `reap_orphans`.
 - **SIGN-OFF (Playwright + screenshot):** every panel shows two controls; `×` then reopen
   carries on warm; no second destructive control; no orphaned PTY after `×`.
 
