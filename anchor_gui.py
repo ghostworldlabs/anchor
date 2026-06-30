@@ -3700,7 +3700,10 @@ def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
             "build pins one on GREEN.</div>")
     return (
         "<div class='panel deliverables-panel'>"
-        "<details open class='deliv-details'>"
+        # crucible-improve #4 (W5): deliverables start COLLAPSED — drop the
+        # `open` attribute so the panel renders folded by default (the
+        # disc-caret CSS keys off [open]/:not([open]) and flips automatically).
+        "<details class='deliv-details'>"
         f"<summary class='ptitle' style='cursor:pointer; outline:none'>"
         f"<span class='disc-caret' style='font-size:11px; transition:transform 0.12s; display:inline-block; margin-right:4px'>&#9662;</span>"
         f"&#128230; Deliverables <span class='cnt'>{len(pinned)}</span>"
@@ -4845,8 +4848,13 @@ def render_project_window_html(project_id: str) -> str:
         # v6 Wave 3: the body is the FREE-resize box (resize:both) so dragging the
         # panel's bottom-right corner resizes the whole panel — width AND height,
         # not just the terminal sub-pane. Size persists per session (_panelRects).
+        # crucible-improve #8 (W5): `width:100%` so the .pin box FILLS its column
+        # by default instead of shrink-wrapping to xterm's 80-col min-width under
+        # `resize:both`. A user drag still sets an inline width (overrides this);
+        # maximize clears the inline width and the fixed .maxd fill takes over.
         ".panel .pin{padding:15px 18px;display:flex;flex-direction:column;gap:13px;"
-        "resize:both;overflow:auto;min-height:160px;min-width:360px;max-width:100%}"
+        "width:100%;resize:both;overflow:auto;min-height:160px;min-width:360px;"
+        "max-width:100%}"
         ".panel .panel-body{min-height:60px}"
         ".panelbtn{width:22px;height:20px;line-height:18px;text-align:center;"
         "border-radius:5px;border:1px solid var(--border);background:var(--surface);"
@@ -8006,6 +8014,15 @@ function openPanel(sessionId) {
   _loadChainBreadcrumb(sessionId, crumb);
   _loadGrassOriginChip(sessionId, crumb);
   _wirePanelResize(sessionId, tpane);
+  // crucible-improve #8 (W5): fit the terminal to its now-full-width column ON
+  // OPEN so a freshly-opened terminal spans the full column immediately — not
+  // only after a maximize→restore. The .pin CSS now carries width:100%, so by
+  // the time the panel paints the host is full width; re-fit once now and once
+  // after layout settles (guarded: _fitPanelTerminal no-ops without a live term).
+  if (isLive) {
+    _fitPanelTerminal(sessionId);
+    setTimeout(function () { _fitPanelTerminal(sessionId); }, 80);
+  }
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
 }
@@ -10285,7 +10302,7 @@ def render_deliverables_html(project_id: str, folder_path: str) -> str:
     except Exception:
         records = []
 
-    out = ["<h2>Deliverables</h2>"]
+    out = []
 
     # Pinned deliverables with Run/Stop (the runnable Anchor deliverable).
     if pinned:
@@ -10354,7 +10371,13 @@ def render_deliverables_html(project_id: str, folder_path: str) -> str:
 
     if not pinned and not records:
         out.append("<p style='color:#8a90a2'>No deliverables yet.</p>")
-    return "".join(out)
+    # crucible-improve #4 (W5): wrap the deliverables in a <details> so they
+    # render COLLAPSED by default (no `open` attribute); the "Deliverables"
+    # heading becomes the always-visible <summary> disclosure.
+    return ("<details class='deliv-collapse'>"
+            "<summary class='deliv-summary'><h2 style='display:inline'>"
+            "Deliverables</h2></summary>"
+            + "".join(out) + "</details>")
 
 
 # ── Change operations ──────────────────────────────────────────────────
