@@ -11,7 +11,16 @@ if [ "$_dir" != "$_self" ] && [ -n "$_dir" ]; then
   cd "$_dir" || exit 2
 fi
 shopt -s nullglob
-exec python -m pytest -v \
+# Neuter the auto-loaded `langsmith` pytest plugin: it instruments the session
+# and FLUSHES traces over the network at sessionfinish, which blocks interpreter
+# shutdown ~20s AFTER pytest already printed "N passed" — pushing the gate past
+# the orchestrator's 120s wall timeout (killed → exit_code null → not green) even
+# though every test passed. No test in this suite uses langsmith, so disabling
+# the plugin (and its tracing) is a pure no-op for coverage. Belt-and-suspenders:
+# `-p no:langsmith_plugin` stops the plugin loading; the env vars stop any flush.
+export LANGSMITH_TRACING=false
+export LANGCHAIN_TRACING_V2=false
+exec python -m pytest -v -p no:langsmith_plugin \
   tests/test_zombie_hunter.py tests/test_swarm_zombie_coverage.py tests/test_cancel_liveness.py \
   tests/test_session_registry.py tests/test_history.py tests/test_session_continue.py \
   tests/test_effort_view_v12.py tests/test_context_handoff_v12.py tests/test_deliverables.py \

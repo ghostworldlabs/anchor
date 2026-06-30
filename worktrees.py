@@ -279,6 +279,25 @@ def list_managed_worktrees(base=None) -> list:
     return out
 
 
+def _is_parked_idle(session_id):
+    """True if ``session_id``'s registry record is parked at ``STATUS_IDLE`` (W6).
+
+    The crucible-improve W6 graceful panel "×" CLOSE stops the PTY but KEEPS the
+    worktree + registry record at ``STATUS_IDLE`` so the session is resumable WARM
+    (W3/W4). The boot orphan-reaper must therefore KEEP such a worktree even though
+    it has no live PTY — otherwise a parked session's worktree is reaped on restart
+    and the work is lost. Best-effort: any registry-lookup failure → NOT parked
+    (the pre-W6 reap behavior), never raises. Imported lazily to avoid a
+    module-load cycle (``session_registry`` is a higher-level module).
+    """
+    try:
+        import session_registry as _sr
+        rec = _sr.get_session(session_id)
+        return bool(rec) and rec.get("status") == _sr.STATUS_IDLE
+    except Exception:
+        return False
+
+
 def reap_orphans(active_session_ids, base=None, project_id=None):
     """Remove managed worktrees whose session id is NOT in the active set.
 
@@ -291,12 +310,19 @@ def reap_orphans(active_session_ids, base=None, project_id=None):
         {"reaped": [session_id, ...], "kept": [session_id, ...],
          "errors": [{"session_id":..., "reason":...}]}
 
+    crucible-improve W6: a worktree whose registry record is parked at
+    ``STATUS_IDLE`` (a graceful panel "×" close) is KEPT even when it has no live
+    PTY — such a session is reopenable/resumable and its worktree must survive a
+    restart (see :func:`_is_parked_idle`). The boot caller passes the live-PTY ids
+    as ``active_session_ids``; the IDLE keep is consulted from the registry here so
+    it holds for that caller AND a direct call.
+
     Never raises.
     """
     active = set(active_session_ids or ())
     reaped, kept, errors = [], [], []
     for sid in list_managed_worktrees(base):
-        if sid in active:
+        if sid in active or _is_parked_idle(sid):
             kept.append(sid)
             continue
         res = remove_worktree(sid, project_id=project_id, base=base)

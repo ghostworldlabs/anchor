@@ -2158,6 +2158,77 @@ def capture_session_docs(session_id, project_id=None, record=None):
         return {"ok": False, "reason": "error", "persisted": []}
 
 
+# ── Graceful CLOSE — park a session, resumable WARM (crucible-improve W6) ─────
+
+def close_session(session_id, project_id=None):
+    """GRACEFUL CLOSE (the panel "×") — park a session so it resumes WARM (W6).
+
+    DISTINCT from both :func:`kill` and :func:`delete_session`. The panel "×" is a
+    NON-destructive close: it STOPS the live PTY but PRESERVES the worktree and
+    KEEPS the registry record — re-statused ``STATUS_IDLE`` (parked / grey /
+    reopenable) when it was RUNNING — so the session can be resumed later (W3/W4).
+    No worktree removal, no record deletion, no auto-advance (a park is NOT a
+    finish).
+
+    W6 amendment — a bare "preserve the worktree" close would reopen COLD: the
+    boot orphan-reaper deletes a no-live-PTY worktree on restart, and
+    :func:`anchor_gui._build_continue_seed` reads cache / main-persisted docs ONLY
+    (never the worktree). So before returning, close MUST PERSIST the session's
+    produced docs into the MAIN project (:func:`capture_session_docs`, exactly like
+    :func:`kill`) so they survive the boot reaper and feed the resume seed. The
+    ``/api/rnd/term_close`` endpoint ALSO schedules the same best-effort background
+    session-summary hook ``finish``/``kill`` use, so the resume opens WARM; and
+    :func:`worktrees.reap_orphans` is taught to KEEP a ``STATUS_IDLE`` worktree.
+
+    Tolerant + best-effort: an already-dead / never-live PTY, a missing record, or
+    a persist failure never blocks the park. Returns ``{"ok": True, "session_id",
+    "pty_killed", "status", "docs"}`` — or ``{"ok": False, "reason":
+    "unknown-session"}`` when the id has no registry record (the panel close then
+    just tears down its DOM).
+    """
+    record = _reg.get_session(session_id)
+    if record is None:
+        return {"ok": False, "session_id": session_id,
+                "reason": "unknown-session"}
+    if project_id is None:
+        project_id = record.get("project_id") or None
+
+    # Stop the live PTY (tolerant of an already-dead / never-live session).
+    pty_killed = False
+    try:
+        _pty.kill(session_id)
+        pty_killed = True
+    except _pty.UnknownSession:
+        pty_killed = False
+
+    # W6 amendment: persist the produced docs into the MAIN project (like kill)
+    # BEFORE anything could reap the worktree (the boot reaper / a later restart),
+    # so they survive and the W3 resume seed (cache / main-only) can read them.
+    # Best-effort — never blocks the park.
+    docs_out = capture_session_docs(session_id, project_id=project_id,
+                                    record=record)
+
+    # KEEP the worktree (NO remove_worktree) and KEEP the registry record. Park a
+    # still-RUNNING session at STATUS_IDLE (grey, reopenable); leave an already
+    # terminal/idle record as-is — a historical panel close must never "un-finish"
+    # a DONE/FAILED session.
+    status = record.get("status")
+    if status == _reg.STATUS_RUNNING:
+        try:
+            _reg.update_session(session_id, status=_reg.STATUS_IDLE)
+            status = _reg.STATUS_IDLE
+        except KeyError:
+            pass
+
+    return {
+        "ok": True,
+        "session_id": session_id,
+        "pty_killed": pty_killed,
+        "status": status,
+        "docs": docs_out,
+    }
+
+
 # ── True session delete (v9 Wave 1) ──────────────────────────────────────────
 #
 # DELETE is DISTINCT from KILL (v8). KILL ends a *running* session: it reaps the

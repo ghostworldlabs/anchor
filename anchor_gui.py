@@ -4864,20 +4864,25 @@ def render_project_window_html(project_id: str) -> str:
         # shows its 'active' accent so it reads as a toggle.
         ".panelbtn.max:hover{color:var(--text);border-color:var(--accent)}"
         ".panel.maxd .panelbtn.max{color:var(--accent);border-color:var(--accent)}"
-        # v5 Wave 1: the panel header carries THREE distinct controls —
+        # crucible-improve W6 — the session panel header carries TWO lifecycle
+        # controls (alongside the – minimize / ▢ maximize WINDOW controls),
+        # unifying the old redundant close/hardkill/delete trio:
         #   .min   '–'  minimize (keeps the session running)
-        #   .close '×'  CLOSE-to-tile (tears down the panel DOM only; the session
-        #               record + lane tile persist; reopenable). NON-destructive.
-        #   .hardkill '🗑' KILL (confirm-gated → term_kill → reap PTY + worktree +
-        #               drop the tile). Visually distinct (danger glyph/color).
+        #   .close '×'  GRACEFUL CLOSE — stops the PTY but PRESERVES the worktree
+        #               + KEEPS the registry record (parked STATUS_IDLE, resumable
+        #               WARM via W3/W4). POST /api/rnd/term_close also persists the
+        #               produced docs to MAIN + schedules a background summary so a
+        #               later resume opens WARM, not cold. NON-destructive.
+        #   .killbone   'Kill → Boneyard' — the ONE destructive control (replaces
+        #               the old 🗑 .hardkill + ✕ .delete pair): confirm-gated →
+        #               term_kill → archive to the Boneyard + reap PTY + worktree.
         ".panelbtn.close:hover{color:var(--text);border-color:var(--accent)}"
-        ".panelbtn.hardkill{color:var(--danger);border-color:var(--border)}"
-        ".panelbtn.hardkill:hover{color:#fff;background:var(--danger);"
+        ".panelbtn.killbone{color:var(--danger);border-color:var(--border)}"
+        ".panelbtn.killbone:hover{color:#fff;background:var(--danger);"
         "border-color:var(--danger)}"
-        # v9 Wave 1: the TRUE-DELETE control (red '✕'). Visually + behaviorally
-        # DISTINCT from .hardkill (🗑): delete removes the session record entirely
-        # (kill only ends a running session). Always-on danger border + bold red
-        # glyph, separated from the other controls, filling solid red on hover.
+        # .panelbtn.delete is RETAINED for the v12 bottom-dock TRUE-delete control
+        # (id=dockDelete, class 'ctl panelbtn delete'); the session PANEL no longer
+        # uses it — W6 unified the panel's destructive controls into .killbone.
         ".panelbtn.delete{color:#fff;background:var(--danger);"
         "border-color:var(--danger);font-weight:700;margin-left:6px}"
         ".panelbtn.delete:hover{color:var(--danger);background:transparent;"
@@ -7827,17 +7832,18 @@ function openPanel(sessionId) {
   // so the toggle is omitted there.
   var engEl = null;
   if (isLive) engEl = _buildEngineToggle(sessionId, s);
-  // v5 Wave 1 — THREE visually + behaviorally distinct panel-header controls:
+  // crucible-improve W6 — UNIFIED panel-header controls. Alongside the window
+  // controls (– minimize / ▢ maximize) the panel now exposes exactly TWO
+  // lifecycle controls, collapsing the old redundant close/hardkill/delete trio:
   //   (a) '–'  minimize  — collapse to a header strip; session keeps running.
-  //   (b) '×'  CLOSE     — close-to-tile: tear down the panel DOM + transport
-  //        ONLY. Does NOT kill the PTY / remove the worktree / drop the registry
-  //        record / remove the lane tile. The session stays reopenable (click its
-  //        tile to re-attach a live terminal or re-show the summary). Live AND
-  //        historical panels use this same non-destructive close.
-  //   (c) '🗑' KILL      — deliberate hard-kill, confirm-gated. Reaps the PTY +
-  //        worktree (POST /api/rnd/term_kill), removes the MANAGED record AND the
-  //        session's lane tile (gone). For a historical/non-live session with no
-  //        live PTY, Kill still removes the tile/record cleanly (no orphan).
+  //   (b) '×'  CLOSE     — GRACEFUL close (W6): stops the PTY but PRESERVES the
+  //        worktree + KEEPS the registry record (parked STATUS_IDLE, resumable
+  //        WARM via W3/W4). POST /api/rnd/term_close persists the produced docs to
+  //        MAIN + schedules a background summary so a later resume opens WARM, not
+  //        cold. NON-destructive — the tile stays (greyed/idle, reopenable).
+  //   (c) Kill → Boneyard — the ONE destructive control (replaces the old 🗑
+  //        hardkill + ✕ delete pair): confirm-gated → POST /api/rnd/term_kill
+  //        (archive to the Boneyard + reap PTY + worktree), then drop the tile.
   var minBtn = document.createElement('button');
   minBtn.className = 'panelbtn min';
   minBtn.title = 'Minimize (keeps the session running)';
@@ -7853,26 +7859,16 @@ function openPanel(sessionId) {
   maxBtn.onclick = function (e) { e.stopPropagation(); maximizePanel(sessionId); };
   var closeBtn = document.createElement('button');
   closeBtn.className = 'panelbtn close';
-  closeBtn.title = 'Close panel (keeps the session — reopen from its tile)';
+  closeBtn.title = 'Close (stops the session but keeps it — reopens WARM from its tile)';
   closeBtn.textContent = '×';
   closeBtn.onclick = function (e) { e.stopPropagation(); closePanel(sessionId); };
+  // The ONE destructive control: Kill → Boneyard. Confirm-gated → term_kill
+  // (archive to the Boneyard + reap PTY + worktree), then the tile is dropped.
   var killBtn = document.createElement('button');
-  killBtn.className = 'panelbtn hardkill';
-  killBtn.title = 'Kill this session (terminate + remove its tile)';
-  killBtn.textContent = '🗑';
+  killBtn.className = 'panelbtn killbone';
+  killBtn.title = 'Kill → Boneyard (archive + reap this session)';
+  killBtn.textContent = '🪦';
   killBtn.onclick = function (e) { e.stopPropagation(); killPanel(sessionId); };
-  //   (d) '✕'  DELETE     — v9 Wave 1: TRUE delete, the red top-right control.
-  //        VISUALLY + behaviorally DISTINCT from KILL (🗑): kill ENDS a *running*
-  //        session (keeps the record so it's resumable); delete REMOVES the
-  //        record entirely (POST /api/rnd/term_delete) — the registry record +
-  //        effort pointer-records + cached summary are dropped, so the tile is
-  //        gone and STAYS gone across a reload. The produced DOCUMENTS are KEPT
-  //        on disk (Option A). Confirm-gated.
-  var delBtn = document.createElement('button');
-  delBtn.className = 'panelbtn delete';
-  delBtn.title = 'Delete this session from Anchor (removes the record; keeps its documents)';
-  delBtn.textContent = '✕';
-  delBtn.onclick = function (e) { e.stopPropagation(); deletePanel(sessionId); };
   bar.appendChild(dot); bar.appendChild(title);
   bar.appendChild(skillEl); bar.appendChild(meta);
   bar.appendChild(crumb);
@@ -7886,7 +7882,6 @@ function openPanel(sessionId) {
   }
   bar.appendChild(minBtn); bar.appendChild(maxBtn);
   bar.appendChild(closeBtn); bar.appendChild(killBtn);
-  bar.appendChild(delBtn);
 
   // Panel inner body STACKS (mockup Paradigm-2): a split summary block on TOP
   // (materials left + role-tagged doc links right, EQUAL height), then a
@@ -8978,15 +8973,27 @@ function _closePanel(sessionId) {
   delete PANELS[sessionId];
 }
 
-// closePanel: the panel "×" = CLOSE-to-tile. Tears down the panel DOM + transport
-// ONLY (via _closePanel). It does NOT kill the PTY, NOT remove the worktree, NOT
-// remove the registry record, NOT remove the lane tile — the session stays
-// reopenable (click its tile → laneTileClick → openPanel re-attaches a live
-// terminal for a running session, or re-shows the summary for a historical one).
-// Live AND historical panels use this same non-destructive close.
-function closePanel(sessionId) {
+// closePanel: the panel "×" = GRACEFUL CLOSE (crucible-improve W6). Stops the
+// live PTY but PRESERVES the worktree + KEEPS the registry record — the session
+// is PARKED (STATUS_IDLE, grey, reopenable), NOT killed. POST /api/rnd/term_close
+// persists the produced docs into MAIN (so the boot reaper can't lose them and
+// the W3 resume seed reads them) + schedules a background session-summary, so a
+// later resume (click the tile) opens WARM, not cold. The tile is NOT removed —
+// the record persists. Best-effort: a 404 (no live PTY / historical panel) or any
+// error still tears down the panel DOM. The board is refreshed so the now-parked
+// tile reflects its idle (grey) status.
+async function closePanel(sessionId) {
+  try {
+    var r = await _postJson('/api/rnd/term_close', {session: sessionId});
+    var data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      await _postJson('/api/rnd/term_close', {session: sessionId});
+    }
+  } catch (e) { /* best-effort; still tear down the panel DOM */ }
   _closePanel(sessionId);
   renderSessionBar();
+  // Reflect the parked (idle/grey) tile — the record persists, so the tile stays.
+  refreshBoard();
 }
 
 // _removeSessionTile: drop the lane-board tile for a session from the DOM (used by
@@ -16874,6 +16881,33 @@ function startZombieTerminal(btn) {
                         auto_build = None
                 self._send_json({"ok": True, "result": out,
                                  "auto_build": auto_build})
+
+        elif self.path == "/api/rnd/term_close":
+            # crucible-improve W6 — the panel "×" GRACEFUL CLOSE. Stop the PTY but
+            # PRESERVE the worktree + KEEP the registry record (parked STATUS_IDLE,
+            # resumable WARM via W3/W4). close_session persists the produced docs to
+            # MAIN (so the boot reaper can't lose them and the W3 resume seed reads
+            # them); here we ALSO schedule the SAME best-effort, non-blocking,
+            # idempotent background session-summary hook kill/finish use, so a later
+            # resume opens WARM, not cold. Token-gated by the do_POST middleware. A
+            # park is NOT a finish — never auto-advances. Best-effort throughout.
+            session = (body.get("session", "") or "").strip()
+            if not session:
+                self._send_json({"ok": False, "error": "session required"}, 400)
+            elif _termsess.get_session(session) is None:
+                self._send_json({"ok": False,
+                                 "error": f"unknown session: {session}",
+                                 "reason": "unknown-session"}, 404)
+            else:
+                rec = _termsess.get_session(session)
+                out = _termsess.close_session(session)
+                try:
+                    _trigger_session_summary_on_finish(
+                        rec.get("project_id") if rec else None,
+                        rec.get("lane") if rec else None, session)
+                except Exception:
+                    pass
+                self._send_json({"ok": True, "result": out})
 
         elif self.path == "/api/rnd/term_delete":
             # v9 Wave 1 — TRUE session delete (DISTINCT from term_kill). Removes
