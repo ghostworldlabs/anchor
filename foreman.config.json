@@ -5,7 +5,7 @@
     "plan": "planning/crucible-improve-2026-06-30/IMPLEMENTATION-PLAN.md",
     "execution_log": "planning/crucible-improve-2026-06-30/EXECUTION-LOG.md"
   },
-  "test_command": "python -m pytest -v (glob tests/test_*_w[0-9].py auto-includes per-wave tests; plan declaration governs)",
+  "test_command": "bash tests-gate.sh wrapper — runs curated list + tests/test_*_w[0-9].py glob under git-bash (cmd.exe can't glob); plan declaration governs",
   "git": {
     "enabled": true,
     "branch": "foreman/crucible-improve-2026-06-30"
