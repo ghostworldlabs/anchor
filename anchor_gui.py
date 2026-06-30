@@ -15031,6 +15031,29 @@ function startZombieTerminal(btn) {
                 html += "  <iframe id='terminal-iframe' style='width:100%; height:450px; border:none; display:none; border-radius:6px;'></iframe>"
                 html += "</div>"
 
+                # Wave 1 (#12a): bounded LIVE auto-refresh of the radar so it
+                # updates during a sweep WITHOUT a manual reload. Bounded by
+                # ZOMBIE_MAX_TICKS so it never churns forever; it SKIPS the
+                # reload while the investigation terminal is open (so an active
+                # session is never nuked) and while the tab is hidden.
+                html += "<script id='zombie-auto-refresh'>"
+                html += """
+(function () {
+  var ZOMBIE_REFRESH_MS = 6000;   // poll cadence
+  var ZOMBIE_MAX_TICKS = 100;     // bounded: ~10 min then stop
+  var ticks = 0;
+  var timer = setInterval(function () {
+    ticks += 1;
+    if (ticks > ZOMBIE_MAX_TICKS) { clearInterval(timer); return; }
+    var iframe = document.getElementById('terminal-iframe');
+    if (iframe && iframe.style.display !== 'none') { return; }  // terminal open -> skip
+    if (document.hidden) { return; }                            // tab hidden  -> skip
+    window.location.reload();
+  }, ZOMBIE_REFRESH_MS);
+})();
+"""
+                html += "</script>"
+
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return

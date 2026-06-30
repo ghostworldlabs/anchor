@@ -250,6 +250,13 @@ def _valid_lanes():
     bare PTY, like ``grass``), it is NOT a trio board column (excluded from
     ``anchor_gui._REGISTRY_LANE_TO_COLUMN``), and it is NOT a planning lane (so
     :func:`auto_advance_planning_to_build` never advances it).
+
+    ``zombie`` (v13 Wave 1 / #12b) is the dashboard-scoped lane for the Zombie
+    Hunter investigation terminal (``/api/rnd/zombie_terminal_start`` under the
+    special ``__dashboard__`` project). Like ``general`` it is bare (NOT in
+    :data:`LANE_SKILL` — its briefing is folded in via ``seed_context``), NOT a
+    trio board column, and NOT a planning lane. Without it a dashboard zombie
+    terminal launch was rejected as an unknown lane (HTTP 400).
     """
     lanes = set()
     try:
@@ -258,6 +265,7 @@ def _valid_lanes():
         pass
     lanes.add("grass")
     lanes.add("general")
+    lanes.add("zombie")
     if _lanes is not None:
         try:
             lanes.update(_lanes.LANES.keys())
@@ -1302,15 +1310,25 @@ def finish_stage(session_id, stage=None, store_lane=None, project_id=None):
 # we observed nothing), never an exception.
 
 #: The byte budget the observed PTY output is measured against. A full Claude
-#: context is ~200k tokens ≈ a few hundred KB of conversational text; we size the
-#: budget so a genuinely long session crosses the threshold. Overridable via env
-#: for tests (``ANCHOR_CONTEXT_FULL_BUDGET``) so a small seeded buffer can push the
-#: ratio over the line deterministically without writing hundreds of KB.
-CONTEXT_FULL_BUDGET_BYTES = 200_000
+#: context is ~200k tokens ≈ on the order of ~1 MB of conversational text; we size
+#: the budget at ~1 MB (v13 Wave 1 / #7 — raised from the old 200 KB, which a big
+#: skill seed alone could blow past on a fresh session, firing a false warning).
+#: Overridable via env for tests (``ANCHOR_CONTEXT_FULL_BUDGET``) so a small seeded
+#: buffer can push the ratio over the line deterministically without writing ~1 MB.
+CONTEXT_FULL_BUDGET_BYTES = 1_000_000
 
 #: Fraction of the budget at/above which ``over_threshold`` flips True. Overridable
 #: via ``ANCHOR_CONTEXT_FULL_RATIO`` (a float in 0..1; a bad value falls back).
 CONTEXT_FULL_RATIO = 0.8
+
+#: A FIXED allowance (bytes) subtracted from the observed PTY output before the
+#: fullness ratio is computed (v13 Wave 1 / #7). The first thing a fresh session
+#: prints is its one-time SKILL SEED — that is not conversation growth, so we
+#: discount a fixed slice of it. The warning then reflects REAL growth since the
+#: seed, not the seed itself. Capped at the budget at use-time (you can never
+#: subtract more than the whole budget). Overridable via
+#: ``ANCHOR_CONTEXT_SEED_ALLOWANCE``.
+CONTEXT_SEED_ALLOWANCE_BYTES = 300_000
 
 
 def _context_budget_bytes():
@@ -1339,17 +1357,39 @@ def _context_full_ratio():
     return CONTEXT_FULL_RATIO
 
 
+def _context_seed_allowance_bytes():
+    """The fixed seed allowance to discount (env-overridable, never negative).
+
+    Falls back to :data:`CONTEXT_SEED_ALLOWANCE_BYTES`. A ``0`` value is honored
+    (no allowance). Capping against the budget happens at the call site.
+    """
+    raw = os.environ.get("ANCHOR_CONTEXT_SEED_ALLOWANCE")
+    if raw is not None and raw.strip():
+        try:
+            v = int(float(raw))
+            if v >= 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return CONTEXT_SEED_ALLOWANCE_BYTES
+
+
 def context_fullness(session_id):
     """Estimate how "full" a live session's context is (v12 Wave 8).
 
     A stdlib heuristic over the session's LIVE PTY output buffer: the observed
     output size is a cheap, monotonically-growing proxy for how much conversation
     has accumulated. Returns ``{"ratio": float in 0..1, "over_threshold": bool,
-    "observed_bytes": int, "budget": int}`` where:
+    "observed_bytes": int, "growth_bytes": int, "budget": int}`` where:
 
-      - ``ratio`` = ``min(1.0, observed_bytes / budget)``;
-      - ``over_threshold`` = ``ratio >= ANCHOR_CONTEXT_FULL_RATIO`` (default 0.8);
       - ``observed_bytes`` = the live PTY buffer length (``read_since`` cursor 0);
+      - ``growth_bytes`` = ``max(0, observed_bytes - seed_allowance)`` — the bytes
+        printed BEYOND the one-time skill seed (v13 Wave 1 / #7): the seed is not
+        conversation growth, so a fixed allowance (capped at the budget) is
+        discounted before the ratio so a freshly-seeded session does not falsely
+        read as "full";
+      - ``ratio`` = ``min(1.0, growth_bytes / budget)``;
+      - ``over_threshold`` = ``ratio >= ANCHOR_CONTEXT_FULL_RATIO`` (default 0.8);
       - ``budget`` = :data:`CONTEXT_FULL_BUDGET_BYTES` (env-overridable).
 
     BEST-EFFORT — never raises. A dead / unknown / un-resolvable session honestly
@@ -1358,7 +1398,7 @@ def context_fullness(session_id):
     """
     budget = _context_budget_bytes()
     out = {"ratio": 0.0, "over_threshold": False, "observed_bytes": 0,
-           "budget": budget}
+           "growth_bytes": 0, "budget": budget}
     try:
         res = _pty.read_since(session_id, 0)
     except _pty.UnknownSession:
@@ -1372,8 +1412,18 @@ def context_fullness(session_id):
         observed = len(text.encode("utf-8", "replace"))
     except Exception:
         observed = len(text)
-    ratio = min(1.0, observed / float(budget)) if budget else 0.0
+    # Discount a FIXED seed allowance (#7): the first thing a fresh session prints
+    # is its one-time skill seed, which is NOT conversation growth. Cap the
+    # allowance at the budget so we never subtract more than the whole budget
+    # (keeps tiny deterministic test budgets sane). The ratio is computed on the
+    # REAL growth beyond the seed; observed_bytes is still reported raw.
+    allowance = min(_context_seed_allowance_bytes(), budget) if budget else 0
+    growth = observed - allowance
+    if growth < 0:
+        growth = 0
+    ratio = min(1.0, growth / float(budget)) if budget else 0.0
     out["observed_bytes"] = observed
+    out["growth_bytes"] = growth
     out["ratio"] = ratio
     out["over_threshold"] = ratio >= _context_full_ratio()
     return out

@@ -225,6 +225,27 @@ def test_unknown_lane_creates_no_worktree_pty_or_session(env):
     assert rec["lane"] == "grass"
 
 
+# ── v13 Wave 1 (#12b): dashboard-scoped zombie terminal returns a record ─────
+
+def test_zombie_lane_dashboard_scope_starts_session(env):
+    """``/api/rnd/zombie_terminal_start`` launches a ``zombie`` lane session on
+    the special ``__dashboard__`` project. Before #12b the ``zombie`` lane was
+    an unknown lane → ``TerminalSessionError`` → the endpoint returned 400. Now
+    it must start cleanly and return a registered RUNNING session record (the
+    bare-shell briefing is folded in via ``seed_context``)."""
+    ts, reg = env["ts"], env["reg"]
+    rec = ts.start_session(
+        "__dashboard__", "zombie", backend="claude",
+        label="zombie-hunter", seed_context="## Zombie sweep briefing\n")
+    assert rec is not None
+    assert rec.get("session_id")
+    assert rec["lane"] == "zombie"
+    assert rec["status"] == reg.STATUS_RUNNING
+    # The session is registered + live (so the endpoint hands back a real id).
+    assert reg.get_session(rec["session_id"]) is not None
+    assert rec["session_id"] in set(env["pty"].live_sessions())
+
+
 # ── FIX 1: register_session failure rolls back BOTH PTY and worktree ─────────
 
 def test_register_failure_rolls_back_pty_and_worktree(env, monkeypatch):

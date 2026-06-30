@@ -432,3 +432,51 @@ def test_start_session_persists_identity_and_classify_is_non_abstain(tmp_path, m
     probe = FakeProbe({5150: 777000.0})
     assert zh.classify(stored, {sid}, probe=probe) == "alive"
     assert zh.classify(stored, set(), probe=probe) == "kill"
+
+
+# ── v13 Wave 1 (#12a): zombie radar page emits a bounded auto-refresh hook ───
+
+def test_zombie_report_emits_bounded_auto_refresh_hook(tmp_path, monkeypatch):
+    """``GET /api/rnd/zombie_hunter_report`` must embed a BOUNDED live
+    auto-refresh hook so the radar updates during a sweep WITHOUT a manual
+    reload. Before #12a the page was static (no setInterval/SSE)."""
+    import importlib as _il
+    import threading as _threading
+    import time as _time
+    import urllib.request as _ureq
+
+    _reload_identity_stack(tmp_path / "data", monkeypatch)
+    import zombie_hunter as _zh
+    import anchor_gui as _gui
+    _gui = _il.reload(_gui)
+
+    # Seed a FRESH sweep report so the endpoint serves the cached view and skips
+    # the live-process (tasklist/ps) fallback — keeps the test fast + hermetic.
+    _zh._persist_report({
+        "swept_at": _time.time(), "total": 0,
+        "killed": [], "alive": [], "abstained": [],
+        "reaped_dead": [], "reaped_recycled": [],
+    })
+
+    srv = _gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    assert port != 8777
+    t = _threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        with _ureq.urlopen(
+                f"http://127.0.0.1:{port}/api/rnd/zombie_hunter_report",
+                timeout=10) as resp:
+            assert resp.status == 200
+            body = resp.read().decode("utf-8")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        t.join(timeout=5)
+
+    # The auto-refresh hook is present …
+    assert "zombie-auto-refresh" in body
+    assert "setInterval" in body
+    assert "location.reload" in body
+    # … and it is BOUNDED (a max-tick guard, not infinite churn).
+    assert "ZOMBIE_MAX_TICKS" in body

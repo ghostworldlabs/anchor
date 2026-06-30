@@ -300,3 +300,28 @@ def test_context_fullness_unknown_session_is_zero(env):
     cf = ts.context_fullness("no-such-session")
     assert cf["ratio"] == 0.0
     assert cf["over_threshold"] is False
+
+
+def test_fresh_seeded_session_not_over_threshold_default_budget(env, monkeypatch):
+    """v13 Wave 1 (#7): a freshly-seeded stub session is NOT over threshold under
+    the DEFAULT (~1 MB) budget. The one-time skill seed is the first thing a new
+    session prints; it is discounted by the fixed seed allowance, so a brand-new
+    session no longer fires a FALSE context-full warning (the bug: the old 200 KB
+    budget measured the seed itself)."""
+    ts = env["ts"]
+    # Defaults ONLY — no budget / ratio / seed-allowance overrides.
+    monkeypatch.delenv("ANCHOR_CONTEXT_FULL_BUDGET", raising=False)
+    monkeypatch.delenv("ANCHOR_CONTEXT_FULL_RATIO", raising=False)
+    monkeypatch.delenv("ANCHOR_CONTEXT_SEED_ALLOWANCE", raising=False)
+    sess = ts.start_session(env["pid"], "research", backend="claude",
+                            effort_managed=True)
+    sid = sess["session_id"]
+    cf = ts.context_fullness(sid)
+    assert cf["over_threshold"] is False
+    assert cf["ratio"] < 0.8
+    # The budget reflects the raised ~1 MB default (not the old 200 KB).
+    assert cf["budget"] >= 1_000_000
+    # The seed is discounted: growth BEYOND the seed is ~0 on a fresh session.
+    assert cf["growth_bytes"] == 0
+    # observed_bytes is still the RAW buffer length (honest about what we saw).
+    assert cf["observed_bytes"] >= 0
