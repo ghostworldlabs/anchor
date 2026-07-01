@@ -3897,6 +3897,12 @@ def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
         (proj_folder / "CLAUDE.md").write_text(
             "# hc gandalf probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
+        # Wave 9: give the probe project ≥2 top-level dirs so the map-reduce
+        # Stage A shards + fans out (rather than a single whole-tree pass).
+        (proj_folder / "src").mkdir(exist_ok=True)
+        (proj_folder / "docs").mkdir(exist_ok=True)
+        (proj_folder / "src" / "mod.py").write_text("x = 1\n", encoding="utf-8")
+        (proj_folder / "docs" / "guide.md").write_text("# guide\n", encoding="utf-8")
         _git_init_repo(proj_folder)  # best-effort; gandalf does not require git
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " gandalf",
                                 str(proj_folder), scaffold=False)
@@ -3969,6 +3975,29 @@ def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
         except Exception as e:
             os.environ.pop("STUB_GANDALF_HOST_FAIL", None)
             steps.append(("error run", False, f"{type(e).__name__}: {e}"))
+
+        # ── (4) Wave 9 map-reduce: ≥2 shards + grouped reduce (pure, no spawn) ─
+        try:
+            shards = _gandalf._shard_tree(fp)
+            shards_ok = len(shards) >= 2
+            merged, reason = _gandalf._reduce_drafts([
+                ("src", {"findings": [{"id": "d", "verdict": "v"}],
+                         "nitpicks": [], "elevations": []}, None),
+                ("docs", {"findings": [], "nitpicks": [], "elevations": []}, None),
+            ])
+            grouped_ok = (
+                reason is None and merged is not None
+                and set(merged.get("groups") or []) == {"src", "docs"}
+                and all(f.get("group") for f in merged.get("findings") or [])
+                and all(any(f.get("group") == lbl
+                            for f in merged["findings"]) for lbl in ("src", "docs")))
+            steps.append((
+                "map-reduce: ≥2 shards + grouped reduce (≥1/shard)",
+                bool(shards_ok and grouped_ok),
+                f"shards={len(shards)} grouped={grouped_ok}"))
+        except Exception as e:
+            steps.append(("map-reduce shard/reduce", False,
+                          f"{type(e).__name__}: {e}"))
 
     except Exception as e:
         steps.append(("exception", False, f"{type(e).__name__}: {e}"))

@@ -52,6 +52,7 @@ from pathlib import Path
 
 import paths as _paths
 import job_runner as _jr
+import lanes as _lanes
 import summarizer as _summarizer
 
 
@@ -118,6 +119,32 @@ _REQUIRED_TOP_KEYS = (
 
 #: How many bytes of SKILL.md to embed in the Stage-A prompt (bounded).
 _MAX_SKILL_BYTES = 64 * 1024
+
+# ── Wave 9 — map-reduce sharding (Pillar B, #2) ──────────────────────────────
+#: The single whole-tree Stage-A pass is replaced by a MAP-REDUCE: shard the
+#: target tree, fan out one read per shard through the W8 engine substrate
+#: (``lanes.select_engine_plan`` picks the honest driver — Claude, or Gemini on a
+#: Gemini-only host), then REDUCE the per-shard drafts into ONE merged raw draft
+#: whose findings are GROUPED by shard (≥1 per shard that produced a draft). The
+#: merged draft is graded once by the Stage-B host (unchanged). A single-file /
+#: trivial tree still yields ONE shard (so the whole-tree behavior is preserved).
+
+#: Cap on the number of shards a run fans out to (env-overridable). Keeps a huge
+#: tree from spawning an unbounded number of concurrent reads.
+MAX_SHARDS_ENV = "ANCHOR_GANDALF_MAX_SHARDS"
+DEFAULT_MAX_SHARDS = 12
+
+#: A top-level bucket bigger than this many files is split into sub-shards so a
+#: large flat tree still fans out (env-overridable).
+FILES_PER_SHARD_ENV = "ANCHOR_GANDALF_FILES_PER_SHARD"
+DEFAULT_FILES_PER_SHARD = 40
+
+#: How many shard file paths to enumerate inside a shard's Stage-A prompt (bounded
+#: so a big shard doesn't blow the prompt; the read agent still has --add-dir).
+_MAX_SHARD_PROMPT_FILES = 120
+
+#: Label for the bucket holding root-level (no-subdir) files.
+_ROOT_SHARD_LABEL = "(root)"
 
 
 # ── ContextSizer / Ignore Helpers (Wave 1) ──────────────────────────────────
@@ -370,6 +397,300 @@ def _run_stage_a(folder_path, env=None, run_id=None):
     return draft, None
 
 
+# ── Stage A (map-reduce) — shard the tree, fan out reads, reduce ─────────────
+
+def _int_env(name, default):
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        v = int(raw)
+        return v if v > 0 else default
+    except ValueError:
+        return default
+
+
+def _collect_files(folder_path) -> list:
+    """Relative POSIX paths of the non-ignored files under ``folder`` (sorted).
+
+    Reuses the same ignore rules as :func:`scan_project_context` (``.anchorignore``
+    + the standard skip dirs), so the map covers exactly what the ContextSizer
+    counts. Never raises."""
+    root = Path(folder_path).resolve()
+    if not root.is_dir():
+        return []
+    patterns = _load_anchorignore(folder_path)
+    out = []
+    for dirpath, dirnames, filenames in os.walk(str(root)):
+        try:
+            rel_dirpath = Path(dirpath).resolve().relative_to(root)
+        except (ValueError, OSError):
+            continue
+        keep = []
+        for d in dirnames:
+            if not _should_ignore(rel_dirpath / d, patterns):
+                keep.append(d)
+        dirnames[:] = keep
+        for fname in filenames:
+            rel_file = rel_dirpath / fname
+            if _should_ignore(rel_file, patterns):
+                continue
+            out.append(rel_file.as_posix())
+    out.sort()
+    return out
+
+
+def _shard_tree(folder_path, files=None) -> list:
+    """Shard the target tree into read-units for the map step.
+
+    Returns a list of shards ``[{"label": <str>, "files": [<rel posix>, ...]}]``:
+
+    - Files are bucketed by their TOP-LEVEL path component; root-level files land
+      in a single ``(root)`` bucket.
+    - A bucket larger than ``FILES_PER_SHARD`` is split into ``…#N`` sub-shards so
+      a large flat tree still fans out.
+    - The shard count is capped at ``MAX_SHARDS`` (extra buckets are round-robin
+      merged), keeping a huge tree bounded.
+    - A trivial tree (0–1 files, or a single small bucket) yields ONE shard, so
+      the historical whole-tree single-pass behavior is preserved.
+
+    Deterministic (sorted inputs). Never raises."""
+    if files is None:
+        files = _collect_files(folder_path)
+    if not files:
+        return [{"label": _ROOT_SHARD_LABEL, "files": []}]
+
+    buckets = {}
+    for rel in files:
+        parts = rel.split("/")
+        top = _ROOT_SHARD_LABEL if len(parts) == 1 else parts[0]
+        buckets.setdefault(top, []).append(rel)
+
+    files_per_shard = _int_env(FILES_PER_SHARD_ENV, DEFAULT_FILES_PER_SHARD)
+    max_shards = _int_env(MAX_SHARDS_ENV, DEFAULT_MAX_SHARDS)
+
+    # Split oversized buckets into deterministic sub-shards.
+    shards = []
+    for label in sorted(buckets):
+        group = buckets[label]
+        if len(group) <= files_per_shard:
+            shards.append({"label": label, "files": group})
+        else:
+            for i in range(0, len(group), files_per_shard):
+                chunk = group[i:i + files_per_shard]
+                shards.append({"label": f"{label}#{i // files_per_shard + 1}",
+                               "files": chunk})
+
+    # Cap the fan-out: round-robin merge extras into the first max_shards shards.
+    if len(shards) > max_shards:
+        merged = [dict(s) for s in shards[:max_shards]]
+        for i, extra in enumerate(shards[max_shards:]):
+            tgt = merged[i % max_shards]
+            tgt["files"] = tgt["files"] + extra["files"]
+            tgt["label"] = tgt["label"] + "+" + extra["label"]
+        shards = merged
+    return shards
+
+
+def _build_shard_prompt(folder_path, shard) -> str:
+    """Stage-A prompt for ONE shard = the protocol + the shard's file list."""
+    protocol = _read_skill_protocol()
+    parts = []
+    if protocol:
+        parts.append("You are running the Gandalf deep-think advisor skill. Its "
+                     "protocol follows verbatim:\n\n" + protocol)
+    else:
+        parts.append("You are running the Gandalf deep-think advisor skill.")
+    label = shard.get("label") or _ROOT_SHARD_LABEL
+    flist = shard.get("files") or []
+    shown = flist[:_MAX_SHARD_PROMPT_FILES]
+    more = len(flist) - len(shown)
+    file_block = "\n".join(shown) if shown else "(the whole folder)"
+    if more > 0:
+        file_block += f"\n… and {more} more file(s) in this shard."
+    parts.append(
+        "This is a MAP shard of a larger project. Analyze ONLY the following slice "
+        f"of the project (shard '{label}') and emit ONLY the RAW draft JSON per the "
+        "skill's runtime/RAW-DRAFT-CONTRACT.md as your FINAL message. Do NOT "
+        "self-assign tiers or refutation stamps — the host applies them.\n\n"
+        f"Project folder: {folder_path}\n\nFiles in this shard:\n{file_block}")
+    return "\n\n".join(parts)
+
+
+def _resolve_shard_backend() -> str:
+    """Pick the shard read engine via the W8 substrate (locked #10).
+
+    ``lanes.select_engine_plan`` returns the HONEST driver for the research lane on
+    this host — Claude when present (Gemini stays the 5:1 skill-layer swarm), or
+    Gemini on a Gemini-only host (research is Gemini-runnable). Never cross-calls;
+    falls back to the default backend when the plan yields no driver. The
+    ``ANCHOR_RUNNER_CMD`` override still wins inside ``job_runner`` (tests)."""
+    try:
+        profile = _lanes.detect_host_profile()
+        plan = _lanes.select_engine_plan(_lanes.LANE_RESEARCH, profile=profile)
+        return plan.get("driver") or _jr.DEFAULT_BACKEND
+    except Exception:
+        return _jr.DEFAULT_BACKEND
+
+
+def _map_shards(folder_path, shards, env=None, run_id=None) -> list:
+    """MAP: launch one read per shard (concurrently), recover each raw draft.
+
+    Returns ``[(label, draft_dict_or_None, reason_or_None), ...]``. All shard jobs
+    are launched first (so they run in PARALLEL as server-owned subprocesses),
+    their ids registered for cancel, then each is awaited + parsed. Read-only
+    (``permission_mode='plan'``). Never raises."""
+    folder = str(folder_path)
+    backend = _resolve_shard_backend()
+    launched = []  # (label, job_id_or_None, launch_reason_or_None)
+    for shard in shards:
+        label = shard.get("label") or _ROOT_SHARD_LABEL
+        prompt = _build_shard_prompt(folder, shard)
+        try:
+            rec = _jr.launch("research", cwd=folder, prompt=prompt,
+                             output_dir=folder, env=(env or None),
+                             permission_mode="plan", backend=backend)
+            launched.append((label, rec["job_id"], None))
+        except Exception:
+            launched.append((label, None, "launch-failed"))
+
+    # Register every shard job so cancel_run can tree-kill the whole fan-out.
+    if run_id:
+        cancelled = False
+        with _ACTIVE_RUNS_LOCK:
+            r = _ACTIVE_RUNS.get(run_id)
+            if r is not None:
+                jids = [j for (_lbl, j, _rs) in launched if j]
+                r["job_ids"] = jids
+                if jids and not r.get("job_id"):
+                    r["job_id"] = jids[0]
+                cancelled = bool(r.get("cancelled"))
+        if cancelled:
+            for (_lbl, j, _rs) in launched:
+                if j:
+                    try:
+                        _jr.cancel(j)
+                    except Exception:
+                        pass
+            return [(lbl, None, "cancelled") for (lbl, _j, _rs) in launched]
+
+    results = []
+    for (label, jid, lreason) in launched:
+        if jid is None:
+            results.append((label, None, lreason or "launch-failed"))
+            continue
+        if run_id:
+            with _ACTIVE_RUNS_LOCK:
+                r = _ACTIVE_RUNS.get(run_id)
+                if r is not None and r.get("cancelled"):
+                    results.append((label, None, "cancelled"))
+                    continue
+        _jr.wait(jid, timeout=_timeout())
+        final = _jr.load_record(jid) or {}
+        st = final.get("status")
+        if st == "cancelled":
+            results.append((label, None, "cancelled"))
+            continue
+        if st != _jr.STATUS_DONE:
+            results.append((label, None,
+                            "stage-a-run-failed:" + str(st or "unknown")))
+            continue
+        text_lines = _jr.extract_assistant_text(_jr.all_lines(jid))
+        draft = _last_balanced_json("\n".join(text_lines))
+        if not isinstance(draft, dict):
+            results.append((label, None, "stage-a-unparseable-draft"))
+            continue
+        results.append((label, draft, None))
+    return results
+
+
+def _group_item(item, label):
+    """A shallow copy of one finding/nitpick/elevation tagged with its shard."""
+    it = dict(item) if isinstance(item, dict) else {"verdict": str(item)}
+    it["group"] = label
+    return it
+
+
+def _reduce_drafts(shard_results) -> tuple:
+    """REDUCE the per-shard drafts into ONE merged raw draft with GROUPED findings.
+
+    ``shard_results`` is the list from :func:`_map_shards`. Returns
+    ``(merged_draft_or_None, reason_or_None)``:
+
+    - Every finding/nitpick/elevation is tagged with its shard ``group``.
+    - Each shard that produced a draft contributes ≥1 finding — a shard whose
+      draft carried none gets an honest "no notable findings in this shard"
+      coverage marker (proves the slice was read, never fabricates a problem).
+    - ``groups`` lists the covered shard labels; ``shard_count`` the count.
+
+    When NO shard produced a parseable draft, returns ``(None, <reason>)`` —
+    preferring an ``unparseable`` reason so the honest Stage-A degrade path (and
+    its tests) is preserved. Never raises."""
+    valid = [(lbl, d) for (lbl, d, _rs) in shard_results if isinstance(d, dict)]
+    if not valid:
+        reason = None
+        for (_lbl, _d, rs) in shard_results:
+            if rs and "unparseable" in rs:
+                reason = rs
+                break
+        if reason is None:
+            for (_lbl, _d, rs) in shard_results:
+                if rs and rs != "cancelled":
+                    reason = rs
+                    break
+        if reason is None:
+            for (_lbl, _d, rs) in shard_results:
+                if rs:
+                    reason = rs
+                    break
+        return None, (reason or "stage-a-no-drafts")
+
+    findings, nitpicks, elevations = [], [], []
+    reasonings, verdicts, groups = [], [], []
+    for (label, d) in valid:
+        groups.append(label)
+        shard_findings = [_group_item(f, label) for f in (d.get("findings") or [])]
+        if not shard_findings:
+            shard_findings = [{
+                "id": f"cover-{label}",
+                "kind": "diagnose",
+                "rung": "OBSERVED",
+                "reasoning": f"Shard '{label}' was read; no notable findings surfaced.",
+                "verdict": f"No notable findings in '{label}'.",
+                "severity": "info",
+                "group": label,
+            }]
+        findings.extend(shard_findings)
+        nitpicks.extend(_group_item(n, label) for n in (d.get("nitpicks") or []))
+        elevations.extend(_group_item(e, label) for e in (d.get("elevations") or []))
+        if d.get("reasoning"):
+            reasonings.append(f"[{label}] " + str(d.get("reasoning")))
+        if d.get("verdict"):
+            verdicts.append(str(d.get("verdict")))
+
+    merged = {
+        "reasoning": "\n\n".join(reasonings),
+        "verdict": (" ".join(verdicts)[:1000]
+                    or f"Map-reduce read across {len(valid)} shard(s)."),
+        "findings": findings,
+        "nitpicks": nitpicks,
+        "elevations": elevations,
+        "groups": groups,
+        "shard_count": len(valid),
+    }
+    return merged, None
+
+
+def _run_stage_a_mapreduce(folder_path, env=None, run_id=None) -> tuple:
+    """The map-reduce Stage A: shard → parallel map → reduce → merged raw draft.
+
+    Returns ``(merged_draft_dict, reason)`` with the same contract as the legacy
+    :func:`_run_stage_a` (``(None, "<reason>")`` on failure). Never raises."""
+    shards = _shard_tree(folder_path)
+    shard_results = _map_shards(folder_path, shards, env=env, run_id=run_id)
+    return _reduce_drafts(shard_results)
+
+
 # ── Stage B — run the host, recover the graded output ────────────────────────
 
 def _run_stage_b(raw_draft, run_id=None):
@@ -474,8 +795,23 @@ def _severity_rank(item) -> int:
     return 1
 
 
+def _render_finding(f, lines) -> None:
+    """Append one finding's markdown to ``lines``."""
+    sev = (f.get("severity") or "info").upper()
+    lines.append(f"### [{sev}] {f.get('title') or 'Finding'}")
+    lines.append(str(f.get("description") or f.get("verdict") or ""))
+    remedy = f.get("remedy")
+    if remedy:
+        lines.append(f"\n*Remedy:* {remedy}")
+    lines.append("")
+
+
 def _render_full_report(graded, *, run_id="", when=None) -> str:
-    """Render the full markdown report."""
+    """Render the full markdown report.
+
+    Wave 9: when the map-reduce grouping survives grading (findings carry a
+    ``group`` shard tag), findings are rendered GROUPED by area; otherwise a flat
+    severity-ordered list (unchanged)."""
     date_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when or time.time()))
     lines = [
         f"# Gandalf Read Report — {run_id or 'run'}\n",
@@ -488,14 +824,38 @@ def _render_full_report(graded, *, run_id="", when=None) -> str:
     findings = sorted(graded.get("findings") or [], key=_severity_rank, reverse=True)
     if not findings:
         lines.append("*No major findings.*")
-    for f in findings:
-        sev = (f.get("severity") or "info").upper()
-        lines.append(f"### [{sev}] {f.get('title') or 'Finding'}")
-        lines.append(str(f.get("description") or ""))
-        remedy = f.get("remedy")
-        if remedy:
-            lines.append(f"\n*Remedy:* {remedy}")
-        lines.append("")
+        return "\n".join(lines)
+
+    grouped = any(isinstance(f, dict) and f.get("group") for f in findings)
+    if grouped:
+        # Preserve the shard order the reduce emitted (via ``groups``), then any
+        # remaining/ungrouped findings under a catch-all.
+        order = [g for g in (graded.get("groups") or []) if isinstance(g, str)]
+        seen = set()
+        ordered_groups = []
+        for g in order:
+            if g not in seen:
+                ordered_groups.append(g)
+                seen.add(g)
+        for f in findings:
+            g = f.get("group") if isinstance(f, dict) else None
+            key = g or "(other)"
+            if key not in seen:
+                ordered_groups.append(key)
+                seen.add(key)
+        lines.append(f"*Grouped across {len(ordered_groups)} area(s).*\n")
+        for g in ordered_groups:
+            members = [f for f in findings
+                       if (f.get("group") if isinstance(f, dict) else None) == g
+                       or (g == "(other)" and not (isinstance(f, dict) and f.get("group")))]
+            if not members:
+                continue
+            lines.append(f"## Area: {g}\n")
+            for f in members:
+                _render_finding(f, lines)
+    else:
+        for f in findings:
+            _render_finding(f, lines)
     return "\n".join(lines)
 
 
@@ -533,13 +893,27 @@ def _load_index(folder_path, project_id) -> list:
 
 
 def _append_index(folder_path, project_id, record: dict) -> None:
-    """Prepend a record (newest-first) to the index under the write lock."""
+    """Upsert a record into the index (newest-first) under the write lock.
+
+    Wave 9: an UPSERT keyed on ``run_id`` — a run first writes an in-progress
+    record (``status='running'``) and later replaces it IN PLACE with its terminal
+    record, so a single run never leaves two rows. A NEW run_id is prepended
+    (newest-first). Distinct run_ids keep the historical append behavior."""
     with _paths.WRITE_LOCK:
         p = _index_path(folder_path, project_id)
         p.parent.mkdir(parents=True, exist_ok=True)
         runs = _load_index(folder_path, project_id)
-        runs.insert(0, record)
-        
+        rid = str(record.get("run_id") or "")
+        replaced = False
+        if rid:
+            for i, r in enumerate(runs):
+                if str(r.get("run_id") or "") == rid:
+                    runs[i] = record
+                    replaced = True
+                    break
+        if not replaced:
+            runs.insert(0, record)
+
         # Cap / auto-prune to newest N (default 20, or env-override)
         max_runs_str = os.environ.get("ANCHOR_GANDALF_MAX_RUNS", "20").strip()
         try:
@@ -597,15 +971,34 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     with _ACTIVE_RUNS_LOCK:
         # folder/project_id are carried so cancel_run can record the cancelled
         # outcome into the index without waiting for this worker to unwind.
+        # job_ids holds the whole map-reduce fan-out so cancel tree-kills all shards.
         _ACTIVE_RUNS[run_id] = {
-            "job_id": None, "proc": None, "cancelled": False,
+            "job_id": None, "job_ids": [], "proc": None, "cancelled": False,
             "folder": folder, "project_id": pid, "index_recorded": False,
         }
+
+    # Wave 9: write an IN-PROGRESS index record up front so the tab exposes a
+    # live "running" state while the map-reduce fans out (index ok:false). It is
+    # UPSERTED into the terminal record on completion (never a duplicate row).
+    with _ACTIVE_RUNS_LOCK:
+        _pre_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+    if not _pre_cancelled:
+        try:
+            _append_index(folder, pid, {
+                "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
+                "run_id": run_id, "ts": ts, "ok": False, "verdict": "",
+                "degraded": True, "cross_model": False,
+                "report_rel": None, "exec_rel": None, "advisor_rel": None,
+                "session_id": run_id, "status": "running", "in_progress": True,
+            })
+        except Exception:
+            pass
 
     ok = False
     reason = "unknown"
     graded = None
-    
+    finalized = False
+
     try:
         # Check if cancelled early
         with _ACTIVE_RUNS_LOCK:
@@ -628,8 +1021,12 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 actual_env["GEMINI_MODEL"] = "gemini-1.5-pro"
                 actual_env["TRIO_MODEL"] = "gemini-1.5-pro"
 
-            draft, reason = _run_stage_a(folder, env=actual_env, run_id=run_id)
-            
+            # Wave 9: map-reduce Stage A — shard the tree, fan out one read per
+            # shard (W8 substrate), reduce into a merged raw draft with grouped
+            # findings. (The legacy single-pass _run_stage_a is retained for the
+            # runner-contract test.)
+            draft, reason = _run_stage_a_mapreduce(folder, env=actual_env, run_id=run_id)
+
             with _ACTIVE_RUNS_LOCK:
                 is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
             if is_cancelled:
@@ -687,6 +1084,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             "advisor_rel": (f"{run_rel}/{ADVISOR_OUTPUT_JSON}" if ok else None),
             "session_id": run_id,
             "status": "cancelled" if reason == "cancelled" else ("done" if ok else "failed"),
+            "in_progress": False,
         }
         if not ok:
             record["reason"] = reason or "unknown"
@@ -705,6 +1103,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             except Exception:
                 # Even if the index write somehow fails, return the honest result.
                 pass
+        finalized = True
 
         out = dict(record)
         out["ok"] = bool(ok)
@@ -713,6 +1112,25 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         return out
 
     finally:
+        # Wave 9: if the run raised before writing a terminal record (e.g. an
+        # unexpected crash in the ContextSizer), reconcile the dangling in-progress
+        # index row to an honest failed record so no "running" ghost persists.
+        if not finalized:
+            with _ACTIVE_RUNS_LOCK:
+                r = _ACTIVE_RUNS.get(run_id)
+                _already = bool(r and r.get("index_recorded"))
+            if not _already:
+                try:
+                    _append_index(folder, pid, {
+                        "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
+                        "run_id": run_id, "ts": ts, "ok": False, "verdict": "",
+                        "degraded": True, "cross_model": False,
+                        "report_rel": None, "exec_rel": None, "advisor_rel": None,
+                        "session_id": run_id, "status": "failed",
+                        "in_progress": False, "reason": "run-crashed",
+                    })
+                except Exception:
+                    pass
         try:
             import session_registry
             with _ACTIVE_RUNS_LOCK:
@@ -754,6 +1172,10 @@ def _safe_run_view(record: dict) -> dict:
         "report_rel": r.get("report_rel"),
         "exec_rel": r.get("exec_rel"),
         "advisor_rel": r.get("advisor_rel"),
+        # Wave 9: surface the lifecycle so the UI can show an in-progress/queued
+        # indicator while a map-reduce run is still fanning out (index ok:false).
+        "status": str(r.get("status") or ""),
+        "in_progress": bool(r.get("in_progress")),
     }
     reason = r.get("reason")
     if reason:
@@ -866,12 +1288,16 @@ def cancel_run(run_id: str) -> bool:
 
         run["cancelled"] = True
 
-        # 1) If in Stage A (job_runner job is active)
-        job_id = run.get("job_id")
-        if job_id:
+        # 1) If in Stage A (job_runner jobs are active) — cancel the WHOLE
+        # map-reduce fan-out (every shard job), not just the first.
+        job_ids = list(run.get("job_ids") or [])
+        primary = run.get("job_id")
+        if primary and primary not in job_ids:
+            job_ids.append(primary)
+        for jid in job_ids:
             try:
                 import job_runner
-                job_runner.cancel(job_id)
+                job_runner.cancel(jid)
             except Exception:
                 pass
 
@@ -918,6 +1344,7 @@ def cancel_run(run_id: str) -> bool:
                     "advisor_rel": None,
                     "session_id": run_id,
                     "status": "cancelled",
+                    "in_progress": False,
                     "reason": "cancelled",
                 })
                 run["index_recorded"] = True
