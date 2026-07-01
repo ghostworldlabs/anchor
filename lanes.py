@@ -33,6 +33,8 @@ Stdlib only. No third-party imports.
 """
 
 import json
+import os
+import shutil
 import time
 from pathlib import Path
 
@@ -61,11 +63,16 @@ BACKEND_CLAUDE = _jr.BACKEND_CLAUDE
 BACKEND_GEMINI = _jr.BACKEND_GEMINI
 DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
 
-#: The set of (lane, backend) pairs that are allowed. Everything else with a
-#: non-claude backend is refused. Claude works on all lanes; gemini only on
-#: research AND the bare ``general`` exploration lane (v7 Wave 6). The trio
-#: lanes plan/build stay Claude-only (Crucible/Foreman are Claude Code engines
-#: Gemini can't run); ``general`` seeds no skill, so either engine is fine.
+#: Lanes on which a ``gemini`` backend REQUEST is accepted at the launch
+#: boundary (the per-panel engine toggle). Claude works on all lanes; a gemini
+#: request is permitted on research, the bare ``general`` exploration lane, and
+#: — because a live Crucible/Foreman session's engine can be toggled when a
+#: Claude subscription IS present — plan/build too. This is the backend-request
+#: allow-policy (enforced by :func:`check_engine_allowed`); it is NOT the
+#: host-capability policy. Whether THIS host can actually RUN a lane (a
+#: Gemini-only host cannot run Crucible/Foreman) is the separate, honest
+#: fallback in :func:`select_engine_plan`, which :func:`launch_lane` consults so
+#: the fallback is enforced at launch — not merely surfaced in the UI badge.
 GEMINI_LANES = frozenset((LANE_RESEARCH, "general", LANE_PLAN, LANE_BUILD))
 
 
@@ -265,6 +272,189 @@ def check_engine_allowed(lane: str, backend: str) -> None:
         raise EngineNotAllowedError(lane, backend)
 
 
+# ── Model-flexible execution: host-capability profile + honest plan (Wave 8) ──
+#
+# Locked decision #10 (MASTER-PLAN Stage-1 lock): the 5:1 Claude-orchestrates-
+# Gemini swarm lives at the SKILL/SESSION layer, NOT in Anchor's ``job_runner``.
+# Anchor's job here is only to (a) default sessions to Claude, (b) detect whether
+# the ``agy-dispatch`` / Gemini swarm substrate is available, (c) surface the
+# 5:1 split, and (d) fall back HONESTLY to whichever single subscription exists
+# — NEVER cross-calling (a Claude-only host never spawns agy/Gemini; a
+# Gemini-only host runs research + Gemini-runnable lanes and shows plan/build as
+# an honest "requires Claude" state instead of crashing).
+
+#: Engine-plan status values. ``ok`` — the plan runs as-is on this host;
+#: ``requires_claude`` — the lane needs Claude (Crucible/Foreman are Claude Code
+#: engines Gemini can't run) but the host has no Claude subscription, surfaced
+#: honestly rather than as a crash; ``unavailable`` — neither engine is present.
+ENGINE_STATUS_OK = "ok"
+ENGINE_STATUS_REQUIRES_CLAUDE = "requires_claude"
+ENGINE_STATUS_UNAVAILABLE = "unavailable"
+
+#: The 5:1 Claude-orchestrates-Gemini swarm ratio (locked decision #10). The
+#: fan-out itself lives in the SKILLS (agy-dispatch), never the job_runner; this
+#: constant is only what the UI surfaces.
+SWARM_RATIO = "5:1"
+
+#: Lanes Gemini can drive on its OWN, with no Claude present: researchPrime is
+#: portable, and the bare ``general`` exploration lane seeds no skill. Crucible
+#: (plan) and Foreman (build) are Claude Code engines Gemini can't run, so on a
+#: Gemini-only host they resolve to a "requires Claude" state — never a crash.
+#: (Distinct from :data:`GEMINI_LANES`, which is the per-panel engine-toggle
+#: allow-policy used when BOTH subscriptions are present.)
+GEMINI_RUNNABLE_LANES = frozenset((LANE_RESEARCH, "general"))
+
+#: Env seams to force host-capability detection deterministically (used by the
+#: gate to construct Claude-only / Gemini-only / both profiles without touching
+#: the real PATH). ``1``/``true``/``yes``/``on`` ⇒ available; ``0``/``false``/
+#: ``no``/``off`` ⇒ absent; unset/blank ⇒ probe the real host.
+CLAUDE_AVAILABLE_ENV = "ANCHOR_CLAUDE_AVAILABLE"
+GEMINI_AVAILABLE_ENV = "ANCHOR_GEMINI_AVAILABLE"
+
+
+def _env_override(env, name):
+    """Return True/False for an explicit truthy/falsy env override, else None."""
+    raw = (env.get(name) or "").strip().lower()
+    if not raw:
+        return None
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def _claude_available(env) -> bool:
+    """Whether a Claude subscription is usable on this host.
+
+    Honors the :data:`CLAUDE_AVAILABLE_ENV` override first (test/deploy seam).
+    Otherwise: a wired runner (``ANCHOR_RUNNER_CMD`` — the mock in tests, or a
+    real override in prod) counts as available, else the ``claude`` CLI on PATH.
+    """
+    ov = _env_override(env, CLAUDE_AVAILABLE_ENV)
+    if ov is not None:
+        return ov
+    if (env.get("ANCHOR_RUNNER_CMD") or "").strip():
+        return True
+    return bool(shutil.which("claude"))
+
+
+def _gemini_available(env) -> bool:
+    """Whether the ``agy-dispatch`` / Gemini swarm substrate is usable here.
+
+    Honors the :data:`GEMINI_AVAILABLE_ENV` override first (test/deploy seam).
+    Otherwise probes for the ``agy`` dispatcher or a bare ``gemini`` CLI on PATH,
+    or the known Windows ``%LOCALAPPDATA%\\agy\\bin\\agy.exe`` install location
+    (mirrors ``terminal_session._resolve_engine_cmd``).
+    """
+    ov = _env_override(env, GEMINI_AVAILABLE_ENV)
+    if ov is not None:
+        return ov
+    if shutil.which("agy") or shutil.which("gemini"):
+        return True
+    agy_path = os.path.join(env.get("LOCALAPPDATA", ""), "agy", "bin", "agy.exe")
+    return os.path.exists(agy_path)
+
+
+def detect_host_profile(env=None) -> dict:
+    """Probe the host for which engine subscriptions are available.
+
+    Returns ``{"claude": bool, "gemini": bool}`` where ``claude`` is the Claude
+    Code driver and ``gemini`` is the ``agy-dispatch`` / Gemini swarm substrate.
+    ``env`` defaults to ``os.environ`` and is the seam through which the gate
+    forces a Claude-only / Gemini-only / both profile deterministically.
+    """
+    if env is None:
+        env = os.environ
+    return {
+        "claude": _claude_available(env),
+        "gemini": _gemini_available(env),
+    }
+
+
+def select_engine_plan(lane: str, profile=None, env=None) -> dict:
+    """The honest per-lane execution plan for a host-capability profile (#10).
+
+    Given a ``lane`` and a host ``profile`` (``{"claude": bool, "gemini": bool}``;
+    detected via :func:`detect_host_profile` when omitted), return a plan dict::
+
+        {
+          "lane": <lane>,
+          "profile": {"claude": bool, "gemini": bool},
+          "driver": "claude" | "gemini" | None,   # engine that drives the lane
+          "swarm": "gemini" | None,               # 5:1 skill-layer swarm engine
+          "swarm_ratio": "5:1" | None,
+          "status": "ok" | "requires_claude" | "unavailable",
+          "spawns_gemini": bool,   # will this plan spawn ANY agy/Gemini process?
+          "reason": <str>,
+        }
+
+    Policy (locked #10, never cross-calling):
+
+    - **Both** subscriptions → the default driver is **Claude**, with **Gemini
+      available as the 5:1 skill-layer swarm**.
+    - **Claude only** → Claude drives every lane and **no agy/Gemini process is
+      ever spawned** (``spawns_gemini`` is False for every lane).
+    - **Gemini only** → research + Gemini-runnable lanes drive on Gemini;
+      **plan/build resolve to a ``requires_claude`` status** (honest, not a crash).
+    - **Neither** → ``unavailable``.
+    """
+    if profile is None:
+        profile = detect_host_profile(env)
+    has_claude = bool(profile.get("claude"))
+    has_gemini = bool(profile.get("gemini"))
+
+    plan = {
+        "lane": lane,
+        "profile": {"claude": has_claude, "gemini": has_gemini},
+        "driver": None,
+        "swarm": None,
+        "swarm_ratio": None,
+        "status": ENGINE_STATUS_UNAVAILABLE,
+        "spawns_gemini": False,
+        "reason": "",
+    }
+
+    if not has_claude and not has_gemini:
+        plan["reason"] = "No Claude or Gemini subscription detected on this host."
+        return plan
+
+    if has_claude and has_gemini:
+        # Both: Claude drives; Gemini is available as the 5:1 skill-layer swarm.
+        plan.update(
+            driver=BACKEND_CLAUDE, swarm=BACKEND_GEMINI, swarm_ratio=SWARM_RATIO,
+            status=ENGINE_STATUS_OK, spawns_gemini=True,
+            reason="Claude driver + Gemini swarm ({}, skill-layer).".format(SWARM_RATIO),
+        )
+        return plan
+
+    if has_claude:  # Claude only: never spawn agy/Gemini.
+        plan.update(
+            driver=BACKEND_CLAUDE, swarm=None, swarm_ratio=None,
+            status=ENGINE_STATUS_OK, spawns_gemini=False,
+            reason="Claude-only host: Claude drives every lane; no Gemini swarm.",
+        )
+        return plan
+
+    # Gemini only (has_gemini and not has_claude).
+    if lane in GEMINI_RUNNABLE_LANES:
+        plan.update(
+            driver=BACKEND_GEMINI, swarm=None, swarm_ratio=None,
+            status=ENGINE_STATUS_OK, spawns_gemini=True,
+            reason="Gemini-only host: {} runs on Gemini.".format(lane),
+        )
+    else:
+        plan.update(
+            driver=None, swarm=None, swarm_ratio=None,
+            status=ENGINE_STATUS_REQUIRES_CLAUDE, spawns_gemini=False,
+            reason=(
+                "{} requires Claude — Crucible/Foreman are Claude Code engines "
+                "Gemini can't run, and this host has no Claude subscription."
+            ).format(lane),
+        )
+    return plan
+
+
 def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
                 extra_args=None, backend=DEFAULT_BACKEND) -> dict:
     """Launch a trio lane for a registered project under the frozen policy.
@@ -302,6 +492,18 @@ def launch_lane(project_id: str, lane: str, env=None, job_id: str = None,
     # Engine policy: Gemini only on research; Claude anywhere. Checked before any
     # subprocess is spawned so a refused launch leaves no side effects.
     check_engine_allowed(lane, backend)
+    # Honest host-capability fallback (locked decision #10): refuse a lane THIS
+    # host cannot actually run BEFORE spawning anything, rather than crashing
+    # mid-run. select_engine_plan is the single source of that policy (both /
+    # claude-only / gemini-only / neither); consulting it here is what enforces
+    # the honest fallback at the launch boundary — not only in the UI badge. On
+    # any host with a Claude subscription every lane is OK, so this is a no-op
+    # there; it only bites a Claude-less host asking for a Claude-only lane
+    # (plan/build ⇒ requires_claude) or a host with neither engine (⇒
+    # unavailable), surfaced as a clean EngineNotAllowedError, never a 500.
+    host_plan = select_engine_plan(lane)
+    if host_plan["status"] != ENGINE_STATUS_OK:
+        raise EngineNotAllowedError(lane, backend, message=host_plan["reason"])
     project = _rnd.get_project(project_id)
     if project is None:
         raise KeyError(project_id)

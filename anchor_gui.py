@@ -4288,6 +4288,47 @@ def render_header_rollup_html(project_id: str) -> str:
     )
 
 
+def render_model_flex_badge(env=None) -> str:
+    """Header badge surfacing the host's model-flex posture (Wave 8, #10).
+
+    Reads the host-capability profile (``lanes.detect_host_profile``) and shows,
+    honestly, how execution resolves on THIS host:
+
+    - both subscriptions → Claude driver + Gemini 5:1 skill-layer swarm;
+    - Claude only → Claude everywhere, no Gemini swarm spawned;
+    - Gemini only → research on Gemini, Plan/Build require Claude;
+    - neither → no engine.
+
+    Pure render (no side effects, no subprocess). Returns a ``<span class='mflex …'>``.
+    """
+    prof = _lanes.detect_host_profile(env)
+    has_c, has_g = bool(prof.get("claude")), bool(prof.get("gemini"))
+    if has_c and has_g:
+        label = "&#9670; Claude driver &middot; &#10022; Gemini swarm %s" % (
+            html_lib.escape(_lanes.SWARM_RATIO))
+        title = ("Both subscriptions: Claude drives every lane; Gemini runs the "
+                 "skill-layer %s swarm (agy-dispatch). Never cross-called." %
+                 _lanes.SWARM_RATIO)
+        cls = "mflex-both"
+    elif has_c:
+        label = "&#9670; Claude only"
+        title = ("Claude-only host: Claude drives every lane; no agy/Gemini "
+                 "process is ever spawned.")
+        cls = "mflex-claude"
+    elif has_g:
+        label = "&#10022; Gemini only &middot; Plan/Build require Claude"
+        title = ("Gemini-only host: research runs on Gemini; Plan/Build require "
+                 "Claude (Crucible/Foreman are Claude Code engines) and are shown "
+                 "as an honest 'requires Claude' state, not a crash.")
+        cls = "mflex-gemini"
+    else:
+        label = "no engine"
+        title = "No Claude or Gemini subscription detected on this host."
+        cls = "mflex-none"
+    return (f"<span class='mflex {cls}' "
+            f"title='{html_lib.escape(title, quote=True)}'>{label}</span>")
+
+
 def render_project_window_html(project_id: str) -> str:
     """Render the per-project "Project Cockpit" (Paradigm 2) for ``/project/<id>``.
 
@@ -4924,6 +4965,18 @@ def render_project_window_html(project_id: str) -> str:
         "color:var(--text-dim);cursor:pointer;font-weight:500}"
         ".engtog b.on{background:rgba(34,197,94,.15);color:var(--success);"
         "font-weight:700}"
+        # Wave 8 (#10): model-flex posture badge in the lifecycle header. Surfaces
+        # the host's execution split — Claude driver + Gemini 5:1 swarm when both
+        # subscriptions are present, or the honest single-subscription fallback.
+        ".mflex{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;"
+        "font-weight:600;padding:3px 9px;border-radius:7px;border:1px solid var(--border);"
+        "background:var(--surface);color:var(--text-dim);white-space:nowrap;cursor:default}"
+        ".mflex.mflex-both{border-color:rgba(34,197,94,.45);color:var(--success);"
+        "background:rgba(34,197,94,.12)}"
+        ".mflex.mflex-claude{border-color:rgba(56,139,253,.45);color:var(--accent)}"
+        ".mflex.mflex-gemini{border-color:rgba(234,179,8,.5);color:#eab308;"
+        "background:rgba(234,179,8,.1)}"
+        ".mflex.mflex-none{border-color:rgba(248,81,73,.5);color:var(--danger)}"
         # ── v4 Wave 5: split summary — materials LEFT, role links RIGHT, both
         # columns filling EQUAL vertical height (mockup Paradigm-2 internals).
         # The left effort line sinks to the bottom (.smat .effbar{margin-top:auto});
@@ -5353,6 +5406,10 @@ def render_project_window_html(project_id: str) -> str:
         "<div class='right'>"
         f"<span class='pri p{pr}'>P{pr}</span>"
         f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
+        # Wave 8 (#10): model-flex posture — Claude driver + Gemini 5:1 swarm when
+        # both subscriptions are present, else the honest single-subscription
+        # fallback state. Pure render off the host-capability profile.
+        f"{render_model_flex_badge()}"
         # v7 Wave 4 (#4) → v12 Wave 11: "Open terminal" — start a BARE general
         # session (no trio skill seed). v12 W11 (SC6): it now opens in the W10
         # BOTTOM DOCK like any effort (summary-on-top + terminal) instead of a
