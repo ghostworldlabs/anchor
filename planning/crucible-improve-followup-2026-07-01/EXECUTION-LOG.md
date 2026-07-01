@@ -7,7 +7,7 @@ Gate: `python -m pytest -q` (orchestrator-run, full suite).
 |------|-------|-------|
 | 1 | Claude-first session launch | GREEN |
 | 2 | Unified dock controls (× + 🪦) [UI sign-off] | GREEN (signed off) |
-| 3 | Bridge job cost onto the effort record | pending |
+| 3 | Bridge job cost onto the effort record | GREEN |
 | 4 | Triage & fix pre-existing baseline reds (~59) | pending |
 
 ## Wave 1 — Claude-first session launch — GREEN (2026-07-01)
@@ -92,6 +92,45 @@ against the final code.
 JS and the vestigial `.panelbtn.delete` CSS + its false "retained for the dock"
 comment (and update `test_terminal_controls_w6`'s `.panelbtn.delete{` assertion
 accordingly).
+
+## Wave 3 — Bridge job cost onto the effort record — GREEN (2026-07-01)
+
+**EXECUTE.** `job_runner._finalize`: after the terminal-status write (outside the
+`WRITE_LOCK`, after `_mirror_session_status`), bridge the captured cost onto the
+project EFFORT record via `effort_history.finalize_effort(folder_path,
+project_id, lane, job_id, rec, auto_commit=False)` — guarded on the record
+carrying `project_id` + `folder_path` + `cost`, lazy import, best-effort
+try/except. The rollups read the effort `cost` block, whose only writer
+(finalize_effort→attach_cost) previously had NO production caller. New gate:
+`tests/test_cost_bridge_w3.py` (4 tests: bridge writes cost · no-identity skip ·
+no-envelope no-fabrication · end-to-end `project_effort_rollup` non-zero).
+
+**REVIEW (2 independent, refute-prompted) — both CLEAN, no FIX needed.**
+Reviewer A (safety): WRITE_LOCK is an RLock and the bridge runs outside it (no
+deadlock); overwrite-not-accumulate idempotency; `auto_commit=False` runs no git;
+no import cycle; the guard fires ONLY for real `launch_guarded` jobs (lane launch
++ v2 REPL) — gandalf shards (bare `launch`) and swarm children (project_id="")
+correctly skip; no file collision with `_write_launch_record`. Reviewer B
+(honesty): traced end-to-end — a bridged effort record is RUN-provenance (no
+`source=discovered`), so `project_effort_rollup` counts it; no double-count.
+Cosmetic-only notes folded in (test 4 simplified to prove the bridge ALONE lights
+the rollup, faithful to production).
+
+**HONEST SCOPE (surfaced to John).** This fixes the zeros for **one-shot
+`launch_lane` jobs** only. **Interactive ConPTY terminal sessions — the
+day-to-day UX — still read 0**: they never reach `job_runner._finalize` with a
+stream-json result envelope and persist as `SOURCE_DISCOVERED` (excluded from the
+rollup by the honesty contract). The bridge does NOT fabricate zero-cost for them.
+Lighting up interactive-session cost needs a separate capture mechanism — a
+documented follow-up, out of this effort's scope.
+
+**GATE.** Full suite 60 failed / 1624 passed. Delta vs baseline: my 4 new tests
+pass; exactly ONE pre-existing test flipped —
+`test_advance_artifacts_v10::test_finish_to_build_persists_planning_docs_so_build_can_read_them`.
+Verified a full-suite ORDER/isolation flake (passes in isolation, as a whole
+file, AND directly after the cost test file); NOT a Wave-3 regression. Per the
+gate rule Wave 3 is GREEN. → **Wave 4 triage now tracks TWO order-flakes**
+(this + `test_summary_panel_no_leaked_braces`) as a test-isolation category.
 
 ## Baseline (pre-Wave-1)
 
