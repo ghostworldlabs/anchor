@@ -1,5 +1,15 @@
 # Crucible Session State — Anchor Improvement Effort
 
+> ## ✅ BUILT 2026-07-01 — all 9 Foreman waves GREEN (final gate 274 passed, exit 0).
+> Branch `foreman/crucible-improve-2026-06-30` in worktree `C:\dev\anchor-build-crucible`.
+> **MERGE + DEPLOY PENDING (John):** merge → master + elevated `nssm restart anchor` +
+> rescan. Then UI/live sign-offs: **W4** warm-resume + previous-efforts link · **W5**
+> deliverables-collapse + terminal full-width · **W6** `×`=stop/preserve + one
+> `Kill→Boneyard` (drop redundant controls) · **W8** model-flex fallback states · **W9**
+> gandalf map-reduce findings — each Playwright + screenshot; PLUS **W2 #1** live
+> orphan-banner check on gwl-server after restart (only warns on genuine orphans). See
+> `EXECUTION-LOG.md` for the full wave/amendment history.
+
 **Carry-on doc.** This is the resume point for a Crucible planning session on the
 Anchor dashboard. If you opened this inside an Anchor plan-lane session, read all
 three docs in this folder, then continue from "Next step" below.
