@@ -855,6 +855,25 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     # OUTSIDE the write lock the registry takes its own lock internally.
     _mirror_session_status(job_id, STATUS_DONE if exit_code == 0 else STATUS_FAILED)
 
+    # Followup Wave 3: BRIDGE the captured cost/tokens/duration onto the project
+    # EFFORT pointer-record, so the per-project / per-effort rollups (which read
+    # the effort `cost` block) stop reporting zeros. `finalize_effort` ->
+    # `attach_cost` is the only writer of that block and had no production caller;
+    # the runner captured cost onto the JOB record but never bridged it. Only for
+    # launch_lane jobs (they carry project_id + folder_path via launch_guarded)
+    # that actually captured a result envelope. Best-effort, idempotent, and
+    # auto_commit=False (no git commit from job finalization). Lazy import +
+    # broad guard so a bridge failure can never break job finalization. Runs
+    # OUTSIDE the WRITE_LOCK (record_effort takes the lock itself).
+    if rec.get("project_id") and rec.get("folder_path") and rec.get("cost"):
+        try:
+            import effort_history as _eh
+            _eh.finalize_effort(
+                rec["folder_path"], rec["project_id"], rec.get("lane"),
+                job_id, rec, auto_commit=False)
+        except Exception:  # pragma: no cover - bridge is strictly best-effort
+            pass
+
 
 # ── Tail / long-poll ─────────────────────────────────────────────────────────
 

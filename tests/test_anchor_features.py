@@ -103,8 +103,14 @@ def test_upload_batch_success(gui, tmp_path):
     f1_b64 = base64.b64encode(f1_content).decode()
     f2_b64 = base64.b64encode(f2_content).decode()
 
+    # Mutating /api/* POSTs are token-gated when ANCHOR_TOKEN is configured
+    # (Wave 2 / D4). Supply the expected token so the test is hermetic against
+    # the ambient env: expected_token() is None (auth disabled) -> token None is
+    # ignored; otherwise it matches exactly.
+    import paths as _paths
     body = {
         "project_id": pid,
+        "token": _paths.expected_token(),
         "files": [
             {"path": "file1.txt", "content_b64": f1_b64},
             {"path": "subdir/file2.txt", "content_b64": f2_b64}

@@ -141,10 +141,12 @@ def test_session_bar_container_rendered_in_body(gui_env, tmp_path):
 
 
 def test_three_distinct_panel_controls_defined_in_js(gui_env, tmp_path):
-    """The panel header builds THREE distinct controls: minimize, a CLOSE button
-    (class 'close', routing to the non-killing closePanel) and a hard-KILL button
-    (class 'hardkill', routing to the confirm-gated killPanel). They are different
-    elements/classes — close and kill are NOT the same control.
+    """The panel header builds two DISTINCT lifecycle controls (W6 unification):
+    a '×' CLOSE button (class 'close', routing to the non-killing closePanel) and
+    a single '🪦' Kill -> Boneyard button (class 'killbone', routing to the
+    confirm-gated killPanel). They are different elements/classes — close and kill
+    are NOT the same control. (W6 collapsed the old redundant close/hardkill/delete
+    trio into these two; the panel no longer has a 'hardkill' or a 'delete'.)
 
     (The controls are created in the RAW _PROJECT_WINDOW_JS string; the real
     button wiring is also asserted via Playwright below — this is the JS-source
@@ -156,9 +158,14 @@ def test_three_distinct_panel_controls_defined_in_js(gui_env, tmp_path):
     # close control: a 'panelbtn close' whose handler is closePanel (non-killing).
     assert "'panelbtn close'" in js or '"panelbtn close"' in js
     assert "closeBtn.onclick" in js and "closePanel(sessionId)" in js
-    # kill control: a SEPARATE 'panelbtn hardkill' whose handler is killPanel.
-    assert "'panelbtn hardkill'" in js or '"panelbtn hardkill"' in js
+    # kill control: a SEPARATE 'panelbtn killbone' (Kill -> Boneyard) whose handler
+    # is the confirm-gated killPanel.
+    assert "'panelbtn killbone'" in js or '"panelbtn killbone"' in js
     assert "killBtn.onclick" in js and "killPanel(sessionId)" in js
+    # NEGATIVE — the old redundant panel controls are gone (W6 unification): the
+    # panel builds no 'panelbtn hardkill' and no 'panelbtn delete'.
+    assert "'panelbtn hardkill'" not in js and '"panelbtn hardkill"' not in js
+    assert "'panelbtn delete'" not in js and '"panelbtn delete"' not in js
     # they are distinct buttons appended both to the bar.
     assert "bar.appendChild(closeBtn)" in js
     assert "bar.appendChild(killBtn)" in js
@@ -191,7 +198,7 @@ def test_kill_is_confirm_gated_and_close_is_not(gui_env, tmp_path):
 def test_old_x_equals_kill_for_live_is_gone(gui_env, tmp_path):
     """NEGATIVE: the replaced behavior — the panel '×' wired straight to killPanel
     for a live session — must be absent. The '×' button (closeBtn) now routes to
-    closePanel; only the SEPARATE hardkill button routes to killPanel."""
+    closePanel; only the SEPARATE Kill -> Boneyard button routes to killPanel."""
     gui = gui_env["gui"]
     folder = tmp_path / "Neg"
     pid = _mkproject(folder, "Neg")["id"]
@@ -201,9 +208,13 @@ def test_old_x_equals_kill_for_live_is_gone(gui_env, tmp_path):
         "the × glyph must no longer be the kill control"
     # closeBtn carries the × glyph and routes to the non-killing path.
     assert "closeBtn.textContent = '×'" in js
-    # The hardkill button uses a DISTINCT glyph (not ×).
-    assert "killBtn.textContent = '\\U0001f5d1'" in js \
-        or "killBtn.textContent = '🗑'" in js, "kill glyph must be distinct from ×"
+    # The Kill -> Boneyard button uses a DISTINCT glyph — the headstone 🪦
+    # (U+1FAA6), never × (and no longer the old 🗑 U+1F5D1).
+    assert "killBtn.textContent = '\\U0001faa6'" in js \
+        or "killBtn.textContent = '🪦'" in js, "kill glyph must be the headstone 🪦"
+    assert "killBtn.textContent = '\\U0001f5d1'" not in js \
+        and "killBtn.textContent = '🗑'" not in js, \
+        "the old 🗑 kill glyph must be gone (W6)"
 
 
 # ── (3) BACKEND registry/PTY assertions (no browser) ─────────────────────────
@@ -314,10 +325,11 @@ def test_close_keeps_tile_reopen_then_kill_removes_it(server):
 
       1. Start a live stub-PTY session (the panel + a reopenable live chip).
       2. Click × (CLOSE) → the panel is gone BUT the chip/tile remains AND the
-         registry record + live PTY persist.
-      3. Click the chip → the panel REOPENS (re-attaches a live terminal).
-      4. Click 🗑 (KILL), accept the confirm → the panel is gone, the chip is
-         gone, and the registry record is reaped (status terminal, no live PTY).
+         registry record PERSISTS (W6 graceful park: the PTY is stopped and the
+         record is re-statused STATUS_IDLE, reopenable WARM — never dropped).
+      3. Click the chip → the panel REOPENS.
+      4. Click 🪦 (Kill -> Boneyard), accept the confirm → the panel is gone, the
+         chip is gone, and the registry record is reaped (status terminal).
 
     No JS console errors throughout.
     """
@@ -352,22 +364,32 @@ def test_close_keeps_tile_reopen_then_kill_removes_it(server):
         pg.wait_for_selector("#panelStack .panel", timeout=5000)
         assert pg.eval_on_selector_all("#panelStack .panel",
                                        "e=>e.length") == 1
-        # The panel header has a CLOSE (.panelbtn.close) AND a distinct KILL
-        # (.panelbtn.hardkill) — two different controls.
+        # The panel header has a CLOSE (.panelbtn.close) AND a distinct Kill ->
+        # Boneyard (.panelbtn.killbone) — two different controls (W6 unified).
         assert pg.eval_on_selector_all(
             "#panelStack .panel .panelbtn.close", "e=>e.length") == 1
         assert pg.eval_on_selector_all(
-            "#panelStack .panel .panelbtn.hardkill", "e=>e.length") == 1
+            "#panelStack .panel .panelbtn.killbone", "e=>e.length") == 1
+        # The old redundant panel controls are gone.
+        assert pg.eval_on_selector_all(
+            "#panelStack .panel .panelbtn.hardkill", "e=>e.length") == 0
+        assert pg.eval_on_selector_all(
+            "#panelStack .panel .panelbtn.delete", "e=>e.length") == 0
 
-        # 2) CLOSE (×): panel gone, chip remains, record + PTY persist.
+        # 2) CLOSE (×): panel gone, chip remains, record PERSISTS (parked idle).
+        #    W6 graceful park — the PTY is STOPPED and the record is re-statused
+        #    STATUS_IDLE, but the record + tile stay (reopenable WARM). Only KILL
+        #    reaps + removes the tile.
         pg.click("#panelStack .panel .panelbtn.close")
         pg.wait_for_function(
             "document.querySelectorAll('#panelStack .panel').length === 0",
             timeout=5000)
         assert pg.eval_on_selector_all(chip_sel, "e=>e.length") == 1, \
             "close removed the chip (work lost) — must keep it reopenable"
-        assert sid in pty_manager.live_sessions(), "close reaped the PTY!"
-        assert reg.get_session(sid)["status"] == reg.STATUS_RUNNING
+        assert sid not in pty_manager.live_sessions(), \
+            "close should STOP the PTY (graceful park)"
+        assert reg.get_session(sid) is not None, "close must KEEP the record"
+        assert reg.get_session(sid)["status"] == reg.STATUS_IDLE
 
         # 3) Reopen from the chip → panel comes back.
         pg.click(chip_sel)
@@ -375,8 +397,9 @@ def test_close_keeps_tile_reopen_then_kill_removes_it(server):
         assert pg.eval_on_selector_all("#panelStack .panel",
                                        "e=>e.length") == 1
 
-        # 4) KILL (🗑): confirm accepted → panel gone, chip gone, session reaped.
-        pg.click("#panelStack .panel .panelbtn.hardkill")
+        # 4) KILL (🪦 Kill -> Boneyard): confirm accepted → panel gone, chip gone,
+        #    session reaped.
+        pg.click("#panelStack .panel .panelbtn.killbone")
         pg.wait_for_function(
             "document.querySelectorAll('#panelStack .panel').length === 0",
             timeout=5000)

@@ -411,8 +411,10 @@ def test_playwright_kill_planning_build_header_shows_foreman(env):
             assert "Crucible" in skl_txt, skl_txt
             assert "Foreman" not in skl_txt  # planning never loads Foreman
 
-            # Hard-kill the planning panel → a build tile auto-opens.
-            pg.click("#panelStack .panel .panelbtn.hardkill")
+            # Hard-kill the planning panel → a build tile auto-opens. (W6 control-
+            # unification renamed the old 🗑 .hardkill button to the single
+            # destructive 🪦 Kill→Boneyard .killbone control.)
+            pg.click("#panelStack .panel .panelbtn.killbone")
             pg.wait_for_selector('#sessionBar .live-chip[data-lane="build"]',
                                  timeout=8000)
             build_chips = pg.eval_on_selector_all(

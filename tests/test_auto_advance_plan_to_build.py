@@ -470,8 +470,10 @@ def test_playwright_kill_planning_opens_build_tile_with_note(env):
             pg.wait_for_selector(chip_sel, timeout=8000)
             pg.click(chip_sel)
             pg.wait_for_selector("#panelStack .panel", timeout=5000)
-            # Hard-kill the planning panel.
-            pg.click("#panelStack .panel .panelbtn.hardkill")
+            # Hard-kill the planning panel. (W6 control-unification renamed the old
+            # 🗑 .hardkill button to the single destructive 🪦 Kill→Boneyard
+            # .killbone control.)
+            pg.click("#panelStack .panel .panelbtn.killbone")
             # The planning chip goes away …
             pg.wait_for_function(
                 "document.querySelectorAll('%s').length === 0" % chip_sel,

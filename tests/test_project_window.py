@@ -209,7 +209,10 @@ def test_most_recent_plus_previous_sessions_expander(gui, tmp_path):
     board = body[body.find("pgrid layoutd"):body.find("grassWorkbenchTpl")]
     assert "Show all 1 older plan/build sessions" in board, \
         "no Plan/Build shelf toggle for the older session (collapsed default)"
-    assert "shelf-wrap collapsed" in board, \
+    # The shelf div carries the stable `prev-efforts` hook (W4 #3, present iff a
+    # zone holds >1 effort) between `shelf-wrap` and `collapsed`; it still renders
+    # COLLAPSED by default (the `collapsed` class → CSS display:none).
+    assert "shelf-wrap prev-efforts collapsed" in board, \
         "older-runs shelf must render COLLAPSED by default"
     # Exactly two session tiles in the Plan/Build zone (1 headline + 1 minitile) —
     # proving a multi-file session is ONE tile, not N per-file cards.

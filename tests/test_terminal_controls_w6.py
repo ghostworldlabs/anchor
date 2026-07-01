@@ -302,11 +302,12 @@ def test_close_panel_posts_term_close(gui, tmp_path):
 
 def test_panel_css_killbone_present_hardkill_removed(gui, tmp_path):
     """CSS in lockstep: `.panelbtn.killbone` is styled; `.panelbtn.hardkill` is
-    removed; `.panelbtn.delete` is RETAINED (the v12 bottom-dock still uses it)."""
+    removed; `.panelbtn.delete` is RETAINED as a re-add path (no rendered control
+    uses it now — the followup W2 removed the dock's #dockDelete, × + 🪦 only)."""
     pid = _project(gui, tmp_path / "proj")
     html = gui.render_project_window_html(pid)
 
     assert ".panelbtn.killbone{" in html, "the Kill→Boneyard CSS rule is missing"
     assert ".panelbtn.hardkill{" not in html, "the hardkill CSS rule must be gone"
-    # The dock's TRUE-delete (id=dockDelete, class 'ctl panelbtn delete') keeps it.
+    # Retained (tested) so true-delete can be reinstated in one line if wanted.
     assert ".panelbtn.delete{" in html

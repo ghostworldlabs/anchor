@@ -68,9 +68,14 @@ def env(tmp_path, monkeypatch):
     _git(repo, "init", "-b", "main")
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "Test")
+    # Keep the throwaway repo hermetic: a host with global commit.gpgsign=true
+    # (no key) or a blocking commit hook would otherwise fail this initial commit,
+    # leaving the repo with no HEAD -> record_stage_baseline() -> "" -> the
+    # baseline assert fails. Disable signing/hooks for this temp-repo commit only.
+    _git(repo, "config", "commit.gpgsign", "false")
     (repo / "README.md").write_text("hello\n", encoding="utf-8")
     _git(repo, "add", "-A")
-    _git(repo, "commit", "-m", "initial")
+    _git(repo, "commit", "--no-verify", "-m", "initial")
 
     proj = rnd_registry.add_project("Stage", str(repo), scaffold=False)
     return {

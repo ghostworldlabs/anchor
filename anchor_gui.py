@@ -3017,9 +3017,11 @@ def _render_kanban_html(folder_path, project_id):
         else:
             cards = _render_lane_sessions(
                 session_views, store_lane, project_id, trio_lane, folder_path)
-        # The "+ new <lane>" launcher. Research offers an engine choice (Claude
-        # default + Gemini); plan/build default to Gemini via the seeded ConPTY path
-        # (newTermSession → term_start → terminal_session.start_session);
+        # The "+ new <lane>" launcher. All lanes launch on Claude by default
+        # (the locked model policy: Claude is the default engine; the 5:1
+        # Claude-orchestrates-Gemini split lives at the skill/session layer; and
+        # Foreman/build code-writing is pinned to Claude). Gemini is reachable
+        # only via the per-session engine toggle — never as a launch default.
         # deliverables are config-driven (no launch); grass gets manual add +
         # promote-from-INBOX.
         if trio_lane == "deliverables":
@@ -3033,10 +3035,8 @@ def _render_kanban_html(folder_path, project_id):
             )
         elif trio_lane == "research":
             add = (
-                "<span class='addnew' onclick=\"newTermSession('research','gemini')\">"
-                "+ New research run (Gemini)</span> "
-                "<span class='addnew' onclick=\"newTermSession('research','gemini')\">"
-                "Gemini</span>"
+                "<span class='addnew' onclick=\"newTermSession('research','claude')\">"
+                f"{html_lib.escape(add_label)}</span>"
             )
         else:
             add = (f"<span class='addnew' onclick=\"newTermSession('{trio_lane}')\">"
@@ -3928,14 +3928,14 @@ def _render_layoutd_dock_html() -> str:
         "onclick='dockMaximize()'>&#9634;</span>"
         "<span class='ctl' id='dockClose' title='Close (keeps the effort)' "
         "onclick='dockClose()'>&#10005;</span>"
-        "<button class='btn kill sm' id='dockKill' "
-        "title='Kill this effort and send it to the Boneyard' "
-        "onclick='dockKill()'>Kill &#8594; Boneyard</button>"
-        # v9 TRUE-delete (keep documents) — distinct from Kill -> Boneyard; the red
-        # ✕ removes the record + effort/summary cache but KEEPS the produced docs.
-        "<span class='ctl panelbtn delete' id='dockDelete' "
-        "title='Delete this effort from Anchor (removes the record; keeps its "
-        "documents)' onclick='dockDelete()'>&#10005;</span>"
+        # W2 (followup): unified with the inline panel — the dock now carries
+        # exactly TWO lifecycle controls, matching the panel's × + 🪦: the ×
+        # graceful CLOSE above, and this ONE destructive Kill → Boneyard as the
+        # headstone glyph (🪦, .killbone). The old "Kill → Boneyard" text button
+        # AND the redundant second-× v9 true-delete (dockDelete) were removed.
+        "<span class='ctl panelbtn killbone' id='dockKill' "
+        "title='Kill &#8594; Boneyard (archive + reap this effort)' "
+        "onclick='dockKill()'>&#129702;</span>"
         "</div></div>"
         "<div class='dbody'>"
         # TOP: summary region (full width).
@@ -4921,9 +4921,12 @@ def render_project_window_html(project_id: str) -> str:
         ".panelbtn.killbone{color:var(--danger);border-color:var(--border)}"
         ".panelbtn.killbone:hover{color:#fff;background:var(--danger);"
         "border-color:var(--danger)}"
-        # .panelbtn.delete is RETAINED for the v12 bottom-dock TRUE-delete control
-        # (id=dockDelete, class 'ctl panelbtn delete'); the session PANEL no longer
-        # uses it — W6 unified the panel's destructive controls into .killbone.
+        # .panelbtn.delete: no rendered control currently uses it. The dock's v9
+        # TRUE-delete (#dockDelete) was removed in the followup W2 (× + 🪦 only,
+        # per user decision — Kill→Boneyard preserves docs), and W6 had already
+        # removed the panel's delete. The rule + the deletePanel()/dockDelete()
+        # client + the /api/rnd/term_delete backend are RETAINED (tested) as a
+        # one-line re-add path if true-delete is ever reinstated in the UI.
         ".panelbtn.delete{color:#fff;background:var(--danger);"
         "border-color:var(--danger);font-weight:700;margin-left:6px}"
         ".panelbtn.delete:hover{color:var(--danger);background:transparent;"
@@ -5301,6 +5304,12 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px solid var(--border);border-radius:6px;cursor:pointer;"
         "font-size:12px;color:var(--text-dim)}"
         ".dock .dbar .ctl:hover{border-color:var(--accent);color:var(--text)}"
+        # W2 (followup): the dock's Kill → Boneyard headstone must read as
+        # DESTRUCTIVE. The panel's `.panelbtn.killbone` danger color is out-
+        # specific'd by `.dock .dbar .ctl`, so restate it at dock specificity.
+        ".dock .dbar .ctl.killbone{color:var(--danger)}"
+        ".dock .dbar .ctl.killbone:hover{color:#fff;background:var(--danger);"
+        "border-color:var(--danger)}"
         ".dock .dbody{display:flex;flex-direction:column;flex:1;min-height:0}"
         ".dock .dtop{padding:11px 20px;overflow-y:auto;flex:0 0 auto;"
         "max-height:48%}"
@@ -5886,7 +5895,8 @@ async function promoteInbox() {
 // register it in MANAGED and open its inline panel (reusing openPanel/repopulate).
 // The idea REMAINS in grass (copy, never destroy).
 async function promoteGrass(ideaId, lane) {
-  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane};
+  var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane,
+                 backend: 'claude'};
   var r, data;
   try {
     r = await _postJson('/api/rnd/promote_grass', payload);
@@ -5903,7 +5913,7 @@ async function promoteGrass(ideaId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'gemini',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -6385,7 +6395,7 @@ function _gandalfRefreshCount() {
 // Tabs + search scope the left list; selecting a .gli loads the right workbench;
 // Develop starts a SEEDED live session in the workbench terminal; a saved
 // refinement appears in the history (grass-<id>/dev-N) and is pullable.
-var _grassEngine = 'gemini';   // workbench engine toggle (research can use gemini)
+var _grassEngine = 'claude';   // workbench engine toggle (default Claude; flip to gemini)
 var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
 var _grassDevSession = null;    // the active Develop session id (for Save refinement)
 // v10 Wave 3 — per-(idea,lane) develop session id, so each of the TWO terminal
@@ -7754,9 +7764,9 @@ function openLinkedPlanning(ev, planningSid) {
 }
 
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
-// then refresh the bar and open its inline panel. backend defaults to gemini.
+// then refresh the bar and open its inline panel. backend defaults to claude.
 async function newTermSession(lane, backend, opts) {
-  backend = backend || 'gemini';
+  backend = backend || 'claude';
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
   // Wave 6 seam: a seed hint (the source session id) rides into term_start so
   // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
@@ -8317,11 +8327,11 @@ function _cssEsc(s) {
 }
 
 // _buildEngineToggle(sessionId, s): the ◆ Claude / ✦ Gemini toggle for the panel
-// bar. The currently-selected engine (s.backend, default gemini) is highlighted;
+// bar. The currently-selected engine (s.backend, default claude) is highlighted;
 // clicking the OTHER engine POSTs term_set_engine (relaunch in the same worktree)
 // and updates the record + toggle on success. Returns the .engtog element.
 function _buildEngineToggle(sessionId, s) {
-  var cur = (s && s.backend) || 'gemini';
+  var cur = (s && s.backend) || 'claude';
   var tog = document.createElement('span');
   tog.className = 'engtog';
   tog.title = 'Chosen once; flip to switch this session to the other engine.';
@@ -8536,7 +8546,8 @@ function resumeDiscovered(ev, sessionId, lane) {
 // success the new session is added to MANAGED and its panel opened/attached
 // (reusing the live-session panel path).
 async function continueSession(sessionId, lane) {
-  var payload = {project_id: PROJECT_ID, lane: lane, source_session: sessionId};
+  var payload = {project_id: PROJECT_ID, lane: lane, source_session: sessionId,
+                 backend: 'claude'};
   var r, data;
   try {
     r = await _postJson('/api/rnd/continue_session', payload);
@@ -8553,7 +8564,7 @@ async function continueSession(sessionId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'gemini',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -8613,7 +8624,7 @@ async function advanceSession(sourceId, toLane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'gemini',
+    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'claude',
     status: rec.status || 'running', label: rec.label || '',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || sourceId,
     idx: (_laneCounters[rec.lane || toLane] = (_laneCounters[rec.lane || toLane] || 0) + 1)
@@ -9180,7 +9191,7 @@ function _addAutoBuildTile(rec) {
   var sid = rec.session_id;
   var lane = rec.lane || 'build';
   MANAGED[sid] = {
-    session_id: sid, lane: lane, backend: rec.backend || 'gemini',
+    session_id: sid, lane: lane, backend: rec.backend || 'claude',
     status: rec.status || 'running', label: rec.label || 'auto · from plan',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || '',
     auto_from_plan: true,
@@ -9775,7 +9786,7 @@ async function newEffort(stage) {
   // lane name mirrors the stage (term_start accepts both 'plan' and 'planning').
   var lane = (stage === 'plan') ? 'plan'
            : (stage === 'build') ? 'build' : 'research';
-  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'gemini',
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'claude',
                  effort_managed: true};
   var r, data;
   try {
@@ -14931,8 +14942,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 import zombie_hunter
                 import pty_manager
                 import subprocess
-                import sys
-                import json
+                # NOTE: do NOT `import json`/`import sys` here — they are
+                # module-global (top of file). A function-local import makes the
+                # name local to the ENTIRE do_GET method, so an earlier branch
+                # (e.g. /api/version) referencing `json` before this line raises
+                # UnboundLocalError -> a 500 on every page load. (followup W4)
                 from datetime import datetime
 
                                 # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
@@ -17187,6 +17201,12 @@ function startZombieTerminal(btn) {
             pid = (body.get("project_id", "") or body.get("id", "")).strip()
             idea_id = (body.get("idea_id", "") or "").strip()
             lane = (body.get("lane", "") or "").strip()
+            # Claude-first policy: a promote opens a NEW session with no prior
+            # engine choice, so it defaults to Claude — never the project's sticky
+            # last_engine (which could be Gemini from an unrelated per-session
+            # toggle). Gemini stays reachable via the session engine toggle.
+            backend = ((body.get("backend", "") or "").strip()
+                       or _termsess.DEFAULT_ENGINE)
             if not pid or not idea_id or not lane:
                 self._send_json(
                     {"ok": False,
@@ -17200,7 +17220,8 @@ function startZombieTerminal(btn) {
                 self._send_json({"ok": False, "error": "Unknown project"}, 404)
             else:
                 try:
-                    rec = _eh.promote_grass_to_lane(pid, idea_id, lane)
+                    rec = _eh.promote_grass_to_lane(pid, idea_id, lane,
+                                                    backend=backend)
                     self._send_json({"ok": True, "session": rec})
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
@@ -17534,7 +17555,12 @@ function startZombieTerminal(btn) {
             lane = (body.get("lane", "") or "").strip()
             source = (body.get("source_session", "")
                       or body.get("session", "") or "").strip()
-            backend = (body.get("backend", "") or "").strip() or None
+            # Claude-first policy: continuing a past session opens a NEW session;
+            # default it to Claude rather than the project's sticky last_engine
+            # (which could be Gemini from an unrelated toggle). Explicit backend
+            # in the body still wins; Gemini stays reachable via the toggle.
+            backend = ((body.get("backend", "") or "").strip()
+                       or _termsess.DEFAULT_ENGINE)
             if not pid or not lane or not source:
                 self._send_json(
                     {"ok": False,
