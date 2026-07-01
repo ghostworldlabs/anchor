@@ -354,7 +354,13 @@ def test_gandalf_cancel(gandalf, project, monkeypatch):
         out = gandalf.run_gandalf(str(folder), pid)
         run_id_holder.append(out)
         
-    t = threading.Thread(target=run_thread)
+    # daemon=True so this thread can NEVER block interpreter shutdown: cancel_run
+    # cannot interrupt the mocked uninterruptible time.sleep, so the thread is
+    # still alive after the 5s join; a non-daemon thread would then hang the
+    # interpreter at exit until the gate's wall timeout killed it (exit_code null,
+    # not green). The assertions read the registry (updated synchronously by
+    # cancel_run on the main thread), so abandoning the thread is sound.
+    t = threading.Thread(target=run_thread, daemon=True)
     t.start()
     
     # Wait for the run_id to be registered and active
