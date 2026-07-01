@@ -168,14 +168,16 @@ def test_maximize_control_built_in_panel_header(gui_env, tmp_path):
 
 
 def test_v5_controls_unchanged(gui_env, tmp_path):
-    """The v5 minimize / close-to-tile / hard-kill controls are EXACTLY as they
-    were — maximize is purely additive, it does not touch the others."""
+    """The minimize / close-to-tile / kill controls are intact — maximize is
+    purely additive, it does not touch the others. (W6 later unified the panel's
+    destructive controls: the kill control is now the single '🪦' Kill -> Boneyard
+    'panelbtn killbone', replacing the old 🗑 'panelbtn hardkill'.)"""
     gui = gui_env["gui"]
     pid = _mkproject(tmp_path / "V5", "V5")["id"]
     js = _js(gui.render_project_window_html(pid))
     assert "minBtn.onclick" in js and "minimizePanel(sessionId)" in js
     assert "'panelbtn close'" in js and "closePanel(sessionId)" in js
-    assert "'panelbtn hardkill'" in js and "killPanel(sessionId)" in js
+    assert "'panelbtn killbone'" in js and "killPanel(sessionId)" in js
     assert "closeBtn.textContent = '×'" in js
     # The whole control row appends min, max, close, kill (all four present).
     assert "bar.appendChild(minBtn)" in js
@@ -290,8 +292,9 @@ def test_maximize_resize_refit_end_to_end(server):
             "#panelStack .panel .panelbtn.min", "e=>e.length") == 1
         assert pg.eval_on_selector_all(
             "#panelStack .panel .panelbtn.close", "e=>e.length") == 1
+        # W6 unified the kill control into the single '🪦' Kill -> Boneyard.
         assert pg.eval_on_selector_all(
-            "#panelStack .panel .panelbtn.hardkill", "e=>e.length") == 1
+            "#panelStack .panel .panelbtn.killbone", "e=>e.length") == 1
 
         pg.wait_for_timeout(150)
         # Record the normal-state terminal dimensions (cols×rows).

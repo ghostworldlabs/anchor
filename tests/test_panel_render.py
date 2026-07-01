@@ -31,6 +31,10 @@ import pytest
 def gui(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    # Back-compat (no-token) mode by default — mirror the suite-wide pattern so
+    # the ambient dev-host ANCHOR_TOKEN can't leak in and 401 the read-only
+    # GET endpoints these tests exercise. The token-gated test re-sets it.
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
     import paths
     importlib.reload(paths)
     import rnd_registry

@@ -218,15 +218,22 @@ def test_advance_shows_prompt_pasted_unsent_in_browser(server):
         # actually ATTACHED and pumping reads — otherwise the greet can land before
         # any read loop exists and the flush is left to chance/timeout. The stub PTY
         # ECHOES the one-time skill-load seed ("Load the Crucible skill now…"), so the
-        # seed appearing in THIS panel's xterm host proves the transport has attached
+        # seed appearing in THIS panel's xterm proves the transport has attached
         # and completed at least one read cycle. Wait for that BEFORE the greet.
+        # NOTE: the advance seed now carries the full upstream research summary
+        # (v8+ "handoff carries docs"), so the "Load the Crucible" opener scrolls
+        # OUT of the small visible viewport almost immediately — checking the
+        # rendered `.term-host` textContent (xterm only keeps VISIBLE rows in the
+        # DOM) would time out. So we read the xterm SCROLLBACK BUFFER (the same
+        # source of truth the UNSENT negative assertion below uses), where the
+        # echoed seed is retained regardless of scroll position.
         pg.wait_for_function(
-            "document.querySelector('#panelStack .panel[data-session=\"%s\"] "
-            ".term-host') && document.querySelector('#panelStack .panel"
-            "[data-session=\"%s\"] .term-host').textContent.indexOf("
-            "'Load the Crucible') >= 0"
-            % (new_sid, new_sid),
-            timeout=10000)
+            "sid=>{var w=window.PANELS&&window.PANELS[sid];"
+            "if(!w||!w.term)return false;var b=w.term.buffer.active;"
+            "for(var i=0;i<b.length;i++){var l=b.getLine(i);"
+            "if(l&&l.translateToString(true).indexOf('Load the Crucible')>=0)"
+            "return true;}return false;}",
+            arg=new_sid, timeout=10000)
 
         # Inject the MODEL greet onto the new planning PTY so the transport's next
         # read flushes the pending paste UNSENT (production: the real greet does it).

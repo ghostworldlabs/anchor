@@ -381,10 +381,12 @@ def test_playwright_kill_no_loss_lifecycle(env):
 
             chip_sel = '#sessionBar .live-chip[data-session="%s"]' % sid
             pg.wait_for_selector(chip_sel, timeout=8000)
-            # Open the live panel and KILL it via the panel's 🗑 control.
+            # Open the live panel and KILL it via the panel's 🪦 Kill→Boneyard
+            # control (W6 control-unification renamed the old 🗑 .hardkill button
+            # to the single destructive .killbone control).
             pg.click(chip_sel)
             pg.wait_for_selector("#panelStack .panel", timeout=5000)
-            pg.click("#panelStack .panel .panelbtn.hardkill")
+            pg.click("#panelStack .panel .panelbtn.killbone")
             # The little top-strip chip for the killed session is GONE.
             pg.wait_for_function(
                 "document.querySelectorAll("

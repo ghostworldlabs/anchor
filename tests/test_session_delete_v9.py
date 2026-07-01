@@ -393,7 +393,8 @@ def test_cleanup_endpoint_token_and_confirm(env, monkeypatch):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# (3) DOM — the red ✕ delete control is present + DISTINCT from the 🗑 kill control
+# (3) DOM — the W6-unified panel scheme: a '×' CLOSE + a single '🪦' Kill ->
+#     Boneyard. The old panel TRUE-delete (red ✕) / 🗑 hardkill controls are gone.
 # ════════════════════════════════════════════════════════════════════════════
 
 class _Collector(HTMLParser):
@@ -406,38 +407,44 @@ class _Collector(HTMLParser):
         self.els.append((tag, (d.get("class") or "").split(), d))
 
 
-def test_dom_delete_control_present_and_distinct(env):
-    """POSITIVE: the project-window JS creates a '.panelbtn.delete' control with a
-    red '✕' glyph wired to deletePanel + posting term_delete with confirm:true;
-    a distinct '.panelbtn.hardkill' (🗑 kill → term_kill) still exists. NEGATIVE:
-    delete and kill are NOT the same control/handler/glyph/endpoint."""
+def test_dom_panel_controls_present_and_distinct(env):
+    """Realigned to the W6-unified panel scheme. The session PANEL no longer
+    carries a separate '.panelbtn.delete' TRUE-delete control — W6 collapsed the
+    old redundant close/hardkill/delete trio into exactly two lifecycle controls:
+
+      POSITIVE — a '×' graceful CLOSE ('.panelbtn.close' -> closePanel, POST
+        term_close) and a single '🪦' Kill -> Boneyard ('.panelbtn.killbone' ->
+        killPanel, POST term_kill) as the ONE destructive control.
+      NEGATIVE — the panel builds NO '.panelbtn.delete' control (no delBtn / red
+        ✕) and NO old 🗑 '.panelbtn.hardkill'. close and kill are distinct
+        (distinct class, glyph, handler, endpoint)."""
     gui = env["gui"]
     html = gui.render_project_window_html(env["pid"])
     js = _js(html)
     css = "\n".join(re.findall(r"<style[^>]*>([\s\S]*?)</style>", html))
 
-    # POSITIVE — the delete control exists, is wired to deletePanel, posts
-    # term_delete with confirm:true, and uses the red ✕ glyph.
-    assert "panelbtn delete" in js, "no .panelbtn.delete control created"
-    assert "deletePanel(sessionId)" in js, "delete control not wired to deletePanel"
-    assert "function deletePanel(" in js or "deletePanel(" in js
-    assert "/api/rnd/term_delete" in js, "deletePanel does not POST term_delete"
-    assert "confirm: true" in js or "confirm:true" in js, \
-        "term_delete must send confirm:true"
-    assert "delBtn.textContent = '✕'" in js, "delete glyph is not the red ✕"
+    # POSITIVE — the '×' graceful CLOSE control (closePanel -> POST term_close).
+    assert "panelbtn close" in js, "no .panelbtn.close control created"
+    assert "closePanel(sessionId)" in js, "close control not wired to closePanel"
+    assert "/api/rnd/term_close" in js, "closePanel must POST term_close"
+    assert "closeBtn.textContent = '×'" in js, "close glyph is not ×"
 
-    # POSITIVE — the kill control still exists and is the DISTINCT 🗑 / term_kill.
-    assert "panelbtn hardkill" in js
-    assert "killPanel(sessionId)" in js
+    # POSITIVE — the single '🪦' Kill -> Boneyard control (killPanel -> term_kill).
+    assert "panelbtn killbone" in js, "no .panelbtn.killbone control created"
+    assert "killPanel(sessionId)" in js, "kill control not wired to killPanel"
     assert "/api/rnd/term_kill" in js
-    assert "killBtn.textContent = '🗑'" in js
+    assert "killBtn.textContent = '🪦'" in js, "kill glyph is not the headstone 🪦"
 
-    # NEGATIVE — they are not the same control: distinct class, glyph, handler,
-    # endpoint. (Delete must NOT reuse the kill endpoint/glyph and vice versa.)
-    assert "delBtn.textContent = '🗑'" not in js
-    assert "killBtn.textContent = '✕'" not in js
-    # The CSS styles the delete control distinctly (its own .panelbtn.delete rule).
-    assert ".panelbtn.delete" in css, "no distinct CSS for the delete control"
+    # NEGATIVE — the panel builds no TRUE-delete control (W6): no red-✕ delBtn and
+    # no 'panelbtn delete', and no old 🗑 'panelbtn hardkill'. Close and kill are
+    # not the same control (distinct glyph).
+    assert "delBtn" not in js, "the panel TRUE-delete control (delBtn) must be gone"
+    assert "'panelbtn delete'" not in js and '"panelbtn delete"' not in js
+    assert "'panelbtn hardkill'" not in js and '"panelbtn hardkill"' not in js
+    assert "killBtn.textContent = '×'" not in js
+    assert "closeBtn.textContent = '🪦'" not in js
+    # The CSS styles the killbone danger control distinctly.
+    assert ".panelbtn.killbone" in css, "no distinct CSS for the kill control"
 
 
 def test_dom_delete_is_confirm_gated(env):
@@ -453,98 +460,38 @@ def test_dom_delete_is_confirm_gated(env):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# (4) REAL Playwright + Chromium — delete → tile gone → reload → STILL gone
+# (4) RETIRED FEATURE — the bottom-dock TRUE-delete (#dockDelete) was REMOVED.
+#
+# The v9 dock second-✕ TRUE-delete control was removed from the UI by user
+# decision: Kill -> Boneyard (#dockKill) reaps the session but PRESERVES the
+# produced docs in the per-project Boneyard, so a separate hard-delete affordance
+# is redundant. The former Playwright "delete tile → reload → stays gone" test
+# exercised that now-removed control; it is retired here and replaced by a
+# deterministic guard that #dockDelete stays gone and #dockKill (Kill -> Boneyard)
+# is the single destructive dock control. (True-delete of a session is still
+# reachable programmatically — the term_delete backend + endpoint remain covered
+# by the section-(1)/(2) tests above.)
 # ════════════════════════════════════════════════════════════════════════════
 
-@pytest.fixture
-def server(env):
+def test_dock_true_delete_removed_kill_to_boneyard_is_sole_destructive(env):
+    """The bottom effort-dock now carries exactly two lifecycle controls, matching
+    the W6-unified panel: a '×' graceful CLOSE (#dockClose) and the single '🪦'
+    Kill -> Boneyard (#dockKill, .panelbtn.killbone) as the ONE destructive
+    control. The v9 TRUE-delete (#dockDelete) was REMOVED — this guards that it
+    stays gone."""
     gui = env["gui"]
-    srv, port, t = _free_server(gui)
-    try:
-        yield env, f"http://127.0.0.1:{port}", port
-    finally:
-        srv.shutdown(); srv.server_close(); t.join(timeout=5)
+    html = gui.render_project_window_html(env["pid"])
 
+    # POSITIVE — the dock's two lifecycle controls are present.
+    assert "id='dockClose'" in html, "dock graceful-close (×) control missing"
+    assert "id='dockKill'" in html, "dock Kill -> Boneyard control missing"
+    assert "onclick='dockClose()'" in html
+    assert "onclick='dockKill()'" in html
+    # Kill -> Boneyard is the headstone killbone control (&#129702; == 🪦).
+    assert "panelbtn killbone' id='dockKill'" in html, \
+        "dock Kill control is not the .panelbtn.killbone headstone"
+    assert "&#129702;" in html, "dock Kill glyph (headstone 🪦) missing"
 
-def test_playwright_delete_tile_gone_and_stays_gone(server):
-    """End to end in a real browser:
-
-      1. A finished (killed) session renders a tile on the board/bar.
-      2. Open its panel → click the red ✕ delete → confirm → tile + panel gone.
-      3. RELOAD the page → the tile is STILL gone (the registry record was
-         hard-deleted; term_sessions/the board no longer surface it — the key bug).
-      4. The produced DOCUMENTS are unaffected (asserted via the backend).
-      5. No JS console errors throughout.
-
-    Screenshot saved to _devtest/wave1_delete.png for orchestrator review.
-    """
-    pytest.importorskip("playwright.sync_api")
-    env, base, _port = server
-    eh, repo, pid = env["eh"], env["repo"], env["pid"]
-    sid, docs = _make_killed_session(env, lane="build", plan_dir="build/pw")
-    assert (repo / docs["deliv"]).is_file()
-
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        b = p.chromium.launch()
-        pg = b.new_page()
-        errors = []
-        pg.on("console",
-              lambda m: errors.append(m.text) if m.type == "error" else None)
-        pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
-
-        # The finished session's tile is on the board (data-session selector).
-        # John tweak: older-runs shelves render COLLAPSED by default and this tile
-        # can land in one (a persisted-doc DISCOVERED session becomes the headline)
-        # — wait for it ATTACHED, then expand its host shelf so it is clickable.
-        tile_sel = '.tile[data-session="%s"]' % sid
-        pg.wait_for_selector(tile_sel, state="attached", timeout=8000)
-        assert pg.eval_on_selector_all(tile_sel, "e=>e.length") >= 1
-        pg.eval_on_selector(
-            tile_sel,
-            "el => { var w = el.closest('.shelf-wrap');"
-            " if (w && w.classList.contains('collapsed'))"
-            " w.classList.remove('collapsed'); }")
-        pg.wait_for_selector(tile_sel, timeout=8000)
-
-        # v12 W10: clicking the EFFORT tile opens the SINGLE bottom DOCK; assert
-        # the red ✕ delete control there, distinct from Kill -> Boneyard.
-        pg.click(tile_sel)
-        pg.wait_for_function(
-            "() => document.getElementById('effortDock').style.display === 'flex'",
-            timeout=5000)
-        del_sel = "#dockDelete"
-        kill_sel = "#dockKill"
-        pg.wait_for_selector(del_sel, timeout=5000)
-        assert pg.eval_on_selector_all(del_sel, "e=>e.length") == 1
-        # Distinct from the kill control (both present; the ✕ is TRUE-delete).
-        assert pg.eval_on_selector(del_sel, "e=>e.textContent") == "✕"
-        assert "Kill" in pg.eval_on_selector(kill_sel, "e=>e.textContent")
-
-        _DEVTEST.mkdir(exist_ok=True)
-        pg.screenshot(path=str(_DEVTEST / "wave1_delete.png"))
-
-        # Auto-accept the confirm() dialog, click delete.
-        pg.on("dialog", lambda d: d.accept())
-        pg.click(del_sel)
-        # The tile disappears and the dock closes (unbinds).
-        pg.wait_for_function(
-            "document.querySelectorAll('.tile[data-session=\"%s\"]').length === 0"
-            % sid, timeout=8000)
-        pg.wait_for_function(
-            "() => document.getElementById('effortDock').style.display === 'none'",
-            timeout=8000)
-
-        # RELOAD — the key bug: it must STAY gone (record is truly removed).
-        pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
-        pg.wait_for_timeout(600)  # let repopulate() run
-        assert pg.eval_on_selector_all(tile_sel, "e=>e.length") == 0, \
-            "DELETED tile RE-APPEARED after reload (the v6 key bug)"
-
-        assert not errors, f"JS console errors during delete: {errors}"
-        b.close()
-
-    # The registry record is gone but the produced DOCUMENTS are KEPT (Option A).
-    assert env["reg"].get_session(sid) is None
-    assert (repo / docs["deliv"]).is_file()
-    assert (repo / docs["north"]).is_file()
+    # NEGATIVE — the removed v9 TRUE-delete dock element must stay gone.
+    assert "id='dockDelete'" not in html, \
+        "the removed #dockDelete true-delete control reappeared"

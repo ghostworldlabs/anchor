@@ -455,7 +455,13 @@ def test_new_project_picker_name_autosuggest_in_html(gui_env):
     # Auto-suggested flag + the manual-edit clear hook wired to the name field.
     assert "_npAutoName" in html
     assert "npNameEdited(" in html
-    assert 'oninput="npNameEdited()"' in html
+    # The name field's oninput clears the auto-suggested flag via npNameEdited().
+    # A live-preview call (npUpdatePreview) was later added to the SAME handler,
+    # so the oninput is now "npNameEdited(); npUpdatePreview()" — match the wire
+    # on the npName field itself rather than an exact single-call string.
+    import re as _re
+    assert _re.search(r'id="npName"[^>]*oninput="[^"]*npNameEdited\(\)', html), \
+        "npName field's oninput must invoke npNameEdited()"
     # The suggestion writes into the npName field.
     assert "getElementById('npName')" in html
     # REGRESSION (f-string escaping): the emitted npBasename split regex MUST

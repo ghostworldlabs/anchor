@@ -8,7 +8,7 @@ Gate: `python -m pytest -q` (orchestrator-run, full suite).
 | 1 | Claude-first session launch | GREEN |
 | 2 | Unified dock controls (× + 🪦) [UI sign-off] | GREEN (signed off) |
 | 3 | Bridge job cost onto the effort record | GREEN |
-| 4 | Triage & fix pre-existing baseline reds (~59) | pending |
+| 4 | Triage & fix pre-existing baseline reds (~59) | GREEN (−2 enumerated order-flakes) |
 
 ## Wave 1 — Claude-first session launch — GREEN (2026-07-01)
 
@@ -144,3 +144,63 @@ Wave 4 clears the baseline itself.
 ---
 
 (Per-wave EXECUTE → GATE → REVIEW → FIX records are appended below as each wave runs.)
+
+## Wave 4 — Triage & fix pre-existing baseline reds — GREEN (2026-07-01)
+
+Baseline 59 full-suite reds → **2 order-flakes** (both pass in isolation).
+1682 passed. The prior "gate 274/274" was a SUBSET gate; the full suite hid one
+real product bug plus a pile of test-hygiene rot.
+
+**1 REAL PRODUCT BUG FIXED (anchor_gui.py) — cleared 39 tests at once.**
+`GET /api/version` 500'd on EVERY page load: a function-local `import json`
+(and `import sys`) inside the zombie-hunter branch of `do_GET` made `json`
+method-local for the whole method, so the earlier `/api/version` branch hit
+`UnboundLocalError`. The client polls `/api/version` every 30s, so this spammed
+500s in production too. Removed the redundant local imports (both are
+module-global). 39 Playwright tests (all asserting "no JS console 500") went
+green.
+
+**20 TEST-HYGIENE REALIGNMENTS (4 parallel triage agents, zero product change,
+zero assertions weakened):**
+- *Stale W6/W9 control-scheme tests (7)* — realigned `panelbtn hardkill`/🗑 →
+  `panelbtn killbone`/🪦 and the dock/panel × + 🪦 scheme; retired the
+  `#dockDelete` Playwright test (true-delete dropped by user decision) →
+  replaced with a render guard that `#dockDelete` stays gone. Files:
+  test_run_lifecycle, test_window_controls_v6, test_session_delete_v9.
+- *Playwright selector renames (4)* — `.panelbtn.hardkill` → `.panelbtn.killbone`
+  in kill-flow tests + one xterm scrollback-vs-visible-viewport read fix
+  (advance seed now carries the upstream summary, scrolling the opener out of
+  view). Chromium confirmed working here — these were NOT env failures. Files:
+  test_no_loss_lifecycle_v8, test_auto_advance_plan_to_build, test_handoff_docs_v8,
+  test_advance_paste_ui_v10.
+- *Host-token / non-hermetic fixtures (6)* — this dev host has a real
+  `ANCHOR_TOKEN` set; fixtures that didn't `delenv` it leaked it in, 401-ing
+  back-compat read tests. Added the suite-standard `delenv`/token-in-body
+  (test_panel_render ×4, test_anchor_features) + hardened the throwaway-git
+  fixture (`commit.gpgsign false` + `--no-verify`) in test_stage_baseline_persist.
+- *Stale literal-string assertions (3)* — realigned to the current render:
+  `npNameEdited()` now co-emits `npUpdatePreview()`; the brand-img "single svg"
+  invariant now allows the documented zombie-hunter photo icon; the older-runs
+  shelf gained a stable `prev-efforts` class between `shelf-wrap` and `collapsed`.
+  Files: test_rnd_ui_wiring, test_dashboard_rows, test_project_window.
+
+**Dead-code decision (deviating from the initial cleanup note, on new info):**
+Agent 2 showed `deletePanel()` is still the tested confirm-gated client for the
+live `/api/rnd/term_delete` backend. Rather than rip it out (and re-edit a
+coherent passing test state) for a removed UI affordance, KEPT the
+`deletePanel()`/`dockDelete()` client + `.panelbtn.delete` CSS as a tested,
+one-line re-add path and FIXED the now-false "the dock still uses it" comments
+(anchor_gui.py + test_terminal_controls_w6).
+
+**GATE.** `python -m pytest` → 2 failed / 1682 passed (13m44s). Both residual
+fails PASS IN ISOLATION and are pre-existing test-ISOLATION (order) flakes, NOT
+product regressions:
+- `test_project_window::test_session_summary_endpoint_unknown_session_is_terminal`
+  (was NOT in the original baseline — newly surfaced by ordering).
+- `test_stage_baseline_persist_v12::test_baseline_best_effort` (green standalone
+  after the git-config hardening; order-coupled in the full suite).
+Each prior gate surfaced a DIFFERENT such flake (W1: no_leaked_braces; W3:
+advance_artifacts finish_to_build), confirming a broad suite-wide isolation
+weakness that predates this effort. **FOLLOW-UP (out of scope): harden
+cross-test isolation** (a global git-config/env/cwd leak between tests). Per the
+plan's "GREEN except an enumerated set," Wave 4 is GREEN.

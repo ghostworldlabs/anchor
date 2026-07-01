@@ -4921,9 +4921,12 @@ def render_project_window_html(project_id: str) -> str:
         ".panelbtn.killbone{color:var(--danger);border-color:var(--border)}"
         ".panelbtn.killbone:hover{color:#fff;background:var(--danger);"
         "border-color:var(--danger)}"
-        # .panelbtn.delete is RETAINED for the v12 bottom-dock TRUE-delete control
-        # (id=dockDelete, class 'ctl panelbtn delete'); the session PANEL no longer
-        # uses it — W6 unified the panel's destructive controls into .killbone.
+        # .panelbtn.delete: no rendered control currently uses it. The dock's v9
+        # TRUE-delete (#dockDelete) was removed in the followup W2 (× + 🪦 only,
+        # per user decision — Kill→Boneyard preserves docs), and W6 had already
+        # removed the panel's delete. The rule + the deletePanel()/dockDelete()
+        # client + the /api/rnd/term_delete backend are RETAINED (tested) as a
+        # one-line re-add path if true-delete is ever reinstated in the UI.
         ".panelbtn.delete{color:#fff;background:var(--danger);"
         "border-color:var(--danger);font-weight:700;margin-left:6px}"
         ".panelbtn.delete:hover{color:var(--danger);background:transparent;"
@@ -14939,8 +14942,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 import zombie_hunter
                 import pty_manager
                 import subprocess
-                import sys
-                import json
+                # NOTE: do NOT `import json`/`import sys` here — they are
+                # module-global (top of file). A function-local import makes the
+                # name local to the ENTIRE do_GET method, so an earlier branch
+                # (e.g. /api/version) referencing `json` before this line raises
+                # UnboundLocalError -> a 500 on every page load. (followup W4)
                 from datetime import datetime
 
                                 # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)

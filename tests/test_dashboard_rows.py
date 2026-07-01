@@ -188,12 +188,22 @@ def test_every_brand_img_uses_single_vendored_svg(env):
         assert src == "/vendor/brand/gwl-m-icon.svg", src
     # And the masthead specifically carries one such mark.
     assert html.count('/vendor/brand/gwl-m-icon.svg') >= 1
-    # There is exactly ONE distinct brand asset path referenced.
+    # The GWL brand MARK is a single vendored svg (asserted per-tag above). The
+    # home page may also reference other DOCUMENTED, non-brand-mark feature icons
+    # under /vendor/brand/ (e.g. the Zombie Hunter radar photo-icon, a real
+    # shipped asset on disk). Allow only that documented set — a random/duplicate
+    # brand asset is still forbidden.
+    ALLOWED_BRAND_SRCS = {
+        "/vendor/brand/gwl-m-icon.svg",
+        "/vendor/brand/zombie-hunter-radar.jpg",
+    }
     srcs = set(
         s.split("?", 1)[0]
         for s in re.findall(r'src="(/vendor/brand/[^"]+)"', html)
     )
-    assert srcs == {"/vendor/brand/gwl-m-icon.svg"}
+    assert "/vendor/brand/gwl-m-icon.svg" in srcs
+    unexpected = srcs - ALLOWED_BRAND_SRCS
+    assert not unexpected, "undocumented brand asset(s): %r" % (unexpected,)
 
 
 def test_no_leaked_fstring_braces_in_view_and_home(env, tmp_path):
