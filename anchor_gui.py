@@ -3928,14 +3928,14 @@ def _render_layoutd_dock_html() -> str:
         "onclick='dockMaximize()'>&#9634;</span>"
         "<span class='ctl' id='dockClose' title='Close (keeps the effort)' "
         "onclick='dockClose()'>&#10005;</span>"
-        "<button class='btn kill sm' id='dockKill' "
-        "title='Kill this effort and send it to the Boneyard' "
-        "onclick='dockKill()'>Kill &#8594; Boneyard</button>"
-        # v9 TRUE-delete (keep documents) — distinct from Kill -> Boneyard; the red
-        # ✕ removes the record + effort/summary cache but KEEPS the produced docs.
-        "<span class='ctl panelbtn delete' id='dockDelete' "
-        "title='Delete this effort from Anchor (removes the record; keeps its "
-        "documents)' onclick='dockDelete()'>&#10005;</span>"
+        # W2 (followup): unified with the inline panel — the dock now carries
+        # exactly TWO lifecycle controls, matching the panel's × + 🪦: the ×
+        # graceful CLOSE above, and this ONE destructive Kill → Boneyard as the
+        # headstone glyph (🪦, .killbone). The old "Kill → Boneyard" text button
+        # AND the redundant second-× v9 true-delete (dockDelete) were removed.
+        "<span class='ctl panelbtn killbone' id='dockKill' "
+        "title='Kill &#8594; Boneyard (archive + reap this effort)' "
+        "onclick='dockKill()'>&#129702;</span>"
         "</div></div>"
         "<div class='dbody'>"
         # TOP: summary region (full width).
@@ -5301,6 +5301,12 @@ def render_project_window_html(project_id: str) -> str:
         "border:1px solid var(--border);border-radius:6px;cursor:pointer;"
         "font-size:12px;color:var(--text-dim)}"
         ".dock .dbar .ctl:hover{border-color:var(--accent);color:var(--text)}"
+        # W2 (followup): the dock's Kill → Boneyard headstone must read as
+        # DESTRUCTIVE. The panel's `.panelbtn.killbone` danger color is out-
+        # specific'd by `.dock .dbar .ctl`, so restate it at dock specificity.
+        ".dock .dbar .ctl.killbone{color:var(--danger)}"
+        ".dock .dbar .ctl.killbone:hover{color:#fff;background:var(--danger);"
+        "border-color:var(--danger)}"
         ".dock .dbody{display:flex;flex-direction:column;flex:1;min-height:0}"
         ".dock .dtop{padding:11px 20px;overflow-y:auto;flex:0 0 auto;"
         "max-height:48%}"

@@ -6,7 +6,7 @@ Gate: `python -m pytest -q` (orchestrator-run, full suite).
 | Wave | Title | State |
 |------|-------|-------|
 | 1 | Claude-first session launch | GREEN |
-| 2 | Unified dock controls (× + 🪦) [UI sign-off] | pending |
+| 2 | Unified dock controls (× + 🪦) [UI sign-off] | GREEN (signed off) |
 | 3 | Bridge job cost onto the effort record | pending |
 | 4 | Triage & fix pre-existing baseline reds (~59) | pending |
 
@@ -52,6 +52,46 @@ red that does not reproduce in isolation cannot block GREEN) Wave 1 is GREEN.
 
 **Also noted for Wave 4:** `_render_kanban_html` is dead code (no live caller;
 `/api/rnd/board_html` renders `_render_layoutd_html`) — candidate for removal.
+
+## Wave 2 — Unified dock controls (× + 🪦) — GREEN (signed off, 2026-07-01)
+
+**EXECUTE.** `_render_layoutd_dock_html`: the dock's destructive controls now
+mirror the W6 inline panel — `×` graceful close (dockClose) + a single
+`🪦` Kill → Boneyard (dockKill, entity `&#129702;`, class `ctl panelbtn
+killbone`, still `onclick=dockKill()` → term_kill). Removed the redundant
+second-`✕` v9 true-delete (`dockDelete`). New gate:
+`tests/test_dock_controls_unified_w2.py` (4 tests).
+
+**REVIEW (2 independent, refute-prompted) — both converged.** (1) The red
+headstone was a CSS-specificity mirage: `.dock .dbar .ctl` (0,3,0) out-specified
+`.panelbtn.killbone` (0,2,0), so the destructive control rendered neutral grey.
+(2) FEATURE LOSS (HIGH): removing `dockDelete` left `/api/rnd/term_delete`
+(true-delete = drop record, KEEP docs) with NO UI trigger anywhere. (3) The
+Playwright `test_session_delete_v9::test_playwright_delete_tile_gone_and_stays_gone`
+still asserts `#dockDelete` (already baseline-red; now also feature-removed).
+
+**FIX.** Added dock-specificity danger rules
+`.dock .dbar .ctl.killbone{color:var(--danger)}` + `:hover` (computed color
+verified rgb(248,113,113) red on dockKill vs grey on dockClose). 
+
+**SIGN-OFF (screenshot + user decision).** Rendered the real dock (Playwright,
+3× crop → `scratchpad/wave2_dock_ctrls.png`): `Advance → | ▁ | ▢ | × | 🪦` — one
+close, one headstone, no second ×. John reviewed and chose **"Drop true-delete —
+× + 🪦 only"** (Kill → Boneyard preserves docs in the searchable Boneyard, so no
+doc loss). Decision recorded.
+
+**GATE.** Full suite 59 failed / 1621 passed — **zero new reds** vs the 59
+baseline (order-flake did not resurface). 1606 + 11 (W1) + 4 (W2) = 1621. The
+CSS danger-rule was added after the gate launched but is test-inert (additive,
+balanced braces, no color assertion); re-verified the 3 dock test files (24 pass)
+against the final code.
+
+**Wave 4 follow-ups queued (true-delete now dropped by decision):** retire
+`test_session_delete_v9::test_playwright_delete_tile_gone_and_stays_gone`
+(tests a removed feature); remove the now-dead `dockDelete()` + `deletePanel()`
+JS and the vestigial `.panelbtn.delete` CSS + its false "retained for the dock"
+comment (and update `test_terminal_controls_w6`'s `.panelbtn.delete{` assertion
+accordingly).
 
 ## Baseline (pre-Wave-1)
 
