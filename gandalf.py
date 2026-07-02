@@ -949,9 +949,18 @@ def _add_gitignore_best_effort(folder_path) -> None:
 
 # ── Public engine ────────────────────────────────────────────────────────────
 
-def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None) -> dict:
-    """Run one full two-stage Gandalf analysis and store the result."""
+def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None,
+                store_folder=None) -> dict:
+    """Run one full two-stage Gandalf analysis and store the result.
+
+    ``folder_path`` is the ANALYSIS scope (what Gandalf reads); ``store_folder``
+    (default: the analysis folder) is where the run is RECORDED — the index +
+    ``gandalf/run-*/`` artifacts. They must be split whenever a caller re-scopes
+    the analysis away from the project's registry folder (the dashboard read
+    path resolves the index off the REGISTRY folder, so a run stored anywhere
+    else is invisible — the 2026-07 ``__dashboard__`` regression)."""
     folder = str(folder_path)
+    store = str(store_folder) if store_folder else folder
     pid = str(project_id)
     ts = time.time()
     run_id = "run-" + str(int(ts * 1000))
@@ -974,7 +983,9 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         # job_ids holds the whole map-reduce fan-out so cancel tree-kills all shards.
         _ACTIVE_RUNS[run_id] = {
             "job_id": None, "job_ids": [], "proc": None, "cancelled": False,
-            "folder": folder, "project_id": pid, "index_recorded": False,
+            # "folder" feeds cancel_run's index write — the STORE folder, so a
+            # cancelled record lands where the read path looks.
+            "folder": store, "project_id": pid, "index_recorded": False,
         }
 
     # Wave 9: write an IN-PROGRESS index record up front so the tab exposes a
@@ -984,7 +995,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         _pre_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
     if not _pre_cancelled:
         try:
-            _append_index(folder, pid, {
+            _append_index(store, pid, {
                 "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
                 "run_id": run_id, "ts": ts, "ok": False, "verdict": "",
                 "degraded": True, "cross_model": False,
@@ -1018,8 +1029,11 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
 
             actual_env = dict(env) if env is not None else {}
             if context_size > frontier_max:
-                actual_env["GEMINI_MODEL"] = "gemini-1.5-pro"
-                actual_env["TRIO_MODEL"] = "gemini-1.5-pro"
+                # Over-cap trees route Gemini-backend shards to the strong
+                # long-context tier. (Was the RETIRED gemini-1.5-pro — a dead
+                # model id that made every over-cap Gemini shard fail.)
+                actual_env["GEMINI_MODEL"] = "gemini-3.1-pro"
+                actual_env["TRIO_MODEL"] = "gemini-3.1-pro"
 
             # Wave 9: map-reduce Stage A — shard the tree, fan out one read per
             # shard (W8 substrate), reduce into a merged raw draft with grouped
@@ -1053,7 +1067,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             degraded = bool(graded.get("degraded"))
             cross_model = bool(graded.get("cross_model"))
             try:
-                run_dir = _runs_dir(folder) / run_id
+                run_dir = _runs_dir(store) / run_id
                 run_dir.mkdir(parents=True, exist_ok=True)
                 report_md = _render_full_report(graded, run_id=run_id, when=ts)
                 exec_md = _render_exec_summary(graded, run_id=run_id, when=ts)
@@ -1064,7 +1078,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                     encoding="utf-8")
                 report_rel = f"{run_rel}/{REPORT_MD}"
                 exec_rel = f"{run_rel}/{EXEC_SUMMARY_MD}"
-                _add_gitignore_best_effort(folder)
+                _add_gitignore_best_effort(store)
             except OSError as exc:
                 ok = False
                 reason = "artifact-write-failed:" + str(exc)[:160]
@@ -1099,7 +1113,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 already_recorded = True
         if not already_recorded:
             try:
-                _append_index(folder, pid, record)
+                _append_index(store, pid, record)
             except Exception:
                 # Even if the index write somehow fails, return the honest result.
                 pass
@@ -1121,7 +1135,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 _already = bool(r and r.get("index_recorded"))
             if not _already:
                 try:
-                    _append_index(folder, pid, {
+                    _append_index(store, pid, {
                         "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
                         "run_id": run_id, "ts": ts, "ok": False, "verdict": "",
                         "degraded": True, "cross_model": False,
@@ -1147,14 +1161,19 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             _ACTIVE_RUNS.pop(run_id, None)
 
 
-def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None) -> dict:
-    """First-scan idempotent: run Gandalf ONLY if no prior run exists."""
+def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None,
+                          store_folder=None) -> dict:
+    """First-scan idempotent: run Gandalf ONLY if no prior run exists.
+
+    The absence check reads the STORE index (where the dashboard reads), so a
+    re-scoped analysis folder never causes duplicate first-scan runs."""
     try:
-        if _load_index(folder_path, project_id):
+        if _load_index(store_folder or folder_path, project_id):
             return {"ok": True, "skipped": True, "reason": "prior-run-exists"}
     except Exception:
         pass
-    return run_gandalf(folder_path, project_id, env=env, status_cb=status_cb)
+    return run_gandalf(folder_path, project_id, env=env, status_cb=status_cb,
+                       store_folder=store_folder)
 
 
 # ── Read seams (SAFE projections — never absolute paths) ─────────────────────

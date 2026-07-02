@@ -313,6 +313,27 @@ def _is_single_session_effort(members: list) -> bool:
     return bool(members[0].get("stage_history"))
 
 
+def _any_registered_session(sids) -> bool:
+    """True iff ANY of the given session ids still has a registry record.
+
+    The orphan gate for `_efforts_from_discovered`'s duplicate-skip: a persisted
+    doc tagged with a `session_id` whose registry record is GONE (wiped registry,
+    rolled-back sessions.json) must fold in, not vanish. Best-effort: on a
+    registry read error err toward True (skip) so a transient failure can only
+    hide a tile for one render, never double it."""
+    try:
+        import session_registry as _sr
+    except Exception:
+        return True
+    for sid in sids:
+        try:
+            if _sr.get_session(sid):
+                return True
+        except Exception:
+            return True
+    return False
+
+
 def _efforts_from_discovered(folder_path, project_id) -> list:
     """Fold DISCOVERED/brownfield efforts into the effort view (W3 #3 data).
 
@@ -350,8 +371,15 @@ def _efforts_from_discovered(folder_path, project_id) -> list:
             if not all(_eh.is_discovered(m) for m in members):
                 continue
             # A persisted managed-session doc (carries session_id) is already its
-            # registry effort — skip the whole session to avoid a duplicate.
-            if any((m.get("session_id") or "") for m in members):
+            # registry effort — skip the whole session to avoid a duplicate. But
+            # ONLY when that registry record still EXISTS: the global registry has
+            # been wiped by test/healthcheck runs and git rollbacks (2026-06-28),
+            # and an unconditional skip made every such ORPHANED session invisible
+            # everywhere (absent from the registry view AND skipped here) even
+            # though its persisted docs survived on disk. An orphan folds in as a
+            # first-class historical effort instead of vanishing.
+            _tagged_sids = {(m.get("session_id") or "") for m in members} - {""}
+            if _tagged_sids and _any_registered_session(_tagged_sids):
                 continue
             sid = s.get("session_id") or ""
             if not sid:

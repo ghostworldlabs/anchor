@@ -1058,20 +1058,17 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
     Returns ``True`` if a run was scheduled, ``False`` if suppressed (gate off, or
     already in-flight).
     """
-    # The dashboard pseudo-project's folder_path resolves to the whole dev tree
-    # (data_dir().parent = C:\dev), an incoherent heterogeneous scope that makes
-    # Gandalf emit a generic, uninformative verdict (and blow past the frontier
-    # cap). Scope the dashboard run to the real dashboard inbox — where global
-    # uploads actually land (ANCHOR_DIR/dev) — so the report is about real
-    # dashboard content. Contained to the Gandalf trigger; the registry
-    # folder_path other code reads is left untouched.
-    if project_id == "__dashboard__":
-        _inbox = ANCHOR_DIR / "dev"
-        try:
-            _inbox.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            pass
-        folder_path = str(_inbox)
+    # The run is always RECORDED against the registry folder (store_folder) — the
+    # read path (`GET /api/rnd/gandalf`, the panel render, archive/delete) resolves
+    # the index off the registry folder, so storing anywhere else makes a finished
+    # run permanently invisible (the 2026-06-29→07-02 __dashboard__ regression: five
+    # ok-runs stranded under ANCHOR_DIR/dev while the UI polled an empty index).
+    # The ANALYSIS scope for __dashboard__ is the registry folder too (the whole
+    # workspace): the Wave-9 map-reduce shards a big heterogeneous tree by
+    # top-level component (12-shard cap), which is exactly the honest "what's
+    # really going on across my workspace" read — the old ANCHOR_DIR/dev inbox
+    # re-scope produced reports about IDE junk and stranded them besides.
+    store_folder = str(folder_path)
     if first_scan and not _PROACTIVE_SUMMARY_ENABLED:
         return False
     # In-flight guard: at most one scheduled-but-unfinished run per project.
@@ -1094,10 +1091,12 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
         try:
             if first_scan:
                 _gandalf.run_gandalf_if_absent(folder_path, project_id,
-                                               env=(runner_env or None), status_cb=_cb)
+                                               env=(runner_env or None), status_cb=_cb,
+                                               store_folder=store_folder)
             else:
                 _gandalf.run_gandalf(folder_path, project_id,
-                                     env=(runner_env or None), status_cb=_cb)
+                                     env=(runner_env or None), status_cb=_cb,
+                                     store_folder=store_folder)
         except Exception:
             pass
         finally:
@@ -4325,8 +4324,25 @@ def render_model_flex_badge(env=None) -> str:
         label = "no engine"
         title = "No Claude or Gemini subscription detected on this host."
         cls = "mflex-none"
+    # Dismissible chip (2026-07-02, John): an inline × persists the dismissal in
+    # localStorage ('mflexDismissed'); the trailing self-contained script hides an
+    # already-dismissed chip on load (document.currentScript anchors it to THIS
+    # badge, so the pattern is safe wherever the badge is rendered — project
+    # window and home dashboard). Clearing site data brings it back.
+    _x = ("<button class='mflex-x' title='Dismiss' "
+          "style=\"background:transparent;border:none;color:inherit;cursor:pointer;"
+          "font-size:13px;line-height:1;padding:0 0 0 6px;vertical-align:baseline\" "
+          "onclick=\"try{localStorage.setItem('mflexDismissed','1')}catch(e){}"
+          "this.parentNode.style.display='none';return false\">&times;</button>")
+    # NOTE: no consecutive `{{`/`}}` anywhere in this JS — the W8 test suite
+    # treats doubled braces in rendered HTML as f-string leakage (a real bug
+    # class in this file), so the closing braces are spaced.
+    _hide = ("<script>try{if(localStorage.getItem('mflexDismissed')==='1')"
+             "{var _m=document.currentScript.previousElementSibling;"
+             "if(_m&&_m.classList&&_m.classList.contains('mflex'))"
+             "_m.style.display='none';} }catch(e){}</script>")
     return (f"<span class='mflex {cls}' "
-            f"title='{html_lib.escape(title, quote=True)}'>{label}</span>")
+            f"title='{html_lib.escape(title, quote=True)}'>{label}{_x}</span>{_hide}")
 
 
 def render_project_window_html(project_id: str) -> str:
@@ -12006,6 +12022,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <!-- 2026-05-12: Stop button removed. Server lifecycle is owned by
                the NSSM "anchor" service on gwl-server. To restart, run
                `nssm restart anchor` on gwl-server. -->
+          <!-- 2026-07-02: model-flex posture chip on the HOME header too (John);
+               dismissible via its inline × (localStorage 'mflexDismissed'). The
+               home stylesheet lacks the project window's .mflex rules, so a
+               scoped copy rides along right here. -->
+          <style>.mflex{{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);white-space:nowrap;cursor:default}}.mflex.mflex-both{{border-color:rgba(34,197,94,.45);color:var(--success);background:rgba(34,197,94,.12)}}.mflex.mflex-claude{{border-color:rgba(56,139,253,.45);color:var(--accent)}}.mflex.mflex-gemini{{border-color:rgba(234,179,8,.5);color:#eab308;background:rgba(234,179,8,.1)}}.mflex.mflex-none{{border-color:rgba(248,81,73,.5);color:var(--danger)}}</style>
+          {render_model_flex_badge()}
         </div>
         <div class="date">{today_str}</div>
       </div>

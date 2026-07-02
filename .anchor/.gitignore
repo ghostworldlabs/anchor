@@ -36,3 +36,8 @@ projects/*/**/raw/
 # runs in its own worktree under .anchor/worktrees/<session_id>/; these are
 # transient working trees and must NEVER be tracked by the host repo.
 worktrees/
+
+# The LIVE mutable session registry — a runtime store, not history. Tracking it
+# meant every test/healthcheck run and git checkout ROLLED BACK real sessions
+# (the 2026-06-28 wipe: 23 rows -> 1). Never track it again.
+sessions.json

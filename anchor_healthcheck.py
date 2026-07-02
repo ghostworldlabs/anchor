@@ -4588,10 +4588,28 @@ def _rmtree_force(path):
 
 def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
     """Remove the synthetic project(s) + throwaway folder + inbox probe line."""
+
+    def _sweep_sessions_for(pid):
+        """Remove every session_registry row keyed to a synthetic project id.
+        MUST run BEFORE the project record is removed: the row carries only the
+        project_id, so once the project (and its name) is gone a leaked row is
+        unidentifiable — exactly how the 2026-07-02 ``rnd probe v3/v4/v5`` rows
+        got stranded in the LIVE ``sessions.json``. Tolerant; never raises."""
+        try:
+            import session_registry as _sreg
+            for rec in _sreg.list_sessions(project_id=pid):
+                try:
+                    _sreg.remove_session(rec.get("session_id"))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # Drop the synthetic project ids from the live registry (never delete real ones).
     try:
         import rnd_registry as _rnd
         for pid in rnd_env.get("created_ids", []):
+            _sweep_sessions_for(pid)
             try:
                 _rnd.remove_project(pid)
             except Exception:
@@ -4602,12 +4620,15 @@ def _cleanup_synthetic_rnd(rnd_env: dict, report: Report):
         # crashed/interrupted run left its synthetic project behind and it rendered
         # as a permanent "ungrouped" dashboard tile (the v3..v12 leak John saw).
         # Scoped strictly to the synthetic name prefix, so a REAL project (which can
-        # never start with ``__healthcheck__``) is never touched.
+        # never start with ``__healthcheck__``) is never touched. Session rows are
+        # swept FIRST (see _sweep_sessions_for) so a leaked project never strands
+        # unidentifiable session rows behind it.
         try:
             for entry in _rnd.list_projects(
                     include_archived=True, include_future=True,
                     include_retired=True, with_effective_state=False):
                 if str(entry.get("name", "")).startswith(SYNTHETIC_RND_NAME):
+                    _sweep_sessions_for(entry["id"])
                     try:
                         _rnd.remove_project(entry["id"])
                     except Exception:
