@@ -117,6 +117,18 @@ TERMINAL_STATUSES = frozenset(
     (STATUS_DONE, STATUS_CANCELLED, STATUS_INTERRUPTED, STATUS_FAILED)
 )
 
+#: Runner-seam env vars captured into a job's ``relaunch_spec`` (durability
+#: 2026-07 Wave 1). ONLY these seed keys are persisted from the launch ``env``
+#: overlay — never the full environment — so a durable record can re-drive the
+#: stub/test seams on relaunch without ever writing secrets into a record.
+RELAUNCH_ENV_EXACT = ("ANCHOR_RUNNER_CMD",)
+RELAUNCH_ENV_PREFIXES = ("STUB_", "FAKE_", "ANCHOR_GANDALF_")
+
+#: Machine-readable relaunch refusal reasons (strings, never exceptions).
+RELAUNCH_REASON_UNKNOWN = "unknown-job"
+RELAUNCH_REASON_NOT_INTERRUPTED = "not-interrupted"
+RELAUNCH_REASON_NO_SPEC = "no-relaunch-spec"
+
 #: Lane stamped on the ``session_registry`` record we mint for every spawned job
 #: (zombie-hunter v2). Each job is a "swarm" sub-agent; registering it under this
 #: lane — with the SAME identity (pid / proc_create_time / crypt_token) we already
@@ -441,6 +453,42 @@ def _stream_json_user_turn(text: str) -> str:
     return json.dumps(envelope, ensure_ascii=False) + "\n"
 
 
+def _relaunch_env_seed(env) -> dict:
+    """Filter a launch ``env`` overlay down to the runner-seam variables.
+
+    Keeps only :data:`RELAUNCH_ENV_EXACT` keys and keys starting with a
+    :data:`RELAUNCH_ENV_PREFIXES` prefix (``ANCHOR_RUNNER_CMD`` / ``STUB_*`` /
+    ``FAKE_*`` / ``ANCHOR_GANDALF_*``). Everything else — anything that could
+    carry a secret — is dropped, so the durable record never persists the full
+    environment.
+    """
+    seed = {}
+    for k, v in (env or {}).items():
+        if k in RELAUNCH_ENV_EXACT or str(k).startswith(RELAUNCH_ENV_PREFIXES):
+            seed[k] = v
+    return seed
+
+
+def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
+                         permission_mode, backend, env) -> dict:
+    """Everything :func:`launch` needs to start an equivalent job (Wave 1).
+
+    Persisted on the job record at launch time so an ``interrupted`` job can be
+    re-launched in ONE call (:func:`relaunch`) from disk state alone. ``env_keys``
+    holds ONLY the runner-seam seed vars (see :func:`_relaunch_env_seed`).
+    """
+    return {
+        "lane": lane,
+        "cwd": str(cwd) if cwd else None,
+        "prompt": prompt,
+        "output_dir": str(output_dir) if output_dir else None,
+        "gated": gated,
+        "permission_mode": permission_mode,
+        "backend": backend,
+        "env_keys": _relaunch_env_seed(env),
+    }
+
+
 def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
            prompt=None, output_dir=None, gated=False,
@@ -585,6 +633,10 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "backend": backend,
         "crypt_token": crypt_token,
         "proc_create_time": proc_create_time,
+        # Durability 2026-07 Wave 1: everything launch() needs to start an
+        # equivalent job, so an interrupted record is re-launchable in ONE call.
+        "relaunch_spec": _build_relaunch_spec(
+            lane, cwd, prompt, output_dir, gated, permission_mode, backend, env),
     }
     _write_record(rec)
 
@@ -1108,7 +1160,9 @@ def reconcile_on_startup() -> list:
     Called at server startup: any job recorded ``running`` whose process is no
     longer alive (e.g. the server was restarted out from under it) is honestly
     reported as ``interrupted`` (C9 — restart-from-checkpoint, not transparent
-    resume). Returns the list of reconciled job_ids.
+    resume). Returns the list of reconciled job_ids — callers may relaunch
+    selectively via :func:`relaunch`; there is deliberately NO auto-relaunch (a
+    restart storm must not launch N stale jobs unattended).
     """
     changed = []
     for rec in list_records():
@@ -1174,6 +1228,48 @@ def gc_old_job_logs(retention_days=None) -> int:
         except OSError:
             pass
     return reaped
+
+
+# ── Relaunch (durability 2026-07 Wave 1) ─────────────────────────────────────
+
+def relaunch(job_id: str) -> dict:
+    """Re-launch an ``interrupted`` job in ONE call from its durable record.
+
+    Loads the record and refuses honestly (``{ok: False, reason}`` — reasons are
+    strings, never exceptions) unless the record exists, its ``status`` is
+    ``interrupted``, and it carries a ``relaunch_spec`` (a legacy record without
+    one refuses with ``reason == 'no-relaunch-spec'``). Otherwise calls
+    :func:`launch` with the persisted spec, links the records both ways
+    (``relaunched_as`` on the old record / ``relaunch_of`` on the new one), and
+    returns the new record (with ``ok: True`` added for uniform callers).
+    """
+    rec = load_record(job_id)
+    if rec is None:
+        return {"ok": False, "reason": RELAUNCH_REASON_UNKNOWN}
+    status = rec.get("status")
+    if status != STATUS_INTERRUPTED:
+        return {"ok": False,
+                "reason": f"{RELAUNCH_REASON_NOT_INTERRUPTED}:{status}"}
+    spec = rec.get("relaunch_spec")
+    if not isinstance(spec, dict) or not spec:
+        return {"ok": False, "reason": RELAUNCH_REASON_NO_SPEC}
+
+    new_rec = launch(
+        spec.get("lane"),
+        cwd=spec.get("cwd"),
+        env=spec.get("env_keys") or None,
+        backend=spec.get("backend") or DEFAULT_BACKEND,
+        prompt=spec.get("prompt"),
+        output_dir=spec.get("output_dir"),
+        gated=spec.get("gated") or False,
+        permission_mode=spec.get("permission_mode"),
+    )
+    # Link both ways on disk (each side under the write lock).
+    _update_record(job_id, relaunched_as=new_rec["job_id"])
+    new_rec = _update_record(new_rec["job_id"], relaunch_of=job_id)
+    out = dict(new_rec)
+    out["ok"] = True
+    return out
 
 
 # ── Cancel (tree-kill) ───────────────────────────────────────────────────────
