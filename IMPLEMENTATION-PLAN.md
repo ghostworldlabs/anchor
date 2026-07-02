@@ -25,14 +25,18 @@ record.
 
 In `job_runner.py`:
 1. At launch time, persist a `relaunch_spec` field on the job record:
-   `{lane, cwd, prompt, output_dir, gated, permission_mode, backend, env_keys}`
-   — everything `launch()` needs to start an equivalent job. Store the SEED
+   `{lane, cwd, prompt, output_dir, gated, permission_mode, backend, env_keys,
+   project_id, folder_path}`
+   — everything a guarded launch needs to start an equivalent job. Store the SEED
    env keys only for the runner-seam variables (`ANCHOR_RUNNER_CMD`, `STUB_*`,
    `FAKE_*`, `ANCHOR_GANDALF_*`) — never the full environment (no secrets in
    records).
 2. Add `relaunch(job_id) -> dict`: loads the record; refuses (honest
    `{ok:False, reason}`) unless `status == interrupted`; otherwise calls
-   `launch()` with the spec, links the records both ways
+   `launch_guarded()` with the spec — the concurrency policy (same-lane
+   serialize, folder-build lock, spawn cap) and project metadata propagation
+   MUST apply to a relaunch exactly as to a first launch (approved amendment,
+   2026-07-02) — and links the records both ways
    (`relaunched_as` on the old record / `relaunch_of` on the new one), and
    returns the new record. Refusal reasons are strings, never exceptions.
 3. `reconcile_on_startup()` return value: unchanged (list of reconciled ids) —
