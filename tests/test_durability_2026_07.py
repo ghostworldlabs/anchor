@@ -1,19 +1,30 @@
-"""Anchor durability (2026-07 review) — Wave 1: re-launchable job specs.
+"""Anchor durability (2026-07 review) — Waves 1 + 2.
 
-An ``interrupted`` job must be re-launchable in ONE call from its durable
-record: ``launch()`` persists a complete ``relaunch_spec`` on the job record
-(seam env seeds only — never the full environment; ``project_id`` /
-``folder_path`` carried per the approved 2026-07-02 amendment), and
-``relaunch(job_id)`` starts an equivalent job from disk state alone THROUGH
-``launch_guarded()`` — the concurrency policy and project-metadata propagation
-apply to a relaunch exactly as to a first launch — linking the two records both
-ways. ``reconcile_on_startup()`` still only RECONCILES — it never auto-relaunches.
+Wave 1 — re-launchable job specs: an ``interrupted`` job must be re-launchable
+in ONE call from its durable record: ``launch()`` persists a complete
+``relaunch_spec`` on the job record (seam env seeds only — never the full
+environment; ``project_id`` / ``folder_path`` carried per the approved
+2026-07-02 amendment), and ``relaunch(job_id)`` starts an equivalent job from
+disk state alone THROUGH ``launch_guarded()`` — the concurrency policy and
+project-metadata propagation apply to a relaunch exactly as to a first launch —
+linking the two records both ways. ``reconcile_on_startup()`` still only
+RECONCILES — it never auto-relaunches.
+
+Wave 2 — durable gate answers: answering a gate must not require the original
+process's live stdin pipe. Marking a gate ALSO writes a durable
+``<jobs_dir>/<job_id>.gate.json``; ``answer_gate()`` on a DEAD job records the
+answer and returns ``{ok, deferred}`` instead of failing; ``relaunch()``
+delivers a recorded answer exactly once (appended to the seed prompt) and
+carries an unanswered question to the new job id; ``load_pending_prompt()``
+prefers the durable gate file when the record path yields nothing post-restart.
 
 Hermetic: temp ``ANCHOR_DATA_DIR``, ``ANCHOR_RUNNER_CMD`` → the deterministic
 ``tests/fake_claude.py`` mock — never real claude / node / port 8777.
 """
 import importlib
+import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -241,3 +252,240 @@ def test_reconcile_returns_ids_and_never_auto_relaunches(runner):
     records = runner.list_records()
     assert len(records) == 1
     assert all("relaunch_of" not in r for r in records)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 2 — durable gate answers
+# ═════════════════════════════════════════════════════════════════════════════
+
+W2_PROMPT = {
+    "tool_use_id": "toolu_w2_gate_01",
+    "question_index": 0,
+    "question": "Which datastore should the registry use?",
+    "header": "Store",
+    "options": [
+        {"label": "JSON files", "description": "Structured JSON"},
+        {"label": "SQLite", "description": "Embedded DB"},
+    ],
+    "multiSelect": False,
+}
+
+
+class _Sink:
+    """Thread-safe in-memory stdin sink standing in for a process's stdin."""
+
+    def __init__(self):
+        self.writes = []
+        self._lock = threading.Lock()
+
+    def write(self, data):
+        with self._lock:
+            self.writes.append(data)
+
+    def flush(self):
+        pass
+
+
+@pytest.fixture
+def gatemods(tmp_path, monkeypatch):
+    """(job_runner, gate_adapter) reloaded against a temp data dir + the mock."""
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"{sys.executable} {FAKE}")
+    import paths
+    importlib.reload(paths)
+    import job_runner
+    importlib.reload(job_runner)
+    import gate_adapter
+    importlib.reload(gate_adapter)
+    yield job_runner, gate_adapter
+    job_runner._reset_live_table_for_tests()
+
+
+# ── AC1: marking a gate writes the durable gate file; survives reload ────────
+
+def test_mark_awaiting_writes_durable_gate_file(gatemods):
+    jr, ga = gatemods
+    rec = jr.launch("plan", env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+
+    p = ga.gate_file_path(jid)
+    assert p.exists()
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["job_id"] == jid
+    assert data["prompt"] == W2_PROMPT
+    assert data["answered"] is False
+    assert isinstance(data["asked_at"], float)
+    jr.wait(jid, timeout=30)
+
+
+def test_pending_prompt_survives_module_reload_from_disk_state(gatemods):
+    """Post-restart shape: the job reconciles to INTERRUPTED (which hides the
+    record's prompt per GATE-2) and every in-memory table is gone — a fresh
+    import reading ONLY disk state still finds the pending question via the
+    durable gate file."""
+    jr, ga = gatemods
+    rec = jr.launch("plan", env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+    jr.wait(jid, timeout=30)
+    # The restart shape: record says running, process is gone → interrupted.
+    jr._update_record(jid, status=jr.STATUS_RUNNING)
+    assert jr.reconcile_on_startup() == [jid]
+    assert jr.load_record(jid)["status"] == jr.STATUS_INTERRUPTED
+
+    # Fresh import — clears the sink registry and any module-level state.
+    import gate_adapter
+    fresh = importlib.reload(gate_adapter)
+    loaded = fresh.load_pending_prompt(jid)
+    assert loaded is not None
+    assert loaded["question"] == "Which datastore should the registry use?"
+    assert loaded["tool_use_id"] == "toolu_w2_gate_01"
+
+
+# ── AC2: answering a DEAD job defers; relaunch delivers exactly once ─────────
+
+def test_answer_gate_dead_job_defers_and_persists(gatemods):
+    jr, ga = gatemods
+    rec = jr.launch("plan", prompt="build the thing",
+                    env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+    jr.wait(jid, timeout=30)
+    jr._update_record(jid, status=jr.STATUS_INTERRUPTED)
+
+    out = ga.answer_gate(jid, "JSON files")
+    assert out["ok"] is True
+    assert out["deferred"] is True
+
+    gate = ga.load_gate_file(jid)
+    assert gate["answered"] is True
+    assert gate["answer"] == "JSON files"
+    assert isinstance(gate["answered_at"], float)
+    assert not gate.get("delivered_at")  # recorded, NOT yet delivered
+
+
+def test_relaunch_delivers_recorded_answer_exactly_once(gatemods):
+    jr, ga = gatemods
+    rec = jr.launch("plan", prompt="build the thing",
+                    env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+    jr.wait(jid, timeout=30)
+    jr._update_record(jid, status=jr.STATUS_INTERRUPTED)
+    assert ga.answer_gate(jid, "JSON files")["deferred"] is True
+
+    out = jr.relaunch(jid)
+    assert out["ok"] is True
+    new_id = out["job_id"]
+    assert jr.wait(new_id, timeout=30)["status"] == jr.STATUS_DONE
+
+    # The stub runner's received prompt (persisted verbatim into the new
+    # record's own relaunch_spec) carries the recovered answer as context.
+    new_prompt = jr.load_record(new_id)["relaunch_spec"]["prompt"]
+    assert new_prompt.startswith("build the thing")
+    assert "Which datastore should the registry use?" in new_prompt
+    assert "JSON files" in new_prompt
+    # Delivered-once bookkeeping on the old job's gate file.
+    gate = ga.load_gate_file(jid)
+    assert gate.get("delivered_at")
+    assert gate.get("delivered_to") == new_id
+
+    # A SECOND relaunch of the same interrupted record must NOT re-deliver:
+    # the seed prompt comes back unaugmented.
+    again = jr.relaunch(jid)
+    assert again["ok"] is True
+    jr.wait(again["job_id"], timeout=30)
+    assert (jr.load_record(again["job_id"])["relaunch_spec"]["prompt"]
+            == "build the thing")
+
+
+def test_relaunch_carries_unanswered_gate_file_to_new_job(gatemods):
+    jr, ga = gatemods
+    rec = jr.launch("plan", prompt="build the thing",
+                    env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+    jr.wait(jid, timeout=30)
+    jr._update_record(jid, status=jr.STATUS_INTERRUPTED)
+
+    # Unanswered → the interrupted job still renders its question (Wave-2
+    # fallback: the record path is hidden by GATE-2, the gate file serves it).
+    assert ga.load_pending_prompt(jid) == W2_PROMPT
+
+    out = jr.relaunch(jid)
+    assert out["ok"] is True
+    new_id = out["job_id"]
+    jr.wait(new_id, timeout=30)
+
+    # The gate file was CARRIED to the new job id, still unanswered…
+    carried = ga.load_gate_file(new_id)
+    assert carried is not None
+    assert carried["job_id"] == new_id
+    assert carried["prompt"] == W2_PROMPT
+    assert carried["answered"] is False
+    assert carried["carried_from"] == jid
+    # …the old copy stops surfacing (stamped carried_to)…
+    assert ga.load_gate_file(jid)["carried_to"] == new_id
+    assert ga.load_pending_prompt(jid) is None
+    # …and the seed prompt was NOT augmented (nothing was answered).
+    assert jr.load_record(new_id)["relaunch_spec"]["prompt"] == "build the thing"
+
+
+# ── AC3: the live path is unchanged (and mirrored into the gate file) ────────
+
+def test_answer_gate_live_job_writes_single_stdin_turn(gatemods):
+    jr, ga = gatemods
+    rec = jr.launch("plan",
+                    env={"FAKE_CLAUDE_LINES": "1", "FAKE_CLAUDE_SLEEP": "5"})
+    jid = rec["job_id"]
+    try:
+        sink = _Sink()
+        ga.register_stdin_sink(jid, sink)
+        ga.mark_awaiting_input(jid, W2_PROMPT)
+
+        out = ga.answer_gate(jid, "JSON files")
+        assert out["ok"] is True
+        assert out["deferred"] is False
+        # Exactly ONE stdin turn — today's live path, unchanged.
+        assert len(sink.writes) == 1
+        assert "JSON files" in sink.writes[0]
+        # The durable gate file mirrors the answer and marks it DELIVERED
+        # (the live stdin write IS the delivery — a relaunch never re-delivers).
+        gate = ga.load_gate_file(jid)
+        assert gate["answered"] is True
+        assert gate["answer"] == "JSON files"
+        assert gate.get("delivered_at")
+        # A second answer no-ops (single-consumer guarantee intact).
+        assert ga.answer_gate(jid, "SQLite")["ok"] is False
+        assert len(sink.writes) == 1
+    finally:
+        jr.cancel(jid)
+
+
+def test_answer_gate_honest_refusals(gatemods):
+    jr, ga = gatemods
+    # Unknown job id (no record, no gate file).
+    out = ga.answer_gate("no-such-job", "x")
+    assert out == {"ok": False, "deferred": False, "reason": "unknown",
+                   "job_id": "no-such-job"}
+
+    # A CANCELLED job's gate is over — never deferred, honest terminal reason.
+    rec = jr.launch("plan",
+                    env={"FAKE_CLAUDE_LINES": "1", "FAKE_CLAUDE_SLEEP": "5"})
+    jid = rec["job_id"]
+    ga.mark_awaiting_input(jid, W2_PROMPT)
+    jr.cancel(jid)
+    out = ga.answer_gate(jid, "JSON files")
+    assert out["ok"] is False
+    assert out["deferred"] is False
+    assert out["reason"] == f"terminal:{jr.STATUS_CANCELLED}"
+
+    # An interrupted job WITHOUT any pending question refuses not-awaiting.
+    rec2 = jr.launch("plan", env={"FAKE_CLAUDE_LINES": "1"})
+    jid2 = rec2["job_id"]
+    jr.wait(jid2, timeout=30)
+    jr._update_record(jid2, status=jr.STATUS_INTERRUPTED)
+    out2 = ga.answer_gate(jid2, "JSON files")
+    assert out2["ok"] is False
+    assert out2["reason"] == "not-awaiting"

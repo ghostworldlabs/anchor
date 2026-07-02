@@ -36,6 +36,15 @@ AskUserQuestion gate auto-dismisses headless and CANNOT be answered via a
 tool_result; the model re-asks in plain text and this plain-text user turn
 continues the session. This path is inherently FRAGILE / best-effort.
 
+Durability (2026-07 review, Wave 2): answering a gate must not require the
+original process's live stdin pipe. A pending gate is ALSO mirrored into a
+durable ``<jobs_dir>/<job_id>.gate.json`` (atomic tmp+replace under
+``paths.WRITE_LOCK``), so the question still renders after a restart
+(:func:`load_pending_prompt` falls back to the gate file), an answer written
+while the job is DEAD is recorded instead of failing (:func:`answer_gate` →
+``{ok: True, deferred: True}``), and ``job_runner.relaunch`` delivers a
+recorded answer exactly once into the relaunched session's seed prompt.
+
 Stdlib only. No third-party imports.
 """
 
@@ -234,6 +243,127 @@ def session_id_from_stream(stream) -> str:
     return None
 
 
+# ── Durable gate files (durability 2026-07 Wave 2) ──────────────────────────
+# A pending gate is mirrored into ``<jobs_dir>/<job_id>.gate.json`` so that
+# (a) the question survives a restart and still renders for an interrupted job,
+# (b) an answer for a DEAD job is recorded durably instead of failing, and
+# (c) ``job_runner.relaunch`` can deliver a recorded answer exactly once (or
+# carry an unanswered question to the relaunched job's id).
+
+def gate_file_path(job_id: str):
+    """Durable gate-file path for a job (``<jobs_dir>/<job_id>.gate.json``)."""
+    return _jr._jobs_dir_for(job_id) / f"{job_id}.gate.json"
+
+
+def load_gate_file(job_id: str):
+    """Return the durable gate-file dict for a job, or ``None``."""
+    p = gate_file_path(job_id)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_gate_file(gate: dict) -> None:
+    """Persist a gate file atomically (tmp + replace) under the write lock."""
+    with _paths.WRITE_LOCK:
+        p = gate_file_path(gate["job_id"])
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(gate, indent=2, ensure_ascii=False),
+                       encoding="utf-8")
+        tmp.replace(p)
+
+
+def _record_gate_answer(job_id: str, choice, delivered=False) -> dict:
+    """Record an answer into the job's durable gate file (created if absent).
+
+    ``delivered=True`` additionally stamps ``delivered_at``: the live stdin
+    path already delivered the answer into the running session, so a later
+    relaunch must never deliver it again (delivered-once semantics).
+    """
+    with _paths.WRITE_LOCK:
+        gate = load_gate_file(job_id)
+        if gate is None:
+            # Legacy record marked awaiting before the gate-file era — build
+            # the file from the record's own prompt so the answer still lands.
+            rec = _jr.load_record(job_id) or {}
+            gate = {
+                "job_id": job_id,
+                "prompt": rec.get("pending_prompt") or rec.get("resolved_prompt"),
+                "asked_at": None,
+                "answered": False,
+            }
+        gate["answered"] = True
+        gate["answer"] = (list(choice) if isinstance(choice, (list, tuple))
+                          else choice)
+        gate["answered_at"] = time.time()
+        if delivered:
+            gate["delivered_at"] = time.time()
+            gate["delivered_via"] = "stdin"
+        _write_gate_file(gate)
+        return gate
+
+
+def mark_gate_delivered(job_id: str, delivered_to=None):
+    """Stamp a job's gate file delivered (relaunch's exactly-once bookkeeping).
+
+    Returns the updated gate dict, or ``None`` when the job has no gate file.
+    """
+    with _paths.WRITE_LOCK:
+        gate = load_gate_file(job_id)
+        if gate is None:
+            return None
+        gate["delivered_at"] = time.time()
+        if delivered_to:
+            gate["delivered_to"] = delivered_to
+        _write_gate_file(gate)
+        return gate
+
+
+def carry_gate_file(old_job_id: str, new_job_id: str):
+    """Carry an UNANSWERED gate file onto a relaunched job's id.
+
+    Writes ``<new_job_id>.gate.json`` with the same question and stamps the old
+    file ``carried_to`` so the stale copy stops surfacing. Returns the carried
+    gate (or ``None`` when the old job had no gate file).
+    """
+    with _paths.WRITE_LOCK:
+        gate = load_gate_file(old_job_id)
+        if gate is None:
+            return None
+        carried = dict(gate)
+        carried["job_id"] = new_job_id
+        carried["carried_from"] = old_job_id
+        carried.pop("carried_to", None)
+        _write_gate_file(carried)
+        gate["carried_to"] = new_job_id
+        _write_gate_file(gate)
+        return carried
+
+
+def append_gate_answer_context(prompt, gate) -> str:
+    """Fold an answered-but-undelivered gate answer into a relaunch seed.
+
+    The relaunched session never saw the original AskUserQuestion exchange, so
+    the recorded answer rides in as plain context appended to the seed prompt.
+    """
+    p = gate.get("prompt") or {}
+    question = p.get("question", "") if isinstance(p, dict) else str(p)
+    ans = gate.get("answer")
+    if isinstance(ans, (list, tuple)):
+        ans = ", ".join(str(a) for a in ans)
+    block = (
+        "\n\n[Recovered gate answer] While this job was interrupted, the user "
+        "answered its pending question. Do not re-ask it.\n"
+        f"Question: {question}\n"
+        f"Answer: {ans}"
+    )
+    return (prompt or "") + block
+
+
 # ── Persisting awaiting-input onto the job record ────────────────────────────
 
 def mark_awaiting_input(job_id: str, prompt: dict) -> dict:
@@ -251,6 +381,14 @@ def mark_awaiting_input(job_id: str, prompt: dict) -> dict:
         rec["pending_prompt"] = prompt
         rec["gate_consumed"] = False
         _jr._write_record(rec)
+        # Durable gate file (Wave 2): mirror the pending question to disk so it
+        # survives a restart and can be answered while the job is dead.
+        _write_gate_file({
+            "job_id": job_id,
+            "prompt": prompt,
+            "asked_at": time.time(),
+            "answered": False,
+        })
         return rec
 
 
@@ -275,20 +413,30 @@ def load_pending_prompt(job_id: str):
     Used by a fresh/reattaching client (incl. over Tailscale) to load the
     question it must answer. Only returns a prompt while the gate is genuinely
     awaiting input and has not yet been consumed.
+
+    Durability (Wave 2): when the record path yields nothing — post-restart the
+    job is ``interrupted`` (GATE-2 hides the record's prompt), or a relaunch
+    carried the gate to a fresh record that never held awaiting state — prefer
+    the DURABLE gate file, so the dashboard can still render the pending
+    question. The fallback only surfaces a gate that is still ANSWERABLE:
+    unanswered, undelivered, not carried away, and the job not done/cancelled/
+    failed (those sessions are over and will never be relaunched — GATE-2).
     """
     rec = _jr.load_record(job_id)
-    if rec is None:
+    if rec is not None:
+        if (rec.get("state") == STATE_AWAITING_INPUT
+                and not rec.get("gate_consumed")
+                and rec.get("status") not in _jr.TERMINAL_STATUSES):
+            return rec.get("pending_prompt")
+    # Durable gate-file fallback (Wave 2).
+    status = (rec or {}).get("status")
+    if status in (_jr.STATUS_DONE, _jr.STATUS_CANCELLED, _jr.STATUS_FAILED):
         return None
-    if rec.get("state") != STATE_AWAITING_INPUT:
-        return None
-    if rec.get("gate_consumed"):
-        return None
-    # GATE-2: never surface an unanswerable prompt for a terminal job (the
-    # session is gone, so the gate can no longer be answered). The gate ``state``
-    # and runner ``status`` are orthogonal; this only guards the read path.
-    if rec.get("status") in _jr.TERMINAL_STATUSES:
-        return None
-    return rec.get("pending_prompt")
+    gate = load_gate_file(job_id)
+    if (gate is not None and not gate.get("answered")
+            and not gate.get("delivered_at") and not gate.get("carried_to")):
+        return gate.get("prompt")
+    return None
 
 
 def _find_job_id(job_id_or_tool_use_id: str):
@@ -453,4 +601,65 @@ def answer(job_id_or_tool_use_id: str, choice) -> AnswerResult:
         if resolved is not None:
             rec["resolved_prompt"] = resolved
         _jr._write_record(rec)
+        # Durable gate file (Wave 2): mirror the answer and mark it DELIVERED —
+        # the live stdin write IS the delivery, so a later relaunch of this job
+        # must never deliver the answer a second time.
+        _record_gate_answer(job_id, choice, delivered=True)
         return AnswerResult(True, "written", job_id)
+
+
+def _job_is_live(job_id: str, rec) -> bool:
+    """True when the job's process can still receive a stdin turn.
+
+    Live = the record says ``running`` AND the process is genuinely alive
+    (either owned/draining in this process, or its PID checks alive). An
+    interrupted / dead-but-"running" job is NOT live — its gate answer must be
+    recorded durably instead of written into a gone pipe.
+    """
+    if not rec or rec.get("status") != _jr.STATUS_RUNNING:
+        return False
+    with _jr._LIVE_LOCK:
+        live = _jr._LIVE.get(job_id)
+    if live is not None and not live.done.is_set():
+        return True
+    return _jr._pid_alive(rec.get("pid"))
+
+
+def answer_gate(job_id: str, choice) -> dict:
+    """Answer a gate durably — works whether or not the job is live (Wave 2).
+
+    LIVE job: today's stdin-pipe path (:func:`answer`) is unchanged — the
+    single continuation turn is written into the running session — and the
+    durable gate file additionally records ``{answered, answer, answered_at}``
+    (+ ``delivered_at``: the live write IS the delivery). Returns
+    ``{ok, deferred: False, reason, job_id}``.
+
+    NOT-live (interrupted / dead) job: the answer is recorded in the durable
+    gate file and ``{ok: True, deferred: True}`` is returned instead of
+    failing; ``job_runner.relaunch`` delivers it exactly once into the
+    relaunched session's seed prompt. A done/cancelled/failed job refuses
+    honestly (that session is over and will never be relaunched), as does a
+    job with no pending question at all.
+    """
+    rec = _jr.load_record(job_id)
+    gate = load_gate_file(job_id)
+    if rec is None and gate is None:
+        return {"ok": False, "deferred": False, "reason": "unknown",
+                "job_id": job_id}
+    if _job_is_live(job_id, rec):
+        res = answer(job_id, choice)
+        return {"ok": bool(res.written), "deferred": False,
+                "reason": res.reason, "job_id": res.job_id or job_id}
+    status = (rec or {}).get("status")
+    if status in (_jr.STATUS_DONE, _jr.STATUS_CANCELLED, _jr.STATUS_FAILED):
+        return {"ok": False, "deferred": False,
+                "reason": f"terminal:{status}", "job_id": job_id}
+    if gate is not None and gate.get("delivered_at"):
+        return {"ok": False, "deferred": False, "reason": "already-delivered",
+                "job_id": job_id}
+    if gate is None and not (rec or {}).get("pending_prompt"):
+        return {"ok": False, "deferred": False, "reason": "not-awaiting",
+                "job_id": job_id}
+    _record_gate_answer(job_id, choice)
+    return {"ok": True, "deferred": True, "reason": "recorded",
+            "job_id": job_id}

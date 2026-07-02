@@ -269,12 +269,19 @@ def load_record(job_id: str):
 
 
 def list_records() -> list:
-    """All persisted job records (best-effort; skips unreadable ones)."""
+    """All persisted job records (best-effort; skips unreadable ones).
+
+    A job's durable GATE file (``<job_id>.gate.json`` — durability 2026-07
+    Wave 2) lives in the same directory and matches the ``*.json`` glob; it is
+    NOT a job record and is skipped so no phantom job ever surfaces here.
+    """
     d = jobs_dir()
     if not d.exists():
         return []
     out = []
     for p in sorted(d.glob("*.json")):
+        if p.name.endswith(".gate.json"):
+            continue
         try:
             out.append(json.loads(p.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
@@ -1283,6 +1290,25 @@ def relaunch(job_id: str) -> dict:
     project_id = spec.get("project_id") or rec.get("project_id")
     folder_path = (spec.get("folder_path") or rec.get("folder_path")
                    or spec.get("cwd") or "")
+
+    # Durable gate answers (2026-07 Wave 2): a pending gate rides the relaunch.
+    # An ANSWERED-but-undelivered gate answer is appended to the seed prompt as
+    # context — delivered exactly ONCE (``delivered_at`` is stamped below, only
+    # after the launch actually happened). An UNANSWERED gate file is carried to
+    # the new job id after launch so the question keeps rendering. Deferred
+    # import (gate_adapter imports job_runner).
+    prompt = spec.get("prompt")
+    gate = None
+    try:
+        import gate_adapter as _ga
+    except ImportError:  # pragma: no cover - stdlib sibling module
+        _ga = None
+    if _ga is not None:
+        gate = _ga.load_gate_file(job_id)
+        if (gate is not None and gate.get("answered")
+                and not gate.get("delivered_at")):
+            prompt = _ga.append_gate_answer_context(prompt, gate)
+
     try:
         new_rec = launch_guarded(
             spec.get("lane"),
@@ -1291,7 +1317,7 @@ def relaunch(job_id: str) -> dict:
             cwd=spec.get("cwd"),
             env=spec.get("env_keys") or None,
             backend=spec.get("backend") or DEFAULT_BACKEND,
-            prompt=spec.get("prompt"),
+            prompt=prompt,
             output_dir=spec.get("output_dir"),
             gated=spec.get("gated") or False,
             permission_mode=spec.get("permission_mode"),
@@ -1301,6 +1327,13 @@ def relaunch(job_id: str) -> dict:
     # Link both ways on disk (each side under the write lock).
     _update_record(job_id, relaunched_as=new_rec["job_id"])
     new_rec = _update_record(new_rec["job_id"], relaunch_of=job_id)
+    # Gate bookkeeping (Wave 2) — only after the launch actually happened, so a
+    # refused relaunch never consumes ("delivers") the recorded answer.
+    if _ga is not None and gate is not None:
+        if gate.get("answered") and not gate.get("delivered_at"):
+            _ga.mark_gate_delivered(job_id, delivered_to=new_rec["job_id"])
+        elif not gate.get("answered"):
+            _ga.carry_gate_file(job_id, new_rec["job_id"])
     out = dict(new_rec)
     out["ok"] = True
     return out
