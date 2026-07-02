@@ -714,7 +714,8 @@ def _run_stage_b(raw_draft, run_id=None):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            errors="replace"
+            errors="replace",
+            creationflags=_paths.NO_WINDOW
         )
     except FileNotFoundError:
         return None, "host-unavailable"

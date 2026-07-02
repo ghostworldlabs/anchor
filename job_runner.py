@@ -504,7 +504,10 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # but the flag keeps the child detached from our console.
     creationflags = 0
     if os.name == "nt":
-        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        # CREATE_NO_WINDOW: a console-subsystem child (claude/gemini/python) must
+        # never flash a visible window (John's standing no-visible-shells rule).
+        creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                         | _paths.NO_WINDOW)
 
     # Gated lanes need a kept-open stdin PIPE so the initial prompt + the gate
     # answer can be written into the live session. Non-gated lanes keep the
@@ -623,30 +626,61 @@ def _reader_loop(live: _LiveJob) -> None:
             import gate_adapter as _ga
         except ImportError:
             _ga = None
+    # Runaway-log guard: a wedged/spewing job must not fill the disk. Past the
+    # cap the durable file stops growing (one honest truncation marker); the
+    # in-memory ring keeps serving the live tail.
+    try:
+        _log_cap = int(os.environ.get("ANCHOR_JOB_LOG_MAX_BYTES", "") or 50 * 1024 * 1024)
+    except ValueError:
+        _log_cap = 50 * 1024 * 1024
+    _log_bytes = 0
+    _log_capped = False
     try:
         with open(live.log_path, "a", encoding="utf-8") as logf:
+            def _emit_line(text):
+                nonlocal _log_bytes, _log_capped
+                with live.lock:
+                    live.ring.append(text)
+                if _log_capped:
+                    return
+                if _log_bytes > _log_cap:
+                    logf.write("!! anchor: durable log cap reached — further "
+                               "output kept in the live ring only\n")
+                    logf.flush()
+                    _log_capped = True
+                    return
+                logf.write(text + "\n")
+                logf.flush()
+                _log_bytes += len(text) + 1
+
             for line in proc.stdout:
                 line = line.rstrip("\n")
-                with live.lock:
-                    live.ring.append(line)
-                logf.write(line + "\n")
-                logf.flush()
+                _emit_line(line)
                 env = _parse_result_envelope(line)
                 if env is not None:
                     result_envelope = env
                 # Gated lanes: surface the first AskUserQuestion gate from the
                 # live stream into awaiting-input state (production wiring).
+                # A parse/mark FAILURE is surfaced into the ring+log (2026-07
+                # review: silently-eaten gate failures made a gated build look
+                # gate-less instead of gate-broken).
                 if _ga is not None and not gate_marked:
                     try:
                         prompts = _ga.parse_event(line)
-                    except Exception:
+                    except Exception as exc:
                         prompts = []
+                        _emit_line("!! anchor: gate-event parse FAILED (%s) — a "
+                                   "pending question may not surface; check the "
+                                   "session" % (str(exc)[:120],))
                     if prompts:
                         try:
                             _ga.mark_awaiting_input(live.job_id, prompts[0])
                             gate_marked = True
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _emit_line("!! anchor: gate mark-awaiting FAILED (%s) "
+                                       "— the dashboard will NOT show this gate; "
+                                       "answer via the session terminal" %
+                                       (str(exc)[:120],))
     except (ValueError, OSError):
         # Pipe closed underneath us (e.g. process tree-killed mid-read). Not
         # fatal — finalization below records the terminal status.
@@ -1026,6 +1060,7 @@ def _pid_alive(pid) -> bool:
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {int(pid)}", "/NH"],
                 capture_output=True, text=True, timeout=10,
+                creationflags=_paths.NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError, ValueError):
             return False
@@ -1090,7 +1125,55 @@ def reconcile_on_startup() -> list:
                            finished_at=time.time())
             _mirror_session_status(jid, STATUS_INTERRUPTED)
             changed.append(jid)
+    # Disk hygiene (2026-07 review): reap the durable .log files of long-terminal
+    # jobs. The small JSON records are KEPT forever (effort rollups/report views
+    # reference them per job_id); only the bulky logs age out. Best-effort.
+    try:
+        gc_old_job_logs()
+    except Exception:
+        pass
     return changed
+
+
+def gc_old_job_logs(retention_days=None) -> int:
+    """Delete the ``.log`` of every TERMINAL job that finished more than
+    ``retention_days`` (default 45; env ``ANCHOR_JOB_LOG_RETENTION_DAYS``) ago.
+
+    Records (``.json``) are never touched — history, cost rollups and report
+    views stay intact; only the raw transcript ages out. A running/gated job's
+    log is never reaped (terminal statuses only). Returns the reap count.
+    """
+    if retention_days is None:
+        try:
+            retention_days = float(
+                os.environ.get("ANCHOR_JOB_LOG_RETENTION_DAYS", "") or 45)
+        except ValueError:
+            retention_days = 45.0
+    if retention_days <= 0:
+        return 0
+    cutoff = time.time() - retention_days * 86400.0
+    reaped = 0
+    for rec in list_records():
+        if rec.get("status") == STATUS_RUNNING:
+            continue
+        fin = rec.get("finished_at") or rec.get("started_at") or 0
+        try:
+            fin = float(fin)
+        except (TypeError, ValueError):
+            continue
+        if not fin or fin > cutoff:
+            continue
+        jid = str(rec.get("job_id") or "")
+        if not jid:
+            continue
+        try:
+            lp = _jobs_dir_for(jid) / f"{jid}.log"
+            if lp.exists():
+                lp.unlink()
+                reaped += 1
+        except OSError:
+            pass
+    return reaped
 
 
 # ── Cancel (tree-kill) ───────────────────────────────────────────────────────
@@ -1141,6 +1224,7 @@ def _tree_kill(pid) -> None:
             subprocess.run(
                 ["taskkill", "/T", "/F", "/PID", str(pid)],
                 capture_output=True, text=True, timeout=15,
+                creationflags=_paths.NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError):
             # Process already gone / taskkill unavailable — not fatal.

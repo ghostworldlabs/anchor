@@ -2288,7 +2288,8 @@ def _git(folder: Path, *args, check=False, timeout=30) -> subprocess.CompletedPr
     """
     cmd = ["git", "-C", str(folder), *args]
     return subprocess.run(cmd, capture_output=True, text=True,
-                          check=check, timeout=timeout)
+                          check=check, timeout=timeout,
+                          creationflags=_paths.NO_WINDOW)
 
 
 def _is_git_repo(folder: Path) -> bool:
@@ -2399,6 +2400,7 @@ def auto_commit_effort(folder_path, project_id: str, lane: str, job_id: str,
                 ["git", "-C", str(folder), *env_args, "commit",
                  "--no-verify", "-m", msg, "--", *rel_targets],
                 capture_output=True, text=True, timeout=30,
+                creationflags=_paths.NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError):
             return {"committed": False, "reason": "commit-failed", "commit": None}
@@ -2497,7 +2499,8 @@ def _empty_tree_sha(worktree_path) -> str:
         r = subprocess.run(
             ["git", "-C", str(worktree_path), "hash-object", "-t", "tree",
              "--stdin"],
-            input="", capture_output=True, text=True, timeout=30)
+            input="", capture_output=True, text=True, timeout=30,
+            creationflags=_paths.NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return ""
     return (r.stdout or "").strip() if r.returncode == 0 else ""
@@ -3100,6 +3103,7 @@ def _commit_session_docs(folder: Path, project_id: str, lane: str,
                 ["git", "-C", str(folder), *env_args, "commit",
                  "--no-verify", "-m", msg, "--", *rel_targets],
                 capture_output=True, text=True, timeout=30,
+                creationflags=_paths.NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError):
             return {"committed": False, "reason": "commit-failed", "commit": None}

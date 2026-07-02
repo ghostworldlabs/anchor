@@ -195,7 +195,7 @@ def _spawn(argv, cwd, env):
         stderr=subprocess.STDOUT,
         env=full_env,
         text=True,
-        creationflags=creationflags,
+        creationflags=creationflags | _paths.NO_WINDOW,
     )
 
 

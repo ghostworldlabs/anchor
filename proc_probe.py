@@ -30,6 +30,8 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import paths as _paths
+
 _IS_WINDOWS = sys.platform.startswith("win")
 
 # 100-ns intervals between 1601-01-01 (Win32 FILETIME epoch) and 1970-01-01.
@@ -153,7 +155,7 @@ def tree_kill(pid: int) -> bool:
         res = subprocess.run(
             ["taskkill", "/T", "/F", "/PID", str(int(pid))],
             capture_output=True,
-            creationflags=_CREATE_NO_WINDOW,
+            creationflags=_CREATE_NO_WINDOW | _paths.NO_WINDOW,
             timeout=15,
         )
         return res.returncode == 0

@@ -216,7 +216,7 @@ def _spawn_preview(target_path: Path, port: int, cwd, env: dict):
         stderr=subprocess.STDOUT,
         env=env,
         text=True,
-        creationflags=creationflags,
+        creationflags=creationflags | _paths.NO_WINDOW,
     )
 
 
@@ -397,7 +397,8 @@ def _pid_alive(pid) -> bool:
         try:
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=15)
+                capture_output=True, text=True, timeout=15,
+                creationflags=_paths.NO_WINDOW)
         except (OSError, subprocess.SubprocessError):
             return False
         return str(pid) in (out.stdout or "")

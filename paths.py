@@ -132,14 +132,25 @@ def auth_ok(provided) -> bool:
     """Token-check predicate for mutating ``/api/*`` requests.
 
     - If no token is configured (env unset) -> auth disabled -> always True.
-    - Otherwise the provided token must match exactly.
+    - Otherwise the provided token must match in CONSTANT TIME
+      (``hmac.compare_digest`` — a plain ``==`` leaks match-length timing).
 
     Kept tiny and pure so it is unit-testable on its own.
     """
     want = expected_token()
     if want is None:
         return True
-    return provided == want
+    import hmac
+    return hmac.compare_digest(str(provided or ""), str(want))
+
+
+# ── Silent subprocess spawning (John's no-visible-shells rule) ──────────────
+
+#: OR this into every ``subprocess.Popen/run`` ``creationflags`` on Windows so a
+#: console child can never flash a window (the service is windowless, but a
+#: console-subsystem child may still allocate its own console without this).
+#: Zero on POSIX, so call sites can apply it unconditionally.
+NO_WINDOW = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
 
 
 # ── Idempotent migration (Wave 2) ──────────────────────────────────────────

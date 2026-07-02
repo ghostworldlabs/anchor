@@ -110,6 +110,7 @@ def _git(repo, args, timeout=_GIT_TIMEOUT):
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout,
+            creationflags=_paths.NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, None, "", "git invocation failed: %s" % exc

@@ -40,6 +40,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import paths as _paths
 import worktrees as _wt
 import rnd_registry as _rnd
 
@@ -86,6 +87,7 @@ def _run_gh(args, cwd, timeout=_NET_TIMEOUT):
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=timeout, cwd=str(cwd),
+            creationflags=_paths.NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, None, "", "gh invocation failed: %s" % exc

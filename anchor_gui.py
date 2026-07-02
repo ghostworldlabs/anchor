@@ -49,6 +49,18 @@ _paths.ensure_data_dirs()
 # ── Error Logging ─────────────────────────────────────────────────────
 ERROR_LOG = LOGS_DIR / "errors.log"
 ERROR_LOG.parent.mkdir(parents=True, exist_ok=True)
+# Boot-time size rotation (2026-07 review: errors.log had grown to 7MB with no
+# cap anywhere). One rotated generation is kept (errors.log.1); rotation happens
+# only at process start so nothing races the live FileHandlers.
+try:
+    _ERRLOG_CAP = int(os.environ.get("ANCHOR_ERROR_LOG_MAX_BYTES", "") or 5 * 1024 * 1024)
+    if ERROR_LOG.exists() and ERROR_LOG.stat().st_size > _ERRLOG_CAP:
+        _rot = ERROR_LOG.with_suffix(".log.1")
+        if _rot.exists():
+            _rot.unlink()
+        ERROR_LOG.rename(_rot)
+except OSError:
+    pass
 logging.basicConfig(
     filename=str(ERROR_LOG),
     level=logging.ERROR,
@@ -82,6 +94,7 @@ def _compute_build_id():
             ["git", "rev-parse", "--short", "HEAD"],
             cwd=str(ANCHOR_DIR),
             capture_output=True, text=True, timeout=5,
+            creationflags=_paths.NO_WINDOW,
         )
         rev = (out.stdout or "").strip()
         if out.returncode == 0 and rev:
@@ -791,7 +804,7 @@ def _maybe_git_init(folder: Path) -> bool:
             return False
         subprocess.run(["git", "init"], cwd=str(folder), check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=30)
+                       timeout=30, creationflags=_paths.NO_WINDOW)
         return True
     except Exception:
         return False

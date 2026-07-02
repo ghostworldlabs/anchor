@@ -37,6 +37,8 @@ import sys
 import threading
 import uuid
 
+import paths as _paths
+
 # ── Errors ──────────────────────────────────────────────────────────────────
 
 
@@ -287,6 +289,7 @@ class _PywinptyChild:
                     ["taskkill", "/T", "/F", "/PID", str(pid)],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     timeout=15,
+                    creationflags=_paths.NO_WINDOW,
                 )
             except (OSError, subprocess.SubprocessError):
                 pass
