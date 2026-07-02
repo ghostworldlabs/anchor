@@ -470,12 +470,17 @@ def _relaunch_env_seed(env) -> dict:
 
 
 def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
-                         permission_mode, backend, env) -> dict:
-    """Everything :func:`launch` needs to start an equivalent job (Wave 1).
+                         permission_mode, backend, env,
+                         project_id=None, folder_path=None) -> dict:
+    """Everything a guarded launch needs to start an equivalent job (Wave 1).
 
     Persisted on the job record at launch time so an ``interrupted`` job can be
     re-launched in ONE call (:func:`relaunch`) from disk state alone. ``env_keys``
     holds ONLY the runner-seam seed vars (see :func:`_relaunch_env_seed`).
+    ``project_id``/``folder_path`` (approved amendment, 2026-07-02) carry the
+    concurrency-policy context so a relaunch goes through :func:`launch_guarded`
+    exactly as the first launch did; a direct :func:`launch` records them as
+    ``None``.
     """
     return {
         "lane": lane,
@@ -486,13 +491,15 @@ def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
         "permission_mode": permission_mode,
         "backend": backend,
         "env_keys": _relaunch_env_seed(env),
+        "project_id": project_id,
+        "folder_path": str(folder_path) if folder_path else None,
     }
 
 
 def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
            prompt=None, output_dir=None, gated=False,
-           permission_mode=None) -> dict:
+           permission_mode=None, project_id=None, folder_path=None) -> dict:
     """Launch a server-owned job. Returns the job record.
 
     The record holds at least ``{job_id, lane, pid, status, log_path, backend}``.
@@ -507,6 +514,12 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     and ``gated`` (falsy for research; ``"plan"``/``"build"`` for the gated lanes)
     are threaded into :func:`resolve_runner_cmd` so a real launch builds a VALID
     per-backend argv.
+
+    ``project_id`` / ``folder_path`` (durability 2026-07 Wave 1, amended) are
+    NOT used by the spawn itself — they are persisted into the record's
+    ``relaunch_spec`` so :func:`relaunch` can re-drive :func:`launch_guarded`
+    with the same concurrency-policy context. :func:`launch_guarded` passes
+    them; a direct call may leave them ``None``.
 
     Stdin handling (D / SETUP §5):
     - NON-GATED (research) **or** no prompt: ``stdin=DEVNULL`` (unchanged Wave-4
@@ -633,10 +646,13 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "backend": backend,
         "crypt_token": crypt_token,
         "proc_create_time": proc_create_time,
-        # Durability 2026-07 Wave 1: everything launch() needs to start an
-        # equivalent job, so an interrupted record is re-launchable in ONE call.
+        # Durability 2026-07 Wave 1: everything a guarded launch needs to start
+        # an equivalent job, so an interrupted record is re-launchable in ONE
+        # call. project_id/folder_path (approved amendment 2026-07-02) are set
+        # when the launch came through launch_guarded().
         "relaunch_spec": _build_relaunch_spec(
-            lane, cwd, prompt, output_dir, gated, permission_mode, backend, env),
+            lane, cwd, prompt, output_dir, gated, permission_mode, backend, env,
+            project_id=project_id, folder_path=folder_path),
     }
     _write_record(rec)
 
@@ -1239,9 +1255,14 @@ def relaunch(job_id: str) -> dict:
     strings, never exceptions) unless the record exists, its ``status`` is
     ``interrupted``, and it carries a ``relaunch_spec`` (a legacy record without
     one refuses with ``reason == 'no-relaunch-spec'``). Otherwise calls
-    :func:`launch` with the persisted spec, links the records both ways
-    (``relaunched_as`` on the old record / ``relaunch_of`` on the new one), and
-    returns the new record (with ``ok: True`` added for uniform callers).
+    :func:`launch_guarded` with the persisted spec (approved amendment,
+    2026-07-02) — the concurrency policy (same-lane serialize, folder-build
+    lock, spawn cap) and the project-metadata propagation apply to a relaunch
+    EXACTLY as to a first launch; a policy refusal (:class:`LaneBusyError`)
+    comes back as an honest ``{ok: False, reason, holder}``, never an
+    exception — links the records both ways (``relaunched_as`` on the old
+    record / ``relaunch_of`` on the new one), and returns the new record (with
+    ``ok: True`` added for uniform callers).
     """
     rec = load_record(job_id)
     if rec is None:
@@ -1254,16 +1275,29 @@ def relaunch(job_id: str) -> dict:
     if not isinstance(spec, dict) or not spec:
         return {"ok": False, "reason": RELAUNCH_REASON_NO_SPEC}
 
-    new_rec = launch(
-        spec.get("lane"),
-        cwd=spec.get("cwd"),
-        env=spec.get("env_keys") or None,
-        backend=spec.get("backend") or DEFAULT_BACKEND,
-        prompt=spec.get("prompt"),
-        output_dir=spec.get("output_dir"),
-        gated=spec.get("gated") or False,
-        permission_mode=spec.get("permission_mode"),
-    )
+    # Policy context for the guarded launch. A guarded first launch persisted
+    # real project_id/folder_path in the spec; a direct launch() recorded None
+    # (record-level fields are a fallback for early-Wave-1 records). The
+    # folder_path degrades to the job's cwd so the folder-build lock still has
+    # an honest key for a metadata-less build record.
+    project_id = spec.get("project_id") or rec.get("project_id")
+    folder_path = (spec.get("folder_path") or rec.get("folder_path")
+                   or spec.get("cwd") or "")
+    try:
+        new_rec = launch_guarded(
+            spec.get("lane"),
+            project_id=project_id,
+            folder_path=folder_path,
+            cwd=spec.get("cwd"),
+            env=spec.get("env_keys") or None,
+            backend=spec.get("backend") or DEFAULT_BACKEND,
+            prompt=spec.get("prompt"),
+            output_dir=spec.get("output_dir"),
+            gated=spec.get("gated") or False,
+            permission_mode=spec.get("permission_mode"),
+        )
+    except LaneBusyError as e:
+        return {"ok": False, "reason": str(e.reason), "holder": e.holder}
     # Link both ways on disk (each side under the write lock).
     _update_record(job_id, relaunched_as=new_rec["job_id"])
     new_rec = _update_record(new_rec["job_id"], relaunch_of=job_id)
@@ -1399,7 +1433,7 @@ def folder_build_holder(folder_path: str):
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                    extra_args=None, env=None, job_id: str = None,
                    backend=DEFAULT_BACKEND, prompt=None, output_dir=None,
-                   gated=False) -> dict:
+                   gated=False, permission_mode=None) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -1416,9 +1450,10 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     ``paths.WRITE_LOCK``, so the policy is correct under concurrency — two
     builds for one folder can never both win the lock.
 
-    ``prompt`` / ``output_dir`` / ``gated`` are threaded straight through to
-    :func:`launch` so the real per-backend argv (and the gated stdin pipe) are
-    built there. They are inert under the concurrency policy itself.
+    ``prompt`` / ``output_dir`` / ``gated`` / ``permission_mode`` are threaded
+    straight through to :func:`launch` so the real per-backend argv (and the
+    gated stdin pipe) are built there. They are inert under the concurrency
+    policy itself.
 
     Raises :class:`LaneBusyError` (with ``reason`` + ``holder``) when refused.
     On success returns the job record (as :func:`launch`).
@@ -1453,10 +1488,14 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                 raise LaneBusyError(REFUSED_FOLDER_BUILD, holder=held)
 
         # Both gates clear → launch under the lock, then record the reservation
-        # against the real job_id so subsequent contenders see it.
+        # against the real job_id so subsequent contenders see it. project_id /
+        # folder_path ride into launch() so the durable relaunch_spec carries
+        # the policy context (approved amendment, 2026-07-02).
         rec = launch(lane, cwd=cwd, extra_args=extra_args, env=env,
                      job_id=job_id, backend=backend, prompt=prompt,
-                     output_dir=output_dir, gated=gated)
+                     output_dir=output_dir, gated=gated,
+                     permission_mode=permission_mode,
+                     project_id=project_id, folder_path=folder_path)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:

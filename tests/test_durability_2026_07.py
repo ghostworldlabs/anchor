@@ -2,8 +2,11 @@
 
 An ``interrupted`` job must be re-launchable in ONE call from its durable
 record: ``launch()`` persists a complete ``relaunch_spec`` on the job record
-(seam env seeds only — never the full environment), and ``relaunch(job_id)``
-starts an equivalent job from disk state alone, linking the two records both
+(seam env seeds only — never the full environment; ``project_id`` /
+``folder_path`` carried per the approved 2026-07-02 amendment), and
+``relaunch(job_id)`` starts an equivalent job from disk state alone THROUGH
+``launch_guarded()`` — the concurrency policy and project-metadata propagation
+apply to a relaunch exactly as to a first launch — linking the two records both
 ways. ``reconcile_on_startup()`` still only RECONCILES — it never auto-relaunches.
 
 Hermetic: temp ``ANCHOR_DATA_DIR``, ``ANCHOR_RUNNER_CMD`` → the deterministic
@@ -63,7 +66,28 @@ def test_launch_persists_complete_relaunch_spec_field_by_field(runner, tmp_path)
         "permission_mode": "plan",
         "backend": "claude",
         "env_keys": {"FAKE_CLAUDE_LINES": "1"},
+        # A direct (unguarded) launch has no policy context to persist.
+        "project_id": None,
+        "folder_path": None,
     }
+
+
+def test_guarded_launch_spec_carries_project_metadata(runner, tmp_path):
+    """A launch_guarded() job's spec carries the policy context (amendment)."""
+    folder = tmp_path / "guardproj"
+    folder.mkdir()
+    rec = runner.launch_guarded(
+        "research", project_id="proj-1", folder_path=folder,
+        cwd=str(folder), env={"FAKE_CLAUDE_LINES": "1"},
+        backend="claude", prompt="guarded seed",
+    )
+    runner.wait(rec["job_id"], timeout=30)
+
+    spec = runner.load_record(rec["job_id"])["relaunch_spec"]
+    assert spec["project_id"] == "proj-1"
+    assert spec["folder_path"] == str(folder)
+    assert spec["lane"] == "research"
+    assert spec["prompt"] == "guarded seed"
 
 
 def test_relaunch_spec_env_seed_keeps_only_runner_seam_vars(runner):
@@ -106,6 +130,61 @@ def test_relaunch_interrupted_runs_to_done_and_links_both_ways(runner):
     # Links persisted both ways on disk.
     assert runner.load_record(jid)["relaunched_as"] == new_id
     assert runner.load_record(new_id)["relaunch_of"] == jid
+
+
+def test_relaunch_propagates_project_metadata_via_launch_guarded(runner, tmp_path):
+    """Amendment: a relaunch re-drives launch_guarded with the spec's policy
+    context, so the NEW record is stamped project_id/folder_path exactly like a
+    first guarded launch (and its own spec carries them forward)."""
+    folder = tmp_path / "metaproj"
+    folder.mkdir()
+    rec = runner.launch_guarded(
+        "research", project_id="proj-meta", folder_path=folder,
+        cwd=str(folder), env={"FAKE_CLAUDE_LINES": "2"}, prompt="carry meta")
+    jid = rec["job_id"]
+    runner.wait(jid, timeout=30)
+    runner._update_record(jid, status=runner.STATUS_INTERRUPTED)
+
+    out = runner.relaunch(jid)
+    assert out["ok"] is True
+    new_id = out["job_id"]
+    final = runner.wait(new_id, timeout=30)
+    assert final["status"] == runner.STATUS_DONE
+    # Project metadata propagated onto the new record (launch_guarded stamp)…
+    new_rec = runner.load_record(new_id)
+    assert new_rec["project_id"] == "proj-meta"
+    assert new_rec["folder_path"] == str(folder)
+    # …and into the new record's own spec, so a relaunch-of-a-relaunch works.
+    assert new_rec["relaunch_spec"]["project_id"] == "proj-meta"
+    assert new_rec["relaunch_spec"]["folder_path"] == str(folder)
+
+
+def test_relaunch_applies_concurrency_policy_same_lane_busy(runner, tmp_path):
+    """Amendment: the same-lane serialization refuses a relaunch exactly as it
+    would a first launch — as an honest string reason, never an exception."""
+    folder = tmp_path / "busyproj"
+    folder.mkdir()
+    rec = runner.launch_guarded(
+        "research", project_id="proj-busy", folder_path=folder,
+        cwd=str(folder), env={"FAKE_CLAUDE_LINES": "1"})
+    jid = rec["job_id"]
+    runner.wait(jid, timeout=30)
+    runner._update_record(jid, status=runner.STATUS_INTERRUPTED)
+
+    # Occupy the (project, lane) slot with a live job.
+    holder = runner.launch_guarded(
+        "research", project_id="proj-busy", folder_path=folder,
+        cwd=str(folder),
+        env={"FAKE_CLAUDE_LINES": "1", "FAKE_CLAUDE_SLEEP": "5"})
+    try:
+        out = runner.relaunch(jid)
+        assert out["ok"] is False
+        assert out["reason"] == runner.REFUSED_SAME_LANE
+        assert out["holder"] == holder["job_id"]
+        # The refused relaunch minted nothing and linked nothing.
+        assert "relaunched_as" not in runner.load_record(jid)
+    finally:
+        runner.cancel(holder["job_id"])
 
 
 # ── AC3: honest refusals ─────────────────────────────────────────────────────
