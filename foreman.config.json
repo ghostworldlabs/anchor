@@ -1,18 +1,21 @@
 {
-  "project": "anchor-crucible-improve-2026-06-30",
+  "project": "anchor-durability-2026-07",
   "docs": {
-    "description": "planning/crucible-improve-2026-06-30/MASTER-PLAN.md",
-    "plan": "planning/crucible-improve-2026-06-30/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/crucible-improve-2026-06-30/EXECUTION-LOG.md"
+    "description": "DESCRIPTION.md",
+    "plan": "IMPLEMENTATION-PLAN.md",
+    "execution_log": "FOREMAN-EXECUTION-LOG-2026-07.md"
   },
-  "test_command": "bash tests-gate.sh wrapper — runs curated list + tests/test_*_w[0-9].py glob under git-bash (cmd.exe can't glob); plan declaration governs",
+  "models": {
+    "execute": "claude:claude-fable-5",
+    "fix": "claude:claude-fable-5",
+    "review": "gemini-cli:gemini-3.1-pro"
+  },
   "git": {
     "enabled": true,
-    "branch": "foreman/crucible-improve-2026-06-30"
+    "branch": "foreman/review-durability"
   },
   "budget": {
-    "max_waves_per_run": 9,
-    "max_fix_iters_per_wave": 4
-  },
-  "notes": "Project dir = isolated worktree ROOT C:/dev/anchor-build-crucible (off master HEAD 40b9ac6; the CODE ROOT Foreman edits: anchor_gui.py, terminal_session.py, zombie_hunter.py, pty_manager.py, gandalf.py, ... and tests/). Plan declares test-command: python -m pytest -q (governs the gate). Do NOT touch the live service at C:/dev/Anchor (dirty, service-owned). Deploy = John merges this branch to master + elevated 'nssm restart anchor'. UI waves (4,5,6,8,9) + #1 live banner finish on Playwright+screenshot+John sign-off (the v4 rule)."
+    "max_waves_per_run": 3,
+    "max_fix_iters_per_wave": 3
+  }
 }
