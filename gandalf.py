@@ -668,8 +668,23 @@ def _reduce_drafts(shard_results) -> tuple:
         if d.get("verdict"):
             verdicts.append(str(d.get("verdict")))
 
+    # Contract caps (2026-07-02 live finding): the Stage-B host enforces the
+    # PRE-REGISTERED output caps (prereg-constants.json: max_nitpicks=7,
+    # max_elevations=5) and hard-fails an over-cap draft — a 12-shard merge
+    # aggregated 35 nitpicks and the whole run failed at grading. Trim HERE,
+    # round-robin across shards (fair coverage — every shard keeps its top
+    # items before any shard gets a second), and record the trim honestly.
+    nitpicks, n_dropped = _cap_round_robin(nitpicks, 7)
+    elevations, e_dropped = _cap_round_robin(elevations, 5)
+    trim_note = ""
+    if n_dropped or e_dropped:
+        trim_note = ("\n\n[reduce] Trimmed to the pre-registered output caps: "
+                     f"dropped {n_dropped} nitpick(s) and {e_dropped} "
+                     "elevation(s) beyond the top-per-shard round-robin "
+                     "(caps: 7 nitpicks, 5 elevations).")
+
     merged = {
-        "reasoning": "\n\n".join(reasonings),
+        "reasoning": "\n\n".join(reasonings) + trim_note,
         "verdict": (" ".join(verdicts)[:1000]
                     or f"Map-reduce read across {len(valid)} shard(s)."),
         "findings": findings,
@@ -679,6 +694,37 @@ def _reduce_drafts(shard_results) -> tuple:
         "shard_count": len(valid),
     }
     return merged, None
+
+
+def _cap_round_robin(items, cap: int):
+    """Trim a merged, shard-tagged item list to ``cap`` FAIRLY: round-robin by
+    shard ``group`` (every shard keeps its first item before any shard keeps a
+    second), preserving within-shard order. Returns ``(kept, dropped_count)``."""
+    if len(items) <= cap:
+        return items, 0
+    by_group: dict = {}
+    order = []
+    for it in items:
+        g = (it.get("group") if isinstance(it, dict) else None) or ""
+        if g not in by_group:
+            by_group[g] = []
+            order.append(g)
+        by_group[g].append(it)
+    kept = []
+    rank = 0
+    while len(kept) < cap:
+        took = False
+        for g in order:
+            bucket = by_group[g]
+            if rank < len(bucket):
+                kept.append(bucket[rank])
+                took = True
+                if len(kept) >= cap:
+                    break
+        if not took:
+            break
+        rank += 1
+    return kept, len(items) - len(kept)
 
 
 def _run_stage_a_mapreduce(folder_path, env=None, run_id=None) -> tuple:

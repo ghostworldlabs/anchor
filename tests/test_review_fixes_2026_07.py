@@ -132,6 +132,38 @@ def test_registered_persisted_session_still_skipped(monkeypatch, tmp_path):
     assert out == [], "a registered session stays represented by its registry effort"
 
 
+# ── 2b. reduce honors the PRE-REGISTERED output caps (live 2026-07-02 failure:
+#        a 12-shard merge aggregated 35 nitpicks; the Stage-B host hard-fails
+#        >7 nitpicks / >5 elevations, so the whole run died at grading) ────────
+
+def test_reduce_trims_to_contract_caps_round_robin(gandalf):
+    shard_results = []
+    for s in range(6):  # 6 shards × 3 nitpicks + 2 elevations each
+        shard_results.append((f"s{s}", {
+            "findings": [{"id": f"f{s}", "verdict": "x"}],
+            "nitpicks": [{"id": f"n{s}-{i}", "verdict": "nit"} for i in range(3)],
+            "elevations": [{"id": f"e{s}-{i}", "verdict": "el"} for i in range(2)],
+            "verdict": f"v{s}", "reasoning": f"r{s}",
+        }, None))
+    merged, reason = gandalf._reduce_drafts(shard_results)
+    assert reason is None
+    assert len(merged["nitpicks"]) == 7, "nitpicks trimmed to the pre-registered cap"
+    assert len(merged["elevations"]) == 5, "elevations trimmed to the pre-registered cap"
+    # Round-robin fairness: the first item of EVERY shard survives before any
+    # shard's second item (6 shards → all six n*-0 kept, one n*-1).
+    kept_first = [n["id"] for n in merged["nitpicks"] if n["id"].endswith("-0")]
+    assert len(kept_first) == 6
+    assert "Trimmed to the pre-registered output caps" in merged["reasoning"]
+
+
+def test_reduce_under_cap_untouched(gandalf):
+    shard_results = [("a", {"findings": [], "nitpicks": [{"id": "n1"}],
+                            "elevations": [], "verdict": "v"}, None)]
+    merged, _ = gandalf._reduce_drafts(shard_results)
+    assert len(merged["nitpicks"]) == 1
+    assert "Trimmed" not in merged["reasoning"]
+
+
 # ── 3. map-reduce FUSION pass (2026-07: the cross-shard synthesis step) ──────
 
 @pytest.fixture
