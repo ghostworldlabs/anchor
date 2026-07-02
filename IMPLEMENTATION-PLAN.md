@@ -1,6 +1,9 @@
 # Implementation plan — Anchor durability (2026-07 review, Plan 1 Wave C)
 
-test-command: python -m pytest tests/test_durability_2026_07.py tests/test_review_fixes_2026_07.py tests/test_gate_adapter.py tests/test_gated_stdin_wiring.py tests/test_runner.py -q
+test-command: python -m pytest tests/test_durability_2026_07.py tests/test_review_fixes_2026_07.py tests/test_gate_adapter.py tests/test_gated_stdin_wiring.py tests/test_runner.py -v
+
+(gate note: `-v`, never `-q` — Foreman's vacuous-GREEN guard requires PER-TEST
+events to prove real execution; a summary-only line is refused as forgeable.)
 
 Conventions for every wave:
 - Python stdlib only (the repo rule; `distro.py` enforces it).
