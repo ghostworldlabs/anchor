@@ -682,13 +682,102 @@ def _reduce_drafts(shard_results) -> tuple:
 
 
 def _run_stage_a_mapreduce(folder_path, env=None, run_id=None) -> tuple:
-    """The map-reduce Stage A: shard → parallel map → reduce → merged raw draft.
+    """The map-reduce Stage A: shard → parallel map → reduce → FUSE → raw draft.
 
     Returns ``(merged_draft_dict, reason)`` with the same contract as the legacy
     :func:`_run_stage_a` (``(None, "<reason>")`` on failure). Never raises."""
     shards = _shard_tree(folder_path)
     shard_results = _map_shards(folder_path, shards, env=env, run_id=run_id)
-    return _reduce_drafts(shard_results)
+    merged, reason = _reduce_drafts(shard_results)
+    if merged is not None:
+        merged = _fuse_merged_draft(folder_path, merged, env=env, run_id=run_id)
+    return merged, reason
+
+
+#: Fusion toggle (default ON): one frontier-model synthesis pass over the
+#: mechanically merged draft. ``0`` disables (pure mechanical merge, the pre-fusion
+#: behavior — also what launch-counting tests set).
+FUSION_ENV = "ANCHOR_GANDALF_FUSION"
+#: Cap on the merged-draft JSON embedded in the fusion prompt.
+_MAX_FUSION_PROMPT_BYTES = 120 * 1024
+
+
+def _fuse_merged_draft(folder_path, merged, env=None, run_id=None) -> dict:
+    """FUSION (2026-07): one frontier-model pass over the merged draft.
+
+    The mechanical reduce staples per-shard drafts together — no model ever
+    reads ACROSS the shards, so cross-cutting findings and a real top-level
+    verdict never existed (the review's single biggest gandalf quality gap).
+    This pass AUGMENTS, never replaces: the grouped per-shard findings (and the
+    ≥1-finding-per-shard coverage contract) are kept verbatim; fusion may only
+    (a) rewrite ``reasoning``/``verdict`` as a true cross-shard synthesis and
+    (b) APPEND cross-cutting findings tagged ``group='(cross-shard)'``.
+    Single-shard runs skip it (nothing to fuse). Any failure degrades honestly
+    to the mechanical merge, stamped in ``merged['fusion']``. Never raises."""
+    if merged.get("shard_count", 0) <= 1:
+        merged["fusion"] = "single-shard"
+        return merged
+    if (os.environ.get(FUSION_ENV) or "").strip() == "0":
+        merged["fusion"] = "disabled"
+        return merged
+    payload = json.dumps(merged, ensure_ascii=False)[:_MAX_FUSION_PROMPT_BYTES]
+    prompt = (
+        "You are the Gandalf map-reduce FUSION step — the first reader who sees the "
+        "WHOLE picture. Below is the merged raw draft of a sharded analysis: each "
+        "shard was read independently and its findings are tagged with a 'group'. "
+        "Synthesize ACROSS the shards. Emit ONLY one JSON object (no prose, no "
+        "fences) with exactly these keys:\n"
+        '  "reasoning": the cross-shard synthesis — the story of the whole tree, '
+        "not a concatenation of per-shard notes;\n"
+        '  "verdict": ONE sentence — the honest top-level read;\n'
+        '  "cross_cutting_findings": findings visible ONLY across shards '
+        "(duplicated effort, contradictory approaches, shared root causes, "
+        "systemic risks) — each shaped like the input findings (id, kind, rung, "
+        "reasoning, verdict, severity), possibly empty. Do NOT restate per-shard "
+        "findings; they are already recorded.\n\n"
+        "=== MERGED RAW DRAFT ===\n" + payload + "\n=== END DRAFT ==="
+    )
+    fusion_env = dict(env) if env else {}
+    # Pin the fusion brain to the frontier tier (the synthesis seat) unless the
+    # caller already routed it. The claude CLI honors ANTHROPIC_MODEL.
+    fusion_env.setdefault("ANTHROPIC_MODEL", "claude-fable-5")
+    try:
+        rec = _jr.launch("research", cwd=str(folder_path), prompt=prompt,
+                         output_dir=str(folder_path), env=fusion_env,
+                         permission_mode="plan",
+                         backend=_resolve_shard_backend())
+        jid = rec["job_id"]
+        if run_id:
+            with _ACTIVE_RUNS_LOCK:
+                r = _ACTIVE_RUNS.get(run_id)
+                if r is not None:
+                    r.setdefault("job_ids", []).append(jid)
+                    if r.get("cancelled"):
+                        merged["fusion"] = "skipped:cancelled"
+                        return merged
+        _jr.wait(jid, timeout=_timeout())
+        final = _jr.load_record(jid) or {}
+        if final.get("status") != _jr.STATUS_DONE:
+            merged["fusion"] = "skipped:fusion-run-" + str(final.get("status") or "unknown")
+            return merged
+        text = "\n".join(_jr.extract_assistant_text(_jr.all_lines(jid)))
+        fused = _last_balanced_json(text)
+        if not isinstance(fused, dict):
+            merged["fusion"] = "skipped:unparseable"
+            return merged
+        if isinstance(fused.get("reasoning"), str) and fused["reasoning"].strip():
+            merged["reasoning"] = fused["reasoning"].strip()
+        if isinstance(fused.get("verdict"), str) and fused["verdict"].strip():
+            merged["verdict"] = fused["verdict"].strip()[:1000]
+        extra = fused.get("cross_cutting_findings")
+        if isinstance(extra, list):
+            merged["findings"].extend(
+                _group_item(f, "(cross-shard)") for f in extra if isinstance(f, dict))
+        merged["fusion"] = "fused"
+        return merged
+    except Exception:
+        merged["fusion"] = "skipped:error"
+        return merged
 
 
 # ── Stage B — run the host, recover the graded output ────────────────────────

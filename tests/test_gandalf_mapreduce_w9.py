@@ -34,6 +34,10 @@ def gandalf(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_GANDALF_HOST_CMD", f"{sys.executable} {HOST_STUB}")
     monkeypatch.setenv("ANCHOR_PROACTIVE_SUMMARY", "")
     monkeypatch.setenv("ANCHOR_GANDALF_SKILL_DIR", str(tmp_path / "no-skill"))
+    # These W9 gates assert the PURE map-reduce contract (exactly one launch per
+    # shard, mechanical merge). The 2026-07 FUSION pass is its own feature with
+    # its own gates (tests/test_review_fixes_2026_07.py) — off here.
+    monkeypatch.setenv("ANCHOR_GANDALF_FUSION", "0")
     import paths
     importlib.reload(paths)
     import job_runner

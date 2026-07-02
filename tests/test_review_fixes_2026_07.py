@@ -132,6 +132,67 @@ def test_registered_persisted_session_still_skipped(monkeypatch, tmp_path):
     assert out == [], "a registered session stays represented by its registry effort"
 
 
+# ── 3. map-reduce FUSION pass (2026-07: the cross-shard synthesis step) ──────
+
+@pytest.fixture
+def multi_project(tmp_path):
+    folder = tmp_path / "proj"
+    (folder / "src").mkdir(parents=True)
+    (folder / "docs").mkdir()
+    (folder / "lib").mkdir()
+    (folder / "src" / "a.py").write_text("print('a')\n", encoding="utf-8")
+    (folder / "docs" / "x.md").write_text("# doc\n", encoding="utf-8")
+    (folder / "lib" / "y.py").write_text("def y():\n    return 1\n", encoding="utf-8")
+    return folder, "pid-fusion"
+
+
+def test_fusion_augments_multi_shard_draft(gandalf, multi_project, monkeypatch):
+    folder, pid = multi_project
+    shards = gandalf._shard_tree(str(folder))
+    assert len(shards) >= 2
+    launches = []
+    orig_launch = gandalf._jr.launch
+    monkeypatch.setattr(gandalf._jr, "launch",
+                        lambda *a, **k: (launches.append(k), orig_launch(*a, **k))[1])
+    captured = {}
+    orig_stage_b = gandalf._run_stage_b
+    monkeypatch.setattr(gandalf, "_run_stage_b",
+                        lambda draft, run_id=None: (captured.setdefault("draft", draft),
+                                                    orig_stage_b(draft, run_id=run_id))[1])
+    out = gandalf.run_gandalf(str(folder), pid)
+    assert out["ok"] is True
+    draft = captured["draft"]
+    # One launch per shard + ONE fusion launch, all read-only.
+    assert len(launches) == len(shards) + 1
+    assert all(k.get("permission_mode") == "plan" for k in launches)
+    # Fusion stamped; the grouped per-shard coverage contract SURVIVES fusion.
+    assert draft["fusion"] == "fused"
+    assert draft["shard_count"] == len(shards)
+    for lbl in draft["groups"]:
+        assert [f for f in draft["findings"] if f.get("group") == lbl]
+    # The fusion job's brain is pinned to the frontier tier unless pre-routed.
+    fusion_env = launches[-1].get("env") or {}
+    assert fusion_env.get("ANTHROPIC_MODEL") == "claude-fable-5"
+
+
+def test_fusion_skipped_single_shard_and_when_disabled(gandalf, scoped_folders,
+                                                       multi_project, monkeypatch):
+    analysis, _store = scoped_folders
+    captured = {}
+    orig_stage_b = gandalf._run_stage_b
+    monkeypatch.setattr(gandalf, "_run_stage_b",
+                        lambda draft, run_id=None: (captured.setdefault("draft", draft),
+                                                    orig_stage_b(draft, run_id=run_id))[1])
+    gandalf.run_gandalf(str(analysis), "pid-single")
+    assert captured["draft"]["fusion"] == "single-shard"
+
+    captured.clear()
+    monkeypatch.setenv("ANCHOR_GANDALF_FUSION", "0")
+    folder, pid = multi_project
+    gandalf.run_gandalf(str(folder), pid)
+    assert captured["draft"]["fusion"] == "disabled"
+
+
 def test_registry_read_error_errs_toward_skip(monkeypatch, tmp_path):
     import effort_view, session_registry
     _fake_discovered(monkeypatch, tmp_path)
