@@ -1266,6 +1266,75 @@ def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None,
                        store_folder=store_folder)
 
 
+def _session_running_alive(run_id) -> bool:
+    """True iff the run's session-registry record is RUNNING **and** its
+    recorded process is verifiably alive (identity-probed PID).
+
+    Gandalf runs register their session without a PID, so a prior instance's
+    stale "running" record never counts as alive — only a record that carries a
+    PID resolving to a live process does. Never raises."""
+    try:
+        import session_registry
+        rec = session_registry.get_session(str(run_id))
+        if not rec or rec.get("status") != session_registry.STATUS_RUNNING:
+            return False
+        pid = rec.get("pid")
+        if not pid:
+            return False
+        import proc_probe
+        return proc_probe.creation_time(pid) is not None
+    except Exception:
+        return False
+
+
+def reconcile_dangling_runs(folder_path, project_id) -> int:
+    """Boot reconcile: no perpetual "running" Gandalf row after a restart.
+
+    For every index row with ``in_progress: true`` whose ``run_id`` is NOT in
+    ``_ACTIVE_RUNS`` (an in-flight run of THIS process) and whose
+    session-registry record is not RUNNING-alive, upsert the row to an honest
+    terminal record (``status: 'failed'``, ``reason: 'interrupted-by-restart'``,
+    ``in_progress: false``). Returns the reconciled count. Never raises."""
+    count = 0
+    try:
+        runs = _load_index(folder_path, project_id)
+        if not runs:
+            return 0
+        with _ACTIVE_RUNS_LOCK:
+            active_ids = set(_ACTIVE_RUNS.keys())
+        for r in runs:
+            if not r.get("in_progress"):
+                continue
+            rid = str(r.get("run_id") or "")
+            if not rid or rid in active_ids:
+                continue
+            if _session_running_alive(rid):
+                continue
+            record = dict(r)
+            record["ok"] = False
+            record["status"] = "failed"
+            record["in_progress"] = False
+            record["reason"] = "interrupted-by-restart"
+            try:
+                _append_index(folder_path, project_id, record)
+            except Exception:
+                continue
+            count += 1
+            # Best-effort: the dangling session-registry "running" row (no live
+            # process) goes terminal too, so it can't feed the orphan banner.
+            try:
+                import session_registry
+                rec = session_registry.get_session(rid)
+                if rec and rec.get("status") == session_registry.STATUS_RUNNING:
+                    session_registry.update_session(
+                        rid, status=session_registry.STATUS_FAILED)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return count
+
+
 # ── Read seams (SAFE projections — never absolute paths) ─────────────────────
 
 def _safe_run_view(record: dict) -> dict:

@@ -18,11 +18,19 @@ delivers a recorded answer exactly once (appended to the seed prompt) and
 carries an unanswered question to the new job id; ``load_pending_prompt()``
 prefers the durable gate file when the record path yields nothing post-restart.
 
+Wave 3 — Gandalf in-progress boot reconcile: no perpetual "running" gandalf
+row after a restart. ``gandalf.reconcile_dangling_runs()`` upserts every
+``in_progress`` index row with no live run (not in ``_ACTIVE_RUNS``, no
+RUNNING-alive session-registry record) to an honest terminal record
+(``failed / interrupted-by-restart``); the server boot path wires it for every
+registered project right after ``job_runner.reconcile_on_startup()``.
+
 Hermetic: temp ``ANCHOR_DATA_DIR``, ``ANCHOR_RUNNER_CMD`` → the deterministic
 ``tests/fake_claude.py`` mock — never real claude / node / port 8777.
 """
 import importlib
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -489,3 +497,200 @@ def test_answer_gate_honest_refusals(gatemods):
     out2 = ga.answer_gate(jid2, "JSON files")
     assert out2["ok"] is False
     assert out2["reason"] == "not-awaiting"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 3 — Gandalf in-progress boot reconcile
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture
+def gandalf_env(tmp_path, monkeypatch):
+    """(gandalf, session_registry, project folder) against a temp data dir."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"{sys.executable} {FAKE}")
+    import paths
+    importlib.reload(paths)
+    import session_registry
+    importlib.reload(session_registry)
+    import gandalf
+    importlib.reload(gandalf)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    yield gandalf, session_registry, proj
+
+
+def _plant_running_row(g, folder, pid, run_id):
+    """Hand-plant the exact in-progress row ``run_gandalf`` writes up front."""
+    g._append_index(str(folder), pid, {
+        "schema_version": g.GANDALF_INDEX_SCHEMA_VERSION,
+        "run_id": run_id, "ts": 1234.5, "ok": False, "verdict": "",
+        "degraded": True, "cross_model": False,
+        "report_rel": None, "exec_rel": None, "advisor_rel": None,
+        "session_id": run_id, "status": "running", "in_progress": True,
+    })
+
+
+# ── AC1: a dangling in-progress row reconciles to failed/interrupted ─────────
+
+def test_dangling_in_progress_row_reconciles_to_failed(gandalf_env):
+    g, _sr, proj = gandalf_env
+    _plant_running_row(g, proj, "proj-g", "run-111")
+
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 1
+
+    runs = g.list_runs(str(proj), "proj-g")
+    assert len(runs) == 1
+    row = runs[0]
+    assert row["run_id"] == "run-111"
+    assert row["status"] == "failed"
+    assert row["reason"] == "interrupted-by-restart"
+    assert row["in_progress"] is False
+    assert row["ok"] is False
+    # list_runs shows NO in_progress row anywhere.
+    assert not any(r["in_progress"] for r in runs)
+    # Idempotent: a second boot reconciles nothing.
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 0
+
+
+def test_reconcile_leaves_terminal_rows_alone_and_is_honest_on_absence(gandalf_env):
+    g, _sr, proj = gandalf_env
+    # No index at all → honest zero, never a raise.
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 0
+    # A terminal (done) row is not touched.
+    g._append_index(str(proj), "proj-g", {
+        "schema_version": g.GANDALF_INDEX_SCHEMA_VERSION,
+        "run_id": "run-done", "ts": 1.0, "ok": True, "verdict": "fine",
+        "degraded": False, "cross_model": False,
+        "report_rel": "gandalf/run-done/report.md", "exec_rel": None,
+        "advisor_rel": None, "session_id": "run-done", "status": "done",
+        "in_progress": False,
+    })
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 0
+    assert g.list_runs(str(proj), "proj-g")[0]["status"] == "done"
+
+
+# ── AC2: a row whose run IS in _ACTIVE_RUNS is left untouched ─────────────────
+
+def test_row_with_active_run_is_left_untouched(gandalf_env):
+    g, _sr, proj = gandalf_env
+    _plant_running_row(g, proj, "proj-g", "run-live")
+    with g._ACTIVE_RUNS_LOCK:
+        g._ACTIVE_RUNS["run-live"] = {
+            "job_id": None, "job_ids": [], "proc": None, "cancelled": False,
+            "folder": str(proj), "project_id": "proj-g",
+            "index_recorded": False,
+        }
+    try:
+        assert g.reconcile_dangling_runs(str(proj), "proj-g") == 0
+        row = g.list_runs(str(proj), "proj-g")[0]
+        assert row["status"] == "running"
+        assert row["in_progress"] is True
+        assert "reason" not in row
+    finally:
+        with g._ACTIVE_RUNS_LOCK:
+            g._ACTIVE_RUNS.pop("run-live", None)
+
+
+def test_row_with_running_alive_session_record_is_left_untouched(gandalf_env):
+    """A RUNNING session-registry record whose PID is verifiably alive (this
+    test process) counts as live — the row is NOT reconciled."""
+    g, sr, proj = gandalf_env
+    _plant_running_row(g, proj, "proj-g", "run-alive")
+    sr.register_session(project_id="proj-g", lane="gandalf",
+                        status=sr.STATUS_RUNNING, session_id="run-alive",
+                        pid=os.getpid())
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 0
+    row = g.list_runs(str(proj), "proj-g")[0]
+    assert row["in_progress"] is True
+    assert row["status"] == "running"
+
+
+def test_stale_running_session_record_does_not_block_reconcile(gandalf_env):
+    """The restart shape: the prior instance's gandalf session record still says
+    RUNNING but carries no live PID (run_gandalf registers without one) — the
+    row reconciles, and the stale registry record goes terminal too."""
+    g, sr, proj = gandalf_env
+    _plant_running_row(g, proj, "proj-g", "run-stale")
+    sr.register_session(project_id="proj-g", lane="gandalf",
+                        status=sr.STATUS_RUNNING, session_id="run-stale")
+
+    assert g.reconcile_dangling_runs(str(proj), "proj-g") == 1
+    row = g.list_runs(str(proj), "proj-g")[0]
+    assert row["status"] == "failed"
+    assert row["reason"] == "interrupted-by-restart"
+    assert sr.get_session("run-stale")["status"] == sr.STATUS_FAILED
+
+
+# ── AC3: the boot wiring reconciles every registered project ─────────────────
+
+@pytest.fixture
+def gui_env(tmp_path, monkeypatch):
+    """(anchor_gui, rnd_registry) reloaded against a temp, fully stubbed env."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"{sys.executable} {FAKE}")
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    monkeypatch.setenv("ANCHOR_PROACTIVE_SUMMARY", "")  # OFF in tests
+    for mod in ("paths", "job_runner", "rnd_registry", "effort_history",
+                "summarizer", "report_viewer", "gandalf"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    import rnd_registry
+    yield gui, rnd_registry
+
+
+def test_boot_wiring_reconciles_each_registered_project(gui_env, tmp_path,
+                                                        monkeypatch):
+    gui, rnd = gui_env
+    f1 = tmp_path / "p1"
+    f1.mkdir()
+    f2 = tmp_path / "p2"
+    f2.mkdir()
+    a = rnd.add_project("P One", str(f1), scaffold=False)
+    b = rnd.add_project("P Two", str(f2), scaffold=False)
+
+    calls = []
+
+    def spy(folder, pid):
+        calls.append((str(folder), str(pid)))
+        return 1
+
+    # The boot function goes through the module seam anchor_gui uses.
+    monkeypatch.setattr(gui._gandalf, "reconcile_dangling_runs", spy)
+
+    assert gui._reconcile_gandalf_boot_runs() == 2
+    assert (a["folder_path"], a["id"]) in calls
+    assert (b["folder_path"], b["id"]) in calls
+
+
+def test_boot_wiring_is_best_effort_per_project(gui_env, tmp_path, monkeypatch):
+    """One project's reconcile blowing up must not stop the others (wrapped,
+    logged — the boot path never dies on a bad project)."""
+    gui, rnd = gui_env
+    f1 = tmp_path / "p1"
+    f1.mkdir()
+    f2 = tmp_path / "p2"
+    f2.mkdir()
+    a = rnd.add_project("P One", str(f1), scaffold=False)
+    b = rnd.add_project("P Two", str(f2), scaffold=False)
+
+    seen = []
+
+    def spy(folder, pid):
+        seen.append(str(pid))
+        if str(pid) == a["id"]:
+            raise RuntimeError("boom")
+        return 3
+
+    monkeypatch.setattr(gui._gandalf, "reconcile_dangling_runs", spy)
+
+    assert gui._reconcile_gandalf_boot_runs() == 3
+    assert set(seen) == {a["id"], b["id"]}

@@ -1154,6 +1154,40 @@ def _trigger_gandalf_first_scan(folder_path, project_id):
         return _trigger_gandalf(folder_path, project_id, first_scan=True)
 
 
+def _reconcile_gandalf_boot_runs() -> int:
+    """Boot hook (2026-07 durability Wave 3): reconcile dangling Gandalf runs.
+
+    Right after ``job_runner.reconcile_on_startup()``, iterate the registered
+    projects and reconcile each project's Gandalf index
+    (``gandalf.reconcile_dangling_runs``) so an ``in_progress`` row orphaned by
+    a restart goes honestly terminal (``failed / interrupted-by-restart``)
+    instead of showing a perpetual "running" state. Best-effort per project,
+    logged via the boot logger. Returns the total reconciled count; never
+    raises."""
+    total = 0
+    try:
+        projects = _rnd.list_projects()
+    except Exception as e:
+        _logger.error(f"gandalf boot reconcile: list_projects failed: {e}")
+        return 0
+    for proj in projects:
+        pid = proj.get("id") or ""
+        folder = proj.get("folder_path") or ""
+        if not pid or not folder:
+            continue
+        try:
+            n = _gandalf.reconcile_dangling_runs(folder, pid)
+        except Exception as e:
+            _logger.error(f"gandalf boot reconcile failed for {pid}: {e}")
+            continue
+        if n:
+            _logger.info(
+                f"gandalf boot reconcile: {n} dangling run(s) → "
+                f"failed/interrupted-by-restart for {pid}")
+            total += n
+    return total
+
+
 def _trigger_session_summary(folder_path, project_id, lane, session,
                              force: bool = False):
     """Kick off proactive SESSION-summary generation WITHOUT blocking (Wave 6).
@@ -18312,6 +18346,13 @@ def main():
         job_runner.reconcile_on_startup()
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
+
+    try:
+        # (2026-07 durability Wave 3) No perpetual "running" Gandalf row after a
+        # restart: reconcile each registered project's dangling in-progress runs.
+        _reconcile_gandalf_boot_runs()
+    except Exception as e:
+        _logger.error(f"gandalf boot reconcile failed: {e}")
 
     try:
         # (#1, safety-critical) Reconcile managed-terminal-session registry
