@@ -1,5 +1,25 @@
 {
   "legs": {
+    "real": {
+      "answers": {
+        "Q-COMPLEXITY": {
+          "detail": "382 significant lines (budget 400)",
+          "pass": true
+        },
+        "Q-LATENCY": {
+          "detail": "median 10.8 ms over 5 rounds (bound 150 ms)",
+          "median_ms": 10.8,
+          "pass": true
+        },
+        "Q-REATTACH": {
+          "detail": "owner survived client detach; re-attach replayed prior output and live echo worked",
+          "pass": true
+        }
+      },
+      "backend": "real",
+      "ran": true,
+      "verdict": "YES"
+    },
     "stub": {
       "answers": {
         "Q-COMPLEXITY": {
