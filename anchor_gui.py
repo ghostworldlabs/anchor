@@ -734,6 +734,7 @@ ANCHOR_TERM_URL_PREFIX = "/vendor/anchor-term"
 _ANCHOR_TERM_CONTENT_TYPES = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
     ".txt": "text/plain; charset=utf-8",
 }
 
@@ -848,6 +849,13 @@ STATIC_URL_PREFIX = "/static"
 #: The extracted project-window app JS asset (Extraction Increment 1).
 PROJECT_WINDOW_JS_ASSET = "project-window.js"
 
+#: The extracted project-window SHELL assets (Extraction Increment 2 · W5):
+#: the interpolation-free stylesheet + the ``@@slot@@`` HTML shell template,
+#: both minted verbatim from their in-source twins (``_PW_SHELL_CSS`` /
+#: ``_PW_SHELL_TMPL``) by ``tools/extract_project_window_shell.py``.
+PROJECT_WINDOW_CSS_ASSET = "project-window.css"
+PROJECT_WINDOW_SHELL_ASSET = "project-window.html"
+
 
 def static_asset(rel_path: str):
     """Resolve a ``/static/<rel>`` request to (bytes, content_type).
@@ -943,6 +951,59 @@ def project_window_boot_extra(project_id: str) -> dict:
         "flags": {"frontend": "static"},
         "counts": {"sessions": sessions, "live_sessions": live},
     }
+
+
+# ── Project-window SHELL include layer (re-architecture 2026-07 · W5) ────────
+# C1 Extraction Increment 2: the project-window HTML/CSS shell lives in two
+# module-level plain strings — ``_PW_SHELL_CSS`` (the whole <style> body,
+# zero interpolations) and ``_PW_SHELL_TMPL`` (the document shell whose ONLY
+# dynamic points are named ``@@slot@@`` placeholders — the include-layer
+# design the W1 census's C1 amendment mandated: markup-emitting values are
+# computed server-side and injected whole; they cannot ride the ANCHOR_BOOT
+# JSON). Both are minted VERBATIM to static files (``static/
+# project-window.css`` / ``static/project-window.html``) by
+# ``tools/extract_project_window_shell.py`` behind the W5 byte-parity gate;
+# until W6 removes the embedded copies the in-source strings stay the single
+# source of truth and the files are their derived byte-identical mirrors.
+# EMBEDDED (the default) inlines the CSS and fills the in-source template —
+# the pre-wave emission, byte-identical. STATIC swaps the inline <style> for
+# the hashed static stylesheet link and fills the template read from the
+# static FILE (falling back to the in-source twin on a missing/undecodable/
+# drifted file so the window still renders correctly, never a 500 — drift is
+# the byte-parity GATE's job to catch, not the render path's).
+
+#: ``@@slot@@`` placeholder syntax for the shell template. ``@@`` appears
+#: nowhere in the shell/CSS/JS bodies (gate-checked), so the delimiter can
+#: never collide with real frontend content.
+_PW_SLOT_RE = re.compile(r"@@([a-z][a-z0-9_]*)@@")
+
+
+def _pw_fill(template: str, slots: dict) -> str:
+    """Fill ``@@slot@@`` placeholders in ONE regex pass.
+
+    Slot values are inserted verbatim and NEVER re-scanned — user content
+    containing ``@@…@@`` text can never pull in a second substitution (no
+    injection through notes/names). An unknown placeholder raises
+    ``KeyError`` (a drifted template must fail loudly, not render holes).
+    """
+    return _PW_SLOT_RE.sub(lambda m: slots[m.group(1)], template)
+
+
+def _pw_shell_template() -> str:
+    """The shell template the project-window render fills.
+
+    The static path reads it from the static FILE (the W5 "static shell
+    serving"); embedded — and any static-path miss — uses the in-source
+    twin, which the gate keeps byte-identical to the file.
+    """
+    if _static_frontend_enabled():
+        asset = static_asset(PROJECT_WINDOW_SHELL_ASSET)
+        if asset is not None:
+            try:
+                return asset[0].decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+    return _PW_SHELL_TMPL
 
 
 # Single-instance project windows (Master Plan C2): opening a project that is
@@ -4764,19 +4825,100 @@ def render_project_window_html(project_id: str) -> str:
             + _PROJECT_WINDOW_JS +
             "</script>"
         )
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        # Without width=device-width a laptop/PWA browser falls back to a ~980px
-        # layout viewport, scales the page up, and trips the .pgrid.layoutd
-        # max-width:980px breakpoint → the right column collapses to a full-width
-        # stack. The home page already has this; the project window was missing it.
-        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
-        f"<title>{name} — Anchor R&amp;D</title>"
-        # Vendored REAL xterm.js terminal (canvas), served like KaTeX. xterm.css
-        # styles the terminal grid mounted inside each live inline panel. (The v2
-        # anchor-term REPL chrome is no longer used by the cockpit.)
-        f"<link rel='stylesheet' href='{XTERM_URL_PREFIX}/xterm.css'>"
-        "<style>"
+    # ── rearch W5 (C1 increment 2): the shell-CSS block ─────────────────────
+    # Chosen by the SAME `frontend` pillar flag as the W4 app-JS block above
+    # (one flag, one revert — no new flag). EMBEDDED (the default) inlines the
+    # full stylesheet — the pre-wave emission, byte-identical. STATIC swaps it
+    # for the checked-in `static/project-window.css` (the byte-parity-gated
+    # mirror of `_PW_SHELL_CSS`) via the traversal-safe static route with a
+    # content-hash `?v=` — ONLY when the minted file exists; a missing mirror
+    # falls back to the in-source inline twin (the same fallback contract as
+    # `_pw_shell_template`: the page must never reference a 404 stylesheet).
+    # Built by PLAIN CONCATENATION (zero new f-string interpolations — census
+    # hygiene, exactly like the W4 block).
+    shell_css_ver = (static_asset_version(PROJECT_WINDOW_CSS_ASSET)
+                     if _static_frontend_enabled() else "missing")
+    if shell_css_ver != "missing":
+        shell_css_block = (
+            "<link rel='stylesheet' href='" + STATIC_URL_PREFIX + "/"
+            + PROJECT_WINDOW_CSS_ASSET + "?v=" + shell_css_ver + "'>"
+        )
+    else:
+        shell_css_block = "<style>" + _PW_SHELL_CSS + "</style>"
+    # ── rearch W5: the include-layer slot values ─────────────────────────────
+    # The C1-amendment blocks: conditional MARKUP computed server-side and
+    # injected whole into the ``@@slot@@`` template (empty string when the
+    # feature is absent — they cannot ride ANCHOR_BOOT). Each block keeps its
+    # exact pre-wave bytes.
+    # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
+    objective_block = (
+        f"<div class='proj-objective' data-objective='1' "
+        f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
+        f"font-size:13px;color:var(--text)'>"
+        f"<b style='color:var(--accent)'>Objective:</b> {objective_esc}</div>"
+        if objective_raw else "")
+    # ── Project blurb ("what this project is"; click 'Blurb' above to edit) ──
+    blurb_block = (
+        f"<div class='rnd-blurb' data-blurb='{blurb_attr}' "
+        f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
+        f"font-size:13px'>{blurb_esc}</div>" if blurb_raw.strip() else "")
+    # ── Project notes (like a task's Notes; click 'Notes' above to edit) ──
+    notes_block = (
+        f"<div style='padding:8px 18px;border-bottom:1px solid var(--border);"
+        f"font-size:12.5px;color:var(--text-dim);white-space:pre-wrap'>"
+        f"&#128221; {notes_esc}</div>" if notes_raw.strip() else "")
+    slots = {
+        "name": name,
+        "xterm_prefix": XTERM_URL_PREFIX,
+        "shell_css": shell_css_block,
+        "back_link": "" if project_id == "__dashboard__" else back_link_normal,
+        "notes_attr": notes_attr,
+        "blurb_attr": blurb_attr,
+        "folder": folder,
+        "header_rollup": header_rollup,
+        "pr": str(pr),
+        "active_cls": " active" if is_active else "",
+        "state": state,
+        "model_flex_badge": render_model_flex_badge(),
+        "token_display": "inline-block" if _paths.expected_token() else "none",
+        "lifecycle": lifecycle,
+        "objective_block": objective_block,
+        "blurb_block": blurb_block,
+        "notes_block": notes_block,
+        "status_line": status,
+        "kanban": kanban,
+        "dock_chrome": dock_chrome,
+        "boneyard_tpl": boneyard_tpl,
+        "tasks_html": tasks_html,
+        "build_id": html_lib.escape(BUILD_ID),
+        "instance_id": html_lib.escape(inst["instance_id"]),
+        "app_js": pw_app_js_block,
+        "cache_bust": cache_bust_script(),
+    }
+    # W5: the whole document shell is ONE ``@@slot@@`` template fill — the
+    # static path fills the template read from the static FILE; a drifted
+    # file (unknown placeholder) falls back to the byte-identical in-source
+    # twin so the window renders, never a 500 (the gate catches the drift).
+    tmpl = _pw_shell_template()
+    try:
+        return _pw_fill(tmpl, slots)
+    except Exception:
+        if tmpl is not _PW_SHELL_TMPL:
+            return _pw_fill(_PW_SHELL_TMPL, slots)
+        raise
+
+
+# The project-window shell STYLESHEET (rearch W5 · C1 increment 2): the whole
+# <style> body as ONE plain module-level string (zero interpolations — plain
+# single-brace CSS, implicit literal concatenation), minted verbatim to
+# `static/project-window.css` by `tools/extract_project_window_shell.py`.
+# The embedded (default) render path inlines THIS string; the static path
+# serves the minted file instead — the W5 byte-parity gate holds the two
+# byte-identical, so this string stays the single source of truth until W6.
+# ANCHOR[rearch]: PW_SHELL_CSS — structural anchor (W5); keep UNIQUE, keep
+# directly above the assignment (the shell extractor re-locates it fresh and
+# refuses a stale/ambiguous anchor, exactly like the census).
+_PW_SHELL_CSS = (
         ":root{--bg:#0f1117;--surface:#1a1d27;--surface2:#232733;"
         "--border:#2e3340;--text:#e2e4e9;--text-dim:#8b8f9a;--accent:#6c9cfc;"
         "--danger:#f87171;--warning:#fbbf24;--success:#4ade80;color-scheme:dark}"
@@ -5691,23 +5833,56 @@ def render_project_window_html(project_id: str) -> str:
         ".files-preview-body{margin:0;font-family:ui-monospace,Consolas,monospace;"
         "font-size:12px;color:var(--text);white-space:pre-wrap;overflow:auto;"
         "max-height:300px;background:#161b22;padding:10px;border-radius:6px}"
-        "</style></head><body>"
-        f"{'' if project_id == '__dashboard__' else back_link_normal}"
-        f"<div class='dash' data-notes='{notes_attr}' data-blurb='{blurb_attr}'>"
+)
+
+
+# The project-window HTML shell TEMPLATE (rearch W5 · C1 increment 2): the
+# whole document as ONE plain module-level string whose ONLY dynamic points
+# are named ``@@slot@@`` placeholders (the C1-amendment include layer —
+# markup-emitting values are computed server-side in the render and injected
+# whole; scalar data/flags could not carry markup through ANCHOR_BOOT).
+# Filled in ONE pass by `_pw_fill` (slot values are never re-scanned).
+# Minted verbatim to `static/project-window.html` by
+# `tools/extract_project_window_shell.py`; the embedded (default) path fills
+# THIS string — the byte-identical pre-wave emission — while the static path
+# fills the minted file. Single source of truth until W6.
+# ANCHOR[rearch]: PW_SHELL_TMPL — structural anchor (W5); keep UNIQUE, keep
+# directly above the assignment (the shell extractor re-locates it fresh).
+_PW_SHELL_TMPL = (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        # Without width=device-width a laptop/PWA browser falls back to a ~980px
+        # layout viewport, scales the page up, and trips the .pgrid.layoutd
+        # max-width:980px breakpoint → the right column collapses to a full-width
+        # stack. The home page already has this; the project window was missing it.
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+        "<title>@@name@@ — Anchor R&amp;D</title>"
+        # Vendored REAL xterm.js terminal (canvas), served like KaTeX. xterm.css
+        # styles the terminal grid mounted inside each live inline panel. (The v2
+        # anchor-term REPL chrome is no longer used by the cockpit.)
+        "<link rel='stylesheet' href='@@xterm_prefix@@/xterm.css'>"
+        # rearch W5: the shell-CSS block — the inline <style> body (embedded)
+        # | the hashed static stylesheet link (static). Beside the W4 app-JS
+        # block, the ONE seam where the two modes diverge; the byte-parity
+        # gate reassembles it (link → the minted file's bytes inlined) and
+        # proves everything outside the documented seams identical.
+        "@@shell_css@@"
+        "</head><body>"
+        "@@back_link@@"
+        "<div class='dash' data-notes='@@notes_attr@@' data-blurb='@@blurb_attr@@'>"
         # ── Lifecycle header ──
         "<div class='dhead'>"
-        f"<span class='name'>{name}</span>"
-        f"<span class='path'>{folder}</span>"
+        "<span class='name'>@@name@@</span>"
+        "<span class='path'>@@folder@@</span>"
         # v4 Wave 5: the per-project cost/tokens/time rollup beside the path,
         # with a lifetime/30-day toggle (run-session-only totals).
-        f"{header_rollup}"
+        "@@header_rollup@@"
         "<div class='right'>"
-        f"<span class='pri p{pr}'>P{pr}</span>"
-        f"<span class='chip{' active' if is_active else ''}'>{state}</span>"
+        "<span class='pri p@@pr@@'>P@@pr@@</span>"
+        "<span class='chip@@active_cls@@'>@@state@@</span>"
         # Wave 8 (#10): model-flex posture — Claude driver + Gemini 5:1 swarm when
         # both subscriptions are present, else the honest single-subscription
         # fallback state. Pure render off the host-capability profile.
-        f"{render_model_flex_badge()}"
+        "@@model_flex_badge@@"
         # v7 Wave 4 (#4) → v12 Wave 11: "Open terminal" — start a BARE general
         # session (no trio skill seed). v12 W11 (SC6): it now opens in the W10
         # BOTTOM DOCK like any effort (summary-on-top + terminal) instead of a
@@ -5731,7 +5906,7 @@ def render_project_window_html(project_id: str) -> str:
         "<button class='rnd-mini' id='tokenBtn' "
         "onclick=\"if(setAnchorToken())location.reload();\" "
         "title='Set or clear the Anchor access token' "
-        f"style='display:{'inline-block' if _paths.expected_token() else 'none'}'>"
+        "style='display:@@token_display@@'>"
         "&#128273;</button>"
         # v8 Wave 3: GitHub link + Option-A auto-push controls. Rendered EMPTY and
         # populated on load by renderRemoteControls() from GET /api/rnd/remote_status
@@ -5739,30 +5914,24 @@ def render_project_window_html(project_id: str) -> str:
         # linked → the remote shown + an auto-push opt-in toggle (set_auto_push) +
         # a "Push now" button (push_now). Default new repos are PRIVATE.
         "<span class='gh-remote' id='ghRemote'></span>"
-        f"{lifecycle}"
+        "@@lifecycle@@"
         "</div></div>"
         # ── Project OBJECTIVE (v5 Wave 3 — cached, validated; read-only) ──
-        + (f"<div class='proj-objective' data-objective='1' "
-           f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
-           f"font-size:13px;color:var(--text)'>"
-           f"<b style='color:var(--accent)'>Objective:</b> {objective_esc}</div>"
-           if objective_raw else "")
+        # W5: the objective/blurb/notes blocks are conditional MARKUP — the
+        # C1-amendment include-layer slots, computed in the render (each is
+        # the exact pre-wave block, or the empty string when absent).
+        "@@objective_block@@"
         # ── Project blurb ("what this project is"; click 'Blurb' above to edit) ──
-        + (f"<div class='rnd-blurb' data-blurb='{blurb_attr}' "
-           f"style='padding:8px 18px;border-bottom:1px solid var(--border);"
-           f"font-size:13px'>{blurb_esc}</div>" if blurb_raw.strip() else "")
+        "@@blurb_block@@"
         # ── Project notes (like a task's Notes; click 'Notes' above to edit) ──
-        + (f"<div style='padding:8px 18px;border-bottom:1px solid var(--border);"
-           f"font-size:12.5px;color:var(--text-dim);white-space:pre-wrap'>"
-           f"&#128221; {notes_esc}</div>" if notes_raw.strip() else "")
-        +
+        "@@notes_block@@"
         # ── 4-state status line (consistent with the dashboard tiles) ──
-        f"<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>{status}</div>"
+        "<div style='padding:8px 18px;border-bottom:1px solid var(--border)'>@@status_line@@</div>"
         # ── Paradigm-2 lane board (.p2lanes → 5 .p2col tile columns) ──
         # v7 Wave 6: wrap in a stable #kanbanBoard container so refreshBoard()
         # can swap the server-rendered board fragment in place (instant-in-column
         # tile after a session-lifecycle mutation) without a full page reload.
-        f"<div id='kanbanBoard'>{kanban}</div>"
+        "<div id='kanbanBoard'>@@kanban@@</div>"
         # ── Paradigm-2 inline PANEL STACK ──
         # Clicking ANY lane tile (live OR historical) expands a full-width inline
         # panel here, stacking down the page (NOT a floating window, NOT page nav).
@@ -5803,33 +5972,32 @@ def render_project_window_html(project_id: str) -> str:
         # content column (after the board / panel-stack, above the Tasks strip), so
         # it reads as part of the page (NOT a position:fixed overlay). Hidden until
         # an effort is selected (display:none); openEffortDock shows it in-flow.
-        + dock_chrome
+        "@@dock_chrome@@"
         # v10 Wave 7: the Boneyard panel template (hidden; cloned into #panelStack
         # by openBoneyard()).
-        + boneyard_tpl +
+        "@@boneyard_tpl@@"
         # ── Linked tasks strip (kept compact) ──
-        f"<div class='taskstrip'>{tasks_html}</div>"
+        "<div class='taskstrip'>@@tasks_html@@</div>"
         "</div>"
         # Visible build/version stamp so new-vs-cached is unmistakable at a glance.
-        f"<p style='color:#8a90a2;font-size:12px'>"
-        f"<b style='color:#22c55e'>Project Cockpit</b> (v4.1 · Paradigm 2) "
-        f"&bull; build {html_lib.escape(BUILD_ID)} &bull; instance "
-        f"{html_lib.escape(inst['instance_id'])}</p>"
+        "<p style='color:#8a90a2;font-size:12px'>"
+        "<b style='color:#22c55e'>Project Cockpit</b> (v4.1 · Paradigm 2) "
+        "&bull; build @@build_id@@ &bull; instance "
+        "@@instance_id@@</p>"
         # Vendored REAL xterm.js (defines window.Terminal) — the cockpit panel JS
         # instantiates an xterm.js Terminal directly over the v3 WS/SSE transport.
-        f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
+        "<script src='@@xterm_prefix@@/xterm.js'></script>"
         # rearch W4: the app-JS block (embedded string, byte-identical pre-wave
-        # default | static file + ANCHOR_BOOT), computed above the return —
-        # see `pw_app_js_block` for the full contract.
-        + pw_app_js_block +
-        "<script>" + cache_bust_script() + "</script>\n"
+        # default | static file + ANCHOR_BOOT), computed in the render — see
+        # `pw_app_js_block` there for the full contract.
+        "@@app_js@@"
+        "<script>@@cache_bust@@</script>\n"
         # Dashboard no longer auto-opens the workbench/effort dock on load (John's
         # preference): the prior __dashboard__ DOMContentLoaded auto-open (effort
         # dock or terminal-button click) was removed. The dock opens only on an
         # explicit user click now.
-        + "" +
         "</body></html>"
-    )
+)
 
 
 # JS for the v4.1 "Project Cockpit" (Paradigm-2). Drives ONLY: the inline
