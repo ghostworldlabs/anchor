@@ -305,6 +305,30 @@ def _find_free_port(preferred: int) -> int:
         s.close()
 
 
+def check_pillar_state(report: Report):
+    """W3 (rearch 2026-07): the CURRENT configuration is a NAMED hybrid state.
+
+    The four per-pillar off-switch flags (frontend · auth · journal ·
+    supervisor — ``pillar_flags.py``) may only ever sit in a combination that
+    is a NAMED row of the hybrid-state matrix. This assertion reads the
+    environment this check runs under (the same env discipline the service's
+    NSSM ``AppEnvironmentExtra`` feeds); an unset env is the ``baseline``
+    named state, so today's live host passes. An invalid flag value or an
+    unnamed combination (including a DAG-forbidden one) FAILS the check
+    loudly — an unsupported hybrid must never run silently. W18 joins this to
+    the live-service introspection once ANCHOR_BOOT carries the flags.
+    """
+    name = "pillar flags: named hybrid state"
+    try:
+        import pillar_flags
+        row = pillar_flags.assert_named_state()
+        flags = " · ".join(f"{f}={row['flags'][f]}"
+                           for f in pillar_flags.FLAG_ORDER)
+        report.check(name, True, f"'{row['name']}' ({flags})")
+    except Exception as e:
+        report.check(name, False, f"{type(e).__name__}: {e}")
+
+
 def check_server_and_endpoints(report: Report):
     """Boot the server on TEST_PORT, exercise endpoints, return the popen handle."""
     global TEST_PORT
@@ -4871,6 +4895,7 @@ def main():
 
         check_filesystem(report)
         check_code_compiles(report)
+        check_pillar_state(report)
 
         # Need anchor_gui as a module to call its parsers
         try:

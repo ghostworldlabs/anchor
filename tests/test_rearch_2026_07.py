@@ -1,4 +1,4 @@
-"""W1+W2 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
+"""W1+W2+W3 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
 
 **W1 — Ground-Truth Instrumentation (census · anchors · tripwire):**
 
@@ -34,6 +34,35 @@ paths):**
   keeps the query param only because WS/SSE demand it), and the checked-in
   ``CONSUMER-INVENTORY.md`` enumerates every open-route consumer with its
   verified token path.
+
+**W3 — Spikes, Pillar Flags & Process Rails:**
+
+* the **ConPTY-across-processes spike** (``tools/conpty_spike.py``): the
+  owner-side-PTY + loopback-IPC harness runs its deterministic stub leg here
+  and records the verdict against the PRE-WRITTEN acceptance questions
+  (latency bound · re-attach behavior · complexity budget) into the
+  checked-in ``SPIKE-CONPTY-VERDICT.{json,md}`` (the real-ConPTY leg is
+  opt-in via ``ANCHOR_SPIKE_REAL_CONPTY=1``, recorded honestly either way);
+* the **cookie-through-WS spike** (``tools/cookie_ws_spike.py``): a real
+  browser (Playwright) proves whether the auth cookie survives the WS
+  upgrade — recorded into ``SPIKE-COOKIE-WS-VERDICT.{json,md}`` with the
+  iPhone-PWA leg as an honest live-manual runbook cell and ``?token=``
+  declared as the WS fallback;
+* the **pre-restart drain** (``tools/pre_restart_drain.py``): close_session
+  park + capture_session_docs + the warm-resume seed for every live PTY,
+  proven against a stub PTY session (park → docs in main → cached summary →
+  warm ``_build_continue_seed``), with the bounded summary generation unable
+  to block a restart;
+* the **four pillar off-switch flags** (``pillar_flags.py``): journal ·
+  auth · supervisor · frontend, the named hybrid-state matrix + cross-pillar
+  DAG (``PILLAR-DAG.md``, gate-refreshed), and the healthcheck assertion
+  (``check_pillar_state``) that the CURRENT configuration is a NAMED state —
+  loud failure on an unnamed/invalid one;
+* the **process rails**: the three Butler user stories (the binding W12
+  envelope target), the codified rituals (``PROCESS-RAILS.md``), and the
+  Appendix-A traceability ledger (ideas 1–52 + mitigations 1–20, Mitigation
+  9 explicitly reconciled) — the ledger diffed mechanically against the
+  frozen plan's own citation lines.
 """
 
 import ast
@@ -53,8 +82,12 @@ from pathlib import Path
 
 import pytest
 
+import pillar_flags as pf
 from tools import anchors as anchors_mod
+from tools import conpty_spike as cs
+from tools import cookie_ws_spike as cw
 from tools import interpolation_census as census_mod
+from tools import pre_restart_drain as drain_mod
 from tools import write_tripwire as wt
 from tools.anchors import AnchorError, locate_anchors
 from tools.interpolation_census import (
@@ -983,3 +1016,721 @@ class TestW2PlaywrightFlows:
             assert "updated" in banner and "Reload" in banner
             assert 409 in statuses, "the mutating POST did not answer 409"
             b.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# W3 — Spikes, Pillar Flags & Process Rails
+# ══════════════════════════════════════════════════════════════════════════
+
+PLAN_PATH = REPO_ROOT / "IMPLEMENTATION-PLAN.md"
+
+
+def _flag_env(frontend=None, auth=None, journal=None, supervisor=None,
+              **extra):
+    """Build a hermetic pillar-flag env dict (unset flags stay at defaults)."""
+    env = {}
+    for flag, value in ((pf.FLAG_FRONTEND, frontend), (pf.FLAG_AUTH, auth),
+                        (pf.FLAG_JOURNAL, journal),
+                        (pf.FLAG_SUPERVISOR, supervisor)):
+        if value is not None:
+            env[pf.FLAG_ENV[flag]] = value
+    env.update(extra)
+    return env
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 10) W3 — the four pillar off-switch flags + named hybrid-state matrix
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW3PillarFlags:
+    def test_unset_env_is_todays_live_behavior_the_baseline_state(self):
+        """A host with none of the four env vars set resolves to every
+        pillar's PRE-MIGRATION default — and that combination is the named
+        ``baseline`` state (the flags are rails laid AHEAD of the pillars)."""
+        assert pf.current_flags(env={}) == pf.FLAG_DEFAULTS
+        row = pf.assert_named_state(env={})
+        assert row["name"] == "baseline"
+        assert row["flags"] == pf.FLAG_DEFAULTS
+        assert row["support"]
+
+    def test_invalid_flag_value_fails_loudly_never_falls_back(self):
+        with pytest.raises(pf.PillarStateError) as e:
+            pf.current_flags(env=_flag_env(frontend="spa"))
+        assert "ANCHOR_FRONTEND" in str(e.value)
+        assert "spa" in str(e.value)
+        # the healthcheck assertion path fails the same way (never a default)
+        with pytest.raises(pf.PillarStateError):
+            pf.assert_named_state(env=_flag_env(auth="enforced-typo"))
+
+    def test_auth_warn_alias_honored_only_when_mode_unset(self):
+        """``ANCHOR_AUTH_WARN=1`` (the W8 soak flag) aliases to warn — but an
+        explicit ``ANCHOR_AUTH_MODE`` always wins."""
+        flags = pf.current_flags(env=_flag_env(ANCHOR_AUTH_WARN="1"))
+        assert flags[pf.FLAG_AUTH] == "warn"
+        flags = pf.current_flags(
+            env=_flag_env(auth="open", ANCHOR_AUTH_WARN="1"))
+        assert flags[pf.FLAG_AUTH] == "open"
+
+    def test_every_named_matrix_row_passes_the_assertion(self):
+        for row in pf.HYBRID_STATE_MATRIX:
+            env = {pf.FLAG_ENV[f]: v for f, v in row["flags"].items()}
+            got = pf.assert_named_state(env=env)
+            assert got["name"] == row["name"]
+            assert got["support"] == row["support"]
+
+    def test_unnamed_combination_fails_loudly(self):
+        """journal=on against the otherwise-baseline flags is NOT a named row
+        (the journal lands on the static frontend ladder) — loud failure."""
+        env = _flag_env(journal="on")
+        assert pf.state_name(pf.current_flags(env=env)) is None
+        with pytest.raises(pf.PillarStateError) as e:
+            pf.assert_named_state(env=env)
+        msg = str(e.value)
+        assert "UNNAMED" in msg
+        assert "baseline" in msg, "the error must name the supported states"
+
+    def test_dag_forbidden_combination_names_the_violated_edge(self):
+        """auth=enforce against the embedded frontend violates the one DAG
+        edge — the failure message carries the edge and its reason."""
+        env = _flag_env(auth="enforce")            # frontend stays embedded
+        flags = pf.current_flags(env=env)
+        violations = pf.dag_violations(flags)
+        assert len(violations) == 1
+        assert "auth=enforce requires frontend=static" in violations[0]
+        with pytest.raises(pf.PillarStateError) as e:
+            pf.assert_named_state(env=env)
+        assert "DAG violation" in str(e.value)
+
+    def test_matrix_rows_are_valid_unique_and_dag_legal(self):
+        names = [r["name"] for r in pf.HYBRID_STATE_MATRIX]
+        assert len(names) == len(set(names)), "matrix state names must be unique"
+        for row in pf.HYBRID_STATE_MATRIX:
+            assert set(row["flags"]) == set(pf.FLAG_ORDER)
+            for flag, value in row["flags"].items():
+                assert value in pf.FLAG_VALUES[flag], (row["name"], flag)
+            assert pf.dag_violations(row["flags"]) == [], \
+                f"named state {row['name']} violates the DAG"
+            assert row["support"].strip(), "every row carries a support note"
+        # the six deployment-ladder states are all named rows, in the matrix
+        for name in pf.LADDER_STATES:
+            assert pf.get_state(name) is not None
+
+    def test_single_pillar_revert_closure(self):
+        """The revert-compatibility rule, mechanically: from every ladder
+        state, stepping any one advanced pillar DOWN one rung lands in a
+        NAMED row — and where the DAG forbids the single-flag revert
+        (frontend back to embedded under auth=enforce), the documented
+        COMPOUND revert (auth→warn with it) lands named instead."""
+        for name in pf.LADDER_STATES:
+            row = pf.get_state(name)
+            for flag in pf.FLAG_ORDER:
+                order = pf.FLAG_VALUES[flag]
+                idx = order.index(row["flags"][flag])
+                if idx == 0:
+                    continue                      # already at its baseline rung
+                reverted = dict(row["flags"])
+                reverted[flag] = order[idx - 1]
+                if pf.dag_violations(reverted):
+                    # only the documented edge may forbid a single-flag revert
+                    assert flag == pf.FLAG_FRONTEND
+                    assert row["flags"][pf.FLAG_AUTH] == "enforce"
+                    reverted[pf.FLAG_AUTH] = "warn"      # the compound revert
+                    assert pf.dag_violations(reverted) == []
+                landing = pf.state_name(reverted)
+                assert landing is not None, (
+                    f"reverting {flag} from {name} lands UNNAMED: {reverted}")
+
+    def test_matrix_doc_is_gate_refreshed_and_faithful(self, tmp_path):
+        """`PILLAR-DAG.md` is a mechanical rendering of the module (refreshed
+        by this very gate run, like the W1 census artifacts) — and a stale
+        copy is rewritten to match."""
+        # a stale/hand-edited copy is repaired
+        stale = tmp_path / pf.MATRIX_DOC_NAME
+        stale.write_text("# hand-edited drift\n", encoding="utf-8")
+        out = pf.write_matrix_doc(out_dir=tmp_path)
+        assert out == stale
+        assert out.read_text(encoding="utf-8") == pf.render_matrix_md()
+        # refresh the CHECKED-IN gate artifact and hold it faithful
+        path = pf.write_matrix_doc()
+        assert path == ARTIFACT_DIR / pf.MATRIX_DOC_NAME
+        text = path.read_text(encoding="utf-8")
+        assert text == pf.render_matrix_md()
+        for row in pf.HYBRID_STATE_MATRIX:
+            assert row["name"] in text
+        assert "Revert-compatibility rule" in text
+        assert "auth=enforce → requires frontend=static" in text
+
+
+class TestW3HealthcheckPillarState:
+    """The healthcheck asserts the CURRENT live configuration is a NAMED
+    hybrid state (the W3 acceptance GWT)."""
+
+    def _clean(self, monkeypatch):
+        for var in list(pf.FLAG_ENV.values()) + [pf.AUTH_WARN_ALIAS_ENV]:
+            monkeypatch.delenv(var, raising=False)
+
+    def test_clean_env_passes_as_baseline(self, monkeypatch):
+        self._clean(monkeypatch)
+        import anchor_healthcheck as hc
+        report = hc.Report()
+        hc.check_pillar_state(report)
+        name, ok, detail = report.checks[-1]
+        assert "pillar" in name
+        assert ok, detail
+        assert "baseline" in detail
+        assert not report.has_issues
+
+    def test_named_nonbaseline_state_passes(self, monkeypatch):
+        self._clean(monkeypatch)
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")     # c1-static
+        import anchor_healthcheck as hc
+        report = hc.Report()
+        hc.check_pillar_state(report)
+        _, ok, detail = report.checks[-1]
+        assert ok, detail
+        assert "c1-static" in detail
+
+    def test_unnamed_state_fails_the_check_loudly(self, monkeypatch):
+        self._clean(monkeypatch)
+        monkeypatch.setenv("ANCHOR_JOURNAL", "on")          # unnamed vs baseline
+        import anchor_healthcheck as hc
+        report = hc.Report()
+        hc.check_pillar_state(report)
+        _, ok, detail = report.checks[-1]
+        assert not ok
+        assert "UNNAMED" in detail
+        assert report.has_issues
+
+    def test_invalid_flag_value_fails_the_check(self, monkeypatch):
+        self._clean(monkeypatch)
+        monkeypatch.setenv("ANCHOR_SUPERVISOR", "sidecar")
+        import anchor_healthcheck as hc
+        report = hc.Report()
+        hc.check_pillar_state(report)
+        _, ok, detail = report.checks[-1]
+        assert not ok
+        assert "sidecar" in detail
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 11) W3 — ConPTY-across-processes spike (harness + recorded verdict)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW3ConPTYSpike:
+    def test_acceptance_questions_are_prewritten(self):
+        """The three questions are frozen IN THE HARNESS (before any run) and
+        carry their concrete bounds."""
+        ids = [q["id"] for q in cs.ACCEPTANCE_QUESTIONS]
+        assert ids == ["Q-LATENCY", "Q-REATTACH", "Q-COMPLEXITY"]
+        joined = " ".join(q["question"] for q in cs.ACCEPTANCE_QUESTIONS)
+        assert f"{cs.LATENCY_BOUND_MS:.0f} ms" in joined
+        assert str(cs.COMPLEXITY_BUDGET_LINES) in joined
+
+    def test_stub_leg_answers_the_questions_and_records_the_verdict(
+            self, tmp_path, monkeypatch):
+        """The deterministic stub leg: a REAL separate owner process holds the
+        PTY, the client detaches (the dashboard 'restart'), a new connection
+        re-attaches with full replay + live I/O — every byte crossing a
+        genuine process boundary. The verdict is recorded into the CHECKED-IN
+        artifacts (gate-refreshed, like the W1 census)."""
+        monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path / "data"))
+        result = cs.run_spike(backend="stub")
+        assert result["backend"] == "stub" and result["ran"] is True
+        answers = result["answers"]
+        assert set(answers) == {"Q-LATENCY", "Q-REATTACH", "Q-COMPLEXITY"}
+        # the across-process OWNERSHIP architecture holds deterministically
+        assert answers["Q-REATTACH"]["pass"] is True, answers["Q-REATTACH"]
+        assert answers["Q-COMPLEXITY"]["pass"] is True, answers["Q-COMPLEXITY"]
+        assert answers["Q-LATENCY"]["median_ms"] > 0.0
+        assert answers["Q-LATENCY"]["pass"] is True, (
+            f"cross-process echo median exceeded the pre-written bound: "
+            f"{answers['Q-LATENCY']}")
+        assert result["verdict"] == "YES"
+
+        jp, mp = cs.record_verdict(result)      # the checked-in gate artifact
+        assert jp == ARTIFACT_DIR / cs.VERDICT_JSON_NAME
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["questions"] == list(cs.ACCEPTANCE_QUESTIONS)
+        assert payload["legs"]["stub"]["ran"] is True
+        md = mp.read_text(encoding="utf-8")
+        assert "Verdict: YES" in md
+        # the real-ConPTY leg is recorded HONESTLY: a leg that has not run
+        # renders NOT YET RUN (a prior recorded real run is never erased)
+        if not (payload["legs"].get("real") or {}).get("ran"):
+            assert "NOT YET RUN" in md
+
+    @pytest.mark.skipif(
+        not os.environ.get("ANCHOR_SPIKE_REAL_CONPTY"),
+        reason="real-ConPTY leg is opt-in (ANCHOR_SPIKE_REAL_CONPTY=1)")
+    def test_real_conpty_leg_opt_in_runs_and_records(self):
+        result = cs.run_spike(backend="real")
+        assert result["ran"] is True and result["backend"] == "real"
+        jp, _ = cs.record_verdict(result)
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"]["real"]["ran"] is True
+
+    def test_record_verdict_is_diff_stable_across_green_reruns(self, tmp_path):
+        """A green re-run whose only difference is the volatile measurement
+        (median ms / detail text) does NOT rewrite the artifacts — git status
+        stays clean; a REAL change (an answer flips) does rewrite."""
+        leg = {
+            "backend": "stub", "ran": True, "verdict": "YES",
+            "answers": {
+                "Q-LATENCY": {"pass": True, "median_ms": 12.3,
+                              "detail": "median 12.3 ms over 5 rounds"},
+                "Q-REATTACH": {"pass": True, "detail": "replayed"},
+                "Q-COMPLEXITY": {"pass": True, "detail": "300 lines"},
+            },
+        }
+        jp, mp = cs.record_verdict(dict(leg), out_dir=tmp_path)
+        j1 = jp.read_text(encoding="utf-8")
+        m1 = mp.read_text(encoding="utf-8")
+
+        rerun = json.loads(json.dumps(leg))
+        rerun["answers"]["Q-LATENCY"]["median_ms"] = 47.9
+        rerun["answers"]["Q-LATENCY"]["detail"] = "median 47.9 ms over 5 rounds"
+        cs.record_verdict(rerun, out_dir=tmp_path)
+        assert jp.read_text(encoding="utf-8") == j1
+        assert mp.read_text(encoding="utf-8") == m1
+
+        flipped = json.loads(json.dumps(leg))
+        flipped["answers"]["Q-REATTACH"]["pass"] = False
+        flipped["verdict"] = "NO"
+        cs.record_verdict(flipped, out_dir=tmp_path)
+        assert jp.read_text(encoding="utf-8") != j1
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"]["stub"]["verdict"] == "NO"
+
+    def test_unrun_leg_is_recorded_honestly_and_no_verdict_is_fabricated(
+            self, tmp_path):
+        """An artifact with NO recorded legs claims nothing: both legs render
+        as NOT YET RUN, and the NO-routing (the pre-designed drain) is
+        documented for W17."""
+        jp, mp = cs.record_verdict(None, out_dir=tmp_path)
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"] == {}
+        md = mp.read_text(encoding="utf-8")
+        assert md.count("NOT YET RUN") == 2
+        assert "pre_restart_drain" in md, \
+            "a NO verdict must route W17 to the pre-designed drain"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 12) W3 — cookie-through-WS-upgrade spike (real browser + recorded verdict)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW3CookieWSSpike:
+    def test_acceptance_questions_and_fallback_are_prewritten(self):
+        ids = [q["id"] for q in cw.ACCEPTANCE_QUESTIONS]
+        assert ids == ["Q-COOKIE-DESKTOP", "Q-COOKIE-PWA", "Q-FALLBACK"]
+        pwa_q = cw.ACCEPTANCE_QUESTIONS[1]["question"]
+        assert "Tailscale" in pwa_q and "PWA" in pwa_q
+        assert "?token=" in cw.FALLBACK_DECLARATION
+        assert "WS/SSE" in cw.FALLBACK_DECLARATION
+
+    def test_evaluate_desktop_judges_the_captured_upgrade(self):
+        good = ("GET /spike-ws HTTP/1.1\r\nHost: t\r\n"
+                "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                f"Cookie: {cw.COOKIE_NAME}={cw.COOKIE_VALUE}\r\n\r\n")
+        assert cw.evaluate_desktop({"ws_request": good})["pass"] is True
+        # cookie missing from the upgrade → honest NO
+        no_cookie = ("GET /spike-ws HTTP/1.1\r\nHost: t\r\n"
+                     "Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
+        verdict = cw.evaluate_desktop({"ws_request": no_cookie})
+        assert verdict["pass"] is False
+        # nothing captured → honest NO with the reason, never fabricated
+        empty = cw.evaluate_desktop({"ws_request": None})
+        assert empty["pass"] is False
+        assert "no WebSocket upgrade request" in empty["detail"]
+
+    def test_capture_server_sets_cookie_and_captures_the_upgrade_verbatim(
+            self):
+        """The stdlib harness itself: GET / answers the cookie-setting page;
+        a client-shaped upgrade request to /spike-ws is captured raw."""
+        import socket as sk
+        port, state, stop = cw.start_capture_server()
+        try:
+            s = sk.create_connection(("127.0.0.1", port), timeout=5)
+            s.sendall(b"GET / HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+            data = b""
+            while True:
+                chunk = s.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            s.close()
+            assert b"Set-Cookie: " + cw.COOKIE_NAME.encode() in data
+            assert b"cookie-ws spike page" in data
+
+            s = sk.create_connection(("127.0.0.1", port), timeout=5)
+            s.sendall(("GET /spike-ws HTTP/1.1\r\nHost: t\r\n"
+                       "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+                       f"Cookie: {cw.COOKIE_NAME}={cw.COOKIE_VALUE}\r\n"
+                       "\r\n").encode("latin-1"))
+            for _ in range(100):
+                if state["ws_request"] is not None:
+                    break
+                time.sleep(0.05)
+            s.close()
+        finally:
+            stop()
+        assert state["ws_request"] is not None
+        assert cw.evaluate_desktop(state)["pass"] is True
+
+    def test_desktop_leg_real_browser_records_the_checked_in_verdict(self):
+        """THE mechanical desktop leg: a REAL browser (Playwright Chromium)
+        loads the cookie-setting page then opens a same-origin ws:// — the
+        captured upgrade request answers Q-COOKIE-DESKTOP, recorded into the
+        CHECKED-IN artifacts."""
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        port, state, stop = cw.start_capture_server()
+        try:
+            with sync_playwright() as p:
+                b = p.chromium.launch()
+                pg = b.new_page()
+                pg.goto(f"http://127.0.0.1:{port}/")
+                assert "cookie-ws spike page" in pg.content()
+                pg.evaluate(
+                    "(url) => { try { new WebSocket(url); } catch (e) {} }",
+                    f"ws://127.0.0.1:{port}{cw.WS_PATH}")
+                for _ in range(160):
+                    if state["ws_request"] is not None:
+                        break
+                    time.sleep(0.05)
+                b.close()
+        finally:
+            stop()
+        assert state["ws_request"] is not None, \
+            "the browser never attempted the WS upgrade"
+        answer = cw.evaluate_desktop(state)
+        assert answer["pass"] is True, (
+            f"desktop browser did not carry the cookie through the WS "
+            f"upgrade: {answer}")
+
+        jp, mp = cw.record_verdict(desktop_result={
+            "ran": True, "browser": "chromium", "answer": answer})
+        assert jp == ARTIFACT_DIR / cw.VERDICT_JSON_NAME
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"]["desktop"]["answer"]["pass"] is True
+        assert payload["fallback_declared"] is True
+        md = mp.read_text(encoding="utf-8")
+        assert "Verdict: YES" in md
+
+    def test_pwa_leg_honest_runbook_and_declared_fallback(self, tmp_path):
+        """The iPhone-PWA leg CANNOT run in CI: until the live manual runbook
+        runs with John it is recorded honestly as NOT YET RUN (with the
+        runbook + the recording command), and ?token= is DECLARED as the WS
+        fallback unconditionally."""
+        jp, mp = cw.record_verdict(out_dir=tmp_path)
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"] == {}
+        assert payload["fallback_declared"] is True
+        assert payload["fallback"] == cw.FALLBACK_DECLARATION
+        md = mp.read_text(encoding="utf-8")
+        assert "NOT YET RUN" in md
+        assert "Tailscale" in md
+        assert "--record-pwa" in md, "the runbook's recording command"
+        assert "UNPROVEN" in md, \
+            "W9 must treat the PWA as unproven until the leg runs"
+        assert "DECLARED" in md
+
+        # the manual runbook's recording path merges the leg in honestly
+        cw.record_verdict(pwa_result={
+            "ran": True,
+            "answer": {"pass": True, "detail": "manual runbook run"}},
+            out_dir=tmp_path)
+        payload = json.loads(jp.read_text(encoding="utf-8"))
+        assert payload["legs"]["pwa"]["ran"] is True
+        md = mp.read_text(encoding="utf-8")
+        assert "manual runbook run" in md
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 13) W3 — pre-designed graceful pre-restart drain (proven on a stub PTY)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW3PreRestartDrain:
+    @staticmethod
+    def _start_with_doc(pid, lane="plan", doc="MASTER-PLAN.md"):
+        """A live stub-PTY session with an UNSAVED produced doc in its
+        worktree — the W3 acceptance GWT's given."""
+        import terminal_session as ts
+        rec = ts.start_session(pid, lane, backend="claude")
+        wt_dir = Path(rec["worktree_path"])
+        pdir = wt_dir / "planning" / "rearch-w3"
+        pdir.mkdir(parents=True, exist_ok=True)
+        (pdir / doc).write_text(
+            "# Master Plan\n## North Star\nDrain parks warm.\n",
+            encoding="utf-8")
+        return rec
+
+    @_needs_git
+    def test_drain_parks_live_sessions_warm(self, w2_env):
+        """The W3 acceptance GWT: a live stub-PTY session with unsaved
+        produced docs → drain → parked via close_session, docs captured to
+        main, and a warm-resume seed exists so the post-restart reopen is
+        WARM, not cold."""
+        import pty_manager
+        import session_registry as reg
+        import summarizer
+        gui = w2_env["gui"]
+        pid, folder = _mk_w2_project(w2_env, "DrainWarm")
+        rec = self._start_with_doc(pid)
+        sid = rec["session_id"]
+        assert sid in pty_manager.live_sessions()
+
+        report = drain_mod.drain()
+        assert report["ok"] is True and report["dry_run"] is False
+        entry = next(e for e in report["drained"] if e["session_id"] == sid)
+
+        # (1) parked via close_session: PTY stopped, record kept IDLE
+        assert entry["parked"] is True
+        assert entry["status"] == reg.STATUS_IDLE
+        assert sid not in pty_manager.live_sessions()
+        assert reg.get_session(sid)["status"] == reg.STATUS_IDLE
+        assert reg.get_session(sid)["status"] not in reg.TERMINAL_STATUSES
+
+        # (2) the produced docs were captured into MAIN before any reap
+        assert any("MASTER-PLAN.md" in p for p in entry["docs_persisted"])
+        assert (folder / "planning" / "rearch-w3" / "MASTER-PLAN.md").exists()
+
+        # (3) the warm-resume seed: summary CACHED + the REAL resume seed of
+        # anchor_gui yields a non-empty warm open (never cold)
+        assert entry["seed"] in ("generated", "cached")
+        assert summarizer.load_cached(str(folder), pid, "planning",
+                                      sid) is not None
+        seed = gui._build_continue_seed(str(folder), pid, "plan", sid)
+        assert seed, "the post-restart reopen must be WARM, not cold"
+
+        # idempotent: a parked session is not drained again
+        again = drain_mod.drain()
+        assert all(e["session_id"] != sid for e in again["drained"])
+
+    @_needs_git
+    def test_dry_run_enumerates_without_mutating(self, w2_env):
+        import pty_manager
+        import session_registry as reg
+        from tests import rearch_flows as flows
+        pid, _ = _mk_w2_project(w2_env, "DrainDry")
+        rec = self._start_with_doc(pid, lane="research")
+        sid = rec["session_id"]
+        try:
+            report = drain_mod.drain(dry_run=True)
+            assert report["dry_run"] is True
+            entry = next(e for e in report["drained"]
+                         if e["session_id"] == sid)
+            assert entry.get("would_drain") is True
+            assert "parked" not in entry
+            # nothing mutated: still live, still RUNNING
+            assert sid in pty_manager.live_sessions()
+            assert reg.get_session(sid)["status"] == reg.STATUS_RUNNING
+        finally:
+            flows.kill_quietly(sid)
+
+    @_needs_git
+    def test_wedged_summary_generation_cannot_block_the_restart(
+            self, w2_env, monkeypatch):
+        """The bounded warm-seed generation: a wedged model call times out
+        honestly (seed='timeout'), the session is STILL parked, and the drain
+        returns fast — a restart can never hang on a summary. The module
+        global is read at call time (test-tunable)."""
+        import session_registry as reg
+        import summarizer
+        pid, _ = _mk_w2_project(w2_env, "DrainWedge")
+        rec = self._start_with_doc(pid)
+        sid = rec["session_id"]
+
+        wedge = threading.Event()
+
+        def _wedged(*a, **k):
+            wedge.wait(30)                      # a wedged model call
+
+        monkeypatch.setattr(summarizer, "summarize_session", _wedged)
+        t0 = time.monotonic()
+        report = drain_mod.drain(summary_timeout=0.2)
+        elapsed = time.monotonic() - t0
+        entry = next(e for e in report["drained"] if e["session_id"] == sid)
+        assert entry["parked"] is True, "the park must proceed regardless"
+        assert entry["seed"] == "timeout"
+        assert elapsed < 15, "a wedged summary must never block the restart"
+        assert reg.get_session(sid)["status"] == reg.STATUS_IDLE
+
+        # DRAIN_SUMMARY_TIMEOUT is the module-global default, read per call
+        monkeypatch.setattr(drain_mod, "DRAIN_SUMMARY_TIMEOUT", 0.1)
+        t0 = time.monotonic()
+        assert drain_mod.ensure_warm_seed(pid, "plan", sid) == "timeout"
+        assert time.monotonic() - t0 < 10
+        wedge.set()
+
+    @_needs_git
+    def test_per_session_failure_never_blocks_the_rest(
+            self, w2_env, monkeypatch):
+        """Best-effort: one session's park failing is recorded honestly and
+        the drain proceeds to the next session (never raises)."""
+        import terminal_session as ts
+        from tests import rearch_flows as flows
+        pid, _ = _mk_w2_project(w2_env, "DrainBestEffort")
+        a = self._start_with_doc(pid)
+        b = self._start_with_doc(pid)
+        real_close = ts.close_session
+
+        def _flaky(sid, project_id=None):
+            if sid == a["session_id"]:
+                raise RuntimeError("boom-park")
+            return real_close(sid, project_id=project_id)
+
+        monkeypatch.setattr(ts, "close_session", _flaky)
+        try:
+            report = drain_mod.drain(summary_timeout=0.1)
+            assert report["ok"] is True
+            by = {e["session_id"]: e for e in report["drained"]}
+            assert by[a["session_id"]]["parked"] is False
+            assert "boom-park" in by[a["session_id"]]["error"]
+            assert by[b["session_id"]]["parked"] is True
+        finally:
+            flows.kill_quietly(a["session_id"])
+            flows.kill_quietly(b["session_id"])
+
+    def test_unresolvable_project_is_honest_unavailable(self, w2_env):
+        """No project/folder → the seed is honestly 'unavailable' (no cache
+        written, nothing fabricated, nothing raised)."""
+        assert drain_mod.ensure_warm_seed(
+            "no-such-project", "plan", "no-such-session") == "unavailable"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 14) W3 — process rails: Butler stories · rituals · Appendix-A ledger
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW3ButlerStories:
+    DOC = ARTIFACT_DIR / "BUTLER-USER-STORIES.md"
+
+    def test_three_binding_stories_with_envelope_answer_paths(self):
+        assert self.DOC.exists(), \
+            "the Butler user stories are a checked-in W3 artifact"
+        md = self.DOC.read_text(encoding="utf-8")
+        assert re.findall(r"^## Story (\d+)", md, flags=re.M) == \
+            ["1", "2", "3"]
+        # every story is answerable from ENVELOPE FIELDS ALONE — each carries
+        # its answer path, and the binding envelope fields are all named
+        assert md.count("**Envelope answer path:**") == 3
+        for field in ("correlation_id", "causation_id", "actor", "seq",
+                      "ts", "schema_ver"):
+            assert field in md, f"envelope field {field} missing"
+        # the stories BIND the W12 envelope (the Phase-4 validation target)
+        assert "W12" in md
+        assert "BINDING" in md or "binding" in md
+        # the amendment path: the envelope changes, never the story
+        assert "amendment" in md.lower()
+
+
+class TestW3ProcessRails:
+    DOC = ARTIFACT_DIR / "PROCESS-RAILS.md"
+
+    def test_the_codified_rituals_are_checked_in(self):
+        assert self.DOC.exists(), \
+            "the codified rituals are a checked-in W3 artifact"
+        md = self.DOC.read_text(encoding="utf-8")
+        for ritual in ("Per-wave live-service smoke checklist",
+                       "Healthcheck SLO",
+                       "Auth-flip sequencing rule",
+                       "Soft merge-freeze protocol"):
+            assert ritual in md, f"ritual missing: {ritual}"
+
+    def test_smoke_checklist_covers_the_live_service(self):
+        md = self.DOC.read_text(encoding="utf-8")
+        assert "nssm restart anchor" in md
+        assert "ANCHOR_BOOT" in md, "the new-build assert (no stale supervisor)"
+        assert "anchor_healthcheck.py" in md
+        assert "8777" in md
+
+    def test_healthcheck_slo_has_the_three_mandated_terms(self):
+        md = self.DOC.read_text(encoding="utf-8")
+        assert "15 minutes" in md, "the wall-time cap"
+        assert "Zero known flakes" in md
+        assert "20 consecutive green" in md and "5AM" in md, \
+            "the 20× nightly promotion rule"
+
+    def test_auth_flip_sequencing_rule(self):
+        md = self.DOC.read_text(encoding="utf-8")
+        assert "NEVER ships in the same deploy" in md
+        # warn soaks BEFORE enforce, and rollback is a FLAG, not a revert
+        assert md.index("warn") < md.index("enforce")
+        assert "never a code revert" in md
+        assert "ANCHOR_AUTH_MODE" in md
+
+    def test_merge_freeze_protocol(self):
+        md = self.DOC.read_text(encoding="utf-8")
+        assert "anchor_gui.py" in md
+        assert "REBASES" in md, "the urgent-fix exception path"
+        assert "byte-parity" in md
+        assert "W6" in md, "the freeze lifts at the C1 exit gate"
+
+
+class TestW3AppendixALedger:
+    """The traceability ledger is DIFFED MECHANICALLY against the frozen
+    plan's own citation lines — demonstrated, not narrated."""
+
+    LEDGER = ARTIFACT_DIR / "APPENDIX-A-TRACEABILITY.md"
+    _CITE = re.compile(
+        r"\(Master Plan Phase \d+;(?: D\d+;)?"
+        r" Integrated ([0-9, ]+?)(?:; Mitigations? ([0-9, ]+?))?\)")
+
+    def _plan_citations(self):
+        text = PLAN_PATH.read_text(encoding="utf-8")
+        waves = [(int(m.group(1)), m.start())
+                 for m in re.finditer(r"^## Wave (\d+)", text, flags=re.M)]
+        assert len(waves) == 18, "the frozen plan has 18 waves"
+        ideas, mits = {}, {}
+        for i, (num, start) in enumerate(waves):
+            end = waves[i + 1][1] if i + 1 < len(waves) else len(text)
+            m = self._CITE.search(text, start, end)
+            assert m, f"wave {num} has no (Master Plan …) citation line"
+            for n in re.findall(r"\d+", m.group(1)):
+                ideas.setdefault(int(n), set()).add(f"W{num}")
+            if m.group(2):
+                for n in re.findall(r"\d+", m.group(2)):
+                    mits.setdefault(int(n), set()).add(f"W{num}")
+        return ideas, mits
+
+    def _ledger_tables(self):
+        assert self.LEDGER.exists(), \
+            "the Appendix-A traceability ledger is a checked-in W3 artifact"
+        md = self.LEDGER.read_text(encoding="utf-8")
+        ideas = {int(m.group(1)): set(re.findall(r"W\d+", m.group(2)))
+                 for m in re.finditer(r"^\| I-(\d+) \| ([^|]*)\|",
+                                      md, flags=re.M)}
+        mits = {int(m.group(1)): set(re.findall(r"W\d+", m.group(2)))
+                for m in re.finditer(r"^\| M-(\d+) \| ([^|]*)\|",
+                                     md, flags=re.M)}
+        return ideas, mits, md
+
+    def test_ledger_matches_the_frozen_plan_mechanically(self):
+        plan_ideas, plan_mits = self._plan_citations()
+        led_ideas, led_mits, _ = self._ledger_tables()
+        # the ledger enumerates ideas 1–52 and mitigations 1–20 exhaustively
+        assert set(led_ideas) == set(range(1, 53))
+        assert set(led_mits) == set(range(1, 21))
+        # ideas: every ledger row equals the plan's own citations — and every
+        # idea is cited by at least one wave (zero silently dropped)
+        for i in range(1, 53):
+            assert led_ideas[i] == plan_ideas.get(i, set()), \
+                f"I-{i} drifted from the frozen plan's citations"
+        assert set(plan_ideas) == set(range(1, 53)), \
+            "an integrated idea is cited by NO wave (silent drop)"
+        # mitigations: exact per row; M-9 is cited by ZERO waves (by design,
+        # reconciled explicitly) and every other mitigation lands somewhere
+        for n in range(1, 21):
+            assert led_mits[n] == plan_mits.get(n, set()), \
+                f"M-{n} drifted from the frozen plan's citations"
+        assert 9 not in plan_mits and led_mits[9] == set()
+        assert set(plan_mits) == set(range(1, 21)) - {9}
+
+    def test_mitigation_9_is_explicitly_reconciled(self):
+        _, _, md = self._ledger_tables()
+        assert "## Mitigation 9 — the explicit reconciliation" in md
+        tail = md.split("Mitigation 9", 1)[1]
+        assert "W18" in tail, \
+            "the reconciliation binds W18's closure to resolve M-9"
+        assert "OPEN reconciliation item" in md

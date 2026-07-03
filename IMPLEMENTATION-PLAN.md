@@ -133,6 +133,16 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 ## Wave 3 — W3 — Spikes, Pillar Flags & Process Rails
 
+> AMENDMENT (2026-07-03, human-authorized, bounded): (1) This wave's
+> optional-dependency skip markers (`pytest.importorskip("playwright...")` etc.)
+> are AUTHORIZED — they follow the repo's documented dev-only-dependency
+> convention (CLAUDE.md: "Playwright is a DEV-ONLY test dependency
+> (pytest.importorskip)"); this amendment is the required plan citation.
+> (2) NEW HARD REQUIREMENT: every process the spike/tests spawn (claude.exe,
+> PTY children) MUST be reaped before the test returns — a gate run leaving
+> zero leaked processes is part of this wave's done-when (the 09:49 gate run
+> leaked ~10 claude.exe processes; that is a defect to fix in this wave).
+
 **Intent:** Run both time-boxed spikes against pre-written acceptance questions so Phases 2 and 5 consume verdicts (not hope), implement the four per-pillar off-switch flags + hybrid-state assertion, pre-design the PTY drain fallback, and codify the standing rituals + traceability ledger (Master Plan Phase 0; Integrated 14, 23, 33, 34, 42, 43, 44, 45, 52; Mitigations 10, 13, 15, 20).
 
 **Deliverables:** ConPTY-across-processes spike harness + recorded verdict against the pre-written acceptance questions (latency bound, re-attach behavior, complexity budget); Cookie-through-WS-upgrade spike on the REAL clients (desktop browser + iPhone PWA over Tailscale HTTPS) + recorded verdict, with ?token= declared as the WS fallback if the Cookie header doesn't survive; Pre-designed graceful pre-restart drain script: close_session park + capture_session_docs + W3 warm-resume seed for every live PTY, proven against a stub PTY session; Four per-pillar off-switch flags implemented (journal emission · auth warn/enforce · supervisor inline/external · static-vs-embedded frontend) + the named hybrid-state matrix + a healthcheck assertion that the CURRENT live configuration is a named state; Three Butler user stories checked in as the binding Phase-4 envelope validation target; cross-pillar dependency DAG with the revert-compatibility rule; Codified rituals: per-wave live-service smoke checklist, healthcheck SLO (wall-time cap, zero-known-flakes, 20× nightly before 5AM), auth-flip sequencing rule, soft merge-freeze protocol for the extraction wave; Checked-in Appendix-A traceability ledger (ideas 1–52 + mitigations 1–20, Mitigation 9 explicitly reconciled)

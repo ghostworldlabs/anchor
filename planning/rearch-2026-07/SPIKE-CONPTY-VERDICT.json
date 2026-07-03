@@ -1,0 +1,19 @@
+{
+  "legs": {},
+  "questions": [
+    {
+      "id": "Q-LATENCY",
+      "question": "Is the median echo round-trip through the cross-process hop <= 150 ms (median of 5 rounds)?"
+    },
+    {
+      "id": "Q-REATTACH",
+      "question": "After the first client detaches (simulating a dashboard restart), does a new connection re-attach with full replay of prior output AND working live I/O, the owner-held PTY having survived the client's death?"
+    },
+    {
+      "id": "Q-COMPLEXITY",
+      "question": "Does the whole across-process ownership harness fit within 400 significant lines?"
+    }
+  ],
+  "schema": 1,
+  "spike": "conpty-across-processes"
+}
