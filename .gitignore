@@ -50,7 +50,7 @@ _foreman-status.log
 .foreman/
 rnd_jobs/
 # Supervisor-session runtime logs (resume/verify/census — transient, not product)
-_foreman-resume-*.log
+_foreman-*.log
 _census.log
 _census.stop
 _conpty-real-leg.log
