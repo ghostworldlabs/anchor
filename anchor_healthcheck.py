@@ -4830,6 +4830,21 @@ def main():
     report = Report()
     server_proc = None
 
+    # W1 (rearch 2026-07): opt-in write-site tripwire over the healthcheck's
+    # own in-process walks (the v2–v5+ surfaces mutate stubbed .anchor/
+    # stores). With ANCHOR_WRITE_TRIPWIRE=inventory set, every such write is
+    # recorded and folded (merge) into the mutation-of-record inventory the
+    # C3 waves consume. Off by default; best-effort — never fails the check.
+    _tripwire = None
+    try:
+        from tools import write_tripwire as _wt
+        _mode = _wt.env_requested_mode(os.environ)
+        if _mode is not None:
+            _wt.install(mode=_mode, clear=False)
+            _tripwire = _wt
+    except Exception:
+        _tripwire = None
+
     # v2 R&D surface (Wave 8): the server subprocess + the in-process registry ops
     # must drive model calls through the STUB runner, never live claude. Set
     # ANCHOR_RUNNER_CMD in this process's environment BEFORE booting the server so
@@ -4901,6 +4916,19 @@ def main():
             os.environ.pop("ANCHOR_RUNNER_CMD", None)
         else:
             os.environ["ANCHOR_RUNNER_CMD"] = rnd_env["prev_runner_cmd"]
+        # W1 (rearch 2026-07): flush + uninstall the opt-in tripwire, folding
+        # this run's write sites into the shared inventory artifact.
+        if _tripwire is not None:
+            try:
+                _tripwire.write_inventory(
+                    os.environ.get("ANCHOR_TRIPWIRE_INVENTORY") or None,
+                    merge=True)
+            except Exception:
+                pass
+            try:
+                _tripwire.uninstall()
+            except Exception:
+                pass
 
     report_path = REPORTS_DIR / f"{TODAY}.md"
     try:

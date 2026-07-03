@@ -4392,6 +4392,9 @@ def render_model_flex_badge(env=None) -> str:
             f"title='{html_lib.escape(title, quote=True)}'>{label}{_x}</span>{_hide}")
 
 
+# ANCHOR[rearch]: RENDER_PROJECT_WINDOW — structural anchor (W1); keep UNIQUE,
+# keep directly above the def. The anchor-freshness gate (tools/anchors.py)
+# re-locates this before every extraction wave — no line numbers anywhere.
 def render_project_window_html(project_id: str) -> str:
     """Render the per-project "Project Cockpit" (Paradigm 2) for ``/project/<id>``.
 
@@ -5620,6 +5623,10 @@ def render_project_window_html(project_id: str) -> str:
 # toggle. NO console drawer / live-terminals bar / loose rollup or deliverables
 # section remain. Plain RAW string (NOT an f-string), so braces are single. No
 # template interpolation here beyond the PROJECT_ID var injected above.
+# ANCHOR[rearch]: PROJECT_WINDOW_JS — structural anchor (W1); keep UNIQUE, keep
+# directly above the assignment. Census contract: this stays a PLAIN raw
+# string with ZERO interpolations (tools/interpolation_census.py fails loudly
+# if it ever becomes an f-string).
 _PROJECT_WINDOW_JS = r"""
 // ════════════════════════════════════════════════════════════════════════════
 // v4.1 "Project Cockpit" — Paradigm-2 (inline expanding panels). The ONLY
@@ -10963,6 +10970,9 @@ def restore_task(task_text, from_archive="saved"):
 
 # ── HTML Dashboard Generation ─────────────────────────────────────────
 
+# ANCHOR[rearch]: GENERATE_HTML — structural anchor (W1); keep UNIQUE, keep
+# directly above the def. The anchor-freshness gate (tools/anchors.py)
+# re-locates this before every extraction wave — no line numbers anywhere.
 def generate_html(projects, tasks, inbox):
     """Generate a full standalone HTML dashboard matching the original Anchor style."""
     today_str = datetime.now().strftime("%A, %B %d, %Y")

@@ -157,6 +157,26 @@ def pytest_configure(config):
         _PREV_THREAD_EXCEPTHOOK = threading.excepthook
         threading.excepthook = _thread_excepthook
 
+    # W1 (rearch 2026-07): opt-in write-site tripwire. When the orchestrator
+    # runs the suite with ANCHOR_WRITE_TRIPWIRE=inventory (or =enforce, once
+    # the journal lands), every .anchor/ write across the WHOLE suite is
+    # recorded into the mutation-of-record inventory. Off by default; a plain
+    # test run is untouched. Best-effort — a tripwire import/install failure
+    # never breaks the suite.
+    global _TRIPWIRE_MOD
+    try:
+        import os as _os
+        from tools import write_tripwire as _wt
+        mode = _wt.env_requested_mode(_os.environ)
+        if mode is not None:
+            _wt.install(mode=mode, clear=False)
+            _TRIPWIRE_MOD = _wt
+    except Exception:
+        _TRIPWIRE_MOD = None
+
+
+_TRIPWIRE_MOD = None
+
 
 def pytest_unconfigure(config):
     """Restore the previous threading excepthook at session end."""
@@ -164,6 +184,24 @@ def pytest_unconfigure(config):
     if _PREV_THREAD_EXCEPTHOOK is not None:
         threading.excepthook = _PREV_THREAD_EXCEPTHOOK
         _PREV_THREAD_EXCEPTHOOK = None
+
+    # W1 (rearch 2026-07): flush + uninstall the opt-in write-site tripwire.
+    # The inventory artifact accumulates (merge=True) so suite + healthcheck
+    # runs fold into one checked-in mutation-of-record inventory.
+    global _TRIPWIRE_MOD
+    if _TRIPWIRE_MOD is not None:
+        try:
+            import os as _os
+            _TRIPWIRE_MOD.write_inventory(
+                _os.environ.get("ANCHOR_TRIPWIRE_INVENTORY") or None,
+                merge=True)
+        except Exception:
+            pass
+        try:
+            _TRIPWIRE_MOD.uninstall()
+        except Exception:
+            pass
+        _TRIPWIRE_MOD = None
 
 
 # ──────────────────────────────────────────────────────────────────────────────

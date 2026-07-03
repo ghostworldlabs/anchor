@@ -1,0 +1,44 @@
+{
+  "artifact": "mutation-of-record inventory (W1 write-site tripwire)",
+  "generator": "tools/write_tripwire.py",
+  "journal_allowlist": {
+    "filenames": [
+      "journal.jsonl"
+    ],
+    "dirnames": [
+      "journal"
+    ]
+  },
+  "entries": [
+    {
+      "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
+      "op": "write",
+      "site": "effort_history.py:record_effort",
+      "count": 2
+    },
+    {
+      "store": ".anchor/projects/pid-w1/grass/index.json",
+      "op": "replace",
+      "site": "effort_history.py:_save_index",
+      "count": 2
+    },
+    {
+      "store": ".anchor/projects/pid-w1/grass/index.json",
+      "op": "write",
+      "site": "effort_history.py:_save_index",
+      "count": 2
+    },
+    {
+      "store": ".anchor/sessions.json",
+      "op": "replace",
+      "site": "session_registry.py:_save_sessions",
+      "count": 4
+    },
+    {
+      "store": ".anchor/sessions.json",
+      "op": "write",
+      "site": "session_registry.py:_save_sessions",
+      "count": 4
+    }
+  ]
+}
