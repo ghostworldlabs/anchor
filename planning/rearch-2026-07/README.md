@@ -1,4 +1,4 @@
-# Re-architecture 2026-07 — gate artifacts (W1 · W2 · W3)
+# Re-architecture 2026-07 — gate artifacts (W1 · W2 · W3 · W4)
 
 Ground-truth artifacts produced by the early instrumentation/rails waves
 (frozen plan: `IMPLEMENTATION-PLAN.md` at the repo root). They are consumed
@@ -18,6 +18,7 @@ runs — never hand-edited.
 | `BUTLER-USER-STORIES.md` | W3 (hand-authored, binding) | the binding W12 envelope validation target; shape held by `TestW3ButlerStories` |
 | `PROCESS-RAILS.md` | W3 (hand-authored, binding) | the codified standing rituals; shape held by `TestW3ProcessRails` |
 | `APPENDIX-A-TRACEABILITY.md` | W3 (ledger) | diffed MECHANICALLY against the frozen plan's own citation lines by `TestW3AppendixALedger` (ideas 1–52 + mitigations 1–20, M-9 explicitly reconciled) |
+| `../../static/project-window.js` | `tools/extract_project_window_js.py` (W4) | the W4 byte-parity gate (`TestW4ByteParityGate`) — minted VERBATIM from the census-certified zero-interpolation `_PROJECT_WINDOW_JS` raw string, which remains the single source of truth until W6; never hand-edited |
 
 ## How to run the full mutation-of-record sweep
 

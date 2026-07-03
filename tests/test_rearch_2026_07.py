@@ -1,4 +1,4 @@
-"""W1+W2+W3 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
+"""W1+W2+W3+W4 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
 
 **W1 — Ground-Truth Instrumentation (census · anchors · tripwire):**
 
@@ -68,10 +68,33 @@ paths):**
   the test returns — a session-end census sentinel (ONE batched CIM call)
   fails the run on any surviving spawned process, with the classifier
   proven on synthetic tables (``TestW3NoLeakRail``).
+
+**W4 — Extraction Increment 1: ``_PROJECT_WINDOW_JS`` → static file:**
+
+* the **byte-parity golden-file gate**: ``static/project-window.js`` is
+  minted/refreshed VERBATIM from the census-certified zero-interpolation raw
+  string by ``tools/extract_project_window_js.py`` (anchor-located, refuses a
+  non-constant), and the emitted JS diffs empty byte-for-byte between the OLD
+  embedded emission and the NEW static serving (no ``{{/}}`` de-escaping is
+  needed for this increment — the string is raw with zero interpolations);
+* the **traversal-safe static root**: ``/static`` serves through the SAME
+  ``resolve()+relative_to`` idiom as the vendored assets (zero new security
+  surface), with content-hash ``?v=<hash8>`` cache-busting minted at startup
+  from the file bytes;
+* ``window.ANCHOR_BOOT`` as the **only server→client state channel** on the
+  static path (token presence · project id · build id · feature flags ·
+  initial counts; the legacy page globals derived from it client-side);
+* the **static-vs-embedded off-switch flag** functional: default = embedded =
+  the pre-wave byte-identical emission; ``ANCHOR_FRONTEND=static`` is the
+  named ``c1-static`` hybrid state; flipping back restores byte-identical
+  embedded serving without reverting anything else — and the project-window
+  Playwright flow re-runs green in static mode with the app JS observed
+  arriving from the static route.
 """
 
 import ast
 import builtins
+import hashlib
 import importlib
 import io
 import json
@@ -91,6 +114,7 @@ import pillar_flags as pf
 from tools import anchors as anchors_mod
 from tools import conpty_spike as cs
 from tools import cookie_ws_spike as cw
+from tools import extract_project_window_js as pwx
 from tools import interpolation_census as census_mod
 from tools import pre_restart_drain as drain_mod
 from tools import write_tripwire as wt
@@ -1913,3 +1937,284 @@ class TestW3NoLeakRail:
                       "created": self.T0 - 100}
         leaked = _flag_leaked_processes(table, 100, self.T0)
         assert 106 not in {e["pid"] for e in leaked}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# W4 — Extraction Increment 1: _PROJECT_WINDOW_JS → static file
+# ══════════════════════════════════════════════════════════════════════════
+
+STATIC_JS = REPO_ROOT / "static" / "project-window.js"
+
+
+def _mint_pw_js():
+    """Mint/refresh the checked-in static mirror (mechanical gate artifact,
+    like the W1 census reports / W3 PILLAR-DAG: refreshed by the gate run,
+    never hand-edited; an unchanged rewrite is skipped)."""
+    return pwx.write_project_window_js()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 17) W4 — the verbatim extractor + byte-parity golden-file gate
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW4ByteParityGate:
+    def test_extractor_matches_imported_string_verbatim(self):
+        """The AST-extracted value and the live module attribute agree — the
+        two ways of reading the source string cannot drift."""
+        import anchor_gui as gui
+        assert pwx.extracted_js() == gui._PROJECT_WINDOW_JS
+
+    def test_static_file_refreshed_and_byte_identical(self):
+        """The golden-file gate: the checked-in static file is refreshed by
+        this run and diffs EMPTY byte-for-byte against the raw string. (No
+        ``{{/}}`` de-escaping applies — the census certifies the string is a
+        plain raw string with zero interpolations.)"""
+        import anchor_gui as gui
+        path = _mint_pw_js()
+        assert path == STATIC_JS
+        assert path.read_bytes() == gui._PROJECT_WINDOW_JS.encode("utf-8")
+
+    def test_remint_is_a_noop(self):
+        path = _mint_pw_js()
+        m1 = path.stat().st_mtime_ns
+        assert pwx.write_project_window_js() == path
+        assert path.stat().st_mtime_ns == m1, (
+            "an unchanged re-mint must skip the rewrite")
+
+    def test_extractor_refuses_an_fstring_body(self):
+        """The moment the string is no longer a plain constant the verbatim
+        move is unsafe — the extractor refuses instead of guessing."""
+        src = _synthetic_source(
+            js_assign='_PROJECT_WINDOW_JS = f"""\nvar x = {1};\n"""')
+        with pytest.raises(pwx.ExtractionError):
+            pwx.extracted_js(source=src)
+
+    def test_extractor_refuses_stale_anchors(self):
+        """The anchor-freshness gate guards the extraction too."""
+        src = _synthetic_source(js_sentinel="# not a sentinel")
+        with pytest.raises(AnchorError):
+            pwx.extracted_js(source=src)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 18) W4 — the traversal-safe static root + content-hash cache-busting
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW4StaticRoot:
+    def test_static_asset_serves_within_root_only(self, w2_env):
+        """The proven resolve()+relative_to idiom — zero new security
+        surface: containment holds, escapes and misses return None."""
+        gui = w2_env["gui"]
+        _mint_pw_js()
+        asset = gui.static_asset("project-window.js")
+        assert asset is not None
+        data, ctype = asset
+        assert ctype == "text/javascript; charset=utf-8"
+        assert data == gui._PROJECT_WINDOW_JS.encode("utf-8")
+        assert gui.static_asset("../anchor_gui.py") is None
+        assert gui.static_asset("..\\anchor_gui.py") is None
+        assert gui.static_asset("sub/../../anchor_gui.py") is None
+        assert gui.static_asset("no-such-file.js") is None
+
+    def test_http_route_serves_and_stays_contained(self, w2_server):
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        _mint_pw_js()
+        with urllib.request.urlopen(
+                base + "/static/project-window.js", timeout=6) as r:
+            assert r.status == 200
+            assert r.headers["Content-Type"].startswith("text/javascript")
+            assert r.read() == gui._PROJECT_WINDOW_JS.encode("utf-8")
+        status, _ = _http(base, "/static/no-such-file.js")
+        assert status == 404
+
+    def test_content_hash_version_minted_from_file_bytes(self, w2_env):
+        gui = w2_env["gui"]
+        path = _mint_pw_js()
+        ver = gui.static_asset_version("project-window.js")
+        assert re.fullmatch(r"[0-9a-f]{8}", ver)
+        assert ver == hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+        # minted once per process: a second read is the cached mint
+        assert gui.static_asset_version("project-window.js") == ver
+        # a missing asset is honest and UNCACHED (heals once the file exists)
+        assert gui.static_asset_version("no-such-file.js") == "missing"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 19) W4 — the static-vs-embedded off-switch flag
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW4FrontendFlag:
+    def test_flag_resolution(self, w2_env, monkeypatch):
+        gui = w2_env["gui"]
+        monkeypatch.delenv("ANCHOR_FRONTEND", raising=False)
+        assert gui._static_frontend_enabled() is False
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        assert gui._static_frontend_enabled() is True
+        monkeypatch.setenv("ANCHOR_FRONTEND", "embedded")
+        assert gui._static_frontend_enabled() is False
+
+    def test_invalid_flag_falls_back_embedded_but_healthcheck_screams(
+            self, w2_env, monkeypatch):
+        """A typo'd flag renders conservatively (embedded — never a 500
+        dashboard) while the W3 configuration assertion fails LOUDLY on the
+        same env, so the misconfiguration is surfaced, never silent."""
+        gui = w2_env["gui"]
+        monkeypatch.setenv("ANCHOR_FRONTEND", "bogus")
+        assert gui._static_frontend_enabled() is False
+        with pytest.raises(pf.PillarStateError):
+            pf.assert_named_state()
+
+    def test_static_flag_is_the_named_c1_state(self):
+        """ANCHOR_FRONTEND=static alone lands exactly on the W3 matrix's
+        ``c1-static`` ladder row — the deploy state this wave ships."""
+        flags = pf.current_flags(env={"ANCHOR_FRONTEND": "static"})
+        assert pf.state_name(flags) == "c1-static"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 20) W4 — render modes: embedded unchanged · static via ANCHOR_BOOT only
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW4RenderModes:
+    def test_embedded_default_page_unchanged(self, w2_server, monkeypatch):
+        """No flag set → the pre-wave emission: the raw JS inline, the legacy
+        var injection, and NO static-route reference."""
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        monkeypatch.delenv("ANCHOR_FRONTEND", raising=False)
+        pid, _ = _mk_w2_project(w2_env, "W4Emb", git=False)
+        status, html = _http(base, f"/project/{pid}")
+        assert status == 200
+        assert gui._PROJECT_WINDOW_JS in html
+        assert f"var PROJECT_ID = {json.dumps(pid)};" in html
+        assert "/static/project-window.js" not in html
+
+    def test_static_mode_serves_js_from_static_route(
+            self, w2_server, monkeypatch):
+        """Flag on → the body is NOT inline; the page references the hashed
+        static asset and that URL serves the byte-identical JS."""
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        _mint_pw_js()
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        pid, _ = _mk_w2_project(w2_env, "W4Stat", git=False)
+        status, html = _http(base, f"/project/{pid}")
+        assert status == 200
+        assert gui._PROJECT_WINDOW_JS not in html
+        m = re.search(
+            r"src='(/static/project-window\.js\?v=([0-9a-f]{8}))'", html)
+        assert m, "static-mode page must reference the hashed static asset"
+        url, ver = m.group(1), m.group(2)
+        assert ver == gui.static_asset_version("project-window.js")
+        with urllib.request.urlopen(base + url, timeout=6) as r:
+            assert r.status == 200
+            raw = r.read()
+        # the emitted-JS diff between the OLD embedded path and the NEW
+        # static path is EMPTY, byte for byte.
+        assert raw == gui._PROJECT_WINDOW_JS.encode("utf-8")
+
+    def test_anchor_boot_is_the_only_state_channel_in_static_mode(
+            self, w2_server, monkeypatch):
+        """The documented W4 contract: token presence, project id, build id,
+        feature flags and initial counts ride ANCHOR_BOOT; the legacy page
+        globals are DERIVED from it client-side, not server-injected."""
+        import effort_history as eh
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        _mint_pw_js()
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        pid, _ = _mk_w2_project(w2_env, "W4Boot", git=False)
+        _, html = _http(base, f"/project/{pid}")
+        boot = _extract_boot(html)
+        assert boot["schema_ver"] == gui.ANCHOR_BOOT_SCHEMA_VER
+        assert boot["build_id"] == gui.BUILD_ID
+        assert boot["auth_required"] is False        # presence only
+        assert boot["page"] == "project-window"
+        assert boot["project_id"] == pid
+        assert boot["grass_dev_label_prefix"] == eh.GRASS_DEV_LABEL_PREFIX
+        assert boot["flags"] == {"frontend": "static"}
+        assert boot["counts"] == {"sessions": 0, "live_sessions": 0}
+        # legacy globals derived from the boot dict — the only state channel
+        assert "var PROJECT_ID = window.ANCHOR_BOOT.project_id;" in html
+        assert ("var GRASS_DEV_LABEL_PREFIX = "
+                "window.ANCHOR_BOOT.grass_dev_label_prefix;") in html
+        assert f"var PROJECT_ID = {json.dumps(pid)};" not in html
+
+    def test_byte_parity_and_only_bootstrap_seam_differs(
+            self, w2_env, monkeypatch):
+        """The W4 GWT: behavior-identical page whose ONLY changed seam is the
+        ANCHOR_BOOT bootstrap block — everything before and after the app-JS
+        block is byte-identical between the two modes."""
+        gui = w2_env["gui"]
+        path = _mint_pw_js()
+        pid, _ = _mk_w2_project(w2_env, "W4Par", git=False)
+        monkeypatch.delenv("ANCHOR_FRONTEND", raising=False)
+        html_emb = gui.render_project_window_html(pid)
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        html_st = gui.render_project_window_html(pid)
+        assert html_emb != html_st
+        # emitted-JS byte parity (transitively: embedded emission carries the
+        # string verbatim; the static file IS the string, byte for byte)
+        assert gui._PROJECT_WINDOW_JS in html_emb
+        assert path.read_bytes() == gui._PROJECT_WINDOW_JS.encode("utf-8")
+        # identical PREFIX up to the app-JS block…
+        marker_pre = "/xterm.js'></script>"
+        assert (html_emb[:html_emb.index(marker_pre)]
+                == html_st[:html_st.index(marker_pre)])
+        # …and identical SUFFIX from the cache-bust script on.
+        cb = "<script>" + gui.cache_bust_script()
+        assert html_emb[html_emb.index(cb):] == html_st[html_st.index(cb):]
+
+    def test_flag_revert_restores_byte_identical_embedded(
+            self, w2_env, monkeypatch):
+        """The revert GWT: flag back to embedded → the pre-wave path serves
+        byte-identical HTML/JS, with nothing else reverted."""
+        gui = w2_env["gui"]
+        _mint_pw_js()
+        pid, _ = _mk_w2_project(w2_env, "W4Rev", git=False)
+        monkeypatch.delenv("ANCHOR_FRONTEND", raising=False)
+        before = gui.render_project_window_html(pid)
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        during = gui.render_project_window_html(pid)
+        assert during != before
+        monkeypatch.delenv("ANCHOR_FRONTEND", raising=False)
+        after = gui.render_project_window_html(pid)
+        assert after == before
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 21) W4 — project-window Playwright flow re-run in STATIC mode
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW4PlaywrightStaticMode:
+    @_needs_git
+    def test_flow_terminal_open_and_type_static_mode(
+            self, w2_server, monkeypatch):
+        """The W2 permanent flow, re-run with the frontend flag flipped:
+        behavior identical (terminal opens, keystrokes round-trip, zero JS
+        console errors) with the app JS OBSERVED arriving from the
+        traversal-safe static route."""
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        w2_env, base = w2_server
+        _mint_pw_js()
+        monkeypatch.setenv("ANCHOR_FRONTEND", "static")
+        pid, _ = _mk_w2_project(w2_env, "W4Flow")
+        rec = flows.start_live_session(pid, "research")
+        sid = rec["session_id"]
+        static_hits = []
+        try:
+            with sync_playwright() as p:
+                b, pg, errors = _browser_page(p)
+                pg.on("response",
+                      lambda r: static_hits.append(r.status)
+                      if "/static/project-window.js" in r.url else None)
+                flows.flow_terminal_open_and_type(pg, base, pid, sid)
+                assert not errors, f"JS console errors: {errors}"
+                b.close()
+        finally:
+            flows.kill_quietly(sid)
+        assert static_hits and set(static_hits) == {200}, (
+            "static mode must fetch the app JS from the /static route")

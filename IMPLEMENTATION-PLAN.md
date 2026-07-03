@@ -156,6 +156,13 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 ## Wave 4 — W4 — Extraction Increment 1: _PROJECT_WINDOW_JS → static file
 
+> AMENDMENT (2026-07-03, human-authorized, bounded): W4's Playwright flow
+> test's optional-dependency skip marker
+> (`pytest.importorskip("playwright.sync_api")`) is AUTHORIZED — it follows
+> the repo's documented dev-only-dependency convention (CLAUDE.md:
+> "Playwright is a DEV-ONLY test dependency (pytest.importorskip)"); this
+> amendment is the required plan citation.
+
 **Intent:** The safest, biggest single cut of C1: move the census-confirmed zero-interpolation _PROJECT_WINDOW_JS raw string verbatim to a static file served by the existing traversal-safe asset-route idiom, behind the byte-parity gate (Master Plan Phase 1; Integrated 2, 3, 6, 7, 50; Mitigation 2).
 
 **Deliverables:** static/ app JS file containing the verbatim _PROJECT_WINDOW_JS body; one new static root served via the proven resolve()+relative_to idiom (zero new security surface); window.ANCHOR_BOOT as the ONLY server→client state channel for the project window (token presence, project id, build id, feature flags, initial counts), documented as a versioned dict in one module; Content-hash cache-busting (?v=<hash8> minted at startup from file bytes); Byte-parity golden-file gate: render via the OLD f-string path and the NEW static path, diff emitted JS byte-for-byte after {{/}} de-escaping; Static-vs-embedded off-switch flag functional (revert without reverting later waves); soft merge-freeze on anchor_gui.py active; anchor-freshness gate re-run before EXECUTE

@@ -181,14 +181,30 @@ BUILD_MISMATCH_ERROR = "build-mismatch"
 
 
 def anchor_boot(extra=None):
-    """Assemble the ``window.ANCHOR_BOOT`` bootstrap dict (W2: minimal).
+    """Assemble the ``window.ANCHOR_BOOT`` bootstrap dict.
 
     Documented contract (versioned via ``schema_ver``; additive-only):
       - ``schema_ver``     — int, the ANCHOR_BOOT shape version;
       - ``build_id``       — the server build this page was rendered from;
-      - ``auth_required``  — whether the server has ANCHOR_TOKEN configured.
-    ``extra`` lets a render surface add page-scoped keys (W4+). Never embeds
-    the token VALUE itself — only its presence.
+      - ``auth_required``  — whether the server has ANCHOR_TOKEN configured
+                             (token PRESENCE only — never the value).
+    ``extra`` lets a render surface add page-scoped keys. Never embeds the
+    token VALUE itself — only its presence.
+
+    W4 (static frontend, rearch C1 increment 1) — the PROJECT WINDOW adds,
+    via ``extra`` = :func:`project_window_boot_extra`:
+      - ``page``                   — ``"project-window"``;
+      - ``project_id``             — the window's project id;
+      - ``grass_dev_label_prefix`` — ``effort_history.GRASS_DEV_LABEL_PREFIX``
+                                     (the [grass-dev] top-strip filter marker);
+      - ``flags``                  — feature flags (``{"frontend": "static"}``);
+      - ``counts``                 — initial counts (``sessions`` /
+                                     ``live_sessions`` from the managed-session
+                                     registry; best-effort zeros on error).
+    On the static-frontend path this dict is the ONLY server→client state
+    channel for the project window: the page derives its legacy globals from
+    it client-side (``_PW_BOOT_GLOBALS_JS``) and the app JS arrives as a
+    static file — no other per-page server value injection exists.
     """
     boot = {
         "schema_ver": ANCHOR_BOOT_SCHEMA_VER,
@@ -501,6 +517,7 @@ import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
+import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
 
@@ -806,6 +823,126 @@ def brand_asset(rel_path: str):
     ctype = _BRAND_CONTENT_TYPES.get(target.suffix.lower(),
                                      "application/octet-stream")
     return target.read_bytes(), ctype
+
+
+# ── Static app-frontend root (re-architecture 2026-07 · W4) ──────────────────
+# C1 Extraction Increment 1: the project-window app JS (the census-confirmed
+# ZERO-interpolation ``_PROJECT_WINDOW_JS`` raw string) also exists as a
+# checked-in static file — ``static/project-window.js`` — minted VERBATIM from
+# the string by ``tools/extract_project_window_js.py`` (the W4 byte-parity
+# gate refreshes it and fails on drift; until W6 removes the embedded blob,
+# the raw string stays the single source of truth and the file is its derived
+# byte-identical mirror). Which copy a project window actually gets is chosen
+# by the ``frontend`` pillar off-switch flag (``pillar_flags``:
+# ANCHOR_FRONTEND = embedded | static; default embedded = the pre-wave
+# behavior, byte-identical), so this pillar reverts by FLAG ONLY — flipping
+# back to embedded never requires reverting later waves. The static root is
+# served through the SAME traversal-safe resolve()+relative_to idiom as the
+# vendored assets above (zero new security surface), with content-hash
+# cache-busting: ?v=<hash8> is minted per process from the file bytes, so a
+# new deploy changes the asset URL and a long-lived tab can never pin a stale
+# copy (the W6 stale-browser criterion).
+STATIC_DIR = ANCHOR_DIR / "static"
+STATIC_URL_PREFIX = "/static"
+
+#: The extracted project-window app JS asset (Extraction Increment 1).
+PROJECT_WINDOW_JS_ASSET = "project-window.js"
+
+
+def static_asset(rel_path: str):
+    """Resolve a ``/static/<rel>`` request to (bytes, content_type).
+
+    Path-traversal safe (same containment pattern as :func:`anchor_term_asset`
+    / :func:`xterm_asset` / :func:`brand_asset` / ``report_viewer.katex_asset``):
+    the resolved file MUST stay within :data:`STATIC_DIR`. Returns ``None``
+    for a missing file or an escape attempt.
+    """
+    rel = rel_path.lstrip("/")
+    target = (STATIC_DIR / rel).resolve()
+    try:
+        target.relative_to(STATIC_DIR.resolve())
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    ctype = _ANCHOR_TERM_CONTENT_TYPES.get(target.suffix.lower(),
+                                           "application/octet-stream")
+    return target.read_bytes(), ctype
+
+
+#: Per-process cache of minted content-hash versions {rel_path: hash8}.
+_static_asset_versions = {}
+
+
+def static_asset_version(rel_path: str) -> str:
+    """The content-hash cache-buster for a static asset (the ``?v=<hash8>``).
+
+    sha256 of the file bytes, first 8 hex chars, minted ONCE per process (a
+    restart re-mints it, so a deploy that changes the file changes every
+    page's asset URL). A missing asset honestly returns ``"missing"`` and is
+    NOT cached, so the version heals as soon as the file exists.
+    """
+    cached = _static_asset_versions.get(rel_path)
+    if cached is not None:
+        return cached
+    asset = static_asset(rel_path)
+    if asset is None:
+        return "missing"
+    ver = _hashlib.sha256(asset[0]).hexdigest()[:8]
+    _static_asset_versions[rel_path] = ver
+    return ver
+
+
+def _static_frontend_enabled() -> bool:
+    """True iff the ``frontend`` pillar flag resolves to ``static`` (W4).
+
+    Resolved FRESH per call through :func:`pillar_flags.current_flags` so a
+    restartless env flip (tests, ops) is honored. An INVALID flag value falls
+    back to the embedded (pre-wave) path here — conservative render behavior,
+    never a 500 dashboard — while the healthcheck's ``check_pillar_state``
+    assertion fails loudly on the same invalid value, so a misconfiguration
+    is surfaced, never silently served.
+    """
+    try:
+        return _pillar.current_flags()[_pillar.FLAG_FRONTEND] == "static"
+    except Exception:
+        return False
+
+
+#: Static-frontend bootstrap tail: the legacy page globals the app JS reads
+#: (PROJECT_ID · GRASS_DEV_LABEL_PREFIX · ANCHOR_AUTH_REQUIRED) DERIVED from
+#: ``window.ANCHOR_BOOT`` client-side — on the static path the bootstrap JSON
+#: is the ONLY server→client state channel; no per-page ``var X = <server
+#: value>`` injection remains. Plain constant string (zero interpolations).
+_PW_BOOT_GLOBALS_JS = (
+    "var PROJECT_ID = window.ANCHOR_BOOT.project_id;\n"
+    "var GRASS_DEV_LABEL_PREFIX = window.ANCHOR_BOOT.grass_dev_label_prefix;\n"
+    "window.ANCHOR_AUTH_REQUIRED = !!window.ANCHOR_BOOT.auth_required;\n"
+)
+
+
+def project_window_boot_extra(project_id: str) -> dict:
+    """The project window's page-scoped ``window.ANCHOR_BOOT`` keys (W4).
+
+    See :func:`anchor_boot` for the documented, versioned contract. The
+    initial counts are best-effort reads of the managed-session registry —
+    a registry hiccup renders honest zeros, never a failed page.
+    """
+    sessions = live = 0
+    try:
+        recs = _sessreg.list_sessions(project_id=project_id)
+        sessions = len(recs)
+        live = sum(1 for r in recs
+                   if r.get("status") == _sessreg.STATUS_RUNNING)
+    except Exception:
+        pass
+    return {
+        "page": "project-window",
+        "project_id": project_id,
+        "grass_dev_label_prefix": _eh.GRASS_DEV_LABEL_PREFIX,
+        "flags": {"frontend": "static"},
+        "counts": {"sessions": sessions, "live_sessions": live},
+    }
 
 
 # Single-instance project windows (Master Plan C2): opening a project that is
@@ -4587,6 +4724,46 @@ def render_project_window_html(project_id: str) -> str:
     )
     pid_js = json.dumps(project_id)
     back_link_normal = '<p><a href="/" target="_top">&larr; Back to dashboard</a></p>'
+    # ── rearch W4 (C1 increment 1): the project-window APP-JS block ─────────
+    # Chosen by the `frontend` pillar off-switch flag. EMBEDDED (the default)
+    # is the pre-wave path, byte-identical: the raw `_PROJECT_WINDOW_JS`
+    # string inline plus the legacy `var` globals. STATIC serves the SAME
+    # bytes from the checked-in `static/project-window.js` (byte-parity-gated
+    # mirror of the string) via the traversal-safe static route with a
+    # content-hash `?v=`, and the ONLY server→client state channel is the
+    # versioned ANCHOR_BOOT bootstrap JSON — the legacy globals are derived
+    # from it client-side (`_PW_BOOT_GLOBALS_JS`). The static branch is built
+    # by PLAIN CONCATENATION (zero new f-string interpolations) and the
+    # embedded branch's three legacy `var` interpolations simply moved here
+    # from the return expression — same function, so the W1 census counts for
+    # this render surface are undisturbed.
+    if _static_frontend_enabled():
+        pw_app_js_block = (
+            "<script>\n"
+            + anchor_boot_script(project_window_boot_extra(project_id)) + "\n"
+            + _PW_BOOT_GLOBALS_JS +
+            "</script>"
+            "<script src='" + STATIC_URL_PREFIX + "/"
+            + PROJECT_WINDOW_JS_ASSET + "?v="
+            + static_asset_version(PROJECT_WINDOW_JS_ASSET)
+            + "'></script>"
+        )
+    else:
+        pw_app_js_block = (
+            "<script>\n"
+            f"var PROJECT_ID = {pid_js};\n"
+            # v10 Wave 5 (DEFECT-2 fix): the [grass-dev] label marker, injected
+            # from the single Python constant so the JS top-strip filter can't
+            # drift from ``effort_history.is_grass_dev_label``.
+            f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
+            f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
+            # W2 contract shim: the versioned bootstrap (build id). Embedded by
+            # PLAIN CONCATENATION — not an f-string interpolation — so the W1
+            # census counts for this render surface are undisturbed.
+            + anchor_boot_script() + "\n"
+            + _PROJECT_WINDOW_JS +
+            "</script>"
+        )
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         # Without width=device-width a laptop/PWA browser falls back to a ~980px
@@ -5641,19 +5818,10 @@ def render_project_window_html(project_id: str) -> str:
         # Vendored REAL xterm.js (defines window.Terminal) — the cockpit panel JS
         # instantiates an xterm.js Terminal directly over the v3 WS/SSE transport.
         f"<script src='{XTERM_URL_PREFIX}/xterm.js'></script>"
-        "<script>\n"
-        f"var PROJECT_ID = {pid_js};\n"
-        # v10 Wave 5 (DEFECT-2 fix): the [grass-dev] label marker, injected from
-        # the single Python constant so the JS top-strip filter can't drift from
-        # ``effort_history.is_grass_dev_label``.
-        f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
-        f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
-        # W2 contract shim: the versioned bootstrap (build id). Embedded by
-        # PLAIN CONCATENATION — not an f-string interpolation — so the W1
-        # census counts for this render surface are undisturbed.
-        + anchor_boot_script() + "\n"
-        + _PROJECT_WINDOW_JS +
-        "</script>"
+        # rearch W4: the app-JS block (embedded string, byte-identical pre-wave
+        # default | static file + ANCHOR_BOOT), computed above the return —
+        # see `pw_app_js_block` for the full contract.
+        + pw_app_js_block +
         "<script>" + cache_bust_script() + "</script>\n"
         # Dashboard no longer auto-opens the workbench/effort dock on load (John's
         # preference): the prior __dashboard__ DOMContentLoaded auto-open (effort
@@ -14471,6 +14639,21 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # home-page lockup and the dashboard favicon.
                 rel = urlparse(self.path).path[len(BRAND_URL_PREFIX):]
                 asset = brand_asset(rel)
+                if asset is None:
+                    self.send_response(404)
+                    self.end_headers()
+                else:
+                    data, ctype = asset
+                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+            elif self.path.startswith(STATIC_URL_PREFIX + "/"):
+                # Read-only extracted app-frontend static asset (rearch W4:
+                # C1 increment 1 — the project-window app JS), served through
+                # the SAME traversal-safe resolve()+relative_to idiom as the
+                # vendored assets (zero new security surface). The long
+                # max-age is safe because every reference carries a
+                # content-hash ?v= minted at startup from the file bytes.
+                rel = urlparse(self.path).path[len(STATIC_URL_PREFIX):]
+                asset = static_asset(rel)
                 if asset is None:
                     self.send_response(404)
                     self.end_headers()
