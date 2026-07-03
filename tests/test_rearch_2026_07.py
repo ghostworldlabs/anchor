@@ -410,7 +410,7 @@ class TestTripwireInventory:
     def test_store_path_normalization(self):
         cs = wt.classify_store_path
         assert cs("/x/.anchor/sessions.json.tmp") == ".anchor/sessions.json"
-        assert cs("/x/.anchor/projects/0f3ab9d2c4e5f6a7/grass/idea-abc12/"
+        assert cs("/x/.anchor/projects/aaaabbbbccccdddd/grass/idea-abc12/"
                   "card.json") == (
             ".anchor/projects/<id>/grass/idea-<id>/card.json")
         assert cs("C:\\d\\.anchor\\projects\\"
@@ -687,12 +687,12 @@ class TestW2ContractShim:
 
     def test_boot_reflects_auth_flag(self, w2_server, monkeypatch):
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         _, html = _http(base, "/")
         boot = _extract_boot(html)
         assert boot["auth_required"] is True
         # presence only — the token VALUE is never embedded in served HTML.
-        assert "w2-s3cret" not in html
+        assert "s3cret" not in html
 
     def test_postjson_senders_declare_build_and_render_banner(self, w2_env):
         """Every _postJson sender carries X-Anchor-Build, and both pages ship
@@ -742,7 +742,7 @@ class TestW2ContractShim:
         """A stale tab learns 'reload required' (409) rather than being asked
         to re-enter a token (401) — the shim is checked first by design."""
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         status, body = _http(base, "/api/done", method="POST",
                              payload={"text": "__w2_probe__"},
                              headers={"X-Anchor-Build": "stale-build-123"})
@@ -768,7 +768,7 @@ class TestW2AuthorizationHeader:
 
     def test_post_accepts_authorization_bearer(self, w2_server, monkeypatch):
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         # no credentials → 401
         status, body = _http(base, "/api/done", method="POST",
                              payload={"text": "__w2_probe__"})
@@ -776,7 +776,7 @@ class TestW2AuthorizationHeader:
         # Authorization: Bearer <token> → accepted
         status, body = _http(base, "/api/done", method="POST",
                              payload={"text": "__w2_probe__"},
-                             headers={"Authorization": "Bearer w2-s3cret"})
+                             headers={"Authorization": "Bearer s3cret"})
         assert status == 200 and "ok" in body
         # wrong bearer → 401
         status, _ = _http(base, "/api/done", method="POST",
@@ -786,7 +786,7 @@ class TestW2AuthorizationHeader:
         # the legacy browser path (X-Anchor-Token) still works unchanged
         status, body = _http(base, "/api/done", method="POST",
                              payload={"text": "__w2_probe__"},
-                             headers={"X-Anchor-Token": "w2-s3cret"})
+                             headers={"X-Anchor-Token": "s3cret"})
         assert status == 200 and "ok" in body
 
     def test_gated_get_accepts_authorization(self, w2_server, monkeypatch):
@@ -794,29 +794,29 @@ class TestW2AuthorizationHeader:
         consumer): Authorization passes the gate (the 400 for missing params
         PROVES auth ran first and passed); tokenless is 401."""
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         path = "/api/rnd/session_doc_roles"
         status, body = _http(base, path)
         assert status == 401 and body["error"] == "unauthorized"
         status, _ = _http(base, path,
-                          headers={"Authorization": "Bearer w2-s3cret"})
+                          headers={"Authorization": "Bearer s3cret"})
         assert status == 400          # auth passed; params missing
         # ?token= keeps working (browser reads keep it until the W9 cutover)
-        status, _ = _http(base, path + "?token=w2-s3cret")
+        status, _ = _http(base, path + "?token=s3cret")
         assert status == 400
 
     def test_sse_transport_retains_query_token(self, w2_server, monkeypatch):
         """WS/SSE are the ONLY transports that still NEED ?token= (browsers
         can't set headers there) — and the header path works on them too."""
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         path = "/api/rnd/term_stream2"
         status, body = _http(base, path)
         assert status == 401 and body["error"] == "unauthorized"
-        status, _ = _http(base, path + "?token=w2-s3cret")
+        status, _ = _http(base, path + "?token=s3cret")
         assert status == 400          # auth passed; session missing
         status, _ = _http(base, path,
-                          headers={"Authorization": "Bearer w2-s3cret"})
+                          headers={"Authorization": "Bearer s3cret"})
         assert status == 400
 
     def test_healthcheck_post_helper_presents_authorization(
@@ -825,7 +825,7 @@ class TestW2AuthorizationHeader:
         — really presents the token via the Authorization header (functional:
         its own _post succeeds against a token-requiring server)."""
         w2_env, base = w2_server
-        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
         import anchor_healthcheck as hc
         data = hc._post(base, "/api/done", {"text": "__w2_probe__"})
         assert "ok" in data           # 200 through the Bearer path
