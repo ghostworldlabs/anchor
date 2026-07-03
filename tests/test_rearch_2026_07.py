@@ -62,7 +62,12 @@ paths):**
   envelope target), the codified rituals (``PROCESS-RAILS.md``), and the
   Appendix-A traceability ledger (ideas 1–52 + mitigations 1–20, Mitigation
   9 explicitly reconciled) — the ledger diffed mechanically against the
-  frozen plan's own citation lines.
+  frozen plan's own citation lines;
+* the **no-leak rail** (W3 amendment, 2026-07-03, human-authorized): every
+  process the spike/tests spawn (claude.exe, PTY children) is reaped before
+  the test returns — a session-end census sentinel (ONE batched CIM call)
+  fails the run on any surviving spawned process, with the classifier
+  proven on synthetic tables (``TestW3NoLeakRail``).
 """
 
 import ast
@@ -1734,3 +1739,177 @@ class TestW3AppendixALedger:
         assert "W18" in tail, \
             "the reconciliation binds W18's closure to resolve M-9"
         assert "OPEN reconciliation item" in md
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 15) W3 amendment (2026-07-03, human-authorized) — the no-leak rail
+#
+# HARD REQUIREMENT: every process the spike/tests spawn (claude.exe, PTY
+# children) is reaped before the test returns — a gate run leaving ZERO
+# leaked processes is part of W3's done-when. Enforced mechanically: a
+# session-scoped autouse sentinel snapshots the host process table ONCE at
+# session end (a single batched CIM call — never a shell storm) and fails
+# the run if any flagged process survived.
+# ──────────────────────────────────────────────────────────────────────────
+
+#: Image names a leak can take here: the engine CLI itself, the PTY children
+#: (real-ConPTY cmd.exe / pywinpty's agent), and python/pythonw (the spike
+#: owner process, fake_claude, preview servers). Deliberately TIGHT — never
+#: conhost/powershell (every console process owns one; the census's own
+#: spawn) — so a legit foreign process is never flagged.
+_LEAK_IMAGES = {"claude.exe", "cmd.exe", "winpty-agent.exe",
+                "python.exe", "pythonw.exe"}
+
+
+def _process_table_snapshot():
+    """One batched CIM call → {pid: {"name", "ppid", "created"}} (Windows).
+
+    ``created`` is seconds since the Unix epoch (converted from FILETIME).
+    The single spawn per gate run is the sanctioned census exception to the
+    no-shell-storm rule.
+    """
+    script = (
+        "Get-CimInstance Win32_Process | Select-Object ProcessId,"
+        "ParentProcessId,Name,@{N='FT';E={ if ($_.CreationDate) "
+        "{ $_.CreationDate.ToFileTimeUtc() } else { 0 } }} | "
+        "ConvertTo-Json -Compress")
+    out = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=120,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    # Tolerant on a census hiccup (empty stdout → empty table → nothing
+    # flagged): the rail must never flake the suite on a WMI blip; the
+    # orchestrator's own gate-time census remains the outer backstop.
+    rows = json.loads(out.stdout or "[]")
+    table = {}
+    for r in rows if isinstance(rows, list) else [rows]:
+        pid = r.get("ProcessId")
+        if pid is None:
+            continue
+        ft = r.get("FT") or 0
+        table[int(pid)] = {
+            "name": (r.get("Name") or "").lower(),
+            "ppid": int(r.get("ParentProcessId") or 0),
+            "created": ft / 1e7 - 11644473600 if ft else 0.0,
+        }
+    return table
+
+
+def _flag_leaked_processes(table, root_pid, started_at):
+    """The pure leak classifier (unit-testable without spawning anything).
+
+    A live process is a LEAK iff its image name is in :data:`_LEAK_IMAGES`,
+    it is not the pytest process itself, and either:
+
+    * it is a DESCENDANT of the pytest process (parent chain reaches
+      ``root_pid``, each edge validated child-younger-than-parent so a
+      recycled PID can never fake an edge), or
+    * it is an ORPHAN born during this run — ``claude.exe`` created after
+      ``started_at`` whose parent PID is no longer in the table (the exact
+      signature of the 09:49 leak: the spawner died, the engine survived).
+
+    A foreign process (John opening a claude session mid-run) is NEVER
+    flagged: its parent (his terminal) is alive and outside our tree.
+    """
+    def _is_descendant(pid):
+        seen = set()
+        while pid and pid not in seen:
+            seen.add(pid)
+            row = table.get(pid)
+            if row is None:
+                return False
+            ppid = row["ppid"]
+            parent = table.get(ppid)
+            if parent is None:
+                return False
+            if parent["created"] and row["created"] \
+                    and parent["created"] > row["created"] + 1.0:
+                return False               # recycled PID — not a real edge
+            if ppid == root_pid:
+                return True
+            pid = ppid
+        return False
+
+    leaked = []
+    for pid, row in table.items():
+        if pid == root_pid or row["name"] not in _LEAK_IMAGES:
+            continue
+        orphan = (row["name"] == "claude.exe"
+                  and row["created"] > started_at
+                  and row["ppid"] not in table)
+        if orphan or _is_descendant(pid):
+            leaked.append({"pid": pid, "name": row["name"],
+                           "ppid": row["ppid"],
+                           "orphan": bool(orphan)})
+    return sorted(leaked, key=lambda e: e["pid"])
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _w3_no_leak_rail():
+    """Session-end census: the gate run itself must leak ZERO processes."""
+    if os.name != "nt":                    # the rail targets this Windows host
+        yield
+        return
+    started_at = time.time()
+    yield
+    leaked = _flag_leaked_processes(_process_table_snapshot(), os.getpid(),
+                                    started_at)
+    if leaked:
+        time.sleep(2.0)                    # grace: a child mid-exit is not a leak
+        again = _flag_leaked_processes(_process_table_snapshot(), os.getpid(),
+                                       started_at)
+        still = {e["pid"] for e in again}
+        leaked = [e for e in leaked if e["pid"] in still]
+    assert not leaked, (
+        "W3 no-leak rail: the run left live spawned processes "
+        f"(reap them in the test that spawned them): {leaked}")
+
+
+class TestW3NoLeakRail:
+    """The classifier itself, proven on synthetic tables (no spawning)."""
+
+    T0 = 1_000_000.0
+
+    def _table(self):
+        return {
+            100: {"name": "python.exe", "ppid": 1, "created": self.T0 - 50},
+            # our descendants: pytest(=100) → owner python → cmd child
+            101: {"name": "python.exe", "ppid": 100, "created": self.T0 + 1},
+            102: {"name": "cmd.exe", "ppid": 101, "created": self.T0 + 2},
+            # an orphan claude born during the run (spawner already dead)
+            103: {"name": "claude.exe", "ppid": 999, "created": self.T0 + 3},
+            # John's own claude: parent alive, outside our tree — NEVER flagged
+            200: {"name": "wt.exe", "ppid": 1, "created": self.T0 - 500},
+            201: {"name": "claude.exe", "ppid": 200, "created": self.T0 + 4},
+            # a conhost descendant of ours: not in the flag set
+            104: {"name": "conhost.exe", "ppid": 101, "created": self.T0 + 2},
+        }
+
+    def test_descendants_and_orphans_are_flagged(self):
+        leaked = _flag_leaked_processes(self._table(), 100, self.T0)
+        got = {(e["pid"], e["orphan"]) for e in leaked}
+        assert got == {(101, False), (102, False), (103, True)}
+
+    def test_foreign_and_unlisted_images_never_flagged(self):
+        leaked = _flag_leaked_processes(self._table(), 100, self.T0)
+        pids = {e["pid"] for e in leaked}
+        assert 201 not in pids, "a foreign claude must never be flagged"
+        assert 104 not in pids, "conhost is outside the flag set"
+        assert 100 not in pids, "the pytest root itself is exempt"
+
+    def test_recycled_pid_cannot_fake_an_edge(self):
+        table = self._table()
+        # 105 claims parent 100, but 100 was created LONG after it —
+        # a recycled PID; the edge is rejected, nothing flagged.
+        table[105] = {"name": "python.exe", "ppid": 100,
+                      "created": self.T0 - 5_000}
+        leaked = _flag_leaked_processes(table, 100, self.T0)
+        assert 105 not in {e["pid"] for e in leaked}
+
+    def test_prexisting_claude_with_dead_parent_not_an_orphan_leak(self):
+        table = self._table()
+        # born BEFORE the run started → not ours, even though orphaned
+        table[106] = {"name": "claude.exe", "ppid": 998,
+                      "created": self.T0 - 100}
+        leaked = _flag_leaked_processes(table, 100, self.T0)
+        assert 106 not in {e["pid"] for e in leaked}

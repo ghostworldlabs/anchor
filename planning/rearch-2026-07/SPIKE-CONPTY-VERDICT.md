@@ -12,7 +12,11 @@ Recorded against the PRE-WRITTEN acceptance questions (frozen with W3, before an
 
 ### stub — stub PTY (deterministic; architecture + protocol + IPC hop)
 
-**NOT YET RUN** — this leg has recorded no verdict. Run: `python tools/conpty_spike.py --run --backend stub` (the gate runs the real leg when `ANCHOR_SPIKE_REAL_CONPTY=1`).
+**Verdict: YES**
+
+- Q-LATENCY: **PASS** — median 0.1 ms over 5 rounds (bound 150 ms)
+- Q-REATTACH: **PASS** — owner survived client detach; re-attach replayed prior output and live echo worked
+- Q-COMPLEXITY: **PASS** — 382 significant lines (budget 400)
 
 ### real — real ConPTY (pywinpty cmd.exe)
 

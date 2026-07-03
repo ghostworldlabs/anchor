@@ -130,6 +130,11 @@ def _owner_serve(backend: str) -> int:  # pragma: no cover - separate process
         except (OSError, ValueError):
             pass          # client vanished mid-line — keep the PTY, re-accept
         finally:
+            for f in (wfile, rfile):     # drain io-refs so close() is real
+                try:
+                    f.close()
+                except Exception:
+                    pass
             conn.close()
     try:
         pty_manager.kill(sid)
@@ -173,6 +178,21 @@ class _Client:
         raise SpikeError(f"echo nonce {nonce!r} never came back")
 
     def close(self):
+        # Close the makefile wrappers FIRST: each holds an io-ref on the
+        # socket, and CPython only truly closes the OS socket (sending the
+        # FIN) once that refcount drains. Without this, sock.close() is a
+        # no-op at the OS level, the owner never sees EOF on the dead
+        # client, and it blocks in its read loop instead of re-accepting —
+        # the re-attach seam wedges. Idempotent; never raises.
+        for f in (self.rfile, self.wfile):
+            try:
+                f.close()
+            except Exception:
+                pass
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         try:
             self.sock.close()
         except OSError:
@@ -216,9 +236,11 @@ def run_spike(backend="stub") -> dict:
     question with a measured pass/fail.
     """
     proc, port = _spawn_owner(backend)
+    clients = []
     try:
         # ── leg 1: attach, measure echo round-trips ──
         c1 = _Client(port)
+        clients.append(c1)
         cursor = 0
         # settle: swallow any shell banner before timing (real cmd.exe)
         time.sleep(0.5 if backend != "stub" else 0.0)
@@ -237,6 +259,7 @@ def run_spike(backend="stub") -> dict:
             raise SpikeError("owner process died when the client detached")
         # ── leg 2: re-attach — replay + live I/O ──
         c2 = _Client(port)
+        clients.append(c2)
         replay = c2.call(op="read", cursor=0)
         replay_ok = f"{nonce1}-0" in replay.get("text", "")
         nonce2 = f"SPIKE-{os.urandom(4).hex()}"
@@ -244,10 +267,32 @@ def run_spike(backend="stub") -> dict:
         c2.call(op="shutdown")
         c2.close()
     finally:
+        # The no-leak rail (W3 amendment): the owner — and through it the PTY
+        # child it holds — is ALWAYS reaped before run_spike returns, on the
+        # green path (shutdown op → clean exit) and on every failure path
+        # (close the clients so the owner unblocks, then wait, then kill —
+        # and WAIT AGAIN after the kill so no zombie/handle survives).
+        for c in clients:
+            c.close()                       # idempotent
+        if proc.poll() is None:             # failure path: ask it to exit
+            try:
+                bye = _Client(port)
+                bye.call(op="shutdown")
+                bye.close()
+            except Exception:
+                pass                        # dead/wedged owner → wait/kill
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
 
     lines = significant_lines()
     answers = {

@@ -44,8 +44,9 @@ service-level objective:
 
 ## 3. Auth-flip sequencing rule
 
-An auth-policy flip (open → warn → enforce on any route batch) NEVER ships in
-the same deploy as JS changes calling the flipped routes. Order, always:
+An auth-policy flip (open → warn → enforce on any route batch)
+NEVER ships in the same deploy as JS changes calling the flipped routes.
+Order, always:
 
 1. ship the client/consumer token paths (W2-style) and soak;
 2. flip the batch to **warn** on the live service; review the warn log —
@@ -54,8 +55,8 @@ the same deploy as JS changes calling the flipped routes. Order, always:
 3. flip to **enforce** in its own deploy, with the live tokenless-401 probe
    asserting the flip took.
 
-A rollback of the flip is a FLAG change (`ANCHOR_AUTH_MODE`), never a code
-revert (the pillar off-switch discipline, `pillar_flags.py`).
+A rollback of the flip is a FLAG change (`ANCHOR_AUTH_MODE`),
+never a code revert (the pillar off-switch discipline, `pillar_flags.py`).
 
 ## 4. Soft merge-freeze protocol (the extraction waves)
 
