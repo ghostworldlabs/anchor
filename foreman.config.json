@@ -1,9 +1,9 @@
 {
-  "project": "anchor-durability-2026-07",
+  "project": "anchor-rearchitecture-2026-07",
   "docs": {
     "description": "DESCRIPTION.md",
     "plan": "IMPLEMENTATION-PLAN.md",
-    "execution_log": "FOREMAN-EXECUTION-LOG-2026-07.md"
+    "execution_log": "FOREMAN-EXECUTION-LOG-REARCH.md"
   },
   "models": {
     "execute": "claude:claude-fable-5",
@@ -12,7 +12,7 @@
   },
   "git": {
     "enabled": true,
-    "branch": "foreman/review-durability"
+    "branch": "foreman/rearchitecture"
   },
   "budget": {
     "max_waves_per_run": 3,
