@@ -164,6 +164,52 @@ def cache_bust_script():
     return _CACHE_BUST_JS_TEMPLATE.replace("__ANCHOR_BUILD_ID__", BUILD_ID)
 
 
+# ── Contract-versioning shim (re-architecture 2026-07 · W2) ─────────────────
+# ``window.ANCHOR_BOOT`` is the VERSIONED server→client bootstrap channel.
+# W2 ships it minimally — the build id + the auth flag — as the deploy-safety
+# contract shim (the LAST pre-migration release): every ``_postJson`` declares
+# the page's build id via the ``X-Anchor-Build`` header, and a mismatch is
+# answered with a STRUCTURED 409 the stale client renders as a 'reload
+# required' banner (stale-tab / PWA-cached iPad client protection). W4 grows
+# ANCHOR_BOOT into the ONLY server→client state channel for the extracted
+# static frontend (token presence, project id, feature flags, initial counts).
+ANCHOR_BOOT_SCHEMA_VER = 1
+
+#: The structured 409 discriminator the client JS matches on. Keep stable —
+#: old clients in the field match this exact string forever.
+BUILD_MISMATCH_ERROR = "build-mismatch"
+
+
+def anchor_boot(extra=None):
+    """Assemble the ``window.ANCHOR_BOOT`` bootstrap dict (W2: minimal).
+
+    Documented contract (versioned via ``schema_ver``; additive-only):
+      - ``schema_ver``     — int, the ANCHOR_BOOT shape version;
+      - ``build_id``       — the server build this page was rendered from;
+      - ``auth_required``  — whether the server has ANCHOR_TOKEN configured.
+    ``extra`` lets a render surface add page-scoped keys (W4+). Never embeds
+    the token VALUE itself — only its presence.
+    """
+    boot = {
+        "schema_ver": ANCHOR_BOOT_SCHEMA_VER,
+        "build_id": BUILD_ID,
+        "auth_required": bool(_paths.expected_token()),
+    }
+    if extra:
+        boot.update(extra)
+    return boot
+
+
+def anchor_boot_script(extra=None):
+    """The inline ``window.ANCHOR_BOOT = {…};`` bootstrap line.
+
+    Returned as a PLAIN string so the project-window page embeds it by
+    concatenation — never as a new f-string interpolation in the two
+    census-counted render surfaces (the W1 census contract).
+    """
+    return "window.ANCHOR_BOOT = " + json.dumps(anchor_boot(extra)) + ";"
+
+
 # ── Parsing ────────────────────────────────────────────────────────────
 
 #: Warnings from the most recent gather_all() — markdown files that could not
@@ -5602,6 +5648,10 @@ def render_project_window_html(project_id: str) -> str:
         # ``effort_history.is_grass_dev_label``.
         f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
         f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
+        # W2 contract shim: the versioned bootstrap (build id). Embedded by
+        # PLAIN CONCATENATION — not an f-string interpolation — so the W1
+        # census counts for this render surface are undisturbed.
+        + anchor_boot_script() + "\n"
         + _PROJECT_WINDOW_JS +
         "</script>"
         "<script>" + cache_bust_script() + "</script>\n"
@@ -5657,10 +5707,39 @@ _PROJECT_WINDOW_JS = r"""
           prompting = false;
         }
       }
+      // W2 contract shim: a structured 409 build-mismatch means THIS tab was
+      // loaded before a deploy — render the 'reload required' banner. The body
+      // is read off a CLONE so the caller's own .json() still works.
+      if (resp && resp.status === 409) {
+        try {
+          resp.clone().json().then(function (d) {
+            if (d && d.error === 'build-mismatch') _showReloadBanner();
+          }).catch(function () {});
+        } catch (e) {}
+      }
       return resp;
     });
   };
 })();
+
+// ── W2 contract shim: the 'reload required' banner ─────────────────────────
+// Shown when any POST answers the structured 409 build-mismatch (this tab is
+// from a pre-deploy build). Idempotent; fixed to the top of the viewport; one
+// click reloads onto the new build.
+function _showReloadBanner() {
+  if (document.getElementById('anchorReloadBanner')) return;
+  var d = document.createElement('div');
+  d.id = 'anchorReloadBanner';
+  d.setAttribute('role', 'alert');
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+    'background:#b45309;color:#fff;padding:10px 16px;text-align:center;' +
+    'font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+  d.innerHTML = 'Anchor was updated — this page is out of date. ' +
+    '<button onclick="location.reload()" style="margin-left:10px;padding:4px 12px;' +
+    'border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;' +
+    'cursor:pointer;font:inherit">Reload</button>';
+  (document.body || document.documentElement).appendChild(d);
+}
 
 function _esc(s) {
   // FULL HTML escaping (defense-in-depth). Escapes &, <, > AND BOTH quote chars
@@ -5748,6 +5827,12 @@ function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
   var tok = _anchorToken();
   if (tok) headers['X-Anchor-Token'] = tok;
+  // W2 contract shim: declare this page's build id on EVERY mutating POST so a
+  // stale tab (loaded before a deploy) gets the structured 409 → the 'reload
+  // required' banner — never an opaque failure. Absent on old cached HTML that
+  // carries no ANCHOR_BOOT (the server never blocks a build-less request).
+  var bid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
+  if (bid) headers['X-Anchor-Build'] = bid;
   return fetch(url, { method: 'POST', headers: headers, body: JSON.stringify(payload) });
 }
 function _isUnauthorized(r, data) { return r.status === 401 || (data && data.error === 'unauthorized'); }
@@ -10985,6 +11070,9 @@ def generate_html(projects, tasks, inbox):
     # Initial visibility of the masthead 🔑 token control — shown only when the
     # server has an ANCHOR_TOKEN configured (auth on), invisible otherwise.
     auth_token_btn_display = "inline-block" if _paths.expected_token() else "none"
+    # W2 contract shim: the versioned window.ANCHOR_BOOT bootstrap (build id +
+    # auth flag) — a JSON literal, never the token value itself.
+    anchor_boot_js = json.dumps(anchor_boot())
 
     # ── Health banner ──
     # If the most recent health report flagged issues, show a banner at the top.
@@ -12424,6 +12512,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 // POSTs; NEVER embedded in the served HTML (GET is unauthenticated). When the
 // server has no ANCHOR_TOKEN set, auth is off and the header is ignored.
 window.ANCHOR_AUTH_REQUIRED = {auth_required_js};
+// W2 contract shim: the versioned bootstrap — apiCall declares this build id on
+// every mutating POST (X-Anchor-Build); a mismatch renders the reload banner.
+window.ANCHOR_BOOT = {anchor_boot_js};
 function _anchorToken() {{ try {{ return localStorage.getItem('anchor_token') || ''; }} catch (e) {{ return ''; }} }}
 function setAnchorToken() {{
     const cur = _anchorToken();
@@ -12460,10 +12551,38 @@ window.addEventListener('DOMContentLoaded', function () {{
                     prompting = false;
                 }}
             }}
+            // W2 contract shim: a structured 409 build-mismatch means this tab
+            // predates the current deploy — show the 'reload required' banner.
+            // The body is read off a CLONE so the caller's .json() still works.
+            if (resp && resp.status === 409) {{
+                try {{
+                    resp.clone().json().then(function (d) {{
+                        if (d && d.error === 'build-mismatch') _showReloadBanner();
+                    }}).catch(function () {{}});
+                }} catch (e) {{}}
+            }}
             return resp;
         }});
     }};
 }})();
+
+// ── W2 contract shim: the 'reload required' banner ──
+// Idempotent; fixed to the top of the viewport; one click reloads onto the
+// new build. Matched by the structured 409 body ({{error:'build-mismatch'}}).
+function _showReloadBanner() {{
+    if (document.getElementById('anchorReloadBanner')) return;
+    const d = document.createElement('div');
+    d.id = 'anchorReloadBanner';
+    d.setAttribute('role', 'alert');
+    d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+        'background:#b45309;color:#fff;padding:10px 16px;text-align:center;' +
+        'font:600 14px/1.4 system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+    d.innerHTML = 'Anchor was updated — this page is out of date. ' +
+        '<button onclick="location.reload()" style="margin-left:10px;padding:4px 12px;' +
+        'border:1px solid #fff;border-radius:6px;background:transparent;color:#fff;' +
+        'cursor:pointer;font:inherit">Reload</button>';
+    (document.body || document.documentElement).appendChild(d);
+}}
 
 async function apiCall(endpoint, body) {{
     // Retry once on network failure — the server may have briefly paused
@@ -12472,6 +12591,10 @@ async function apiCall(endpoint, body) {{
         const headers = {{'Content-Type': 'application/json'}};
         const tok = _anchorToken();
         if (tok) headers['X-Anchor-Token'] = tok;
+        // W2 contract shim: declare this page's build id on every mutating
+        // POST (a stale tab gets the structured 409 → the reload banner).
+        const bid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
+        if (bid) headers['X-Anchor-Build'] = bid;
         const r = await fetch(endpoint, {{
             method: 'POST',
             headers: headers,
@@ -13967,17 +14090,26 @@ class AnchorHandler(BaseHTTPRequestHandler):
 
     # ── ConPTY terminal transport (Wave 3) ──────────────────────────────────
     def _term_token_ok(self):
-        """Auth a terminal GET endpoint via the ``?token=`` query param.
+        """Auth a token-gated GET endpoint (``?token=`` / Authorization header).
 
         Browsers can't set request headers on an EventSource / WebSocket
         handshake, so the terminal GET surface (an RCE surface) authenticates via
         a query-param token with the SAME semantics as ``paths.auth_ok``: if no
         token is configured (``ANCHOR_TOKEN`` unset) it is allowed (local
-        back-compat); otherwise the provided token must match. Also accepts a
-        token carried in the ``Sec-WebSocket-Protocol`` header (for WS clients).
+        back-compat); otherwise the provided token must match.
+
+        rearch-2026-07 W2: the standard ``Authorization`` header (Bearer or a
+        bare token) is accepted EVERYWHERE this gate applies, so every
+        non-browser consumer (healthcheck endpoint walk, scripts) has a header
+        token path — ``?token=`` remains only because the WS/SSE transports
+        demand it. Also accepts a token carried in the
+        ``Sec-WebSocket-Protocol`` header (for WS clients).
         """
         q = parse_qs(urlparse(self.path).query)
         provided = (q.get("token", [None])[0])
+        if provided is None:
+            provided = _paths.token_from_authorization(
+                self.headers.get("Authorization"))
         if provided is None:
             # WS clients may smuggle the token via the subprotocol header.
             provided = self.headers.get("Sec-WebSocket-Protocol")
@@ -16032,12 +16164,40 @@ function startZombieTerminal(btn) {
         content_len = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(content_len)) if content_len > 0 else {}
 
+        # Contract-versioning shim (re-architecture 2026-07 · W2). A browser
+        # page declares the build id it was rendered from (window.ANCHOR_BOOT
+        # → the X-Anchor-Build header on every _postJson/apiCall). A mismatch
+        # means the tab predates the current deploy (stale JS about to call a
+        # migrated server): answer a STRUCTURED 409 the old client renders as
+        # the 'reload required' banner — never an opaque failure. Consumers
+        # that declare no build (healthcheck, CLI, curl) are never blocked.
+        # Checked BEFORE auth so a stale tab learns 'reload' instead of
+        # re-prompting for a token (the build id is already public via
+        # GET /api/version — nothing new is leaked).
+        client_build = (self.headers.get("X-Anchor-Build") or "").strip()
+        if client_build and client_build != BUILD_ID:
+            self._send_json({
+                "ok": False,
+                "error": BUILD_MISMATCH_ERROR,
+                "reason": "reload-required",
+                "server_build": BUILD_ID,
+                "client_build": client_build,
+                "action": "reload",
+            }, 409)
+            return
+
         # Token-auth middleware (Wave 2 / D4). Every mutating /api/* POST
         # requires a valid shared-secret token when ANCHOR_TOKEN is configured.
         # If ANCHOR_TOKEN is unset, auth is disabled (local-only back-compat).
-        # The token may be supplied via the X-Anchor-Token header (preferred)
-        # or a "token" field in the JSON body. Read endpoints are not gated.
+        # The token may be supplied via the X-Anchor-Token header (preferred
+        # by the browser clients), the standard Authorization header
+        # (Bearer <token> or a bare token — the rearch-W2 path every
+        # non-browser consumer uses), or a "token" field in the JSON body.
+        # Read endpoints are not gated.
         provided = self.headers.get("X-Anchor-Token")
+        if provided is None:
+            provided = _paths.token_from_authorization(
+                self.headers.get("Authorization"))
         if provided is None and isinstance(body, dict):
             provided = body.get("token")
         if not _paths.auth_ok(provided):

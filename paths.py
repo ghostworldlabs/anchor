@@ -144,6 +144,34 @@ def auth_ok(provided) -> bool:
     return hmac.compare_digest(str(provided or ""), str(want))
 
 
+def token_from_authorization(header_value):
+    """Extract the shared-secret token from an ``Authorization`` header value.
+
+    W2 (re-architecture 2026-07): every consumer of a token-gated route has a
+    header-based token path — ``Authorization: Bearer <token>`` is the standard
+    spelling (scheme case-insensitive). A bare token value (no scheme) is also
+    accepted so simple scripts (curl one-liners, PowerShell probes) don't need
+    to know the Bearer convention. ``?token=`` remains only for the WS/SSE
+    transports, where browsers cannot set request headers.
+
+    Returns the token string, or ``None`` when the header is absent/blank
+    (callers then fall back to the legacy senders: ``X-Anchor-Token``,
+    ``?token=``, JSON-body ``token``). Pure — never reads the environment.
+    """
+    if header_value is None:
+        return None
+    value = str(header_value).strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if lowered == "bearer":
+        # A scheme word with no token (e.g. "Bearer ") is NOT a bare token.
+        return None
+    if lowered.startswith("bearer "):
+        value = value[len("bearer "):].strip()
+    return value or None
+
+
 # ── Silent subprocess spawning (John's no-visible-shells rule) ──────────────
 
 #: OR this into every ``subprocess.Popen/run`` ``creationflags`` on Windows so a

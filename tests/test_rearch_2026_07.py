@@ -1,6 +1,6 @@
-"""W1 gate — Ground-Truth Instrumentation (census · anchors · tripwire).
+"""W1+W2 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
 
-Re-architecture 2026-07, Wave 1 (frozen plan: IMPLEMENTATION-PLAN.md). Gates:
+**W1 — Ground-Truth Instrumentation (census · anchors · tripwire):**
 
 * the **anchor-freshness gate**: every structural anchor (the
   ``_PROJECT_WINDOW_JS`` assignment, the ``generate_html`` def, the
@@ -17,14 +17,39 @@ Re-architecture 2026-07, Wave 1 (frozen plan: IMPLEMENTATION-PLAN.md). Gates:
   journal path itself allowlisted;
 * the **gate artifacts**: the checked-in census report + mutation-set
   inventory are refreshed by this very gate run (consumed by later waves).
+
+**W2 — Regression Rails (Playwright flows · contract shim · consumer token
+paths):**
+
+* the **five permanent Playwright flows** (``tests/rearch_flows.py`` — the
+  reusable assets the extraction gate and every later pillar re-run):
+  terminal open+type via stub PTY · pending-paste flush · drag-to-group ·
+  maximize/restore · v12 dock click;
+* the **contract-versioning shim**: ``window.ANCHOR_BOOT`` carries the build
+  id on both pages, every ``_postJson``/``apiCall`` declares it
+  (``X-Anchor-Build``), a mismatch answers a STRUCTURED 409, and the stale
+  client renders the 'reload required' banner (Playwright-proven);
+* **consumer token paths**: the standard ``Authorization`` header is accepted
+  on every token gate (POST middleware + the ``?token=`` GET surface, which
+  keeps the query param only because WS/SSE demand it), and the checked-in
+  ``CONSUMER-INVENTORY.md`` enumerates every open-route consumer with its
+  verified token path.
 """
 
 import ast
 import builtins
+import importlib
 import io
 import json
 import os
+import re
+import subprocess
 import textwrap
+import threading
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -487,3 +512,474 @@ class TestMutationInventoryArtifact:
             second = json.loads(out.read_text(encoding="utf-8"))["entries"]
         assert len(first) == len(second) == 1
         assert second[0]["count"] == 2 * first[0]["count"]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# W2 — Regression Rails (Playwright flows · contract shim · consumer tokens)
+# ══════════════════════════════════════════════════════════════════════════
+
+FAKE = (Path(__file__).resolve().parent / "fake_claude.py").as_posix()
+
+
+def _have_git():
+    try:
+        return subprocess.run(["git", "--version"],
+                              capture_output=True).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+@pytest.fixture
+def w2_env(tmp_path, monkeypatch):
+    """Hermetic W2 server env: tmp data dir, stub PTY, fake runner, no token
+    (individual tests flip ANCHOR_TOKEN on via monkeypatch — the auth helpers
+    read the env per call)."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_WORKTREE_BASE", str(tmp_path / "wt-base"))
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {FAKE}")
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    monkeypatch.delenv("ANCHOR_TERMINAL_SEED", raising=False)
+    monkeypatch.delenv("ANCHOR_PROACTIVE_SUMMARY", raising=False)
+    for mod in ("paths", "job_runner", "pty_manager", "rnd_registry",
+                "session_registry", "worktrees", "lanes", "effort_history",
+                "sessions", "summarizer", "gate_adapter", "handoff",
+                "terminal_session", "effort_view"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    yield {"gui": gui, "tmp": tmp_path}
+    try:
+        import pty_manager
+        pty_manager._reset_live_table_for_tests()
+    except Exception:
+        pass
+
+
+@pytest.fixture
+def w2_server(w2_env):
+    gui = w2_env["gui"]
+    srv = gui.make_server("127.0.0.1", 0)
+    port = srv.server_address[1]
+    assert port != 8777
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield w2_env, f"http://127.0.0.1:{port}"
+    finally:
+        time.sleep(0.1)
+        try:
+            srv.shutdown()
+        except Exception:
+            pass
+        try:
+            srv.server_close()
+        except Exception:
+            pass
+        t.join(timeout=5)
+
+
+def _http(base, path, method="GET", payload=None, headers=None, timeout=6.0):
+    """Tiny urllib helper → (status, parsed-or-raw body)."""
+    hdrs = {"Content-Type": "application/json"}
+    hdrs.update(headers or {})
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(base + path, data=data, headers=hdrs,
+                                 method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+            status = r.status
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        status = e.code
+    try:
+        return status, json.loads(raw)
+    except ValueError:
+        return status, raw
+
+
+_BOOT_RE = re.compile(r"window\.ANCHOR_BOOT = (\{[^;]*\});")
+
+
+def _extract_boot(html):
+    m = _BOOT_RE.search(html)
+    assert m, "window.ANCHOR_BOOT not found in the page"
+    return json.loads(m.group(1))
+
+
+def _mk_w2_project(w2_env, name, git=True):
+    from tests import rearch_flows as flows
+    folder = w2_env["tmp"] / name
+    if git:
+        flows.git_init(folder)
+    else:
+        folder.mkdir(parents=True, exist_ok=True)
+    return flows.mkproject(folder, name)["id"], folder
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 6) W2 — contract-versioning shim (ANCHOR_BOOT · X-Anchor-Build · 409)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW2ContractShim:
+    def test_anchor_boot_on_home_dashboard(self, w2_server):
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        status, html = _http(base, "/")
+        assert status == 200
+        boot = _extract_boot(html)
+        assert boot["schema_ver"] == gui.ANCHOR_BOOT_SCHEMA_VER == 1
+        assert boot["build_id"] == gui.BUILD_ID
+        assert boot["auth_required"] is False
+
+    def test_anchor_boot_on_project_window(self, w2_server):
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        pid, _ = _mk_w2_project(w2_env, "BootPW", git=False)
+        status, html = _http(base, f"/project/{pid}")
+        assert status == 200
+        boot = _extract_boot(html)
+        assert boot["build_id"] == gui.BUILD_ID
+        assert boot["schema_ver"] == 1
+
+    def test_boot_reflects_auth_flag(self, w2_server, monkeypatch):
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        _, html = _http(base, "/")
+        boot = _extract_boot(html)
+        assert boot["auth_required"] is True
+        # presence only — the token VALUE is never embedded in served HTML.
+        assert "w2-s3cret" not in html
+
+    def test_postjson_senders_declare_build_and_render_banner(self, w2_env):
+        """Every _postJson sender carries X-Anchor-Build, and both pages ship
+        the 409 → 'reload required' banner path (the client half of the
+        shim, present in the LAST pre-migration release by design)."""
+        gui = w2_env["gui"]
+        pw_js = gui._PROJECT_WINDOW_JS
+        assert "X-Anchor-Build" in pw_js
+        assert "_showReloadBanner" in pw_js
+        assert "anchorReloadBanner" in pw_js
+        assert "build-mismatch" in pw_js
+        html = gui.generate_html(*gui.gather_all())
+        assert "X-Anchor-Build" in html          # apiCall's _doFetch
+        assert "_showReloadBanner" in html
+        assert "anchorReloadBanner" in html
+        assert "build-mismatch" in html
+        # brace discipline: the f-string page leaked no doubled braces.
+        assert "{{" not in html and "}}" not in html
+
+    def test_build_mismatch_answers_structured_409(self, w2_server):
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"},
+                             headers={"X-Anchor-Build": "stale-build-123"})
+        assert status == 409
+        assert body["ok"] is False
+        assert body["error"] == gui.BUILD_MISMATCH_ERROR == "build-mismatch"
+        assert body["server_build"] == gui.BUILD_ID
+        assert body["client_build"] == "stale-build-123"
+        assert body["action"] == "reload"
+
+    def test_matching_or_absent_build_never_blocked(self, w2_server):
+        """The current client (matching build) and every build-less consumer
+        (healthcheck, CLI, curl) pass the shim untouched."""
+        w2_env, base = w2_server
+        gui = w2_env["gui"]
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"},
+                             headers={"X-Anchor-Build": gui.BUILD_ID})
+        assert status == 200 and "ok" in body
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"})
+        assert status == 200 and "ok" in body
+
+    def test_mismatch_beats_auth_prompt(self, w2_server, monkeypatch):
+        """A stale tab learns 'reload required' (409) rather than being asked
+        to re-enter a token (401) — the shim is checked first by design."""
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"},
+                             headers={"X-Anchor-Build": "stale-build-123"})
+        assert status == 409 and body["error"] == "build-mismatch"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 7) W2 — Authorization-header token paths (representative routes)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW2AuthorizationHeader:
+    def test_token_from_authorization_parsing(self):
+        import paths
+        f = paths.token_from_authorization
+        assert f("Bearer abc123") == "abc123"
+        assert f("bearer abc123") == "abc123"      # scheme case-insensitive
+        assert f("BEARER  abc123 ") == "abc123"
+        assert f("abc123") == "abc123"             # bare token convenience
+        assert f("") is None
+        assert f("   ") is None
+        assert f(None) is None
+        assert f("Bearer ") is None                # scheme with no token
+
+    def test_post_accepts_authorization_bearer(self, w2_server, monkeypatch):
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        # no credentials → 401
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"})
+        assert status == 401 and body["error"] == "unauthorized"
+        # Authorization: Bearer <token> → accepted
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"},
+                             headers={"Authorization": "Bearer w2-s3cret"})
+        assert status == 200 and "ok" in body
+        # wrong bearer → 401
+        status, _ = _http(base, "/api/done", method="POST",
+                          payload={"text": "__w2_probe__"},
+                          headers={"Authorization": "Bearer nope"})
+        assert status == 401
+        # the legacy browser path (X-Anchor-Token) still works unchanged
+        status, body = _http(base, "/api/done", method="POST",
+                             payload={"text": "__w2_probe__"},
+                             headers={"X-Anchor-Token": "w2-s3cret"})
+        assert status == 200 and "ok" in body
+
+    def test_gated_get_accepts_authorization(self, w2_server, monkeypatch):
+        """A representative token-gated read GET (the healthcheck-walk class of
+        consumer): Authorization passes the gate (the 400 for missing params
+        PROVES auth ran first and passed); tokenless is 401."""
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        path = "/api/rnd/session_doc_roles"
+        status, body = _http(base, path)
+        assert status == 401 and body["error"] == "unauthorized"
+        status, _ = _http(base, path,
+                          headers={"Authorization": "Bearer w2-s3cret"})
+        assert status == 400          # auth passed; params missing
+        # ?token= keeps working (browser reads keep it until the W9 cutover)
+        status, _ = _http(base, path + "?token=w2-s3cret")
+        assert status == 400
+
+    def test_sse_transport_retains_query_token(self, w2_server, monkeypatch):
+        """WS/SSE are the ONLY transports that still NEED ?token= (browsers
+        can't set headers there) — and the header path works on them too."""
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        path = "/api/rnd/term_stream2"
+        status, body = _http(base, path)
+        assert status == 401 and body["error"] == "unauthorized"
+        status, _ = _http(base, path + "?token=w2-s3cret")
+        assert status == 400          # auth passed; session missing
+        status, _ = _http(base, path,
+                          headers={"Authorization": "Bearer w2-s3cret"})
+        assert status == 400
+
+    def test_healthcheck_post_helper_presents_authorization(
+            self, w2_server, monkeypatch):
+        """The healthcheck endpoint walk — the canonical non-browser consumer
+        — really presents the token via the Authorization header (functional:
+        its own _post succeeds against a token-requiring server)."""
+        w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "w2-s3cret")
+        import anchor_healthcheck as hc
+        data = hc._post(base, "/api/done", {"text": "__w2_probe__"})
+        assert "ok" in data           # 200 through the Bearer path
+        # and the helper's source sends Authorization, not X-Anchor-Token
+        import inspect
+        src = inspect.getsource(hc._post)
+        assert "Authorization" in src and "Bearer" in src
+        assert "X-Anchor-Token" not in src
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 8) W2 — consumer-enumeration inventory (checked-in gate artifact)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW2ConsumerInventory:
+    INVENTORY = ARTIFACT_DIR / "CONSUMER-INVENTORY.md"
+
+    def test_inventory_enumerates_every_consumer_class(self):
+        assert self.INVENTORY.exists(), (
+            "the W2 consumer-enumeration inventory is a checked-in artifact")
+        text = self.INVENTORY.read_text(encoding="utf-8")
+        # every consumer class the frozen plan names must be enumerated:
+        for required in (
+                "anchor_healthcheck.py",          # healthcheck endpoint walk
+                "fix_anchor_stale.ps1",           # personal script
+                "setup_service_as_john.ps1",      # personal script
+                "AnchorDashboard.vbs",            # launchers
+                "launch_anchor.pyw",              # launchers
+                "Anchor Health Check",            # scheduled task
+                "Anchor Server",                  # scheduled task (disabled)
+                "anchor.py",                      # repo code (CLI, no HTTP)
+                "_PROJECT_WINDOW_JS",             # browser client (project)
+                "generate_html",                  # browser client (home)
+                "Authorization",                  # the token path column
+        ):
+            assert required in text, f"inventory missing consumer: {required}"
+        # ?token= is documented as WS/SSE-only going forward
+        assert "WS/SSE" in text
+
+    def test_inventory_claims_are_real_in_consumer_source(self):
+        """The two consumers the inventory claims were given a header token
+        path in W2 really carry it in their source."""
+        hc_src = (REPO_ROOT / "anchor_healthcheck.py").read_text(
+            encoding="utf-8")
+        assert 'headers["Authorization"] = f"Bearer {token}"' in hc_src
+        ps_src = (REPO_ROOT / "fix_anchor_stale.ps1").read_text(
+            encoding="utf-8")
+        assert "Authorization" in ps_src and "ANCHOR_TOKEN" in ps_src
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 9) W2 — the five permanent Playwright flows (tests/rearch_flows.py)
+# ──────────────────────────────────────────────────────────────────────────
+
+_needs_git = pytest.mark.skipif(not _have_git(), reason="git not on PATH")
+
+
+def _browser_page(p, viewport=None):
+    b = p.chromium.launch()
+    pg = b.new_page(**({"viewport": viewport} if viewport else {}))
+    errors = []
+    pg.on("console",
+          lambda m: errors.append(m.text) if m.type == "error" else None)
+    return b, pg, errors
+
+
+class TestW2PlaywrightFlows:
+    @_needs_git
+    def test_flow_terminal_open_and_type(self, w2_server):
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        w2_env, base = w2_server
+        pid, _ = _mk_w2_project(w2_env, "FlowTerm")
+        rec = flows.start_live_session(pid, "research")
+        sid = rec["session_id"]
+        try:
+            with sync_playwright() as p:
+                b, pg, errors = _browser_page(p)
+                flows.flow_terminal_open_and_type(pg, base, pid, sid)
+                assert not errors, f"JS console errors: {errors}"
+                b.close()
+        finally:
+            flows.kill_quietly(sid)
+
+    @_needs_git
+    def test_flow_pending_paste_flush(self, w2_server):
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        import session_registry as reg
+        w2_env, base = w2_server
+        pid, folder = _mk_w2_project(w2_env, "FlowPaste")
+        src_sid, doc_rel = flows.research_session_with_doc(pid, folder)
+        new_sid = None
+        try:
+            with sync_playwright() as p:
+                b, pg, errors = _browser_page(p)
+                new_sid = flows.flow_pending_paste_flush(pg, base, pid,
+                                                         doc_rel)
+                assert not errors, f"JS console errors: {errors}"
+                b.close()
+            # backend truth: the planning session links to its research source
+            plan = [r for r in reg.list_sessions(project_id=pid)
+                    if r.get("lane") in ("plan", "planning")]
+            assert any(r.get("parent_session_id") == src_sid for r in plan)
+        finally:
+            for r in reg.list_sessions(project_id=pid):
+                flows.kill_quietly(r["session_id"])
+
+    def test_flow_drag_to_group(self, w2_server):
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        w2_env, base = w2_server
+        pid, folder = _mk_w2_project(w2_env, "FlowDrag", git=False)
+        with sync_playwright() as p:
+            b, pg, _errors = _browser_page(p)
+            flows.flow_drag_to_group(pg, base, pid, group="Research")
+            b.close()
+        import rnd_registry as rnd
+        assert rnd.get_project(pid)["group"] == "Research"
+        assert Path(rnd.get_project(pid)["folder_path"]).resolve() == \
+            folder.resolve()
+
+    @_needs_git
+    def test_flow_maximize_restore(self, w2_server):
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        w2_env, base = w2_server
+        pid, _ = _mk_w2_project(w2_env, "FlowMax")
+        rec = flows.start_live_session(pid, "research")
+        sid = rec["session_id"]
+        try:
+            with sync_playwright() as p:
+                b, pg, errors = _browser_page(
+                    p, viewport={"width": 1280, "height": 900})
+                pg.on("dialog", lambda d: d.accept())
+                flows.flow_maximize_restore(pg, base, pid, sid)
+                assert not errors, f"JS console errors: {errors}"
+                b.close()
+        finally:
+            flows.kill_quietly(sid)
+
+    @_needs_git
+    def test_flow_dock_click(self, w2_server):
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        from tests import rearch_flows as flows
+        w2_env, base = w2_server
+        pid, _ = _mk_w2_project(w2_env, "FlowDock")
+        rec = flows.start_live_session(pid, "research", effort_managed=True)
+        sid = rec["session_id"]
+        try:
+            with sync_playwright() as p:
+                b, pg, errors = _browser_page(p)
+                flows.flow_dock_click(pg, base, pid, sid)
+                assert not errors, f"JS console errors: {errors}"
+                b.close()
+        finally:
+            flows.kill_quietly(sid)
+
+    def test_stale_tab_renders_reload_banner(self, w2_server):
+        """The W2 acceptance GWT, end to end in a real browser: a tab whose
+        ANCHOR_BOOT build id is stale issues a _postJson → the server answers
+        the structured 409 → the client renders the 'reload required' banner
+        instead of failing opaquely."""
+        pytest.importorskip("playwright.sync_api")
+        from playwright.sync_api import sync_playwright
+        w2_env, base = w2_server
+        pid, _ = _mk_w2_project(w2_env, "FlowStale", git=False)
+        with sync_playwright() as p:
+            b = p.chromium.launch()
+            pg = b.new_page()
+            statuses = []
+            pg.on("response",
+                  lambda r: statuses.append(r.status)
+                  if "/api/rnd/set_notes" in r.url else None)
+            pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            # the page booted with the CURRENT build id
+            boot_bid = pg.evaluate(
+                "() => window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id")
+            assert boot_bid == w2_env["gui"].BUILD_ID
+            # simulate the stale tab: it declares a pre-deploy build id
+            pg.evaluate("() => { window.ANCHOR_BOOT.build_id = 'stale-tab'; }")
+            pg.evaluate(
+                "(pid) => { _postJson('/api/rnd/set_notes',"
+                " {project_id: pid, notes: 'w2'}); }", pid)
+            pg.wait_for_selector("#anchorReloadBanner", timeout=6000)
+            banner = pg.eval_on_selector("#anchorReloadBanner",
+                                         "e => e.textContent")
+            assert "updated" in banner and "Reload" in banner
+            assert 409 in statuses, "the mutating POST did not answer 409"
+            b.close()

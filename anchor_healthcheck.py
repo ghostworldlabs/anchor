@@ -444,7 +444,12 @@ def _post(base: str, path: str, payload: dict, timeout: float = 5.0,
     if token is _UNSET:
         token = _paths.expected_token()
     if token is not None:
-        headers["X-Anchor-Token"] = token
+        # rearch-2026-07 W2: the healthcheck is the canonical NON-BROWSER
+        # consumer — it presents the token via the standard Authorization
+        # header (Bearer), proving the W2 consumer token path on every
+        # nightly run. (Browser clients keep their legacy header/query
+        # token senders; the server accepts all three.)
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         base + path,
         data=json.dumps(payload).encode(),

@@ -90,9 +90,15 @@ Write-Host ("[ok] anchor is listening on {0} (PID {1})." -f $Port, ((Get-PortOwn
 
 # 4. Verify the new code is serving
 Write-Host "`n==> 4/4 Verifying new code is live" -ForegroundColor Cyan
+# rearch-2026-07 W2 consumer token path: /api/rnd/tail is in the to-be-gated
+# data-plane batch. When ANCHOR_TOKEN is set in this shell's environment,
+# present it via the standard Authorization header so this probe keeps working
+# after the auth flip (W8/W9). Absent env -> no header (local back-compat).
+$AuthHeaders = @{}
+if ($env:ANCHOR_TOKEN) { $AuthHeaders['Authorization'] = "Bearer $($env:ANCHOR_TOKEN)" }
 function Get-TailCode {
   try {
-    $r = Invoke-WebRequest "$Base/api/rnd/tail" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+    $r = Invoke-WebRequest "$Base/api/rnd/tail" -Headers $AuthHeaders -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
     return [int]$r.StatusCode
   } catch [System.Net.WebException] {
     if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
@@ -112,7 +118,7 @@ else { Write-Host "[FAIL] /api/rnd/tail unreachable (code $code)." -ForegroundCo
 
 $uiOk = $false
 try {
-  $h = (Invoke-WebRequest "$Base/" -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop).Content
+  $h = (Invoke-WebRequest "$Base/" -Headers $AuthHeaders -UseBasicParsing -TimeoutSec 6 -ErrorAction Stop).Content
   $marker1 = "showView('rnd')"
   $uiOk = $h.Contains($marker1) -and $h.Contains('New Project')
   if ($uiOk) { Write-Host "[ok] Dashboard has the RnD tab and New Project button." -ForegroundColor Green }
