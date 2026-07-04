@@ -2838,3 +2838,401 @@ class TestW7StranglerDispatch:
         src = ANCHOR_GUI.read_text(encoding="utf-8")
         assert 'self._strangler_dispatch("GET"' in src
         assert 'self._strangler_dispatch("POST"' in src
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# W8 — Route Migration Completion + Warn-Mode Auth Soak
+# ──────────────────────────────────────────────────────────────────────────
+
+import auth_warn as aw
+
+AUTH_WARN_SOAK_DOC = ARTIFACT_DIR / "AUTH-WARN-SOAK.md"
+
+
+class TestW8ImportShadowZero:
+    """The os/datetime in-method import-shadowing class is structurally killed."""
+
+    def test_anchor_gui_has_zero_shadowing_imports(self):
+        vios = route_import_scan.scan_file(str(ANCHOR_GUI))
+        assert vios == [], (
+            "W8 drives the in-method import-shadowing count to ZERO (handlers "
+            f"use the module-level os/datetime): {[(v.name, v.lineno) for v in vios]}")
+
+    def test_scan_attributes_import_to_innermost_function(self):
+        # The W7 open finding: a nested helper's import must be reported against
+        # the helper, never its enclosing function.
+        src = textwrap.dedent('''
+            import os
+
+            def outer():
+                def inner():
+                    import os              # shadows module os, lives in inner
+                    return os
+                return inner
+        ''')
+        vios = route_import_scan.scan_shadowing_imports(src, "nested")
+        assert len(vios) == 1
+        assert vios[0].name == "os"
+        assert vios[0].scope == "inner", (
+            "nested import must attribute to the innermost function scope")
+
+    def test_scan_counts_each_import_once(self):
+        src = textwrap.dedent('''
+            import os
+            from datetime import datetime
+
+            def a():
+                import os
+                def b():
+                    from datetime import datetime
+                    return datetime
+                return os, b
+        ''')
+        vios = route_import_scan.scan_shadowing_imports(src, "counts")
+        flagged = sorted((v.name, v.scope) for v in vios)
+        assert flagged == [("datetime", "b"), ("os", "a")]
+
+
+class TestW8MigrationBatch:
+    """A reviewed batch advances the legacy-arm counter (dir_browse → module)."""
+
+    def test_dir_browse_row_migrated(self):
+        row = rt.match("GET", "/api/rnd/dir_browse?path=x")
+        assert row.migrated and row.handler == "handle_dir_browse"
+        assert rt.migrated_count() >= 4  # version/status/routes + dir_browse
+        assert rt.legacy_arm_count() == len(rt.ROUTES) - rt.migrated_count()
+
+    def test_handler_registered_and_legacy_arm_removed(self):
+        anchor_gui = _bind_fake()
+        assert "handle_dir_browse" in anchor_gui._MIGRATED_HANDLERS
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        # The legacy elif arm is gone — the strangler serves it now.
+        assert 'startswith("/api/rnd/dir_browse")' not in src
+
+    def test_dir_browse_dispatches_through_strangler(self, monkeypatch):
+        anchor_gui = _bind_fake()
+        monkeypatch.setattr(anchor_gui._dirb, "browse",
+                            lambda p: {"cwd": "stub", "entries": []})
+        fh = _FakeHandler(token_ok=True)   # open route: no token needed
+        fh.path = "/api/rnd/dir_browse?path=x"
+        handled = fh._strangler_dispatch("GET", "/api/rnd/dir_browse", None)
+        assert handled is True
+        assert fh.sent and fh.sent[0][0] == 200
+        assert fh.sent[0][1]["ok"] is True
+        assert fh.sent[0][1]["result"]["cwd"] == "stub"
+
+
+class TestW8DataPlaneBatch:
+    """route_table's declared data-plane batch + derived per-mode posture."""
+
+    def test_batch_matches_the_open_routes_w8_tags(self):
+        # Every gated route is a real declared row and currently auth=open.
+        for method, pattern in rt.DATA_PLANE_GATED:
+            row = next((r for r in rt.ROUTES
+                        if r.method == method and r.pattern == pattern), None)
+            assert row is not None, f"gated {method} {pattern} has no row"
+            assert row.auth == rt.AUTH_OPEN, (
+                f"{pattern} is warned/enforced from open in W8/W9")
+
+    def test_is_data_plane_gated_by_match(self):
+        assert rt.is_data_plane_gated(rt.match("GET", "/artifact/abc"))
+        assert rt.is_data_plane_gated(rt.match("GET", "/api/rnd/tail?job_id=1"))
+        # projects_html is a LONGER prefix — never the gated projects row.
+        assert not rt.is_data_plane_gated(
+            rt.match("GET", "/api/rnd/projects_html"))
+        assert not rt.is_data_plane_gated(rt.match("GET", "/api/rnd/previews"))
+        assert not rt.is_data_plane_gated(None)
+
+    def test_effective_auth_flips_only_under_enforce(self):
+        row = rt.match("GET", "/api/rnd/projects")
+        assert rt.effective_auth(row, "open") == rt.AUTH_OPEN
+        assert rt.effective_auth(row, "warn") == rt.AUTH_OPEN
+        assert rt.effective_auth(row, "enforce") == rt.AUTH_TOKEN
+        # A non-gated open row never flips.
+        prev = rt.match("GET", "/api/rnd/previews")
+        assert rt.effective_auth(prev, "enforce") == rt.AUTH_OPEN
+
+    def test_walk_expectations_skip_upgrade_and_reflect_policy(self):
+        exps = list(rt.walk_expectations(token_configured=True, auth_mode="open"))
+        # No upgrade rows are walked.
+        assert all(e["kind"] != rt.KIND_UPGRADE for e in exps)
+        # term_ws (upgrade) is absent; term_stream2 (stream) IS walked but is not
+        # tokenless-asserted (socket-holding transport; ambiguous bare probe).
+        assert not any(e["pattern"] == "/api/rnd/term_ws" for e in exps)
+        stream = next(e for e in exps if e["pattern"] == "/api/rnd/term_stream2")
+        assert stream["tokenless_expect"] is None
+        assert stream["check_authed"] is False  # streams skip the authed probe
+        # A STANDARD token route IS tokenless-asserted (401).
+        routes_row = next(e for e in exps if e["pattern"] == "/api/routes")
+        assert routes_row["tokenless_expect"] == "401"
+        # An open route expects a served (non-401) tokenless request.
+        home = next(e for e in exps if e["pattern"] == "/")
+        assert home["tokenless_expect"] == "not_401"
+        # A gated data-plane row under open mode still serves tokenless.
+        proj = next(e for e in exps if e["pattern"] == "/api/rnd/projects")
+        assert proj["tokenless_expect"] == "not_401"
+
+    def test_walk_expectations_enforce_flips_data_plane(self):
+        exps = {e["pattern"]: e for e in
+                rt.walk_expectations(token_configured=True, auth_mode="enforce")}
+        assert exps["/api/rnd/projects"]["tokenless_expect"] == "401"
+        assert exps["/artifact/"]["tokenless_expect"] == "401"
+
+    def test_walk_expectations_no_token_skips_token_rows(self):
+        exps = {e["pattern"]: e for e in
+                rt.walk_expectations(token_configured=False, auth_mode="open")}
+        # A token route can't be asserted when auth is disabled → skipped.
+        assert exps["/api/routes"]["tokenless_expect"] is None
+        assert exps["/"]["tokenless_expect"] == "not_401"
+
+
+class TestW8AuthWarnLog:
+    """The would-401 soak recorder + review harness (no secret ever logged)."""
+
+    def test_record_and_read_roundtrip(self, tmp_path):
+        log = tmp_path / "aw.log"
+        aw.record_would_401("GET", "/artifact/x?token=SECRET", remote="10.0.0.1",
+                            has_token=True, user_agent="ua", referer="ref",
+                            mode="warn", ts=1.0, log_path=str(log))
+        entries = aw.read_entries(str(log))
+        assert len(entries) == 1
+        e = entries[0]
+        assert e["path"] == "/artifact/x"          # query (the token!) stripped
+        assert "SECRET" not in json.dumps(e)        # never logged
+        assert e["has_token"] is True and e["mode"] == "warn"
+
+    def test_summarize_counts_by_path(self, tmp_path):
+        log = tmp_path / "aw.log"
+        for p in ("/report/a", "/report/b", "/api/rnd/jobs"):
+            aw.record_would_401("GET", p, ts=1.0, log_path=str(log))
+        s = aw.summarize(str(log))
+        assert s["total"] == 3
+        assert s["by_path"]["/report/a"] == 1
+        assert set(s["paths"]) == {"/report/a", "/report/b", "/api/rnd/jobs"}
+        assert s["tokenless"] == 3
+
+    def test_review_ok_when_all_paths_known(self, tmp_path):
+        log = tmp_path / "aw.log"
+        known = [p for _, p in rt.DATA_PLANE_GATED]
+        aw.record_would_401("GET", "/artifact/x", ts=1.0, log_path=str(log))
+        aw.record_would_401("GET", "/api/rnd/jobs", ts=1.0, log_path=str(log))
+        verdict = aw.review_against_consumers(known, log_path=str(log))
+        assert verdict["ok"] is True and verdict["unexplained_count"] == 0
+        assert verdict["explained"] == 2
+
+    def test_review_holds_flip_on_unexplained(self, tmp_path):
+        log = tmp_path / "aw.log"
+        known = [p for _, p in rt.DATA_PLANE_GATED]
+        aw.record_would_401("GET", "/artifact/x", ts=1.0, log_path=str(log))
+        aw.record_would_401("GET", "/some/rogue/scanner", ts=1.0,
+                            log_path=str(log))
+        verdict = aw.review_against_consumers(known, log_path=str(log))
+        assert verdict["ok"] is False
+        assert "/some/rogue/scanner" in verdict["unexplained_paths"]
+        assert verdict["unexplained_count"] == 1
+
+    def test_missing_log_is_empty_pass(self, tmp_path):
+        log = tmp_path / "nope.log"
+        assert aw.read_entries(str(log)) == []
+        assert aw.review_against_consumers(["/x"], log_path=str(log))["ok"]
+
+
+class _GateFake:
+    """Minimal handler bound to the REAL data-plane-gate methods."""
+
+    def __init__(self, path, token_ok, headers=None, remote="127.0.0.1"):
+        self.path = path
+        self._ok = token_ok
+        self.headers = headers or {}
+        self.client_address = (remote, 5555)
+        self.sent = []
+
+    def _term_token_ok(self):
+        return self._ok
+
+    def _send_json(self, data, code=200):
+        self.sent.append((code, data))
+
+
+def _bind_gate():
+    import anchor_gui
+    for m in ("_data_plane_gate", "_auth_mode", "_presented_token"):
+        setattr(_GateFake, m, getattr(anchor_gui.AnchorHandler, m))
+    return anchor_gui
+
+
+class TestW8DataPlaneGate:
+    """The server overlay: open=no-op, warn=log-only, enforce=401."""
+
+    def _logpath(self, tmp_path, monkeypatch):
+        log = tmp_path / "aw.log"
+        monkeypatch.setenv("ANCHOR_AUTH_WARN_LOG", str(log))
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        return log
+
+    def test_open_mode_is_a_noop(self, tmp_path, monkeypatch):
+        _bind_gate()
+        log = self._logpath(tmp_path, monkeypatch)
+        monkeypatch.delenv("ANCHOR_AUTH_MODE", raising=False)
+        monkeypatch.delenv("ANCHOR_AUTH_WARN", raising=False)
+        fh = _GateFake("/artifact/x", token_ok=False)
+        assert fh._data_plane_gate("GET", "/artifact/x") is False
+        assert fh.sent == []
+        assert aw.read_entries(str(log)) == []
+
+    def test_warn_mode_logs_but_serves(self, tmp_path, monkeypatch):
+        _bind_gate()
+        log = self._logpath(tmp_path, monkeypatch)
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "warn")
+        fh = _GateFake("/report/abc?token=wrong", token_ok=False,
+                       headers={"User-Agent": "curl", "Referer": "r"})
+        handled = fh._data_plane_gate("GET", "/report/abc")
+        assert handled is False           # log-only: still served
+        assert fh.sent == []
+        entries = aw.read_entries(str(log))
+        assert len(entries) == 1
+        assert entries[0]["path"] == "/report/abc"
+        assert entries[0]["has_token"] is True   # presented a (wrong) token
+        assert entries[0]["mode"] == "warn"
+
+    def test_warn_mode_authorized_request_not_logged(self, tmp_path, monkeypatch):
+        _bind_gate()
+        log = self._logpath(tmp_path, monkeypatch)
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "warn")
+        fh = _GateFake("/artifact/x", token_ok=True)
+        assert fh._data_plane_gate("GET", "/artifact/x") is False
+        assert aw.read_entries(str(log)) == []
+
+    def test_enforce_mode_401s_tokenless(self, tmp_path, monkeypatch):
+        _bind_gate()
+        log = self._logpath(tmp_path, monkeypatch)
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "enforce")
+        fh = _GateFake("/project/p1", token_ok=False)
+        handled = fh._data_plane_gate("GET", "/project/p1")
+        assert handled is True
+        assert fh.sent and fh.sent[0][0] == 401
+        assert len(aw.read_entries(str(log))) == 1
+
+    def test_nongated_route_is_untouched(self, tmp_path, monkeypatch):
+        _bind_gate()
+        log = self._logpath(tmp_path, monkeypatch)
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "enforce")
+        fh = _GateFake("/api/rnd/previews", token_ok=False)
+        assert fh._data_plane_gate("GET", "/api/rnd/previews") is False
+        assert fh.sent == []
+        assert aw.read_entries(str(log)) == []
+
+    def test_warn_no_token_configured_records_nothing(self, tmp_path,
+                                                      monkeypatch):
+        # Auth disabled (no ANCHOR_TOKEN) → _term_token_ok True → nothing to warn.
+        _bind_gate()
+        log = tmp_path / "aw.log"
+        monkeypatch.setenv("ANCHOR_AUTH_WARN_LOG", str(log))
+        monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "warn")
+        fh = _GateFake("/artifact/x", token_ok=True)   # auth_ok(None) is True
+        assert fh._data_plane_gate("GET", "/artifact/x") is False
+        assert aw.read_entries(str(log)) == []
+
+
+class TestW8Socket401Before101:
+    """The hand-rolled RFC-6455 ordering: 401 precedes any 101/handshake byte."""
+
+    def test_unauth_ws_upgrade_401_before_handshake(self, w2_server,
+                                                    monkeypatch):
+        import socket as _socket
+        _w2_env, base = w2_server
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        host = base.split("//", 1)[1].split(":")[0]
+        port = int(base.rsplit(":", 1)[1])
+        s = _socket.create_connection((host, port), timeout=6)
+        try:
+            req = (
+                "GET /api/rnd/term_ws?session=nope HTTP/1.1\r\n"
+                f"Host: {host}:{port}\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "\r\n"
+            )
+            s.sendall(req.encode("ascii"))
+            s.settimeout(6)
+            data = b""
+            while b"\r\n\r\n" not in data and len(data) < 8192:
+                chunk = s.recv(1024)
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            s.close()
+        text = data.decode("latin-1")
+        status_line = text.split("\r\n", 1)[0]
+        assert "401" in status_line, f"expected a 401 status line, got: {text[:160]}"
+        assert "101" not in status_line
+        assert "Switching Protocols" not in text
+        assert "Sec-WebSocket-Accept" not in text
+
+
+class TestW8HealthcheckRowWalk:
+    """The healthcheck endpoint walk is rewired to iterate the declared rows."""
+
+    HC = REPO_ROOT / "anchor_healthcheck.py"
+
+    def test_check_defined_and_wired(self):
+        src = self.HC.read_text(encoding="utf-8")
+        assert "def check_route_table_walk(" in src
+        assert "check_route_table_walk(report, server_proc)" in src
+        # It iterates the declared rows and skips upgrade (via walk_expectations).
+        assert "walk_expectations" in src
+
+    def test_walk_plan_covers_every_nonupgrade_row(self):
+        exps = list(rt.walk_expectations(token_configured=True, auth_mode="open"))
+        nonupgrade = [r for r in rt.ROUTES if r.kind != rt.KIND_UPGRADE]
+        assert len(exps) == len(nonupgrade)
+
+
+class TestW8SoakArtifactAndSequencing:
+    """The soak runbook + the honored auth-flip sequencing rule."""
+
+    def test_soak_doc_is_checked_in_and_names_the_batch(self):
+        assert AUTH_WARN_SOAK_DOC.exists(), \
+            "the W8 warn-soak runbook is a checked-in gate artifact"
+        md = AUTH_WARN_SOAK_DOC.read_text(encoding="utf-8")
+        for pattern in ("/artifact/", "/report/", "/summary/", "/project/",
+                        "/api/rnd/projects", "/api/rnd/tail", "/api/rnd/jobs"):
+            assert pattern in md, f"soak doc missing gated route {pattern}"
+
+    def test_soak_doc_states_the_review_acceptance_rule(self):
+        md = AUTH_WARN_SOAK_DOC.read_text(encoding="utf-8")
+        assert "review_against_consumers" in md
+        assert "CONSUMER-INVENTORY.md" in md
+        assert "HOLDS the flip" in md
+
+    def test_soak_doc_honors_the_sequencing_rule(self):
+        md = AUTH_WARN_SOAK_DOC.read_text(encoding="utf-8")
+        assert "NEVER ships in the same deploy" in md
+        assert md.index("warn") < md.index("enforce")
+        assert "never a code revert" in md
+        assert "ANCHOR_AUTH_MODE" in md
+
+    def test_process_rails_sequencing_rule_still_holds(self):
+        # W8 does not weaken the W3 codified sequencing rule.
+        md = (ARTIFACT_DIR / "PROCESS-RAILS.md").read_text(encoding="utf-8")
+        assert "Auth-flip sequencing rule" in md
+
+
+class TestW8PostMiddlewareConsultsTable:
+    """The do_POST token middleware defers to the declared route-table policy."""
+
+    def test_source_consults_route_table_for_post_auth(self):
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        assert '_routes.match("POST"' in src
+        assert "_post_open" in src
+
+    def test_no_post_route_is_open_today(self):
+        # The default-deny invariant: every declared POST row is token-gated.
+        for r in rt.ROUTES:
+            if r.method == "POST":
+                assert r.auth == rt.AUTH_TOKEN, (
+                    f"POST {r.pattern} is unexpectedly not token-gated")

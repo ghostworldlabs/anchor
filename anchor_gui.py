@@ -29,6 +29,11 @@ import paths as _paths
 # Pure data + pure functions (stdlib only); the migrated handler *functions* live
 # in this module and are looked up by name via _MIGRATED_HANDLERS below.
 import route_table as _routes
+# Per-pillar off-switch flags (rearch W3) + the ANCHOR_AUTH_WARN log-only soak
+# recorder (rearch W8). The auth-mode flag governs the data-plane gate below:
+# open (today) → serve; warn → log a would-401 but still serve; enforce (W9) → 401.
+import pillar_flags as _pillar_flags
+import auth_warn as _auth_warn
 
 # Process-wide write lock: held around every markdown/JSON mutation so two
 # concurrent mutating requests (ThreadingHTTPServer) cannot lose an update.
@@ -14400,6 +14405,19 @@ def handle_status(handler, path, body):
     })
 
 
+def handle_dir_browse(handler, path, body):
+    """GET /api/rnd/dir_browse — read-only directory browser for the "select
+    existing" project UI (rearch W8 migration batch → module-level handler).
+
+    Reads the ``?path=`` query off ``handler.path`` (the strangler passes the
+    query-stripped path as ``path``). Open by policy (declared in the reviewed
+    OPEN_ROUTES allowlist), so no token gate applies.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    path_arg = q.get("path", [None])[0]
+    handler._send_json({"ok": True, "result": _dirb.browse(path_arg)})
+
+
 def handle_routes(handler, path, body):
     """GET /api/routes — dump the live declarative route table (token-authed).
 
@@ -14422,6 +14440,7 @@ _MIGRATED_HANDLERS = {
     "handle_version": handle_version,
     "handle_status": handle_status,
     "handle_routes": handle_routes,
+    "handle_dir_browse": handle_dir_browse,
 }
 
 
@@ -14690,6 +14709,82 @@ class AnchorHandler(BaseHTTPRequestHandler):
         fn(self, path, body)
         return True
 
+    # ── Data-plane auth-mode gate (rearch W8 warn / W9 enforce) ──────────────
+    def _auth_mode(self):
+        """The current ``auth`` pillar flag: ``open`` | ``warn`` | ``enforce``.
+
+        Resolved from the environment each call (``ANCHOR_AUTH_MODE`` / the
+        ``ANCHOR_AUTH_WARN`` alias). Defensive: an unreadable/invalid config
+        falls back to ``open`` (today's live behavior) rather than crashing a
+        request — the loud invalid-value failure is the healthcheck's job
+        (``check_pillar_state``), not the hot request path's.
+        """
+        try:
+            return _pillar_flags.current_flags()[_pillar_flags.FLAG_AUTH]
+        except Exception:
+            return _pillar_flags.FLAG_DEFAULTS[_pillar_flags.FLAG_AUTH]
+
+    def _presented_token(self):
+        """Any token the request carried (``?token=`` / Authorization / WS proto),
+        or ``None`` — used only to record WHETHER a token was presented, never its
+        value."""
+        try:
+            q = parse_qs(urlparse(self.path).query)
+            provided = q.get("token", [None])[0]
+            if provided is None:
+                provided = _paths.token_from_authorization(
+                    self.headers.get("Authorization"))
+            if provided is None:
+                provided = self.headers.get("Sec-WebSocket-Protocol")
+            return provided
+        except Exception:
+            return None
+
+    def _data_plane_gate(self, method, path):
+        """Apply the W8/W9 auth-mode overlay to the reviewed data-plane batch.
+
+        Returns True iff the request was HANDLED here (a 401 was sent) and the
+        caller must ``return``. Behavior by mode for a route in
+        ``route_table.DATA_PLANE_GATED``:
+
+          * ``open`` (today)  → False (serve; no overlay).
+          * ``warn`` (W8)     → for a TOKENLESS request, append a would-401 entry
+            to the soak log, then return False (log-only — STILL served).
+          * ``enforce`` (W9)  → for a TOKENLESS request, send 401 + return True.
+
+        An authorized request (valid token) is always served (False) in every
+        mode. A non-gated / unmatched route is a no-op (False).
+        """
+        route = _routes.match(method, path)
+        if not _routes.is_data_plane_gated(route):
+            return False
+        mode = self._auth_mode()
+        if mode == _auth_warn.MODE_OPEN:
+            return False
+        if self._term_token_ok():
+            return False
+        # Tokenless request against a gated route while warned/enforced.
+        try:
+            remote = None
+            addr = getattr(self, "client_address", None)
+            if addr:
+                remote = addr[0]
+            _auth_warn.record_would_401(
+                method, path,
+                remote=remote,
+                has_token=self._presented_token() is not None,
+                user_agent=self.headers.get("User-Agent"),
+                referer=self.headers.get("Referer"),
+                mode=mode,
+            )
+        except Exception:
+            # Logging must never break the request during the soak.
+            pass
+        if mode == _auth_warn.MODE_ENFORCE:
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return True
+        return False  # warn: observe-only, fall through to the legacy handler
+
     def _serve_term_stream2(self):
         """SSE-out fallback for a ConPTY session (Wave 3).
 
@@ -14954,6 +15049,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # (with the row's auth applied first). Anything unmatched or not-yet-
             # migrated falls through to the legacy if/elif chain below unchanged.
             if self._strangler_dispatch("GET", _path_only, None):
+                return
+            # Data-plane auth-mode overlay (rearch W8 warn / W9 enforce). In
+            # 'open' mode this is a no-op; in 'warn' it logs would-401 consumers
+            # for the soak but still serves; in 'enforce' a tokenless request to
+            # the gated batch is 401'd here before the legacy handler runs.
+            if self._data_plane_gate("GET", _path_only):
                 return
             if _path_only == "/" or _path_only == "/dashboard":
                 # Serve the dashboard for "/" REGARDLESS of query string so the
@@ -15226,7 +15327,6 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 files_list = []
 
                 if recursive_param:
-                    import os
                     for root, dirs, files in os.walk(target_path):
                         # Filter ignored directories in-place to prevent scanning them
                         dirs_to_keep = []
@@ -15734,12 +15834,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 import zombie_hunter
                 import pty_manager
                 import subprocess
-                # NOTE: do NOT `import json`/`import sys` here — they are
-                # module-global (top of file). A function-local import makes the
-                # name local to the ENTIRE do_GET method, so an earlier branch
-                # (e.g. /api/version) referencing `json` before this line raises
-                # UnboundLocalError -> a 500 on every page load. (followup W4)
-                from datetime import datetime
+                # NOTE: do NOT import json/sys/os/datetime function-locally here —
+                # they are module-global (top of file). A function-local import
+                # makes the name local to the ENTIRE do_GET method, so an earlier
+                # branch referencing it before this line raises UnboundLocalError
+                # -> a 500 on every page load. (rearch W8: the shadowing class is
+                # structurally eliminated — route_import_scan proves it stays 0.)
 
                                 # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
                 report_path = zombie_hunter._last_report_path()
@@ -16661,12 +16761,8 @@ function startZombieTerminal(btn) {
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
                                  "groups": _rnd.group_by_folder()})
-            elif self.path.startswith("/api/rnd/dir_browse"):
-                # Read-only directory browser for the "select existing" UI.
-                q = parse_qs(urlparse(self.path).query)
-                path_arg = q.get("path", [None])[0]
-                self._send_json({"ok": True,
-                                 "result": _dirb.browse(path_arg)})
+            # /api/rnd/dir_browse migrated to route_table (handle_dir_browse,
+            # W8 migration batch) — served by the strangler above.
             elif self.path.startswith("/api/rnd/tail"):
                 # Read-only incremental log tail for the project-window console
                 # drawer. Returns {lines,next,status,pending_prompt}. This is a
@@ -16781,7 +16877,17 @@ function startZombieTerminal(btn) {
                 self.headers.get("Authorization"))
         if provided is None and isinstance(body, dict):
             provided = body.get("token")
-        if not _paths.auth_ok(provided):
+        # Default-deny by construction, driven by the declared route table (W7):
+        # a POST is gated UNLESS its row explicitly declares ``auth == open``. No
+        # POST is open today, so behavior is unchanged — but the middleware now
+        # DEFERS to the reviewed table (+ OPEN_ROUTES) instead of blanket-gating,
+        # so an undeclared POST is still default-denied while a future reviewed
+        # open POST would be honored (rearch W8: post-middleware consults the
+        # route-table auth policy).
+        _post_route = _routes.match("POST", urlparse(self.path).path)
+        _post_open = (_post_route is not None
+                      and _post_route.auth == _routes.AUTH_OPEN)
+        if not _post_open and not _paths.auth_ok(provided):
             self._send_json({"ok": False, "error": "unauthorized"}, 401)
             return
 
@@ -16818,8 +16924,7 @@ function startZombieTerminal(btn) {
             
             import base64
             import tempfile
-            import os
-            
+
             try:
                 for file_info in files:
                     rel_path_str = file_info.get("path", "")
@@ -17666,7 +17771,6 @@ function startZombieTerminal(btn) {
             if report_data:
                 swept_time_str = "unknown"
                 try:
-                    from datetime import datetime
                     swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
                     pass

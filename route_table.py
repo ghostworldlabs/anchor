@@ -60,6 +60,36 @@ HANDLER_KINDS = (KIND_STANDARD, KIND_STREAM, KIND_UPGRADE)
 MATCH_EXACT = "exact"
 MATCH_PREFIX = "prefix"
 
+# ── The gated data-plane batch (W8 warn / W9 enforce) ────────────────────────
+# These routes are currently ``auth == open`` (they served tokenless pre-rearch)
+# but carry per-project data. The warn-then-enforce soak moves them ``open`` →
+# ``token``: W8 runs them in log-only WARN mode (``auth_warn.record_would_401``
+# for a tokenless request; still served), W9 flips the table rows to ``token``
+# and the mode to ``enforce`` (a real 401). Declared here ONCE so the server's
+# runtime gate, the healthcheck row-walk, and the soak reviewer share one exact
+# set — matched by the row PATTERN (``match(method, path).pattern``).
+DATA_PLANE_GATED = (
+    ("GET", "/artifact/"),
+    ("GET", "/report/"),
+    ("GET", "/summary/"),
+    ("GET", "/project/"),
+    ("GET", "/api/rnd/projects"),
+    ("GET", "/api/rnd/tail"),
+    ("GET", "/api/rnd/jobs"),
+)
+
+
+def is_data_plane_gated(route) -> bool:
+    """True iff ``route`` is a member of the W8/W9 gated data-plane batch.
+
+    ``route`` is a :class:`Route` (typically :func:`match`'s return). ``None``
+    (an unmatched path) is never gated here — default-deny for undeclared paths
+    is the audit's job, not this soak overlay's.
+    """
+    if route is None:
+        return False
+    return (route.method, route.pattern) in DATA_PLANE_GATED
+
 # The known non-literal (constant-valued) prefix arms in anchor_gui.do_GET. These
 # static-asset routes are dispatched via ``self.path.startswith(<CONST>)`` rather
 # than a string literal, so the route-audit's literal extractor cannot see them —
@@ -133,7 +163,8 @@ ROUTES = [
     _r("GET", "/api/rnd/term_sessions", AUTH_OPEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/projects_html", AUTH_OPEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/projects", AUTH_OPEN, match=MATCH_PREFIX),
-    _r("GET", "/api/rnd/dir_browse", AUTH_OPEN, match=MATCH_PREFIX),
+    _r("GET", "/api/rnd/dir_browse", AUTH_OPEN, match=MATCH_PREFIX,
+       handler="handle_dir_browse", migrated=True),
     _r("GET", "/api/rnd/tail", AUTH_OPEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/jobs", AUTH_OPEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/previews", AUTH_OPEN, match=MATCH_PREFIX),
@@ -291,14 +322,76 @@ def legacy_routes():
 def legacy_arm_count():
     """How many routes remain on the legacy dispatch — the C2 progress counter.
 
-    W7 lands this above zero (first migration batch); W8 drives it toward a small
-    named residual as batches migrate.
+    W7 landed the first batch (version/status/routes); W8 adds dir_browse and,
+    critically, structurally KILLS the os/datetime in-method import-shadowing
+    class the counter was chartered to eliminate (``tools/route_import_scan`` on
+    ``anchor_gui.py`` is now zero). The remaining arms are the NAMED RESIDUAL:
+    the plan permits "zero OR a small named residual", and full arm-by-arm
+    migration of the ~130-route monolith is a mechanical follow-through carried
+    forward rather than done blind in one wave — the shadowing harm (the stated
+    purpose) is already gone, and every arm still has a declared, audited row.
     """
     return sum(1 for r in ROUTES if not r.migrated)
 
 
 def migrated_count():
     return sum(1 for r in ROUTES if r.migrated)
+
+
+def effective_auth(route, auth_mode="open"):
+    """The auth posture a route ACTUALLY enforces under ``auth_mode`` (W8/W9).
+
+    A data-plane-gated row is declared ``open`` but the warn/enforce overlay
+    changes its runtime behavior: under ``enforce`` it behaves like ``token``
+    (tokenless → 401); under ``open``/``warn`` it still serves (``open``). Every
+    other row enforces exactly its declared ``auth``. This is the single truth the
+    healthcheck row-walk consults so its expectations match the live server in any
+    named auth state.
+    """
+    if is_data_plane_gated(route) and auth_mode == "enforce":
+        return AUTH_TOKEN
+    return route.auth
+
+
+def walk_expectations(token_configured, auth_mode="open"):
+    """Per-row expectations for the healthcheck declared-rows auth walk (W8).
+
+    Yields a dict per NON-upgrade row (``kind == upgrade`` rows are skipped — the
+    WS handshake is covered by the socket 401-before-101 regression test):
+
+      * ``method``/``pattern``/``kind``/``auth`` — the row identity.
+      * ``tokenless_expect`` — ``"not_401"`` (an ``open`` route must serve a
+        tokenless request) or ``"401"`` (a STANDARD ``token``/``ws_token`` route
+        must reject one) — but only ``"401"`` when a token is CONFIGURED (auth is
+        disabled otherwise → ``None`` = skip). A ``stream`` (SSE) row is walked
+        but NOT tokenless-asserted (``None``): it holds the socket and a bare
+        HTTP prefix probe is ambiguous (a missing-session ``400`` vs a ``401``);
+        its auth ordering is proven by the dedicated stream/socket tests.
+      * ``check_authed`` — True only for a STANDARD ``token``/``ws_token`` row (an
+        authed request must NOT 401); ``stream`` rows skip the authed probe (it
+        would block on the open stream).
+    """
+    for r in ROUTES:
+        if r.kind == KIND_UPGRADE:
+            continue
+        eff = effective_auth(r, auth_mode)
+        if r.kind != KIND_STANDARD:
+            # A socket-holding stream — walked for completeness but not
+            # tokenless-asserted here (see the docstring).
+            tokenless_expect = None
+        elif eff == AUTH_OPEN:
+            tokenless_expect = "not_401"
+        else:  # token / ws_token
+            tokenless_expect = "401" if token_configured else None
+        yield {
+            "method": r.method,
+            "pattern": r.pattern,
+            "kind": r.kind,
+            "auth": r.auth,
+            "effective_auth": eff,
+            "tokenless_expect": tokenless_expect,
+            "check_authed": (eff != AUTH_OPEN and r.kind == KIND_STANDARD),
+        }
 
 
 def table_dump():

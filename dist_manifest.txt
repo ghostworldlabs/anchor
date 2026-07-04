@@ -82,6 +82,14 @@ effort_view.py
 # like git/gh — never a Python dependency.
 gandalf.py
 
+# ── Re-architecture 2026-07 runtime modules (C2 route table + auth soak) ───
+# Both stdlib-only and imported by anchor_gui.py at runtime: route_table (the
+# declarative HTTP route table + strangler dispatch substrate, W7) is pure data
+# + pure functions; auth_warn (the ANCHOR_AUTH_WARN log-only would-401 soak
+# recorder, W8) uses only json / os / time / pathlib + the paths seam.
+route_table.py
+auth_warn.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 # Gandalf the White wizard mark (white robes/staff; the Gandalf tab icon + served

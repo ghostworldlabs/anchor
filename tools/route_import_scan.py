@@ -76,25 +76,44 @@ def scan_shadowing_imports(source_text: str, source_name: str = "<source>"):
     module_names = _module_level_names(tree)
     violations = []
 
-    # Each import node is attributed to the OUTERMOST enclosing function (ast.walk
-    # is breadth-first from the module, so an outer ``def`` is visited before a
-    # nested one). ``seen`` dedupes an import node reached through both an outer
-    # and an inner function walk — so a nested-function import is counted ONCE.
-    seen = set()
+    # Attribute each in-function import to its INNERMOST enclosing function (the
+    # scope where the name is actually rebound), not the outermost — a nested
+    # helper's ``import os`` is reported against the helper, never its parent.
+    # We record each import node exactly ONCE by pairing it with the nearest
+    # ``def``/``async def`` on its ancestor chain (``None`` == module scope, which
+    # is a legitimate top-level import, not a violation).
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for child in ast.walk(node):
-                if not isinstance(child, (ast.Import, ast.ImportFrom)):
-                    continue
-                if id(child) in seen:
-                    continue
-                seen.add(id(child))
-                for local_name, kind in _bound_local_names(child):
-                    if local_name in module_names:
-                        violations.append(Violation(
-                            name=local_name, lineno=child.lineno,
-                            kind=kind, scope=node.name))
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        # The imports whose NEAREST enclosing function is exactly ``node``: walk
+        # this function's body but stop descending into a nested function (that
+        # import belongs to the nested function's own pass over the tree).
+        for child in _imports_directly_in(node):
+            for local_name, kind in _bound_local_names(child):
+                if local_name in module_names:
+                    violations.append(Violation(
+                        name=local_name, lineno=child.lineno,
+                        kind=kind, scope=node.name))
     return violations
+
+
+def _imports_directly_in(func):
+    """Yield the Import/ImportFrom nodes whose innermost enclosing scope is ``func``.
+
+    Descends ``func``'s body but does NOT cross into a nested ``def``/``async
+    def``/``lambda`` (those imports belong to the nested scope) — so each import
+    is attributed to exactly one function and counted once across the whole walk.
+    """
+    stack = list(getattr(func, "body", []))
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            # A new function scope — its imports are attributed there, not here.
+            continue
+        stack.extend(ast.iter_child_nodes(node))
 
 
 def scan_file(path: str):

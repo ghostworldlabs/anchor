@@ -453,6 +453,107 @@ def check_server_and_endpoints(report: Report):
     return proc
 
 
+# ── Check 4b: declared-route auth walk (rearch W8) ──────────────────────────
+def _status_of(req_or_url, timeout=4.0):
+    """Return the HTTP status of a request, following the HTTPError path.
+
+    A 2xx/3xx returns its code (no body read for streams — a HEAD-like probe is
+    impossible for the hand-rolled handlers, so we open then immediately close).
+    A 4xx/5xx surfaces via HTTPError and we return its code. A transport error
+    re-raises for the caller to record.
+    """
+    try:
+        with urllib.request.urlopen(req_or_url, timeout=timeout) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def check_route_table_walk(report: Report, server_proc):
+    """Walk EVERY declared route table row and assert its per-policy auth
+    behavior against the live throwaway server (rearch W8).
+
+    The declared rows (``route_table.ROUTES``) are the single source of truth;
+    this walk skips ``kind == upgrade`` (the WS handshake is covered by the
+    socket 401-before-101 regression test) and, per the row's declared/effective
+    auth policy under the current auth mode, asserts:
+
+      * ``open``  → a TOKENLESS request must NOT return 401 (it still serves).
+      * ``token``/``ws_token`` → a TOKENLESS request MUST return 401 (only
+        meaningful when a token is configured; auth-disabled rows are skipped).
+
+    Plus one representative AUTHED positive: ``GET /api/routes`` with the
+    Authorization header must not 401 — proving the token path end-to-end.
+    """
+    name = "declared-route auth walk (W8)"
+    if server_proc is None:
+        report.check(name, False, "server not running")
+        return
+    try:
+        import route_table as _rt
+        import pillar_flags as _pf
+    except Exception as e:
+        report.check(name, False, f"import failed: {type(e).__name__}: {e}")
+        return
+
+    base = f"http://127.0.0.1:{TEST_PORT}"
+    token = _paths.expected_token()
+    try:
+        auth_mode = _pf.current_flags()[_pf.FLAG_AUTH]
+    except Exception:
+        auth_mode = "open"
+
+    failures = []
+    walked = 0
+    for exp in _rt.walk_expectations(token is not None, auth_mode):
+        method, pattern = exp["method"], exp["pattern"]
+        want = exp["tokenless_expect"]
+        if want is None:
+            continue  # token route but auth disabled — nothing to assert
+        walked += 1
+        # Build a TOKENLESS request. A prefix pattern is probed at the pattern
+        # itself (auth is checked before any id/param parsing, so a bare prefix
+        # still exercises the gate). A POST sends an empty body.
+        try:
+            if method == "GET":
+                code = _status_of(base + pattern)
+            else:
+                req = urllib.request.Request(
+                    base + pattern, data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST")
+                code = _status_of(req)
+        except Exception as e:
+            failures.append(f"{method} {pattern}: transport error {e}")
+            continue
+        if want == "401" and code != 401:
+            failures.append(f"{method} {pattern}: expected 401, got {code}")
+        elif want == "not_401" and code == 401:
+            failures.append(f"{method} {pattern}: open route unexpectedly 401'd")
+
+    # Representative authed positive: the token path must be honored.
+    if token is not None:
+        try:
+            req = urllib.request.Request(
+                base + "/api/routes",
+                headers={"Authorization": f"Bearer {token}"}, method="GET")
+            code = _status_of(req)
+            walked += 1
+            if code == 401:
+                failures.append("GET /api/routes (authed): unexpected 401")
+        except Exception as e:
+            failures.append(f"GET /api/routes (authed): transport error {e}")
+
+    if failures:
+        report.check(name, False,
+                     f"{walked} rows walked; {len(failures)} failed: "
+                     + "; ".join(failures[:8]))
+    else:
+        report.check(name, True,
+                     f"{walked} declared rows honor their auth policy "
+                     f"(mode={auth_mode}, token={'set' if token else 'unset'})")
+
+
 # â”€â”€ Check 5: synthetic round-trip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _post(base: str, path: str, payload: dict, timeout: float = 5.0,
           token: "str | None" = _UNSET) -> dict:
@@ -4908,6 +5009,7 @@ def main():
             check_markdown_parses(report, mod)
 
         server_proc = check_server_and_endpoints(report)
+        check_route_table_walk(report, server_proc)
         check_synthetic_roundtrip(report, server_proc)
         check_rnd_v2_surface(report, server_proc, rnd_env)
         check_rnd_v3_surface(report, server_proc, rnd_env)
