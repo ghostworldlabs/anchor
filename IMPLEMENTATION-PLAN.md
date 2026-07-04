@@ -201,7 +201,11 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 > unchanged). Byte-parity remains the gate throughout. Optional-dependency skip
 > markers (`pytest.importorskip("playwright.sync_api")`) in W6a/W6b/W6c tests
 > follow the repo's documented dev-only-dependency convention — this amendment
-> is the required plan citation for them.
+> is the required plan citation for them. CITED CONSEQUENCE (2026-07-04): the
+> renumbering to 20 wave ordinals necessarily updates the W3 Appendix-A ledger
+> test's plan-structure assertions (`_plan_citations`: 18 → 20 ordinals,
+> citations keyed by W-label with W6a/b/c collapsing to W6) — that test edit is
+> AUTHORIZED as part of this amendment, whichever agent applies it.
 
 **Intent:** Build the extraction MECHANISM without touching rendering behavior: the slot renderer, the mechanical extractor, and the home-dashboard byte-parity harness — so W6b's actual extraction is assembly, not research (Master Plan Phase 1; Integrated 1, 9, 50).
 

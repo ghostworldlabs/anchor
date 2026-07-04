@@ -1,4 +1,4 @@
-"""W1+W2+W3+W4 gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
+"""W1+W2+W3+W4+W6a gate — re-architecture 2026-07 (frozen plan: IMPLEMENTATION-PLAN.md).
 
 **W1 — Ground-Truth Instrumentation (census · anchors · tripwire):**
 
@@ -114,8 +114,10 @@ import pillar_flags as pf
 from tools import anchors as anchors_mod
 from tools import conpty_spike as cs
 from tools import cookie_ws_spike as cw
+from tools import extract_dashboard as exd
 from tools import extract_project_window_js as pwx
 from tools import interpolation_census as census_mod
+from tools import slot_renderer as sr
 from tools import pre_restart_drain as drain_mod
 from tools import write_tripwire as wt
 from tools.anchors import AnchorError, locate_anchors
@@ -1708,19 +1710,27 @@ class TestW3AppendixALedger:
 
     def _plan_citations(self):
         text = PLAN_PATH.read_text(encoding="utf-8")
-        waves = [(int(m.group(1)), m.start())
-                 for m in re.finditer(r"^## Wave (\d+)", text, flags=re.M)]
-        assert len(waves) == 18, "the frozen plan has 18 waves"
+        # Each heading is "## Wave <ordinal> — W<label>[suffix] — …". The C1
+        # extraction epic was decomposed (human-authorized 2026-07-04) into
+        # W6a/W6b/W6c, taking the plan to 20 ordinals while the semantic
+        # W-labels stay W1–W18. The ledger cites the LABELS, so the citation
+        # map is keyed by label (W6a/b/c collapse to W6 — `W\d+` stops at the
+        # letter suffix), never the raw ordinal, which no longer equals the
+        # label past wave 5.
+        waves = [(m.group(2), m.start())  # (label token "W6", offset)
+                 for m in re.finditer(r"^## Wave (\d+) — (W\d+)",
+                                      text, flags=re.M)]
+        assert len(waves) == 20, "the frozen plan has 20 wave ordinals"
         ideas, mits = {}, {}
-        for i, (num, start) in enumerate(waves):
+        for i, (label, start) in enumerate(waves):
             end = waves[i + 1][1] if i + 1 < len(waves) else len(text)
             m = self._CITE.search(text, start, end)
-            assert m, f"wave {num} has no (Master Plan …) citation line"
+            assert m, f"{label} has no (Master Plan …) citation line"
             for n in re.findall(r"\d+", m.group(1)):
-                ideas.setdefault(int(n), set()).add(f"W{num}")
+                ideas.setdefault(int(n), set()).add(label)
             if m.group(2):
                 for n in re.findall(r"\d+", m.group(2)):
-                    mits.setdefault(int(n), set()).add(f"W{num}")
+                    mits.setdefault(int(n), set()).add(label)
         return ideas, mits
 
     def _ledger_tables(self):
@@ -2218,3 +2228,234 @@ class TestW4PlaywrightStaticMode:
             flows.kill_quietly(sid)
         assert static_hits and set(static_hits) == {200}, (
             "static mode must fetch the app JS from the /static route")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# W6a — C1 Include-Slot Substrate + Parity Harness (MECHANISM ONLY)
+# ══════════════════════════════════════════════════════════════════════════
+#
+# The census forced the C1 amendment (48 markup-emitting interpolations >
+# threshold 40): the markup fragments stay SERVER-RENDERED in helpers, the
+# static shell carries NAMED INCLUDE SLOTS (``<!--ANCHOR:SLOT:<name>-->``), and
+# the render function reduces to data + slot substitution. This wave builds the
+# MECHANISM — the slot renderer, the mechanical extractor, and the
+# home-dashboard byte-parity harness — WITHOUT modifying anchor_gui.py; W6b
+# executes the extraction the map here describes.
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 22) W6a — the include-slot renderer (loud on any slot/helper mismatch)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW6aSlotRenderer:
+    def test_assembles_slots_in_place(self):
+        shell = "<a><!--ANCHOR:SLOT:top--></a><b><!--ANCHOR:SLOT:mid--></b>"
+        out = sr.render_slots(shell, {"top": "<T/>", "mid": "<M/>"})
+        assert out == "<a><T/></a><b><M/></b>"
+
+    def test_slot_names_ordered_and_deduped(self):
+        shell = ("<!--ANCHOR:SLOT:b--><!--ANCHOR:SLOT:a-->"
+                 "<!--ANCHOR:SLOT:b-->")
+        assert sr.slot_names(shell) == ["b", "a"]
+
+    def test_repeated_slot_substituted_everywhere(self):
+        shell = "<!--ANCHOR:SLOT:x-->|<!--ANCHOR:SLOT:x-->"
+        assert sr.render_slots(shell, {"x": "Q"}) == "Q|Q"
+
+    def test_missing_helper_for_slot_raises_loudly(self):
+        shell = "<!--ANCHOR:SLOT:present--><!--ANCHOR:SLOT:absent-->"
+        with pytest.raises(sr.SlotError, match="missing"):
+            sr.render_slots(shell, {"present": "ok"})
+
+    def test_extra_helper_with_no_slot_raises_loudly(self):
+        shell = "<!--ANCHOR:SLOT:only-->"
+        with pytest.raises(sr.SlotError, match="extra"):
+            sr.render_slots(shell, {"only": "ok", "orphan": "x"})
+
+    def test_non_string_helper_output_raises(self):
+        shell = "<!--ANCHOR:SLOT:x-->"
+        with pytest.raises(sr.SlotError, match="must be str"):
+            sr.render_slots(shell, {"x": 123})
+
+    def test_mangled_marker_is_not_a_slot(self):
+        # a not-quite marker is ordinary text — never a fuzzy match
+        shell = "<!-- ANCHOR:SLOT:x -->plain"
+        assert sr.slot_names(shell) == []
+        assert sr.render_slots(shell, {}) == shell
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 23) W6a — the home-dashboard byte-parity harness (synthetic fixture)
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW6aByteParityHarness:
+    def test_deescape_collapses_doubled_braces(self):
+        assert sr.deescape_braces("a{{b}}c") == "a{b}c"
+        assert sr.deescape_braces("{{{{}}}}") == "{{}}"
+
+    def test_synthetic_slot_assembly_is_byte_identical(self):
+        """The W6a GWT: a shell with slots + a set of helper outputs assembles
+        byte-for-byte equal to the OLD f-string emission after {{/}}
+        de-escaping."""
+        # The OLD path: an f-string with doubled literal braces (CSS) and one
+        # interpolated markup slot.
+        badge = "<span class='b'>1</span>"
+        reference = f"<style>{{.b{{color:red}}}}</style><div>{badge}</div>"
+        # The NEW path: the static shell (verbatim f-string literal — braces
+        # still doubled) + a named slot; helper output inserted verbatim.
+        shell = ("<style>{{.b{{color:red}}}}</style>"
+                 "<div><!--ANCHOR:SLOT:badge--></div>")
+        res = sr.parity_check(shell, {"badge": badge}, reference)
+        assert res["identical"], res
+
+    def test_deescape_precedes_substitution_so_brace_output_survives(self):
+        """De-escaping the SHELL before substitution is the faithful order: a
+        helper output that itself contains ``}}`` (e.g. a nested JS object
+        literal) is inserted verbatim, never corrupted — post-substitution
+        de-escaping WOULD corrupt it, proving the pipeline order matters."""
+        payload = "<script>var o={a:{b:1}};</script>"   # ends in '}};'
+        reference = f"<hdr>{{x}}</hdr>{payload}"          # {{x}} → {x}
+        shell = "<hdr>{{x}}</hdr><!--ANCHOR:SLOT:p-->"
+        assert sr.parity_check(shell, {"p": payload}, reference)["identical"]
+        # the naive order (substitute, THEN de-escape the whole thing) drops a
+        # brace from the payload — the harness must NOT do this.
+        naive = sr.deescape_braces(sr.render_slots(shell, {"p": payload}))
+        assert naive != reference
+
+    def test_byte_parity_reports_first_diff_offset(self):
+        res = sr.byte_parity("hello world", "hello xorld")
+        assert res["identical"] is False
+        assert res["first_diff_offset"] == 6
+        assert "world" in res["reference_excerpt"]
+        assert "xorld" in res["candidate_excerpt"]
+
+    def test_assemble_without_deescape_matches_w4_rawstring(self):
+        # raw-string (W4) shells are already single-braced — deescape=False
+        shell = "<x>{keep}</x><!--ANCHOR:SLOT:s-->"
+        out = sr.assemble(shell, {"s": "S"}, deescape=False)
+        assert out == "<x>{keep}</x>S"
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 24) W6a — the mechanical extraction map (48/48 accounted, no remainder)
+# ──────────────────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def extraction_map():
+    return exd.build_extraction_map(path=ANCHOR_GUI)
+
+# The census markup total the amendment recorded (C1-AMENDMENT-REQUIRED.md).
+_MARKUP_48 = exd.MARKUP_AMENDMENT_COUNT
+
+
+class TestW6aExtractionMap:
+    def test_map_covers_all_48_markup_interpolations(self, extraction_map):
+        """done-when: the map accounts for all 48 census markup interpolations
+        with no unclassified remainder."""
+        m = extraction_map
+        assert m["markup_emitting_total"] == _MARKUP_48 == 48
+        assert m["accounted"] == 48
+        assert len(m["slots"]) == 48
+        assert m["unclassified"] == []
+
+    def test_accounting_matches_the_census_exactly(self, extraction_map,
+                                                    real_census):
+        """The map is DERIVED from the census — its markup accounting cannot
+        drift from the ground-truth classification."""
+        m = extraction_map
+        assert (m["markup_emitting_total"]
+                == real_census["totals"][CLASS_MARKUP])
+        for name in exd.RENDER_FUNCTIONS:
+            assert (m["by_function"][name]
+                    == real_census["functions"][name]["counts"][CLASS_MARKUP])
+        assert (m["by_function"]["generate_html"]
+                + m["by_function"]["render_project_window_html"] == 48)
+
+    def test_every_slot_maps_to_a_named_helper(self, extraction_map):
+        m = extraction_map
+        slot_ids = {s["slot"] for s in m["slots"]}
+        assert len(slot_ids) == 48, "slot names must be unique per occurrence"
+        for s in m["slots"]:
+            assert s["helper"], s
+            assert s["kind"] in (
+                exd.KIND_NAMED_VAR, exd.KIND_RENDERER, exd.KIND_INLINE)
+            # the slot token is safe for an <!--ANCHOR:SLOT:name--> comment
+            assert re.fullmatch(r"[A-Za-z0-9_.\-]+", s["slot"])
+
+    def test_helper_grouping_sums_to_48(self, extraction_map):
+        m = extraction_map
+        assert sum(h["occurrences"]
+                   for h in m["helpers"].values()) == 48
+        # repeated source symbols collapse to ONE helper with many slots
+        assert m["helpers"]["project_card"]["occurrences"] >= 2
+        assert m["helpers"]["project_card"]["kind"] == exd.KIND_RENDERER
+        assert m["helpers"]["notes_html"]["kind"] == exd.KIND_NAMED_VAR
+
+    def test_inline_literals_get_their_own_slot_as_helper(self, extraction_map):
+        for s in extraction_map["slots"]:
+            if s["kind"] == exd.KIND_INLINE:
+                assert s["helper"] == s["slot"]
+
+    def test_blobs_inventory_the_static_spans(self, extraction_map,
+                                              real_census):
+        m = extraction_map
+        assert m["blobs"]["generate_html"] == [
+            list(s) for s in real_census["blob_spans"]["generate_html"]]
+        assert m["blobs"]["generate_html"], "generate_html has extractable blobs"
+
+    def test_map_refuses_stale_anchors(self):
+        src = _synthetic_source(js_sentinel="# gone")
+        with pytest.raises(AnchorError):
+            exd.build_extraction_map(source=src)
+
+    def test_verify_map_rejects_undercount(self):
+        bad = {
+            "markup_emitting_total": 48,
+            "accounted": 47,
+            "unclassified": [],
+            "helpers": {},
+        }
+        with pytest.raises(exd.ExtractionMapError, match="does not cover"):
+            exd.verify_map(bad)
+
+    def test_verify_map_rejects_unclassified_remainder(self):
+        bad = {
+            "markup_emitting_total": 1,
+            "accounted": 1,
+            "unclassified": [{"function": "generate_html", "lineno": 1}],
+            "helpers": {},
+        }
+        with pytest.raises(exd.ExtractionMapError, match="UNCLASSIFIED"):
+            exd.verify_map(bad)
+
+
+class TestW6aMapArtifacts:
+    """The extraction map is a checked-in gate artifact refreshed by the run."""
+
+    def test_write_map_refreshes_checked_in_artifacts(self, extraction_map):
+        written = exd.write_map(extraction_map, out_dir=ARTIFACT_DIR)
+        json_path = ARTIFACT_DIR / exd.MAP_JSON_NAME
+        md_path = ARTIFACT_DIR / exd.MAP_MD_NAME
+        assert set(written) == {json_path, md_path}
+        reloaded = json.loads(json_path.read_text(encoding="utf-8"))
+        assert reloaded["accounted"] == 48
+        assert "extraction map" in md_path.read_text(encoding="utf-8").lower()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 25) W6a — mechanism-only: anchor_gui.py is NOT modified by this wave
+# ──────────────────────────────────────────────────────────────────────────
+
+class TestW6aMechanismOnly:
+    def test_building_the_map_does_not_touch_anchor_gui(self):
+        """W6a is mechanism-only: the extractor READS anchor_gui.py; the source
+        bytes are unchanged by building/writing the map."""
+        before = ANCHOR_GUI.read_bytes()
+        m = exd.build_extraction_map(path=ANCHOR_GUI)
+        exd.write_map(m, out_dir=ARTIFACT_DIR)
+        assert ANCHOR_GUI.read_bytes() == before
+
+    def test_no_include_slots_in_anchor_gui_yet(self):
+        """The include slots land in W6b — the mechanism wave adds NONE to the
+        monolith; the substrate is proven on synthetic fixtures only."""
+        assert not sr.SLOT_RE.search(ANCHOR_GUI.read_text(encoding="utf-8"))
