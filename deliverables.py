@@ -48,6 +48,7 @@ import rnd_registry as _rnd
 import job_runner as _jr
 import report_viewer as _rv
 import effort_history as _eh
+import journal as _journal
 
 # ── Deliverable types ───────────────────────────────────────────────────────
 
@@ -463,8 +464,11 @@ def pin_deliverable(folder_path, project_id: str, path: str,
         "description": description or "",
         "status": "pinned",
     }
-    return _eh.record_effort(folder_path, project_id, "deliverables", jid,
-                             extra=extra)
+    with _journal.journaled(project_id, _journal.EV_DELIVERABLE_PINNED,
+                            correlation_id=project_id, folder_path=folder_path,
+                            payload={"path": path}):
+        return _eh.record_effort(folder_path, project_id, "deliverables", jid,
+                                 extra=extra)
 
 
 def _relpath(folder_path, path: str) -> str:
@@ -1071,6 +1075,11 @@ def launch_deliverable(folder_path, project_id: str, deliverable_id: str,
     if rec is None:
         return {"ok": False, "reason": "unknown deliverable",
                 "deliverable_id": deliverable_id}
+
+    _journal.emit_safe(project_id, _journal.EV_DELIVERABLE_LAUNCHED,
+                       correlation_id=(deliverable_id or project_id),
+                       folder_path=folder_path,
+                       payload={"deliverable_id": deliverable_id})
 
     dtype = (rec.get("deliverable_type") or "").strip().lower()
     if dtype not in VALID_TYPES:

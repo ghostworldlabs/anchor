@@ -26,6 +26,7 @@ import uuid
 from pathlib import Path
 
 import paths as _paths
+import journal as _journal
 
 # Registry JSON filename, stored at the data-dir root.
 REGISTRY_NAME = "rnd_registry.json"
@@ -247,7 +248,10 @@ def add_project(name: str, folder_path, priority: int = 2,
             "blurb": blurb,
         })
         reg[pid] = entry
-        _save_registry(reg)
+        with _journal.journaled(pid, _journal.EV_PROJECT_CREATED,
+                                correlation_id=pid, folder_path=folder_path,
+                                payload={"project_id": pid, "name": name}):
+            _save_registry(reg)
         if scaffold:
             scaffold_project_store(entry["folder_path"], pid)
         return entry
@@ -292,11 +296,17 @@ def update_project(project_id: str, **fields) -> dict:
 
 def set_priority(project_id: str, priority: int) -> dict:
     """Change a project's priority (lifecycle op C7)."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "set_priority"})
     return update_project(project_id, priority=int(priority))
 
 
 def archive_project(project_id: str) -> dict:
     """Archive a project — RETAINED in the registry, not deleted (C7)."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "archive"})
     return update_project(project_id, state=STATE_ARCHIVED)
 
 
@@ -307,16 +317,25 @@ def mark_future(project_id: str) -> dict:
 
 def retire_project(project_id: str) -> dict:
     """Retire/cancel a project — RETAINED in the registry, not deleted (C7)."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "retire"})
     return update_project(project_id, state=STATE_RETIRED)
 
 
 def reactivate_project(project_id: str) -> dict:
     """Move an archived/future/retired project back to active."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "reactivate"})
     return update_project(project_id, state=STATE_ACTIVE)
 
 
 def set_notes(project_id: str, notes: str) -> dict:
     """Set the free-text notes for a project (like a task's Notes field)."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "set_notes"})
     return update_project(project_id, notes=("" if notes is None else str(notes)))
 
 
@@ -333,6 +352,9 @@ def set_group(project_id: str, group: str) -> dict:
     v9 Wave 4 guarded on-disk move); it only re-labels which collapsible
     folder the project renders under on the home dashboard. Returns the entry.
     """
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "set_group"})
     return update_project(
         project_id, group=("" if group is None else str(group).strip()))
 
@@ -362,6 +384,9 @@ _BLURB_MAX_LEN = 400
 
 def set_blurb(project_id: str, blurb: str) -> dict:
     """Set the user-editable project blurb (what the project is). Returns entry."""
+    _journal.emit_safe(project_id, _journal.EV_PROJECT_LIFECYCLE,
+                       correlation_id=project_id, folder_path=None,
+                       payload={"project_id": project_id, "action": "set_blurb"})
     return update_project(project_id, blurb=("" if blurb is None else str(blurb)))
 
 

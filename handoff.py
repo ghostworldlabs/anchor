@@ -42,6 +42,7 @@ from pathlib import Path, PurePosixPath
 import paths as _paths
 import sessions as _sessions
 import anchor_marker as _marker
+import journal as _journal
 
 #: The handoff reference file written into a primed worktree root.
 HANDOFF_FILENAME = "HANDOFF.md"
@@ -379,7 +380,7 @@ def record_handoff(folder_path, project_id, build_session_id, plan_set):
         "doc_rels": list(plan_set.get("doc_rels") or []),
         "when": time.time(),
     }
-    with _paths.WRITE_LOCK:
+    with _paths.WRITE_LOCK, _journal.journaled(project_id, _journal.EV_HANDOFF_RECORDED, correlation_id=(build_session_id or project_id), folder_path=folder_path, payload={"build_session_id": build_session_id, "plan_session_id": plan_set.get("plan_session_id", "")}):
         p = _marker.sidecar_path(folder_path, project_id)
         try:
             p.parent.mkdir(parents=True, exist_ok=True)

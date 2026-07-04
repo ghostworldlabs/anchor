@@ -5196,6 +5196,179 @@ def shutdown_server(server_proc):
         pass
 
 
+def check_journal_completeness_gate(report: Report):
+    """rearch W13 (C3): the ENFORCING write-completeness gate — a healthcheck walk.
+
+    W13 flips the W1 write-site tripwire to its permanent enforce mode: with the
+    gate armed (``journal.completeness_gate`` = tripwire enforce + journal on),
+    EVERY mutation of a ``.anchor/`` store must be paired with a journal event or
+    a ``TripwireViolation`` names the write site. This walk proves the gate BOTH
+    ways over a representative store-mutation workload, hermetically (a temp
+    folder, explicit ``folder_path`` — never the live service / real data):
+
+      (1) the BLESSED instrumented paths (``add_idea`` / ``record_effort`` — which
+          journal-and-pair) run under the enforcing gate WITHOUT a violation; and
+      (2) an intentionally UNPAIRED raw ``.anchor/`` store write DOES raise
+          ``TripwireViolation`` — completeness is mechanical, not narrated.
+    """
+    name = "journal completeness gate (enforce)"
+    import tempfile as _tf
+    import shutil as _shutil
+    prev_journal = os.environ.get("ANCHOR_JOURNAL")
+    prev_tw = os.environ.get("ANCHOR_WRITE_TRIPWIRE")
+    tmp = None
+    try:
+        import journal as _journal
+        import effort_history as _eh
+        from tools import write_tripwire as _wt
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-jgate-"))
+        pid = "gate-pid"
+        paired_ok = False
+        unpaired_fired = False
+        with _journal.completeness_gate():
+            # (1) blessed instrumented mutations must NOT raise under enforce.
+            _eh.add_idea(str(tmp), pid, "gate idea")
+            _eh.record_effort(str(tmp), pid, "build", "gate-job",
+                              extra={"kind": "doc", "title": "gate doc"})
+            paired_ok = True
+            # (2) an UNPAIRED raw .anchor store write must raise, naming the site.
+            rogue = (tmp / ".anchor" / "projects" / pid / "grass"
+                     / "rogue.json")
+            rogue.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                with open(rogue, "w", encoding="utf-8") as fh:
+                    fh.write("{}")
+            except _wt.TripwireViolation:
+                unpaired_fired = True
+        ok = bool(paired_ok and unpaired_fired)
+        report.check(name, ok,
+                     f"paired-passed={paired_ok} unpaired-fired={unpaired_fired}")
+    except Exception as e:
+        report.check(name, False,
+                     f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        # completeness_gate restores these on exit, but be defensive.
+        try:
+            from tools import write_tripwire as _wt2
+            _wt2.uninstall()
+        except Exception:
+            pass
+        for k, v in (("ANCHOR_JOURNAL", prev_journal),
+                     ("ANCHOR_WRITE_TRIPWIRE", prev_tw)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        if tmp is not None:
+            try:
+                _shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
+def check_journal_perf_budget(report: Report):
+    """rearch W13 (C3): the journal-on perf budget — a HARD <5% regression gate.
+
+    The C3 journal DUAL-WRITES (a legacy store write PLUS a journal append) on
+    every mutation of record. The frozen plan (Wave 15) makes that overhead a
+    measured, budgeted gate: the store-mutation workload the v2–v5 R&D walks
+    exercise, timed journal-OFF vs journal-ON, must not regress by more than 5%.
+
+    Rather than re-invoke the full v2–v5 server/PTY walks (whose HTTP/subprocess
+    noise would swamp the tiny append signal and make a <5% budget meaningless),
+    this times a FAITHFUL PROXY of what those walks (and the live dashboard) do on
+    every mutation of record: a store WRITE through the instrumented path
+    (``effort_history.add_idea`` — journal-and-pair) followed by the READ-BACK the
+    UI performs to re-render (``list_efforts``). That read-after-write access
+    pattern is the real per-action cost the journal append rides on top of — so
+    the measured overhead is the HONEST journal-on fraction of a real action, not
+    the inflated fraction of a bare micro-write. OFF then ON; journal ON adds one
+    ``journal.jsonl`` append (fsync off, the default) per mutation.
+
+    Robust to timer noise: several trials, the MIN wall time per condition (the
+    least-noisy estimator), and an absolute floor so sub-millisecond granularity
+    on a fast host never trips a false regression. Fully hermetic (a temp folder,
+    explicit ``folder_path`` — never the global data dir / the live service); the
+    env is left exactly as found.
+    """
+    name = "journal perf budget (<5%)"
+    import tempfile as _tf
+    import time as _time
+    import shutil as _shutil
+
+    prev_journal = os.environ.get("ANCHOR_JOURNAL")
+    tmp = None
+    try:
+        import journal as _journal
+        import effort_history as _eh
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-jperf-"))
+        pid = "perf-pid"
+        ITERS = 120      # enough store mutations that total time is measurable
+        TRIALS = 3       # take the min across trials to shed scheduling noise
+        FLOOR_S = 0.010  # 10 ms absolute floor: below this the ratio is noise
+
+        def _workload(tag):
+            """One representative R&D action batch: instrumented write + UI read.
+
+            Each iteration is a mutation-of-record (``add_idea`` → journal-and-pair)
+            plus the ``list_efforts`` read-back the dashboard runs to re-render —
+            the real read-after-write access pattern the journal append rides on.
+            """
+            folder = tmp / tag
+            folder.mkdir(parents=True, exist_ok=True)
+            _journal.reset_seq_cache()
+            for i in range(ITERS):
+                _eh.add_idea(str(folder), pid, f"perf idea {i}")
+                # the UI re-reads the lane on each mutation (grows with the store)
+                _eh.list_efforts(str(folder), pid, "grass")
+
+        def _timed(flag_on, label):
+            if flag_on:
+                os.environ["ANCHOR_JOURNAL"] = "on"
+            else:
+                os.environ.pop("ANCHOR_JOURNAL", None)
+            best = None
+            for t in range(TRIALS):
+                start = _time.perf_counter()
+                _workload(f"{label}-{t}")
+                dt = _time.perf_counter() - start
+                best = dt if best is None else min(best, dt)
+            return best
+
+        # Warm the interpreter/import/FS caches once so neither side pays first-run
+        # costs the other doesn't (a fair off-vs-on comparison).
+        _workload("warm")
+
+        off = _timed(False, "off")
+        on = _timed(True, "on")
+
+        # Verify the ON run actually journaled (the measurement is meaningful).
+        journaled_ok = bool(_journal.read_events(
+            pid, folder_path=str(tmp / "on-0")))
+
+        overhead = (on - off) / off if off > 0 else 0.0
+        within = (on <= off * 1.05) or ((on - off) <= FLOOR_S)
+        detail = (f"off={off*1000:.1f}ms on={on*1000:.1f}ms "
+                  f"overhead={overhead*100:.1f}% (budget 5%), "
+                  f"journaled={'yes' if journaled_ok else 'NO'}")
+        report.check(name, bool(within and journaled_ok), detail)
+    except Exception as e:
+        report.check(name, False,
+                     f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        if prev_journal is None:
+            os.environ.pop("ANCHOR_JOURNAL", None)
+        else:
+            os.environ["ANCHOR_JOURNAL"] = prev_journal
+        if tmp is not None:
+            try:
+                _shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     report = Report()
@@ -5265,6 +5438,11 @@ def main():
         check_rnd_v11_1_surface(report, server_proc, rnd_env)
         check_rnd_v12_surface(report, server_proc, rnd_env)
         check_gandalf_surface(report, server_proc, rnd_env)
+
+        # rearch W13 (C3): the journal completeness gate (enforce) + the
+        # journal-on perf budget (<5%), both hermetic (never the live service).
+        check_journal_completeness_gate(report)
+        check_journal_perf_budget(report)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

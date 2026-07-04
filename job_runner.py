@@ -42,6 +42,7 @@ from collections import deque
 from pathlib import Path
 
 import paths as _paths
+import journal as _journal
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -661,6 +662,12 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
             lane, cwd, prompt, output_dir, gated, permission_mode, backend, env,
             project_id=project_id, folder_path=folder_path),
     }
+    # W13 (C3): journal the launch. Use the project_id/folder_path PARAMETERS
+    # (a guarded launch passes them) — the rec dict carries them only inside
+    # relaunch_spec, so reading rec.get("project_id") here would always no-op.
+    _journal.emit_safe(project_id or "", _journal.EV_JOB_LAUNCHED,
+                       correlation_id=job_id or "x", folder_path=folder_path,
+                       payload={"job_id": job_id, "lane": lane})
     _write_record(rec)
 
     live.reader = threading.Thread(
@@ -959,6 +966,7 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
         rec["exit_code"] = exit_code
         rec["finished_at"] = time.time()
         rec["status"] = STATUS_DONE if exit_code == 0 else STATUS_FAILED
+        _journal.emit_safe(rec.get("project_id") or "", _journal.EV_JOB_FINISHED, correlation_id=job_id, folder_path=rec.get("folder_path"), payload={"job_id": job_id, "status": rec.get("status")})
         _write_record(rec)
     # Mirror the terminal status onto the swarm session (gandalf finally analog),
     # OUTSIDE the write lock the registry takes its own lock internally.
@@ -1359,6 +1367,7 @@ def cancel(job_id: str) -> dict:
     pid = rec.get("pid")
     # Set the terminal status FIRST so the reader's _finalize() does not clobber
     # it with done/failed when the pipe closes after the kill.
+    _journal.emit_safe((load_record(job_id) or {}).get("project_id") or "", _journal.EV_JOB_CANCELLED, correlation_id=job_id, folder_path=(load_record(job_id) or {}).get("folder_path"), payload={"job_id": job_id})
     _update_record(job_id, status=STATUS_CANCELLED)
     # Clear the swarm session out of RUNNING immediately (covers the no-live-reader
     # case where _finalize never runs — e.g. cancelling a job from a prior process).

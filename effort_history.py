@@ -43,6 +43,7 @@ from pathlib import Path, PurePosixPath
 
 import paths as _paths
 import rnd_registry as _rnd
+import journal as _journal
 
 #: Marker on a pointer-record that was DISCOVERED from a pre-existing on-disk
 #: artifact (brownfield), as opposed to an Anchor-RUN effort. Discovered records
@@ -153,7 +154,7 @@ def record_effort(folder_path, project_id: str, lane: str, job_id: str,
 
     All writes under ``paths.WRITE_LOCK``.
     """
-    with _paths.WRITE_LOCK:
+    with _paths.WRITE_LOCK, _journal.pairing():
         ed = efforts_dir(folder_path, project_id, lane)
         ed.mkdir(parents=True, exist_ok=True)
         ppath = _pointer_path(folder_path, project_id, lane, job_id)
@@ -323,7 +324,11 @@ def add_idea(folder_path, project_id: str, text: str, notes: str = "") -> dict:
         # as RAW by :func:`grass_status` so old records keep working.)
         "status": GRASS_RAW,
     }
-    return record_effort(folder_path, project_id, "grass", jid, extra=extra)
+    with _journal.journaled(project_id, _journal.EV_GRASS_IDEA_ADDED,
+                            correlation_id=(jid or project_id),
+                            folder_path=folder_path,
+                            payload={"idea_id": jid, "title": text}):
+        return record_effort(folder_path, project_id, "grass", jid, extra=extra)
 
 
 def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
@@ -381,7 +386,11 @@ def promote_inbox(folder_path, project_id: str, inbox_item_text: str,
         "status": GRASS_RAW,
         "promoted_from": "inbox",
     }
-    return record_effort(folder_path, project_id, "grass", jid, extra=extra)
+    with _journal.journaled(project_id, _journal.EV_EFFORT_PROMOTED,
+                            correlation_id=(jid or project_id),
+                            folder_path=folder_path,
+                            payload={"source": "inbox", "job_id": jid}):
+        return record_effort(folder_path, project_id, "grass", jid, extra=extra)
 
 
 #: The lanes a grass idea may be promoted into (v4 Wave 6). Only the two TRIO
@@ -468,17 +477,21 @@ def promote_grass_to_lane(project_id: str, idea_id: str, lane: str,
     kwargs = {"label": label, "seed_context": idea_text}
     if backend is not None:
         kwargs["backend"] = backend
-    record = _ts.start_session(project_id, lane, **kwargs)
-    # The idea REMAINS in grass — promotion copies, never moves. We only
-    # ANNOTATE the idea record in place (status -> promoted + a link to the run
-    # it became); nothing here deletes or rewrites the idea's identity/title.
-    try:
-        set_grass_status(folder_path, project_id, idea_id, GRASS_PROMOTED,
-                         promoted_to_session=record.get("session_id"),
-                         promoted_to_lane=lane)
-    except Exception:
-        # A failed annotation must never tear down a live, seeded session.
-        pass
+    with _journal.journaled(project_id, _journal.EV_EFFORT_PROMOTED,
+                            correlation_id=(idea_id or project_id),
+                            folder_path=folder_path,
+                            payload={"idea_id": idea_id, "lane": lane}):
+        record = _ts.start_session(project_id, lane, **kwargs)
+        # The idea REMAINS in grass — promotion copies, never moves. We only
+        # ANNOTATE the idea record in place (status -> promoted + a link to the run
+        # it became); nothing here deletes or rewrites the idea's identity/title.
+        try:
+            set_grass_status(folder_path, project_id, idea_id, GRASS_PROMOTED,
+                             promoted_to_session=record.get("session_id"),
+                             promoted_to_lane=lane)
+        except Exception:
+            # A failed annotation must never tear down a live, seeded session.
+            pass
     return record
 
 
@@ -516,8 +529,12 @@ def set_grass_status(folder_path, project_id: str, idea_id: str, status: str,
             extra["promoted_to_session"] = promoted_to_session
         if promoted_to_lane:
             extra["promoted_to_lane"] = promoted_to_lane
-    return record_effort(folder_path, project_id, "grass",
-                         idea.get("job_id", idea_id), extra=extra)
+    with _journal.journaled(project_id, _journal.EV_GRASS_IDEA_STATUS,
+                            correlation_id=(idea_id or project_id),
+                            folder_path=folder_path,
+                            payload={"idea_id": idea_id, "status": status}):
+        return record_effort(folder_path, project_id, "grass",
+                             idea.get("job_id", idea_id), extra=extra)
 
 
 def _refinements_dir(folder_path, project_id: str, idea_id: str) -> Path:
@@ -578,7 +595,10 @@ def save_grass_refinement(folder_path, project_id: str, idea_id: str,
     if idea is None:
         raise ValueError("grass idea not found: %s" % (idea_id,))
     jid = idea.get("job_id", idea_id)
-    with _paths.WRITE_LOCK:
+    with _paths.WRITE_LOCK, _journal.journaled(
+            project_id, _journal.EV_GRASS_IDEA_REFINED,
+            correlation_id=(idea_id or project_id),
+            folder_path=folder_path, payload={"idea_id": idea_id}):
         d = _refinements_dir(folder_path, project_id, jid)
         d.mkdir(parents=True, exist_ok=True)
         existing = list_grass_refinements(folder_path, project_id, jid)
@@ -1317,10 +1337,14 @@ def delete_grass_idea(folder_path, project_id: str, idea_id: str) -> dict:
                     pass
 
     # 2) Drop the idea pointer-record + its grass index entry (reuse the W1 pattern).
-    try:
-        deleted = bool(_delete_effort_record(folder_path, project_id, "grass", jid))
-    except Exception:
-        deleted = False
+    with _journal.journaled(project_id, _journal.EV_GRASS_IDEA_DELETED,
+                            correlation_id=(want or project_id),
+                            folder_path=folder_path,
+                            payload={"idea_id": want}):
+        try:
+            deleted = bool(_delete_effort_record(folder_path, project_id, "grass", jid))
+        except Exception:
+            deleted = False
 
     # 3) Remove the refinements dir (the dev-N versions) — recursive, tolerant.
     try:
@@ -1476,11 +1500,15 @@ def export_grass_to_project(project_id: str, idea_id: str,
                          promoted_to_lane=first["lane"])
     except Exception:
         pass
-    try:
-        record_effort(folder_path, project_id, "grass", jid,
-                      extra={"exported_to": exported})
-    except Exception:
-        pass
+    with _journal.journaled(project_id, _journal.EV_GRASS_IDEA_EXPORTED,
+                            correlation_id=(idea_id or project_id),
+                            folder_path=folder_path,
+                            payload={"idea_id": idea_id}):
+        try:
+            record_effort(folder_path, project_id, "grass", jid,
+                          extra={"exported_to": exported})
+        except Exception:
+            pass
     return {"ok": True, "exported": exported, "reason": "ok"}
 
 
@@ -1650,8 +1678,12 @@ def archive_grass_session(project_id: str, idea_id: str, lane: str,
                 break
         if not replaced:
             bundles.append(archive)
-        record_effort(folder_path, project_id, "grass", jid,
-                      extra={"archives": bundles})
+        with _journal.journaled(project_id, _journal.EV_GRASS_IDEA_ARCHIVED,
+                                correlation_id=(idea_id or project_id),
+                                folder_path=folder_path,
+                                payload={"idea_id": idea_id, "lane": lane}):
+            record_effort(folder_path, project_id, "grass", jid,
+                          extra={"archives": bundles})
     except Exception:
         return {"ok": False, "archive": None, "reason": "record-failed"}
 
@@ -2675,32 +2707,36 @@ def persist_session_docs(folder_path, project_id: str, lane: str,
         # timestamp would re-stage the pointer and break idempotency). The doc's
         # mtime is the honest creation marker we stamp once on first record.
         pointer_rels = []
-        for rel in persisted:
-            kind, title = _doc_kind_title(rel)
-            jid = discovered_job_id(lane, rel)
-            try:
-                existing = load_effort(main, project_id, lane, jid)
-                extra = {"source": SOURCE_DISCOVERED, "kind": kind,
-                         "title": title, "artifact_path": rel,
-                         "status": "imported", "session_id": session_id}
-                if existing is None:
-                    # First record: stamp created_at from the doc's on-disk mtime.
-                    try:
-                        extra["created_at"] = (main / rel).stat().st_mtime
-                    except OSError:
-                        pass
-                    record_effort(main, project_id, lane, jid, skill=None,
-                                  extra=extra)
-                # else: already recorded with this exact content-addressed id —
-                # leave the pointer-record untouched (idempotent; no re-stage).
-                pp = _pointer_path(main, project_id, lane, jid)
-                if pp.exists():
-                    pointer_rels.append(_rel_to_folder(main, pp))
-            except (OSError, ValueError):
-                continue
-        ipath = _index_path(main, project_id, lane)
-        if ipath.exists():
-            pointer_rels.append(_rel_to_folder(main, ipath))
+        with _journal.journaled(project_id, _journal.EV_DOC_PERSISTED,
+                                correlation_id=(session_id or project_id),
+                                folder_path=folder_path,
+                                payload={"lane": lane}):
+            for rel in persisted:
+                kind, title = _doc_kind_title(rel)
+                jid = discovered_job_id(lane, rel)
+                try:
+                    existing = load_effort(main, project_id, lane, jid)
+                    extra = {"source": SOURCE_DISCOVERED, "kind": kind,
+                             "title": title, "artifact_path": rel,
+                             "status": "imported", "session_id": session_id}
+                    if existing is None:
+                        # First record: stamp created_at from the doc's on-disk mtime.
+                        try:
+                            extra["created_at"] = (main / rel).stat().st_mtime
+                        except OSError:
+                            pass
+                        record_effort(main, project_id, lane, jid, skill=None,
+                                      extra=extra)
+                    # else: already recorded with this exact content-addressed id —
+                    # leave the pointer-record untouched (idempotent; no re-stage).
+                    pp = _pointer_path(main, project_id, lane, jid)
+                    if pp.exists():
+                        pointer_rels.append(_rel_to_folder(main, pp))
+                except (OSError, ValueError):
+                    continue
+            ipath = _index_path(main, project_id, lane)
+            if ipath.exists():
+                pointer_rels.append(_rel_to_folder(main, ipath))
 
         out["persisted"] = persisted
         commit = _commit_session_docs(main, project_id, lane, session_id,

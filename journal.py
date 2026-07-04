@@ -120,6 +120,48 @@ EV_SESSION_ADVANCED = "session-advanced"
 EV_SESSION_KILLED = "session-killed"
 EV_SESSION_CLOSED = "session-closed"
 
+# ── W13 (C3): the full mutation-of-record set the W1 tripwire enumerated ───────
+# Every remaining mutation-of-record class instrumented via the blessed
+# :func:`journaled` / :func:`dual_write` wrappers (frozen plan Wave 15). Per-tick
+# / telemetry writes (a job record's periodic cost/progress re-stamp, a
+# summary-cache refresh) are EXCLUDED BY RULE — they are not mutations of record.
+
+#: doc-persisted — a trio session's produced docs copied+committed into the main
+#: project (``effort_history.persist_session_docs``; the v8 keystone).
+EV_DOC_PERSISTED = "doc-persisted"
+
+#: job lifecycle — a durable lane job launched / reached a terminal state /
+#: cancelled (``job_runner``).
+EV_JOB_LAUNCHED = "job-launched"
+EV_JOB_FINISHED = "job-finished"
+EV_JOB_CANCELLED = "job-cancelled"
+
+#: effort promoted — an inbox item or a grass idea promoted into a real lane.
+EV_EFFORT_PROMOTED = "effort-promoted"
+
+#: grass idea lifecycle (raw → refined → promoted, plus archive/export/delete).
+EV_GRASS_IDEA_ADDED = "grass-idea-added"
+EV_GRASS_IDEA_REFINED = "grass-idea-refined"
+EV_GRASS_IDEA_STATUS = "grass-idea-status-changed"
+EV_GRASS_IDEA_ARCHIVED = "grass-idea-archived"
+EV_GRASS_IDEA_EXPORTED = "grass-idea-exported"
+EV_GRASS_IDEA_DELETED = "grass-idea-deleted"
+
+#: deliverable pinned / launched (``deliverables``).
+EV_DELIVERABLE_PINNED = "deliverable-pinned"
+EV_DELIVERABLE_LAUNCHED = "deliverable-launched"
+
+#: project lifecycle — created / priority-archive-retire-reactivate / relabel
+#: (``rnd_registry``).
+EV_PROJECT_CREATED = "project-created"
+EV_PROJECT_LIFECYCLE = "project-lifecycle-changed"
+
+#: handoff recorded — a stage handoff persisted (``handoff.record_handoff``).
+EV_HANDOFF_RECORDED = "handoff-recorded"
+
+#: boneyard capture — discarded material indexed (``boneyard.record_entry``).
+EV_BONEYARD_CAPTURED = "boneyard-captured"
+
 #: The mandatory envelope keys every event carries (schema validation target).
 ENVELOPE_KEYS = (
     "schema_ver",
@@ -293,6 +335,54 @@ def pairing():
         return _wt.journal_event()
     except Exception:
         return _NullPairing()
+
+
+# ── The permanent C3 completeness gate (W13: enforce mode + journal on) ───────
+
+class completeness_gate:
+    """Arm the permanent C3 write-completeness gate for the enclosed block.
+
+    W13 flips the W1 write-site tripwire to its permanent ENFORCE mode: with this
+    gate active, EVERY mutation of a ``.anchor/`` store that is not paired with a
+    journal event (via :class:`journaled` / :func:`dual_write`) raises
+    :class:`tools.write_tripwire.TripwireViolation` naming the write site —
+    completeness is mechanical, not narrated.
+
+    On enter it (1) forces the ``journal`` flag ON in the process env (so the
+    blessed wrappers actually emit + arm pairing) and (2) installs the tripwire
+    in enforce mode. On exit it uninstalls the tripwire and restores the prior
+    ``ANCHOR_JOURNAL`` value. Best-effort import of the tripwire — a host without
+    the tools package degrades to journal-on-only (never crashes the caller).
+    """
+
+    def __init__(self, clear=True):
+        self._clear = clear
+        self._prev_journal = None
+        self._wt = None
+
+    def __enter__(self):
+        self._prev_journal = os.environ.get(_flags.FLAG_ENV[_flags.FLAG_JOURNAL])
+        os.environ[_flags.FLAG_ENV[_flags.FLAG_JOURNAL]] = "on"
+        try:
+            from tools import write_tripwire as _wt
+            _wt.install(mode=_wt.MODE_ENFORCE, clear=self._clear)
+            self._wt = _wt
+        except Exception:
+            self._wt = None
+        return self
+
+    def __exit__(self, *exc):
+        if self._wt is not None:
+            try:
+                self._wt.uninstall()
+            except Exception:
+                pass
+            self._wt = None
+        if self._prev_journal is None:
+            os.environ.pop(_flags.FLAG_ENV[_flags.FLAG_JOURNAL], None)
+        else:
+            os.environ[_flags.FLAG_ENV[_flags.FLAG_JOURNAL]] = self._prev_journal
+        return False
 
 
 # ── The choke point ──────────────────────────────────────────────────────────
@@ -475,6 +565,82 @@ def dual_write(project_id, event_type, legacy_write, *, correlation_id,
             # journal-first, but journaling NEVER blocks the legacy mutation.
             pass
         return legacy_write()
+
+
+# ── emit_safe + the journaled() blessed wrapper (W13) ────────────────────────
+
+def emit_safe(project_id, event_type, *, correlation_id, folder_path=None,
+              actor=None, causation_id=None, payload=None):
+    """Best-effort, off-switch-gated :func:`emit` — the W13 semantic-event helper.
+
+    Emits ONLY when the ``journal`` flag is on, and NEVER raises: a schema/IO
+    failure is swallowed so journaling a mutation-of-record can never break the
+    real mutation ("alongside, never instead of"). Returns the written event, or
+    ``None`` when the flag is off or the emit failed. Callers that also need the
+    write-tripwire pairing for the legacy store write use :class:`journaled`.
+    """
+    if not enabled():
+        return None
+    try:
+        return emit(project_id, event_type, correlation_id=correlation_id,
+                    folder_path=folder_path, actor=actor,
+                    causation_id=causation_id, payload=payload)
+    except Exception:
+        return None
+
+
+class journaled:
+    """The blessed wrapper for a W13 mutation-of-record class — pairing + emit.
+
+    ``with journal.journaled(pid, EV_X, correlation_id=..., folder_path=...,
+    payload={...}): <legacy store writes>`` does, on enter, exactly the D1
+    journal-first-then-legacy dance for a whole block of legacy writes:
+
+      1. arm the write-tripwire :func:`pairing` for the enclosed writes (so the
+         C3 completeness gate treats every ``.anchor/`` mutation inside the block
+         as PAIRED — never an unjournaled-mutation violation);
+      2. emit the semantic journal event FIRST (best-effort, off-switch-gated via
+         :func:`emit_safe`), before the block's legacy writes run.
+
+    With the ``journal`` flag OFF (today's default) the emit is skipped and the
+    pairing is an inert no-op (it only matters when the tripwire is installed in
+    enforce mode), so the enclosed legacy writes are byte-identical to pre-journal
+    behavior. A journal failure never propagates. Nestable (pairing is a counter).
+    """
+
+    def __init__(self, project_id, event_type, *, correlation_id,
+                 folder_path=None, actor=None, causation_id=None, payload=None):
+        self.project_id = project_id
+        self.event_type = event_type
+        self.correlation_id = correlation_id
+        self.folder_path = folder_path
+        self.actor = actor
+        self.causation_id = causation_id
+        self.payload = payload
+        self._pair = None
+        self.event = None
+
+    def __enter__(self):
+        # Gate on the off-switch exactly like :func:`dual_write`: when the
+        # journal flag is OFF (today's default) this is fully inert — no pairing
+        # is armed and no event is emitted, so the enclosed legacy writes are
+        # byte-identical to pre-journal behavior. When ON, arm the pairing (so
+        # the enforce gate treats the enclosed .anchor/ writes as paired) and
+        # emit the semantic event journal-first, before the legacy writes run.
+        if enabled():
+            self._pair = pairing()
+            self._pair.__enter__()
+            self.event = emit_safe(
+                self.project_id, self.event_type,
+                correlation_id=self.correlation_id, folder_path=self.folder_path,
+                actor=self.actor, causation_id=self.causation_id,
+                payload=self.payload)
+        return self
+
+    def __exit__(self, *exc):
+        if self._pair is not None:
+            return self._pair.__exit__(*exc)
+        return False
 
 
 # ── Readers (unknown-field-tolerant; schema-evolution rule) ──────────────────

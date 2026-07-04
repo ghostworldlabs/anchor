@@ -1054,6 +1054,31 @@ def rnd_boneyard(project_id, search=None):
     return _bone.list_entries(folder, project_id)
 
 
+def rnd_events(project_id, since=None):
+    """CLI mirror of ``journal.read_events`` (rearch W13, C3 — the journal tail).
+
+    READ-ONLY: returns the project's schema-versioned journal events, in journal
+    (append) order — OLDEST-first, NEWEST-LAST — from the per-project append-only
+    ``journal.jsonl``. With ``since`` given, only events whose ``seq`` is strictly
+    greater are returned (the "what happened while I was away" tail). This never
+    calls a model and never touches the live ``:8777`` server — it reads the
+    on-disk journal only, tolerating unknown fields / a higher ``schema_ver`` per
+    the journal's schema-evolution rule. Honest-absent: ``[]`` when the project
+    has no journal yet (the ``journal`` pillar flag has never been on for it).
+    Raises ``KeyError`` for an unknown project.
+    """
+    import journal as _journal
+    _proj, folder = _rnd_resolve(project_id)
+    since_seq = None
+    if since is not None and str(since).strip() != "":
+        try:
+            since_seq = int(since)
+        except (TypeError, ValueError):
+            raise ValueError(f"--since must be an integer seq (got {since!r})")
+    return _journal.read_events(project_id, folder_path=folder,
+                                since_seq=since_seq)
+
+
 def rnd_gandalf(project_id):
     """CLI mirror of ``gandalf.list_runs`` (Gandalf v1).
 
@@ -1355,7 +1380,7 @@ def _rnd_cli(args):
               "deliverable-type|engine|session-summary|grass|"
               "build-deliverable|chain|blurb|remote|docs|"
               "folders|ghost-sessions|boneyard|next-prompt|"
-              "efforts|effort|effort-deliverable> ...")
+              "events|efforts|effort|effort-deliverable> ...")
         return
     sub = args[0].lower()
     rest = args[1:]
@@ -1382,7 +1407,7 @@ def _rnd_cli(args):
                 # flags that take a value consume the next token
                 if a in ("--lane", "--session", "--notes", "--name",
                          "--type", "--desc", "--seed-session", "--window",
-                         "--search"):
+                         "--search", "--since"):
                     skip = True
                 continue
             out.append(a)
@@ -1838,6 +1863,36 @@ def _rnd_cli(args):
                 return
             print(f"Next-stage handoff prompt for session {session_id}:")
             print(prompt)
+
+        elif sub == "events":
+            pos = _positionals()
+            if not pos:
+                print("Usage: anchor.py rnd events <project_id> [--since <seq>]")
+                return
+            since = _opt("--since")
+            events = rnd_events(pos[0], since=since)
+            if not events:
+                if since:
+                    print(f"No journal events after seq {since} for {pos[0]}.")
+                else:
+                    print(f"No journal events for {pos[0]} "
+                          f"(the journal flag has never been on for it).")
+                return
+            head = (f"{len(events)} journal event(s) for {pos[0]}"
+                    + (f" after seq {since}" if since else "")
+                    + " (oldest-first):")
+            print(head)
+            for e in events:
+                actor = e.get("actor", {}) or {}
+                akind = actor.get("kind", "") or "?"
+                aid = actor.get("id", "") or ""
+                who = f"{akind}:{aid}" if aid else akind
+                cause = e.get("causation_id")
+                causes = f" cause={cause}" if cause else ""
+                print(f"  #{e.get('seq','?'):<4} [v{e.get('schema_ver','?')}] "
+                      f"{e.get('type','') or '?':<24} "
+                      f"corr={e.get('correlation_id','')}{causes} "
+                      f"by={who}")
 
         elif sub == "efforts":
             pos = _positionals()

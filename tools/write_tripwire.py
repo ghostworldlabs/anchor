@@ -8,11 +8,16 @@ A test-mode wrapper around Python-level file writes that lands under any
   write site (product ``module:function``) together with the NORMALIZED store
   path it mutated — the mechanical mutation-of-record inventory the C3
   instrumentation waves consume. Never raises, never alters behavior.
-* **enforce mode** (the permanent C3 completeness gate, armed when the journal
-  lands in W12/W13): any mutation of a ``.anchor/`` store that is NOT paired
-  with a journal event (see :func:`journal_event`) raises
+* **enforce mode** (the permanent C3 completeness gate — FLIPPED ON in W13, now
+  the real gate, on forever): any mutation of a ``.anchor/`` store that is NOT
+  paired with a journal event (see :func:`journal_event`) raises
   :class:`TripwireViolation` naming the write site. The journal path itself is
-  allowlisted — journal appends never need pairing.
+  allowlisted — journal appends never need pairing. The blessed wrappers
+  (:class:`journal.journaled` / :func:`journal.dual_write`) pair every
+  instrumented mutation-of-record; :class:`journal.completeness_gate` arms this
+  mode + the journal flag together (used by the W13 test + the healthcheck's
+  completeness walk). Armed via ``ANCHOR_WRITE_TRIPWIRE=enforce`` (the
+  orchestrator/healthcheck seam) or programmatically by ``completeness_gate``.
 
 Interception points (writes only; reads pass through untouched):
 ``builtins.open`` / ``io.open`` with a write/append/create mode (this also

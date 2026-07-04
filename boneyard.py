@@ -46,6 +46,7 @@ from pathlib import Path
 
 import paths as _paths
 import rnd_registry as _rnd
+import journal as _journal
 
 #: The three locked Boneyard sources (D3).
 SOURCE_KILLED = "killed"
@@ -214,7 +215,7 @@ def record_entry(folder_path, project_id: str, entry: dict) -> dict:
             "when": when,
         }
 
-        with _paths.WRITE_LOCK:
+        with _paths.WRITE_LOCK, _journal.journaled(project_id, _journal.EV_BONEYARD_CAPTURED, correlation_id=(key or project_id), folder_path=folder_path, payload={"source": src, "entry_id": eid}):
             epath = _entry_path(folder_path, project_id, eid)
             # Preserve the first-write timestamp on a re-record (true upsert).
             if epath.exists():
