@@ -126,11 +126,25 @@ function setAnchorToken() {
   try { if (t) { localStorage.setItem('anchor_token', t.trim()); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
   return true;
 }
+// W9 cookie navigation: prime the HttpOnly auth cookie from this browser's
+// localStorage token so page navigation (/project/, /report/, /summary/,
+// /artifact/, /api/rnd/projects …) authenticates off the cookie under
+// ANCHOR_AUTH_MODE=enforce — no shared-secret token ever rides in a page URL.
+// The POST carries the token via the X-Anchor-Token header (_postJson); the
+// server Set-Cookies it. Best-effort + idempotent (safe to call every load).
+function primeAuthCookie() {
+  try {
+    var t = _anchorToken();
+    if (!window.ANCHOR_AUTH_REQUIRED || !t) return;
+    _postJson('/api/auth/login', {}).catch(function () {});
+  } catch (e) {}
+}
 // On first load: ask for a token once if required, then sync MANAGED from the
 // session registry so a tile for an already-running terminal can re-open its
 // inline panel.
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
+  primeAuthCookie();   // W9: set the cookie so page navigation works under enforce
   repopulate();
   try { initGandalfPanelCollapse(); } catch(e){}
   // v8 Wave 3: render the GitHub link / auto-push header controls from the

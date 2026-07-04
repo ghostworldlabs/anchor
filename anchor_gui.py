@@ -6224,11 +6224,25 @@ function setAnchorToken() {
   try { if (t) { localStorage.setItem('anchor_token', t.trim()); } else { localStorage.removeItem('anchor_token'); } } catch (e) {}
   return true;
 }
+// W9 cookie navigation: prime the HttpOnly auth cookie from this browser's
+// localStorage token so page navigation (/project/, /report/, /summary/,
+// /artifact/, /api/rnd/projects …) authenticates off the cookie under
+// ANCHOR_AUTH_MODE=enforce — no shared-secret token ever rides in a page URL.
+// The POST carries the token via the X-Anchor-Token header (_postJson); the
+// server Set-Cookies it. Best-effort + idempotent (safe to call every load).
+function primeAuthCookie() {
+  try {
+    var t = _anchorToken();
+    if (!window.ANCHOR_AUTH_REQUIRED || !t) return;
+    _postJson('/api/auth/login', {}).catch(function () {});
+  } catch (e) {}
+}
 // On first load: ask for a token once if required, then sync MANAGED from the
 // session registry so a tile for an already-running terminal can re-open its
 // inline panel.
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
+  primeAuthCookie();   // W9: set the cookie so page navigation works under enforce
   repopulate();
   try { initGandalfPanelCollapse(); } catch(e){}
   // v8 Wave 3: render the GitHub link / auto-push header controls from the
@@ -14433,6 +14447,92 @@ def handle_routes(handler, path, body):
     })
 
 
+# ── Browser auth-cookie login/logout (rearch W9 / C2) ───────────────────────
+def _request_presented_token(handler, body):
+    """The shared-secret token this request carried, or ``None``.
+
+    Mirrors the do_POST middleware's extraction order (X-Anchor-Token header →
+    standard Authorization header → JSON body ``token``) and additionally
+    accepts the W9 auth cookie, so the login handler can echo the caller's
+    already-validated token into the Set-Cookie value.
+    """
+    provided = handler.headers.get("X-Anchor-Token")
+    if provided is None:
+        provided = _paths.token_from_authorization(
+            handler.headers.get("Authorization"))
+    if provided is None and isinstance(body, dict):
+        provided = body.get("token")
+    if provided is None:
+        provided = _paths.token_from_cookie(handler.headers.get("Cookie"))
+    return provided
+
+
+def _request_is_secure(handler):
+    """True iff the request reached us over HTTPS (so the cookie gets ``Secure``).
+
+    Tailscale Serve terminates TLS and proxies to the loopback HTTP server,
+    declaring the original scheme via ``X-Forwarded-Proto``. On the plain-HTTP
+    ``http://localhost:8777`` loopback the header is absent → ``Secure`` is
+    omitted so the cookie is still accepted locally.
+    """
+    xf = (handler.headers.get("X-Forwarded-Proto") or "").strip().lower()
+    if xf:
+        return xf == "https"
+    return bool(getattr(handler, "_is_tls", False))
+
+
+def _send_json_with_cookie(handler, data, cookie, code=200):
+    """Send a JSON response carrying ONE ``Set-Cookie`` header (W9 login/logout)."""
+    payload = json.dumps(data).encode()
+    try:
+        handler.send_response(code)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        if cookie is not None:
+            handler.send_header("Set-Cookie", cookie)
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+    except Exception as exc:
+        if _is_benign_disconnect(exc):
+            return
+        raise
+
+
+def handle_auth_login(handler, path, body):
+    """POST /api/auth/login — mint the HttpOnly browser auth cookie (rearch W9).
+
+    The do_POST token middleware has ALREADY validated the caller (the row is
+    ``token``, default-deny), so this only ever runs for an authenticated
+    request. It Set-Cookies the presented token so subsequent same-origin page
+    navigation (``/project/``, ``/report/``, ``/summary/``, ``/artifact/``,
+    ``/api/rnd/projects`` …) and the ``term_ws`` upgrade authenticate off the
+    cookie — no shared-secret token ever rides in a page URL under
+    ``ANCHOR_AUTH_MODE=enforce``.
+    """
+    want = _paths.expected_token()
+    if want is None:
+        # Auth disabled (no ANCHOR_TOKEN) — nothing to gate, no cookie to set.
+        _send_json_with_cookie(handler, {"ok": True, "auth": "disabled"}, None)
+        return
+    token = _request_presented_token(handler, body)
+    if not _paths.auth_ok(token):
+        # Belt-and-suspenders: the middleware already enforced this.
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    cookie = _paths.build_auth_cookie(token, secure=_request_is_secure(handler))
+    _send_json_with_cookie(handler, {"ok": True, "auth": "cookie-set"}, cookie)
+
+
+def handle_auth_logout(handler, path, body):
+    """POST /api/auth/logout — clear the browser auth cookie (rearch W9)."""
+    cookie = _paths.build_auth_cookie(
+        None, secure=_request_is_secure(handler), clear=True)
+    _send_json_with_cookie(
+        handler, {"ok": True, "auth": "cookie-cleared"}, cookie)
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -14441,6 +14541,8 @@ _MIGRATED_HANDLERS = {
     "handle_status": handle_status,
     "handle_routes": handle_routes,
     "handle_dir_browse": handle_dir_browse,
+    "handle_auth_login": handle_auth_login,
+    "handle_auth_logout": handle_auth_logout,
 }
 
 
@@ -14665,6 +14767,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
         if provided is None:
             # WS clients may smuggle the token via the subprotocol header.
             provided = self.headers.get("Sec-WebSocket-Protocol")
+        if provided is None:
+            # rearch W9: browser page navigation (and the desktop term_ws
+            # upgrade — cookie-through-WS spike proven) authenticates off the
+            # HttpOnly auth cookie, so no token rides in a page URL.
+            provided = _paths.token_from_cookie(self.headers.get("Cookie"))
         return _paths.auth_ok(provided)
 
     # ── Strangler dispatch (rearch W7 / C2) ─────────────────────────────────
@@ -14736,6 +14843,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.headers.get("Authorization"))
             if provided is None:
                 provided = self.headers.get("Sec-WebSocket-Protocol")
+            if provided is None:
+                # W9: the browser auth cookie is also a presented token.
+                provided = _paths.token_from_cookie(
+                    self.headers.get("Cookie"))
             return provided
         except Exception:
             return None

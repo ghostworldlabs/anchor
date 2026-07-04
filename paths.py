@@ -172,6 +172,71 @@ def token_from_authorization(header_value):
     return value or None
 
 
+# ── Cookie-based browser auth (rearch 2026-07 · W9) ─────────────────────────
+
+#: The auth cookie name. Browser PAGE NAVIGATION authenticates off this cookie
+#: (set at login), so no shared-secret token ever rides in a page URL — the W9
+#: cutover keeps ``?token=`` ONLY on the WS/SSE transports the cookie spike did
+#: not clear for every client (SPIKE-COOKIE-WS-VERDICT: desktop WS proven, the
+#: iPhone PWA unproven → its ``?token=`` fallback stays).
+AUTH_COOKIE_NAME = "anchor_auth"
+
+
+def token_from_cookie(cookie_header, cookie_name=AUTH_COOKIE_NAME):
+    """Extract the auth token from a request ``Cookie`` header value (W9).
+
+    The desktop cookie-through-WS spike proved the browser sends this cookie on
+    the ``term_ws`` upgrade too, so the same value authenticates both page
+    navigation and the terminal transport. Parses the standard
+    ``name=value; name2=value2`` cookie syntax and returns the value of
+    ``cookie_name`` verbatim (the token is an opaque shared secret — no URL
+    unescaping is applied). Returns ``None`` when the header is absent/blank or
+    the cookie is not present. Pure — never reads the environment.
+    """
+    if not cookie_header:
+        return None
+    for part in str(cookie_header).split(";"):
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        if k.strip() == cookie_name:
+            v = v.strip()
+            return v or None
+    return None
+
+
+def build_auth_cookie(token, *, secure=False, clear=False,
+                      cookie_name=AUTH_COOKIE_NAME):
+    """Build the ``Set-Cookie`` header VALUE for the auth cookie (W9).
+
+    The cookie carries the shared-secret token so the browser presents it
+    automatically on same-origin page navigation and the ``term_ws`` upgrade.
+    Attributes:
+
+      * ``HttpOnly`` — JS can never read the cookie value (an XSS cannot exfil
+        the token from the cookie jar);
+      * ``SameSite=Strict`` — never sent cross-site (this is a single-origin
+        app; also a CSRF hardening — mutating POSTs still require the explicit
+        ``X-Anchor-Token`` header, never the cookie alone);
+      * ``Path=/`` — the whole app;
+      * ``Secure`` — added ONLY when the request arrived over HTTPS (the
+        Tailscale Serve origin) and omitted on the plain-HTTP loopback so local
+        ``http://localhost:8777`` use still works.
+
+    ``clear=True`` emits an immediate-expiry deletion cookie (logout). Pure
+    string builder — stdlib only.
+    """
+    if clear:
+        attrs = [f"{cookie_name}=", "Path=/", "Max-Age=0",
+                 "HttpOnly", "SameSite=Strict"]
+    else:
+        attrs = [f"{cookie_name}={token}", "Path=/",
+                 "HttpOnly", "SameSite=Strict"]
+    if secure:
+        attrs.append("Secure")
+    return "; ".join(attrs)
+
+
 # ── Silent subprocess spawning (John's no-visible-shells rule) ──────────────
 
 #: OR this into every ``subprocess.Popen/run`` ``creationflags`` on Windows so a

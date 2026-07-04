@@ -554,6 +554,247 @@ def check_route_table_walk(report: Report, server_proc):
                      f"(mode={auth_mode}, token={'set' if token else 'unset'})")
 
 
+# â”€â”€ W9 cookie/auth walk + the 20Ã— soak-candidate pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# rearch 2026-07 W9 (C2). The cookie navigation + enforce flip get a dedicated,
+# STUBBED, in-process end-to-end walk that exercises the REAL server auth code
+# under ``ANCHOR_AUTH_MODE=enforce``: tokenless data-plane GET â†’ 401, login mints
+# the HttpOnly cookie, the cookie carries a page-nav GET + the term_ws upgrade,
+# ?token= stays as the declared WS fallback, logout clears. Per PROCESS-RAILS Â§2
+# the walk ENTERS the 20Ã— nightly repetition pipeline (below) and is NOT joined
+# to the 5AM main() sequence until it has 20 consecutive green nights (W18).
+
+class _CookieWalkHandler:
+    """In-process stand-in bound to the REAL AnchorHandler auth methods (W9).
+
+    Captures both the ``_send_json`` path (``sent``) and the raw
+    ``send_response``/``send_header`` path (``resp``) so the login/logout
+    handlers' ``Set-Cookie`` header is observable without a socket.
+    """
+
+    class _WFile:
+        def write(self, _b):
+            return None
+
+    def __init__(self, path, headers=None, remote="127.0.0.1"):
+        self.path = path
+        self.headers = headers or {}
+        self.client_address = (remote, 5555)
+        self.sent = []                       # (code, json) from _send_json
+        self.resp = {"status": None, "headers": []}
+        self.wfile = self._WFile()
+
+    def _send_json(self, data, code=200):
+        self.sent.append((code, data))
+
+    def send_response(self, code):
+        self.resp["status"] = code
+
+    def send_header(self, k, v):
+        self.resp["headers"].append((k, v))
+
+    def end_headers(self):
+        return None
+
+    def _set_cookies(self):
+        return [v for (k, v) in self.resp["headers"] if k == "Set-Cookie"]
+
+
+def _bind_cookie_walk_methods(mod):
+    for m in ("_term_token_ok", "_data_plane_gate", "_auth_mode",
+              "_presented_token"):
+        setattr(_CookieWalkHandler, m, getattr(mod.AnchorHandler, m))
+
+
+def check_cookie_auth_walk(report: Report, server_proc=None):
+    """W9: stubbed cookie-nav + enforce end-to-end walk (soak candidate).
+
+    Fully in-process (no socket, no live :8777): drives the real handler auth
+    methods with ``ANCHOR_TOKEN`` set and ``ANCHOR_AUTH_MODE=enforce``, writing
+    any warn/enforce record to a THROWAWAY log. Env + log are restored/removed.
+    """
+    name = "cookie/auth walk (W9)"
+    import tempfile
+    try:
+        mod = _import_anchor_gui()
+        import paths as _p
+    except Exception as e:
+        report.check(name, False, f"import failed: {type(e).__name__}: {e}")
+        return
+
+    saved = {k: os.environ.get(k) for k in
+             ("ANCHOR_TOKEN", "ANCHOR_AUTH_MODE", "ANCHOR_AUTH_WARN",
+              "ANCHOR_AUTH_WARN_LOG")}
+    tmp_log = Path(tempfile.mkdtemp(prefix="anchor-hc-cookie-")) / "aw.log"
+    token = "hc-cookie-walk-secret"
+    failures = []
+    try:
+        os.environ["ANCHOR_TOKEN"] = token
+        os.environ["ANCHOR_AUTH_MODE"] = "enforce"
+        os.environ.pop("ANCHOR_AUTH_WARN", None)
+        os.environ["ANCHOR_AUTH_WARN_LOG"] = str(tmp_log)
+        _bind_cookie_walk_methods(mod)
+        cookie_pair = f"{_p.AUTH_COOKIE_NAME}={token}"
+
+        # 1) tokenless data-plane GET under enforce â†’ 401.
+        fh = _CookieWalkHandler("/api/rnd/projects", headers={})
+        if fh._data_plane_gate("GET", "/api/rnd/projects") is not True \
+                or not fh.sent or fh.sent[-1][0] != 401:
+            failures.append("tokenless /api/rnd/projects did not 401 under enforce")
+
+        # 2) login mints an HttpOnly, SameSite=Strict cookie carrying the token.
+        lh = _CookieWalkHandler("/api/auth/login",
+                                headers={"X-Anchor-Token": token})
+        mod.handle_auth_login(lh, "/api/auth/login", {})
+        setc = lh._set_cookies()
+        if not setc:
+            failures.append("login set no cookie")
+        else:
+            c = setc[0]
+            if token not in c:
+                failures.append("login cookie missing the token value")
+            if "HttpOnly" not in c or "SameSite=Strict" not in c:
+                failures.append("login cookie missing HttpOnly/SameSite=Strict")
+
+        # 3) the cookie carries a page-nav GET (served, not blocked).
+        ch = _CookieWalkHandler("/api/rnd/projects",
+                                headers={"Cookie": cookie_pair})
+        if ch._data_plane_gate("GET", "/api/rnd/projects") is not False:
+            failures.append("cookie-bearing page-nav GET was blocked under enforce")
+
+        # 4) the cookie authenticates the term_ws upgrade (desktop spike proven);
+        #    ?token= remains the declared WS fallback; tokenless WS is rejected.
+        wh = _CookieWalkHandler("/api/rnd/term_ws?session=x",
+                                headers={"Cookie": cookie_pair})
+        if wh._term_token_ok() is not True:
+            failures.append("cookie did not authenticate the term_ws upgrade")
+        th = _CookieWalkHandler(f"/api/rnd/term_ws?session=x&token={token}",
+                                headers={})
+        if th._term_token_ok() is not True:
+            failures.append("?token= WS fallback stopped working")
+        nh = _CookieWalkHandler("/api/rnd/term_ws?session=x", headers={})
+        if nh._term_token_ok() is not False:
+            failures.append("tokenless term_ws was not rejected")
+
+        # 5) logout clears the cookie.
+        oh = _CookieWalkHandler("/api/auth/logout",
+                                headers={"X-Anchor-Token": token})
+        mod.handle_auth_logout(oh, "/api/auth/logout", {})
+        clr = oh._set_cookies()
+        if not clr or "Max-Age=0" not in clr[0]:
+            failures.append("logout did not clear the cookie")
+    except Exception as e:
+        failures.append(f"walk crashed: {type(e).__name__}: {e}")
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            shutil.rmtree(tmp_log.parent, ignore_errors=True)
+        except Exception:
+            pass
+
+    if failures:
+        report.check(name, False, "; ".join(failures[:6]))
+    else:
+        report.check(name, True,
+                     "enforce: tokenless 401 Â· login sets HttpOnly cookie Â· "
+                     "cookie carries page-nav + term_ws Â· ?token= WS fallback "
+                     "Â· logout clears")
+
+
+# The 20Ã— nightly repetition pipeline (PROCESS-RAILS.md Â§2). A NEW walk joins the
+# 5AM run (main()) ONLY after 20 consecutive green nightly repetitions; until
+# then it lives here, exercised via ``python anchor_healthcheck.py --soak`` and
+# recorded to the soak ledger. W18 performs the join once ``soak_ready`` is True.
+SOAK_LEDGER = DATA_DIR / "logs" / "soak-candidates.jsonl"
+SOAK_TARGET_REPETITIONS = 20
+
+
+def soak_candidate_walks():
+    """The walks currently IN the 20Ã— pipeline but NOT yet in the 5AM run."""
+    return (("cookie/auth walk (W9)", check_cookie_auth_walk),)
+
+
+def record_soak_result(name, passed, ledger_path=None, ts=None):
+    """Append ONE soak repetition result (atomic, under WRITE_LOCK)."""
+    p = Path(ledger_path) if ledger_path is not None else SOAK_LEDGER
+    entry = {"name": name, "passed": bool(passed),
+             "ts": float(time.time() if ts is None else ts)}
+    with _paths.WRITE_LOCK:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry) + "\n")
+    return entry
+
+
+def read_soak_ledger(ledger_path=None):
+    """Parse the soak ledger JSONL into a list of dicts (missing â†’ ``[]``)."""
+    p = Path(ledger_path) if ledger_path is not None else SOAK_LEDGER
+    if not p.exists():
+        return []
+    out = []
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    for raw in text.splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def soak_green_streak(name, ledger_path=None):
+    """Consecutive green repetitions for ``name`` counting back from the end."""
+    streak = 0
+    for e in reversed(read_soak_ledger(ledger_path)):
+        if e.get("name") != name:
+            continue
+        if e.get("passed"):
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def soak_ready(name, ledger_path=None):
+    """True iff ``name`` has met the 20Ã— green-streak bar (W18 join gate)."""
+    return soak_green_streak(name, ledger_path) >= SOAK_TARGET_REPETITIONS
+
+
+def run_soak_candidates(ledger_path=None):
+    """Run every soak-candidate walk once + record each result to the ledger.
+
+    Invoked by ``python anchor_healthcheck.py --soak`` on the nightly
+    repetition; deliberately NOT part of the 5AM ``main()`` sequence until W18
+    joins a walk that has reached ``soak_ready``. Returns the Report.
+    """
+    report = Report()
+    for wname, fn in soak_candidate_walks():
+        before = len(report.checks)
+        try:
+            fn(report)
+        except Exception as e:
+            report.check(wname, False, f"{type(e).__name__}: {e}")
+        segment = report.checks[before:]
+        passed = bool(segment) and all(ok for _, ok, _ in segment)
+        record_soak_result(wname, passed, ledger_path)
+        streak = soak_green_streak(wname, ledger_path)
+        report.check(f"{wname} â€” soak streak",
+                     True, f"{streak}/{SOAK_TARGET_REPETITIONS} "
+                     f"green nightly repetitions "
+                     f"({'READY to join 5AM' if streak >= SOAK_TARGET_REPETITIONS else 'soaking'})")
+    return report
+
+
 # â”€â”€ Check 5: synthetic round-trip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _post(base: str, path: str, payload: dict, timeout: float = 5.0,
           token: "str | None" = _UNSET) -> dict:
@@ -5127,4 +5368,13 @@ def check_onboard_surface():
 
 if __name__ == "__main__":
     import sys
+    if "--soak" in sys.argv[1:]:
+        # rearch W9: run the 20Ã— nightly repetition pipeline's soak-candidate
+        # walks (NOT the 5AM run) and record each result to the soak ledger.
+        _rep = run_soak_candidates()
+        try:
+            _rep.write(REPORTS_DIR / f"soak-{TODAY}.md")
+        except Exception:
+            pass
+        sys.exit(1 if _rep.has_issues else 0)
     sys.exit(main())

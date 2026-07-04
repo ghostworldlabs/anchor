@@ -189,6 +189,16 @@ ROUTES = [
     _r("GET", "/api/rnd/chain", AUTH_TOKEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/board_html", AUTH_TOKEN, match=MATCH_PREFIX),
 
+    # ── POST: browser auth-cookie login/logout (rearch W9, migrated) ──────
+    # Mint / clear the HttpOnly auth cookie that carries browser page
+    # navigation under ``ANCHOR_AUTH_MODE=enforce`` (SPIKE-COOKIE-WS-VERDICT).
+    # Token-authed by the do_POST middleware (default-deny) BEFORE the handler
+    # runs, so the login handler only ever sets a cookie for a validated caller.
+    _r("POST", "/api/auth/login", AUTH_TOKEN, handler="handle_auth_login",
+       migrated=True),
+    _r("POST", "/api/auth/logout", AUTH_TOKEN, handler="handle_auth_logout",
+       migrated=True),
+
     # ── POST: every mutating arm (token; do_POST middleware enforces) ──────
     _r("POST", "/api/done", AUTH_TOKEN),
     _r("POST", "/api/rnd/upload_batch", AUTH_TOKEN),

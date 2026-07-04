@@ -3236,3 +3236,363 @@ class TestW8PostMiddlewareConsultsTable:
             if r.method == "POST":
                 assert r.auth == rt.AUTH_TOKEN, (
                     f"POST {r.pattern} is unexpectedly not token-gated")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# W9 — Auth Enforce + Cookie Navigation + Ops Cutover (C2 gate)
+# ══════════════════════════════════════════════════════════════════════════
+import paths as _pth
+from tools import auth_cutover as acut
+
+HC_FILE = REPO_ROOT / "anchor_healthcheck.py"
+OPS_CUTOVER_DOC = ARTIFACT_DIR / "OPS-CUTOVER-W9.md"
+
+
+class _CookieFake:
+    """Handler stand-in bound to the REAL cookie-aware auth methods (W9)."""
+
+    def __init__(self, path, headers=None, remote="127.0.0.1"):
+        self.path = path
+        self.headers = headers or {}
+        self.client_address = (remote, 5555)
+        self.sent = []
+        self.resp = {"status": None, "headers": []}
+
+    class _WFile:
+        def write(self, _b):
+            return None
+
+    wfile = _WFile()
+
+    def _send_json(self, data, code=200):
+        self.sent.append((code, data))
+
+    def send_response(self, code):
+        self.resp["status"] = code
+
+    def send_header(self, k, v):
+        self.resp["headers"].append((k, v))
+
+    def end_headers(self):
+        return None
+
+    def set_cookies(self):
+        return [v for (k, v) in self.resp["headers"] if k == "Set-Cookie"]
+
+
+def _bind_cookie(mod):
+    for m in ("_term_token_ok", "_data_plane_gate", "_auth_mode",
+              "_presented_token", "_route_auth_ok"):
+        setattr(_CookieFake, m, getattr(mod.AnchorHandler, m))
+    return mod
+
+
+class TestW9CookieHelpers:
+    """paths.token_from_cookie / build_auth_cookie — the stdlib cookie seam."""
+
+    def test_token_from_cookie_extracts_the_auth_value(self):
+        h = f"foo=bar; {_pth.AUTH_COOKIE_NAME}=s3cret; baz=qux"
+        assert _pth.token_from_cookie(h) == "s3cret"
+
+    def test_token_from_cookie_absent_and_blank(self):
+        assert _pth.token_from_cookie(None) is None
+        assert _pth.token_from_cookie("") is None
+        assert _pth.token_from_cookie("other=1") is None
+        assert _pth.token_from_cookie(f"{_pth.AUTH_COOKIE_NAME}=") is None
+
+    def test_build_auth_cookie_attributes(self):
+        c = _pth.build_auth_cookie("tok")
+        assert c.startswith(f"{_pth.AUTH_COOKIE_NAME}=tok")
+        assert "HttpOnly" in c and "SameSite=Strict" in c and "Path=/" in c
+        assert "Secure" not in c            # plain-HTTP loopback
+
+    def test_build_auth_cookie_secure_over_https(self):
+        assert "Secure" in _pth.build_auth_cookie("tok", secure=True)
+
+    def test_build_auth_cookie_clear_is_immediate_expiry(self):
+        c = _pth.build_auth_cookie(None, clear=True)
+        assert "Max-Age=0" in c and "HttpOnly" in c
+        assert f"{_pth.AUTH_COOKIE_NAME}=;" in c or c.startswith(
+            f"{_pth.AUTH_COOKIE_NAME}=;")
+
+    def test_roundtrip_cookie_then_parse(self):
+        c = _pth.build_auth_cookie("round-trip-tok")
+        # A browser echoes back only "name=value" (no attributes).
+        echoed = c.split(";", 1)[0]
+        assert _pth.token_from_cookie(echoed) == "round-trip-tok"
+
+
+class TestW9TermTokenAcceptsCookie:
+    """The token-gated GET surface authenticates off the auth cookie (W9)."""
+
+    def test_cookie_authenticates_when_token_configured(self, monkeypatch):
+        mod = _bind_cookie(__import__("anchor_gui"))
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        good = _CookieFake("/api/rnd/term_ws?session=x",
+                           headers={"Cookie": f"{_pth.AUTH_COOKIE_NAME}=s3cret"})
+        assert good._term_token_ok() is True
+        bad = _CookieFake("/api/rnd/term_ws?session=x",
+                          headers={"Cookie": f"{_pth.AUTH_COOKIE_NAME}=nope"})
+        assert bad._term_token_ok() is False
+        none = _CookieFake("/api/rnd/term_ws?session=x", headers={})
+        assert none._term_token_ok() is False
+
+    def test_query_token_fallback_still_works(self, monkeypatch):
+        mod = _bind_cookie(__import__("anchor_gui"))
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        fh = _CookieFake("/api/rnd/term_ws?session=x&token=s3cret", headers={})
+        assert fh._term_token_ok() is True
+
+    def test_presented_token_sees_cookie(self, monkeypatch):
+        mod = _bind_cookie(__import__("anchor_gui"))
+        fh = _CookieFake("/x", headers={"Cookie": f"{_pth.AUTH_COOKIE_NAME}=abc"})
+        assert fh._presented_token() == "abc"
+
+
+class TestW9DataPlaneGateCookie:
+    """Under enforce: a cookie-bearing browser GET is served; tokenless 401s."""
+
+    def test_cookie_bearing_served_under_enforce(self, monkeypatch, tmp_path):
+        mod = _bind_cookie(__import__("anchor_gui"))
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "enforce")
+        monkeypatch.setenv("ANCHOR_AUTH_WARN_LOG", str(tmp_path / "aw.log"))
+        fh = _CookieFake("/api/rnd/projects",
+                         headers={"Cookie": f"{_pth.AUTH_COOKIE_NAME}=s3cret"})
+        assert fh._data_plane_gate("GET", "/api/rnd/projects") is False
+        assert fh.sent == []
+
+    def test_tokenless_401_under_enforce(self, monkeypatch, tmp_path):
+        mod = _bind_cookie(__import__("anchor_gui"))
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        monkeypatch.setenv("ANCHOR_AUTH_MODE", "enforce")
+        monkeypatch.setenv("ANCHOR_AUTH_WARN_LOG", str(tmp_path / "aw.log"))
+        fh = _CookieFake("/api/rnd/projects", headers={})
+        assert fh._data_plane_gate("GET", "/api/rnd/projects") is True
+        assert fh.sent and fh.sent[-1][0] == 401
+
+
+class TestW9LoginLogoutHandlers:
+    """POST /api/auth/login|logout — mint / clear the HttpOnly auth cookie."""
+
+    def test_login_sets_httponly_cookie(self, monkeypatch):
+        import anchor_gui
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        fh = _CookieFake("/api/auth/login",
+                         headers={"X-Anchor-Token": "s3cret"})
+        anchor_gui.handle_auth_login(fh, "/api/auth/login", {})
+        cookies = fh.set_cookies()
+        assert cookies, "login set no cookie"
+        c = cookies[0]
+        assert "s3cret" in c and "HttpOnly" in c and "SameSite=Strict" in c
+        assert fh.resp["status"] == 200
+
+    def test_login_auth_disabled_sets_no_cookie(self, monkeypatch):
+        import anchor_gui
+        monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+        fh = _CookieFake("/api/auth/login", headers={})
+        anchor_gui.handle_auth_login(fh, "/api/auth/login", {})
+        assert fh.set_cookies() == []
+
+    def test_logout_clears_cookie(self, monkeypatch):
+        import anchor_gui
+        fh = _CookieFake("/api/auth/logout",
+                         headers={"X-Anchor-Token": "s3cret"})
+        anchor_gui.handle_auth_logout(fh, "/api/auth/logout", {})
+        cookies = fh.set_cookies()
+        assert cookies and "Max-Age=0" in cookies[0]
+
+    def test_login_secure_flag_follows_forwarded_proto(self, monkeypatch):
+        import anchor_gui
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        fh = _CookieFake("/api/auth/login",
+                         headers={"X-Anchor-Token": "s3cret",
+                                  "X-Forwarded-Proto": "https"})
+        anchor_gui.handle_auth_login(fh, "/api/auth/login", {})
+        assert "Secure" in fh.set_cookies()[0]
+
+
+class TestW9Routes:
+    """The auth-cookie endpoints are declared, migrated, and default-deny."""
+
+    def test_login_logout_rows_declared_token_migrated(self):
+        for pat in ("/api/auth/login", "/api/auth/logout"):
+            row = rt.match("POST", pat)
+            assert row is not None, f"{pat} has no row"
+            assert row.auth == rt.AUTH_TOKEN
+            assert row.migrated and row.handler
+
+    def test_handlers_registered(self):
+        import anchor_gui
+        assert "handle_auth_login" in anchor_gui._MIGRATED_HANDLERS
+        assert "handle_auth_logout" in anchor_gui._MIGRATED_HANDLERS
+
+    def test_login_dispatches_through_strangler(self, monkeypatch):
+        anchor_gui = _bind_fake()
+        monkeypatch.setenv("ANCHOR_TOKEN", "s3cret")
+        fh = _FakeHandler(token_ok=True)   # POST auth handled by do_POST middleware
+        fh.path = "/api/auth/login"
+        fh.headers = {"X-Anchor-Token": "s3cret"}
+        fh.resp = {"status": None, "headers": []}
+        fh.send_response = lambda c: fh.resp.__setitem__("status", c)
+        fh.send_header = lambda k, v: fh.resp["headers"].append((k, v))
+        handled = fh._strangler_dispatch("POST", "/api/auth/login",
+                                         {"token": "s3cret"})
+        assert handled is True
+        assert any(k == "Set-Cookie" for k, _ in fh.resp["headers"])
+
+    def test_open_routes_unchanged_by_w9(self):
+        # W9 adds NO open route (the data-plane rows stay open + overlay-flipped).
+        for r in rt.ROUTES:
+            if r.pattern in ("/api/auth/login", "/api/auth/logout"):
+                assert r.auth == rt.AUTH_TOKEN
+
+
+class TestW9Frontend:
+    """Cookie priming ships in the JS; page navigation carries no URL token."""
+
+    def test_prime_auth_cookie_defined_and_called(self):
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        assert "function primeAuthCookie()" in src
+        assert "primeAuthCookie();" in src
+        assert "/api/auth/login" in src
+
+    def test_page_nav_links_carry_no_url_token(self):
+        # The window.open of a project window is a page navigation — no ?token=.
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        assert "window.open('/project/' + encodeURIComponent(pid)" in src
+        # The line must not smuggle a token into the page URL.
+        for line in src.splitlines():
+            if "window.open('/project/'" in line:
+                assert "token" not in line, (
+                    "project-window navigation must not carry a URL token (W9)")
+
+
+class TestW9HealthcheckSoak:
+    """The cookie/auth walk + its entry into the 20× repetition pipeline."""
+
+    def test_walk_defined_and_green(self):
+        import anchor_healthcheck as hc
+        rep = hc.Report()
+        hc.check_cookie_auth_walk(rep)
+        names = {n for n, _, _ in rep.checks}
+        assert "cookie/auth walk (W9)" in names
+        for n, ok, detail in rep.checks:
+            if n == "cookie/auth walk (W9)":
+                assert ok, f"cookie/auth walk failed: {detail}"
+
+    def test_walk_is_a_soak_candidate(self):
+        import anchor_healthcheck as hc
+        cands = {n for n, _ in hc.soak_candidate_walks()}
+        assert "cookie/auth walk (W9)" in cands
+
+    def test_walk_not_yet_in_5am_run(self):
+        # PROCESS-RAILS §2: a new walk joins main() only after 20× green (W18).
+        src = HC_FILE.read_text(encoding="utf-8")
+        main_onward = src[src.index("def main("):]
+        assert "check_cookie_auth_walk(" not in main_onward, (
+            "the cookie/auth walk must NOT be wired into the 5AM main() run yet")
+        assert "--soak" in src and "run_soak_candidates" in src
+
+    def test_soak_ledger_streak_and_ready(self, tmp_path):
+        import anchor_healthcheck as hc
+        ledger = tmp_path / "soak.jsonl"
+        name = "cookie/auth walk (W9)"
+        assert hc.soak_green_streak(name, ledger) == 0
+        assert hc.soak_ready(name, ledger) is False
+        for i in range(hc.SOAK_TARGET_REPETITIONS):
+            hc.record_soak_result(name, True, ledger_path=ledger, ts=float(i))
+        assert hc.soak_green_streak(name, ledger) == hc.SOAK_TARGET_REPETITIONS
+        assert hc.soak_ready(name, ledger) is True
+        # A failure resets the consecutive streak.
+        hc.record_soak_result(name, False, ledger_path=ledger, ts=999.0)
+        assert hc.soak_green_streak(name, ledger) == 0
+
+
+class TestW9OpsCutover:
+    """The live tokenless-401 probe + the honest (amendment-gated) outcome ledger."""
+
+    def _server(self, code):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class _H(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"ok": false}')
+
+            def log_message(self, *a):
+                return
+
+        srv = HTTPServer(("127.0.0.1", 0), _H)
+        t = threading.Thread(target=srv.serve_forever, daemon=True)
+        t.start()
+        return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def test_probe_detects_live_401(self):
+        srv, base = self._server(401)
+        try:
+            res = acut.probe_tokenless_401(base)
+        finally:
+            srv.shutdown()
+        assert res["ok"] is True and res["status"] == 401
+
+    def test_probe_fails_when_not_enforced(self):
+        srv, base = self._server(200)
+        try:
+            res = acut.probe_tokenless_401(base)
+        finally:
+            srv.shutdown()
+        assert res["ok"] is False and res["status"] == 200
+
+    def test_record_pending_and_enforced(self, tmp_path):
+        p = acut.record_cutover_outcome(acut.OUTCOME_ENFORCED,
+                                        detail="observed", out_dir=tmp_path)
+        loaded = acut.load_cutover_outcome(tmp_path)
+        assert loaded["outcome"] == "enforced"
+        assert p.exists()
+
+    def test_decline_requires_amendment_citation(self, tmp_path):
+        with pytest.raises(ValueError):
+            acut.record_cutover_outcome(acut.OUTCOME_DECLINED, out_dir=tmp_path)
+        # With a citation it is recorded honestly.
+        acut.record_cutover_outcome(acut.OUTCOME_DECLINED,
+                                    amendment_ref="IMPLEMENTATION-PLAN.md#W9-amend",
+                                    out_dir=tmp_path)
+        assert acut.load_cutover_outcome(tmp_path)["outcome"] == "declined"
+
+    def test_unknown_outcome_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            acut.record_cutover_outcome("bogus", out_dir=tmp_path)
+
+    def test_cutover_doc_checked_in_and_names_the_teeth(self):
+        assert OPS_CUTOVER_DOC.exists()
+        md = OPS_CUTOVER_DOC.read_text(encoding="utf-8")
+        assert "/api/rnd/projects" in md and "401" in md
+        assert "ANCHOR_AUTH_MODE=enforce" in md
+        assert "c2-enforced" in md
+        assert "amendment" in md.lower() and "declined" in md.lower()
+        assert "NEVER" in md.upper()   # the sequencing rule (separate deploy)
+
+    def test_pending_outcome_artifact_checked_in(self):
+        art = ARTIFACT_DIR / acut.OUTCOME_NAME
+        assert art.exists()
+        data = json.loads(art.read_text(encoding="utf-8"))
+        assert data["outcome"] == acut.OUTCOME_PENDING
+        assert data["probe_path"] == "/api/rnd/projects"
+
+
+class TestW9SpikeVerdictConsumed:
+    """W9 acts on the recorded cookie-through-WS spike verdict (D3)."""
+
+    def test_desktop_leg_proven_pwa_fallback_retained(self):
+        verdict = json.loads(
+            (ARTIFACT_DIR / cw.VERDICT_JSON_NAME).read_text(encoding="utf-8"))
+        assert verdict["legs"]["desktop"]["answer"]["pass"] is True
+        assert verdict["fallback_declared"] is True
+        # The PWA leg is unproven → ?token= stays on the WS transport.
+        assert "pwa" not in verdict["legs"] or not verdict["legs"].get(
+            "pwa", {}).get("ran")
+        # term_ws keeps its ws_token policy (the declared query fallback).
+        assert rt.match("GET", "/api/rnd/term_ws").auth == rt.AUTH_WS_TOKEN
