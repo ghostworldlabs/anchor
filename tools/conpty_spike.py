@@ -446,7 +446,10 @@ def main(argv=None):  # pragma: no cover - thin CLI shim
     result = run_spike(backend=backend)
     jp, mp = record_verdict(result)
     print(json.dumps(result, indent=2))
-    print(f"recorded → {jp}\nrendered → {mp}")
+    # ASCII-only status line: the console default encoding on the live host
+    # is cp1252, which cannot encode U+2192 ("→") — the print crashed there
+    # (observed 2026-07-03). Keep the message encoding-safe (rearch W6c).
+    print(f"recorded -> {jp}\nrendered -> {mp}")
     return 0 if result["verdict"] == "YES" else 1
 
 
