@@ -14,31 +14,31 @@
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "write",
       "site": "effort_history.py:record_effort",
-      "count": 19
+      "count": 18
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "replace",
       "site": "effort_history.py:_save_index",
-      "count": 19
+      "count": 18
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "write",
       "site": "effort_history.py:_save_index",
-      "count": 19
+      "count": 18
     },
     {
       "store": ".anchor/sessions.json",
       "op": "replace",
       "site": "session_registry.py:_save_sessions",
-      "count": 38
+      "count": 36
     },
     {
       "store": ".anchor/sessions.json",
       "op": "write",
       "site": "session_registry.py:_save_sessions",
-      "count": 38
+      "count": 36
     }
   ]
 }
