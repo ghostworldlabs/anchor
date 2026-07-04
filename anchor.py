@@ -124,124 +124,21 @@ def _read_md_text(filepath):
         return filepath.read_text(encoding="utf-8", errors="replace")
 
 
-def parse_tasks_from_md(filepath):
-    """Extract checkbox tasks from a markdown file."""
-    tasks = []
-    if not filepath.exists():
-        return tasks
-    text = _read_md_text(filepath)
-    for line in text.splitlines():
-        m = re.match(r'\s*-\s*\[([ xX])\]\s*\*?\*?(.*?)(?:\*?\*?\s*—\s*(.*))?$', line)
-        if m:
-            done = m.group(1).lower() == 'x'
-            raw_text = m.group(2).strip().rstrip('*')
-            meta = m.group(3) or ""
-            # Extract priority
-            pm = re.search(r'Priority:\s*(\d)', meta) or re.search(r'Priority:\s*(\d)', raw_text)
-            priority = int(pm.group(1)) if pm else 2
-            # Extract energy
-            em = re.search(r'energy:\s*(\w+)', meta, re.I) or re.search(r'energy:\s*(\w+)', raw_text, re.I)
-            energy = em.group(1).lower() if em else "med"
-            # Extract domain
-            dm = re.search(r'\[(\w+)\]', meta) or re.search(r'\[(\w+)\]', raw_text)
-            domain = dm.group(1).lower() if dm else "personal"
-            # Extract due date
-            due_m = re.search(r'Due:\s*([\d/\-\w]+)', meta, re.I)
-            due = due_m.group(1) if due_m else ""
-            # Extract the optional Project: <id> link (Wave 3; no-op until Wave 9).
-            proj_m = re.search(r'Project:\s*([^\s—]+)', meta, re.I)
-            project = proj_m.group(1).strip() if proj_m else ""
-            # Extract notes
-            notes_m = re.search(r'Notes:\s*(.+?)(?:\s*—\s*(?:Priority|energy|Due|Project|\[)|$)', meta, re.I)
-            if not notes_m:
-                notes_m = re.search(r'Notes:\s*(.+?)$', meta, re.I)
-            notes = notes_m.group(1).strip().rstrip(' —') if notes_m else ""
-            # Clean text
-            clean = re.sub(r'\s*—\s*Priority:.*', '', raw_text)
-            clean = re.sub(r'\s*—\s*\[.*', '', clean)
-            clean = re.sub(r'\s*—\s*energy:.*', '', clean, flags=re.I)
-            clean = re.sub(r'\s*—\s*Notes:.*', '', clean, flags=re.I)
-            clean = re.sub(r'\s*—\s*Project:.*', '', clean, flags=re.I)
-            clean = clean.strip(' *')
-            tasks.append({
-                "text": clean,
-                "done": done,
-                "priority": priority,
-                "energy": energy,
-                "domain": domain,
-                "due": due,
-                "notes": notes,
-                "project": project,
-            })
-    return tasks
-
-
-def parse_projects_from_md(filepath):
-    """Extract projects from PROJECTS.md."""
-    projects = []
-    if not filepath.exists():
-        return projects
-    text = _read_md_text(filepath)
-    current = None
-    for line in text.splitlines():
-        h2 = re.match(r'^##\s+(.+)', line)
-        if h2:
-            if current:
-                projects.append(current)
-            current = {
-                "name": h2.group(1).strip(),
-                "domain": "academic",
-                "priority": 2,
-                "status": "active",
-                "effort": "high",
-                "due": "",
-                "next": "",
-                "collabs": "",
-                "notes": "",
-            }
-            continue
-        if current:
-            kv = re.match(r'\s*-\s*\*\*(\w[\w\s]*?):\*\*\s*(.*)', line)
-            if kv:
-                key = kv.group(1).strip().lower()
-                val = kv.group(2).strip()
-                if key == "domain":
-                    current["domain"] = val.lower().split("+")[0].strip().split("/")[0].strip()
-                elif key == "priority":
-                    try: current["priority"] = int(val)
-                    except: pass
-                elif key == "status":
-                    current["status"] = val.lower().split("—")[0].strip()
-                elif key.startswith("next"):
-                    current["next"] = val
-                elif key == "collaborators":
-                    current["collabs"] = val
-                elif key == "notes":
-                    current["notes"] = val
-                elif key in ("effort", "effort level"):
-                    current["effort"] = val.lower()
-                elif key in ("deadline", "due"):
-                    current["due"] = val
-    if current:
-        projects.append(current)
-    return projects
-
-
-def parse_inbox_from_md(filepath):
-    """Extract inbox items from INBOX.md."""
-    items = []
-    if not filepath.exists():
-        return items
-    text = _read_md_text(filepath)
-    for line in text.splitlines():
-        m = re.match(r'\s*-\s*(\d{4}-\d{2}-\d{2}):\s*(.*?)(?:\s*\[(\w+)\])?\s*$', line)
-        if m:
-            items.append({
-                "date": m.group(1),
-                "text": m.group(2).strip(),
-                "domain": m.group(3) or "",
-            })
-    return items
+# ── Markdown parsers — the single shared layer (C5 de-fork, 2026-07) ───
+# These parsers used to be a byte-identical twin of anchor_gui.py's copies
+# (with a drifted third copy in the now-deleted dead Flask anchor_server.py).
+# They now live once, in the shared ``anchor_md`` module, imported by both the
+# CLI (here) and the GUI. Re-exported as module globals so ``anchor.parse_*``
+# call sites keep working unchanged. The CLI additionally gains
+# ``parse_archived_tasks`` and ``serialize_task_line`` for free (previously
+# GUI-only).
+from anchor_md import (
+    parse_tasks_from_md,
+    serialize_task_line,
+    parse_projects_from_md,
+    parse_inbox_from_md,
+    parse_archived_tasks,
+)
 
 
 # ── Dashboard HTML generation ──────────────────────────────────────────
