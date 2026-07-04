@@ -27,6 +27,7 @@ exec python -m pytest -v -p no:langsmith_plugin \
   tests/test_build_deliverable.py tests/test_engine_persist.py tests/test_engine_selector.py \
   tests/test_lanes_concurrency.py tests/test_terminal_session.py tests/test_terminal_seed.py \
   tests/test_gandalf_endpoints.py tests/test_gandalf_engine.py tests/test_worktrees.py \
+  tests/test_parity_recovery_w14.py \
   tests/test_*_w[0-9].py \
   --deselect tests/test_session_continue.py::test_historical_panel_shows_summary_and_continue_works \
   --deselect tests/test_build_deliverable.py::test_build_deliverable_in_lane_and_panel_playwright

@@ -5369,6 +5369,116 @@ def check_journal_perf_budget(report: Report):
                 pass
 
 
+def check_journal_parity(report: Report):
+    """rearch W14 (C3): the quiescent classifying journal↔legacy PARITY gate.
+
+    The C3 journal dual-writes journal-first; this walk proves the journal and
+    the legacy stores stay in agreement, AND that the 'lost from an index' class
+    is recoverable-by-construction — hermetically (a temp folder + a temp data
+    dir + explicit ``folder_path`` — never the live service / real data):
+
+      (1) drive a representative journaled workload with the flag ON — grass
+          ideas (``add_idea``) + a session lifecycle (started→killed via the
+          blessed ``journal.dual_write``) — then run the parity gate and assert
+          ZERO divergence (both stores written; nothing in flight);
+      (2) DELETE the grass ``index.json`` mid-walk (simulate a torn/lost index)
+          and assert the gate now CLASSIFIES the loss (journal-ahead beyond the
+          tail — not clean at ``tail_window=0``);
+      (3) run ``tools.rebuild_index`` against the journal and assert the rebuilt
+          index restores the gate to ZERO divergence.
+    """
+    name = "journal parity gate (classify + recover)"
+    import tempfile as _tf
+    import shutil as _shutil
+    prev_journal = os.environ.get("ANCHOR_JOURNAL")
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    tmp = None
+    try:
+        import journal as _journal
+        import effort_history as _eh
+        import session_registry as _reg
+        import paths as _paths
+        import parity as _parity
+        from tools import rebuild_index as _rebuild
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-jparity-"))
+        data = tmp / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        os.environ["ANCHOR_DATA_DIR"] = str(data)
+        os.environ["ANCHOR_JOURNAL"] = "on"
+        _paths.ensure_data_dirs()
+        _journal.reset_seq_cache()
+
+        folder = tmp / "proj"
+        folder.mkdir(parents=True, exist_ok=True)
+        pid = "hc-parity-pid"
+
+        # (1) representative journaled workload (grass + a session lifecycle).
+        _eh.add_idea(str(folder), pid, "parity idea A")
+        _eh.add_idea(str(folder), pid, "parity idea B")
+        sid = "hc-parity-sess-1"
+        _journal.dual_write(
+            pid, _journal.EV_SESSION_STARTED,
+            lambda: _reg.register_session(
+                project_id=pid, lane="research", session_id=sid,
+                status=_reg.STATUS_RUNNING),
+            correlation_id=sid, folder_path=str(folder),
+            payload={"session_id": sid, "lane": "research",
+                     "backend": _reg.BACKEND_CLAUDE})
+        _journal.dual_write(
+            pid, _journal.EV_SESSION_KILLED,
+            lambda: _reg.update_session(sid, status=_reg.STATUS_DONE),
+            correlation_id=sid, folder_path=str(folder),
+            payload={"session_id": sid, "lane": "research"})
+
+        rep1 = _parity.classify_parity(pid, folder_path=str(folder))
+        clean_after_workload = rep1.is_clean()
+
+        # (2) simulate a lost/torn grass index → the gate must classify it.
+        idx = _eh._index_path(str(folder), pid, "grass")
+        try:
+            idx.unlink()
+        except OSError:
+            pass
+        rep2 = _parity.classify_parity(pid, folder_path=str(folder))
+        classified_loss = (not rep2.is_clean()) and any(
+            d["classification"] == _parity.CLASS_JOURNAL_AHEAD
+            and d["entity"] == _parity.ENTITY_EFFORT
+            for d in rep2.effective_divergences())
+
+        # (3) rebuild from the journal → back to zero divergence.
+        _rebuild.rebuild_grass_index_from_journal(str(folder), pid,
+                                                  dry_run=False)
+        rep3 = _parity.classify_parity(pid, folder_path=str(folder))
+        recovered = rep3.is_clean()
+
+        ok = bool(clean_after_workload and classified_loss and recovered)
+        report.check(name, ok,
+                     f"clean-after-workload={clean_after_workload} "
+                     f"classified-loss={classified_loss} "
+                     f"recovered-by-rebuild={recovered} | {rep3.summary()}")
+    except Exception as e:
+        report.check(name, False,
+                     f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        for k, v in (("ANCHOR_JOURNAL", prev_journal),
+                     ("ANCHOR_DATA_DIR", prev_data)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            import journal as _journal2
+            _journal2.reset_seq_cache()
+        except Exception:
+            pass
+        if tmp is not None:
+            try:
+                _shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     report = Report()
@@ -5443,6 +5553,10 @@ def main():
         # journal-on perf budget (<5%), both hermetic (never the live service).
         check_journal_completeness_gate(report)
         check_journal_perf_budget(report)
+        # rearch W14 (C3): the quiescent classifying journal↔legacy parity gate
+        # + the rebuild-from-journal recovery leg (hermetic; never the live
+        # service). Joins the 20× nightly pipeline.
+        check_journal_parity(report)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
