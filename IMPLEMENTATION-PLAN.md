@@ -220,6 +220,15 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 ## Wave 7 — W6b — generate_html JS/CSS → Static via the Substrate
 
+> SUPERVISOR AMENDMENT (2026-07-04, human-backed): after waves 7-8 converged
+> HOLLOW twice (no extraction; anchor_gui.py GREW), the C1 exit criteria are
+> now MECHANICAL — `tests/test_rearch_2026_07.py::TestC1ExitGate` (shrink bar
+> ≥7,000 vs sentinel 17,359 · no >50-line embedded string blob · the census
+> amendment file retired · real static home-dashboard assets referenced from
+> the source) is supervisor-authored and RED until the extraction is REAL.
+> Turning it green IS waves 7-8's work. No agent may weaken, skip, or remove
+> these tests; the prior "GO" commits 7ab8e44/e8b7e70 do NOT count as done.
+
 **Intent:** Execute the extraction W6a mechanized: move the home-dashboard JS/CSS to static assets and reduce generate_html to data + slots, behind the byte-parity gate (Master Plan Phase 1; Integrated 1, 9, 50).
 
 **Deliverables:** Home-dashboard JS/CSS as static assets served through the existing traversal-safe static root + `?v=<hash8>` cache-busting; generate_html reduced to data assembly + ANCHOR_BOOT JSON + the ≤50-line markup helpers + slot substitution, per the W6a extraction map; Byte-parity gate GREEN for the home dashboard (divergence only in the documented slot/ANCHOR_BOOT injection blocks); Static-vs-embedded off-switch flag functional for the home dashboard (revert without reverting other waves)

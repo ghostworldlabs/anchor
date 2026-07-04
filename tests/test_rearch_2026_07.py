@@ -2458,4 +2458,68 @@ class TestW6aMechanismOnly:
     def test_no_include_slots_in_anchor_gui_yet(self):
         """The include slots land in W6b — the mechanism wave adds NONE to the
         monolith; the substrate is proven on synthetic fixtures only."""
-        assert not sr.SLOT_RE.search(ANCHOR_GUI.read_text(encoding="utf-8"))
+        if sr.SLOT_RE.search(ANCHOR_GUI.read_text(encoding="utf-8")):
+            pytest.skip("W6b has landed slots in anchor_gui.py — the "
+                        "mechanism-only assertion is superseded by "
+                        "TestC1ExitGate (supervisor amendment 2026-07-04)")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 26) C1 EXIT GATE — supervisor-authored, human-backed (2026-07-04)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# After two hollow convergences (waves 7-8 "GO" with zero extraction — see the
+# FOREMAN-EXECUTION-LOG supervisor corrections), the C1 exit criteria are now
+# MECHANICAL. These tests are RED until the extraction is REAL; turning them
+# green IS waves 7-8's work. Plan citation: IMPLEMENTATION-PLAN.md §Wave 6
+# amendment + §Wave 7/8. No agent may weaken, skip, or remove them.
+
+class TestC1ExitGate:
+    # anchor_gui.py measured 17,359 lines at the pre-C1 sentinel (master,
+    # 2026-07-04); the plan's C1 exit bar is a NET shrink ≥ 7,000 lines.
+    SENTINEL_LINES = 17_359
+    SHRINK_BAR = 7_000
+    BLOB_CAP = 50
+
+    def test_shrink_bar_met(self):
+        count = len(ANCHOR_GUI.read_text(encoding="utf-8").splitlines())
+        limit = self.SENTINEL_LINES - self.SHRINK_BAR
+        assert count <= limit, (
+            f"C1 exit: anchor_gui.py has {count} lines; the bar is <= {limit} "
+            f"(sentinel {self.SENTINEL_LINES} - shrink >= {self.SHRINK_BAR})")
+
+    def test_no_embedded_string_blob_over_cap(self):
+        tree = ast.parse(ANCHOR_GUI.read_text(encoding="utf-8"))
+        offenders = []
+        for node in ast.walk(tree):
+            is_str = (isinstance(node, ast.JoinedStr)
+                      or (isinstance(node, ast.Constant)
+                          and isinstance(node.value, str)))
+            if not is_str:
+                continue
+            span = (node.end_lineno or node.lineno) - node.lineno + 1
+            if span > self.BLOB_CAP:
+                offenders.append((node.lineno, span))
+        assert not offenders, (
+            f"C1 exit: embedded string blobs over {self.BLOB_CAP} lines "
+            f"remain at (lineno, span): {offenders}")
+
+    def test_census_amendment_file_retired(self):
+        amend = ARTIFACT_DIR / "C1-AMENDMENT-REQUIRED.md"
+        assert not amend.exists(), (
+            "C1 exit: C1-AMENDMENT-REQUIRED.md still present — the "
+            "include-layer amendment is not yet satisfied IN CODE (the file "
+            "self-regenerates while the census demands it)")
+
+    def test_home_dashboard_assets_static_and_referenced(self):
+        static = ANCHOR_GUI.parent / "static"
+        js = [p for p in static.glob("*.js") if p.name != "project-window.js"]
+        css = [p for p in static.glob("*.css")
+               if p.name != "project-window.css"]
+        assert js and css, (
+            "C1 exit: no static home-dashboard js/css assets exist yet")
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        assert (any(p.name in src for p in js)
+                and any(p.name in src for p in css)), (
+            "C1 exit: anchor_gui.py does not reference the home-dashboard "
+            "static assets")
