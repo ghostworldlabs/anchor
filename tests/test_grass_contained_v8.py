@@ -229,7 +229,9 @@ def test_gather_project_sessions_excludes_develop(env):
 def test_js_does_not_leak_develop_into_strip_or_board():
     """SOURCE ASSERT: developGrass() must NOT add the develop session to MANAGED
     nor call renderSessionBar()/refreshBoard() (containment in the JS path)."""
-    src = _GUI_SRC.read_text(encoding="utf-8")
+    # C1 (2026-07-05): the app JS is EXTRACTED to static/project-window.js —
+    # developGrass and the session-bar/board fns live there now, not in anchor_gui.py.
+    src = (_GUI_SRC.parent / "static" / "project-window.js").read_text(encoding="utf-8")
     m = re.search(r"async function developGrass\([\s\S]*?\n\}\n", src)
     assert m, "developGrass() not found"
     fn = m.group(0)

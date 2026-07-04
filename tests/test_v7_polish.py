@@ -237,7 +237,9 @@ def test_refreshboard_defined_and_wired_into_lifecycle():
     session-lifecycle mutation that changes the board. Asserting on the product
     source (not a string-grep-only UI claim — the Playwright test below proves the
     behavior end-to-end; this just guards the wiring doesn't silently drop)."""
-    src = _GUI_SRC.read_text(encoding="utf-8")
+    # C1 (2026-07-05): the app JS is EXTRACTED to static/project-window.js —
+    # refreshBoard + the lifecycle fns live there now, not in anchor_gui.py.
+    src = (_GUI_SRC.parent / "static" / "project-window.js").read_text(encoding="utf-8")
     assert "async function refreshBoard()" in src, "refreshBoard() is not defined"
     # It is wired into each lifecycle function. We assert each function body calls
     # refreshBoard() by slicing the function source and checking the call appears.
