@@ -16,87 +16,87 @@ W6a gate refreshes it). W6b executes this map; W6a does NOT modify
 
 ## Extractable JS/CSS blobs (merged static spans)
 
-- `generate_html`: lines 11688–11738 (51 lines)
-- `generate_html`: lines 11854–11873 (20 lines)
-- `generate_html`: lines 11889–14170 (2282 lines)
-- `render_project_window_html`: lines 4834–4859 (26 lines)
+- `generate_html`: lines 11689–11739 (51 lines)
+- `generate_html`: lines 11855–11874 (20 lines)
+- `generate_html`: lines 11890–14171 (2282 lines)
+- `render_project_window_html`: lines 4835–4860 (26 lines)
 
 ## Named helpers (source symbol → slot occurrences)
 
-- `balance_rows` [named-var] × 1: `generate_html_L12506_0`
-- `blurb_attr` [named-var] × 1: `render_project_window_html_L4825_0`
-- `cache_bust_script` [renderer-call] × 1: `generate_html_L14167_0`
-- `d_top_rows` [named-var] × 1: `generate_html_L11722_0`
-- `generate_html_L11529_0` [inline-literal] × 1: `generate_html_L11529_0`
-- `generate_html_L11571_0` [inline-literal] × 1: `generate_html_L11571_0`
-- `generate_html_L11577_0` [inline-literal] × 1: `generate_html_L11577_0`
-- `generate_html_L11600_0` [inline-literal] × 1: `generate_html_L11600_0`
-- `generate_html_L11683_0` [inline-literal] × 1: `generate_html_L11683_0`
-- `generate_html_L11725_1` [inline-literal] × 1: `generate_html_L11725_1`
-- `generate_html_L11733_0` [inline-literal] × 1: `generate_html_L11733_0`
-- `generate_html_L11735_1` [inline-literal] × 1: `generate_html_L11735_1`
-- `generate_html_L11737_0` [inline-literal] × 1: `generate_html_L11737_0`
-- `generate_html_L11749_0` [inline-literal] × 1: `generate_html_L11749_0`
-- `gpid_attr` [named-var] × 1: `generate_html_L11566_0`
-- `health_banner_html` [named-var] × 1: `generate_html_L12530_0`
-- `notes_html` [named-var] × 3: `generate_html_L11528_0`, `generate_html_L11599_0`, `generate_html_L11747_0`
-- `pid_attr` [named-var] × 13: `render_project_window_html_L4680_0`, `render_project_window_html_L4685_0`, `render_project_window_html_L4686_0`, `render_project_window_html_L4693_0`, `render_project_window_html_L4697_0`, `render_project_window_html_L4698_0`, `render_project_window_html_L4701_0`, `render_project_window_html_L4702_0`, `render_project_window_html_L4703_0`, `render_project_window_html_L4704_0`, `render_project_window_html_L4708_0`, `render_project_window_html_L4711_0`, `render_project_window_html_L4712_0`
-- `project_card` [renderer-call] × 4: `generate_html_L11725_0`, `generate_html_L11735_0`, `generate_html_L12607_0`, `generate_html_L12622_0`
-- `render_model_flex_badge` [renderer-call] × 1: `generate_html_L12547_0`
-- `rescan_btn` [named-var] × 2: `render_project_window_html_L4699_0`, `render_project_window_html_L4709_0`
-- `rnd_archive_html` [named-var] × 1: `generate_html_L12703_0`
-- `rnd_projects_html` [named-var] × 2: `generate_html_L12604_0`, `generate_html_L12691_0`
-- `tier_btn` [named-var] × 3: `generate_html_L11532_0`, `generate_html_L11574_0`, `generate_html_L11603_0`
-- `top_task_row` [renderer-call] × 1: `generate_html_L12583_0`
-- `upload_btn` [named-var] × 2: `render_project_window_html_L4700_0`, `render_project_window_html_L4710_0`
+- `balance_rows` [named-var] × 1: `generate_html_L12507_0`
+- `blurb_attr` [named-var] × 1: `render_project_window_html_L4826_0`
+- `cache_bust_script` [renderer-call] × 1: `generate_html_L14168_0`
+- `d_top_rows` [named-var] × 1: `generate_html_L11723_0`
+- `generate_html_L11530_0` [inline-literal] × 1: `generate_html_L11530_0`
+- `generate_html_L11572_0` [inline-literal] × 1: `generate_html_L11572_0`
+- `generate_html_L11578_0` [inline-literal] × 1: `generate_html_L11578_0`
+- `generate_html_L11601_0` [inline-literal] × 1: `generate_html_L11601_0`
+- `generate_html_L11684_0` [inline-literal] × 1: `generate_html_L11684_0`
+- `generate_html_L11726_1` [inline-literal] × 1: `generate_html_L11726_1`
+- `generate_html_L11734_0` [inline-literal] × 1: `generate_html_L11734_0`
+- `generate_html_L11736_1` [inline-literal] × 1: `generate_html_L11736_1`
+- `generate_html_L11738_0` [inline-literal] × 1: `generate_html_L11738_0`
+- `generate_html_L11750_0` [inline-literal] × 1: `generate_html_L11750_0`
+- `gpid_attr` [named-var] × 1: `generate_html_L11567_0`
+- `health_banner_html` [named-var] × 1: `generate_html_L12531_0`
+- `notes_html` [named-var] × 3: `generate_html_L11529_0`, `generate_html_L11600_0`, `generate_html_L11748_0`
+- `pid_attr` [named-var] × 13: `render_project_window_html_L4681_0`, `render_project_window_html_L4686_0`, `render_project_window_html_L4687_0`, `render_project_window_html_L4694_0`, `render_project_window_html_L4698_0`, `render_project_window_html_L4699_0`, `render_project_window_html_L4702_0`, `render_project_window_html_L4703_0`, `render_project_window_html_L4704_0`, `render_project_window_html_L4705_0`, `render_project_window_html_L4709_0`, `render_project_window_html_L4712_0`, `render_project_window_html_L4713_0`
+- `project_card` [renderer-call] × 4: `generate_html_L11726_0`, `generate_html_L11736_0`, `generate_html_L12608_0`, `generate_html_L12623_0`
+- `render_model_flex_badge` [renderer-call] × 1: `generate_html_L12548_0`
+- `rescan_btn` [named-var] × 2: `render_project_window_html_L4700_0`, `render_project_window_html_L4710_0`
+- `rnd_archive_html` [named-var] × 1: `generate_html_L12704_0`
+- `rnd_projects_html` [named-var] × 2: `generate_html_L12605_0`, `generate_html_L12692_0`
+- `tier_btn` [named-var] × 3: `generate_html_L11533_0`, `generate_html_L11575_0`, `generate_html_L11604_0`
+- `top_task_row` [renderer-call] × 1: `generate_html_L12584_0`
+- `upload_btn` [named-var] × 2: `render_project_window_html_L4701_0`, `render_project_window_html_L4711_0`
 
 ## Slots (one per markup interpolation)
 
-- `generate_html_L11528_0` ← `notes_html` [named-var] (generate_html L11528): `{notes_html}`
-- `generate_html_L11529_0` ← `generate_html_L11529_0` [inline-literal] (generate_html L11529): `{f'<span class="top-task-due">{esc(t["due"])}</span>' if t.get("due") else ""}`
-- `generate_html_L11532_0` ← `tier_btn` [named-var] (generate_html L11532): `{tier_btn}`
-- `generate_html_L11566_0` ← `gpid_attr` [named-var] (generate_html L11566): `{gpid_attr}`
-- `generate_html_L11571_0` ← `generate_html_L11571_0` [inline-literal] (generate_html L11571): `{f'<span class="due-badge">{esc(p["due"])}</span>' if p.get("due") else ""}`
-- `generate_html_L11574_0` ← `tier_btn` [named-var] (generate_html L11574): `{tier_btn}`
-- `generate_html_L11577_0` ← `generate_html_L11577_0` [inline-literal] (generate_html L11577): `{f'<div class="next-text">Next: {esc(p["next"])}</div>' if p.get("next") else ""}`
-- `generate_html_L11599_0` ← `notes_html` [named-var] (generate_html L11599): `{notes_html}`
-- `generate_html_L11600_0` ← `generate_html_L11600_0` [inline-literal] (generate_html L11600): `{f'<span class="top-task-due">{esc(t["due"])}</span>' if t.get("due") else ""}`
-- `generate_html_L11603_0` ← `tier_btn` [named-var] (generate_html L11603): `{tier_btn}`
-- `generate_html_L11683_0` ← `generate_html_L11683_0` [inline-literal] (generate_html L11683): `{f'<span class="task-energy">{t["energy"]}</span>' if t.get("energy") else ""}`
-- `generate_html_L11722_0` ← `d_top_rows` [named-var] (generate_html L11722): `{d_top_rows}`
-- `generate_html_L11725_0` ← `project_card` [renderer-call] (generate_html L11725): `{"".join(project_card(p) for p in d_p1_projects)}`
-- `generate_html_L11725_1` ← `generate_html_L11725_1` [inline-literal] (generate_html L11725): `{f'<div class="section-header"><h3>Priority 1 Projects</h3></div><div class="card-grid">{"".join(project_card(p) for p...}`
-- `generate_html_L11733_0` ← `generate_html_L11733_0` [inline-literal] (generate_html L11733): `{f'<div class="section-header"><h3>Other Tasks</h3></div><div class="task-list">{"".join(task_item(t) for t in d_other...}`
-- `generate_html_L11735_0` ← `project_card` [renderer-call] (generate_html L11735): `{"".join(project_card(p) for p in d_p2_projects)}`
-- `generate_html_L11735_1` ← `generate_html_L11735_1` [inline-literal] (generate_html L11735): `{f'<div class="section-header"><h3>Priority 2+ Projects</h3></div><div class="card-grid">{"".join(project_card(p) for ...}`
-- `generate_html_L11737_0` ← `generate_html_L11737_0` [inline-literal] (generate_html L11737): `{f'<div class="section-header" style="margin-top:24px"><h3>Completed ({len(d_done)})</h3></div><div class="task-list">...}`
-- `generate_html_L11747_0` ← `notes_html` [named-var] (generate_html L11747): `{notes_html}`
-- `generate_html_L11749_0` ← `generate_html_L11749_0` [inline-literal] (generate_html L11749): `{f'<span class="task-energy">{t["energy"]}</span>' if t.get("energy") else ""}`
-- `generate_html_L12506_0` ← `balance_rows` [named-var] (generate_html L12506): `{balance_rows}`
-- `generate_html_L12530_0` ← `health_banner_html` [named-var] (generate_html L12530): `{health_banner_html}`
-- `generate_html_L12547_0` ← `render_model_flex_badge` [renderer-call] (generate_html L12547): `{render_model_flex_badge()}`
-- `generate_html_L12583_0` ← `top_task_row` [renderer-call] (generate_html L12583): `{"".join(top_task_row(t) for t in top_tasks)}`
-- `generate_html_L12604_0` ← `rnd_projects_html` [named-var] (generate_html L12604): `{rnd_projects_html}`
-- `generate_html_L12607_0` ← `project_card` [renderer-call] (generate_html L12607): `{"".join(project_card(p) for p in p1_projects)}`
-- `generate_html_L12622_0` ← `project_card` [renderer-call] (generate_html L12622): `{"".join(project_card(p) for p in p2_projects)}`
-- `generate_html_L12691_0` ← `rnd_projects_html` [named-var] (generate_html L12691): `{rnd_projects_html}`
-- `generate_html_L12703_0` ← `rnd_archive_html` [named-var] (generate_html L12703): `{rnd_archive_html}`
-- `generate_html_L14167_0` ← `cache_bust_script` [renderer-call] (generate_html L14167): `{cache_bust_script()}`
-- `render_project_window_html_L4680_0` ← `pid_attr` [named-var] (render_project_window_html L4680): `{pid_attr}`
-- `render_project_window_html_L4685_0` ← `pid_attr` [named-var] (render_project_window_html L4685): `{pid_attr}`
+- `generate_html_L11529_0` ← `notes_html` [named-var] (generate_html L11529): `{notes_html}`
+- `generate_html_L11530_0` ← `generate_html_L11530_0` [inline-literal] (generate_html L11530): `{f'<span class="top-task-due">{esc(t["due"])}</span>' if t.get("due") else ""}`
+- `generate_html_L11533_0` ← `tier_btn` [named-var] (generate_html L11533): `{tier_btn}`
+- `generate_html_L11567_0` ← `gpid_attr` [named-var] (generate_html L11567): `{gpid_attr}`
+- `generate_html_L11572_0` ← `generate_html_L11572_0` [inline-literal] (generate_html L11572): `{f'<span class="due-badge">{esc(p["due"])}</span>' if p.get("due") else ""}`
+- `generate_html_L11575_0` ← `tier_btn` [named-var] (generate_html L11575): `{tier_btn}`
+- `generate_html_L11578_0` ← `generate_html_L11578_0` [inline-literal] (generate_html L11578): `{f'<div class="next-text">Next: {esc(p["next"])}</div>' if p.get("next") else ""}`
+- `generate_html_L11600_0` ← `notes_html` [named-var] (generate_html L11600): `{notes_html}`
+- `generate_html_L11601_0` ← `generate_html_L11601_0` [inline-literal] (generate_html L11601): `{f'<span class="top-task-due">{esc(t["due"])}</span>' if t.get("due") else ""}`
+- `generate_html_L11604_0` ← `tier_btn` [named-var] (generate_html L11604): `{tier_btn}`
+- `generate_html_L11684_0` ← `generate_html_L11684_0` [inline-literal] (generate_html L11684): `{f'<span class="task-energy">{t["energy"]}</span>' if t.get("energy") else ""}`
+- `generate_html_L11723_0` ← `d_top_rows` [named-var] (generate_html L11723): `{d_top_rows}`
+- `generate_html_L11726_0` ← `project_card` [renderer-call] (generate_html L11726): `{"".join(project_card(p) for p in d_p1_projects)}`
+- `generate_html_L11726_1` ← `generate_html_L11726_1` [inline-literal] (generate_html L11726): `{f'<div class="section-header"><h3>Priority 1 Projects</h3></div><div class="card-grid">{"".join(project_card(p) for p...}`
+- `generate_html_L11734_0` ← `generate_html_L11734_0` [inline-literal] (generate_html L11734): `{f'<div class="section-header"><h3>Other Tasks</h3></div><div class="task-list">{"".join(task_item(t) for t in d_other...}`
+- `generate_html_L11736_0` ← `project_card` [renderer-call] (generate_html L11736): `{"".join(project_card(p) for p in d_p2_projects)}`
+- `generate_html_L11736_1` ← `generate_html_L11736_1` [inline-literal] (generate_html L11736): `{f'<div class="section-header"><h3>Priority 2+ Projects</h3></div><div class="card-grid">{"".join(project_card(p) for ...}`
+- `generate_html_L11738_0` ← `generate_html_L11738_0` [inline-literal] (generate_html L11738): `{f'<div class="section-header" style="margin-top:24px"><h3>Completed ({len(d_done)})</h3></div><div class="task-list">...}`
+- `generate_html_L11748_0` ← `notes_html` [named-var] (generate_html L11748): `{notes_html}`
+- `generate_html_L11750_0` ← `generate_html_L11750_0` [inline-literal] (generate_html L11750): `{f'<span class="task-energy">{t["energy"]}</span>' if t.get("energy") else ""}`
+- `generate_html_L12507_0` ← `balance_rows` [named-var] (generate_html L12507): `{balance_rows}`
+- `generate_html_L12531_0` ← `health_banner_html` [named-var] (generate_html L12531): `{health_banner_html}`
+- `generate_html_L12548_0` ← `render_model_flex_badge` [renderer-call] (generate_html L12548): `{render_model_flex_badge()}`
+- `generate_html_L12584_0` ← `top_task_row` [renderer-call] (generate_html L12584): `{"".join(top_task_row(t) for t in top_tasks)}`
+- `generate_html_L12605_0` ← `rnd_projects_html` [named-var] (generate_html L12605): `{rnd_projects_html}`
+- `generate_html_L12608_0` ← `project_card` [renderer-call] (generate_html L12608): `{"".join(project_card(p) for p in p1_projects)}`
+- `generate_html_L12623_0` ← `project_card` [renderer-call] (generate_html L12623): `{"".join(project_card(p) for p in p2_projects)}`
+- `generate_html_L12692_0` ← `rnd_projects_html` [named-var] (generate_html L12692): `{rnd_projects_html}`
+- `generate_html_L12704_0` ← `rnd_archive_html` [named-var] (generate_html L12704): `{rnd_archive_html}`
+- `generate_html_L14168_0` ← `cache_bust_script` [renderer-call] (generate_html L14168): `{cache_bust_script()}`
+- `render_project_window_html_L4681_0` ← `pid_attr` [named-var] (render_project_window_html L4681): `{pid_attr}`
 - `render_project_window_html_L4686_0` ← `pid_attr` [named-var] (render_project_window_html L4686): `{pid_attr}`
-- `render_project_window_html_L4693_0` ← `pid_attr` [named-var] (render_project_window_html L4693): `{pid_attr}`
-- `render_project_window_html_L4697_0` ← `pid_attr` [named-var] (render_project_window_html L4697): `{pid_attr}`
+- `render_project_window_html_L4687_0` ← `pid_attr` [named-var] (render_project_window_html L4687): `{pid_attr}`
+- `render_project_window_html_L4694_0` ← `pid_attr` [named-var] (render_project_window_html L4694): `{pid_attr}`
 - `render_project_window_html_L4698_0` ← `pid_attr` [named-var] (render_project_window_html L4698): `{pid_attr}`
-- `render_project_window_html_L4699_0` ← `rescan_btn` [named-var] (render_project_window_html L4699): `{rescan_btn}`
-- `render_project_window_html_L4700_0` ← `upload_btn` [named-var] (render_project_window_html L4700): `{upload_btn}`
-- `render_project_window_html_L4701_0` ← `pid_attr` [named-var] (render_project_window_html L4701): `{pid_attr}`
+- `render_project_window_html_L4699_0` ← `pid_attr` [named-var] (render_project_window_html L4699): `{pid_attr}`
+- `render_project_window_html_L4700_0` ← `rescan_btn` [named-var] (render_project_window_html L4700): `{rescan_btn}`
+- `render_project_window_html_L4701_0` ← `upload_btn` [named-var] (render_project_window_html L4701): `{upload_btn}`
 - `render_project_window_html_L4702_0` ← `pid_attr` [named-var] (render_project_window_html L4702): `{pid_attr}`
 - `render_project_window_html_L4703_0` ← `pid_attr` [named-var] (render_project_window_html L4703): `{pid_attr}`
 - `render_project_window_html_L4704_0` ← `pid_attr` [named-var] (render_project_window_html L4704): `{pid_attr}`
-- `render_project_window_html_L4708_0` ← `pid_attr` [named-var] (render_project_window_html L4708): `{pid_attr}`
-- `render_project_window_html_L4709_0` ← `rescan_btn` [named-var] (render_project_window_html L4709): `{rescan_btn}`
-- `render_project_window_html_L4710_0` ← `upload_btn` [named-var] (render_project_window_html L4710): `{upload_btn}`
-- `render_project_window_html_L4711_0` ← `pid_attr` [named-var] (render_project_window_html L4711): `{pid_attr}`
+- `render_project_window_html_L4705_0` ← `pid_attr` [named-var] (render_project_window_html L4705): `{pid_attr}`
+- `render_project_window_html_L4709_0` ← `pid_attr` [named-var] (render_project_window_html L4709): `{pid_attr}`
+- `render_project_window_html_L4710_0` ← `rescan_btn` [named-var] (render_project_window_html L4710): `{rescan_btn}`
+- `render_project_window_html_L4711_0` ← `upload_btn` [named-var] (render_project_window_html L4711): `{upload_btn}`
 - `render_project_window_html_L4712_0` ← `pid_attr` [named-var] (render_project_window_html L4712): `{pid_attr}`
-- `render_project_window_html_L4825_0` ← `blurb_attr` [named-var] (render_project_window_html L4825): `{blurb_attr}`
+- `render_project_window_html_L4713_0` ← `pid_attr` [named-var] (render_project_window_html L4713): `{pid_attr}`
+- `render_project_window_html_L4826_0` ← `blurb_attr` [named-var] (render_project_window_html L4826): `{blurb_attr}`

@@ -273,15 +273,16 @@ def list_records() -> list:
     """All persisted job records (best-effort; skips unreadable ones).
 
     A job's durable GATE file (``<job_id>.gate.json`` — durability 2026-07
-    Wave 2) lives in the same directory and matches the ``*.json`` glob; it is
-    NOT a job record and is skipped so no phantom job ever surfaces here.
+    Wave 2) and its durable read-CURSOR file (``<job_id>.cursor.json`` — rearch
+    W15) live in the same directory and match the ``*.json`` glob; neither is a
+    job record and both are skipped so no phantom job ever surfaces here.
     """
     d = jobs_dir()
     if not d.exists():
         return []
     out = []
     for p in sorted(d.glob("*.json")):
-        if p.name.endswith(".gate.json"):
+        if p.name.endswith((".gate.json", ".cursor.json")):
             continue
         try:
             out.append(json.loads(p.read_text(encoding="utf-8")))
@@ -1105,6 +1106,49 @@ def tail(job_id: str, since: int = 0) -> dict:
         "total": total,
         "status": rec.get("status"),
     }
+
+
+# ── Durable tail cursor (rearch W15 — IPC contract "tail-cursor-durability") ──
+# A client's last-read line offset is persisted in the job dir so a tail cursor
+# survives a dashboard/supervisor restart (the W16 external supervisor lives on
+# this same file). The offset is a single last-read index — overwriting it is
+# idempotent; a torn write falls back to 0 (re-reads, never skips).
+
+def cursor_path_for(job_id: str) -> Path:
+    """Durable read-cursor path for a job (``<jobs_dir>/<job_id>.cursor.json``).
+
+    Distinct from the ``.gate.json`` sibling and the ``.json`` record; the
+    ``list_records`` glob skips ``.gate.json`` and this ``.cursor.json`` matches
+    the same ``*.json`` glob, so it is filtered there too (see below).
+    """
+    return _jobs_dir_for(job_id) / f"{job_id}.cursor.json"
+
+
+def persist_read_cursor(job_id: str, offset) -> None:
+    """Persist a client's last-read line offset for a job (atomic, locked)."""
+    try:
+        off = max(0, int(offset))
+    except (TypeError, ValueError):
+        off = 0
+    with _paths.WRITE_LOCK:
+        p = cursor_path_for(job_id)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"job_id": job_id, "offset": off}),
+                       encoding="utf-8")
+        tmp.replace(p)
+
+
+def load_read_cursor(job_id: str) -> int:
+    """Return a job's persisted read offset (0 when absent or torn)."""
+    p = cursor_path_for(job_id)
+    if not p.exists():
+        return 0
+    try:
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return max(0, int(obj.get("offset", 0)))
+    except (json.JSONDecodeError, OSError, ValueError, TypeError, AttributeError):
+        return 0
 
 
 def long_poll(job_id: str, since: int = 0,

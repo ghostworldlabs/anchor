@@ -394,6 +394,7 @@ import deliverables as _deliv
 import lanes as _lanes
 import job_runner as _jr
 import gate_adapter as _gate
+import supervisor as _sup  # rearch W15 — ANCHOR_SUPERVISOR job-ownership seam
 import brownfield_scan as _bscan
 import anchor_marker as _marker
 import rnd_terminal as _term
@@ -16768,7 +16769,11 @@ function startZombieTerminal(btn) {
                 if not job_id:
                     self._send_json({"ok": False, "error": "missing job_id"}, 400)
                 else:
-                    out = _jr.tail(job_id, since)
+                    # rearch W15: read through the supervisor seam so job
+                    # ownership is a single swap point (inline today, external
+                    # in W16). Persist the served offset as the durable read
+                    # cursor so a client resumes across a restart.
+                    out = _sup.get_supervisor().tail(job_id, since, persist=True)
                     try:
                         pending = _gate.load_pending_prompt(job_id)
                     except Exception:
@@ -17375,15 +17380,22 @@ function startZombieTerminal(btn) {
                     }, 409)
 
         elif self.path == "/api/rnd/answer_gate":
-            # Answer a pending in-session gate by writing a single stdin turn.
+            # Answer a pending in-session gate through the supervisor seam
+            # (rearch W15): the answer is durably QUEUED + ACKed to the job dir
+            # BEFORE this POST returns, then delivered to the session's stdin
+            # supervisor-side — exactly once, retryable across a killed hop.
+            # ``written`` is kept for the legacy endpoint contract (== delivered).
             job_id = body.get("job_id", "")
             choice = body.get("choice", "")
-            res = _gate.answer(job_id, choice)
+            res = _sup.get_supervisor().answer_gate(job_id, choice)
             self._send_json({
-                "ok": bool(res.written),
-                "written": bool(res.written),
-                "reason": res.reason,
-                "job_id": res.job_id,
+                "ok": bool(res.get("ok")) and bool(res.get("delivered")),
+                "written": bool(res.get("delivered")),
+                "delivered": bool(res.get("delivered")),
+                "deferred": bool(res.get("deferred")),
+                "queued": bool(res.get("queued")),
+                "reason": res.get("reason"),
+                "job_id": res.get("job_id"),
             })
 
         # ── R&D interactive terminal (Wave 7) ─────────────────────────
@@ -17493,7 +17505,9 @@ function startZombieTerminal(btn) {
                 self._send_json({"ok": False, "error": f"unknown job: {job_id}",
                                  "reason": "unknown-job"}, 404)
             else:
-                out = _jr.cancel(job_id)
+                # rearch W15: cancel through the supervisor seam (it owns the
+                # process tree). Tree-kill is idempotent; a re-cancel no-ops.
+                out = _sup.get_supervisor().cancel(job_id)
                 self._send_json({
                     "ok": True,
                     "job_id": job_id,
@@ -19199,6 +19213,22 @@ def main():
         job_runner.reconcile_on_startup()
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
+
+    try:
+        # rearch W15: re-adopt in-flight jobs through the supervisor seam — a
+        # dashboard restart must leave a still-running job listed live with its
+        # concurrency slots (lane serialization + folder-build lock) rebuilt
+        # from the durable records. Inline today; the external supervisor
+        # (W16) sits behind the same seam. Best-effort — never blocks boot.
+        _summary = _sup.get_supervisor().rebuild()
+        if _summary.get("running_jobs"):
+            _logger.info("supervisor.rebuild re-adopted %d running job(s); "
+                         "rebuilt %d lane slot(s), %d folder lock(s)"
+                         % (len(_summary["running_jobs"]),
+                            _summary.get("rebuilt_lane_slots", 0),
+                            _summary.get("rebuilt_folder_locks", 0)))
+    except Exception as e:
+        _logger.error(f"supervisor.rebuild failed: {e}")
 
     try:
         # (2026-07 durability Wave 3) No perpetual "running" Gandalf row after a

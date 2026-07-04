@@ -15,6 +15,12 @@ ways). argv takes precedence over env.
   --sleep SECS     / FAKE_CLAUDE_SLEEP   sleep SECS *after* emitting lines
                                          (keeps the job "running" so it can be
                                          observed / cancelled).
+  --line-interval SECS / FAKE_CLAUDE_LINE_INTERVAL
+                                         sleep SECS *between* each content line,
+                                         so stdout DRIPS over time (a long-poll /
+                                         tail reader observes an advancing cursor
+                                         while the job is still alive — rearch
+                                         W15 restart-survival). Default 0.
   --spawn-child    / FAKE_CLAUDE_SPAWN_CHILD=1
                                          spawn a long-sleeping grandchild
                                          process before sleeping, so tree-kill
@@ -87,6 +93,7 @@ def parse_args(argv):
     p = argparse.ArgumentParser(add_help=True)
     p.add_argument("--lines", type=int, default=None)
     p.add_argument("--sleep", type=float, default=None)
+    p.add_argument("--line-interval", type=float, default=None)
     p.add_argument("--spawn-child", action="store_true")
     p.add_argument("--child-pid-file", default=None)
     p.add_argument("--exit-code", type=int, default=None)
@@ -105,6 +112,8 @@ def main(argv=None):
 
     lines = a.lines if a.lines is not None else _env_int("FAKE_CLAUDE_LINES", 3)
     sleep_s = a.sleep if a.sleep is not None else _env_float("FAKE_CLAUDE_SLEEP", 0.0)
+    line_interval = (a.line_interval if a.line_interval is not None
+                     else _env_float("FAKE_CLAUDE_LINE_INTERVAL", 0.0))
     spawn_child = a.spawn_child or _env_flag("FAKE_CLAUDE_SPAWN_CHILD")
     child_pid_file = a.child_pid_file or os.environ.get("FAKE_CLAUDE_CHILD_PID_FILE")
     exit_code = a.exit_code if a.exit_code is not None else _env_int("FAKE_CLAUDE_EXIT_CODE", 0)
@@ -112,8 +121,11 @@ def main(argv=None):
     emit_result = a.result or emit_result_error or _env_flag("FAKE_CLAUDE_RESULT")
     emit_gate = a.gate or _env_flag("FAKE_CLAUDE_GATE")
 
-    # Emit N deterministic content lines.
+    # Emit N deterministic content lines (optionally dripped over time so a
+    # tail reader sees an advancing cursor while the job is still alive).
     for i in range(lines):
+        if line_interval > 0 and i > 0:
+            time.sleep(line_interval)
         sys.stdout.write(f"fake-line {i}\n")
         sys.stdout.flush()
 

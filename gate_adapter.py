@@ -663,3 +663,69 @@ def answer_gate(job_id: str, choice) -> dict:
     _record_gate_answer(job_id, choice)
     return {"ok": True, "deferred": True, "reason": "recorded",
             "job_id": job_id}
+
+
+# ── Queue-first gate answer (rearch W15 — supervisor seam) ───────────────────
+# The supervisor seam answers a gate in two steps so the answer is DURABLY
+# QUEUED + ACKed before any stdin write, and delivery is exactly-once + retryable
+# across a killed IPC hop (IPC contract "gate-answer" row):
+#   1. queue_gate_answer  — record the answer in the durable gate file (the ACK).
+#   2. deliver_queued_answer — write the single stdin turn supervisor-side, once.
+
+def queue_gate_answer(job_id: str, choice) -> dict:
+    """Durably QUEUE a gate answer WITHOUT touching stdin (the ACK).
+
+    The queue write lands in ``<job_id>.gate.json`` before any delivery, so a
+    hop killed after the ACK still has the answer (never lost). Idempotent — a
+    second queue for an ALREADY-answered gate KEEPS the first answer and never
+    re-stamps it (never doubled). Refuses honestly (``{ok: False, reason}``) for
+    an unknown / terminal job or one with no pending question.
+
+    Returns the queued gate dict augmented with ``{ok: True}``.
+    """
+    with _paths.WRITE_LOCK:
+        rec = _jr.load_record(job_id)
+        gate = load_gate_file(job_id)
+        if rec is None and gate is None:
+            return {"ok": False, "reason": "unknown", "job_id": job_id}
+        status = (rec or {}).get("status")
+        if status in (_jr.STATUS_DONE, _jr.STATUS_CANCELLED, _jr.STATUS_FAILED):
+            # That session is over and will never be relaunched — unanswerable.
+            return {"ok": False, "reason": f"terminal:{status}",
+                    "job_id": job_id}
+        if gate is None and not (rec or {}).get("pending_prompt"):
+            return {"ok": False, "reason": "not-awaiting", "job_id": job_id}
+        if gate is not None and gate.get("answered"):
+            # Already queued — keep the first answer (idempotent, never doubled).
+            out = dict(gate)
+            out["ok"] = True
+            out["already_queued"] = True
+            return out
+        out = dict(_record_gate_answer(job_id, choice, delivered=False))
+        out["ok"] = True
+        return out
+
+
+def deliver_queued_answer(job_id: str) -> dict:
+    """Deliver a QUEUED gate answer to the session's stdin — exactly once.
+
+    Reads the durably-queued answer and, when the job is live with a writable
+    stdin sink, writes the single continuation turn via :func:`answer` (which
+    enforces the single-consumer + delivered-once markers). A gate already
+    delivered (``delivered_at`` set) is a clean no-op — a retry never doubles
+    the write. A queued answer with no live sink stays QUEUED (deferred) for a
+    later retry / relaunch. Returns ``{delivered: bool, reason}``.
+    """
+    with _paths.WRITE_LOCK:
+        gate = load_gate_file(job_id)
+        if gate is None or not gate.get("answered"):
+            return {"delivered": False, "reason": "not-queued"}
+        if gate.get("delivered_at"):
+            return {"delivered": False, "reason": "already-delivered"}
+        choice = gate.get("answer")
+    # answer() takes WRITE_LOCK itself (re-entrant); it is the single-consumer
+    # write path and stamps the gate file delivered, so delivery is exactly once.
+    res = answer(job_id, choice)
+    if res.written:
+        return {"delivered": True, "reason": "written"}
+    return {"delivered": False, "reason": res.reason}

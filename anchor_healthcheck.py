@@ -5479,6 +5479,139 @@ def check_journal_parity(report: Report):
                 pass
 
 
+def check_supervisor_seam(report: Report):
+    """rearch W15: the inline supervisor seam + restart-survival walk.
+
+    Proves — hermetically (a temp data dir + the fake_claude stub runner; never
+    the live service / real data) — that job ownership behind the
+    ``ANCHOR_SUPERVISOR`` seam survives a dashboard restart in the INLINE mode
+    (the mode the healthcheck itself runs in):
+
+      (1) the two checked-in gate artifacts render and the rebuild table has
+          ZERO unresolved rows;
+      (2) a fake_claude job launched through the seam is re-adopted after the
+          dashboard-side in-memory tables are torn down (simulated restart):
+          the SAME job_id lists running, its durable tail cursor advances, and
+          cancel tree-kills it.
+    """
+    name = "supervisor seam (inline restart survival)"
+    import tempfile as _tf
+    import shutil as _shutil
+    import time as _time
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_sup = os.environ.get("ANCHOR_SUPERVISOR")
+    tmp = None
+    jid = None
+    try:
+        import supervisor as _sup
+        import job_runner as _jr
+        import paths as _paths
+
+        # (1) artifacts: docs render + rebuild table fully resolved.
+        rows_unresolved = len(_sup.unresolved_rebuild_rows())
+        ipc_md = _sup.render_ipc_contract_md()
+        rebuild_md = _sup.render_rebuild_table_md()
+        docs_ok = (rows_unresolved == 0
+                   and "IPC contract" in ipc_md
+                   and "rebuild table" in rebuild_md
+                   and len(_sup.IPC_CONTRACT) >= 6)
+
+        runner = _fake_runner_cmd()
+        if not runner:
+            report.check(name, docs_ok,
+                         f"artifacts-only (stub runner absent) "
+                         f"unresolved-rebuild-rows={rows_unresolved}")
+            return
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-sup-"))
+        data = tmp / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        os.environ["ANCHOR_DATA_DIR"] = str(data)
+        os.environ["ANCHOR_RUNNER_CMD"] = runner
+        os.environ.pop("ANCHOR_SUPERVISOR", None)   # default inline
+        _paths.ensure_data_dirs()
+        _jr._reset_live_table_for_tests()
+
+        sup = _sup.get_supervisor()
+        seam_inline = (sup.mode == _sup.MODE_INLINE and not sup.degraded)
+
+        folder = tmp / "proj"
+        folder.mkdir(parents=True, exist_ok=True)
+        rec = sup.launch_guarded(
+            "research", project_id="hc-sup-pid", folder_path=str(folder),
+            cwd=str(folder), extra_args=["--lines", "6", "--line-interval",
+                                         "0.15", "--sleep", "6"])
+        jid = rec["job_id"]
+
+        # Let a couple of lines drip, then record the durable cursor.
+        _deadline = _time.monotonic() + 5
+        while _time.monotonic() < _deadline:
+            if len(_jr.all_lines(jid)) >= 2:
+                break
+            _time.sleep(0.05)
+        first = sup.tail(jid, persist=True)
+        cursor_after_first = _jr.load_read_cursor(jid)
+
+        # (2) simulate a dashboard restart: tear down the in-memory tables.
+        _jr._reset_live_table_for_tests()
+
+        summary = sup.rebuild()
+        listed = [r.get("job_id") for r in sup.list_jobs(running_only=True)]
+        same_job_running = jid in listed and jid in summary.get(
+            "running_jobs", [])
+
+        # Wait for more dripped lines, then tail from the persisted cursor.
+        _deadline = _time.monotonic() + 5
+        advanced = False
+        for _ in range(100):
+            out = sup.tail(jid, persist=True)
+            if _jr.load_read_cursor(jid) > cursor_after_first:
+                advanced = True
+                break
+            if _time.monotonic() >= _deadline:
+                break
+            _time.sleep(0.05)
+
+        out = sup.cancel(jid)
+        cancelled = (out or {}).get("status") == _jr.STATUS_CANCELLED
+
+        ok = bool(docs_ok and seam_inline and same_job_running and advanced
+                  and cancelled)
+        report.check(name, ok,
+                     f"docs-ok={docs_ok} inline={seam_inline} "
+                     f"same-job-running={same_job_running} "
+                     f"cursor-advanced={advanced} cancelled={cancelled} "
+                     f"unresolved-rebuild-rows={rows_unresolved}")
+    except Exception as e:
+        report.check(name, False,
+                     f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        if jid is not None:
+            try:
+                import job_runner as _jr2
+                _jr2.cancel(jid)
+            except Exception:
+                pass
+        for k, v in (("ANCHOR_DATA_DIR", prev_data),
+                     ("ANCHOR_RUNNER_CMD", prev_runner),
+                     ("ANCHOR_SUPERVISOR", prev_sup)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            import job_runner as _jr3
+            _jr3._reset_live_table_for_tests()
+        except Exception:
+            pass
+        if tmp is not None:
+            try:
+                _shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     report = Report()
@@ -5557,6 +5690,10 @@ def main():
         # + the rebuild-from-journal recovery leg (hermetic; never the live
         # service). Joins the 20× nightly pipeline.
         check_journal_parity(report)
+        # rearch W15 (C4): the inline supervisor seam + restart-survival walk
+        # (hermetic; never the live service). Proves the seam re-adopts an
+        # in-flight job across a simulated dashboard restart.
+        check_supervisor_seam(report)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.
