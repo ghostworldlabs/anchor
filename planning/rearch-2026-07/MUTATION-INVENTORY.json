@@ -62,31 +62,31 @@
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "write",
       "site": "effort_history.py:record_effort",
-      "count": 53
+      "count": 55
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "replace",
       "site": "effort_history.py:_save_index",
-      "count": 53
+      "count": 55
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "write",
       "site": "effort_history.py:_save_index",
-      "count": 53
+      "count": 55
     },
     {
       "store": ".anchor/sessions.json",
       "op": "replace",
       "site": "session_registry.py:_save_sessions",
-      "count": 106
+      "count": 110
     },
     {
       "store": ".anchor/sessions.json",
       "op": "write",
       "site": "session_registry.py:_save_sessions",
-      "count": 106
+      "count": 110
     }
   ]
 }

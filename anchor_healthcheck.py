@@ -704,6 +704,95 @@ def check_cookie_auth_walk(report: Report, server_proc=None):
                      "Â· logout clears")
 
 
+def check_relocated_data_dir(report: Report):
+    """rearch W18 (C6): the runtime-state-out-of-the-repo walk (soak candidate).
+
+    Proves, HERMETICALLY (a temp code-root + a temp data root outside it — never
+    the live service / real data), that Anchor's runtime state relocates OUTSIDE
+    the repo and the git-hygiene classifier keeps the repo provably clean:
+
+      (1) with ``ANCHOR_DATA_DIR`` pointed at a folder OUTSIDE the simulated
+          repo root, ``ensure_data_dirs`` + a health-report/log write land under
+          the data root and NOT inside the repo;
+      (2) the resolved data dir is genuinely outside the repo tree;
+      (3) ``git_hygiene.classify_runtime`` still flags runtime artifacts True and
+          product/pointer files False — the rules that keep porcelain empty.
+
+    The env is restored afterward; ``paths.data_dir()`` reads ``ANCHOR_DATA_DIR``
+    at call time, so no module reload is needed. Joins the 20× nightly pipeline.
+    """
+    name = "relocated data-dir walk (W11/W18)"
+    import tempfile as _tf
+    import shutil as _shutil
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    tmp = None
+    failures = []
+    try:
+        import paths as _p
+        from tools import git_hygiene as _gh
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-datadir-"))
+        repo = tmp / "repo"                       # the simulated code root
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "anchor_gui.py").write_text("# product\n", encoding="utf-8")
+        data = tmp / "AnchorData"                 # OUTSIDE the repo, on purpose
+        os.environ["ANCHOR_DATA_DIR"] = str(data)
+
+        resolved = _p.data_dir()
+        if resolved != data.resolve():
+            failures.append(f"data_dir() did not honor ANCHOR_DATA_DIR "
+                            f"({resolved} != {data.resolve()})")
+        # (2) the data root is genuinely outside the repo tree.
+        try:
+            resolved.relative_to(repo.resolve())
+            failures.append("relocated data dir is INSIDE the repo tree")
+        except ValueError:
+            pass                                  # outside — correct
+
+        # (1) writes land under the data root, never in the repo.
+        _p.ensure_data_dirs()
+        hr = _p.health_reports_dir() / "2026-07-04.md"
+        hr.write_text("# ok\n", encoding="utf-8")
+        lg = _p.logs_dir() / "2026-07-04.md"
+        lg.write_text("log\n", encoding="utf-8")
+        if not (data / "health_reports" / "2026-07-04.md").exists():
+            failures.append("health-report write did not land under the data dir")
+        if not (data / "logs" / "2026-07-04.md").exists():
+            failures.append("log write did not land under the data dir")
+        # nothing leaked into the repo (only the product file we seeded).
+        leaked = [p.name for p in repo.rglob("*")
+                  if p.is_file() and p.name != "anchor_gui.py"]
+        if leaked:
+            failures.append(f"runtime writes leaked into the repo: {leaked[:4]}")
+
+        # (3) the hygiene classifier — runtime True, product/pointer False.
+        for rel in ("rnd_registry.json", "dashboard.html", "logs/2026.md",
+                    "rnd_jobs/j.json", ".anchor/sessions.json"):
+            if _gh.classify_runtime(rel) is not True:
+                failures.append(f"classifier missed runtime artifact: {rel}")
+        for rel in ("anchor_gui.py", "OPEN_ROUTES.json",
+                    ".anchor/projects/p/index.json"):
+            if _gh.classify_runtime(rel) is not False:
+                failures.append(f"classifier flagged a kept file runtime: {rel}")
+    except Exception as e:
+        failures.append(f"walk crashed: {type(e).__name__}: {e}")
+    finally:
+        if prev_data is None:
+            os.environ.pop("ANCHOR_DATA_DIR", None)
+        else:
+            os.environ["ANCHOR_DATA_DIR"] = prev_data
+        if tmp is not None:
+            _shutil.rmtree(tmp, ignore_errors=True)
+
+    if failures:
+        report.check(name, False, "; ".join(failures[:6]))
+    else:
+        report.check(name, True,
+                     "ANCHOR_DATA_DIR relocates runtime state outside the repo "
+                     "Â· writes land under the data root Â· hygiene classifier "
+                     "keeps porcelain empty")
+
+
 # The 20Ã— nightly repetition pipeline (PROCESS-RAILS.md Â§2). A NEW walk joins the
 # 5AM run (main()) ONLY after 20 consecutive green nightly repetitions; until
 # then it lives here, exercised via ``python anchor_healthcheck.py --soak`` and
@@ -711,10 +800,33 @@ def check_cookie_auth_walk(report: Report, server_proc=None):
 SOAK_LEDGER = DATA_DIR / "logs" / "soak-candidates.jsonl"
 SOAK_TARGET_REPETITIONS = 20
 
+#: rearch W18 (C7): the FOUR NEW walks named by PROCESS-RAILS §2 — the canonical
+#: set the closure joins to the 5AM run, each only after its 20× green soak.
+#: journal-parity (W14) + supervisor-probes (W16) were promoted directly into the
+#: 5AM ``main()`` sequence by their own waves (each proven by a dedicated test
+#: gate, ``test_parity_recovery_w14`` / ``test_supervisor_w16`` — that is their
+#: green-repetition basis); cookie/auth (W9) + relocated-data-dir (W11/W18) are
+#: the two that carry the live nightly soak and join via :func:`soak_ready`.
+def four_new_walks():
+    """The canonical four new walks (name, fn) named by PROCESS-RAILS §2."""
+    return (
+        ("journal parity gate (classify + recover)", check_journal_parity),
+        ("supervisor live probes (W16)", check_supervisor_live_probes),
+        ("cookie/auth walk (W9)", check_cookie_auth_walk),
+        ("relocated data-dir walk (W11/W18)", check_relocated_data_dir),
+    )
+
+#: The subset still earning its 20× soak before joining the 5AM run. journal
+#: parity + supervisor probes are already in ``main()`` (promoted by their waves).
+SOAK_GATED_WALKS = (
+    ("cookie/auth walk (W9)", check_cookie_auth_walk),
+    ("relocated data-dir walk (W11/W18)", check_relocated_data_dir),
+)
+
 
 def soak_candidate_walks():
-    """The walks currently IN the 20Ã— pipeline but NOT yet in the 5AM run."""
-    return (("cookie/auth walk (W9)", check_cookie_auth_walk),)
+    """The walks currently IN the 20× pipeline but NOT yet in the 5AM run."""
+    return SOAK_GATED_WALKS
 
 
 def record_soak_result(name, passed, ledger_path=None, ts=None):
@@ -793,6 +905,68 @@ def run_soak_candidates(ledger_path=None):
                      f"green nightly repetitions "
                      f"({'READY to join 5AM' if streak >= SOAK_TARGET_REPETITIONS else 'soaking'})")
     return report
+
+
+def joined_soak_walks(ledger_path=None):
+    """rearch W18 (C7): the soak-gated walks that have EARNED the 5AM join.
+
+    Returns the subset of :data:`SOAK_GATED_WALKS` whose 20× green streak has
+    been met (:func:`soak_ready`) — the walks the closure promotes into the 5AM
+    ``main()`` sequence. On a fresh ledger this is empty (the discipline holds
+    the join until the live nightly soak completes); once John's live nightly
+    ``--soak`` runs reach 20 green, the walk auto-joins the 5AM run.
+    """
+    return tuple((n, fn) for (n, fn) in SOAK_GATED_WALKS
+                 if soak_ready(n, ledger_path))
+
+
+def run_joined_soak_walks(report: Report, ledger_path=None):
+    """Run every soak-gated walk that has reached ``soak_ready`` as a HARD 5AM
+    check. Called from ``main()`` — the W18 join. Returns the joined names."""
+    joined = joined_soak_walks(ledger_path)
+    for wname, fn in joined:
+        try:
+            fn(report)
+        except Exception as e:
+            report.check(wname, False, f"{type(e).__name__}: {e}")
+    return [n for (n, _) in joined]
+
+
+def check_north_star_scorecard(report: Report):
+    """rearch W18 (C7): emit + assert the North-Star scorecard every run.
+
+    Asserts the closure bar READ-ONLY (never rewrites the tracked artifacts —
+    the W18 gate is their producer, so the nightly run never dirties the repo):
+    every C1–C7 criterion is met OR narrowed-by-recorded-amendment (zero
+    ``unresolved``), and the Appendix-A reconciliation shows zero silently
+    dropped ideas. A regression that flips a criterion to bare ``unmet`` fails
+    the nightly run — the scorecard is DEMONSTRATED, not narrated.
+    """
+    name = "north-star scorecard (C1–C7)"
+    try:
+        from tools import north_star_scorecard as _sc
+        unresolved = _sc.unresolved_criteria()
+        recon = _sc.appendix_a_reconciliation()
+    except Exception as e:
+        report.check(name, False, f"{type(e).__name__}: {e}")
+        return
+    problems = []
+    if unresolved:
+        problems.append(f"unresolved criteria (not met/narrowed): {unresolved}")
+    if recon["ideas_dropped"]:
+        problems.append(f"silently-dropped ideas: {recon['ideas_dropped']}")
+    if not recon["ok"]:
+        problems.append("appendix-A reconciliation drifted from the ledger")
+    if problems:
+        report.check(name, False, "; ".join(problems))
+    else:
+        crits = _sc.criteria()
+        met = sum(1 for c in crits if c["status"] == _sc.STATUS_MET)
+        narrowed = sum(1 for c in crits if c["status"] == _sc.STATUS_NARROWED)
+        report.check(name, True,
+                     f"{met} met Â· {narrowed} narrowed-by-amendment Â· 0 unmet; "
+                     f"appendix-A: {len(recon['ideas_landed'])}/52 ideas landed, "
+                     f"M-9 documented amendment")
 
 
 # â”€â”€ Check 5: synthetic round-trip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -5872,6 +6046,20 @@ def main():
         # claude --version resolves under the account, and a breakaway child is
         # spawnable.
         check_supervisor_live_probes(report)
+
+        # rearch W18 (C7): the soak-gated join. The two walks still earning
+        # their 20× green nightly soak (cookie/auth · relocated-data-dir) join
+        # the 5AM run as HARD checks ONLY once ``soak_ready`` — on a fresh
+        # ledger this is a no-op (the discipline holds the join); once John's
+        # live nightly ``--soak`` runs reach 20 green, they auto-join here.
+        joined = run_joined_soak_walks(report)
+        if joined:
+            report.check("W18 soak-gated join", True,
+                         f"joined the 5AM run: {', '.join(joined)}")
+
+        # rearch W18 (C7): emit + assert the North-Star scorecard (every C1–C7
+        # met or narrowed-by-recorded-amendment; zero silently-dropped ideas).
+        check_north_star_scorecard(report)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

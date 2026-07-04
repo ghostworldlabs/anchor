@@ -252,28 +252,88 @@ def run_demo(root, sup=None, restart_hook=None, lane=DEMO_LANE,
             sup, job_id=job_id, project_id=project_id, retire=created_project)
 
 
-def main(argv=None):  # pragma: no cover - thin CLI shim
+def _build_parser():
+    """The C4-demo CLI parser (extracted so the W18 gate can assert its shape).
+
+    The live runbook is PHASED across a REAL ``nssm restart anchor`` — a single
+    one-shot ``run_demo`` cannot demonstrate cross-process survival because it
+    rolls back in its own ``finally`` before an out-of-band restart could land.
+    So the runbook uses ``--phase``:
+
+    * ``launch``   — register the throwaway project + launch the job, print the
+      ``project_id`` / ``job_id``, and LEAVE IT RUNNING (no rollback);
+    * *(manual)*   — ``nssm restart anchor`` from an elevated shell;
+    * ``verify``   — re-adopt (``rebuild``) + assert the same job_id survived;
+    * ``rollback`` — cancel the LIVE job + clear the lane lock + retire (targets
+      the given ``--job-id``/``--project-id``, never starts a new demo);
+    * ``demo``     — the hermetic one-shot (setup+launch+verify+rollback in one
+      process; ``--simulate-restart`` tears down the in-memory tables).
+    """
     import argparse
+
+    ap = argparse.ArgumentParser(
+        description="C4 live-demo harness: restart-survival of a harmless "
+                    "long-running job through the real launch path.")
+    ap.add_argument("--phase", choices=("demo", "launch", "verify", "rollback"),
+                    default="demo",
+                    help="demo = hermetic one-shot; launch/verify/rollback = the "
+                         "live phased runbook across a real nssm restart")
+    ap.add_argument("--root", default=None,
+                    help="root dir for the throwaway project (default: a temp "
+                         "dir). On the live service, pass a scratch folder.")
+    ap.add_argument("--simulate-restart", action="store_true",
+                    help="(demo phase) simulate the restart in-process (tear "
+                         "down the in-memory tables) instead of a real nssm "
+                         "restart — the hermetic demo")
+    ap.add_argument("--job-id", default=None,
+                    help="the demo job_id (required by --phase verify/rollback)")
+    ap.add_argument("--project-id", default=None,
+                    help="the demo project_id (launch prints it; rollback "
+                         "retires it)")
+    return ap
+
+
+def main(argv=None):  # pragma: no cover - thin CLI shim
     import json
     import tempfile
 
     _bootstrap_path()
     import supervisor
 
-    ap = argparse.ArgumentParser(
-        description="C4 live-demo harness: restart-survival of a harmless "
-                    "long-running job through the real launch path.")
-    ap.add_argument("--root", default=None,
-                    help="root dir for the throwaway project (default: a temp "
-                         "dir). On the live service, pass a scratch folder.")
-    ap.add_argument("--simulate-restart", action="store_true",
-                    help="simulate the restart in-process (tear down the "
-                         "in-memory tables) instead of a real nssm restart — "
-                         "the hermetic demo")
+    ap = _build_parser()
     args = ap.parse_args(argv)
-
-    root = args.root or tempfile.mkdtemp(prefix="c4-demo-")
     sup = supervisor.get_supervisor()
+
+    if args.phase == "launch":
+        root = args.root or tempfile.mkdtemp(prefix="c4-demo-")
+        folder = Path(root) / "c4-demo-project"
+        proj = setup_demo_project(folder)
+        rec = launch_demo_job(sup, proj["id"], folder)
+        live = wait_live(rec["job_id"])
+        out = {"phase": "launch", "project_id": proj["id"],
+               "job_id": rec["job_id"], "pid": rec.get("pid"),
+               "went_live": live, "folder": str(folder)}
+        print(json.dumps(out, indent=2, default=str))
+        return 0 if (rec.get("job_id") and live) else 1
+
+    if args.phase == "verify":
+        if not args.job_id:
+            ap.error("--phase verify requires --job-id")
+        rep = verify_survival(sup, args.job_id, project_id=args.project_id)
+        print(json.dumps({"phase": "verify", **rep}, indent=2, default=str))
+        return 0 if rep.get("survived") else 1
+
+    if args.phase == "rollback":
+        if not args.job_id:
+            ap.error("--phase rollback requires --job-id")
+        rep = rollback_demo(sup, job_id=args.job_id,
+                            project_id=args.project_id,
+                            retire=bool(args.project_id))
+        print(json.dumps({"phase": "rollback", **rep}, indent=2, default=str))
+        return 0 if rep.get("cancelled") else 1
+
+    # default: the hermetic one-shot demo.
+    root = args.root or tempfile.mkdtemp(prefix="c4-demo-")
     hook = None
     if args.simulate_restart:
         import job_runner as jr
