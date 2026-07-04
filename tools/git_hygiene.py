@@ -69,6 +69,15 @@ def classify_runtime(rel) -> bool:
         base = parts[-1]
         if base in ("sessions.json", "discovery.json"):
             return True
+        # rearch W12 (C3): the per-project event journal is a RUNTIME, volatile,
+        # potentially personal-data-carrying append-only log (mutation-of-record,
+        # not a durable pointer record) — ignored like sessions.json, never
+        # committed. Covers ``journal.jsonl`` (+ its ``.tmp`` twin) and a
+        # ``journal/`` dir.
+        if base == "journal.jsonl" or base.startswith("journal.jsonl."):
+            return True
+        if "journal" in parts[1:]:
+            return True
         if "jobs" in parts[1:]:            # any nested jobs/ record
             return True
         if len(parts) > 1 and parts[1] == "worktrees":

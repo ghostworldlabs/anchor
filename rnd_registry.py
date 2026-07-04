@@ -174,6 +174,12 @@ projects/*/**/*.log
 projects/*/**/*.pdf
 projects/*/**/raw/
 
+# rearch W12 (C3): the per-project append-only event journal is a RUNTIME,
+# volatile mutation-of-record log (may carry absolute paths / personal data) —
+# ignored like the job logs above, never a committed pointer record.
+projects/*/journal.jsonl
+projects/*/**/journal.jsonl
+
 # Re-include the small pointer-record JSON index files (git-trackable).
 !projects/*/**/index.json
 !projects/*/**/*.pointer.json

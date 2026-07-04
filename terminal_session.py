@@ -46,6 +46,11 @@ import effort_history as _eh  # v8 Wave 2 keystone: persist_session_docs (no
 #                              nor session_registry — only paths + rnd_registry)
 import handoff as _handoff  # v6 Wave 6 auto-advance (no cycle: handoff imports
 #                            neither terminal_session nor session_registry)
+import journal as _journal  # rearch W12 (C3): the per-project event journal.
+#                            The FIRST instrumented class — session lifecycle
+#                            mutations dual-write journal-first (D1). No cycle:
+#                            journal imports only paths + pillar_flags (lazily
+#                            rnd_registry / tools.write_tripwire).
 try:
     import boneyard as _boneyard  # v10 Wave 6 Boneyard capture (stdlib-only; no
     #                              cycle: boneyard imports only paths +
@@ -364,7 +369,7 @@ def _resolve_engine_cmd(engine: str) -> str:
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   parent_session_id=None, paste_prompt=None, grass_origin=None,
-                  effort_id=None, effort_managed=False):
+                  effort_id=None, effort_managed=False, actor=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -514,27 +519,42 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     #    invisible to reconcile — the docstring's "nothing left registered / no
     #    PTY leaked" promise must hold for the registry-failure path too.
     try:
-        record = _reg.register_session(
-            project_id=project_id,
-            lane=lane,
-            backend=backend,
-            worktree_path=worktree_path,
-            branch=branch,
-            status=_reg.STATUS_RUNNING,
-            label=label,
-            session_id=sid,
-            parent_session_id=parent_id,
-            chain_id=chain_id,
-            grass_origin=origin,
-            # v12 Wave 1: inherit the effort id if given (a context-relief
-            # continuation joins the SAME effort), else default to own sid;
-            # ``effort_managed`` stored exactly as passed (the v12 discriminator).
-            effort_id=(effort_id or sid),
-            effort_managed=bool(effort_managed),
-            # zombie-hunter Phase 1: persist the spawn-captured process identity.
-            pid=child_pid,
-            proc_create_time=child_proc_create_time,
-            crypt_token=child_crypt_token,
+        # W12 (C3, D1): journal-first-then-legacy. The blessed dual-write emits
+        # a ``session-started`` event (correlation_id = the chain/effort this
+        # session joins; causation_id = the parent session that spawned it, or
+        # None for a user-rooted start) BEFORE register_session writes the
+        # legacy row — best-effort + honoring the ``journal`` off-switch, so with
+        # the flag off (today's default) ONLY register_session runs, byte-
+        # identical to pre-journal behavior.
+        record = _journal.dual_write(
+            project_id, _journal.EV_SESSION_STARTED,
+            lambda: _reg.register_session(
+                project_id=project_id,
+                lane=lane,
+                backend=backend,
+                worktree_path=worktree_path,
+                branch=branch,
+                status=_reg.STATUS_RUNNING,
+                label=label,
+                session_id=sid,
+                parent_session_id=parent_id,
+                chain_id=chain_id,
+                grass_origin=origin,
+                # v12 Wave 1: inherit the effort id if given (a context-relief
+                # continuation joins the SAME effort), else default to own sid;
+                # ``effort_managed`` stored exactly as passed (v12 discriminator).
+                effort_id=(effort_id or sid),
+                effort_managed=bool(effort_managed),
+                # zombie-hunter Phase 1: persist the spawn-captured identity.
+                pid=child_pid,
+                proc_create_time=child_proc_create_time,
+                crypt_token=child_crypt_token,
+            ),
+            correlation_id=(chain_id or sid),
+            folder_path=proj.get("folder_path", ""),
+            actor=actor,
+            causation_id=(parent_id or None),
+            payload={"session_id": sid, "lane": lane, "backend": backend},
         )
     except Exception as exc:
         try:
@@ -1606,7 +1626,7 @@ def context_fullness(session_id):
 
 
 def advance_stage(session_id, to_stage=None, mode="manual", project_id=None,
-                  load_skill=False):
+                  load_skill=False, actor=None):
     """Advance an effort to the next stage IN THE SAME SESSION (v12 Wave 6).
 
     The continuity-first "Advance" = **relabel + save**: the effort keeps its ONE
@@ -1720,8 +1740,21 @@ def advance_stage(session_id, to_stage=None, mode="manual", project_id=None,
         except Exception:
             new_baseline = ""
         try:
-            record = _reg.set_current_stage(
-                session_id, to_stage, new_store_lane, new_baseline)
+            # W12 (C3, D1): journal-first-then-legacy. Emit ``session-advanced``
+            # (correlation_id = the effort/chain; causation_id = the chain parent)
+            # BEFORE the legacy stage-flip write — best-effort, off-switch-gated,
+            # so with the journal flag off ONLY set_current_stage runs.
+            record = _journal.dual_write(
+                project_id, _journal.EV_SESSION_ADVANCED,
+                lambda: _reg.set_current_stage(
+                    session_id, to_stage, new_store_lane, new_baseline),
+                correlation_id=(record.get("chain_id")
+                                or record.get("effort_id") or session_id),
+                actor=actor,
+                causation_id=(record.get("parent_session_id") or None),
+                payload={"session_id": session_id, "lane": new_store_lane,
+                         "from_stage": current_stage, "to_stage": to_stage},
+            )
         except Exception as exc:
             return {"ok": False, "reason": "set-stage-failed",
                     "detail": str(exc), "session_id": session_id,
@@ -2183,7 +2216,7 @@ def recover_interrupted_efforts(live_session_ids=None):
     return {"ok": True, "recovered": recovered}
 
 
-def kill(session_id, project_id=None, _record_boneyard=True):
+def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
     """Kill a session: reap the PTY, mark terminal, PERSIST DOCS, remove worktree.
 
     Tolerant: an unknown/already-dead PTY still proceeds to re-status the registry
@@ -2221,8 +2254,19 @@ def kill(session_id, project_id=None, _record_boneyard=True):
         pty_killed = False  # already dead / never had a live PTY — tolerate
 
     # Mark the registry record terminal (DONE) — tolerate an unknown id.
+    # W12 (C3, D1): journal-first — emit ``session-killed`` BEFORE the legacy
+    # DONE write (best-effort, off-switch-gated: with the journal flag off ONLY
+    # update_session runs, byte-identical to before).
     try:
-        _reg.update_session(session_id, status=_reg.STATUS_DONE)
+        _journal.dual_write(
+            project_id, _journal.EV_SESSION_KILLED,
+            lambda: _reg.update_session(session_id, status=_reg.STATUS_DONE),
+            correlation_id=((record or {}).get("chain_id") or session_id),
+            actor=actor,
+            causation_id=((record or {}).get("parent_session_id") or None),
+            payload={"session_id": session_id,
+                     "lane": (record or {}).get("lane", "")},
+        )
     except KeyError:
         pass
 
@@ -2336,7 +2380,7 @@ def capture_session_docs(session_id, project_id=None, record=None):
 
 # ── Graceful CLOSE — park a session, resumable WARM (crucible-improve W6) ─────
 
-def close_session(session_id, project_id=None):
+def close_session(session_id, project_id=None, actor=None):
     """GRACEFUL CLOSE (the panel "×") — park a session so it resumes WARM (W6).
 
     DISTINCT from both :func:`kill` and :func:`delete_session`. The panel "×" is a
@@ -2390,8 +2434,19 @@ def close_session(session_id, project_id=None):
     # a DONE/FAILED session.
     status = record.get("status")
     if status == _reg.STATUS_RUNNING:
+        # W12 (C3, D1): journal-first — emit ``session-closed`` BEFORE the legacy
+        # park (RUNNING→IDLE) write (best-effort, off-switch-gated).
         try:
-            _reg.update_session(session_id, status=_reg.STATUS_IDLE)
+            _journal.dual_write(
+                project_id, _journal.EV_SESSION_CLOSED,
+                lambda: _reg.update_session(
+                    session_id, status=_reg.STATUS_IDLE),
+                correlation_id=(record.get("chain_id") or session_id),
+                actor=actor,
+                causation_id=(record.get("parent_session_id") or None),
+                payload={"session_id": session_id,
+                         "lane": record.get("lane", "")},
+            )
             status = _reg.STATUS_IDLE
         except KeyError:
             pass
@@ -2779,7 +2834,11 @@ def auto_advance_planning_to_build(project_id, planning_session_id,
                 project_id, "build",
                 paste_prompt=next_prompt,
                 parent_session_id=planning_session_id,
-                label="auto · from plan")
+                label="auto · from plan",
+                # W12: this is the machine advancing on John's behalf — the
+                # ``session-started`` event is attributed ``auto-advance`` so
+                # Butler story 2 can distinguish it from a user click.
+                actor=_journal.auto_advance_actor())
         except TerminalSessionError:
             return None
 

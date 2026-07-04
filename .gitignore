@@ -83,3 +83,7 @@ bridge_test*.txt
 .anchor/worktrees/
 .anchor/projects/*/discovery.json
 .anchor/projects/*/**/jobs/
+# rearch W12 (C3): the per-project append-only event journal — runtime,
+# volatile, mutation-of-record (never a committed pointer record).
+.anchor/projects/*/journal.jsonl
+.anchor/projects/*/**/journal.jsonl

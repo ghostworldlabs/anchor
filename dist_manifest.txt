@@ -91,6 +91,15 @@ gandalf.py
 route_table.py
 auth_warn.py
 
+# ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
+# Stdlib-only: journal (the per-project append-only JSONL event journal — the
+# ONE schema-validated emit() choke point + the Butler envelope + the blessed
+# journal-first-then-legacy dual_write wrapper) uses only json / os / re /
+# threading / time / pathlib + the paths / pillar_flags seams (lazily
+# rnd_registry / tools.write_tripwire). Imported by terminal_session.py at
+# runtime (the first instrumented mutation class — session lifecycle, D1).
+journal.py
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 # Gandalf the White wizard mark (white robes/staff; the Gandalf tab icon + served
