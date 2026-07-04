@@ -2533,3 +2533,308 @@ class TestC1ExitGate:
                 and any(p.name in src for p in css)), (
             "C1 exit: anchor_gui.py does not reference the home-dashboard "
             "static assets")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Wave 9 — W7: Route Table Core + Strangler Dispatch
+#
+# The single declarative route table (route_table.py), the strangler dispatch
+# wired into anchor_gui.do_GET/do_POST, the reviewed OPEN_ROUTES.json allowlist,
+# the distro.py-style in-method import-shadowing scan, and the /api/routes dump.
+# ═══════════════════════════════════════════════════════════════════════════
+
+import route_table as rt
+from tools import route_import_scan
+
+OPEN_ROUTES_FILE = REPO_ROOT / "OPEN_ROUTES.json"
+
+# The recorded W7 baseline of in-method imports that shadow a module-level name
+# (the os/datetime class). W7 introduces the scan and holds the line; W8 migrates
+# the remaining handlers to module level and drives this to ZERO.
+_SHADOW_BASELINE = 4
+
+
+def _dispatch_literals(src):
+    """Extract every string-literal path arm in anchor_gui.do_GET/do_POST.
+
+    Returns ``{"GET": {literals...}, "POST": {literals...}}`` — only comparisons
+    and ``.startswith(...)`` calls whose receiver is ``self.path`` or the
+    ``_path_only`` local (i.e. genuine dispatch arms), never unrelated string
+    literals inside a handler body.
+    """
+    tree = ast.parse(src)
+
+    def _is_path_ref(n):
+        if (isinstance(n, ast.Attribute) and n.attr == "path"
+                and isinstance(n.value, ast.Name) and n.value.id == "self"):
+            return True
+        return isinstance(n, ast.Name) and n.id == "_path_only"
+
+    out = {"GET": set(), "POST": set()}
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.FunctionDef)
+                and node.name in ("do_GET", "do_POST")):
+            continue
+        method = "GET" if node.name == "do_GET" else "POST"
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Compare) and _is_path_ref(sub.left):
+                for c in sub.comparators:
+                    if isinstance(c, ast.Constant) and isinstance(c.value, str):
+                        out[method].add(c.value)
+            if (isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "startswith"
+                    and _is_path_ref(sub.func.value) and sub.args):
+                a0 = sub.args[0]
+                if isinstance(a0, ast.Constant) and isinstance(a0.value, str):
+                    out[method].add(a0.value)
+    return out
+
+
+class _FakeHandler:
+    """Minimal stand-in bound to the REAL AnchorHandler strangler methods."""
+
+    def __init__(self, token_ok=True):
+        self.sent = []          # (code, json_obj) from _send_json
+        self._token_ok = token_ok
+        self.wfile = io.BytesIO()
+
+    def _term_token_ok(self):
+        return self._token_ok
+
+    def _send_json(self, data, code=200):
+        self.sent.append((code, data))
+
+    def send_response(self, code):
+        pass
+
+    def send_header(self, k, v):
+        pass
+
+    def end_headers(self):
+        pass
+
+
+def _bind_fake():
+    import anchor_gui
+    _FakeHandler._route_auth_ok = anchor_gui.AnchorHandler._route_auth_ok
+    _FakeHandler._strangler_dispatch = anchor_gui.AnchorHandler._strangler_dispatch
+    return anchor_gui
+
+
+class TestW7RouteTable:
+    """The declarative table's own invariants."""
+
+    def test_match_exact_and_prefix_longest(self):
+        assert rt.match("GET", "/api/version").pattern == "/api/version"
+        assert rt.match("GET", "/api/status").pattern == "/api/status"
+        # longest-prefix wins over a shorter shared prefix
+        assert (rt.match("GET", "/api/rnd/gandalf_status_all?x=1").pattern
+                == "/api/rnd/gandalf_status_all")
+        assert (rt.match("GET", "/api/rnd/gandalf?x=1").pattern
+                == "/api/rnd/gandalf")
+        assert (rt.match("GET", "/api/rnd/term_stream2").pattern
+                == "/api/rnd/term_stream2")
+        assert rt.match("GET", "/nope/nope") is None
+
+    def test_every_row_has_valid_policy_and_kind(self):
+        for r in rt.ROUTES:
+            assert r.auth in rt.AUTH_POLICIES
+            assert r.kind in rt.HANDLER_KINDS
+            assert r.match in (rt.MATCH_EXACT, rt.MATCH_PREFIX)
+            if r.migrated:
+                assert r.handler, f"migrated {r.pattern} lacks a handler name"
+
+    def test_first_migration_batch_present(self):
+        migrated = {r.pattern for r in rt.migrated_routes()}
+        assert {"/api/version", "/api/status", "/api/routes"} <= migrated
+        assert rt.migrated_count() >= 3
+
+    def test_legacy_arm_counter_wired(self):
+        # counter == total - migrated, and the batch has moved the needle
+        assert rt.legacy_arm_count() == len(rt.ROUTES) - rt.migrated_count()
+        assert rt.legacy_arm_count() < len(rt.ROUTES)
+
+    def test_table_dump_shape(self):
+        dump = rt.table_dump()
+        assert len(dump) == len(rt.ROUTES)
+        sample = next(d for d in dump if d["path"] == "/api/routes")
+        assert set(sample) >= {"method", "path", "auth", "kind", "status",
+                               "handler"}
+        assert sample["status"] == "migrated"
+        assert sample["handler"] == "handle_routes"
+        legacy = next(d for d in dump if d["path"] == "/api/done")
+        assert legacy["status"] == "legacy" and legacy["handler"] is None
+
+
+class TestW7RouteAudit:
+    """No route exists without a declared row (default-deny by construction)."""
+
+    def test_every_dispatch_arm_has_a_row(self):
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        lits = _dispatch_literals(src)
+        declared = rt.declared_keys()
+        missing = sorted(
+            (m, lit)
+            for m, method in (("GET", "GET"), ("POST", "POST"))
+            for lit in lits[m]
+            if (method, lit) not in declared)
+        assert not missing, (
+            "route-audit: dispatch arms with no declared route_table row: "
+            f"{missing}")
+
+    def test_audit_catches_an_undeclared_arm(self):
+        # A new endpoint added without a table row MUST be caught.
+        fake_src = textwrap.dedent('''
+            class AnchorHandler:
+                def do_GET(self):
+                    if self.path == "/api/brand_new_undeclared":
+                        pass
+                def do_POST(self):
+                    pass
+        ''')
+        lits = _dispatch_literals(fake_src)
+        declared = rt.declared_keys()
+        assert ("GET", "/api/brand_new_undeclared") not in declared
+        assert any((("GET", lit) not in declared) for lit in lits["GET"])
+
+
+class TestW7OpenRoutesExact:
+    """OPEN_ROUTES.json exactly matches the live open set, justified per entry."""
+
+    def _file_entries(self):
+        payload = json.loads(OPEN_ROUTES_FILE.read_text(encoding="utf-8"))
+        return payload["routes"]
+
+    def test_open_set_matches_file_exactly(self):
+        file_keys = {(e["method"], e["pattern"]) for e in self._file_entries()}
+        assert file_keys == rt.open_route_keys(), (
+            "OPEN_ROUTES.json must equal route_table.open_route_keys() EXACTLY; "
+            f"table-only={rt.open_route_keys() - file_keys}, "
+            f"file-only={file_keys - rt.open_route_keys()}")
+
+    def test_every_open_entry_has_a_justification(self):
+        for e in self._file_entries():
+            assert e.get("justification", "").strip(), (
+                f"open route {e} lacks a justification string")
+
+    def test_a_new_open_route_breaks_the_match(self):
+        # Simulate adding an 'open' route to the table but NOT to the file.
+        extra = rt.Route("GET", "/api/new_open_thing", rt.MATCH_EXACT,
+                         rt.AUTH_OPEN, rt.KIND_STANDARD, None, False)
+        rt.ROUTES.append(extra)
+        try:
+            file_keys = {(e["method"], e["pattern"])
+                         for e in self._file_entries()}
+            assert file_keys != rt.open_route_keys()
+        finally:
+            rt.ROUTES.remove(extra)
+
+
+class TestW7ImportShadowScan:
+    """distro.py-style AST scan for in-method imports shadowing module names."""
+
+    def test_flags_shadowing_ignores_nonshadowing(self):
+        src = textwrap.dedent('''
+            import os
+            from datetime import datetime
+
+            def handler(self):
+                import os                       # shadows module-level os
+                from datetime import datetime   # shadows module-level datetime
+                import subprocess               # NOT module-level -> fine
+                return os, datetime, subprocess
+        ''')
+        vios = route_import_scan.scan_shadowing_imports(src, "fixture")
+        flagged = {(v.name, v.kind) for v in vios}
+        assert ("os", "import") in flagged
+        assert ("datetime", "from-import") in flagged
+        assert not any(v.name == "subprocess" for v in vios)
+
+    def test_clean_module_has_no_violations(self):
+        src = textwrap.dedent('''
+            import os
+
+            def f():
+                return os.getpid()
+        ''')
+        assert route_import_scan.scan_shadowing_imports(src, "clean") == []
+
+    def test_anchor_gui_baseline_not_regressed(self):
+        vios = route_import_scan.scan_file(str(ANCHOR_GUI))
+        assert len(vios) <= _SHADOW_BASELINE, (
+            f"in-method import shadowing increased past the W7 baseline "
+            f"({_SHADOW_BASELINE}); W8 drives this to zero, W7 must not regress: "
+            f"{[(v.name, v.lineno) for v in vios]}")
+        # The residual is exactly the documented os/datetime class.
+        assert all(v.name in ("os", "datetime") for v in vios)
+
+
+class TestW7StranglerDispatch:
+    """Table-first dispatch with legacy fallthrough + auth-first specials."""
+
+    def test_migrated_route_dispatches_the_table_dump(self):
+        anchor_gui = _bind_fake()
+        fh = _FakeHandler(token_ok=True)
+        handled = fh._strangler_dispatch("GET", "/api/routes", None)
+        assert handled is True
+        code, data = fh.sent[0]
+        assert code == 200 and data["ok"] is True
+        assert data["routes"] == rt.table_dump()
+        assert data["legacy_arm_count"] == rt.legacy_arm_count()
+
+    def test_token_route_401s_when_unauthed(self):
+        _bind_fake()
+        fh = _FakeHandler(token_ok=False)
+        handled = fh._strangler_dispatch("GET", "/api/routes", None)
+        assert handled is True
+        assert fh.sent[0][0] == 401
+
+    def test_open_migrated_route_writes_version(self):
+        anchor_gui = _bind_fake()
+        fh = _FakeHandler(token_ok=False)  # open route: no token needed
+        handled = fh._strangler_dispatch("GET", "/api/version", None)
+        assert handled is True
+        assert anchor_gui.BUILD_ID.encode() in fh.wfile.getvalue()
+
+    def test_unmatched_and_legacy_fall_through(self):
+        _bind_fake()
+        fh = _FakeHandler(token_ok=True)
+        # a real but NOT-migrated route -> strangler declines (legacy handles)
+        assert fh._strangler_dispatch("GET", "/api/rnd/projects", None) is False
+        # a totally unknown path -> declines
+        assert fh._strangler_dispatch("GET", "/no/such/path", None) is False
+        assert fh.sent == []
+
+    def test_special_kind_auth_invoked_first(self):
+        anchor_gui = _bind_fake()
+        called = {"ran": False}
+
+        def _fake_stream(handler, path, body):
+            called["ran"] = True
+            handler._send_json({"streamed": True})
+
+        extra = rt.Route("GET", "/api/test_stream", rt.MATCH_EXACT,
+                         rt.AUTH_WS_TOKEN, rt.KIND_STREAM,
+                         "handle_test_stream", True)
+        rt.ROUTES.append(extra)
+        anchor_gui._MIGRATED_HANDLERS["handle_test_stream"] = _fake_stream
+        try:
+            # auth FAILS: the stream handler must NEVER run (auth-first).
+            fh = _FakeHandler(token_ok=False)
+            handled = fh._strangler_dispatch("GET", "/api/test_stream", None)
+            assert handled is True
+            assert called["ran"] is False
+            assert fh.sent[0][0] == 401
+            # auth OK: now the special handler runs.
+            fh2 = _FakeHandler(token_ok=True)
+            fh2._strangler_dispatch("GET", "/api/test_stream", None)
+            assert called["ran"] is True
+        finally:
+            rt.ROUTES.remove(extra)
+            anchor_gui._MIGRATED_HANDLERS.pop("handle_test_stream", None)
+
+    def test_anchor_gui_wires_the_strangler(self):
+        src = ANCHOR_GUI.read_text(encoding="utf-8")
+        assert 'self._strangler_dispatch("GET"' in src
+        assert 'self._strangler_dispatch("POST"' in src

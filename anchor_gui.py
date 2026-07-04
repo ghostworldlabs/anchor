@@ -25,6 +25,10 @@ import html as html_lib
 # Wave 2: data paths resolve via the shared `paths` helper, honoring the
 # ANCHOR_DATA_DIR env var (unset -> the code dir, so behavior is unchanged).
 import paths as _paths
+# Declarative HTTP route table + strangler dispatch substrate (rearch W7 / C2).
+# Pure data + pure functions (stdlib only); the migrated handler *functions* live
+# in this module and are looked up by name via _MIGRATED_HANDLERS below.
+import route_table as _routes
 
 # Process-wide write lock: held around every markdown/JSON mutation so two
 # concurrent mutating requests (ThreadingHTTPServer) cannot lose an update.
@@ -14361,6 +14365,66 @@ def _is_benign_disconnect(exc):
     return False
 
 
+# ── Migrated route handlers (rearch W7 / C2 strangler, first batch) ──────────
+# Module-level handler functions the declarative route table dispatches to. Each
+# takes ``(handler, path, body)`` — ``handler`` is the live AnchorHandler
+# instance (for _send_json/wfile/etc.), ``path`` is the request path, ``body`` is
+# the parsed POST body (None for GET). Auth is applied by the strangler BEFORE
+# these run, per the route row's declared policy. Moving these out of the
+# do_GET/do_POST if/elif chains to module-level functions is the mechanism that
+# structurally kills the in-method import-shadowing class (W8 completes it).
+
+def handle_version(handler, path, body):
+    """GET /api/version — the build-id probe for the self-healing redeploy client.
+
+    Always fetched fresh (no-store) so the client can detect a redeploy.
+    """
+    payload = json.dumps({"version": BUILD_ID}).encode()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(payload)
+
+
+def handle_status(handler, path, body):
+    """GET /api/status — coarse task/project/inbox counts for the page header."""
+    projects, tasks, inbox = gather_all()
+    active = [t for t in tasks if not t["done"]]
+    handler._send_json({
+        "projects": len(projects),
+        "active": len(active),
+        "done": len([t for t in tasks if t["done"]]),
+        "inbox": len(inbox),
+    })
+
+
+def handle_routes(handler, path, body):
+    """GET /api/routes — dump the live declarative route table (token-authed).
+
+    The audit surface: path, method, auth policy, handler kind, and legacy-or-
+    migrated status for every declared route, plus the C2 progress counters.
+    """
+    handler._send_json({
+        "ok": True,
+        "routes": _routes.table_dump(),
+        "legacy_arm_count": _routes.legacy_arm_count(),
+        "migrated_count": _routes.migrated_count(),
+        "total": len(_routes.ROUTES),
+    })
+
+
+# Route-table handler name -> module-level function. route_table rows reference
+# the STRING name (keeping route_table.py import-free); the strangler resolves it
+# here. A migrated row whose name is absent falls through to legacy (defensive).
+_MIGRATED_HANDLERS = {
+    "handle_version": handle_version,
+    "handle_status": handle_status,
+    "handle_routes": handle_routes,
+}
+
+
 class AnchorHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"  [{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
@@ -14583,6 +14647,48 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # WS clients may smuggle the token via the subprotocol header.
             provided = self.headers.get("Sec-WebSocket-Protocol")
         return _paths.auth_ok(provided)
+
+    # ── Strangler dispatch (rearch W7 / C2) ─────────────────────────────────
+    def _route_auth_ok(self, route):
+        """Apply a route row's declared auth policy. True == permitted.
+
+        ``open`` routes are always permitted. For ``token``/``ws_token`` routes:
+        a POST is already gated by the do_POST token middleware (which runs
+        BEFORE the strangler), so re-checking would be redundant AND wrong (that
+        middleware also accepts the X-Anchor-Token header and a body token, which
+        :meth:`_term_token_ok` does not) — so a POST returns True here. A GET is
+        gated via :meth:`_term_token_ok` (query token / Authorization header),
+        matching the pre-existing token-gated GET surface exactly.
+        """
+        if route.auth == _routes.AUTH_OPEN:
+            return True
+        if route.method == "POST":
+            return True
+        return self._term_token_ok()
+
+    def _strangler_dispatch(self, method, path, body=None):
+        """Table-first dispatch. Returns True iff this request was HANDLED here.
+
+        Looks the request up in the declarative route table. A matched, MIGRATED
+        row is handled by its module-level function — but the row's auth check is
+        invoked FIRST (honestly special-cased for ``kind != standard``: the auth
+        gate runs before any stream/upgrade handler takes over the socket). A
+        miss, or a matched-but-not-yet-migrated row, returns False so the caller
+        FALLS THROUGH to the legacy if/elif chain unchanged (the strangler
+        pattern). Defensive: a row flagged migrated whose handler name is not
+        registered also falls through rather than 500-ing.
+        """
+        route = _routes.match(method, path)
+        if route is None or not route.migrated:
+            return False
+        fn = _MIGRATED_HANDLERS.get(route.handler)
+        if fn is None:
+            return False
+        if not self._route_auth_ok(route):
+            self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return True
+        fn(self, path, body)
+        return True
 
     def _serve_term_stream2(self):
         """SSE-out fallback for a ConPTY session (Wave 3).
@@ -14843,6 +14949,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # inside (?token=). Distinct from the v2 /api/rnd/term_stream.
                 self._serve_term_stream2()
                 return
+            # Strangler dispatch (rearch W7 / C2): the declarative route table
+            # is consulted FIRST; a matched, migrated GET row is handled here
+            # (with the row's auth applied first). Anything unmatched or not-yet-
+            # migrated falls through to the legacy if/elif chain below unchanged.
+            if self._strangler_dispatch("GET", _path_only, None):
+                return
             if _path_only == "/" or _path_only == "/dashboard":
                 # Serve the dashboard for "/" REGARDLESS of query string so the
                 # cache-busting reload ("/?v=<build_id>") lands on the dashboard
@@ -14850,16 +14962,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
-            elif _path_only == "/api/version":
-                # Must always be fetched fresh (no-store) so the self-healing
-                # client can detect a redeploy.
-                body = json.dumps({"version": BUILD_ID}).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
-                self.end_headers()
-                self.wfile.write(body)
+            # /api/version migrated to route_table (handle_version, W7 batch 1) —
+            # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
                 ico_path = ANCHOR_DIR / "anchor.ico"
                 if ico_path.exists():
@@ -14904,15 +15008,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 else:
                     self.send_response(404)
                     self.end_headers()
-            elif self.path == "/api/status":
-                projects, tasks, inbox = gather_all()
-                active = [t for t in tasks if not t["done"]]
-                self._send_json({
-                    "projects": len(projects),
-                    "active": len(active),
-                    "done": len([t for t in tasks if t["done"]]),
-                    "inbox": len(inbox),
-                })
+            # /api/status migrated to route_table (handle_status, W7 batch 1) —
+            # served by the strangler above.
             elif self.path.startswith(_rv.KATEX_URL_PREFIX):
                 # Read-only vendored KaTeX static assets for the Reader (Wave 7).
                 rel = urlparse(self.path).path[len(_rv.KATEX_URL_PREFIX):]
@@ -16686,6 +16783,13 @@ function startZombieTerminal(btn) {
             provided = body.get("token")
         if not _paths.auth_ok(provided):
             self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
+        # Strangler dispatch (rearch W7 / C2): consult the declarative route
+        # table FIRST. Runs AFTER the token middleware, so a migrated POST row is
+        # already authenticated. Unmatched / not-yet-migrated POSTs fall through
+        # to the legacy if/elif chain below unchanged.
+        if self._strangler_dispatch("POST", self.path, body):
             return
 
         if self.path == "/api/done":
