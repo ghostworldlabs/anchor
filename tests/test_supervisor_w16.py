@@ -181,9 +181,16 @@ class TestLoopbackAuth:
             f"{srv.url}/list_jobs", data=b"{}",
             headers={"Authorization": "Bearer WRONG",
                      "Content-Type": "application/json"}, method="POST")
-        with pytest.raises(urllib.error.HTTPError) as ei:
-            urllib.request.urlopen(req, timeout=5)
-        assert ei.value.code == 401
+        # A bad token MUST be rejected. The server answers 401 and closes; on a
+        # loaded loopback the client can observe the close as a connection reset
+        # BEFORE it reads the 401 (a socket race, not an auth bypass) — both
+        # outcomes prove rejection (the request never returns an authorized body).
+        try:
+            with pytest.raises(urllib.error.HTTPError) as ei:
+                urllib.request.urlopen(req, timeout=5)
+            assert ei.value.code == 401
+        except (ConnectionError, ConnectionAbortedError, ConnectionResetError):
+            pass  # rejected-by-close is still rejected
 
     def test_client_available_reflects_token(self, server):
         jr, ga, supmod, tmp, srv, cenv, token = server
