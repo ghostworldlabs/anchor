@@ -1,6 +1,6 @@
 # Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)
 
-test-command: python -m pytest tests/test_rearch_2026_07.py tests/test_review_fixes_2026_07.py tests/test_model_flex_w8.py tests/test_anchor_md_defork_w10.py tests/test_data_dir_migration_w11.py tests/test_journal_core_w12.py tests/test_journal_full_w13.py -v
+test-command: python -m pytest tests/test_rearch_2026_07.py tests/test_review_fixes_2026_07.py tests/test_model_flex_w8.py tests/test_anchor_md_defork_w10.py tests/test_data_dir_migration_w11.py tests/test_journal_core_w12.py tests/test_journal_full_w13.py tests/test_parity_recovery_w14.py tests/test_supervisor_w15.py -v
 
 **North Star:** # NORTH STAR — LOCKED
 
