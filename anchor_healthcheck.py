@@ -5612,6 +5612,178 @@ def check_supervisor_seam(report: Report):
                 pass
 
 
+def check_supervisor_live_probes(report: Report):
+    """rearch W16: the external supervisor process + the two live probes.
+
+    The inline seam (W15) can never cover the two things that only a SECOND
+    process proves. This walk stands up a REAL loopback token-authed
+    ``SupervisorServer`` in-process (temp data dir + fake_claude stub — never the
+    live :8777 service / real data) and drives the external CLIENT over 127.0.0.1
+    HTTP, proving:
+
+      (1) the external seam resolves + round-trips: ``get_supervisor`` returns a
+          non-degraded ``external`` client against the live server, a wrong-token
+          client is refused (401), and a launch → tail → cancel round-trips;
+      (2) TAIL-CURSOR durability across a SUPERVISOR restart: a persisted read
+          offset survives ``stop()`` of the old server + ``start()`` of a new one
+          over the same data dir (the offset lives in the job dir, not memory);
+      (3) probe (a) — ``probe_claude_version`` returns a structured result under
+          the service account (honest ``ok=False`` when claude is absent);
+      (4) probe (b) — ``spawn_sacrificial`` mints a job-object BREAKAWAY child
+          that is alive (the restart-survival mechanism), then reaps it.
+
+    The TRUE cross-service probes (real claude on the live service; a real
+    ``nssm restart anchor-supervisor`` with a surviving child) are the Wave-19
+    C4 runbook items; this walk proves the code paths every daily run.
+    """
+    name = "supervisor live probes (external process)"
+    import tempfile as _tf
+    import shutil as _shutil
+    import time as _time
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    prev_runner = os.environ.get("ANCHOR_RUNNER_CMD")
+    prev_sup = os.environ.get("ANCHOR_SUPERVISOR")
+    prev_url = os.environ.get("ANCHOR_SUPERVISOR_URL")
+    prev_tok = os.environ.get("ANCHOR_SUPERVISOR_TOKEN")
+    tmp = None
+    srv = None
+    srv2 = None
+    jid = None
+    sac_pid = None
+    try:
+        import supervisor as _sup
+        import job_runner as _jr
+        import paths as _paths
+        import proc_probe as _pp
+
+        runner = _fake_runner_cmd()
+        if not runner:
+            report.check(name, True,
+                         "skipped (fake_claude stub absent) — external seam "
+                         "code present; live probes need the stub runner")
+            return
+
+        tmp = Path(_tf.mkdtemp(prefix="anchor-hc-sup16-"))
+        data = tmp / "data"
+        data.mkdir(parents=True, exist_ok=True)
+        os.environ["ANCHOR_DATA_DIR"] = str(data)
+        os.environ["ANCHOR_RUNNER_CMD"] = runner
+        _paths.ensure_data_dirs()
+        _jr._reset_live_table_for_tests()
+
+        token = "hc-sup16-token"
+        srv = _sup.SupervisorServer(host="127.0.0.1", port=0, token=token)
+        srv.start()
+        url = srv.url
+
+        # (1) the seam resolves to a NON-degraded external client + round-trips.
+        env = {"ANCHOR_SUPERVISOR": "external",
+               "ANCHOR_SUPERVISOR_URL": url,
+               "ANCHOR_SUPERVISOR_TOKEN": token}
+        client = _sup.get_supervisor(env=env)
+        seam_external = (client.mode == _sup.MODE_EXTERNAL
+                         and not client.degraded)
+        # A wrong token is refused → the factory degrades to inline honestly.
+        bad = _sup.get_supervisor(env={"ANCHOR_SUPERVISOR": "external",
+                                       "ANCHOR_SUPERVISOR_URL": url,
+                                       "ANCHOR_SUPERVISOR_TOKEN": "WRONG"})
+        bad_refused = (bad.mode == _sup.MODE_INLINE and bad.degraded)
+
+        rec = client.launch("research",
+                            extra_args=["--lines", "5", "--line-interval",
+                                        "0.12", "--sleep", "5"])
+        jid = rec["job_id"]
+        _deadline = _time.monotonic() + 5
+        while _time.monotonic() < _deadline:
+            if len(_jr.all_lines(jid)) >= 2:
+                break
+            _time.sleep(0.05)
+        first = client.tail(jid, persist=True)
+        cur1 = client.read_cursor(jid)
+        round_trips = bool(first.get("total", 0) >= 1 and cur1 >= 1)
+
+        # (2) tail-cursor durability across a SUPERVISOR restart.
+        srv.stop()
+        srv = None
+        srv2 = _sup.SupervisorServer(host="127.0.0.1", port=0, token=token)
+        srv2.start()
+        env2 = dict(env)
+        env2["ANCHOR_SUPERVISOR_URL"] = srv2.url
+        client2 = _sup.get_supervisor(env=env2)
+        cursor_survived = (client2.read_cursor(jid) == cur1 and cur1 >= 1)
+
+        # (3) probe (a): claude --version through the supervisor (structured).
+        ver = client2.probe_claude_version(timeout=15.0)
+        probe_a_shape = isinstance(ver, dict) and "ok" in ver and (
+            "output" in ver or "reason" in ver)
+
+        # (4) probe (b): a breakaway sacrificial child is alive, then reaped.
+        sac = client2.spawn_sacrificial(seconds=30)
+        sac_pid = sac.get("pid")
+        _deadline = _time.monotonic() + 3
+        alive = False
+        while _time.monotonic() < _deadline:
+            if sac_pid and (_pp.is_alive(sac_pid) or _jr._pid_alive(sac_pid)):
+                alive = True
+                break
+            _time.sleep(0.05)
+        probe_b = bool(sac.get("ok") and alive)
+        if sac_pid:
+            client2.reap_pid(sac_pid)
+
+        # Clean up the fake job.
+        client2.cancel(jid)
+
+        ok = bool(seam_external and bad_refused and round_trips
+                  and cursor_survived and probe_a_shape and probe_b)
+        report.check(name, ok,
+                     f"external={seam_external} bad-token-refused={bad_refused} "
+                     f"round-trip={round_trips} cursor-survived-restart="
+                     f"{cursor_survived} probe-a(claude --version)-ok="
+                     f"{ver.get('ok')} probe-b(breakaway-child-alive)={probe_b}")
+    except Exception as e:
+        report.check(name, False,
+                     f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        for _s in (srv, srv2):
+            if _s is not None:
+                try:
+                    _s.stop()
+                except Exception:
+                    pass
+        if sac_pid is not None:
+            try:
+                import proc_probe as _pp2
+                _pp2.tree_kill(sac_pid)
+            except Exception:
+                pass
+        if jid is not None:
+            try:
+                import job_runner as _jr2
+                _jr2.cancel(jid)
+            except Exception:
+                pass
+        for k, v in (("ANCHOR_DATA_DIR", prev_data),
+                     ("ANCHOR_RUNNER_CMD", prev_runner),
+                     ("ANCHOR_SUPERVISOR", prev_sup),
+                     ("ANCHOR_SUPERVISOR_URL", prev_url),
+                     ("ANCHOR_SUPERVISOR_TOKEN", prev_tok)):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        try:
+            import job_runner as _jr3
+            _jr3._reset_live_table_for_tests()
+        except Exception:
+            pass
+        if tmp is not None:
+            try:
+                _shutil.rmtree(tmp, ignore_errors=True)
+            except Exception:
+                pass
+
+
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def main():
     report = Report()
@@ -5694,6 +5866,12 @@ def main():
         # (hermetic; never the live service). Proves the seam re-adopts an
         # in-flight job across a simulated dashboard restart.
         check_supervisor_seam(report)
+        # rearch W16 (C4): the external supervisor process + the two live probes
+        # (hermetic loopback server; never the live service). Proves the
+        # external seam round-trips, tail cursors survive a supervisor restart,
+        # claude --version resolves under the account, and a breakaway child is
+        # spawnable.
+        check_supervisor_live_probes(report)
 
         # Logging check should happen AFTER the server has done its work
         # so today's log file gets written by the boot/shutdown events.

@@ -36,7 +36,11 @@ Stdlib only. No third-party imports.
 
 from __future__ import annotations
 
+import json
 import os
+import socket
+import subprocess
+import threading
 from pathlib import Path
 
 import pillar_flags as _pf
@@ -49,6 +53,31 @@ DEFAULT_ARTIFACT_DIR = REPO_ROOT / "planning" / "rearch-2026-07"
 #: Supervisor modes (mirror the ``supervisor`` pillar flag values).
 MODE_INLINE = "inline"
 MODE_EXTERNAL = "external"
+
+# ── External-process IPC configuration (W16) ─────────────────────────────────
+#: Loopback host the supervisor binds / the client dials. NEVER the tailnet — a
+#: job-owning IPC surface stays on 127.0.0.1 (the same discipline as
+#: ``preview_server``). Overridable only for tests.
+SUPERVISOR_HOST_ENV = "ANCHOR_SUPERVISOR_HOST"
+SUPERVISOR_PORT_ENV = "ANCHOR_SUPERVISOR_PORT"
+SUPERVISOR_TOKEN_ENV = "ANCHOR_SUPERVISOR_TOKEN"
+SUPERVISOR_URL_ENV = "ANCHOR_SUPERVISOR_URL"
+
+DEFAULT_SUPERVISOR_HOST = "127.0.0.1"
+#: The supervisor's fixed IPC port (distinct from the dashboard's 8777 and the
+#: ledger's 8778). A test binds port 0 (OS-assigned) instead.
+DEFAULT_SUPERVISOR_PORT = 8781
+
+#: CreateProcess flag: a child spawned with this BREAKS AWAY from the parent's
+#: Win32 Job Object, so a supervisor restart (which closes the supervisor's
+#: KILL_ON_JOB_CLOSE job handle) does NOT kill the in-flight job — the W16
+#: "job-object breakaway" live probe. 0 / ignored off Windows.
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000 if os.name == "nt" else 0
+
+#: Short connect/read timeout for the client → supervisor loopback hops. A hop
+#: that can't answer inside this bound is treated as "supervisor down" and the
+#: seam degrades to inline (never hangs the dashboard on a wedged supervisor).
+DEFAULT_IPC_TIMEOUT = 5.0
 
 
 class SupervisorUnavailable(RuntimeError):
@@ -545,31 +574,497 @@ class InlineSupervisor(Supervisor):
         }
 
 
-class ExternalSupervisor(Supervisor):
-    """The real second-process supervisor (W16 lands the implementation).
+# ── W16 supervisor-side spawn helpers (breakaway + claude probe) ─────────────
 
-    W15 defines the seam contract; the external client — loopback token-authed
-    HTTP IPC against the NSSM-hosted supervisor process — is W16. Instantiating
-    it here is intentionally a placeholder that reports unavailable, so the
-    factory can degrade to inline honestly.
+def _spawn_creationflags(breakaway=True):
+    """Windows creationflags for a supervisor-owned child.
+
+    Always ``CREATE_NO_WINDOW`` (no console flash — John's standing rule) plus a
+    new process group so the tree is reapable. When ``breakaway`` is set the
+    child also carries ``CREATE_BREAKAWAY_FROM_JOB`` so it survives the
+    supervisor's own Job Object being torn down on a restart (the W16 live
+    probe). Off Windows this is always 0.
+    """
+    if os.name != "nt":
+        return 0
+    flags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+             | _paths_no_window())
+    if breakaway:
+        flags |= CREATE_BREAKAWAY_FROM_JOB
+    return flags
+
+
+def _paths_no_window():
+    import paths as _paths
+    return getattr(_paths, "NO_WINDOW", 0)
+
+
+def spawn_breakaway_child(argv, cwd=None, env=None):
+    """Spawn a detached, job-breakaway child; return ``{ok, pid, reason}``.
+
+    The child is spawned with ``CREATE_NO_WINDOW`` (never a visible console) and
+    ``CREATE_BREAKAWAY_FROM_JOB`` so it OUTLIVES a supervisor restart. If the
+    containing job forbids breakaway (``ERROR_ACCESS_DENIED`` at CreateProcess),
+    we retry WITHOUT the breakaway flag and record ``breakaway=False`` — the job
+    still spawns; only the restart-survival guarantee is narrowed, honestly
+    reported rather than crashing.
+    """
+    full_env = dict(os.environ)
+    if env:
+        full_env.update(env)
+    for breakaway in (True, False):
+        try:
+            proc = subprocess.Popen(
+                list(argv),
+                cwd=str(cwd) if cwd else None,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=full_env,
+                creationflags=_spawn_creationflags(breakaway=breakaway),
+            )
+            return {"ok": True, "pid": proc.pid, "breakaway": bool(breakaway),
+                    "reason": None}
+        except OSError as e:
+            # ACCESS_DENIED (breakaway forbidden by the job) → retry plain.
+            if breakaway and os.name == "nt":
+                continue
+            return {"ok": False, "pid": None, "breakaway": False,
+                    "reason": f"{type(e).__name__}: {e}"}
+    return {"ok": False, "pid": None, "breakaway": False,
+            "reason": "spawn failed"}
+
+
+def _resolve_claude_cmd():
+    """Resolve the claude executable for the version probe.
+
+    Honors ``ANCHOR_CLAUDE_CMD`` (an explicit override / test seam), else the
+    bare ``claude.exe`` (Windows) / ``claude`` on PATH. Returns the command
+    string; the caller runs it with ``--version``.
+    """
+    override = os.environ.get("ANCHOR_CLAUDE_CMD")
+    if override and override.strip():
+        return override.strip()
+    return "claude.exe" if os.name == "nt" else "claude"
+
+
+def probe_claude_version(timeout=20.0):
+    """Live probe (a): spawn ``claude --version`` under THIS process account.
+
+    Runs the real claude binary with ``--version`` (no window), capturing
+    stdout — proving the supervisor's credentials + PATH resolve claude under
+    the service account. Returns ``{ok, output, cmd, returncode, reason}``;
+    ``ok`` is False (with a ``reason``) when claude is absent/unrunnable, never
+    an exception.
+    """
+    cmd = _resolve_claude_cmd()
+    argv = cmd.split() if (" " in cmd) else [cmd]
+    argv = argv + ["--version"]
+    try:
+        res = subprocess.run(
+            argv, capture_output=True, text=True, timeout=timeout,
+            creationflags=(_paths_no_window() if os.name == "nt" else 0),
+        )
+    except FileNotFoundError:
+        return {"ok": False, "output": "", "cmd": cmd, "returncode": None,
+                "reason": "claude executable not found on PATH"}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "output": "", "cmd": cmd, "returncode": None,
+                "reason": f"{type(e).__name__}: {e}"}
+    out = (res.stdout or "").strip() or (res.stderr or "").strip()
+    return {"ok": res.returncode == 0 and bool(out), "output": out,
+            "cmd": cmd, "returncode": res.returncode,
+            "reason": None if res.returncode == 0 else "non-zero exit"}
+
+
+# ── The external supervisor: loopback token-authed HTTP IPC ───────────────────
+#
+# The server side runs IN the supervisor process (its own NSSM service). It owns
+# an :class:`InlineSupervisor` and exposes every IPC-contract interaction as a
+# JSON POST on 127.0.0.1. The client side (:class:`ExternalSupervisor`) is the
+# dashboard's implementation of the seam — a thin RPC that degrades to inline
+# when the hop can't be reached.
+
+def _supervisor_token(env=None):
+    src = env if env is not None else os.environ
+    tok = src.get(SUPERVISOR_TOKEN_ENV)
+    return tok.strip() if tok and tok.strip() else None
+
+
+def _supervisor_base_url(env=None):
+    src = env if env is not None else os.environ
+    url = src.get(SUPERVISOR_URL_ENV)
+    if url and url.strip():
+        return url.strip().rstrip("/")
+    host = (src.get(SUPERVISOR_HOST_ENV) or DEFAULT_SUPERVISOR_HOST).strip()
+    port = src.get(SUPERVISOR_PORT_ENV) or DEFAULT_SUPERVISOR_PORT
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        port = DEFAULT_SUPERVISOR_PORT
+    return f"http://{host}:{port}"
+
+
+def _make_ipc_handler():
+    """Build the ``BaseHTTPRequestHandler`` subclass for the supervisor server.
+
+    Deferred so importing :mod:`supervisor` never pays for :mod:`http.server`
+    unless the process actually serves IPC.
+    """
+    from http.server import BaseHTTPRequestHandler
+
+    class _SupervisorHandler(BaseHTTPRequestHandler):
+        server_version = "AnchorSupervisor/1"
+
+        # Silence the default stderr access log (no console spam under NSSM).
+        def log_message(self, *a):  # noqa: D401 - stdlib override
+            pass
+
+        def _authed(self):
+            want = getattr(self.server, "auth_token", None)
+            if want is None:
+                return True
+            got = None
+            hdr = self.headers.get("Authorization")
+            if hdr:
+                import paths as _p
+                got = _p.token_from_authorization(hdr)
+            if got is None:
+                got = self.headers.get("X-Anchor-Supervisor-Token")
+            import hmac
+            return bool(got) and hmac.compare_digest(str(got), str(want))
+
+        def _send(self, code, obj):
+            body = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except OSError:
+                pass
+
+        def _read_json(self):
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n <= 0:
+                return {}
+            try:
+                return json.loads(self.rfile.read(n).decode("utf-8") or "{}")
+            except (ValueError, OSError):
+                return {}
+
+        def do_GET(self):
+            # 401 BEFORE any work (mirrors the dashboard's default-deny).
+            if not self._authed():
+                self._send(401, {"ok": False, "error": "unauthorized"})
+                return
+            if self.path.split("?", 1)[0] == "/ping":
+                self._send(200, self.server.supervisor_ping())
+                return
+            self._send(404, {"ok": False, "error": "not found"})
+
+        def do_POST(self):
+            if not self._authed():
+                self._send(401, {"ok": False, "error": "unauthorized"})
+                return
+            path = self.path.split("?", 1)[0]
+            payload = self._read_json()
+            try:
+                result = self.server.dispatch(path, payload)
+            except _IPCNotFound:
+                self._send(404, {"ok": False, "error": f"no route {path}"})
+                return
+            except Exception as e:  # a method error is 200-with-error, not 500
+                self._send(200, {"ok": False,
+                                 "error": f"{type(e).__name__}: {e}"})
+                return
+            self._send(200, result)
+
+    return _SupervisorHandler
+
+
+class _IPCNotFound(Exception):
+    """Unknown IPC route (→ 404)."""
+
+
+class SupervisorServer:
+    """The supervisor-side loopback IPC server (runs in the supervisor process).
+
+    Owns an :class:`InlineSupervisor` and serves every IPC-contract interaction
+    as a token-authed JSON POST on 127.0.0.1. ``start()`` binds (port 0 → an
+    OS-assigned free port for tests) and serves on a daemon thread; ``stop()``
+    shuts it down. A supervisor RESTART is modelled by ``stop()`` on the old
+    server + ``start()`` of a new one over the SAME data dir — durable job
+    records + persisted tail cursors carry across (nothing in-memory is
+    required to survive).
+    """
+
+    def __init__(self, host=None, port=None, token=None):
+        self.host = host or os.environ.get(SUPERVISOR_HOST_ENV) \
+            or DEFAULT_SUPERVISOR_HOST
+        self._req_port = DEFAULT_SUPERVISOR_PORT if port is None else int(port)
+        self.token = token if token is not None else _supervisor_token()
+        self._sup = InlineSupervisor()
+        self._httpd = None
+        self._thread = None
+        self.port = None
+        # Track sacrificial probe children so we can reap them on stop().
+        self._probe_children = []
+
+    # -- IPC method table ----------------------------------------------------
+    def dispatch(self, path, payload):
+        name = path.strip("/").replace("-", "_")
+        fn = getattr(self, f"_op_{name}", None)
+        if fn is None:
+            raise _IPCNotFound(path)
+        return fn(payload or {})
+
+    def supervisor_ping(self):
+        return {"ok": True, "mode": MODE_EXTERNAL, "pid": os.getpid(),
+                "ipc_contract_rows": len(IPC_CONTRACT)}
+
+    def _op_ping(self, _):
+        return self.supervisor_ping()
+
+    def _op_launch(self, p):
+        return self._sup.launch(p.pop("lane"), **p)
+
+    def _op_launch_guarded(self, p):
+        return self._sup.launch_guarded(
+            p.pop("lane"), p.pop("project_id"), p.pop("folder_path"), **p)
+
+    def _op_tail(self, p):
+        return self._sup.tail(p["job_id"], since=p.get("since"),
+                              persist=bool(p.get("persist")))
+
+    def _op_read_cursor(self, p):
+        return {"job_id": p["job_id"],
+                "offset": self._sup.read_cursor(p["job_id"])}
+
+    def _op_persist_cursor(self, p):
+        self._sup.persist_cursor(p["job_id"], p["offset"])
+        return {"ok": True, "job_id": p["job_id"], "offset": p["offset"]}
+
+    def _op_cancel(self, p):
+        return self._sup.cancel(p["job_id"])
+
+    def _op_answer_gate(self, p):
+        return self._sup.answer_gate(p["job_id"], p.get("choice"))
+
+    def _op_deliver_gate(self, p):
+        return self._sup.deliver_gate(p["job_id"])
+
+    def _op_load_job(self, p):
+        return {"record": self._sup.load_job(p["job_id"])}
+
+    def _op_list_jobs(self, p):
+        return {"jobs": self._sup.list_jobs(
+            project_id=p.get("project_id"),
+            running_only=bool(p.get("running_only")))}
+
+    def _op_is_live(self, p):
+        return {"job_id": p["job_id"], "live": self._sup.is_live(p["job_id"])}
+
+    def _op_reconcile(self, _):
+        return {"interrupted": list(self._sup.reconcile() or [])}
+
+    def _op_rebuild(self, _):
+        return self._sup.rebuild()
+
+    # -- the two live-probe operations (W16) ---------------------------------
+    def _op_probe_claude_version(self, p):
+        return probe_claude_version(timeout=float(p.get("timeout", 20.0)))
+
+    def _op_spawn_sacrificial(self, p):
+        """Spawn a long-lived breakaway child for the restart-survival probe.
+
+        Returns its pid; the child breaks away from THIS supervisor's job
+        object so it survives the supervisor being restarted.
+        """
+        seconds = int(p.get("seconds", 120))
+        import sys as _sys
+        argv = [_sys.executable, "-c",
+                f"import time; time.sleep({seconds})"]
+        out = spawn_breakaway_child(argv)
+        if out.get("ok"):
+            self._probe_children.append(out["pid"])
+        return out
+
+    def _op_reap_pid(self, p):
+        import proc_probe
+        pid = p.get("pid")
+        killed = proc_probe.tree_kill(pid) if pid else False
+        return {"ok": bool(killed), "pid": pid}
+
+    # -- lifecycle -----------------------------------------------------------
+    def start(self):
+        from http.server import ThreadingHTTPServer
+        handler = _make_ipc_handler()
+        self._httpd = ThreadingHTTPServer((self.host, self._req_port), handler)
+        self.port = self._httpd.server_address[1]
+        # Attach the owner + token onto the server so the handler can reach them.
+        self._httpd.supervisor_ping = self.supervisor_ping
+        self._httpd.dispatch = self.dispatch
+        self._httpd.auth_token = self.token
+        self._thread = threading.Thread(
+            target=self._httpd.serve_forever, name="anchor-supervisor",
+            daemon=True)
+        self._thread.start()
+        return self.port
+
+    @property
+    def url(self):
+        return f"http://{self.host}:{self.port}"
+
+    def stop(self, reap_children=True):
+        if self._httpd is not None:
+            try:
+                self._httpd.shutdown()
+            except Exception:
+                pass
+            try:
+                self._httpd.server_close()
+            except Exception:
+                pass
+        self._httpd = None
+        self._thread = None
+        if reap_children:
+            import proc_probe
+            for pid in self._probe_children:
+                try:
+                    proc_probe.tree_kill(pid)
+                except Exception:
+                    pass
+            self._probe_children = []
+
+
+class ExternalSupervisor(Supervisor):
+    """The real second-process supervisor CLIENT (W16).
+
+    A thin loopback RPC to the NSSM-hosted supervisor process implementing
+    :data:`IPC_CONTRACT`. Ownership operations (launch / cancel / gate-answer /
+    rebuild) and reads route over 127.0.0.1 HTTP; the durable stores + persisted
+    tail cursors live in the shared data dir, so a SUPERVISOR restart is
+    survivable by construction. :meth:`available` probes ``/ping``; a hop that
+    can't be reached makes the factory degrade to inline honestly.
     """
 
     mode = MODE_EXTERNAL
 
+    def __init__(self, base_url=None, token=None, timeout=DEFAULT_IPC_TIMEOUT,
+                 env=None):
+        self.base_url = (base_url or _supervisor_base_url(env)).rstrip("/")
+        self.token = token if token is not None else _supervisor_token(env)
+        self.timeout = float(timeout)
+
+    # -- transport -----------------------------------------------------------
+    def _call(self, path, payload=None, method="POST"):
+        import urllib.request
+        import urllib.error
+        url = f"{self.base_url}{path}"
+        data = None
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        if method == "POST":
+            data = json.dumps(payload or {}).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers,
+                                     method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                body = resp.read().decode("utf-8") or "{}"
+                return json.loads(body)
+        except urllib.error.HTTPError as e:
+            if e.code == 401:
+                raise SupervisorUnavailable("supervisor rejected the token")
+            try:
+                return json.loads(e.read().decode("utf-8") or "{}")
+            except Exception:
+                raise SupervisorUnavailable(f"supervisor HTTP {e.code}")
+        except (urllib.error.URLError, socket.timeout, OSError, ValueError) as e:
+            raise SupervisorUnavailable(
+                f"supervisor unreachable: {type(e).__name__}: {e}")
+
     def available(self):
-        # W16: probe the loopback supervisor. Until then it is never up.
-        return False
+        try:
+            out = self._call("/ping", method="GET")
+        except SupervisorUnavailable:
+            return False
+        return bool(out.get("ok"))
+
+    # -- launch --------------------------------------------------------------
+    def launch_guarded(self, lane, project_id, folder_path, **kw):
+        return self._call("/launch_guarded", dict(
+            lane=lane, project_id=project_id, folder_path=folder_path, **kw))
+
+    def launch(self, lane, **kw):
+        return self._call("/launch", dict(lane=lane, **kw))
+
+    # -- tail + cursor -------------------------------------------------------
+    def tail(self, job_id, since=None, persist=False):
+        return self._call("/tail", dict(job_id=job_id, since=since,
+                                        persist=bool(persist)))
+
+    def read_cursor(self, job_id):
+        return int(self._call("/read_cursor", dict(job_id=job_id))
+                   .get("offset", 0))
+
+    def persist_cursor(self, job_id, offset):
+        self._call("/persist_cursor", dict(job_id=job_id, offset=offset))
+
+    # -- cancel --------------------------------------------------------------
+    def cancel(self, job_id):
+        return self._call("/cancel", dict(job_id=job_id))
+
+    # -- gate answer ---------------------------------------------------------
+    def answer_gate(self, job_id, choice):
+        return self._call("/answer_gate", dict(job_id=job_id, choice=choice))
+
+    def deliver_gate(self, job_id):
+        return self._call("/deliver_gate", dict(job_id=job_id))
+
+    # -- introspection / rebuild --------------------------------------------
+    def load_job(self, job_id):
+        return self._call("/load_job", dict(job_id=job_id)).get("record")
+
+    def list_jobs(self, project_id=None, running_only=False):
+        return self._call("/list_jobs", dict(
+            project_id=project_id, running_only=bool(running_only))
+        ).get("jobs", [])
+
+    def is_live(self, job_id):
+        return bool(self._call("/is_live", dict(job_id=job_id)).get("live"))
+
+    def reconcile(self):
+        return self._call("/reconcile").get("interrupted", [])
+
+    def rebuild(self):
+        return self._call("/rebuild")
+
+    # -- W16 live probes -----------------------------------------------------
+    def probe_claude_version(self, timeout=20.0):
+        return self._call("/probe_claude_version", dict(timeout=timeout))
+
+    def spawn_sacrificial(self, seconds=120):
+        return self._call("/spawn_sacrificial", dict(seconds=seconds))
+
+    def reap_pid(self, pid):
+        return self._call("/reap_pid", dict(pid=pid))
 
 
 def get_supervisor(env=None):
     """Resolve the ANCHOR_SUPERVISOR flag to a live :class:`Supervisor`.
 
     - ``inline`` → :class:`InlineSupervisor` (the in-process owner).
-    - ``external`` → the external process WHEN available; otherwise a DEGRADED
-      inline fallback (``degraded=True`` + a reason) — the honest "the
-      supervisor is down, keep working in-process" behavior. W16 makes the
-      external path real; W15's job is that the seam always resolves to a
-      working owner and never crashes the dashboard over a missing process.
+    - ``external`` → the real :class:`ExternalSupervisor` client WHEN the
+      loopback supervisor answers ``/ping``; otherwise a DEGRADED inline
+      fallback (``degraded=True`` + a reason) — the honest "the supervisor is
+      down, keep working in-process" behavior. The dashboard therefore always
+      resolves to a working owner and never crashes over a missing process.
 
     Never raises for the default flag values; an invalid flag value still
     raises :class:`pillar_flags.PillarStateError` (a typo must fail loudly).
@@ -577,22 +1072,46 @@ def get_supervisor(env=None):
     flags = _pf.current_flags(env=env)          # raises on an invalid value
     mode = flags[_pf.FLAG_SUPERVISOR]
     if mode == MODE_EXTERNAL:
-        ext = ExternalSupervisor()
-        if ext.available():                      # pragma: no cover - W16
+        ext = ExternalSupervisor(env=env)
+        if ext.available():
             return ext
         return InlineSupervisor(
             degraded=True,
-            reason="external supervisor unavailable (W16 not deployed) — "
-                   "degraded to inline")
+            reason="external supervisor unavailable at "
+                   f"{ext.base_url} — degraded to inline")
     return InlineSupervisor()
 
 
+def serve(host=None, port=None, token=None):  # pragma: no cover - live service
+    """Run the supervisor IPC server forever (the NSSM service entry point).
+
+    Binds the loopback IPC port and serves the contract table until killed.
+    ``install_supervisor.ps1`` runs ``python supervisor.py --serve`` under the
+    ``.\\john`` account with ``ANCHOR_SUPERVISOR_TOKEN`` / ``_PORT`` in the
+    cloned environment.
+    """
+    srv = SupervisorServer(host=host, port=port, token=token)
+    srv.start()
+    print(f"anchor supervisor serving on {srv.url} "
+          f"(auth={'on' if srv.token else 'off'})", flush=True)
+    try:
+        while True:
+            import time as _t
+            _t.sleep(3600)
+    except KeyboardInterrupt:
+        srv.stop()
+    return 0
+
+
 def main(argv=None):  # pragma: no cover - thin CLI shim
-    """CLI: ``--write-docs`` refreshes both gate artifacts; else print state."""
+    """CLI: ``--serve`` runs the IPC server; ``--write-docs`` refreshes the gate
+    artifacts; else print the resolved seam state."""
     import json as _json
     import sys as _sys
 
     argv = list(_sys.argv[1:] if argv is None else argv)
+    if "--serve" in argv:
+        return serve()
     if "--write-docs" in argv:
         p1 = write_ipc_contract_doc()
         p2 = write_rebuild_table_doc()
