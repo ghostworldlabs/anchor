@@ -188,6 +188,24 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 ## Wave 6 — W6 — Extraction Increment 3: generate_html JS/CSS → static (C1 exit gate)
 
+> AMENDMENT (2026-07-03, human-authorized — the census-forced C1 include-layer
+> design, per C1-AMENDMENT-REQUIRED.md / CENSUS-REPORT.md "48 markup-emitting
+> interpolations > threshold 40"): the home-dashboard shell HTML/CSS/JS extract
+> to static files as planned, with the shell carrying NAMED INCLUDE SLOTS
+> (`<!--ANCHOR:SLOT:<name>-->`). The 48 census-classified markup-emitting
+> interpolations stay SERVER-RENDERED: each moves into a small dedicated helper
+> function (each ≤50 significant lines, satisfying the no-blob exit gate), and
+> generate_html reduces to data assembly + ANCHOR_BOOT JSON + substituting the
+> helper outputs into the shell's slots (same stdlib-substitution idiom as the
+> W5 ANCHOR_BOOT injection block; no new dependency; XSS posture unchanged).
+> Byte-parity stays the gate: pre/post emissions diff byte-for-byte, divergence
+> permitted only in the documented slot-injection blocks. The shrink bar stays
+> ≥7,000 lines (census measured 7,055 achievable). NOTE FOR THE EXECUTE AGENT:
+> wave 6 is NOT yet built — the two prior "wave 6 GREEN" commits (4c057b4,
+> 8a668c0) were FALSE GOs (empty diffs, since reverted); build the wave for real
+> and DELETE C1-AMENDMENT-REQUIRED.md only if the census re-run confirms the
+> amendment is satisfied (the file self-regenerates while required).
+
 **Intent:** The one genuinely fiddly increment, sized and gated by the W1 census: extract the generate_html f-string JS/CSS, close C1's shrink bar, and lift the merge freeze (Master Plan Phase 1; Integrated 1, 9, 50).
 
 **Deliverables:** Home-dashboard JS/CSS as static assets; generate_html reduced to data assembly + bootstrap JSON, handling the census-classified data/flag interpolations through ANCHOR_BOOT (or the amended include layer if W1 forced the amendment); Byte-parity gate for the home dashboard; Playwright home-dashboard + project-window + top-5 flows green; C1 exit-gate artifact: measured anchor_gui.py shrink ≥ 7,000 lines (or the census-amended bar), no embedded frontend blob > ~50 lines remaining; Merge freeze on anchor_gui.py formally lifted after merge
