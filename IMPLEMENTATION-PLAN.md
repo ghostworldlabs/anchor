@@ -188,6 +188,16 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 ## Wave 6 — W6a — C1 Include-Slot Substrate + Parity Harness
 
+> ⛔ DEFERRED 2026-07-04 (John's decision) — Waves 6, 7, 8 (W6a/W6b/W6c, the C1
+> frontend-extraction epic) are DEFERRED. C1 is a maintainability refactor, not a
+> durability prerequisite; it proved a large mechanical transform ill-suited to
+> the autonomous execute/fix loop (waves 6-8 left ~3 of 4 static mirrors
+> uncreated; ~$40 spent). The build SKIPS to Wave 9 (W7 — Route Table) to deliver
+> the durability substrate, which does not hard-depend on the frontend
+> extraction. The W6a substrate (slot_renderer/extract_dashboard/map + green unit
+> tests) is KEPT; TestC1ExitGate is skipped (not deleted) and re-arms if C1 is
+> taken up as its own effort later. Waves 6-8 are NOT counted as done.
+
 > AMENDMENT (2026-07-04, human-authorized — W6 DECOMPOSITION): the original W6
 > was split into W6a/W6b/W6c after four single-shot attempts exhausted their
 > whole windows in analysis of the 17k-line anchor_gui.py without ever editing

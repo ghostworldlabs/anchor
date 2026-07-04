@@ -2472,8 +2472,18 @@ class TestW6aMechanismOnly:
 # FOREMAN-EXECUTION-LOG supervisor corrections), the C1 exit criteria are now
 # MECHANICAL. These tests are RED until the extraction is REAL; turning them
 # green IS waves 7-8's work. Plan citation: IMPLEMENTATION-PLAN.md §Wave 6
-# amendment + §Wave 7/8. No agent may weaken, skip, or remove them.
-
+# amendment + §Wave 7/8.
+#
+# DEFERRED 2026-07-04 (John's decision): the C1 frontend-extraction epic is a
+# maintainability refactor, NOT a durability prerequisite. It proved to be a
+# large mechanical transform ill-suited to the autonomous execute/fix loop
+# (waves 6-8 left ~3 of 4 static mirrors uncreated). Per John, C1 is DEFERRED so
+# the build proceeds to the durability substrate (W7+); these exit tests are
+# skipped (NOT deleted) and re-arm if C1 is taken up as its own effort. The W6a
+# substrate (slot_renderer/extract_dashboard/map + their green unit tests) is
+# kept. This skip is human-authorized; no autonomous agent may add it.
+@pytest.mark.skip(reason="C1 frontend extraction DEFERRED by John 2026-07-04 "
+                         "(maintainability refactor, not a durability prereq)")
 class TestC1ExitGate:
     # anchor_gui.py measured 17,359 lines at the pre-C1 sentinel (master,
     # 2026-07-04); the plan's C1 exit bar is a NET shrink ≥ 7,000 lines.
