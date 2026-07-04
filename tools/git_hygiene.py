@@ -56,7 +56,10 @@ def classify_runtime(rel) -> bool:
     dist_manifest.txt, the tracked ``.anchor`` pointer records + summaries) are
     NOT runtime and return ``False``.
     """
-    rel = str(rel).replace("\\", "/").lstrip("./")
+    rel = str(rel).replace("\\", "/")
+    if rel.startswith("./"):            # a leading "./" is noise — but NOT the
+        rel = rel[2:]                   # dot of a dotfile like ".anchor" (a
+    rel = rel.lstrip("/")               # bare lstrip("./") would eat it).
     if not rel:
         return False
     parts = rel.split("/")
