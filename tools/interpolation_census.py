@@ -227,11 +227,16 @@ def run_census(source=None, path=None):
             f"interpolation(s) — the census contract requires ZERO (plain raw "
             f"string). The C1 increment-1 verbatim move is no longer safe."
         )
-    if not (isinstance(js_value, ast.Constant)
-            and isinstance(js_value.value, str)):
+    elif isinstance(js_value, ast.Constant) and isinstance(js_value.value, str):
+        pass  # pre-extraction: a plain zero-interpolation raw string (still valid)
+    elif isinstance(js_value, ast.Call):
+        pass  # C1 (2026-07-05): EXTRACTED — the constant now loads its verbatim,
+        # byte-identical body from static/ via ``read_text()``. This is the
+        # terminal-OK extracted form; there is no in-source blob left to certify.
+    else:
         raise CensusError(
-            "_PROJECT_WINDOW_JS is not a plain string constant — the census "
-            "cannot certify a zero-interpolation verbatim move."
+            "_PROJECT_WINDOW_JS is neither a plain string constant nor an "
+            "extraction read_text() load — the census cannot classify it."
         )
     js_span = (js_assign.lineno, js_assign.end_lineno)
     js_lines = js_span[1] - js_span[0] + 1

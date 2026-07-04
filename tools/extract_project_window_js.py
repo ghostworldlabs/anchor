@@ -52,13 +52,18 @@ def extracted_js(source=None, path=None) -> str:
     """
     _source_text, structural = locate_anchor_nodes(source=source, path=path)
     value = structural["project_window_js_assign"]["node"].value
-    if not (isinstance(value, ast.Constant) and isinstance(value.value, str)):
-        raise ExtractionError(
-            "_PROJECT_WINDOW_JS is not a plain string constant — the W4 "
-            "verbatim extraction refuses to run (the census contract "
-            "requires a zero-interpolation raw string)."
-        )
-    return value.value
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value  # pre-extraction: the in-source raw string is the source of truth
+    if isinstance(value, ast.Call):
+        # C1 COMPLETE (2026-07-05): W6 removed the embedded blob — the constant now
+        # loads its verbatim body from static/project-window.js via read_text(), so
+        # the CHECKED-IN STATIC FILE is now the source of truth (exactly the handoff
+        # the W4 docstring anticipated). Return its bytes; re-mint is a no-op.
+        return DEFAULT_OUT.read_text(encoding="utf-8")
+    raise ExtractionError(
+        "_PROJECT_WINDOW_JS is neither a plain string constant nor an extraction "
+        "read_text() load — the W4 verbatim extraction cannot classify it."
+    )
 
 
 def write_project_window_js(out_path=None, source=None, path=None) -> Path:
