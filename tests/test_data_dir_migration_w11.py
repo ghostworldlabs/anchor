@@ -66,7 +66,7 @@ def _seed_data_dir(root: Path, old_root: Path):
     # external project (elsewhere, untouched).
     (root / "rnd_registry.json").write_text(json.dumps([
         {"id": "p1", "name": "self", "folder_path": old},
-        {"id": "p2", "name": "ext", "folder_path": r"C:\dev\OtherRepo"},
+        {"id": "p2", "name": "ext", "folder_path": r"Q:\proj\OtherRepo"},
     ]), encoding="utf-8")
 
     # sessions: a worktree UNDER the data dir (relocates) + a blank one.
@@ -96,27 +96,27 @@ def _seed_data_dir(root: Path, old_root: Path):
 
 class TestPathAuditMechanics:
     def test_under_root_is_rewritten(self):
-        old = r"C:\dev\Anchor"
+        old = r"Q:\proj\Anchor"
         new = r"D:\AnchorData"
         got = path_audit.rewrite_string(
-            r"C:\dev\Anchor\.anchor\worktrees\s1", old, new)
+            r"Q:\proj\Anchor\.anchor\worktrees\s1", old, new)
         assert got == r"D:\AnchorData\.anchor\worktrees\s1"
 
     def test_exact_root_rewrites_to_new_root(self):
-        old = r"C:\dev\Anchor"
+        old = r"Q:\proj\Anchor"
         assert path_audit.rewrite_string(old, old, r"D:\X") == r"D:\X"
 
     def test_not_under_root_is_left_alone(self):
         assert path_audit.rewrite_string(
-            r"C:\dev\Other\file", r"C:\dev\Anchor", r"D:\X") is None
+            r"Q:\proj\Other\file", r"Q:\proj\Anchor", r"D:\X") is None
         # a sibling with a shared prefix but not a path boundary is NOT under.
         assert path_audit.rewrite_string(
-            r"C:\dev\Anchor2\file", r"C:\dev\Anchor", r"D:\X") is None
+            r"Q:\proj\Anchor2\file", r"Q:\proj\Anchor", r"D:\X") is None
 
     def test_case_and_separator_insensitive_match(self):
         # forward slashes + mixed case still match on Windows (case-insensitive).
         got = path_audit.rewrite_string(
-            "C:/DEV/anchor/rnd_jobs/j.log", r"C:\dev\Anchor", r"D:\New")
+            "Q:/PROJ/anchor/rnd_jobs/j.log", r"Q:\proj\Anchor", r"D:\New")
         if os.name == "nt":
             assert got == os.path.join(r"D:\New", "rnd_jobs", "j.log")
         else:
@@ -128,7 +128,7 @@ class TestPathAuditMechanics:
             assert path_audit.rewrite_string(v, r"C:\a", r"C:\b") is None
 
     def test_segment_filter_keeps_repo_paths(self):
-        old = r"C:\dev\Anchor"
+        old = r"Q:\proj\Anchor"
         # folder_path == repo root (empty tail) is NOT relocated data.
         assert path_audit.rewrite_string(
             old, old, r"D:\X", path_audit.RELOCATED_SEGMENTS) is None

@@ -625,7 +625,7 @@ def check_cookie_auth_walk(report: Report, server_proc=None):
              ("ANCHOR_TOKEN", "ANCHOR_AUTH_MODE", "ANCHOR_AUTH_WARN",
               "ANCHOR_AUTH_WARN_LOG")}
     tmp_log = Path(tempfile.mkdtemp(prefix="anchor-hc-cookie-")) / "aw.log"
-    token = "hc-cookie-walk-secret"
+    token = os.urandom(8).hex()  # ephemeral self-test token (no literal secret in the shippable set)
     failures = []
     try:
         os.environ["ANCHOR_TOKEN"] = token
@@ -5845,7 +5845,7 @@ def check_supervisor_live_probes(report: Report):
         _paths.ensure_data_dirs()
         _jr._reset_live_table_for_tests()
 
-        token = "hc-sup16-token"
+        token = os.urandom(8).hex()  # ephemeral loopback self-test token (no literal secret in the shippable set)
         srv = _sup.SupervisorServer(host="127.0.0.1", port=0, token=token)
         srv.start()
         url = srv.url

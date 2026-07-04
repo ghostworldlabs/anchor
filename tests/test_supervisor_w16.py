@@ -32,6 +32,7 @@ the same data dir) — the honest hermetic approximation of the second process;
 the true cross-service survival is Wave-19's live runbook.
 """
 import json
+import os
 import sys
 import time
 import threading
@@ -78,7 +79,7 @@ def env(tmp_path, monkeypatch):
 def server(env):
     """A live loopback SupervisorServer (OS-assigned port) + a matched client env."""
     jr, ga, supmod, tmp = env
-    token = "w16-secret-token"
+    token = os.urandom(8).hex()  # ephemeral loopback test token (no literal secret)
     srv = supmod.SupervisorServer(host="127.0.0.1", port=0, token=token)
     srv.start()
     client_env = {
