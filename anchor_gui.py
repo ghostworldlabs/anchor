@@ -856,6 +856,80 @@ PROJECT_WINDOW_JS_ASSET = "project-window.js"
 PROJECT_WINDOW_CSS_ASSET = "project-window.css"
 PROJECT_WINDOW_SHELL_ASSET = "project-window.html"
 
+#: The extracted HOME-dashboard assets (rearch W6b · C1 increment 3): the
+#: interpolation-free stylesheet, the ANCHOR_BOOT-driven application JS, and the
+#: ANCHOR:SLOT-marked HTML shell — minted VERBATIM from ``generate_html``'s
+#: return f-string by ``tools/extract_home_dashboard.py`` behind the W6b
+#: byte-parity gate (mirrors the W4 app-JS + W5 shell idiom, one level up: the
+#: home f-string's markup-emitting interpolations stay SERVER-RENDERED as slot
+#: values — they cannot ride the ANCHOR_BOOT JSON). The raw slot markers live in
+#: the minted static shell FILE, never inline in this source.
+HOME_CSS_ASSET = "home.css"
+HOME_JS_ASSET = "home.js"
+HOME_SHELL_ASSET = "home.html"
+
+#: The ANCHOR:SLOT HTML-comment include-slot marker (the W6a substrate
+#: delimiter, mirrored inline here so product code stays stdlib-only and
+#: self-contained — ``tools/slot_renderer.py`` is the gate/test twin). This
+#: comment form (and the W5 project-window ``@@`` form) never appear in real
+#: frontend content, so neither can collide with page bytes.
+_HOME_SLOT_RE = re.compile(r"<!--ANCHOR:SLOT:([A-Za-z0-9_.\-]+)-->")
+
+
+def _render_home_slots(shell: str, helpers: dict) -> str:
+    """Substitute every ANCHOR:SLOT include marker in ``shell`` with
+    ``helpers[name]`` (byte-compatible twin of
+    ``tools.slot_renderer.render_slots``).
+
+    A slot with no helper output, a helper output with no slot, or a non-string
+    output each raises ``ValueError`` LOUDLY — the completeness invariant that
+    makes the extraction provably faithful (never a silent drop / silent extra).
+    """
+    shell_slots = {m.group(1) for m in _HOME_SLOT_RE.finditer(shell)}
+    provided = set(helpers)
+    missing = shell_slots - provided
+    if missing:
+        raise ValueError("home shell slot(s) with no helper output: "
+                         + ", ".join(sorted(missing)))
+    extra = provided - shell_slots
+    if extra:
+        raise ValueError("home helper output(s) with no matching slot: "
+                         + ", ".join(sorted(extra)))
+    for name in shell_slots:
+        if not isinstance(helpers[name], str):
+            raise ValueError(f"home slot {name!r} output must be str, got "
+                             f"{type(helpers[name]).__name__}")
+    return _HOME_SLOT_RE.sub(lambda m: helpers[m.group(1)], shell)
+
+
+def home_boot_extra() -> dict:
+    """Page-scoped ``window.ANCHOR_BOOT`` keys for the home dashboard (W6b).
+
+    ``auth_required`` already rides the base :func:`anchor_boot` dict (token
+    PRESENCE only); this adds the page marker + the frontend feature flag so the
+    static ``home.js`` shares the same ANCHOR_BOOT contract as
+    ``project-window.js``.
+    """
+    return {"page": "home", "flags": {"frontend": "static"}}
+
+
+def _home_shell_template():
+    """The ``static/home.html`` slot template, or ``None`` when unavailable.
+
+    Read from the checked-in static FILE (the W6b byte-parity-gated mirror of
+    ``generate_html``'s return f-string). ``None`` signals the render to fall
+    back to the EMBEDDED f-string path — so a missing/undecodable mirror serves
+    the pre-wave dashboard correctly, never a 500 (drift is the gate's job to
+    catch, not the render path's).
+    """
+    asset = static_asset(HOME_SHELL_ASSET)
+    if asset is not None:
+        try:
+            return asset[0].decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+    return None
+
 
 def static_asset(rel_path: str):
     """Resolve a ``/static/<rel>`` request to (bytes, content_type).
@@ -11849,6 +11923,65 @@ def generate_html(projects, tasks, inbox):
                 <div class="balance-bar"><div class="fill" style="width:{pct}%;background:{color}"></div></div>
                 <span>{domain_counts[d]}</span>
             </div>'''
+
+    # ── rearch W6b (C1 increment 3): the static home-dashboard path ─────────
+    # Chosen by the SAME ``frontend`` pillar off-switch flag as W4/W5 (one flag,
+    # one revert). EMBEDDED (the default, the f-string below) is the pre-wave
+    # emission — byte-identical and the byte-parity reference. STATIC assembles
+    # the same page from the checked-in ``static/home.{html,css,js}`` mirror
+    # (minted by ``tools/extract_home_dashboard.py``): the head <style> and the
+    # application <script> arrive as hashed static assets, server state rides
+    # ONLY the ANCHOR_BOOT bootstrap, and the markup-emitting values stay
+    # server-rendered as include-slot fills. A missing/undecodable shell mirror
+    # (or a missing hashed asset) falls back to the embedded path — never a 500.
+    if _static_frontend_enabled():
+        _home_shell = _home_shell_template()
+        _home_css_ver = static_asset_version(HOME_CSS_ASSET)
+        _home_js_ver = static_asset_version(HOME_JS_ASSET)
+        if (_home_shell is not None and _home_css_ver != "missing"
+                and _home_js_ver != "missing"):
+            _home_css_block = (
+                "<link rel='stylesheet' href='" + STATIC_URL_PREFIX + "/"
+                + HOME_CSS_ASSET + "?v=" + _home_css_ver + "'>")
+            _home_js_block = (
+                "<script>\n" + anchor_boot_script(home_boot_extra()) + "\n</script>"
+                "<script src='" + STATIC_URL_PREFIX + "/" + HOME_JS_ASSET
+                + "?v=" + _home_js_ver + "'></script>")
+            _home_slots = {
+                "build_id": BUILD_ID,
+                "inbox_count": str(len(inbox)),
+                "nav_items": nav_items,
+                "balance_rows": balance_rows,
+                "auth_token_btn_display": auth_token_btn_display,
+                "health_banner_html": health_banner_html,
+                "done_count": str(len(done_tasks)),
+                "cancelled_count": str(len(cancelled_tasks)),
+                "saved_count": str(len(saved_tasks)),
+                "model_flex_badge": render_model_flex_badge(),
+                "today_str": today_str,
+                "top_done": str(top_done),
+                "top_total": str(len(top_tasks)),
+                "top_task_rows": "".join(top_task_row(t) for t in top_tasks),
+                "rnd_projects_html": rnd_projects_html,
+                "p1_cards": "".join(project_card(p) for p in p1_projects),
+                "active_projects": str(
+                    len([p for p in projects if p["status"] == "active"])),
+                "open_tasks": str(len(active)),
+                "other_task_items": "".join(
+                    task_item(t) for t in other_tasks),
+                "p2_cards": "".join(project_card(p) for p in p2_projects),
+                "completed_items": completed_items,
+                "cancelled_items": cancelled_items,
+                "saved_items": saved_items,
+                "inbox_items": inbox_items,
+                "rnd_archive_html": rnd_archive_html,
+                "domain_views": domain_views,
+                "cache_bust": cache_bust_script(),
+                "orphan_alert": _ORPHAN_ALERT_JS,
+                "home_css": _home_css_block,
+                "home_js": _home_js_block,
+            }
+            return _render_home_slots(_home_shell, _home_slots)
 
     return f'''<!DOCTYPE html>
 <html lang="en">
