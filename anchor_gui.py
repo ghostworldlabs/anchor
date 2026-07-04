@@ -19241,7 +19241,17 @@ def main():
     try:
         import worktrees
         import pty_manager
-        worktrees.reap_orphans(set(pty_manager._LIVE.keys()))
+        _reap = worktrees.reap_orphans(set(pty_manager._LIVE.keys()))
+        # W11 (C6): the first post-move boot sweeps report-only so a path-rewrite
+        # miss can never delete a legit worktree. Live reaping re-arms only after
+        # a clean dry report (worktrees.reap_orphans clears the marker itself).
+        if _reap.get("dryrun"):
+            _logger.info(
+                "worktrees.reap_orphans DRY-RUN (post-move): would_reap=%s "
+                "kept=%s — live reaping %s",
+                _reap.get("would_reap"), _reap.get("kept"),
+                "re-armed (clean report)" if not _reap.get("would_reap")
+                and not _reap.get("errors") else "held (report not clean)")
     except Exception as e:
         _logger.error(f"worktrees.reap_orphans failed: {e}")
 

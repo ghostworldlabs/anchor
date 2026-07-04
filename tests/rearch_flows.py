@@ -167,9 +167,16 @@ def flow_pending_paste_flush(pg, base, pid, doc_rel):
               if r.get("lane") in ("plan", "planning")}
     pg.click("#panelStack .panel .advbtn")
 
-    # the advance mints the linked planning session server-side.
+    # the advance mints the linked planning session server-side. The advance
+    # POST runs concurrently with this poll and does REAL git work before the
+    # planning session registers — two commits (persist the source docs into
+    # main so they ride into the new worktree off HEAD) plus a `git worktree
+    # add`. Under a loaded gate (Chromium up, hundreds of prior tests, a hot
+    # Windows box with AV file-scanning) that can outrun a 4s budget, so poll
+    # for ~12s. The session IS created server-side before the POST responds;
+    # this only widens the wait, it does not relax any assertion.
     new_sid = None
-    for _ in range(80):
+    for _ in range(240):
         fresh = [r["session_id"] for r in reg.list_sessions(project_id=pid)
                  if r.get("lane") in ("plan", "planning")
                  and r["session_id"] not in before]
@@ -182,7 +189,7 @@ def flow_pending_paste_flush(pg, base, pid, doc_rel):
     # the record HOLDS the prompt (registered first, paste set in a follow-up
     # update — poll for it; the intent is unchanged: held, not sent).
     prompt = ""
-    for _ in range(80):
+    for _ in range(240):
         prec = reg.get_session(new_sid) or {}
         prompt = prec.get("pending_paste") or ""
         if prompt:

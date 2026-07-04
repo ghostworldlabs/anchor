@@ -42,6 +42,16 @@ WORKTREE_BASE_ENV = "ANCHOR_WORKTREE_BASE"
 #: Subdir under ``.anchor/`` that holds managed worktrees.
 WORKTREES_DIRNAME = "worktrees"
 
+#: W11 (C6) — reaper dry-run env override. When truthy, :func:`reap_orphans`
+#: computes a would-reap report WITHOUT deleting anything. The scripted data-dir
+#: migration ALSO arms a persistent on-disk marker (see :func:`arm_reaper_dryrun`)
+#: so the FIRST post-move boot is report-only regardless of the env: a path-rewrite
+#: miss would otherwise make the reaper delete a legit parked/live worktree it can
+#: no longer resolve. Live reaping is re-armed only after a CLEAN report.
+REAPER_DRYRUN_ENV = "ANCHOR_REAPER_DRYRUN"
+#: Persistent "first post-move boot is dry-run" marker under the managed base.
+REAPER_DRYRUN_MARKER = ".reaper_dryrun"
+
 #: Branch-name prefix; the branch is deterministic from the session id.
 BRANCH_PREFIX = "anchor/session/"
 
@@ -299,7 +309,55 @@ def _is_parked_idle(session_id):
         return False
 
 
-def reap_orphans(active_session_ids, base=None, project_id=None):
+def reaper_dryrun_marker(base=None) -> Path:
+    """Path to the persistent 'first post-move boot is dry-run' marker."""
+    return managed_base(base) / REAPER_DRYRUN_MARKER
+
+
+def arm_reaper_dryrun(base=None) -> Path:
+    """Arm the persistent reaper dry-run (the migration calls this post-move).
+
+    Creates the marker under the managed base so the NEXT :func:`reap_orphans`
+    (typically the first post-move boot) is report-only. Idempotent; best-effort
+    (a filesystem error is swallowed — arming is a safety belt, not a hard dep).
+    Returns the marker path.
+    """
+    marker = reaper_dryrun_marker(base)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        if not marker.exists():
+            marker.write_text(
+                "reaper armed report-only after data-dir migration (W11/C6);"
+                " cleared automatically after one clean sweep.\n",
+                encoding="utf-8")
+    except OSError:
+        pass
+    return marker
+
+
+def reaper_dryrun_active(base=None, env=None) -> bool:
+    """Is the reaper in report-only mode? (env override OR the armed marker)."""
+    e = os.environ if env is None else env
+    raw = (e.get(REAPER_DRYRUN_ENV) or "").strip().lower()
+    if raw in ("1", "true", "yes", "on", "dryrun"):
+        return True
+    try:
+        return reaper_dryrun_marker(base).exists()
+    except OSError:
+        return False
+
+
+def _disarm_reaper_dryrun(base=None) -> None:
+    """Clear the marker so live reaping is re-armed on the next boot."""
+    try:
+        marker = reaper_dryrun_marker(base)
+        if marker.exists():
+            marker.unlink()
+    except OSError:
+        pass
+
+
+def reap_orphans(active_session_ids, base=None, project_id=None, dryrun=None):
     """Remove managed worktrees whose session id is NOT in the active set.
 
     Sweeps ``managed_base()`` for ``<session_id>`` dirs; any whose id is not in
@@ -309,7 +367,7 @@ def reap_orphans(active_session_ids, base=None, project_id=None):
     skipped (git's per-repo prune needs the repo). Returns what it reaped::
 
         {"reaped": [session_id, ...], "kept": [session_id, ...],
-         "errors": [{"session_id":..., "reason":...}]}
+         "would_reap": [...], "dryrun": bool, "errors": [{...}]}
 
     crucible-improve W6: a worktree whose registry record is parked at
     ``STATUS_IDLE`` (a graceful panel "×" close) is KEPT even when it has no live
@@ -318,13 +376,27 @@ def reap_orphans(active_session_ids, base=None, project_id=None):
     as ``active_session_ids``; the IDLE keep is consulted from the registry here so
     it holds for that caller AND a direct call.
 
+    W11 (C6) — DRY-RUN: on the first post-move boot the reaper must NOT delete a
+    worktree it can no longer resolve because a path-rewrite miss left the record
+    stale. ``dryrun`` (env ``ANCHOR_REAPER_DRYRUN`` or the armed marker when the
+    arg is ``None``) makes the sweep REPORT-ONLY — it fills ``would_reap`` and
+    deletes nothing. When a dry sweep is CLEAN (nothing would be reaped and no
+    errors) the marker is cleared, RE-ARMING live reaping for the next boot; an
+    unclean dry report keeps the marker so nothing is ever wrongly deleted from a
+    path miss.
+
     Never raises.
     """
+    if dryrun is None:
+        dryrun = reaper_dryrun_active(base)
     active = set(active_session_ids or ())
-    reaped, kept, errors = [], [], []
+    reaped, kept, would_reap, errors = [], [], [], []
     for sid in list_managed_worktrees(base):
         if sid in active or _is_parked_idle(sid):
             kept.append(sid)
+            continue
+        if dryrun:
+            would_reap.append(sid)
             continue
         res = remove_worktree(sid, project_id=project_id, base=base)
         if res.get("ok"):
@@ -332,7 +404,11 @@ def reap_orphans(active_session_ids, base=None, project_id=None):
         else:
             errors.append({"session_id": sid,
                            "reason": res.get("reason", "remove-failed")})
-    return {"reaped": reaped, "kept": kept, "errors": errors}
+    if dryrun and not would_reap and not errors:
+        # A clean dry sweep: re-arm live reaping for the next boot.
+        _disarm_reaper_dryrun(base)
+    return {"reaped": reaped, "kept": kept, "would_reap": would_reap,
+            "dryrun": bool(dryrun), "errors": errors}
 
 
 # ── git-ignore safety (managed base under .anchor/) ─────────────────────────
