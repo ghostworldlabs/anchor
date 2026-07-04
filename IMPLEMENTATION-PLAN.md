@@ -186,51 +186,74 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 - **Given** a project window rendered pre- and post-increment, **when** the emitted shell HTML/CSS is diffed after de-escaping, **then** the bytes match, with divergence permitted only in the documented ANCHOR_BOOT injection block
 
-## Wave 6 — W6 — Extraction Increment 3: generate_html JS/CSS → static (C1 exit gate)
+## Wave 6 — W6a — C1 Include-Slot Substrate + Parity Harness
 
-> AMENDMENT (2026-07-03, human-authorized — the census-forced C1 include-layer
-> design, per C1-AMENDMENT-REQUIRED.md / CENSUS-REPORT.md "48 markup-emitting
-> interpolations > threshold 40"): the home-dashboard shell HTML/CSS/JS extract
-> to static files as planned, with the shell carrying NAMED INCLUDE SLOTS
-> (`<!--ANCHOR:SLOT:<name>-->`). The 48 census-classified markup-emitting
-> interpolations stay SERVER-RENDERED: each moves into a small dedicated helper
-> function (each ≤50 significant lines, satisfying the no-blob exit gate), and
-> generate_html reduces to data assembly + ANCHOR_BOOT JSON + substituting the
-> helper outputs into the shell's slots (same stdlib-substitution idiom as the
-> W5 ANCHOR_BOOT injection block; no new dependency; XSS posture unchanged).
-> Byte-parity stays the gate: pre/post emissions diff byte-for-byte, divergence
-> permitted only in the documented slot-injection blocks. The shrink bar stays
-> ≥7,000 lines (census measured 7,055 achievable). NOTE FOR THE EXECUTE AGENT:
-> wave 6 is NOT yet built — the two prior "wave 6 GREEN" commits (4c057b4,
-> 8a668c0) were FALSE GOs (empty diffs, since reverted); build the wave for real
-> and DELETE C1-AMENDMENT-REQUIRED.md only if the census re-run confirms the
-> amendment is satisfied (the file self-regenerates while required).
+> AMENDMENT (2026-07-04, human-authorized — W6 DECOMPOSITION): the original W6
+> was split into W6a/W6b/W6c after four single-shot attempts exhausted their
+> whole windows in analysis of the 17k-line anchor_gui.py without ever editing
+> (three false GOs, all reverted — see FOREMAN-EXECUTION-LOG). Content carries
+> the approved C1 include-layer design (census-forced, C1-AMENDMENT-REQUIRED.md:
+> 48 markup-emitting interpolations > threshold 40): NAMED INCLUDE SLOTS
+> (`<!--ANCHOR:SLOT:<name>-->`) in the static shell; the 48 markup interpolations
+> stay SERVER-RENDERED in dedicated helpers (each ≤50 significant lines);
+> generate_html reduces to data assembly + ANCHOR_BOOT JSON + slot substitution
+> (same stdlib idiom as the W5 injection block; no new dependency; XSS posture
+> unchanged). Byte-parity remains the gate throughout. Optional-dependency skip
+> markers (`pytest.importorskip("playwright.sync_api")`) in W6a/W6b/W6c tests
+> follow the repo's documented dev-only-dependency convention — this amendment
+> is the required plan citation for them.
 
-**Intent:** The one genuinely fiddly increment, sized and gated by the W1 census: extract the generate_html f-string JS/CSS, close C1's shrink bar, and lift the merge freeze (Master Plan Phase 1; Integrated 1, 9, 50).
+**Intent:** Build the extraction MECHANISM without touching rendering behavior: the slot renderer, the mechanical extractor, and the home-dashboard byte-parity harness — so W6b's actual extraction is assembly, not research (Master Plan Phase 1; Integrated 1, 9, 50).
 
-**Deliverables:** Home-dashboard JS/CSS as static assets; generate_html reduced to data assembly + bootstrap JSON, handling the census-classified data/flag interpolations through ANCHOR_BOOT (or the amended include layer if W1 forced the amendment); Byte-parity gate for the home dashboard; Playwright home-dashboard + project-window + top-5 flows green; C1 exit-gate artifact: measured anchor_gui.py shrink ≥ 7,000 lines (or the census-amended bar), no embedded frontend blob > ~50 lines remaining; Merge freeze on anchor_gui.py formally lifted after merge
+**Deliverables:** Slot renderer: stdlib substitution of `<!--ANCHOR:SLOT:<name>-->` placeholders with helper-function outputs (missing slot/extra helper = loud error, never silent); tools/extract_dashboard.py mirroring the proven tools/extract_project_window_js.py idiom: mechanically inventories generate_html's JS/CSS blobs and maps ALL 48 census-classified markup-emitting interpolations to named helper stubs (the machine-readable extraction map W6b executes); Byte-parity harness extended to the home dashboard (old f-string emission vs slot-assembled emission, compared after {{/}} de-escaping); Unit tests for renderer + extractor map completeness (48/48 accounted)
 
 **Depends on:** W5 — Extraction Increment 2: project-window HTML/CSS shell → static
 
-**done-when:** The census-derived shrink number is achieved (≥7,000 lines unless amended up front), byte-parity and full Playwright parity are green, no embedded frontend blob over ~50 lines remains in anchor_gui.py, and the live smoke passes.
+**done-when:** Renderer and extractor tests are green, the parity harness proves byte-identical assembly on a synthetic slot fixture, the extraction map covers all 48 interpolations, and anchor_gui.py itself is NOT yet modified (mechanism-only wave).
 
-- **Given** the completed three-increment extraction, **when** the C1 exit gate runs, **then** anchor_gui.py measures ≥7,000 lines smaller than the pre-wave sentinel commit and the census re-run finds no embedded frontend blob larger than ~50 lines
+- **Given** a shell with slots and a set of helper outputs, **when** the renderer assembles the page, **then** the bytes equal the reference emission and an unmatched slot or helper raises loudly
+- **Given** the current generate_html source, **when** the extractor runs, **then** its map accounts for every JS/CSS blob and all 48 markup interpolations with no unclassified remainder
+
+## Wave 7 — W6b — generate_html JS/CSS → Static via the Substrate
+
+**Intent:** Execute the extraction W6a mechanized: move the home-dashboard JS/CSS to static assets and reduce generate_html to data + slots, behind the byte-parity gate (Master Plan Phase 1; Integrated 1, 9, 50).
+
+**Deliverables:** Home-dashboard JS/CSS as static assets served through the existing traversal-safe static root + `?v=<hash8>` cache-busting; generate_html reduced to data assembly + ANCHOR_BOOT JSON + the ≤50-line markup helpers + slot substitution, per the W6a extraction map; Byte-parity gate GREEN for the home dashboard (divergence only in the documented slot/ANCHOR_BOOT injection blocks); Static-vs-embedded off-switch flag functional for the home dashboard (revert without reverting other waves)
+
+**Depends on:** W6a — C1 Include-Slot Substrate + Parity Harness
+
+**done-when:** Home-dashboard byte-parity is green, the home-dashboard Playwright flow passes with the app JS observed arriving from the static route, and the off-switch flips back to a byte-identical embedded path.
+
+- **Given** a dashboard rendered pre- and post-extraction, **when** the emitted page is diffed after de-escaping, **then** the bytes match outside the documented injection blocks
+- **Given** the off-switch flipped to embedded, **when** the service renders, **then** the pre-wave embedded path serves byte-identical output
+
+## Wave 8 — W6c — C1 Exit Gate: Census Clean · Shrink ≥7,000 · Freeze Lift
+
+**Intent:** Close C1: prove the extraction epic's exit criteria and lift the merge freeze (Master Plan Phase 1; Integrated 1, 9, 50).
+
+**Deliverables:** Census re-run CLEAN — C1-AMENDMENT-REQUIRED.md no longer regenerated (the include layer satisfied it); C1 exit-gate artifact: measured anchor_gui.py shrink ≥ 7,000 lines vs the pre-wave sentinel commit, no embedded frontend blob > ~50 lines remaining; Full Playwright parity: home dashboard + project window + top-5 flows green; Merge freeze on anchor_gui.py formally lifted; Cosmetic fix carried in this wave: tools/conpty_spike.py's final status print crashes on cp1252 (the `→` character, observed 2026-07-03) — make it encoding-safe
+
+**Depends on:** W6b — generate_html JS/CSS → Static via the Substrate
+
+**done-when:** The exit-gate artifact records shrink ≥7,000 and zero blobs >~50 lines, the census no longer demands an amendment, full Playwright parity is green, and the live smoke passes.
+
+- **Given** the completed extraction epic, **when** the C1 exit gate runs, **then** anchor_gui.py measures ≥7,000 lines smaller than the pre-wave sentinel commit and the census re-run finds no embedded frontend blob larger than ~50 lines
 - **Given** John's long-lived browser tab from before the deploy, **when** the new build starts and mints new content hashes, **then** the tab's next navigation fetches fresh assets via the changed ?v= hash (no stale-browser flavor of the documented pitfall)
 
-## Wave 7 — W7 — Route Table Core + Strangler Dispatch
+## Wave 9 — W7 — Route Table Core + Strangler Dispatch
 
 **Intent:** Stand up the single declarative route table with default-deny-by-construction auditing and strangler fallthrough, so C2 progress becomes a measurable count (Master Plan Phase 2; D3; Integrated 10, 16, 18, 46; Mitigation 16).
 
 **Deliverables:** Route-table module: every route — including streaming/upgrade specials — gets a ROW (method, pattern, auth policy, handler kind: standard|stream|upgrade); kind≠standard is honestly special-cased at the pre-dispatch hook with the row's auth check invoked FIRST; Strangler dispatch: table first, unmatched falls through to the legacy if-elif chains; a coverage test counts remaining legacy arms; OPEN_ROUTES as a checked-in reviewed artifact with a mandatory justification string per entry + a test asserting the live open set matches it exactly; distro.py-style AST scan failing on any in-method import that shadows a module-level name; First migration batch of handlers to module-level functions; /api/routes (token-authed) dumping the live table (path, method, auth policy, handler kind, legacy-or-migrated)
 
-**Depends on:** W6 — Extraction Increment 3: generate_html JS/CSS → static (C1 exit gate)
+**Depends on:** W6c — C1 Exit Gate: Census Clean · Shrink ≥7,000 · Freeze Lift
 
 **done-when:** The table dispatches with legacy fallthrough and the audit test proves no route exists without a declared row, OPEN_ROUTES exactly matches the live open set, the legacy-arm counter is wired, and /api/routes serves the live table.
 
 - **Given** a developer adds a new endpoint without a table row, **when** the route-audit test runs, **then** it fails — the auditable invariant 'no route exists without a declared row' holds by construction
 - **Given** a new route added with auth policy 'open', **when** the OPEN_ROUTES exact-match test runs, **then** it fails until the reviewed OPEN_ROUTES file is edited with a justification string
 
-## Wave 8 — W8 — Route Migration Completion + Warn-Mode Auth Soak
+## Wave 10 — W8 — Route Migration Completion + Warn-Mode Auth Soak
 
 **Intent:** Migrate the remaining dispatch arms in reviewed batches, harden the special transports, rewire the healthcheck to the declared rows, and soak the auth flip in log-only mode on the live service (Master Plan Phase 2; Integrated 11, 12, 17, 45, 51; Mitigation 4).
 
@@ -243,7 +266,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** ANCHOR_TOKEN set and a term_ws upgrade attempted without credentials, **when** the socket-level test inspects the response, **then** a 401 arrives before any 101/handshake bytes, preserving the hand-rolled RFC-6455 ordering
 - **Given** the data-plane routes in warn mode on the live service for the soak day, **when** the warn log is reviewed, **then** every would-401 entry maps to a W2-enumerated consumer with a token path, or the flip is held until it does
 
-## Wave 9 — W9 — Auth Enforce + Cookie Navigation + Ops Cutover (C2 gate)
+## Wave 11 — W9 — Auth Enforce + Cookie Navigation + Ops Cutover (C2 gate)
 
 **Intent:** Apply the W3 cookie-through-WS verdict, flip the gated data plane from warn to enforce, and execute the ops cutover with the live tokenless-401 assert that makes C2 demonstrated, not narrated (Master Plan Phase 2; D3; Integrated 14, 15; Mitigation 3).
 
@@ -256,7 +279,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** ANCHOR_TOKEN set on the live service after the cutover, **when** a tokenless GET hits /api/rnd/projects, **then** the healthcheck probe observes a 401 from the real :8777 service
 - **Given** the same cutover state, **when** John navigates the dashboard and a project window in a browser holding the auth cookie, **then** pages load and WS/SSE terminals attach, with URL tokens present only on the transports the spike proved need them
 
-## Wave 10 — W10 — anchor_md.py De-fork + anchor_server.py Deletion (C5)
+## Wave 12 — W10 — anchor_md.py De-fork + anchor_server.py Deletion (C5)
 
 **Intent:** Collapse the three markdown-parser copies to one: extract the shared parsing module, prove parse-identity on the real corpus, and delete the confirmed-dead anchor_server.py after the pre-deletion sweep (Master Plan Phase 3; Integrated 37, 38; Mitigation 17).
 
@@ -268,7 +291,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 
 - **Given** the complete set of real DASHBOARD.md/domains/INBOX/archive files as a golden corpus, **when** parsed via the pre-de-fork copies and via anchor_md, **then** the parsed structures are identical, byte-for-byte on serialization
 
-## Wave 11 — W11 — Data-Dir Migration + Git Hygiene (C6)
+## Wave 13 — W11 — Data-Dir Migration + Git Hygiene (C6)
 
 **Intent:** Move runtime state out of the repo as ONE scripted, rollback-able unit — before the journal exists, so journals are born outside the repo — and make the repo provably stay clean (Master Plan Phase 3; Integrated 39, 40, 41; Mitigation 11).
 
@@ -281,7 +304,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** the migration script run against the live data set, **when** the service restarts from the relocated ANCHOR_DATA_DIR, **then** the dashboard is fully operational, the reaper's dry-run report shows zero would-delete parked/live worktrees from path misses, and rollback restores the pre-move state if any step fails
 - **Given** the post-hygiene repo, **when** a full healthcheck cycle runs (which writes reports, journals-to-be, job records), **then** `git status --porcelain` remains empty — runtime writes all land outside the repo
 
-## Wave 12 — W12 — journal.py Core: emit() Choke Point + Butler Envelope
+## Wave 14 — W12 — journal.py Core: emit() Choke Point + Butler Envelope
 
 **Intent:** Lay the C3 spine: one schema-validated append-only emit() path, the Butler-shaped envelope proven against the three user stories, journal-first write order, and the first blessed wrappers on session lifecycle (Master Plan Phase 4; D1; Integrated 19, 21, 23, 24; Mitigations 6, 13).
 
@@ -294,7 +317,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** a session started, advanced, and killed through the normal terminal_session paths, **when** the per-project journal is read back, **then** schema-versioned events exist for each transition with monotonic seq, correct actor kind, and correlation/causation ids linking the advance to its parent — while the registry/index stores remain byte-equivalent to their pre-journal behavior
 - **Given** a crash between emit() and the legacy-store write, **when** the parity classification (landing in W14) later inspects the divergence, **then** the orphaned journal event classifies as benign journal-ahead intent, replayable idempotently — never a lost legacy write
 
-## Wave 13 — W13 — Full Mutation-Set Instrumentation + Events CLI + Perf Budget
+## Wave 15 — W13 — Full Mutation-Set Instrumentation + Events CLI + Perf Budget
 
 **Intent:** Instrument every mutation class the W1 tripwire enumerated, flip the tripwire to the permanent enforcing completeness gate, and ship the first queryable taste of the journal — under a hard perf budget (Master Plan Phase 4; Integrated 20, 26, 47; Mitigation 19).
 
@@ -307,7 +330,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** the enforcing tripwire active across the full suite and stubbed healthcheck, **when** any code path mutates a store under the data dir without a paired journal event, **then** the run fails naming the write site — completeness is mechanical, not narrated
 - **Given** a project with recent session, job, and grass activity, **when** `anchor.py rnd events <pid> --since <seq>` runs, **then** it prints the schema-versioned events after seq, newest-last, with no model call and no server dependency
 
-## Wave 14 — W14 — Parity Gate + Recovery & Replay Tools (C3 gate)
+## Wave 16 — W14 — Parity Gate + Recovery & Replay Tools (C3 gate)
 
 **Intent:** Close C3's proof obligations: the quiescent classifying parity gate in tests AND the healthcheck, rebuild_index.py proving the 'lost from an index' class recoverable-by-construction, and the idempotent replay/reconcile tools (Master Plan Phase 4; D1; Integrated 22, 25, 48; Mitigation 6).
 
@@ -320,7 +343,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** a project's index.json deleted mid-suite after real journaled activity, **when** rebuild_index.py runs against the journal, **then** the rebuilt index passes the parity gate with zero divergence against the derived views
 - **Given** a seeded legacy-ahead divergence (legacy store mutated without its journal event), **when** the parity gate runs, **then** it classifies the row as BUG (never OK), and the replay/reconcile tooling reports it dry-run-first without mutating anything unasked
 
-## Wave 15 — W15 — Supervisor Core: Inline Seam + IPC Contract + Restart Matrix
+## Wave 17 — W15 — Supervisor Core: Inline Seam + IPC Contract + Restart Matrix
 
 **Intent:** Move job ownership behind the ANCHOR_SUPERVISOR=inline|external interface with the IPC contract table written BEFORE code, durable gate answers, the in-memory rebuild table, and the literal automated restart-survival test matrix (Master Plan Phase 5; D2; Integrated 27, 28, 29, 30, 35, 49; Mitigations 7, 8).
 
@@ -333,7 +356,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** a fake_claude-driven job in flight through the inline seam, **when** the dashboard side is torn down and restarted in-test, **then** the restarted dashboard lists the SAME job_id as running, its /api/rnd/tail cursor advances, and cancel tree-kills it
 - **Given** a gate question answered via POST /api/rnd/answer_gate while the IPC hop is killed mid-interaction, **when** the interaction retries per the contract row, **then** the durably-queued answer is delivered exactly once to the job's stdin — retryable, never lost, never doubled
 
-## Wave 16 — W16 — External Supervisor Service + Live Probes
+## Wave 18 — W16 — External Supervisor Service + Live Probes
 
 **Intent:** Stand up the real second process: the stdlib supervisor as its own NSSM service with loopback token-authed IPC, the scripted installer honoring John's account + no-console discipline, durable tail cursors, and the two live probes the inline seam can never cover (Master Plan Phase 5; D2; Integrated 31, 32, 49).
 
@@ -346,7 +369,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** the live supervisor service installed by install_supervisor.ps1, **when** the healthcheck asks it to spawn claude.exe --version, **then** the child runs under John's profile with output reported and no console window appears
 - **Given** a sacrificial long-running child owned by the live supervisor, **when** the SUPERVISOR service is restarted, **then** the child survives the restart and the restarted supervisor re-adopts it with its persisted tail offset intact
 
-## Wave 17 — W17 — C4 Live Demo + ConPTY Verdict Application
+## Wave 19 — W17 — C4 Live Demo + ConPTY Verdict Application
 
 **Intent:** Prove restart survival on the real service with John per the runbook — the criterion is honestly unmet until the runbook has run once — and apply the W3 ConPTY spike verdict for PTYs (adoption follow-on or the drain + honestly-recorded narrowing) (Master Plan Phase 5; Integrated 33, 34, 36; Mitigations 10, 18).
 
@@ -359,7 +382,7 @@ fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
 - **Given** a real fake_claude-driven lane job in flight on the live :8777 service, launched through the real path with John observing, **when** `nssm restart anchor` runs from an elevated shell, **then** the job never stops, and the restarted dashboard lists the same job_id live with an advancing tail — the C4 live demo recorded in the runbook artifact
 - **Given** the ConPTY spike verdict was NO, **when** any subsequent deploy of this effort restarts the dashboard, **then** the automated drain parks every live PTY with docs captured and warm-resume seeds, so the restart costs a warm reconnect, not dead context, and the narrowing is recorded via the amendment path — never silently
 
-## Wave 18 — W18 — Closure: Hybrid Hardening + North-Star Scorecard (C7)
+## Wave 20 — W18 — Closure: Hybrid Hardening + North-Star Scorecard (C7)
 
 **Intent:** Convert 'we built it' into 'the daily 5AM run and the live service prove it, continuously': finalize the hybrid-state matrix, promote the four soaked healthcheck walks, run the one-sitting live sign-offs with John, and emit the demonstrated scorecard + Appendix-A reconciliation (Master Plan Phase 6; Integrated 15, 36, 41, 43, 44, 52).
 
