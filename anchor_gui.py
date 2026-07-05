@@ -13537,6 +13537,25 @@ def main():
         _logger.error(f"session_registry boot reconcile failed: {e}")
 
     try:
+        # zombie-hunter safe-to-arm Wave 7: re-honor the persisted, PROTECT-ONLY
+        # frozen-set across the NSSM restart. Re-probe each frozen entry's owning
+        # PID (identity-tuple reuse guard) and re-establish the per-PID freeze
+        # from scratch — a dead/recycled PID is dropped (never touched), and a
+        # persisted 'would-kill' marker is INERT (kept pending; a kill is only
+        # ever re-derived in-process from a fresh live probe). Relies on NO
+        # cross-restart OS containment; never kills.
+        import freeze_state
+        _fz = freeze_state.reconcile_after_restart()
+        if _fz.re_frozen or _fz.thawed or _fz.would_kill_pending:
+            _logger.info(
+                "freeze_state boot reconcile: re-froze %d, dropped %d "
+                "(dead/recycled), %d would-kill marker(s) pending",
+                len(_fz.re_frozen), len(_fz.thawed),
+                len(_fz.would_kill_pending))
+    except Exception as e:
+        _logger.error(f"freeze_state boot reconcile failed: {e}")
+
+    try:
         import preview_server
         preview_server.reap_orphans()
     except Exception as e:
