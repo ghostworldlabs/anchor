@@ -2276,8 +2276,21 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
     docs_out = _persist_current_stage(session_id, project_id=project_id,
                                       record=record)
 
-    # Docs are now persisted + confirmed → NOW mark the registry record terminal
-    # (DONE) — tolerate an unknown id.
+    # ── zombie-hunter safe-to-arm, Wave 6: teardown owns the PTY AND the jobs ──
+    #
+    # A dead session must NEVER leave its ``job_runner`` jobs alive — that is the
+    # exact orphan-swarm the reaper exists to prevent. Reap every job THIS session
+    # owns via a targeted per-``job_id`` cancel (never a full ``list_records``
+    # scan), reference-counted so a job handed off to a live successor survives.
+    # This runs BEFORE the record is marked terminal so the record stays HONEST
+    # (visible/RUNNING) until the owned jobs are confirmed reaped — a hidden
+    # (terminal) record whose jobs are still live is exactly the lie we forbid.
+    # Best-effort: a teardown failure never blocks the kill.
+    jobs_out = _teardown_owned_jobs(session_id, record=record,
+                                    project_id=project_id)
+
+    # Docs are now persisted + confirmed AND owned jobs reaped → NOW mark the
+    # registry record terminal (DONE) — tolerate an unknown id.
     # W12 (C3, D1): journal-first — emit ``session-killed`` BEFORE the legacy
     # DONE write (best-effort, off-switch-gated: with the journal flag off ONLY
     # update_session runs, byte-identical to before).
@@ -2312,8 +2325,125 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
         "session_id": session_id,
         "pty_killed": pty_killed,
         "docs": docs_out,
+        "jobs": jobs_out,
         "worktree": wt_out,
     }
+
+
+# ── zombie-hunter safe-to-arm, Wave 6: reference-counted owned-job teardown ───
+
+def _teardown_owned_jobs(session_id, record=None, *, project_id=None):
+    """Reap every ``job_runner`` job ``session_id`` owns — reference-counted (W6).
+
+    Closes the swarm-job leak: a session that dies must never leave its jobs
+    alive. Two ownership sources are walked, BOTH off the SESSION registry so we
+    NEVER do a full ``job_runner.list_records`` scan:
+
+    1. **Explicit claims** — ``record["owned_job_ids"]`` (a successor claims a
+       shared/handed-off job here).
+    2. **Worktree-shared live swarm jobs** — every spawned ``job_runner`` job
+       mints a ``SWARM_LANE`` session record keyed by its ``job_id`` with
+       ``worktree_path == cwd``; a job running in THIS session's worktree is one
+       this session owns. This is the real orphan-swarm.
+
+    Ownership is REFERENCE-COUNTED: for each owned job, if a LIVE (RUNNING)
+    successor still claims it, the job SURVIVES and this session's claim is
+    released (an explicit ownership transfer to the successor). Otherwise this
+    session is the last owner → a targeted per-``job_id``
+    :func:`job_runner.cancel` (tree-kill + terminal status) reaps it.
+
+    Best-effort + tolerant: an unknown job id, a cancel failure, or a missing job
+    runner never raises. Returns ``{"cancelled": [...], "transferred": [...],
+    "already_terminal": [...], "all_reaped": bool}``.
+    """
+    result = {"cancelled": [], "transferred": [], "already_terminal": [],
+              "all_reaped": True}
+    try:
+        import job_runner as _jr
+    except Exception:  # pragma: no cover - no job runner → nothing to reap
+        return result
+
+    rec = record if record is not None else _reg.get_session(session_id)
+
+    # ONE registry snapshot for the whole teardown (the reference-count source).
+    try:
+        all_records = _reg.list_sessions()
+    except Exception:
+        all_records = []
+
+    # (1) Explicit claims on this session's record.
+    owned = list(_reg.owned_jobs(rec if rec is not None else session_id))
+
+    # (2) Worktree-shared LIVE swarm jobs (the real orphan-swarm).
+    wt = (rec or {}).get("worktree_path") if isinstance(rec, dict) else None
+    if wt:
+        try:
+            wt_norm = str(Path(wt))
+        except (TypeError, ValueError):
+            wt_norm = str(wt)
+        swarm_lane = getattr(_jr, "SWARM_LANE", "swarm")
+        for r in all_records:
+            if not isinstance(r, dict):
+                continue
+            if r.get("lane") != swarm_lane:
+                continue
+            if r.get("status") != _reg.STATUS_RUNNING:
+                continue
+            jid = r.get("session_id")
+            if not jid or jid == session_id or jid in owned:
+                continue
+            try:
+                r_wt = str(Path(r.get("worktree_path") or "")) if r.get(
+                    "worktree_path") else ""
+            except (TypeError, ValueError):
+                r_wt = str(r.get("worktree_path") or "")
+            if r_wt and r_wt == wt_norm:
+                owned.append(jid)
+
+    # (3) Reference-counted reap.
+    for jid in owned:
+        try:
+            claimants = _reg.job_claimants(jid, records=all_records,
+                                           exclude=session_id)
+        except Exception:
+            claimants = []
+        live_claimant = None
+        for c in claimants:
+            if isinstance(c, dict) and c.get("status") == _reg.STATUS_RUNNING:
+                live_claimant = c.get("session_id")
+                break
+        if live_claimant is not None:
+            # Hand-off: a live successor is the sole remaining owner. Record the
+            # explicit ownership transfer by releasing THIS session's claim.
+            try:
+                _reg.release_job(session_id, jid)
+            except Exception:
+                pass
+            result["transferred"].append({"job_id": jid, "to": live_claimant})
+            continue
+        # No live claimant → last owner. Targeted per-job_id cancel/reap.
+        try:
+            crec = _jr.cancel(jid)
+        except Exception:
+            crec = None
+        if crec is None:
+            # Unknown / already-gone job id — nothing left to reap.
+            result["already_terminal"].append(jid)
+        else:
+            status = crec.get("status")
+            if status in getattr(_jr, "TERMINAL_STATUSES", frozenset()):
+                result["cancelled"].append(jid)
+            else:
+                # Cancel did not confirm terminal — the record is NOT honest yet.
+                result["all_reaped"] = False
+                result["cancelled"].append(jid)
+        # Drop our now-defunct claim so a stale record never re-lists it.
+        try:
+            _reg.release_job(session_id, jid)
+        except Exception:
+            pass
+
+    return result
 
 
 def _capture_killed_to_boneyard(session_id, project_id, record, docs_out):
@@ -2521,6 +2651,18 @@ def delete_session(session_id, project_id=None):
             killed = True
     except Exception:
         killed = False
+
+    # zombie-hunter safe-to-arm, Wave 6: term_delete tears down the jobs too. A
+    # LIVE delete already reaped them inside kill() above; a NON-live delete (the
+    # session was already terminal) still walks the reference-counted teardown so
+    # any lingering owned job is cancelled/handed-off before the record — and its
+    # claim set — is dropped below. Idempotent + best-effort (a second teardown
+    # over an already-reaped set is a clean no-op).
+    if not killed:
+        try:
+            _teardown_owned_jobs(session_id, record=rec, project_id=project_id)
+        except Exception:
+            pass
 
     # Hard-delete the registry record (the durability of "stays gone": the board
     # + term_sessions read the registry, so a removed record never re-surfaces).

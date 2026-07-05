@@ -329,6 +329,27 @@ def _normalize(record: dict) -> dict:
     except (TypeError, ValueError):
         proc_create_time = None
     crypt_token = record.get("crypt_token", "") or ""
+    # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
+    # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
+    # ids — the reference-counted ownership the teardown path (``kill`` /
+    # ``delete_session``) walks to reap every job the session owns via a targeted
+    # per-``job_id`` cancel (never a full ``list_records`` scan). A job handed off
+    # to a live successor stays claimed by that successor, so the reference count
+    # keeps it alive across the predecessor's kill. Back-compat: every pre-Wave-6
+    # record (no key) normalizes to ``[]``. Sanitized to a de-duped list of
+    # non-empty id strings, order preserved.
+    raw_jobs = record.get("owned_job_ids")
+    owned_job_ids = []
+    if isinstance(raw_jobs, (list, tuple)):
+        _seen_jobs = set()
+        for j in raw_jobs:
+            if j is None:
+                continue
+            js = str(j)
+            if not js or js in _seen_jobs:
+                continue
+            _seen_jobs.add(js)
+            owned_job_ids.append(js)
     return {
         "session_id": sid,
         "project_id": record.get("project_id", ""),
@@ -377,6 +398,8 @@ def _normalize(record: dict) -> dict:
         "pid": pid,
         "proc_create_time": proc_create_time,
         "crypt_token": crypt_token,
+        # zombie-hunter safe-to-arm, Wave 6: reference-counted owned-job claims.
+        "owned_job_ids": owned_job_ids,
     }
 
 
@@ -693,7 +716,9 @@ def update_session(session_id: str, **fields) -> dict:
                "kind", "current_stage", "stage_history", "seeded_stages",
                "effort_id", "effort_managed",
                # zombie-hunter v2: process-identity fields.
-               "pid", "proc_create_time", "crypt_token"}
+               "pid", "proc_create_time", "crypt_token",
+               # zombie-hunter safe-to-arm, Wave 6: owned-job claim set.
+               "owned_job_ids"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
@@ -727,6 +752,124 @@ def remove_session(session_id: str) -> bool:
             _save_sessions(reg, _locked=True)
             return True
         return False
+
+
+# ── Reference-counted owned-job claims (zombie-hunter safe-to-arm, Wave 6) ───
+#
+# A managed trio session OWNS the ``job_runner`` jobs it spawned (Gemini-swarm
+# sub-agents, previews). When the session dies its jobs must die WITH it — the
+# exact orphan-swarm the reaper exists to prevent — via a targeted per-``job_id``
+# cancel walked off this explicit claim set (never a full ``list_records``
+# scan). Ownership is REFERENCE-COUNTED: a job handed off to / shared with a live
+# successor in the chain (e.g. plan→build, a shared preview) is claimed by that
+# successor too, so it survives the predecessor's teardown. These helpers are the
+# storage seam; the teardown orchestration lives in ``terminal_session``.
+
+def owned_jobs(session_id_or_record) -> list:
+    """Return the list of ``job_id``s a session explicitly claims (owns).
+
+    Accepts a ``session_id`` string OR a record dict. An unknown id / a record
+    with no claim set yields ``[]``. The returned list is a fresh copy — mutating
+    it never touches the stored record.
+    """
+    rec = session_id_or_record
+    if isinstance(rec, str):
+        rec = load_sessions().get(rec)
+    if not isinstance(rec, dict):
+        return []
+    jobs = rec.get("owned_job_ids")
+    return list(jobs) if isinstance(jobs, (list, tuple)) else []
+
+
+def claim_job(session_id: str, job_id: str) -> bool:
+    """Record that ``session_id`` owns ``job_id`` (append to its claim set).
+
+    Idempotent + de-duped: claiming the same ``job_id`` twice is a no-op. Returns
+    True when a NEW claim was recorded, False when the session is unknown or the
+    claim already existed. A CANCELLED/terminal-locked record can still take a
+    claim — the terminal lock only guards ``status`` (Wave 5), not bookkeeping —
+    but the teardown only honors claims held by LIVE sessions, so a claim on a
+    dead session never keeps a job alive.
+    """
+    if not session_id or not job_id:
+        return False
+    job_id = str(job_id)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        if session_id not in reg:
+            return False
+        rec = dict(reg[session_id])
+        jobs = list(rec.get("owned_job_ids") or [])
+        if job_id in jobs:
+            return False
+        jobs.append(job_id)
+        rec["owned_job_ids"] = jobs
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
+
+
+def release_job(session_id: str, job_id: str) -> bool:
+    """Drop ``session_id``'s claim over ``job_id`` (ownership hand-off / reap).
+
+    Returns True when a claim was removed, False when the session is unknown or
+    did not hold the claim. Used to record an explicit ownership transfer: when a
+    dying session's job survives because a live successor still claims it, the
+    dying session releases its claim so the successor is the sole owner.
+    """
+    if not session_id or not job_id:
+        return False
+    job_id = str(job_id)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        if session_id not in reg:
+            return False
+        rec = dict(reg[session_id])
+        jobs = list(rec.get("owned_job_ids") or [])
+        if job_id not in jobs:
+            return False
+        jobs = [j for j in jobs if j != job_id]
+        rec["owned_job_ids"] = jobs
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
+
+
+def job_claimants(job_id, records=None, *, exclude=None) -> list:
+    """Return the session RECORDS that explicitly claim ``job_id``.
+
+    Reference-count primitive: walks the SESSION registry (never
+    ``job_runner.list_records``) for every record whose ``owned_job_ids`` holds
+    ``job_id``. ``exclude`` (a session_id or an iterable of them) drops the caller
+    from its own count. ``records`` may pre-supply the record list (one snapshot
+    per teardown) so the walk is not re-read per job.
+    """
+    if not job_id:
+        return []
+    job_id = str(job_id)
+    if records is None:
+        records = list(load_sessions().values())
+    if exclude is None:
+        excl = frozenset()
+    elif isinstance(exclude, str):
+        excl = frozenset((exclude,))
+    else:
+        excl = frozenset(exclude)
+    out = []
+    for rec in records or []:
+        if not isinstance(rec, dict):
+            continue
+        sid = rec.get("session_id")
+        if sid in excl:
+            continue
+        jobs = rec.get("owned_job_ids")
+        if isinstance(jobs, (list, tuple)) and job_id in [str(j) for j in jobs]:
+            out.append(rec)
+    return out
 
 
 # ── Recovery / reconcile (MASTER-PLAN §I) ─────────────────────────────────
