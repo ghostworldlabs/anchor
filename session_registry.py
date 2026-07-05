@@ -31,12 +31,23 @@ Stdlib only. No third-party imports.
 """
 
 import json
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 
 import paths as _paths
+
+_log = logging.getLogger("anchor.session_registry")
+
+
+def _log_rejected_transition(session_id, from_status, to_status) -> None:
+    """Audit a rejected status transition (Wave 5 terminal-lock guard)."""
+    _log.info(
+        "session_registry: rejected terminal transition %s: %s -> %s "
+        "(kept %s — a terminal-locked state is never resurrected)",
+        session_id, from_status, to_status, from_status)
 
 # Sessions JSON filename, stored under ``.anchor/`` at the data-dir root.
 SESSIONS_NAME = "sessions.json"
@@ -68,6 +79,23 @@ STATUS_IDLE = "idle"
 #: having ``_normalize`` coerce the unknown status to ``idle``.
 STATUS_CANCELLED = "cancelled"
 
+# ── zombie-hunter safe-to-arm, Wave 5: split the overloaded STATUS_IDLE ───────
+#
+# The historical ``STATUS_IDLE`` meant BOTH "parked warm — a graceful "×" close,
+# resumable, keeps its worktree" AND "reaped orphan — reconciled dead, worktree
+# gone". Those two meanings drive OPPOSITE worktree-retention decisions, so the
+# reaper cannot trust a bare ``idle`` to decide whether a worktree may be
+# removed. Wave 5 disambiguates them into two EXPLICIT states:
+#
+#   STATUS_PARKED_WARM    → non-running, RESUMABLE, KEEPS its worktree (grey).
+#   STATUS_REAPED_ORPHAN  → non-running, reconciled dead, worktree NOT retained.
+#
+# Legacy ``STATUS_IDLE`` records are conservatively read as PARKED_WARM
+# (over-protect only — an idle record kept its worktree, so warm-park is the safe
+# reading) and are migrated forward by :func:`migrate_idle_to_parked_warm`.
+STATUS_PARKED_WARM = "parked-warm"
+STATUS_REAPED_ORPHAN = "reaped-orphan"
+
 #: Every recognized status.
 VALID_STATUSES = {
     STATUS_RUNNING,
@@ -76,12 +104,82 @@ VALID_STATUSES = {
     STATUS_FAILED,
     STATUS_IDLE,
     STATUS_CANCELLED,
+    STATUS_PARKED_WARM,
+    STATUS_REAPED_ORPHAN,
 }
 
 #: Terminal statuses — a session in one of these has no live process and is
 #: never "running". (``idle`` is non-running too, but it is the parked/recovered
 #: state rather than a finished one.)
 TERMINAL_STATUSES = frozenset((STATUS_DONE, STATUS_FAILED))
+
+# ── Wave 5: state-transition table (STATUS_CANCELLED strictly terminal) ───────
+#
+# A terminal-LOCKED status is one no transition can ever leave: a CANCELLED run
+# is never re-adopted / reconciled-to-running / resurrected, and a REAPED_ORPHAN
+# is gone. :func:`can_transition` is the single authority the mutating CRUD
+# entrypoints consult so a status change OUT of a locked state is REJECTED
+# (the locked status is kept, the record is never resurrected).
+TERMINAL_LOCKED_STATUSES = frozenset((STATUS_CANCELLED, STATUS_REAPED_ORPHAN))
+
+#: Non-running statuses whose managed worktree is RETAINED (resumable warm).
+#: Legacy ``STATUS_IDLE`` folds in here — the conservative over-protect reading.
+WORKTREE_RETAINING_STATUSES = frozenset((STATUS_PARKED_WARM, STATUS_IDLE))
+
+#: Non-running statuses whose managed worktree is explicitly NOT retained.
+WORKTREE_DROPPING_STATUSES = frozenset((STATUS_REAPED_ORPHAN, STATUS_CANCELLED))
+
+#: Live / finished statuses that are NOT "parked warm" (so :func:`is_parked_warm`
+#: reports False — a live session is kept by the active-id check, a finished one
+#: is handled by its own teardown). Enumerated so an UNRECOGNIZED status is the
+#: only thing left to the fail-SAFE branch.
+_NON_PARKED_KNOWN_STATUSES = frozenset(
+    (STATUS_RUNNING, STATUS_NEEDS_ATTENTION, STATUS_DONE, STATUS_FAILED))
+
+
+def can_transition(from_status, to_status) -> bool:
+    """Is a status change ``from_status`` → ``to_status`` permitted? (Wave 5.)
+
+    The state-transition table is intentionally minimal: it locks ONLY the
+    terminal states. A record already in a :data:`TERMINAL_LOCKED_STATUSES`
+    status (``cancelled`` / ``reaped-orphan``) may NEVER transition to a
+    different status — the sole permitted "transition" is the identity (staying
+    put). Every other transition stays permissive so the non-terminal lifecycle
+    is unchanged. This is the single guard that makes ``STATUS_CANCELLED``
+    strictly terminal (never re-adopted, never reconciled to running).
+    """
+    if from_status == to_status:
+        return True
+    if from_status in TERMINAL_LOCKED_STATUSES:
+        return False
+    return True
+
+
+def is_parked_warm(record_or_status) -> bool:
+    """Does this record/status mean "parked WARM — keep the worktree"? (Wave 5.)
+
+    Retention is keyed on the EXPLICIT state field, not the overloaded ``idle``:
+
+    - ``STATUS_PARKED_WARM`` / legacy ``STATUS_IDLE`` → **True** (keep; resumable).
+    - ``STATUS_REAPED_ORPHAN`` / ``STATUS_CANCELLED`` → **False** (no worktree).
+    - a live / finished status (running/needs-attention/done/failed) → **False**
+      (a live session is retained by the active-id check; a finished one by its
+      own teardown — neither is "parked warm").
+    - anything else (an ambiguous / UNRECOGNIZED status) → fail **SAFE** to
+      **True** (parked/keep) so an unknown state is NEVER reaped.
+
+    Accepts either a record dict or a bare status string.
+    """
+    status = (record_or_status.get("status")
+              if isinstance(record_or_status, dict) else record_or_status)
+    if status in WORKTREE_DROPPING_STATUSES:
+        return False
+    if status in WORKTREE_RETAINING_STATUSES:
+        return True
+    if status in _NON_PARKED_KNOWN_STATUSES:
+        return False
+    # Unknown / ambiguous → fail SAFE (keep, never reap).
+    return True
 
 #: Recognized backends.
 BACKEND_CLAUDE = "claude"
@@ -601,8 +699,17 @@ def update_session(session_id: str, **fields) -> dict:
         if session_id not in reg:
             raise KeyError(session_id)
         rec = dict(reg[session_id])
+        # Wave 5: the state-transition table is the single authority that makes
+        # STATUS_CANCELLED (and STATUS_REAPED_ORPHAN) strictly terminal. A status
+        # change OUT of a terminal-locked state is REJECTED here — the locked
+        # status is kept so the record is never resurrected — while every other
+        # field in the same call still applies.
+        orig_status = reg[session_id].get("status")
         for k, v in fields.items():
             if k in allowed and v is not None:
+                if k == "status" and not can_transition(orig_status, v):
+                    _log_rejected_transition(session_id, orig_status, v)
+                    continue
                 rec[k] = v
         rec = _normalize(rec)
         rec["session_id"] = session_id
@@ -704,4 +811,59 @@ def reconcile(live_session_ids=None, worktree_exists=None,
             _save_sessions(reg, _locked=True)
         report["marked"] = marked
         report["applied"] = True
+    return report
+
+
+# ── Wave 5: conservative legacy STATUS_IDLE → STATUS_PARKED_WARM migration ────
+
+def migrate_idle_to_parked_warm(apply=True) -> dict:
+    """Migrate every legacy ``STATUS_IDLE`` record forward to ``PARKED_WARM``.
+
+    The Wave-5 split disambiguated the overloaded ``idle`` into ``parked-warm``
+    (keeps its worktree) and ``reaped-orphan`` (no worktree). A legacy ``idle``
+    record kept its worktree, so ``parked-warm`` is the CONSERVATIVE (over-protect
+    only) reading — the migration NEVER downgrades a record to reaped-orphan.
+
+    On the FIRST boot that actually migrates a record, the reaper's persistent
+    dry-run marker is armed (via :func:`worktrees.arm_reaper_dryrun`) so that the
+    first post-migration sweep is REPORT-ONLY (log, delete nothing) — reap is
+    re-armed only after one clean dry report, so a migration can never race a live
+    delete. Best-effort and never raises.
+
+    Returns ``{"migrated": [session_id, ...], "applied": bool}``.
+    """
+    reg = load_sessions()
+    targets = [sid for sid, rec in reg.items()
+               if rec.get("status") == STATUS_IDLE]
+    report = {"migrated": [], "applied": bool(apply)}
+    if not targets:
+        report["applied"] = False
+        return report
+    if not apply:
+        report["migrated"] = list(targets)
+        report["applied"] = False
+        return report
+
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        migrated = []
+        for sid in targets:
+            if sid in reg and reg[sid].get("status") == STATUS_IDLE:
+                rec = dict(reg[sid])
+                rec["status"] = STATUS_PARKED_WARM
+                reg[sid] = _normalize(rec)
+                migrated.append(sid)
+        if migrated:
+            _save_sessions(reg, _locked=True)
+        report["migrated"] = migrated
+
+    if report["migrated"]:
+        # First post-migration boot sweeps report-only (never a live delete on the
+        # boot that just rewrote the state). Best-effort — arming is a safety belt.
+        try:
+            import worktrees as _wt
+            _wt.arm_reaper_dryrun()
+        except Exception:
+            _log.info("session_registry: reaper dry-run arm skipped after "
+                      "idle→parked-warm migration (best-effort)")
     return report

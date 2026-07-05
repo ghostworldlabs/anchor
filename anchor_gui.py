@@ -1909,6 +1909,10 @@ _SESSION_STATUS_COLOR = {
     _sessreg.STATUS_DONE: "amber",
     _sessreg.STATUS_FAILED: "red",
     _sessreg.STATUS_IDLE: "grey",
+    # Wave 5: the split of the overloaded idle — a parked-warm session is a grey
+    # reopenable tile (like idle); a reaped orphan is a spent grey tile.
+    _sessreg.STATUS_PARKED_WARM: "grey",
+    _sessreg.STATUS_REAPED_ORPHAN: "grey",
 }
 
 
@@ -2597,6 +2601,10 @@ _REG_STATUS_LIGHT = {
     _sessreg.STATUS_DONE: "amber",
     _sessreg.STATUS_FAILED: "red",
     _sessreg.STATUS_IDLE: "grey",
+    # Wave 5: the split of the overloaded idle — both render grey (parked-warm is
+    # a reopenable tile like idle; a reaped orphan is a spent grey tile).
+    _sessreg.STATUS_PARKED_WARM: "grey",
+    _sessreg.STATUS_REAPED_ORPHAN: "grey",
 }
 
 
@@ -2624,6 +2632,11 @@ def _registry_session_view(rec):
         pill_cls, pill_lbl = "done", "done"
     elif status == _sessreg.STATUS_FAILED:
         pill_cls, pill_lbl = "fail", "failed"
+    elif status == _sessreg.STATUS_PARKED_WARM:
+        # Wave 5: a parked-warm session is the reopenable grey tile the pre-split
+        # STATUS_IDLE produced — keep the same "idle" pill so a migrated record
+        # renders identically.
+        pill_cls, pill_lbl = "", "idle"
     else:
         pill_cls, pill_lbl = "", (status or "idle")
     label = (rec.get("label") or "").strip()
@@ -13506,6 +13519,20 @@ def main():
             job_active=lambda _sid: False)
         _alive_pids = reaper.live_pid_ids(_snap_boot)
         _sr_boot.reconcile(live_session_ids=_alive_pids)
+        # zombie-hunter safe-to-arm Wave 5: conservatively migrate every legacy
+        # STATUS_IDLE record forward to STATUS_PARKED_WARM (over-protect only) so
+        # worktree-retention keys on the explicit split state. On the first boot
+        # that actually migrates a record this arms the reaper dry-run, so the
+        # first post-migration worktree sweep below is report-only.
+        try:
+            _mig = _sr_boot.migrate_idle_to_parked_warm()
+            if _mig.get("migrated"):
+                _logger.info(
+                    "session_registry: migrated %d legacy idle record(s) to "
+                    "parked-warm (reaper sweep armed report-only for this boot)",
+                    len(_mig["migrated"]))
+        except Exception as e:
+            _logger.error(f"session_registry idle→parked-warm migration failed: {e}")
     except Exception as e:
         _logger.error(f"session_registry boot reconcile failed: {e}")
 

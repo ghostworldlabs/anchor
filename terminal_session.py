@@ -2253,7 +2253,31 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
     except _pty.UnknownSession:
         pty_killed = False  # already dead / never had a live PTY — tolerate
 
-    # Mark the registry record terminal (DONE) — tolerate an unknown id.
+    # ── zombie-hunter safe-to-arm, Wave 5: PERSIST-BEFORE-TERMINAL ORDERING ──
+    #
+    # THE invariant: the session's produced docs are captured/persisted to MAIN
+    # and CONFIRMED *before* the registry record is marked DONE/terminal. The
+    # historical order (mark DONE, then persist) meant a crash or a reaper sweep
+    # racing between the two saw a terminal record whose docs had NOT yet reached
+    # main — a doc-loss window. Persisting first closes it: if anything interrupts
+    # the kill after this point, the record is still non-terminal (recoverable)
+    # and the docs are already safe in main.
+    #
+    # v8 KEYSTONE: capture + persist BEFORE the worktree is reaped (after which
+    # they'd be gone forever). v12 Wave 5: this routes through the SHARED
+    # persist+summarize keystone (:func:`_persist_current_stage`) that
+    # :func:`finish_stage` also calls — so a stage boundary and a kill persist
+    # identically. For a v12 effort with a recorded active stage it persists ONLY
+    # that stage's docs (Wave-3) and schedules the stage-keyed summary (Wave-4);
+    # for every legacy/non-effort session it falls back to the EXACT pre-v12
+    # whole-tree :func:`capture_session_docs`, so kill's observable persisted-doc
+    # set (fed to the worktree-removal + the Boneyard below) is unchanged.
+    # Best-effort (never blocks kill).
+    docs_out = _persist_current_stage(session_id, project_id=project_id,
+                                      record=record)
+
+    # Docs are now persisted + confirmed → NOW mark the registry record terminal
+    # (DONE) — tolerate an unknown id.
     # W12 (C3, D1): journal-first — emit ``session-killed`` BEFORE the legacy
     # DONE write (best-effort, off-switch-gated: with the journal flag off ONLY
     # update_session runs, byte-identical to before).
@@ -2269,21 +2293,6 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
         )
     except KeyError:
         pass
-
-    # v8 KEYSTONE: capture + persist the session's produced docs into the MAIN
-    # project BEFORE the worktree is reaped (after which they'd be gone forever).
-    #
-    # v12 Wave 5: this now routes through the SHARED persist+summarize keystone
-    # (:func:`_persist_current_stage`) that :func:`finish_stage` also calls — so a
-    # stage boundary and a kill persist identically. For a v12 effort with a
-    # recorded active stage it persists ONLY that stage's docs (Wave-3) and
-    # schedules the stage-keyed summary (Wave-4); for every legacy/non-effort
-    # session (i.e. every existing kill test) it falls back to the EXACT pre-v12
-    # whole-tree :func:`capture_session_docs`, so kill's observable behavior here
-    # — the persisted doc set fed to the worktree-removal + the Boneyard below —
-    # is byte-identical to before the refactor. Best-effort (never blocks kill).
-    docs_out = _persist_current_stage(session_id, project_id=project_id,
-                                      record=record)
 
     # Remove the per-session worktree (safety-checked, tolerant of already-gone).
     wt_out = _wt.remove_worktree(session_id, project_id=project_id)
