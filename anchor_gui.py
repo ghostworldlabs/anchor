@@ -5645,6 +5645,25 @@ def generate_html(projects, tasks, inbox):
                 f'</div>'
             )
 
+    # Wave 8 — the reaper consecutive-abstain health banner. Trips when the reaper
+    # has abstained (could-not-observe liveness) for > K consecutive sweeps, or
+    # the owner-evidence receipt chain fails verification — a signal the reaper is
+    # flying blind / the audit log may be tampered. Best-effort: never break the
+    # dashboard render over a reaper diagnostic.
+    try:
+        import reaper_arming as _reaper_arm
+        _rb = _reaper_arm.health_banner()
+        if _rb and _rb.get("tripped"):
+            health_banner_html += (
+                f'<div style="background:#3b2a1f;border:1px solid #9b6a3a;color:#ffd9b3;'
+                f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;">'
+                f'<strong style="color:#ffb37a">&#9888; Reaper health</strong> '
+                f'{html_lib.escape(str(_rb.get("message", "")))}'
+                f'</div>'
+            )
+    except Exception:
+        pass
+
     # Domain sort order: commercial first, then academic, family, writing, personal
     domain_sort_order = {"commercial": 0, "academic": 1, "family": 2, "writing": 3, "personal": 4}
     # Energy sort order: high-energy tasks first, then med, then low
@@ -10491,6 +10510,23 @@ function startZombieTerminal(btn) {
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
+            elif self.path.startswith("/api/rnd/reaper_status"):
+                # Read-only (Wave 8): the reaper-explain inspection surface — the
+                # current arm tier + distance-to-bar, the disarm/brake state, the
+                # abstain-streak health banner, and every running session's
+                # classification + latest owner-evidence receipt. NO mutation, NO
+                # kill/freeze — pure inspection. AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token set). Global (not project-scoped).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                import reaper_arming as _arm
+                try:
+                    dump = _arm.explain()
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True, "reaper": dump})
             elif self.path.startswith("/api/rnd/boneyard"):
                 # Read-only (v10 Wave 7): the project's per-project Boneyard — a
                 # searchable list of DISCARDED material (hard-killed sessions w/
@@ -12223,6 +12259,33 @@ function startZombieTerminal(btn) {
                     self._send_json({"ok": True,
                                      "removed": out.get("removed", [])})
 
+        elif self.path in ("/api/rnd/reaper_arm", "/api/rnd/reaper_advance",
+                            "/api/rnd/reaper_disarm"):
+            # Wave 8 — the reaper ARMING CONTROL PLANE. arm/advance/disarm are
+            # exposed ONLY through these mutating endpoints, already token-gated by
+            # the do_POST middleware above (default-deny: an unauthed request is
+            # 401'd before it reaches here, with NO state change). Defense in
+            # depth: the module functions ALSO re-check paths.auth_ok(provided) —
+            # they refuse with no state change on a bad token. The persisted tier
+            # only ENABLES the in-process gate; every destructive action is
+            # re-derived live in the sweep (protect-only). arm/advance are gated by
+            # the numeric bar recomputed in-process from the tamper-evident receipt
+            # chain; an under-bar advance is refused.
+            import reaper_arming as _arm
+            try:
+                if self.path == "/api/rnd/reaper_arm":
+                    out = _arm.arm(provided)
+                elif self.path == "/api/rnd/reaper_advance":
+                    out = _arm.advance(provided)
+                else:
+                    out = _arm.disarm(provided)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            else:
+                code = 200 if out.get("ok") else (
+                    401 if out.get("error") == "unauthorized" else 409)
+                self._send_json(out, code)
+
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
             # Token-gated by the do_POST middleware above. Reaps + relaunches in
@@ -13601,39 +13664,51 @@ def main():
             import reaper
             import pty_manager
             import session_registry as _sr_daemon
+            # Wave 8 — the daemon is governed by the ARMING LADDER, UNARMED by
+            # default. Each cycle does ONE running-record read and builds the ONE
+            # immutable snapshot (the single shared provider — same source the
+            # banner/view/brief/boot-reconcile sites use), derives the live-owner
+            # set from THAT snapshot (abstain-safe), caches it for _live_provider,
+            # then routes the SAME snapshot + records through
+            # reaper_arming.armed_sweep, whose effective tier (log → freeze → kill)
+            # honors the persisted arm state AND the restart-durable
+            # .anchor/reaper.disarmed kill-switch brake. Every destructive action
+            # is re-derived in-process from the fresh snapshot (protect-only) — a
+            # persisted 'kill' tier never kills a session whose owner is alive. A
+            # second build_snapshot here would violate the single-source contract.
+            import reaper_arming
+            _daemon_owners = {"set": set()}
             def _live_provider():
-                # (#3, single source) The daemon KILLS verdict==kill sessions
-                # when armed (ANCHOR_ZOMBIE_HUNTER=1). Build the ONE immutable
-                # snapshot for the sweep and hand it the full live-owner set (the
-                # shared provider), not just the PTY-attached one, so a legit
-                # job-owned / parent-owned session is never reaped for lacking a
-                # browser stream.
-                # Defensive boundary (Wave 2, criterion 1): the MOST dangerous
-                # call site. owner_ids_or_abstain returns EVERY running id as
-                # "owned" on a degraded/faulty snapshot, so a single fetch hiccup
-                # can never feed the armed daemon a narrowed live set → mass-kill.
-                attached = set(pty_manager._LIVE.keys())
+                # The daemon's live-owner set, derived from the most-recent sweep
+                # snapshot (abstain-safe PTY-attached fallback before the first
+                # sweep). Never builds a second snapshot.
+                return _daemon_owners["set"] or set(pty_manager._LIVE.keys())
+            def _armed_sweep_cycle():
                 try:
                     running = _sr_daemon.list_sessions(status="running")
                 except Exception:
                     running = []
+                attached = set(pty_manager._LIVE.keys())
                 try:
-                    _snap = reaper.build_snapshot(attached_pty_ids=attached,
-                                                  records=running)
+                    snap = reaper.build_snapshot(attached_pty_ids=attached,
+                                                 records=running)
                 except Exception:
-                    _snap = None
-                # Normal path: derive the live-owner set DIRECTLY from the one
-                # snapshot via the shared provider — same single source every
-                # other sweep site uses (banner, view, brief).
-                if _snap is not None and not getattr(_snap, "degraded", False):
-                    return reaper.live_owner_ids(_snap) or attached
-                # Degraded/None snapshot (owner enumeration failed → an
-                # artificially-narrow owner set): the abstain-safe wrapper
-                # returns EVERY running id as "owned" so the sweep kills NOTHING
-                # this cycle — a single fetch hiccup can never feed the armed
-                # daemon a narrowed live set → mass-kill.
-                return reaper.owner_ids_or_abstain(_snap, running) or attached
-            zombie_hunter.start_hunter(_live_provider)
+                    snap = None
+                # Derive the live-owner set DIRECTLY from the one snapshot via the
+                # shared provider. Defensive boundary (Wave 2, criterion 1): a
+                # degraded/None snapshot → owner_ids_or_abstain returns EVERY
+                # running id as "owned", so a single fetch hiccup can never feed
+                # the armed daemon a narrowed live set → mass-kill.
+                try:
+                    if snap is not None and not getattr(snap, "degraded", False):
+                        _daemon_owners["set"] = reaper.live_owner_ids(snap) or attached
+                    else:
+                        _daemon_owners["set"] = (
+                            reaper.owner_ids_or_abstain(snap, running) or attached)
+                except Exception:
+                    _daemon_owners["set"] = attached
+                reaper_arming.armed_sweep(running, snap)
+            zombie_hunter.start_hunter(_live_provider, sweep_fn=_armed_sweep_cycle)
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")
 

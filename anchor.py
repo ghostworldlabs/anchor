@@ -1095,6 +1095,21 @@ def rnd_gandalf(project_id):
     return _gandalf.list_runs(folder, project_id)
 
 
+def rnd_reaper_explain():
+    """CLI mirror of ``reaper_arming.explain`` (Wave 8, reaper-explain).
+
+    READ-ONLY inspection: dumps the reaper's current liveness snapshot summary,
+    the live-owner set, each running session's classification + latest
+    owner-evidence receipt, the current arm tier + distance-to-bar, the
+    disarm/kill-switch-brake state, and the consecutive-abstain health banner.
+    GLOBAL (not project-scoped) — the reaper governs the whole service. NEVER
+    runs the model / kills / freezes; it reads the registry + the tamper-evident
+    receipt chain only. Returns the explain dict.
+    """
+    import reaper_arming as _arm
+    return _arm.explain()
+
+
 def rnd_next_prompt(project_id, session_id):
     """CLI mirror — the generated next-stage handoff prompt for a session (v10).
 
@@ -1953,6 +1968,15 @@ def _rnd_cli(args):
                 print(f"Effort build deliverable for session {session_id}: "
                       f"UNRESOLVED")
                 print(f"  reason: {res.get('reason','no deliverable yet')}")
+
+        elif sub == "reaper":
+            # Wave 8 — reaper-explain (GLOBAL, read-only). Dumps the arm tier +
+            # distance-to-bar, the disarm/brake state, the abstain health banner,
+            # and every running session's classification. NEVER kills/freezes —
+            # arm/advance/disarm are interactive mutating ops (no CLI form).
+            import reaper_arming as _arm
+            dump = rnd_reaper_explain()
+            print(_arm.format_explain(dump))
 
         else:
             print(f"Unknown rnd subcommand: {sub}")

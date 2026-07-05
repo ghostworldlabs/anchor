@@ -201,6 +201,46 @@ def reaper_lineage_max_depth() -> int:
                     REAPER_LINEAGE_MAX_DEPTH_DEFAULT)
 
 
+# ── Arming ladder knobs (Wave 8 — safe-to-arm control plane) ────────────────
+# The daemon ships UNARMED (dry-run) and advances a rung (log → freeze → kill)
+# only when a numeric bar is met, recomputed IN-PROCESS from the tamper-evident
+# receipt chain. All read at call time (env-tunable) with conservative defaults
+# in the SAFE direction (a HIGH sweep bar, a LOW abstain-banner threshold, a
+# BOUNDED auto-thaw so a freeze can never be forgotten forever).
+
+REAPER_ARM_MIN_SWEEPS_ENV = "ANCHOR_REAPER_ARM_MIN_SWEEPS"
+REAPER_ABSTAIN_BANNER_K_ENV = "ANCHOR_REAPER_ABSTAIN_BANNER_K"
+REAPER_FREEZE_MAX_SECS_ENV = "ANCHOR_REAPER_FREEZE_MAX_SECS"
+
+#: How many CONSECUTIVE clean dry-run/observation sweeps the receipt chain must
+#: show before a rung may be armed/advanced. Deliberately high — the arm bar is
+#: earned by observed evidence, never asserted.
+REAPER_ARM_MIN_SWEEPS_DEFAULT = 10
+#: The dashboard health-banner trips when the reaper has ABSTAINED (degraded /
+#: could-not-observe liveness) for MORE than this many consecutive sweeps — a
+#: signal the liveness inputs are broken and the reaper is flying blind.
+REAPER_ABSTAIN_BANNER_K_DEFAULT = 5
+#: An auto-thaw watchdog bounds every freeze: a session frozen by the freeze-only
+#: tier is automatically resumed after this many seconds so a freeze can never be
+#: forgotten indefinitely (fully-reversible, self-healing first rung).
+REAPER_FREEZE_MAX_SECS_DEFAULT = 3600.0
+
+
+def reaper_arm_min_sweeps() -> int:
+    """Consecutive-clean-sweep arm bar (``ANCHOR_REAPER_ARM_MIN_SWEEPS``)."""
+    return _env_int(REAPER_ARM_MIN_SWEEPS_ENV, REAPER_ARM_MIN_SWEEPS_DEFAULT)
+
+
+def reaper_abstain_banner_k() -> int:
+    """Consecutive-abstain health-banner threshold (``ANCHOR_REAPER_ABSTAIN_BANNER_K``)."""
+    return _env_int(REAPER_ABSTAIN_BANNER_K_ENV, REAPER_ABSTAIN_BANNER_K_DEFAULT)
+
+
+def reaper_freeze_max_secs() -> float:
+    """Auto-thaw watchdog bound for a freeze (``ANCHOR_REAPER_FREEZE_MAX_SECS``)."""
+    return _env_float(REAPER_FREEZE_MAX_SECS_ENV, REAPER_FREEZE_MAX_SECS_DEFAULT)
+
+
 def ensure_data_dirs() -> None:
     """Create the data subdirectories that Anchor writes into.
 

@@ -122,6 +122,11 @@ class FrozenEntry:
     state: str = STATE_FROZEN
     frozen_at: Optional[float] = None
     reason: str = ""
+    #: Wave 8 auto-thaw watchdog: the epoch after which this freeze must be
+    #: automatically resumed (``reaper_arming.auto_thaw_expired``) so a freeze can
+    #: never be forgotten forever. ``None`` ⇒ no watchdog (a legacy / manual
+    #: freeze) — the conservative reading is "do not auto-thaw", never "thaw now".
+    thaw_deadline: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -131,6 +136,7 @@ class FrozenEntry:
             "state": self.state,
             "frozen_at": self.frozen_at,
             "reason": self.reason,
+            "thaw_deadline": self.thaw_deadline,
         }
 
 
@@ -173,6 +179,7 @@ def _normalize_entry(raw: dict) -> Optional[FrozenEntry]:
         state=state,
         frozen_at=_coerce_float(raw.get("frozen_at")),
         reason=str(raw.get("reason") or ""),
+        thaw_deadline=_coerce_float(raw.get("thaw_deadline")),
     )
 
 
@@ -276,7 +283,8 @@ def _identity_of(record) -> tuple:
             _coerce_float(record.get("proc_create_time")))
 
 
-def freeze_session(record, *, suspend=None, now=None, reason="") -> dict:
+def freeze_session(record, *, suspend=None, now=None, reason="",
+                   thaw_deadline=None) -> dict:
     """FREEZE a session: persist the entry FIRST, THEN suspend its PID.
 
     Persist-before-suspend is deliberate: if the process crashes between the two
@@ -298,7 +306,8 @@ def freeze_session(record, *, suspend=None, now=None, reason="") -> dict:
     if now is None:
         now = time.time()
     entry = FrozenEntry(session_id=sid, pid=pid, proc_create_time=ctime,
-                        state=STATE_FROZEN, frozen_at=now, reason=reason or "")
+                        state=STATE_FROZEN, frozen_at=now, reason=reason or "",
+                        thaw_deadline=_coerce_float(thaw_deadline))
     with _paths.WRITE_LOCK:
         entries = load_frozen()
         entries[sid] = entry

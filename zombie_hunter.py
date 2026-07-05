@@ -329,7 +329,7 @@ _stop_event = None
 _hunter_lock = threading.Lock()
 
 
-def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
+def start_hunter(live_ids_provider, interval_sec=600, enabled=None, sweep_fn=None):
     """Start the background sweep daemon. Returns the thread, or ``None``.
 
     By default, starting is enabled (runs in dry-run mode, apply=False, unless
@@ -341,6 +341,13 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
     ``interval_sec`` seconds, swallowing+logging any exception so the loop never
     dies. ``live_ids_provider`` is a zero-arg callable returning the set of
     currently-attached session ids.
+
+    ``sweep_fn`` (Wave 8) — an optional zero-arg callable run INSTEAD of the
+    legacy ``sweep`` each cycle. The boot daemon passes the arming-ladder sweep
+    (:func:`reaper_arming.armed_sweep`, governed by the effective arm tier +
+    kill-switch brake) so the daemon is UNARMED by default and only ever kills
+    through the in-process, gate-authorized ladder. When ``None`` the legacy
+    dry-run/env-armed behavior is unchanged.
     """
     global _hunter_thread, _stop_event
 
@@ -360,8 +367,11 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
             # Sweep immediately on start, then every interval until stopped.
             while not stop.is_set():
                 try:
-                    apply_kills = os.environ.get(HUNTER_ENV) == "1"
-                    sweep(live_ids_provider(), apply=apply_kills)
+                    if sweep_fn is not None:
+                        sweep_fn()
+                    else:
+                        apply_kills = os.environ.get(HUNTER_ENV) == "1"
+                        sweep(live_ids_provider(), apply=apply_kills)
                 except Exception as exc:  # never let the loop die
                     try:
                         print(f"[zombie_hunter] sweep error: {exc!r}")
