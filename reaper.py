@@ -54,15 +54,35 @@ The line is **live owner**, never "effort-bound": binding to an effort must NOT
 neuter the hunter. A genuinely-orphaned swarm (identity-alive, no live owner)
 still classifies ``kill``.
 
+────────────────────────────────────────────────────────────────────────────
+POSITIVE-PROOF-OF-DEATH KILL PREDICATE + ABSTAIN BOUNDARY (Wave 2)
+────────────────────────────────────────────────────────────────────────────
+:func:`classify` flags CANDIDATES (an identity-alive session with no live owner
+is flagged ``kill`` for the banner / Swarm & Owner View). A destructive action
+is separately gated by :func:`kill_authorized`, which authorizes ONLY on
+POSITIVE proof of death — a confirmed-dead OWNER (``VERDICT_REAP_DEAD``) AND no
+CORROBORATED positive signal (:func:`has_corroborated_positive`, which gates
+every detectable artifact — git ``index.lock``, a heartbeat, an owned socket, a
+fresh worktree write, a CPU sample — on owning-PID-alive corroboration so a
+stale lock / forged heartbeat is never mistaken for life) AND a fresh in-lock
+re-validation (:func:`revalidate_target`) that finds no new sign of life. ANY
+uncertainty — a ``None``/``degraded`` snapshot, a throwing owner computation, a
+missing/partial input — resolves to KEEP: :func:`classify_record` returns the
+abstain sentinel and :func:`kill_authorized` returns ``False`` (criterion 1).
+
 Stdlib only. No third-party imports.
 """
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping, Optional, Tuple
 
+import paths as _paths
 import proc_probe
 import session_registry
 
@@ -87,18 +107,39 @@ NO_PROBE = object()
 class PositiveSignals:
     """Per-session liveness signals sampled ONCE when the snapshot is built.
 
-    Wave 1 carries only the identity-probe outcome — the LIVE creation time of
-    the session's owning PID (``None`` when the PID no longer resolves to an
-    accessible process). Wave 2 enriches this with corroborated positive signals
-    (git ``index.lock`` presence, session heartbeat, owned-socket probe,
-    worktree write mtime, a CPU sample), each gated on owning-PID-alive
-    corroboration. The field set is intentionally forward-compatible.
+    Wave 1 carried only the identity-probe outcome. Wave 2 enriches this with
+    concretely-detectable stdlib positive signals — git ``index.lock`` presence,
+    a session heartbeat file, an owned-socket probe, worktree write mtime, a CPU
+    sample — plus the two derived owner-liveness verdicts. THE CORROBORATION RULE
+    (criterion 1): a positive signal counts as *liveness* ONLY when the owning
+    PID is alive (:attr:`owner_alive`). A stale ``index.lock`` or a forged
+    heartbeat whose owner is DEAD is NOT liveness — see
+    :func:`has_corroborated_positive`. All fields are sampled once, immutably.
     """
 
     owner_pid: Optional[int] = None
     #: The owning PID's live creation time (epoch seconds). ``None`` ⇒ the PID
     #: has no accessible live process (gone / exited / access-denied).
     owner_create_time: Optional[float] = None
+    #: The owning PID resolves to a LIVE process whose creation time MATCHES the
+    #: recorded identity (our process, still running). This is the process-alive
+    #: probe — itself a corroborated positive signal.
+    owner_alive: bool = False
+    #: The owning PID resolves to NO accessible process (gone). Positive proof of
+    #: death of the owner — a precondition of :func:`kill_authorized`. (Wave 3
+    #: hardens the access-denied-vs-gone distinction via WaitForSingleObject.)
+    owner_confirmed_dead: bool = False
+    #: A git ``index.lock`` is present in the session's worktree (raw detection;
+    #: only *protective* when corroborated by ``owner_alive``).
+    index_lock: bool = False
+    #: A fresh session heartbeat file (mtime within the staleness window).
+    heartbeat_fresh: bool = False
+    #: An owned listening socket the session recorded is reachable.
+    socket_owned: bool = False
+    #: A worktree write occurred within the work-mtime window.
+    work_mtime_fresh: bool = False
+    #: A CPU sample showed the owning process burning cycles in the window.
+    cpu_active: bool = False
 
 
 # ── The immutable per-sweep snapshot ────────────────────────────────────────
@@ -125,10 +166,17 @@ class LivenessSnapshot:
     #: session_id → :class:`PositiveSignals` sampled once for this sweep.
     positive_liveness: Mapping[str, PositiveSignals] = \
         field(default_factory=lambda: MappingProxyType({}))
+    #: TRUE when the owner-enumeration inputs DEGRADED (a default fetch of the
+    #: attached set / running records / owning-job predicate threw), so the
+    #: owner set may be artificially narrow/empty. The defensive boundary
+    #: (criterion 1) treats a degraded snapshot as "cannot classify" → every
+    #: call site KEEPS (never freeze/kill on a degraded snapshot). Distinct from
+    #: a *legitimately* empty owner set built from good inputs.
+    degraded: bool = False
 
 
 def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
-                   probe=None) -> LivenessSnapshot:
+                   probe=None, *, tol=2.0, now=None) -> LivenessSnapshot:
     """Build the immutable per-sweep :class:`LivenessSnapshot` — call ONCE/sweep.
 
     ``attached_pty_ids`` — the base set of sessions with a live PTY/browser
@@ -142,10 +190,19 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
                            positive-liveness sampling; defaults to
                            :mod:`proc_probe`. Pass :data:`NO_PROBE` to skip the
                            per-PID probe entirely (ownership-only callers).
+    ``tol``              — allowed creation-time drift (seconds) when deciding
+                           whether the live PID is still OUR process.
+    ``now``              — epoch seconds for the mtime/heartbeat freshness math
+                           (injectable for tests); defaults to ``time.time()``.
 
     Best-effort: any probe/import failure degrades to "not owned via that path"
-    / "identity unknown", never raises.
+    / "identity unknown", never raises. When a DEFAULT fetch (attached set /
+    running records / owning-job predicate) itself throws, :attr:`degraded` is
+    set TRUE so the defensive boundary can KEEP everything (criterion 1) rather
+    than silently classify against an artificially-narrow owner set.
     """
+    degraded = False
+
     # ── attached ────────────────────────────────────────────────────────────
     if attached_pty_ids is None:
         try:
@@ -153,6 +210,7 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
             attached_pty_ids = set(pty_manager.live_sessions())
         except Exception:
             attached_pty_ids = set()
+            degraded = True
     attached = set(attached_pty_ids or ())
 
     # ── owning-job predicate ─────────────────────────────────────────────────
@@ -162,6 +220,7 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
             job_active = job_runner._holder_is_active
         except Exception:  # pragma: no cover - defensive against an import cycle
             job_active = lambda _sid: False
+            degraded = True
 
     # ── the RUNNING records for this sweep ───────────────────────────────────
     if records is None:
@@ -169,6 +228,7 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
             records = session_registry.list_sessions(status="running")
         except Exception:
             records = []
+            degraded = True
 
     by_id = {}
     job_owned = set()
@@ -202,6 +262,8 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
                 changed = True
 
     # ── identity tuples + positive-liveness (probe each PID ONCE) ────────────
+    if now is None:
+        now = time.time()
     pid_identity = {}
     positive = {}
     do_probe = probe is not NO_PROBE
@@ -221,8 +283,32 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
             except Exception:
                 actual = None
             pid_identity[pid_int] = (pid_int, actual, None)
-            positive[sid] = PositiveSignals(owner_pid=pid_int,
-                                            owner_create_time=actual)
+
+            # Derive the two owner-liveness verdicts from the recorded identity.
+            recorded_ct = rec.get("proc_create_time")
+            owner_alive = (actual is not None and recorded_ct is not None
+                           and abs(actual - recorded_ct) <= tol)
+            #: confirmed dead = the PID resolves to NO live process at all. A PID
+            #: that is live but whose creation time MISMATCHES is a RECYCLED PID
+            #: (a different process now owns it) — neither alive-ours NOR
+            #: confirmed-dead: we must abstain, never kill the new owner.
+            owner_confirmed_dead = (actual is None)
+
+            # Concretely-detectable positive signals (raw detection; the
+            # corroboration gate lives in has_corroborated_positive). Cheap,
+            # best-effort, stdlib-only — a probe failure is just "no signal".
+            wp = rec.get("worktree_path") or ""
+            positive[sid] = PositiveSignals(
+                owner_pid=pid_int,
+                owner_create_time=actual,
+                owner_alive=owner_alive,
+                owner_confirmed_dead=owner_confirmed_dead,
+                index_lock=_probe_index_lock(wp),
+                heartbeat_fresh=_probe_heartbeat(wp, now),
+                socket_owned=_probe_socket(rec),
+                work_mtime_fresh=_probe_work_mtime(wp, now),
+                cpu_active=_probe_cpu(rec),
+            )
 
     return LivenessSnapshot(
         attached_pty_ids=frozenset(attached),
@@ -230,7 +316,101 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
         parent_owned_ids=frozenset(parent_owned),
         pid_identity=MappingProxyType(dict(pid_identity)),
         positive_liveness=MappingProxyType(dict(positive)),
+        degraded=degraded,
     )
+
+
+# ── Positive-liveness signal probes (stdlib, cheap, best-effort) ─────────────
+# Each returns a raw bool: whether the artifact is DETECTABLE right now. Whether
+# a detected artifact grants KEEP is decided by has_corroborated_positive, which
+# gates every one of them on owning-PID-alive corroboration — so a stale lock or
+# a forged heartbeat left by a DEAD owner is never mistaken for life.
+
+HEARTBEAT_FILENAME = ".anchor_heartbeat"
+
+
+def _probe_index_lock(worktree_path) -> bool:
+    """A git ``index.lock`` present in the worktree (a build/commit in flight)."""
+    if not worktree_path:
+        return False
+    try:
+        return (Path(worktree_path) / ".git" / "index.lock").exists()
+    except Exception:
+        return False
+
+
+def _probe_heartbeat(worktree_path, now, stale_secs=None) -> bool:
+    """A session heartbeat file whose mtime is fresher than the stale window."""
+    if not worktree_path:
+        return False
+    if stale_secs is None:
+        stale_secs = _paths.reaper_heartbeat_stale_secs()
+    try:
+        hb = Path(worktree_path) / HEARTBEAT_FILENAME
+        if not hb.exists():
+            return False
+        return (now - hb.stat().st_mtime) <= stale_secs
+    except Exception:
+        return False
+
+
+def _probe_work_mtime(worktree_path, now, max_secs=None) -> bool:
+    """A recent write anywhere shallow in the worktree (work in progress).
+
+    Cheap by design (a Wave-9 perf gate follows): the worktree root and its
+    immediate children only — never a full recursive walk.
+    """
+    if not worktree_path:
+        return False
+    if max_secs is None:
+        max_secs = _paths.reaper_work_mtime_secs()
+    try:
+        root = Path(worktree_path)
+        newest = root.stat().st_mtime
+        try:
+            for child in os.scandir(root):
+                try:
+                    ct = child.stat().st_mtime
+                except OSError:
+                    continue
+                if ct > newest:
+                    newest = ct
+        except OSError:
+            pass
+        return (now - newest) <= max_secs
+    except Exception:
+        return False
+
+
+def _probe_socket(record) -> bool:
+    """An owned listening socket the session recorded (``port``) is reachable.
+
+    Best-effort: only records that declared a loopback ``port`` are probed, with
+    a short non-blocking connect. No recorded port → no signal (``False``).
+    """
+    port = record.get("port") if hasattr(record, "get") else None
+    if not port:
+        return False
+    try:
+        import socket as _socket
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+            s.settimeout(0.15)
+            return s.connect_ex(("127.0.0.1", int(port))) == 0
+    except Exception:
+        return False
+
+
+def _probe_cpu(record) -> bool:
+    """Whether a CPU sample shows the owning process active in the window.
+
+    A true CPU-activity read needs two samples spaced over
+    ``ANCHOR_REAPER_CPU_WINDOW_SECS``; the single-shot snapshot cannot take the
+    second sample without stalling the sweep, so this is a forward hook that
+    defaults to ``False`` (no CPU signal) and is corroborated by the
+    :func:`revalidate_target` re-probe / the Wave-9 evidence harness. Honestly
+    inert here rather than fabricating activity.
+    """
+    return False
 
 
 # ── Pure derivations over the immutable snapshot ────────────────────────────
@@ -310,13 +490,148 @@ def classify(record, live_owner_ids, positive_liveness, *, tol=2.0) -> str:
 
 
 def classify_record(record, snapshot, *, tol=2.0) -> str:
-    """The single classify entry every call site uses.
+    """The single classify entry every call site uses — DEFENSIVELY BOUNDED.
 
     Classifies one ``record`` against the immutable ``snapshot`` — its live-owner
     set AND its positive-liveness map — so all five discriminators share the
     identical provider. Bypassing this (hand-rolling :func:`classify` args, or
     reaching back into the old per-site input set) is what the Wave-1 stub-gate
     is designed to catch.
+
+    THE DEFENSIVE BOUNDARY (Wave 2, criterion 1 — abstain-not-kill): ANY
+    uncertainty resolves to KEEP. A ``None`` snapshot, a :attr:`degraded`
+    snapshot (owner enumeration failed), a throwing ``live_owner_ids``, or a
+    missing/partial positive-liveness map all return :data:`VERDICT_ABSTAIN` —
+    the sentinel every call site interprets as OWNED/alive, so no site ever
+    freezes or kills on a fault. It NEVER returns ``kill`` on a fault.
     """
-    return classify(record, live_owner_ids(snapshot), snapshot.positive_liveness,
-                    tol=tol)
+    try:
+        if snapshot is None or getattr(snapshot, "degraded", False):
+            return VERDICT_ABSTAIN
+        owners = live_owner_ids(snapshot)
+        return classify(record, owners, snapshot.positive_liveness, tol=tol)
+    except Exception:
+        # Fail SAFE: any fault in the owner / positive-liveness computation is
+        # treated as OWNED/alive — never a kill.
+        return VERDICT_ABSTAIN
+
+
+# ── Positive-proof-of-death kill predicate (Wave 2) ─────────────────────────
+
+def has_corroborated_positive(signals) -> bool:
+    """Whether ``signals`` carries a CORROBORATED positive-liveness signal.
+
+    THE CORROBORATION RULE: a detectable artifact (``index.lock``, a heartbeat
+    file, an owned socket, a fresh worktree write, a CPU sample) grants KEEP
+    ONLY when the owning PID is alive (``owner_alive``). A stale lock or a forged
+    heartbeat whose owner is DEAD is NOT liveness → returns ``False`` so the
+    orphan stays reap-eligible. When the owner PID IS alive, the process-alive
+    probe is itself a corroborated positive signal.
+    """
+    if signals is None or not getattr(signals, "owner_alive", False):
+        return False
+    return bool(signals.owner_alive or signals.index_lock or signals.heartbeat_fresh
+                or signals.socket_owned or signals.work_mtime_fresh
+                or signals.cpu_active)
+
+
+def kill_authorized(record, snapshot, *, revalidate=None, tol=2.0) -> bool:
+    """Whether a DESTRUCTIVE action (freeze/kill) is authorized for ``record``.
+
+    The KILL predicate — KILL rests on POSITIVE proof of death, never on absence
+    and never on a stale artifact masquerading as life. Authorizes ONLY when ALL
+    hold:
+
+      1. **no live owner** — the session is not attached / job-owned / parent-
+         owned in the snapshot;
+      2. **identity-probe-confirmed-dead** — the owning PID resolves to NO live
+         process (``VERDICT_REAP_DEAD``). An ALIVE process (owned or not), a
+         RECYCLED PID, a missing identity, or a non-running record are all KEPT;
+      3. **no corroborated positive signal** — :func:`has_corroborated_positive`
+         is ``False`` (a dead owner's stale lock/heartbeat is not protective);
+      4. **fresh in-lock re-validation** — when a ``revalidate`` callable is
+         supplied (used immediately before the destructive action, under the
+         same lock), it must report NO new sign of life.
+
+    Defensively bounded: a ``None``/``degraded`` snapshot or ANY exception →
+    ``False`` (never authorize on uncertainty).
+    """
+    try:
+        if snapshot is None or getattr(snapshot, "degraded", False):
+            return False
+        sid = record.get("session_id")
+        if not sid:
+            return False
+        # (1)+(2): only a confirmed-dead-of-owner orphan is eligible.
+        verdict = classify(record, live_owner_ids(snapshot),
+                           snapshot.positive_liveness, tol=tol)
+        if verdict != VERDICT_REAP_DEAD:
+            return False
+        # (3): no corroborated positive signal.
+        signals = snapshot.positive_liveness.get(sid)
+        if has_corroborated_positive(signals):
+            return False
+        # (4): fresh, single-target re-validation immediately before acting.
+        if revalidate is not None:
+            try:
+                if revalidate(record):
+                    return False
+            except Exception:
+                # A re-validation that itself faults is uncertainty → abort.
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def revalidate_target(record, *, attached_pty_ids=None, records=None,
+                      job_active=None, probe=None, tol=2.0, now=None) -> bool:
+    """Fresh, single-target liveness recheck for the pre-execution gate.
+
+    Called INSIDE the destructive lock, immediately before freezing/killing the
+    specific target: it rebuilds a one-record snapshot from a LIVE probe and
+    reports whether ANYTHING now indicates life — a live owner, an alive owning
+    PID, or a corroborated positive signal. Returns ``True`` ⇒ **ABORT** the
+    action (life re-appeared); ``False`` ⇒ the target still looks dead.
+
+    Fail-safe: any exception returns ``True`` (abort) — a failed recheck must
+    never green-light a kill.
+    """
+    try:
+        snap = build_snapshot(
+            attached_pty_ids=attached_pty_ids,
+            records=records if records is not None else [record],
+            job_active=job_active, probe=probe, tol=tol, now=now,
+        )
+        if getattr(snap, "degraded", False):
+            return True
+        sid = record.get("session_id")
+        if sid in live_owner_ids(snap):
+            return True
+        signals = snap.positive_liveness.get(sid)
+        if signals is not None and (signals.owner_alive
+                                    or has_corroborated_positive(signals)):
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def owner_ids_or_abstain(snapshot, records) -> set:
+    """Abstain-safe live-owner set for the armed kill-daemon's live_ids provider.
+
+    If the snapshot is ``None`` or :attr:`degraded` (owner enumeration failed →
+    an artificially-narrow/empty owner set), return EVERY running session id as
+    "owned" so the sweep classifies them all alive and kills NOTHING this cycle
+    (uncertainty → KEEP). Otherwise the canonical :func:`live_owner_ids`. This is
+    what keeps the most dangerous call site (the daemon) from mass-killing on a
+    single fetch hiccup.
+    """
+    try:
+        if snapshot is None or getattr(snapshot, "degraded", False):
+            return {r.get("session_id") for r in (records or [])
+                    if r.get("session_id")}
+        return live_owner_ids(snapshot)
+    except Exception:
+        return {r.get("session_id") for r in (records or [])
+                if r.get("session_id")}

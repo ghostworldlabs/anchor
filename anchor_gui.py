@@ -10029,7 +10029,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         try:
                             verdict = reaper.classify_record(rec, _snap)
                         except Exception:
-                            verdict = "kill" if (sid and sid not in live_ids) else "alive"
+                            # Defensive boundary (Wave 2, criterion 1): a fault
+                            # NEVER produces a "kill" — abstain-safe (OWNED/alive)
+                            # so the startup banner can't false-alarm on a hiccup.
+                            verdict = reaper.VERDICT_ABSTAIN
                         # Only alert on orphans born DURING THIS server's life.
                         # After a restart, prior-instance 'running' records whose
                         # backend survived classify as 'kill' against an empty
@@ -10260,7 +10263,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             try:
                                 is_orphaned = (reaper.classify_record(rec, _snap) == "kill")
                             except Exception:
-                                is_orphaned = (sid not in live_ids)
+                                # Defensive boundary (Wave 2, criterion 1): a
+                                # fault NEVER freezes — treat as OWNED/alive so
+                                # pause_orphan can't freeze a legit session.
+                                is_orphaned = False
                                 
                             if is_orphaned:
                                 # FREEZE the orphan while it waits to be killed so
@@ -11983,7 +11989,9 @@ function startZombieTerminal(btn) {
                 try:
                     classification = reaper.classify_record(rec, _snap)
                 except Exception:
-                    classification = "kill" if sid not in live_ids else "alive"
+                    # Defensive boundary (Wave 2, criterion 1): a fault NEVER
+                    # briefs a session as an orphan-pending-kill — abstain-safe.
+                    classification = reaper.VERDICT_ABSTAIN
                     
                 if classification == "kill":
                     orphaned_ids.append(sid)
@@ -13546,6 +13554,7 @@ def main():
             import zombie_hunter
             import reaper
             import pty_manager
+            import session_registry as _sr_daemon
             def _live_provider():
                 # (#3, single source) The daemon KILLS verdict==kill sessions
                 # when armed (ANCHOR_ZOMBIE_HUNTER=1). Build the ONE immutable
@@ -13553,12 +13562,31 @@ def main():
                 # shared provider), not just the PTY-attached one, so a legit
                 # job-owned / parent-owned session is never reaped for lacking a
                 # browser stream.
+                # Defensive boundary (Wave 2, criterion 1): the MOST dangerous
+                # call site. owner_ids_or_abstain returns EVERY running id as
+                # "owned" on a degraded/faulty snapshot, so a single fetch hiccup
+                # can never feed the armed daemon a narrowed live set → mass-kill.
                 attached = set(pty_manager._LIVE.keys())
                 try:
-                    _snap = reaper.build_snapshot(attached_pty_ids=attached)
-                    return reaper.live_owner_ids(_snap)
+                    running = _sr_daemon.list_sessions(status="running")
                 except Exception:
-                    return attached
+                    running = []
+                try:
+                    _snap = reaper.build_snapshot(attached_pty_ids=attached,
+                                                  records=running)
+                except Exception:
+                    _snap = None
+                # Normal path: derive the live-owner set DIRECTLY from the one
+                # snapshot via the shared provider — same single source every
+                # other sweep site uses (banner, view, brief).
+                if _snap is not None and not getattr(_snap, "degraded", False):
+                    return reaper.live_owner_ids(_snap) or attached
+                # Degraded/None snapshot (owner enumeration failed → an
+                # artificially-narrow owner set): the abstain-safe wrapper
+                # returns EVERY running id as "owned" so the sweep kills NOTHING
+                # this cycle — a single fetch hiccup can never feed the armed
+                # daemon a narrowed live set → mass-kill.
+                return reaper.owner_ids_or_abstain(_snap, running) or attached
             zombie_hunter.start_hunter(_live_provider)
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")

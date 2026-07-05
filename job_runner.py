@@ -1479,6 +1479,41 @@ def _holder_is_active(job_id: str) -> bool:
     return rec.get("status") not in TERMINAL_STATUSES
 
 
+def is_gate_blocked(job_id: str) -> bool:
+    """True when ``job_id`` is parked on an AskUserQuestion gate.
+
+    A gate-blocked job's ``state`` is ``awaiting-input`` (set by
+    :func:`gate_adapter.mark_awaiting_input`) — it is blocked on a stdin read,
+    doing no file writes and burning no CPU, yet it is legitimately in-flight.
+    """
+    if not job_id:
+        return False
+    rec = load_record(job_id)
+    if rec is None:
+        return False
+    try:
+        import gate_adapter as _ga
+        return rec.get("state") == _ga.STATE_AWAITING_INPUT
+    except Exception:  # pragma: no cover - defensive against an import failure
+        return rec.get("state") == "awaiting-input"
+
+
+def blocked_but_owned(job_id: str) -> bool:
+    """A gate-blocked / API-waiting job that is STILL owned (in-flight).
+
+    The zombie-hunter reaper (Wave 2) leans on this INVARIANT: a legitimately-
+    working sub-agent blocked on a gate must stay in ``reaper.build_snapshot``'s
+    ``job_owned_ids`` so it is never classified as an orphan. It already does —
+    a gate-blocked job keeps its process alive (blocked on the stdin read) and
+    its ``status`` stays RUNNING, so :func:`_holder_is_active` returns True — and
+    the owner-enumeration contract uses ``_holder_is_active`` as its owning-job
+    predicate. NO ``blocked_but_owned`` job state was needed in ``job_runner``;
+    this accessor surfaces the invariant (gate-blocked AND still an active
+    holder) for the reaper's instrumentation / the Wave-2 proof test.
+    """
+    return bool(is_gate_blocked(job_id) and _holder_is_active(job_id))
+
+
 def _gc_lane_slot(project_id: str, lane: str) -> None:
     """Drop the (project_id, lane) active slot if its holder is no longer live."""
     key = (project_id, lane)

@@ -99,6 +99,52 @@ def health_reports_dir() -> Path:
     return data_dir() / HEALTH_REPORTS_DIRNAME
 
 
+# ── Reaper (zombie-hunter → safe-to-arm) tuning knobs (Wave 2) ─────────────
+# Positive-liveness corroboration windows, read at call time so a test/deploy
+# can tune them via env. Each has a conservative default (over-protect: a wider
+# window keeps MORE sessions, which is the safe direction). All are seconds.
+
+REAPER_WORK_MTIME_SECS_ENV = "ANCHOR_REAPER_WORK_MTIME_SECS"
+REAPER_CPU_WINDOW_SECS_ENV = "ANCHOR_REAPER_CPU_WINDOW_SECS"
+REAPER_HEARTBEAT_STALE_SECS_ENV = "ANCHOR_REAPER_HEARTBEAT_STALE_SECS"
+
+#: A worktree write within this window counts as a (corroborated) work signal.
+REAPER_WORK_MTIME_SECS_DEFAULT = 120.0
+#: The window over which a CPU sample is judged "active".
+REAPER_CPU_WINDOW_SECS_DEFAULT = 5.0
+#: A session heartbeat file older than this is STALE (grants no liveness).
+REAPER_HEARTBEAT_STALE_SECS_DEFAULT = 90.0
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float env knob at call time; blank/invalid → ``default``."""
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    # A non-positive window is meaningless; fall back to the safe default.
+    return val if val > 0 else default
+
+
+def reaper_work_mtime_secs() -> float:
+    """Worktree-write freshness window (``ANCHOR_REAPER_WORK_MTIME_SECS``)."""
+    return _env_float(REAPER_WORK_MTIME_SECS_ENV, REAPER_WORK_MTIME_SECS_DEFAULT)
+
+
+def reaper_cpu_window_secs() -> float:
+    """CPU-sample activity window (``ANCHOR_REAPER_CPU_WINDOW_SECS``)."""
+    return _env_float(REAPER_CPU_WINDOW_SECS_ENV, REAPER_CPU_WINDOW_SECS_DEFAULT)
+
+
+def reaper_heartbeat_stale_secs() -> float:
+    """Heartbeat staleness threshold (``ANCHOR_REAPER_HEARTBEAT_STALE_SECS``)."""
+    return _env_float(REAPER_HEARTBEAT_STALE_SECS_ENV,
+                      REAPER_HEARTBEAT_STALE_SECS_DEFAULT)
+
+
 def ensure_data_dirs() -> None:
     """Create the data subdirectories that Anchor writes into.
 
