@@ -1,6 +1,6 @@
 # Zombie-Hunter → safe-to-arm reaper (pause-first) — Implementation Plan (Foreman-ready)
 
-test-command: python -m pytest tests/ -k reaper -q
+test-command: python -m pytest tests/ -k reaper -v
 
 **North Star:** Turn Anchor's process-lifecycle subsystem from a permanently-disarmed liability into a trustworthy autonomous reaper that is provably SAFE TO ARM — one that reliably kills only truly orphaned sub-agent swarms (never a legitimate work-doing run) and whose safety is earned by evidence, not asserted — so John can finally flip it on.
 
