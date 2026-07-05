@@ -75,6 +75,7 @@ Stdlib only. No third-party imports.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -646,3 +647,274 @@ def owner_ids_or_abstain(snapshot, records) -> set:
     except Exception:
         return {r.get("session_id") for r in (records or [])
                 if r.get("session_id")}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BOUNDED BLAST RADIUS + BOOT GRACE + CONSERVATIVE AGE + SAFE LINEAGE (Wave 4)
+# ─────────────────────────────────────────────────────────────────────────────
+# Cap the worst case BEFORE any arming is contemplated: no runaway cascade (a
+# per-cycle blast cap), no touching young sessions (a boot/startup grace window),
+# no touching unknown-age sessions (a registered created_at is REQUIRED for
+# kill-eligibility), and a transitive-parent lineage walk that can never spin on
+# a malformed/looping chain (a visited-set + hard depth cap; a cycle is flagged
+# by the registry-integrity check and its whole branch is PROTECTED/abstained).
+#
+# Every predicate here fails in the SAFE direction: any uncertainty (unknown age,
+# a lineage cycle, an over-deep chain, a throwing probe) resolves to PROTECTED,
+# never to an action. These bounds sit ON TOP of the Wave-2 positive-proof-of-
+# death :func:`kill_authorized` predicate — a session is only ever a sweep
+# candidate when it is BOTH confirmed-dead-of-owner AND past every bound here.
+
+_log = logging.getLogger("anchor.reaper")
+# The reaper is a safety subsystem whose operational WARNINGs (e.g. a blast-cap
+# deferral) must stay independently visible — capturable by tests and available
+# to any root handler. ``anchor_gui`` reconfigures process-wide logging when it
+# loads: it pins the ROOT logger to ERROR (``basicConfig(level=ERROR)``) and
+# islands the ``anchor`` logger (``propagate=False``) to de-duplicate its own
+# error log. As a child of ``anchor`` under an ERROR root, the reaper's warnings
+# would then neither fire nor propagate. Decouple this logger from that global
+# state: keep it firing at INFO+ and parent it directly to root so its records
+# reach the root logger's handlers regardless of ``anchor_gui``'s islanding.
+_log.setLevel(logging.INFO)
+_log.propagate = True
+_log.parent = logging.getLogger()
+
+
+def _coerce_epoch(value):
+    """Coerce a stored timestamp to epoch-seconds float, or ``None`` if absent
+    / uninterpretable. Never raises — an unparseable value is ``None`` (unknown),
+    which the callers treat as PROTECTED."""
+    if value is None:
+        return None
+    try:
+        ts = float(value)
+    except (TypeError, ValueError):
+        return None
+    # A zero / negative timestamp is not a defensible birth signal → unknown.
+    return ts if ts > 0 else None
+
+
+def _pid_start_time(record, snapshot=None, probe=None):
+    """The owning PID's process-tree start time (GetProcessTimes) — the defensible
+    age anchor, NEVER file mtime.
+
+    Prefers the value already sampled into the immutable snapshot's
+    positive-liveness map (one probe per sweep); falls back to a fresh
+    ``probe.creation_time(pid)`` only when a ``probe`` is supplied (unit tests) and
+    the snapshot has no entry. Returns ``None`` when the PID has no accessible live
+    process (gone / exited / access-denied) — a dead orphan has no probeable start,
+    so its only age signal is its registry ``created_at``.
+    """
+    sid = record.get("session_id")
+    if snapshot is not None:
+        try:
+            sig = snapshot.positive_liveness.get(sid)
+        except Exception:
+            sig = None
+        if sig is not None and getattr(sig, "owner_create_time", None) is not None:
+            return sig.owner_create_time
+    if probe is not None:
+        pid = record.get("pid")
+        try:
+            pid_int = int(pid)
+        except (TypeError, ValueError):
+            return None
+        try:
+            return probe.creation_time(pid_int)
+        except Exception:
+            return None
+    return None
+
+
+def session_age_secs(record, snapshot=None, *, now=None, probe=None):
+    """Conservative age of ``record`` in seconds, or ``None`` when unknown.
+
+    Age is derived from the oldest DEFENSIBLE birth signal — the process-tree
+    start time via ``GetProcessTimes`` on the live PID and/or the registry
+    ``created_at`` — and NEVER from file mtime (a file can be touched at any time).
+    When both a PID start and a ``created_at`` exist, the age is taken from the
+    MOST-RECENT (youngest) of them, so a session counts as "old enough" only when
+    EVERY defensible signal agrees it is — the conservative/protect direction on
+    disagreement. Returns ``None`` when NO defensible signal exists (unknown age →
+    the caller PROTECTS).
+    """
+    if now is None:
+        now = time.time()
+    starts = []
+    created = _coerce_epoch(record.get("created_at"))
+    if created is not None:
+        starts.append(created)
+    pid_start = _coerce_epoch(_pid_start_time(record, snapshot, probe))
+    if pid_start is not None:
+        starts.append(pid_start)
+    if not starts:
+        return None
+    age = now - max(starts)
+    return age if age > 0 else 0.0
+
+
+def age_protected(record, snapshot=None, *, now=None, grace=None, probe=None) -> bool:
+    """Whether ``record`` must NOT be frozen/killed on AGE grounds (PROTECTED).
+
+    Returns ``True`` (PROTECTED — abstain) when ANY of:
+
+      • **no registered created_at** — a registered ``created_at`` is REQUIRED for
+        kill-eligibility; without it the session is never age-eligible;
+      • **unknown age** — no created_at AND no probeable PID start;
+      • **inside the boot/startup grace window** — younger than
+        ``ANCHOR_REAPER_BOOT_GRACE_SECS`` (it has not yet had time to attach a PTY,
+        register its owning job, or write its first heartbeat).
+
+    Fails safe: any exception → ``True`` (PROTECTED).
+    """
+    try:
+        if _coerce_epoch(record.get("created_at")) is None:
+            return True  # a registered created_at is required for kill-eligibility
+        age = session_age_secs(record, snapshot, now=now, probe=probe)
+        if age is None:
+            return True  # unknown age → PROTECTED
+        if grace is None:
+            grace = _paths.reaper_boot_grace_secs()
+        return age < grace
+    except Exception:
+        return True
+
+
+def find_lineage_cycles(records, *, max_depth=None) -> set:
+    """Registry-integrity check: session ids on a malformed ``parent_session_id``
+    lineage — a cycle, or a chain deeper than the hard depth cap.
+
+    The transitive-parent walk is a functional graph (each session points at ONE
+    ``parent_session_id``). This walks every session up its parent chain with a
+    per-walk visited-set and a hard depth cap
+    (``ANCHOR_REAPER_LINEAGE_MAX_DEPTH``): a revisited node means a CYCLE (the loop
+    portion is flagged); exceeding the cap means a runaway/over-deep chain (the
+    walked branch is flagged). Flagged sessions are treated as PROTECTED (abstain)
+    by :func:`plan_sweep` — a broken chain must never authorize a kill.
+
+    Never raises — a malformed record is skipped, not fatal.
+    """
+    if max_depth is None:
+        max_depth = _paths.reaper_lineage_max_depth()
+    parent = {}
+    for rec in records or []:
+        try:
+            sid = rec.get("session_id")
+        except Exception:
+            continue
+        if not sid:
+            continue
+        parent[sid] = rec.get("parent_session_id") or ""
+
+    flagged = set()
+    for start in parent:
+        node = start
+        seen = []
+        seen_set = set()
+        depth = 0
+        while node and node in parent:
+            if node in seen_set:
+                # Cycle: flag from the first occurrence of this node onward.
+                idx = seen.index(node)
+                flagged.update(seen[idx:])
+                break
+            if depth >= max_depth:
+                # Over-deep / runaway chain: protect the whole walked branch.
+                flagged.update(seen)
+                flagged.add(node)
+                break
+            seen.append(node)
+            seen_set.add(node)
+            depth += 1
+            node = parent.get(node)
+    return flagged
+
+
+@dataclass(frozen=True)
+class SweepPlan:
+    """The bounded plan for ONE sweep cycle — what the sweep may act on now.
+
+    ``to_act``        — session ids authorized for a destructive action THIS cycle,
+                        already capped at the per-cycle blast-radius limit;
+    ``deferred``      — authorized candidates BEYOND the cap, deferred (logged) to
+                        the next sweep so a runaway can never cascade;
+    ``protected``     — sessions that were death-authorized but SPARED by a Wave-4
+                        bound (boot grace / unknown age / lineage cycle);
+    ``lineage_cycles``— the registry-integrity flag set: every session id on a
+                        malformed (cyclic / over-deep) lineage, action-eligible or
+                        not;
+    ``cap``           — the per-cycle blast-radius cap that was applied.
+    """
+
+    to_act: tuple = ()
+    deferred: tuple = ()
+    protected: tuple = ()
+    lineage_cycles: tuple = ()
+    cap: int = 0
+
+
+def plan_sweep(records, snapshot, *, now=None, max_actions=None, grace=None,
+               max_depth=None, revalidate=None, probe=None) -> SweepPlan:
+    """Compute the BOUNDED destructive-action plan for one sweep cycle.
+
+    Starts from the Wave-2 positive-proof-of-death predicate
+    (:func:`kill_authorized`) and then applies every Wave-4 bound: a candidate is
+    dropped to ``protected`` if it is inside the boot-grace window, of unknown age,
+    or on a malformed lineage; the survivors are capped at
+    ``ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP`` and the remainder is ``deferred`` (and
+    logged). A degraded/``None`` snapshot yields an EMPTY plan (``kill_authorized``
+    already refuses everything) — uncertainty never acts.
+
+    Pure and side-effect-free except for a single deferred-remainder log line —
+    the caller owns the actual freeze/kill so this stays unit-testable with no real
+    process.
+    """
+    if now is None:
+        now = time.time()
+    if max_actions is None:
+        max_actions = _paths.reaper_max_actions_per_sweep()
+    recs = list(records or [])
+
+    cycles = find_lineage_cycles(recs, max_depth=max_depth)
+
+    candidates = []
+    protected = []
+    for rec in recs:
+        try:
+            sid = rec.get("session_id")
+        except Exception:
+            continue
+        if not sid:
+            continue
+        # Only a confirmed-dead-of-owner orphan is ever a candidate (Wave 2).
+        try:
+            authorized = kill_authorized(rec, snapshot, revalidate=revalidate)
+        except Exception:
+            authorized = False
+        if not authorized:
+            continue
+        # Wave-4 bounds — any one spares the session (PROTECT/abstain).
+        if sid in cycles:
+            protected.append(sid)
+            continue
+        if age_protected(rec, snapshot, now=now, grace=grace, probe=probe):
+            protected.append(sid)
+            continue
+        candidates.append(sid)
+
+    to_act = candidates[:max_actions]
+    deferred = candidates[max_actions:]
+    if deferred:
+        _log.warning(
+            "reaper sweep blast-cap reached (%d): acting on %d, deferring %d "
+            "to the next sweep: %s",
+            max_actions, len(to_act), len(deferred), list(deferred),
+        )
+
+    return SweepPlan(
+        to_act=tuple(to_act),
+        deferred=tuple(deferred),
+        protected=tuple(protected),
+        lineage_cycles=tuple(sorted(cycles)),
+        cap=max_actions,
+    )

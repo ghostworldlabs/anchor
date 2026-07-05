@@ -145,6 +145,62 @@ def reaper_heartbeat_stale_secs() -> float:
                       REAPER_HEARTBEAT_STALE_SECS_DEFAULT)
 
 
+# ── Reaper bounds knobs (Wave 4 — bounded blast radius + boot grace) ────────
+# The worst-case containment: a per-cycle blast-radius cap so a runaway sweep
+# can never cascade, a boot/startup grace window so a freshly-started session is
+# never touched before it can establish ownership, and a hard lineage-walk depth
+# cap so a malformed/looping chain can never spin the transitive-parent walk.
+# All read at call time so a test/deploy can tune them via env. Defaults chosen
+# in the SAFE direction (small blast cap, wide grace).
+
+REAPER_MAX_ACTIONS_PER_SWEEP_ENV = "ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP"
+REAPER_BOOT_GRACE_SECS_ENV = "ANCHOR_REAPER_BOOT_GRACE_SECS"
+REAPER_LINEAGE_MAX_DEPTH_ENV = "ANCHOR_REAPER_LINEAGE_MAX_DEPTH"
+
+#: At most this many freeze/kill actions may fire per sweep cycle; the remainder
+#: is deferred (logged) to the next sweep. Small on purpose — a runaway sweep is
+#: halted long before it can cascade across a whole swarm.
+REAPER_MAX_ACTIONS_PER_SWEEP_DEFAULT = 3
+#: A session younger than this (seconds) is inside the boot/startup grace window
+#: and is NEVER frozen or killed — it has not yet had time to attach a PTY,
+#: register its owning job, or write its first heartbeat.
+REAPER_BOOT_GRACE_SECS_DEFAULT = 300.0
+#: Hard cap on how many parent hops the transitive-lineage walk may take before
+#: it declares the chain malformed and abstains (PROTECT) on the whole branch.
+REAPER_LINEAGE_MAX_DEPTH_DEFAULT = 64
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env knob at call time; blank/invalid/non-positive → default."""
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        val = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    # A non-positive cap/depth is meaningless; fall back to the safe default.
+    return val if val > 0 else default
+
+
+def reaper_max_actions_per_sweep() -> int:
+    """Per-sweep blast-radius cap (``ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP``)."""
+    return _env_int(REAPER_MAX_ACTIONS_PER_SWEEP_ENV,
+                    REAPER_MAX_ACTIONS_PER_SWEEP_DEFAULT)
+
+
+def reaper_boot_grace_secs() -> float:
+    """Boot/startup grace window (``ANCHOR_REAPER_BOOT_GRACE_SECS``)."""
+    return _env_float(REAPER_BOOT_GRACE_SECS_ENV,
+                      REAPER_BOOT_GRACE_SECS_DEFAULT)
+
+
+def reaper_lineage_max_depth() -> int:
+    """Transitive-lineage walk hard depth cap (``ANCHOR_REAPER_LINEAGE_MAX_DEPTH``)."""
+    return _env_int(REAPER_LINEAGE_MAX_DEPTH_ENV,
+                    REAPER_LINEAGE_MAX_DEPTH_DEFAULT)
+
+
 def ensure_data_dirs() -> None:
     """Create the data subdirectories that Anchor writes into.
 
