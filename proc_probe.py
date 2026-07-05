@@ -93,6 +93,11 @@ PROBE_RUNNING = "running"
 PROBE_EXITED = "exited"
 PROBE_UNKNOWN = "unknown"
 
+# ── Toolhelp process-enumeration constants (module scope; the Windows block
+#    below pins the ctypes surface). TH32CS_SNAPPROCESS = walk the process list.
+_TH32CS_SNAPPROCESS = 0x00000002
+_MAX_PATH = 260
+
 
 def _coerce_pid(pid):
     """Coerce ``pid`` to a positive ``int`` PID, or ``None`` when it is not one."""
@@ -181,6 +186,35 @@ if _IS_WINDOWS:  # pragma: no cover - exercised only on Windows
     _ntdll.NtSuspendProcess.argtypes = [_HANDLE]
     _ntdll.NtResumeProcess.restype = ctypes.c_long
     _ntdll.NtResumeProcess.argtypes = [_HANDLE]
+
+    #: (HANDLE)-1 — what CreateToolhelp32Snapshot returns on failure. Compared
+    #: as the full-width c_void_p value so a 64-bit sentinel is never truncated.
+    _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    class _PROCESSENTRY32W(ctypes.Structure):
+        """The Win32 ``PROCESSENTRY32W`` — only ``th32ProcessID`` is read, but the
+        WHOLE struct is declared so ``dwSize`` (which Toolhelp validates) and the
+        field offsets are correct."""
+        _fields_ = [
+            ("dwSize", wintypes.DWORD),
+            ("cntUsage", wintypes.DWORD),
+            ("th32ProcessID", wintypes.DWORD),
+            ("th32DefaultHeapID", ctypes.c_size_t),
+            ("th32ModuleID", wintypes.DWORD),
+            ("cntThreads", wintypes.DWORD),
+            ("th32ParentProcessID", wintypes.DWORD),
+            ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", wintypes.DWORD),
+            ("szExeFile", ctypes.c_wchar * _MAX_PATH),
+        ]
+
+    # ── Full-width Toolhelp process-enumeration surface (Wave 9) ─────────────
+    _kernel32.CreateToolhelp32Snapshot.restype = _HANDLE
+    _kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    _kernel32.Process32FirstW.restype = wintypes.BOOL
+    _kernel32.Process32FirstW.argtypes = [_HANDLE, ctypes.POINTER(_PROCESSENTRY32W)]
+    _kernel32.Process32NextW.restype = wintypes.BOOL
+    _kernel32.Process32NextW.argtypes = [_HANDLE, ctypes.POINTER(_PROCESSENTRY32W)]
 
     def _filetime_to_epoch(ft: "_FILETIME") -> float:
         raw = (ft.dwHighDateTime << 32) | ft.dwLowDateTime
@@ -396,6 +430,67 @@ def is_alive(pid: int) -> bool:
         return code == _STILL_ACTIVE
     finally:
         _win.close(h)
+
+
+def enum_pids():
+    """Enumerate every live PID via the Toolhelp process snapshot (ctypes only).
+
+    Returns a ``frozenset[int]`` of the currently-live process ids, or ``None``
+    on an enumeration GAP — a failed snapshot, a non-Windows host, or any ctypes
+    error. **A ``None`` return is the UNKNOWN sentinel: the caller must ABSTAIN**
+    (never infer death from an enumeration it could not take).
+
+    This is the ownership-safe liveness oracle the ``OpenProcess``-based probes
+    cannot be. Toolhelp lists a PID regardless of whether we may OPEN it, so a
+    process we are DENIED access to (``creation_time`` → ``None``) still shows as
+    alive here — closing the "denied-open looks dead" hole a bare OpenProcess
+    probe leaves. Validated against ``psutil`` ground truth in the Wave-9 test
+    harness (``psutil`` is a dev/test-only dependency — never a product import).
+    """
+    if not _IS_WINDOWS or _win is None:
+        return None
+    try:  # pragma: no cover - exercised on Windows via the Wave-9 harness
+        snap = _kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+        if snap is None or snap == _INVALID_HANDLE_VALUE:
+            return None
+        try:
+            entry = _PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(_PROCESSENTRY32W)
+            pids = set()
+            ok = _kernel32.Process32FirstW(snap, ctypes.byref(entry))
+            # Guard the walk with a hard cap so a pathological snapshot can never
+            # spin forever (a Windows host has far fewer than this many PIDs).
+            guard = 0
+            while ok and guard < 1_000_000:
+                pids.add(int(entry.th32ProcessID))
+                ok = _kernel32.Process32NextW(snap, ctypes.byref(entry))
+                guard += 1
+            return frozenset(pids)
+        finally:
+            _kernel32.CloseHandle(snap)
+    except Exception:
+        return None
+
+
+def pid_alive_via_enum(pid, enum=None):
+    """Tri-state liveness for ``pid`` from the Toolhelp enumeration.
+
+    - ``True``  — the PID is present in the process snapshot (ALIVE, even when we
+      cannot OPEN it: a denied-open process is still alive);
+    - ``False`` — the PID is absent from a SUCCESSFUL snapshot (gone);
+    - ``None``  — the snapshot could not be taken (gap / non-Windows) → UNKNOWN,
+      the caller ABSTAINS.
+
+    ``enum`` may pre-supply the snapshot set (one enumeration per sweep); when
+    omitted a fresh :func:`enum_pids` is taken.
+    """
+    p = _coerce_pid(pid)
+    if p is None:
+        return None
+    pids = enum_pids() if enum is None else enum
+    if pids is None:
+        return None
+    return p in pids
 
 
 def tree_kill(pid: int) -> bool:

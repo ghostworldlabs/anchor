@@ -417,6 +417,7 @@ def build_decision_receipt(record, snapshot, decision, *, now=None) -> dict:
         "socket_owned": bool(getattr(signals, "socket_owned", False)),
         "work_mtime_fresh": bool(getattr(signals, "work_mtime_fresh", False)),
         "cpu_active": bool(getattr(signals, "cpu_active", False)),
+        "owner_probe_unknown": bool(getattr(signals, "owner_probe_unknown", False)),
     }
     try:
         age_protected = _reaper.age_protected(record, snapshot, now=now)

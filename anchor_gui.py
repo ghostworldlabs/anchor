@@ -10051,7 +10051,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     # work-doing session with no open browser stream is never
                     # falsely flagged as a runaway.
                     try:
-                        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs)
+                        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs,
+                                                      enumerate_pids=reaper.enumerate_live_pids)
                         live_ids = reaper.live_owner_ids(_snap)
                     except Exception:
                         _snap = None
@@ -10239,7 +10240,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # an orphan has NO live owner (not job-owned, not parent-owned),
                 # not merely "no attached PTY stream".
                 try:
-                    _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records)
+                    _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                                  enumerate_pids=reaper.enumerate_live_pids)
                     live_ids = reaper.live_owner_ids(_snap)
                 except Exception:
                     _snap = None
@@ -12012,7 +12014,8 @@ function startZombieTerminal(btn) {
             # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
             # parent-owned.
             try:
-                _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records)
+                _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                              enumerate_pids=reaper.enumerate_live_pids)
                 live_ids = reaper.live_owner_ids(_snap)
             except Exception:
                 _snap = None
@@ -13579,7 +13582,8 @@ def main():
         _snap_boot = reaper.build_snapshot(
             attached_pty_ids=set(),
             records=_sr_boot.list_sessions(status="running"),
-            job_active=lambda _sid: False)
+            job_active=lambda _sid: False,
+            enumerate_pids=reaper.enumerate_live_pids)
         _alive_pids = reaper.live_pid_ids(_snap_boot)
         _sr_boot.reconcile(live_session_ids=_alive_pids)
         # zombie-hunter safe-to-arm Wave 5: conservatively migrate every legacy
@@ -13691,7 +13695,8 @@ def main():
                 attached = set(pty_manager._LIVE.keys())
                 try:
                     snap = reaper.build_snapshot(attached_pty_ids=attached,
-                                                 records=running)
+                                                 records=running,
+                                                 enumerate_pids=reaper.enumerate_live_pids)
                 except Exception:
                     snap = None
                 # Derive the live-owner set DIRECTLY from the one snapshot via the

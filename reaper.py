@@ -141,6 +141,14 @@ class PositiveSignals:
     work_mtime_fresh: bool = False
     #: A CPU sample showed the owning process burning cycles in the window.
     cpu_active: bool = False
+    #: The owning PID could NOT be resolved to a definite alive-or-gone verdict
+    #: this sweep — an OpenProcess-DENIED read whose PID nonetheless appears in
+    #: the Toolhelp enumeration (denied ≠ gone), or an enumeration GAP. UNKNOWN
+    #: ⇒ :func:`classify` ABSTAINS (never confirms death on uncertainty). Set only
+    #: when :func:`build_snapshot` is given an ``enumerate_pids`` oracle; the
+    #: legacy (no-enumerator) path leaves it ``False`` and behaves exactly as
+    #: before (``owner_create_time is None`` ⇒ gone).
+    owner_probe_unknown: bool = False
 
 
 # ── The immutable per-sweep snapshot ────────────────────────────────────────
@@ -177,7 +185,8 @@ class LivenessSnapshot:
 
 
 def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
-                   probe=None, *, tol=2.0, now=None) -> LivenessSnapshot:
+                   probe=None, *, tol=2.0, now=None,
+                   enumerate_pids=None) -> LivenessSnapshot:
     """Build the immutable per-sweep :class:`LivenessSnapshot` — call ONCE/sweep.
 
     ``attached_pty_ids`` — the base set of sessions with a live PTY/browser
@@ -195,6 +204,17 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
                            whether the live PID is still OUR process.
     ``now``              — epoch seconds for the mtime/heartbeat freshness math
                            (injectable for tests); defaults to ``time.time()``.
+    ``enumerate_pids``   — OPTIONAL callable ``() -> frozenset[int] | None`` (the
+                           Toolhelp process enumeration, e.g.
+                           ``proc_probe.enum_pids``). When supplied, a PID whose
+                           ``OpenProcess`` read failed (``creation_time`` → ``None``)
+                           is DISAMBIGUATED: still enumerable (or the enumeration
+                           itself GAPPED / threw) ⇒ ``owner_probe_unknown`` →
+                           :func:`classify` ABSTAINS (denied ≠ gone); absent from a
+                           good enumeration ⇒ genuinely gone (confirmed dead).
+                           DEFAULT ``None`` ⇒ the legacy semantics EXACTLY
+                           (``creation_time is None`` ⇒ gone) — zero behavior
+                           change for every existing caller/test.
 
     Best-effort: any probe/import failure degrades to "not owned via that path"
     / "identity unknown", never raises. When a DEFAULT fetch (attached set /
@@ -265,6 +285,17 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
     # ── identity tuples + positive-liveness (probe each PID ONCE) ────────────
     if now is None:
         now = time.time()
+    # Take the Toolhelp process enumeration ONCE for this sweep (when an oracle
+    # was supplied) so the denied-vs-gone disambiguation below is O(1)/PID. A
+    # throwing enumerator is itself an enumeration GAP → every dead-looking PID
+    # abstains (never confirmed dead) rather than acting on an unknown.
+    enum_set = None
+    enum_supplied = enumerate_pids is not None
+    if enum_supplied:
+        try:
+            enum_set = enumerate_pids()
+        except Exception:
+            enum_set = None
     pid_identity = {}
     positive = {}
     do_probe = probe is not NO_PROBE
@@ -304,7 +335,20 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
             #: that is live but whose creation time MISMATCHES is a RECYCLED PID
             #: (a different process now owns it) — neither alive-ours NOR
             #: confirmed-dead: we must abstain, never kill the new owner.
-            owner_confirmed_dead = (actual is None)
+            owner_probe_unknown = False
+            if actual is None and enum_supplied:
+                # OpenProcess could not read this PID. Disambiguate denied-vs-gone
+                # via the Toolhelp enumeration: a PID that is still enumerable — or
+                # an enumeration that GAPPED (enum_set is None) — is UNKNOWN and
+                # must ABSTAIN, NEVER be confirmed dead. Only a PID demonstrably
+                # ABSENT from a good enumeration is genuinely gone.
+                if enum_set is None or pid_int in enum_set:
+                    owner_confirmed_dead = False
+                    owner_probe_unknown = True
+                else:
+                    owner_confirmed_dead = True
+            else:
+                owner_confirmed_dead = (actual is None)
 
             # Concretely-detectable positive signals (raw detection; the
             # corroboration gate lives in has_corroborated_positive). Cheap,
@@ -320,6 +364,7 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
                 socket_owned=_probe_socket(rec),
                 work_mtime_fresh=_probe_work_mtime(wp, now),
                 cpu_active=_probe_cpu(rec),
+                owner_probe_unknown=owner_probe_unknown,
             )
 
     return LivenessSnapshot(
@@ -427,6 +472,23 @@ def _probe_cpu(record) -> bool:
 
 # ── Pure derivations over the immutable snapshot ────────────────────────────
 
+def enumerate_live_pids():
+    """The production ``enumerate_pids`` oracle for :func:`build_snapshot`.
+
+    A thin, lazy passthrough to :func:`proc_probe.enum_pids` (the Toolhelp
+    process enumeration) so the five production sweep call sites can wire the
+    denied-vs-gone disambiguation with one shared provider without importing
+    ``proc_probe`` at each site. Returns a ``frozenset[int]`` of live PIDs, or
+    ``None`` on an enumeration GAP / non-Windows host (→ dead-looking PIDs
+    ABSTAIN). Never raises.
+    """
+    try:
+        import proc_probe
+        return proc_probe.enum_pids()
+    except Exception:
+        return None
+
+
 def live_owner_ids(snapshot) -> set:
     """The canonical live-owner set — a PURE function of ``snapshot``.
 
@@ -450,7 +512,8 @@ def live_pid_ids(snapshot) -> set:
     silently reaps an orphan at startup.
     """
     return {sid for sid, sig in snapshot.positive_liveness.items()
-            if sig is not None and sig.owner_create_time is not None}
+            if sig is not None and (sig.owner_create_time is not None
+                                    or getattr(sig, "owner_probe_unknown", False))}
 
 
 def classify(record, live_owner_ids, positive_liveness, *, tol=2.0) -> str:
@@ -487,6 +550,11 @@ def classify(record, live_owner_ids, positive_liveness, *, tol=2.0) -> str:
 
     sid = record.get("session_id")
     signals = positive_liveness.get(sid) if positive_liveness else None
+    if signals is not None and getattr(signals, "owner_probe_unknown", False):
+        # Owner liveness is UNKNOWN this sweep — an OpenProcess-DENIED read whose
+        # PID is still enumerable (denied ≠ gone), or an enumeration GAP. Never
+        # confirm death on uncertainty: ABSTAIN (KEEP), never reap.
+        return VERDICT_ABSTAIN
     actual = signals.owner_create_time if signals is not None else None
     if actual is None:
         # No live process for this PID — reconcile only (no kill).
