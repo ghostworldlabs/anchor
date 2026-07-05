@@ -9,7 +9,7 @@
     "branch": "foreman/zombie-hunter-safe-to-arm"
   },
   "budget": {
-    "max_waves_per_run": 3,
+    "max_waves_per_run": 10,
     "max_fix_iters_per_wave": 4
   },
   "models": {
