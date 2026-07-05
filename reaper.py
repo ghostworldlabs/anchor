@@ -282,7 +282,18 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
                 actual = probe.creation_time(pid_int)
             except Exception:
                 actual = None
-            pid_identity[pid_int] = (pid_int, actual, None)
+            # Wave 3: the identity tuple carries the image path "where available"
+            # — a best-effort corroborating field. Probed only when the probe
+            # exposes it (the real proc_probe does; a bare creation-time fake does
+            # not), so a fake without image_path leaves the field None unchanged.
+            img_path = None
+            _img_getter = getattr(probe, "image_path", None)
+            if callable(_img_getter):
+                try:
+                    img_path = _img_getter(pid_int)
+                except Exception:
+                    img_path = None
+            pid_identity[pid_int] = (pid_int, actual, img_path)
 
             # Derive the two owner-liveness verdicts from the recorded identity.
             recorded_ct = rec.get("proc_create_time")

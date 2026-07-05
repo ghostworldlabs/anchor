@@ -282,24 +282,73 @@ def _normalize(record: dict) -> dict:
     }
 
 
-def _save_sessions(reg: dict) -> None:
+#: Bounded retry for the atomic ``os.replace`` on Windows. A concurrent
+#: read-only sweep (``load_sessions`` → ``read_text``) momentarily holds the
+#: target file open; Windows then denies the rename with ``PermissionError(13,
+#: 'Access is denied')`` (a transient sharing violation, NOT a real permission
+#: fault). The reader's handle is released within microseconds, so a few short
+#: backed-off retries turn the race into a correct, atomic write instead of a
+#: spurious crash. POSIX ``os.replace`` never hits this — the loop is a no-op
+#: there (first attempt succeeds).
+_REPLACE_RETRIES = 40
+_REPLACE_BACKOFF_S = 0.005
+
+
+def _atomic_replace(tmp: str, target: str) -> None:
+    """``os.replace`` with a bounded retry over the transient Windows sharing
+    violation raised while a concurrent reader has ``target`` open. Re-raises
+    the last error if the window never clears within the retry budget."""
+    for attempt in range(_REPLACE_RETRIES):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_RETRIES - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_S)
+
+
+def _write_sessions_locked(reg: dict) -> None:
+    """The atomic write itself — the caller MUST already hold ``paths.WRITE_LOCK``.
+
+    Writes to a temp file in the same directory then ``os.replace`` over the
+    target so a crash mid-write can never leave a truncated/corrupt store
+    (durability discipline). Ensures the ``.anchor/`` dir exists first.
+
+    The replace goes through :func:`_atomic_replace` so a concurrent read-only
+    sweep holding the target open (the Windows sharing-violation race) is
+    tolerated with a bounded retry rather than surfacing a spurious
+    ``PermissionError``.
+    """
+    d = anchor_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    items = [reg[k] for k in reg]
+    target = sessions_path()
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(
+        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    _atomic_replace(str(tmp), str(target))
+
+
+def _save_sessions(reg: dict, *, _locked: bool = False) -> None:
     """Persist the registry (dict keyed by id) as a JSON list, atomically.
 
-    Runs under ``paths.WRITE_LOCK`` (matching ``rnd_registry``). Writes to a
-    temp file in the same directory then ``os.replace`` over the target so a
-    crash mid-write can never leave a truncated/corrupt store (durability
-    discipline). Ensures the ``.anchor/`` dir exists first.
+    WRITE_LOCK reentrancy (zombie-hunter → safe-to-arm, Wave 3): the mutating
+    CRUD entrypoints (:func:`register_session`, :func:`update_session`,
+    :func:`set_current_stage`, :func:`remove_session`, :func:`reconcile`) already
+    run inside ``with paths.WRITE_LOCK``. They call this with ``_locked=True`` so
+    the write does NOT re-acquire the lock — the critical section is SPLIT (the
+    held lock is passed down as the ``_locked`` flag), rather than relying on the
+    lock being reentrant. The code is therefore correct even if ``WRITE_LOCK`` is
+    a plain, non-reentrant ``threading.Lock`` — no self-deadlock on a held lock.
+    A standalone caller (the default ``_locked=False``) acquires the lock here.
     """
-    with _paths.WRITE_LOCK:
-        d = anchor_dir()
-        d.mkdir(parents=True, exist_ok=True)
-        items = [reg[k] for k in reg]
-        target = sessions_path()
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(
-            json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        os.replace(str(tmp), str(target))
+    if _locked:
+        _write_sessions_locked(reg)
+    else:
+        with _paths.WRITE_LOCK:
+            _write_sessions_locked(reg)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────
@@ -351,7 +400,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "crypt_token": crypt_token or "",
         })
         reg[sid] = record
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return record
 
 
@@ -524,7 +573,7 @@ def set_current_stage(session_id: str, stage: str, store_lane: str,
         rec = _normalize(rec)
         rec["session_id"] = session_id
         reg[session_id] = rec
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return rec
 
 
@@ -558,7 +607,7 @@ def update_session(session_id: str, **fields) -> dict:
         rec = _normalize(rec)
         rec["session_id"] = session_id
         reg[session_id] = rec
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return rec
 
 
@@ -568,7 +617,7 @@ def remove_session(session_id: str) -> bool:
         reg = load_sessions()
         if session_id in reg:
             del reg[session_id]
-            _save_sessions(reg)
+            _save_sessions(reg, _locked=True)
             return True
         return False
 
@@ -652,7 +701,7 @@ def reconcile(live_session_ids=None, worktree_exists=None,
                 reg[sid] = _normalize(rec)
                 marked.append(sid)
         if marked:
-            _save_sessions(reg)
+            _save_sessions(reg, _locked=True)
         report["marked"] = marked
         report["applied"] = True
     return report
