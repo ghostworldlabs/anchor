@@ -1,437 +1,157 @@
-# Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)
+# Zombie-Hunter → safe-to-arm reaper (pause-first) — Implementation Plan (Foreman-ready)
 
-test-command: python -m pytest tests/test_rearch_2026_07.py tests/test_review_fixes_2026_07.py tests/test_model_flex_w8.py tests/test_anchor_md_defork_w10.py tests/test_data_dir_migration_w11.py tests/test_journal_core_w12.py tests/test_journal_full_w13.py tests/test_parity_recovery_w14.py tests/test_supervisor_w15.py tests/test_supervisor_w16.py tests/test_c4_w17.py tests/test_closure_w18.py -v
+test-command: python -m pytest tests/ -k reaper -q
 
-**North Star:** # NORTH STAR — LOCKED
+**North Star:** Turn Anchor's process-lifecycle subsystem from a permanently-disarmed liability into a trustworthy autonomous reaper that is provably SAFE TO ARM — one that reliably kills only truly orphaned sub-agent swarms (never a legitimate work-doing run) and whose safety is earned by evidence, not asserted — so John can finally flip it on.
 
-**Effort:** Anchor Re-architecture — the Butler substrate
-**Project:** C:\dev\Anchor · **Locked:** 2026-07-02 by John (as-is, via AskUserQuestion; FULL triage confirmed)
-**Pipeline:** Crucible FULL (Stage 0 ✓ → Stage 1 → Stage 2 → Foreman)
-**Drift rule:** drift detection is ACTIVE from this lock. Amendments only via the
-documented North-Star-amendment path with John's approval.
-
----
-
-## Objective
-
-Re-architect Anchor from an 18,441-line monolith into a maintainable, observable,
-restart-resilient substrate — the architectural foundation for the Butler (an always-on
-agent that manages John's projects and workflow) — by (1) extracting the embedded
-frontend to static files, (2) replacing the if-elif dispatch with a declarative
-route table whose auth is default-deny by construction, (3) laying an append-only
-per-project event-log spine (dual-write; legacy stores stay authoritative), and
-(4) splitting spawned work into a supervisor process so the dashboard can restart
-without killing in-flight jobs or terminals — all delivered incrementally, with the
-dashboard fully working on :8777 at every merged step.
-
-## Success criteria (measurable)
-
-1. **Frontend extracted.** anchor_gui.py contains no embedded frontend blob larger than
-   ~50 lines: `_PROJECT_WINDOW_JS` (5623–10285), the `generate_html` f-string JS/CSS
-   (10966–13671), and the project-window HTML/CSS shell are served as static files via
-   the existing traversal-safe asset-route idiom, with server state injected only
-   through a small bootstrap JSON. Bar: behavior parity, Playwright-verified on the
-   home dashboard and the project window; anchor_gui.py shrinks by ≥ 7,000 lines.
-2. **One route table, declarative auth, default-deny.** All HTTP routes (~125 dispatch
-   arms across do_GET/do_POST) dispatch through a single declarative table where EVERY
-   route declares its auth policy; token is the default; unauthenticated routes exist
-   only on an explicit, reviewed allowlist. The currently-unauthenticated GET data
-   plane (/artifact, /report, /summary, /project, /api/rnd/projects, /api/rnd/tail,
-   /api/rnd/jobs) is gated when ANCHOR_TOKEN is set, with browser page navigation still
-   working (cookie or equivalent — no URL tokens except where WS demands it). Zero
-   in-branch imports shadowing module names (the os/datetime class) remain.
-3. **Event-log spine, dual-write, provably derivable.** Every mutation-of-record
-   (session started/closed/killed/advanced, doc persisted, job launched/finished/
-   cancelled, effort promoted, grass idea lifecycle, deliverable pinned/launched,
-   project lifecycle, handoff recorded, boneyard capture) appends a schema-versioned
-   event to an append-only per-project journal, written alongside — never instead of —
-   the existing index/pointer/registry stores. A parity gate (in tests AND the daily
-   healthcheck) re-derives the session/effort views from the journal and reports zero
-   divergence; a recovery tool rebuilds a deleted index.json from the journal in a
-   test. The "lost from an index" bug class becomes recoverable-by-construction.
-4. **Supervisor split — restart survival, live-proven.** Spawned lane jobs are owned by
-   a separate stdlib supervisor process (own NSSM service, loopback token-authed IPC,
-   inline seam for tests/healthcheck): `nssm restart anchor` with a job in flight
-   leaves the job running and the restarted dashboard reporting it live — demonstrated
-   on the real service. PTY sessions follow behind a mandated ConPTY-across-processes
-   spike; if the spike refutes economic feasibility, PTYs remain dashboard-owned and
-   that narrowing is recorded honestly in the plan (jobs-half is non-negotiable).
-5. **One markdown-parsing layer.** A single shared parsing module; anchor_gui.py and
-   anchor.py import it (today's byte-identical twins de-forked); the drifted third copy
-   dies with anchor_server.py, which is **deleted** (confirmed dead: Flask, port 5000,
-   referenced by nothing).
-6. **Runtime state out of the repo.** The live deployment runs with ANCHOR_DATA_DIR
-   pointing outside C:\dev\Anchor (using the existing paths.py seam + migrate_data);
-   `git status` on the repo is clean of runtime artifacts (~62 today) and stays clean
-   through a healthcheck cycle.
-7. **Never-broken increments.** Every merged step keeps the dashboard fully operational
-   as the NSSM `anchor` service on :8777 (John's daily use never breaks); Python stdlib
-   only (pywinpty exception stands); markdown files remain the source of truth for
-   tasks; the full test suite stays green (modulo the 2–3 documented pre-existing
-   flakes) and each pillar lands with its own test gate.
-
-## Non-goals (explicit)
-
-- **NOT building the Butler itself** — no autonomous scheduling/decision agent, no
-  proactive actions; this effort delivers the substrate only.
-- **NOT promoting the event log to source of truth** — no read-path cutover, no removal
-  of index/pointer/registry stores; that is a later, separate effort.
-- **NOT a UI redesign** — extraction is verbatim/behavior-parity; no visual or
-  interaction changes beyond what parity requires.
-- **NOT replacing markdown** as the task source of truth, and no new storage engines
-  (no SQLite, no third-party deps).
-- **NOT decomposing terminal_session.py** (Plan-1 Wave D item 13) — separate effort.
-- **NOT changing John's ops surface** beyond adding the one supervisor service — the
-  dashboard stays the NSSM `anchor` service on :8777.
-- **NOT a big-bang rewrite** — any step that would leave the dashboard down or require
-  a multi-day freeze is out.
-
-## Constraints (inherited, binding)
-
-Python stdlib only (pywinpty exception) · NSSM service `anchor` on :8777 · markdown
-source of truth for tasks · incremental migration, dashboard working at every step ·
-no visible console windows from spawned processes · sequenced after the
-fix/review-wave-a-2026-07 merge to master (DONE — deployed 2026-07-02).
-
-## Locked architectural decisions (Stage-0 D1–D3, John-approved with the lock)
-
-- **D1:** per-project append-only JSONL journal, DUAL-WRITE (legacy stores stay
-  authoritative for reads); parity gate + recovery tool are mandatory consumers.
-- **D2:** separate stdlib supervisor as its own NSSM service, loopback token-authed
-  IPC, inline seam for tests; JOBS first, PTYs behind the mandated ConPTY spike.
-- **D3:** default-deny declarative route auth; `open` is an explicit reviewed
-  allowlist; cookie-based browser navigation; strangler-style migration.
-
+## Success criteria
+- ABSTAIN-not-kill invariant: when liveness inputs are missing, stale, partial, or the owner-set computation throws, every one of the 5 call sites (orphan_check banner, Swarm & Owner View freeze, zombie_terminal_start brief, armed kill-daemon live_ids provider, boot reconcile) treats the session as OWNED/alive — a unit test injects each failure mode and asserts zero freeze/kill actions (fixes fail-deadly fallback #1).
+- Single shared liveness source: all 5 call sites consume one canonical live_owner_ids computation (attached ∪ job-owned ∪ transitive-parent-owned) built from one snapshot per sweep; a test proves no call site can classify with a different/narrower input set (fixes inconsistent inputs #3).
+- Bounded blast radius + boot grace: a sweep can freeze/kill at most a configured cap per cycle, and no session younger than a configured boot/startup grace window is ever frozen or killed; tests assert the cap halts a runaway sweep and that a fresh session inside the grace window survives (fixes unbounded blast radius / no boot-grace #2).
+- No swarm-job leak: term_kill and term_delete tear down BOTH the PTY AND every job_runner job the session owns, and never hide the registry record while jobs are still live; a test starts a session with in-flight jobs, kills it, and asserts all owned jobs are cancelled/reaped and the record state is honest (fixes job leak #4).
+- Status-model correctness: STATUS_CANCELLED is terminal (never re-adopted, never keeps a worktree), and the reaped-orphan vs parked-warm meanings of STATUS_IDLE are disambiguated into distinct states so a parked-warm session keeps its worktree while a reaped-orphan does not; tests assert a cancelled session is never resurrected and that worktree retention follows the correct state (fixes #5).
+- kill() persist-before-terminal ordering: produced docs are captured/persisted to main BEFORE the record is marked DONE/terminal, and _is_parked_idle / _is_parked classification fails SAFE (unknown → treat as parked/keep, never as reapable); tests assert no doc loss on kill and that an ambiguous record is never reaped (fixes #6).
+- Win32 correctness: process-liveness probing uses a full-width ctypes handle path (_kernel32 with argtypes/restype set, not windll implicit-int truncation), distinguishes a real running process from exit code 259/STILL_ACTIVE via a proper wait-with-timeout, and _save_sessions never deadlocks on WRITE_LOCK reentrancy; targeted tests cover handle width, the 259 ambiguity, and the reentrant-save path (fixes #7).
+- Restart-durable containment: process containment (Job Object association or an equivalent stdlib mechanism) and a crash-safe PERSISTED frozen-set are written to disk BEFORE any arming, and are re-read and re-honored after an NSSM `anchor` restart — a hermetic simulated-restart test proves a frozen session stays frozen and containment survives across the process boundary (fixes #8).
+- Arming safety gate: the daemon remains dry-run/unarmed by DEFAULT and can only be armed once the plan's enumerated safety gates are met; a dry-run telemetry/audit path records what WOULD have been frozen/killed (with the owner-evidence for each decision) so precision can be measured on the live service before the arm flag is ever set.
+- stdlib-only + green suite: all changes are Python-3.8+ stdlib only (sole exception: lazy pywinpty in pty_manager.py, unchanged), pass distro.py's import scan, and land with the full test suite green plus a new/updated test module gating each of the 9 findings (C7 never-broken-green discipline).
+- Spec truth: C:\dev\Skill Foundry\skills\zombie-hunter\SKILL.md is rewritten to match the shipped mechanism — ownership-based (live-owner), NOT identity-based; psutil/WMI references removed; the abstain-default, boot-grace, blast-cap, and arming-gate model documented as the contract.
 
 > Every wave ships real source its new tests import and exercise; acceptance criteria follow the D16 hybrid convention (a one-line done-when + Given/When/Then for non-trivial waves).
 
-## Wave 1 — W1 — Ground-Truth Instrumentation (census · anchors · tripwire)
+## Wave 1 — Wave 1 — Unified reaper module + one canonical liveness snapshot + written owner-enumeration contract
 
-**Intent:** Replace hope with mechanical evidence before any wave is sized: size the C1 extraction, make structural references durable, and enumerate the TRUE mutation-of-record set for C3 (Master Plan Phase 0; Integrated 1, 4, 20; Mitigations 1, 5, 14).
+**Intent:** Collapse the five drifted discriminators onto ONE import surface fed by one immutable per-sweep snapshot built to a written owner-enumeration contract — the structural foundation every later safety property leans on. Serves criteria (2),(15).
 
-**Deliverables:** tools/interpolation_census.py — mechanically classifies EVERY {…} interpolation in generate_html and render_project_window_html as data/flag/markup-emitting with counts, asserts _PROJECT_WINDOW_JS has zero, and derives the actual shrink number; if markup-emitting exceeds the small threshold, the C1 amendment is raised NOW via the North-Star amendment path; Sentinel-comment anchors landed in a tiny pre-wave commit + an anchor-freshness gate test that re-locates each structural anchor (the _PROJECT_WINDOW_JS assignment, the generate_html def, sentinels) and fails loudly on ambiguity — no line numbers anywhere in later waves; Write-site tripwire: a test-mode wrapper around file writes under .anchor/ (journal path allowlisted) run across the full suite + healthcheck to emit the mechanical mutation-of-record inventory; wired to become the permanent C3 completeness gate when the journal lands; Checked-in census report + mutation-set inventory as gate artifacts consumed by later waves
+**Deliverables:** New reaper.py module absorbing zombie_hunter.classify / live_owner_ids and the five call-site discriminators; @dataclass(frozen=True) LivenessSnapshot (attached_pty_ids, job_owned_ids, parent_owned_ids, pid_identity: Mapping[int,(pid,create_time,image_path)], positive_liveness: Mapping[session_id,PositiveSignals]) built EXACTLY ONCE per sweep; Owner-enumeration contract written into the module docstring AND enforced in code: live_owner_ids(snapshot) = attached ∪ job-owned ∪ transitive-parent-owned, rebuilt from the immutable snapshot each sweep (never incrementally mutated); live_owner_ids(snapshot) as a pure function of the snapshot with no self-sourcing; classify() refactored to take the live-owner set AND positive-liveness map as its ONLY inputs; All 5 call sites re-pointed to the identical snapshot/provider: /api/rnd/orphan_check banner, Swarm & Owner View freeze, zombie_terminal_start brief, armed kill-daemon live_ids provider, boot reconcile (anchor_gui.py:~18198); tests/test_reaper_single_source.py: stub-gate grep of every classify/kill call site (fail if any bypasses the single provider) + owner-contract test (re-parented grandchild recorded at launch stays owned after parent exit; set rebuilt not mutated each sweep)
 
 **Depends on:** —
 
-**done-when:** The census emits classified counts + the derived shrink number (with the C1 amendment raised now if forced), the freshness gate relocates every anchor unambiguously, and the tripwire run over the full suite + healthcheck produces the complete mutation-of-record inventory.
+**done-when:** reaper.py exists with a frozen LivenessSnapshot and a pure live_owner_ids built once per sweep; all 5 call sites consume the identical snapshot/provider; test_reaper_single_source.py passes and its stub-gate fails if any site bypasses the single source.
 
-- **Given** the full test suite plus a stubbed healthcheck running under the write-site tripwire, **when** any test path mutates a file under .anchor/, **then** the tripwire captures the write site into the inventory, and (in enforce mode) fails any mutation not paired with a journal event, with the journal path itself allowlisted
-- **Given** a refactor has moved or renamed the _PROJECT_WINDOW_JS assignment or the generate_html def, **when** the anchor-freshness gate runs before an EXECUTE, **then** it fails loudly on the ambiguous/missing anchor instead of letting a stale structural reference proceed
+- **Given** A session whose launch PID was re-parented to PID 1 after its parent exited, with the launch PID recorded in the identity registry, **when** live_owner_ids is computed for the sweep, **then** the session id remains in the owner set via the launch-time identity-tuple registry (never orphaned merely because its parent exited)
+- **Given** A new sixth consumer of classify() written without supplying the live-owner set or positive-liveness map, **when** the code is compiled / the single-source stub-gate test runs, **then** it is compile-forced to supply them and the grep gate FAILS the build if it bypasses the shared live_owner_ids/snapshot provider
+- **Given** Two consecutive sweeps over the same registry state, **when** the owner set is built for each, **then** each set is rebuilt fresh from that sweep's immutable snapshot and no drift carries across sweeps
 
-## Wave 2 — W2 — Regression Rails (Playwright flows · contract shim · consumer token paths)
+## Wave 2 — Wave 2 — Positive, liveness-corroborated kill predicate + abstain invariant + gate-blocked KEEP proof + pre-execution re-validation
 
-**Intent:** Manufacture the permanent regression assets and deploy-safety shims every later pillar depends on: the top-5 stateful Playwright flows, the frontend↔backend contract-versioning shim, and a token path for every consumer of every currently-open route (Master Plan Phase 0; Integrated 5, 8, 13; Mitigations 4, 12).
+**Intent:** Make ANY uncertainty resolve to KEEP and put KILL on POSITIVE proof of death (never absence, never a stale artifact masquerading as life); PROVE the gate-blocked/API-waiting session stays owned, and prove WHICH protection holds. Serves criteria (1),(8),(15).
 
-**Deliverables:** Five scripted Playwright flows as permanent regression assets: terminal open+type via stub PTY, pending-paste flush, drag-to-group, maximize/restore, v12 dock click — runnable in the extraction gate and every later pillar; Contract-versioning shim shipped as the LAST pre-migration release: window.ANCHOR_BOOT carries a build id, every _postJson sends it, mismatches answer a structured 409 the old client renders as a 'reload required' banner (stale tab / PWA-cached iPad client protection); Consumer-enumeration inventory (repo code, anchor_healthcheck.py endpoint walk, .bat/.vbs launchers, scheduled tasks, personal scripts) with Authorization-header token acceptance implemented everywhere, ?token= retained only for WS/SSE; Tests: 409-on-mismatch contract test + Authorization-header acceptance tests on representative routes
+**Deliverables:** Defensive boundary wrapping owner + positive-liveness computation: any exception / None / missing input / stale timestamp / partial set / empty owner-set returns a sentinel every call site interprets as OWNED/alive; positive_liveness(session) implemented from concretely-detectable stdlib signals — git index.lock presence, session heartbeat file, owned-socket probe, worktree write mtime, CPU sample — EACH gated on owning-PID-alive corroboration (stale lock / forged heartbeat whose owner is dead is NOT liveness); KILL predicate: no live owner AND identity-probe-confirmed-dead AND no CORROBORATED positive signal AND fresh in-lock re-validation; Investigation + fix task: instrument job_runner and PROVE (with a test) a gate-blocked / API-waiting job stays RUNNING/in-flight with _holder_is_active true; if not, extend job_runner with a blocked_but_owned state so it stays in job_owned_ids; Pre-execution re-validation: within the SAME lock, immediately before the destructive action, recompute owner + positive-liveness + confirmed-death for the specific target and ABORT if anything now indicates life; env knobs via paths.py: ANCHOR_REAPER_WORK_MTIME_SECS, ANCHOR_REAPER_CPU_WINDOW_SECS, ANCHOR_REAPER_HEARTBEAT_STALE_SECS; tests/test_reaper_work_evidence.py (positive-basis; gate-blocked KEEP run TWICE incl. ownership-stripped variant; quiet-but-alive KEEP; stale-lock/forged-heartbeat NOT-protective) + tests/test_reaper_abstain.py (inject throw/None/stale/partial at each of the 5 sites → assert ZERO freeze/kill)
 
-**Depends on:** W1 — Ground-Truth Instrumentation (census · anchors · tripwire)
+**Depends on:** Wave 1 — Unified reaper module + one canonical liveness snapshot + written owner-enumeration contract
 
-**done-when:** All five Playwright flows are green against the current server, a build-id mismatch returns the structured 409 rendered as the reload banner, and every enumerated open-route consumer has a verified token path.
+**done-when:** The kill predicate authorizes only on confirmed-death-of-owner + no corroborated positive signal + fresh re-validation; every failure mode injected at all 5 sites yields zero freeze/kill; the gate-blocked session is proven owned and KEEP is proven twice (owner + ownership-stripped process-alive fallback).
 
-- **Given** a browser tab loaded before a deploy (stale ANCHOR_BOOT build id), **when** its JS issues any _postJson call to the upgraded server, **then** the server answers a structured 409 and the old client renders the 'reload required' banner instead of failing opaquely
-- **Given** a consumer currently calling an open GET route (e.g. the healthcheck endpoint walk), **when** it presents the token via the Authorization header, **then** the route accepts it, with ?token= needed only on WS/SSE transports
+- **Given** A legitimately-working sub-agent blocked on an AskUserQuestion gate — no file writes, no CPU, no obvious handles — whose owning process is still alive, **when** a sweep classifies it, **then** it is KEPT (kill predicate fails at positive-proof-of-death) and the fixture asserts KEEP still holds even when ownership is forcibly stripped from the snapshot, via the process-alive probe
+- **Given** A git index.lock file present in a worktree but the owning PID confirmed dead (a stale lock), **when** positive_liveness evaluates the signal, **then** the stale lock does NOT grant KEEP (corroboration by owner-alive fails) and the orphan remains reap-eligible
+- **Given** The owner-set computation throws or returns a partial/None input at any of the 5 call sites, **when** classify runs, **then** a sentinel is returned that every site interprets as OWNED/alive and zero freeze/kill actions occur
 
-## Wave 3 — W3 — Spikes, Pillar Flags & Process Rails
+## Wave 3 — Wave 3 — Win32 correctness: full-width ctypes, STILL_ACTIVE/259 disambiguation, identity tuples, WRITE_LOCK reentrancy
 
-> AMENDMENT (2026-07-03, human-authorized, bounded): (1) This wave's
-> optional-dependency skip markers (`pytest.importorskip("playwright...")` etc.)
-> are AUTHORIZED — they follow the repo's documented dev-only-dependency
-> convention (CLAUDE.md: "Playwright is a DEV-ONLY test dependency
-> (pytest.importorskip)"); this amendment is the required plan citation.
-> (2) NEW HARD REQUIREMENT: every process the spike/tests spawn (claude.exe,
-> PTY children) MUST be reaped before the test returns — a gate run leaving
-> zero leaked processes is part of this wave's done-when (the 09:49 gate run
-> leaked ~10 claude.exe processes; that is a defect to fix in this wave).
+**Intent:** Make the liveness probe the positive-proof kill predicate and identity registry trust provably correct — no handle truncation, no exit-259 misread, no save deadlock — before any age or containment logic relies on it. Serves criterion (7).
 
-**Intent:** Run both time-boxed spikes against pre-written acceptance questions so Phases 2 and 5 consume verdicts (not hope), implement the four per-pillar off-switch flags + hybrid-state assertion, pre-design the PTY drain fallback, and codify the standing rituals + traceability ledger (Master Plan Phase 0; Integrated 14, 23, 33, 34, 42, 43, 44, 45, 52; Mitigations 10, 13, 15, 20).
+**Deliverables:** Explicit _kernel32 ctypes surface (OpenProcess/GetExitCodeProcess/WaitForSingleObject/GetProcessTimes) with argtypes/restype fully set and HANDLE as c_void_p, replacing windll implicit-int probing; Exit-259 disambiguation: never treat GetExitCodeProcess==259 as dead; confirm via WaitForSingleObject(handle,0) (WAIT_TIMEOUT=running vs WAIT_OBJECT_0=exited); ACCESS_DENIED/open-failure → UNKNOWN→abstain. 'Confirmed dead' = WAIT_OBJECT_0 with a matching identity tuple; Stable identity tuple per tracked PID (PID + GetProcessTimes creation time + image path where available); liveness read or kill fires ONLY when PID and creation-time both match the snapshot; mismatch = recycled PID → abstain; _save_sessions restructured in session_registry.py to NOT re-acquire WRITE_LOCK when called under a held lock (pass the held lock down / split the critical section), not a reentrant lock; tests/test_reaper_win32.py: handle width on a synthetic high-value handle, the 259 ambiguity, denied-open→abstain, PID-reuse-within-a-sweep, and the reentrant-save path + a parallel-sweep + user-write concurrency stress test
 
-**Deliverables:** ConPTY-across-processes spike harness + recorded verdict against the pre-written acceptance questions (latency bound, re-attach behavior, complexity budget); Cookie-through-WS-upgrade spike on the REAL clients (desktop browser + iPhone PWA over Tailscale HTTPS) + recorded verdict, with ?token= declared as the WS fallback if the Cookie header doesn't survive; Pre-designed graceful pre-restart drain script: close_session park + capture_session_docs + W3 warm-resume seed for every live PTY, proven against a stub PTY session; Four per-pillar off-switch flags implemented (journal emission · auth warn/enforce · supervisor inline/external · static-vs-embedded frontend) + the named hybrid-state matrix + a healthcheck assertion that the CURRENT live configuration is a named state; Three Butler user stories checked in as the binding Phase-4 envelope validation target; cross-pillar dependency DAG with the revert-compatibility rule; Codified rituals: per-wave live-service smoke checklist, healthcheck SLO (wall-time cap, zero-known-flakes, 20× nightly before 5AM), auth-flip sequencing rule, soft merge-freeze protocol for the extraction wave; Checked-in Appendix-A traceability ledger (ideas 1–52 + mitigations 1–20, Mitigation 9 explicitly reconciled)
+**Depends on:** Wave 2 — Positive, liveness-corroborated kill predicate + abstain invariant + gate-blocked KEEP proof + pre-execution re-validation
 
-**Depends on:** W2 — Regression Rails (Playwright flows · contract shim · consumer token paths)
+**done-when:** Liveness probing uses a full-width _kernel32 handle path, distinguishes running from exit-259 via wait-with-timeout, gates every read/kill on a matching identity tuple, and _save_sessions never deadlocks under a held lock — all covered by test_reaper_win32.py.
 
-**done-when:** Both spike verdicts are recorded against their pre-written acceptance questions, the four pillar flags exist with the healthcheck asserting the live config is a named hybrid state, the drain script runs green against a stub PTY, and the traceability ledger (including Mitigation 9's reconciliation) is committed.
+- **Given** A tracked process that has exited but whose GetExitCodeProcess returns 259 (a real process legitimately using 259 as its exit code, or STILL_ACTIVE), **when** the probe evaluates liveness, **then** it confirms status via WaitForSingleObject(handle,0) and only reports 'dead' on WAIT_OBJECT_0 with a matching identity tuple — never inferring death from the 259 alone
+- **Given** A PID from the snapshot that has since been recycled to a different process (creation-time mismatch), **when** a liveness read or kill is attempted, **then** the identity-tuple mismatch forces an abstain and no action fires against the recycled PID
+- **Given** _save_sessions invoked from a code path already holding WRITE_LOCK, under a concurrent parallel sweep + user write, **when** the save runs, **then** it completes without re-acquiring the lock and without deadlock, and the concurrency stress test passes
 
-- **Given** a live stub-PTY session with unsaved produced docs, **when** the pre-restart drain script runs, **then** the session is parked via close_session, its docs are captured to main, and a warm-resume seed exists so the post-restart reopen is warm, not cold
-- **Given** the four pillar off-switch flags set to any supported combination, **when** the healthcheck configuration assertion runs, **then** it passes only when the combination matches a named row of the hybrid-state matrix and fails loudly on an unnamed state
+## Wave 4 — Wave 4 — Bounded blast radius + boot grace + conservative age + safe lineage walk
 
-## Wave 4 — W4 — Extraction Increment 1: _PROJECT_WINDOW_JS → static file
+**Intent:** Cap the worst case — no runaway cascade, no touching young or unknown-age sessions — before any arming is contemplated. Serves criterion (3).
 
-> AMENDMENT (2026-07-03, human-authorized, bounded): W4's Playwright flow
-> test's optional-dependency skip marker
-> (`pytest.importorskip("playwright.sync_api")`) is AUTHORIZED — it follows
-> the repo's documented dev-only-dependency convention (CLAUDE.md:
-> "Playwright is a DEV-ONLY test dependency (pytest.importorskip)"); this
-> amendment is the required plan citation.
+**Deliverables:** Per-cycle blast-radius cap ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP (small default): sweep STOPS after the cap and logs the remainder as deferred; Boot/startup grace window ANCHOR_REAPER_BOOT_GRACE_SECS: never freeze/kill a session younger than the window; Conservative age derivation from the oldest defensible signal — process-tree start time via GetProcessTimes on live PIDs, not file mtime; unknown-age (no registered created_at, no probeable PID start) treated as PROTECTED; a registered created_at required for kill-eligibility; Transitive-parent-owned lineage walk over chain_id with a visited-set + hard depth cap; on cycle-or-cap, log and treat involved sessions as PROTECTED (abstain); registry-integrity check flags lineage cycles; tests/test_reaper_bounds.py: cap halts a runaway sweep, a fresh session inside the grace window survives, unknown-age is never reaped, a lineage cycle is flagged + abstained
 
-**Intent:** The safest, biggest single cut of C1: move the census-confirmed zero-interpolation _PROJECT_WINDOW_JS raw string verbatim to a static file served by the existing traversal-safe asset-route idiom, behind the byte-parity gate (Master Plan Phase 1; Integrated 2, 3, 6, 7, 50; Mitigation 2).
+**Depends on:** Wave 3 — Win32 correctness: full-width ctypes, STILL_ACTIVE/259 disambiguation, identity tuples, WRITE_LOCK reentrancy
 
-**Deliverables:** static/ app JS file containing the verbatim _PROJECT_WINDOW_JS body; one new static root served via the proven resolve()+relative_to idiom (zero new security surface); window.ANCHOR_BOOT as the ONLY server→client state channel for the project window (token presence, project id, build id, feature flags, initial counts), documented as a versioned dict in one module; Content-hash cache-busting (?v=<hash8> minted at startup from file bytes); Byte-parity golden-file gate: render via the OLD f-string path and the NEW static path, diff emitted JS byte-for-byte after {{/}} de-escaping; Static-vs-embedded off-switch flag functional (revert without reverting later waves); soft merge-freeze on anchor_gui.py active; anchor-freshness gate re-run before EXECUTE
+**done-when:** A sweep freezes/kills at most the configured cap per cycle, never touches a session inside the boot-grace window or of unknown age, and walks lineage with a bounded visited-set that abstains on cycles — all asserted by test_reaper_bounds.py.
 
-**Depends on:** W3 — Spikes, Pillar Flags & Process Rails
+- **Given** A sweep with more kill-eligible candidates than ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP, **when** the sweep runs, **then** it stops after the cap, logs the remainder as deferred, and the runaway is halted
+- **Given** A freshly-started session younger than ANCHOR_REAPER_BOOT_GRACE_SECS, and separately a session with no registered created_at and no probeable PID start, **when** a sweep evaluates them, **then** the fresh session survives and the unknown-age session is treated as PROTECTED — neither is reaped
+- **Given** A chain_id lineage containing a cycle, **when** the transitive-parent-owned set is walked, **then** the visited-set + depth cap stops the loop, the cycle is flagged by the registry-integrity check, and the involved sessions are abstained (PROTECTED)
 
-**done-when:** The byte-parity diff between the old f-string emission and the new static-file emission is empty, the project-window Playwright flows are green, and the live-service smoke (restart → GET / 200 → project window loads → healthcheck green) passes.
+## Wave 5 — Wave 5 — Status-model correctness + kill() persist-before-terminal ordering
 
-- **Given** the service restarted onto the static-file path, **when** the project window loads and the top-5 Playwright flows run, **then** behavior is identical, the JS arrives from the traversal-safe static route with a content-hash query, and the only changed seam is the ANCHOR_BOOT bootstrap JSON
-- **Given** the static-vs-embedded flag flipped back to embedded, **when** the service restarts, **then** the pre-wave embedded path serves byte-identical JS and the dashboard remains fully operational
+**Intent:** Disambiguate the overloaded STATUS_IDLE and reorder kill persistence so worktree-retention and no-doc-loss decisions become trustworthy. Serves criteria (5),(6).
 
-## Wave 5 — W5 — Extraction Increment 2: project-window HTML/CSS shell → static
+**Deliverables:** STATUS_CANCELLED made strictly terminal via a state-transition table that REJECTS any transition out of CANCELLED (never re-adopted, never reconciled to running, never retains a worktree); STATUS_IDLE split into STATUS_PARKED_WARM (keeps worktree, reopenable) and STATUS_REAPED_ORPHAN (no worktree); worktrees.reap_orphans / _is_parked_idle retention keyed on the explicit state field, not the overloaded one; Conservative migration of every legacy STATUS_IDLE record to PARKED_WARM (protected, over-protect only); first post-migration boot gated with reap DISABLED (dry-run log only); terminal_session.kill() reordered so produced docs are captured/persisted to main (capture_session_docs) and CONFIRMED before the record is marked DONE/terminal; _is_parked_idle/_is_parked fail SAFE (unknown/ambiguous → parked/keep, never reapable); tests/test_reaper_status_model.py: a cancelled session is never resurrected by reconcile/adopt, worktree retention follows the correct state, no doc loss on kill, an ambiguous record is never reaped
 
-**Intent:** Second C1 increment: the project-window HTML/CSS shell moves to static files with server state entering only through ANCHOR_BOOT, byte-gated and live-smoked like increment 1 (Master Plan Phase 1; Integrated 2, 3, 50).
+**Depends on:** Wave 4 — Bounded blast radius + boot grace + conservative age + safe lineage walk
 
-**Deliverables:** Project-window HTML/CSS shell as static assets served through the same static root + cache-busting; render_project_window_html reduced to bootstrap-JSON assembly + static shell serving; Byte-parity gate extended to the shell's emitted HTML/CSS; Playwright project-window parity re-run
+**done-when:** STATUS_CANCELLED is terminal and worktree-free, PARKED_WARM vs REAPED_ORPHAN drive worktree retention correctly, kill() persists docs before marking terminal, and ambiguous records fail safe — all covered by test_reaper_status_model.py.
 
-**Depends on:** W4 — Extraction Increment 1: _PROJECT_WINDOW_JS → static file
+- **Given** A session in STATUS_CANCELLED, **when** reconcile or adopt runs against it, **then** the state-transition table rejects any transition out of CANCELLED, the session is never resurrected, and it retains no worktree
+- **Given** A session being killed that has produced documents, **when** terminal_session.kill() runs, **then** the docs are captured/persisted to main and confirmed BEFORE the record is marked DONE/terminal, so no doc loss occurs
+- **Given** A record whose parked-vs-reapable state is ambiguous/unknown, **when** _is_parked_idle/_is_parked classifies it, **then** it fails safe to parked/keep and is never reaped
 
-**done-when:** Shell byte-parity is green, project-window Playwright flows are green, live smoke passes, and the increment merged independently of increment 3.
+## Wave 6 — Wave 6 — Close the swarm-job leak: teardown owns PTY AND jobs, reference-counted
 
-- **Given** a project window rendered pre- and post-increment, **when** the emitted shell HTML/CSS is diffed after de-escaping, **then** the bytes match, with divergence permitted only in the documented ANCHOR_BOOT injection block
+**Intent:** Ensure a session that dies never leaves its job_runner jobs alive (the exact orphan-swarm the reaper exists to prevent) and never lies about record state. Serves criterion (4).
 
-## Wave 6 — W6a — C1 Include-Slot Substrate + Parity Harness
+**Deliverables:** term_kill/term_delete tear down the PTY AND every job_runner job the session owns via targeted per-job_id cancel/reap (never a full list_records scan); Record state kept honest: the registry record is not hidden while any owned job is still live — it stays honest until jobs are confirmed reaped; Reference-counted job ownership: before reaping, check whether any live successor in the chain (plan→build handoff, shared preview) still claims the job; kill only jobs with no other live claimant and record explicit hand-off ownership transfer; tests/test_reaper_job_leak.py: start a session with in-flight jobs, kill it, assert all owned jobs cancelled/reaped and record honest; assert a handed-off/shared job survives when a live successor claims it
 
-> ⛔ DEFERRED 2026-07-04 (John's decision) — Waves 6, 7, 8 (W6a/W6b/W6c, the C1
-> frontend-extraction epic) are DEFERRED. C1 is a maintainability refactor, not a
-> durability prerequisite; it proved a large mechanical transform ill-suited to
-> the autonomous execute/fix loop (waves 6-8 left ~3 of 4 static mirrors
-> uncreated; ~$40 spent). The build SKIPS to Wave 9 (W7 — Route Table) to deliver
-> the durability substrate, which does not hard-depend on the frontend
-> extraction. The W6a substrate (slot_renderer/extract_dashboard/map + green unit
-> tests) is KEPT; TestC1ExitGate is skipped (not deleted) and re-arms if C1 is
-> taken up as its own effort later. Waves 6-8 are NOT counted as done.
+**Depends on:** Wave 5 — Status-model correctness + kill() persist-before-terminal ordering
 
-> AMENDMENT (2026-07-04, human-authorized — W6 DECOMPOSITION): the original W6
-> was split into W6a/W6b/W6c after four single-shot attempts exhausted their
-> whole windows in analysis of the 17k-line anchor_gui.py without ever editing
-> (three false GOs, all reverted — see FOREMAN-EXECUTION-LOG). Content carries
-> the approved C1 include-layer design (census-forced, C1-AMENDMENT-REQUIRED.md:
-> 48 markup-emitting interpolations > threshold 40): NAMED INCLUDE SLOTS
-> (`<!--ANCHOR:SLOT:<name>-->`) in the static shell; the 48 markup interpolations
-> stay SERVER-RENDERED in dedicated helpers (each ≤50 significant lines);
-> generate_html reduces to data assembly + ANCHOR_BOOT JSON + slot substitution
-> (same stdlib idiom as the W5 injection block; no new dependency; XSS posture
-> unchanged). Byte-parity remains the gate throughout. Optional-dependency skip
-> markers (`pytest.importorskip("playwright.sync_api")`) in W6a/W6b/W6c tests
-> follow the repo's documented dev-only-dependency convention — this amendment
-> is the required plan citation for them. CITED CONSEQUENCE (2026-07-04): the
-> renumbering to 20 wave ordinals necessarily updates the W3 Appendix-A ledger
-> test's plan-structure assertions (`_plan_citations`: 18 → 20 ordinals,
-> citations keyed by W-label with W6a/b/c collapsing to W6) — that test edit is
-> AUTHORIZED as part of this amendment, whichever agent applies it.
+**done-when:** Killing/deleting a session with in-flight jobs cancels/reaps every owned job (targeted per-job_id) while keeping the record honest, and a job still claimed by a live successor survives — all asserted by test_reaper_job_leak.py.
 
-**Intent:** Build the extraction MECHANISM without touching rendering behavior: the slot renderer, the mechanical extractor, and the home-dashboard byte-parity harness — so W6b's actual extraction is assembly, not research (Master Plan Phase 1; Integrated 1, 9, 50).
+- **Given** A session with in-flight job_runner jobs it owns, **when** term_kill tears it down, **then** the PTY and every owned job are reaped via targeted per-job_id cancel and the registry record is never hidden while any owned job is still live
+- **Given** A job shared with / handed off to a live successor in the chain (e.g. plan→build), **when** the predecessor session is killed, **then** the reference count shows a live claimant, the job survives, and an explicit ownership transfer is recorded
 
-**Deliverables:** Slot renderer: stdlib substitution of `<!--ANCHOR:SLOT:<name>-->` placeholders with helper-function outputs (missing slot/extra helper = loud error, never silent); tools/extract_dashboard.py mirroring the proven tools/extract_project_window_js.py idiom: mechanically inventories generate_html's JS/CSS blobs and maps ALL 48 census-classified markup-emitting interpolations to named helper stubs (the machine-readable extraction map W6b executes); Byte-parity harness extended to the home dashboard (old f-string emission vs slot-assembled emission, compared after {{/}} de-escaping); Unit tests for renderer + extractor map completeness (48/48 accounted)
+## Wave 7 — Wave 7 — Restart-durable protect-only FREEZE STATE; OS containment demoted to non-load-bearing enhancement
 
-**Depends on:** W5 — Extraction Increment 2: project-window HTML/CSS shell → static
+**Intent:** Build the load-bearing crash-safe persisted frozen-set + restart re-probe/reconcile (protect-only, never authorizes a kill), with per-PID suspend/resume as the floor and Job Object containment demoted to an optional cheap-only enhancement. Serves criteria (9),(14).
 
-**done-when:** Renderer and extractor tests are green, the parity harness proves byte-identical assembly on a synthetic slot fixture, the extraction map covers all 48 interpolations, and anchor_gui.py itself is NOT yet modified (mechanism-only wave).
+**Deliverables:** Crash-safe frozen-set + minimal metadata persisted under .anchor/ written atomically (tmp+rename) BEFORE any arming; Restart reconcile: re-probe PID liveness (identity-tuple reuse guard) and re-establish freeze control from scratch; frozen-set treated as advisory-to-revalidate; never rely on cross-restart OS containment; Protect-only persistence: the persisted frozen-set may only keep-frozen or thaw; it can NEVER by itself authorize a kill — any post-restart destructive action is re-derived in-process from a fresh live probe; Verified per-PID suspend/resume as the FLOOR freeze mechanism (works with zero OS-containment support); Optional, explicitly-off-critical-path Job-Object-at-spawn enhancement — built ONLY if clearly cheap; if built, prove IsProcessInJob==true coverage and ABSTAIN→per-PID fallback on any escapee; never KILL_ON_JOB_CLOSE on a service-owned job; DROPPED if cost unjustified; tests/test_reaper_restart.py: hermetic simulated-restart proving a frozen session stays frozen across the process boundary via re-probe-and-reconcile, no mass-kill-on-handle-close when containment absent, and a persisted 'would-kill' marker does NOT cause a kill without a live in-process re-derivation
 
-- **Given** a shell with slots and a set of helper outputs, **when** the renderer assembles the page, **then** the bytes equal the reference emission and an unmatched slot or helper raises loudly
-- **Given** the current generate_html source, **when** the extractor runs, **then** its map accounts for every JS/CSS blob and all 48 markup interpolations with no unclassified remainder
+**Depends on:** Wave 6 — Close the swarm-job leak: teardown owns PTY AND jobs, reference-counted
 
-## Wave 7 — W6b — generate_html JS/CSS → Static via the Substrate
+**done-when:** A frozen session survives an NSSM restart via persisted-frozen-set re-probe/reconcile, the persisted state can only protect (never authorize a kill), per-PID suspend/resume is the floor, and Job-Object containment is off the arm-gate critical path — all covered by test_reaper_restart.py.
 
-> SUPERVISOR AMENDMENT (2026-07-04, human-backed): after waves 7-8 converged
-> HOLLOW twice (no extraction; anchor_gui.py GREW), the C1 exit criteria are
-> now MECHANICAL — `tests/test_rearch_2026_07.py::TestC1ExitGate` (shrink bar
-> ≥7,000 vs sentinel 17,359 · no >50-line embedded string blob · the census
-> amendment file retired · real static home-dashboard assets referenced from
-> the source) is supervisor-authored and RED until the extraction is REAL.
-> Turning it green IS waves 7-8's work. No agent may weaken, skip, or remove
-> these tests; the prior "GO" commits 7ab8e44/e8b7e70 do NOT count as done.
+- **Given** A frozen session and a persisted frozen-set written atomically before arming, **when** the anchor process restarts and reconciles, **then** the session is re-probed and stays frozen across the process boundary via re-probe-and-reconcile, relying on no cross-restart OS containment
+- **Given** A persisted record marked 'would-kill' after a restart, **when** reconcile runs, **then** no kill fires from the persisted marker alone — any destructive action is re-derived in-process from a fresh live probe (protect-only persistence)
+- **Given** A host where the optional Job Object enhancement is absent, **when** the service restarts and handles close, **then** no mass-kill-on-handle-close occurs and freeze still works via verified per-PID suspend/resume
 
-**Intent:** Execute the extraction W6a mechanized: move the home-dashboard JS/CSS to static assets and reduce generate_html to data + slots, behind the byte-parity gate (Master Plan Phase 1; Integrated 1, 9, 50).
+## Wave 8 — Wave 8 — Arming safety gate + control-plane integrity: token-authed arm/advance/disarm, tamper-evident receipts, in-process gate, dry-run default, freeze-only tier, reaper-explain CLI, health-banner
 
-**Deliverables:** Home-dashboard JS/CSS as static assets served through the existing traversal-safe static root + `?v=<hash8>` cache-busting; generate_html reduced to data assembly + ANCHOR_BOOT JSON + the ≤50-line markup helpers + slot substitution, per the W6a extraction map; Byte-parity gate GREEN for the home dashboard (divergence only in the documented slot/ANCHOR_BOOT injection blocks); Static-vs-embedded off-switch flag functional for the home dashboard (revert without reverting other waves)
+**Intent:** Expose an incremental log→freeze→kill arming ladder that is unarmed by default and can only advance on the numeric arm bar recomputed in-process behind an authenticated, tamper-evident control plane. Serves criteria (10),(12),(14).
 
-**Depends on:** W6a — C1 Include-Slot Substrate + Parity Harness
+**Deliverables:** Authz: arming, rung-advance, and disarm exposed only through mutating endpoints requiring the same token-auth as every other mutating Anchor endpoint (reuse paths.py auth helpers); unauthenticated request refused with no state change; Protect-only persistence at the control plane: a persisted 'armed' flag only ENABLES the in-process gate to run; every destructive action is re-derived in-process from a fresh live probe; Append-only, hash-chained per-decision owner-evidence receipt JSON for every classify outcome (KEEP/ABSTAIN/would-freeze/would-kill: predicates fired, identity tuples, positive-liveness + corroboration result, confirmed-death result, age source, decision) under .anchor/; the arm gate computed IN-PROCESS from the live harness at arm time (never from a stored aggregate); Daemon dry-run/UNARMED by DEFAULT; .anchor/reaper.disarmed kill-switch file forces dry-run regardless of the arm flag (restart-durable brake); FREEZE-ONLY armed tier (fully reversible, never kill) as the first rung: freezes only confirmed-dead-owner + no-corroborated-signal candidates, snapshots detectable locks and ABSTAINS on any corroborated positive signal, bounds every freeze with an auto-thaw watchdog; Arm-tier STATE MACHINE that refuses to advance a rung whose numeric bar (criterion 12) is unmet (computed in-process) and records the passing-sweep as the arm event; reaper explain read-only CLI/inspection mirror (dumps snapshot, live_owner_ids, per-session classification + evidence receipt, current arm tier + distance-to-bar) + consecutive-abstain-streak dashboard health-banner (>K sweeps); tests/test_reaper_arming.py (unarmed default, disarm-file forces dry-run, freeze-only never kills, abstain-on-corroborated-signal, receipt shape, under-bar advance refused, health-banner trip) + tests/test_reaper_control_plane.py (unauthed arm/advance/disarm refused; persisted 'armed' cannot trigger a kill without live in-process re-derivation; forged/edited receipt log fails the gate via chain-verify + in-process recompute)
 
-**done-when:** Home-dashboard byte-parity is green, the home-dashboard Playwright flow passes with the app JS observed arriving from the static route, and the off-switch flips back to a byte-identical embedded path.
+**Depends on:** Wave 7 — Restart-durable protect-only FREEZE STATE; OS containment demoted to non-load-bearing enhancement
 
-- **Given** a dashboard rendered pre- and post-extraction, **when** the emitted page is diffed after de-escaping, **then** the bytes match outside the documented injection blocks
-- **Given** the off-switch flipped to embedded, **when** the service renders, **then** the pre-wave embedded path serves byte-identical output
+**done-when:** The daemon ships unarmed by default, arm/advance/disarm are token-authed and refuse under-bar advance, a freeze-only tier never kills, receipts are hash-chained and the gate recomputes in-process (a forged log fails), and the kill-switch + health-banner + reaper-explain CLI exist — all covered by test_reaper_arming.py and test_reaper_control_plane.py.
 
-## Wave 8 — W6c — C1 Exit Gate: Census Clean · Shrink ≥7,000 · Freeze Lift
+- **Given** An arm/advance/disarm request without a valid Anchor token, **when** it hits the control-plane endpoint, **then** it is refused with no state change
+- **Given** A forged or edited receipt log whose stored aggregate would clear the arm bar, **when** the arm gate is evaluated, **then** the in-process recompute + hash-chain verify reject it and the gate FAILS on the forged numbers
+- **Given** A .anchor/reaper.disarmed file present while the arm flag is set, **when** a sweep runs, **then** the daemon is forced to dry-run regardless of the arm flag and nothing is actually suspended or killed
 
-**Intent:** Close C1: prove the extraction epic's exit criteria and lift the merge freeze (Master Plan Phase 1; Integrated 1, 9, 50).
+## Wave 9 — Wave 9 — Evidence harness: synthetic orphan injection, real-process integration, enumerator parity (psutil hard-gate), fuzz, perf gate
 
-**Deliverables:** Census re-run CLEAN — C1-AMENDMENT-REQUIRED.md no longer regenerated (the include layer satisfied it); C1 exit-gate artifact: measured anchor_gui.py shrink ≥ 7,000 lines vs the pre-wave sentinel commit, no embedded frontend blob > ~50 lines remaining; Full Playwright parity: home dashboard + project window + top-5 flows green; Merge freeze on anchor_gui.py formally lifted; Cosmetic fix carried in this wave: tools/conpty_spike.py's final status print crashes on cp1252 (the `→` character, observed 2026-07-03) — make it encoding-safe
+**Intent:** Manufacture the ground truth (synthetic + real orphans) and MEASURE recall/precision so the numeric arm bar has real numbers to clear, while enforcing stdlib-only product code and a flat sweep-cost perf gate. Serves criteria (12),(10),(11),(15).
 
-**Depends on:** W6b — generate_html JS/CSS → Static via the Substrate
+**Deliverables:** Synthetic orphan injection harness abandoning known process trees at N_syn ≥ 200 measuring recall/precision vs ground truth; required fixture classes: breakaway grandchild, reused PID, held index.lock, denied probe, STALE index.lock orphan, FORGED/stale heartbeat orphan; Shadow-mode would-have-killed/would-have-frozen counter cross-checked against a deterministic post-hoc oracle (did the tree exit on its own within T?), feeding the criterion-12 shadow precision number; At least one REAL-process integration test spawning an actual detached child tree and abandoning it — breakaway grandchild, reused PID, denied probe, held index.lock, stale-lock, forged-heartbeat as REQUIRED fixtures that must pass before the arm gate can pass (breakaway-grandchild also validates re-parented-grandchild ownership); stdlib-vs-psutil HARD GATE: ctypes Toolhelp32Snapshot/OpenProcess enumerator validated against psutil ground truth in TESTS ONLY (psutil dev/test-only, enforced absent from product by tests/test_reaper_distro_scan.py); any enumeration gap/denied-open = UNKNOWN→abstain; documented bounded assent-gated escape hatch (never open-ended); Fuzz/property-test of classify over random present/absent/stale/throwing input combinations asserting 'no FREEZE/KILL without positive-death-of-owner AND no corroborated positive signal AND fresh re-validation' for every case; Perf gate asserting sweep time stays flat as rnd_jobs/ grows (targeted per-session job_id load, chains indexed by chain_id, one snapshot per sweep); Full stdlib-only green suite: all product changes Python-3.8+ stdlib (sole exception lazy pywinpty), pass distro.py's import scan, every finding gated by its named test module per the traceability matrix
 
-**done-when:** The exit-gate artifact records shrink ≥7,000 and zero blobs >~50 lines, the census no longer demands an amendment, full Playwright parity is green, and the live smoke passes.
+**Depends on:** Wave 8 — Arming safety gate + control-plane integrity: token-authed arm/advance/disarm, tamper-evident receipts, in-process gate, dry-run default, freeze-only tier, reaper-explain CLI, health-banner
 
-- **Given** the completed extraction epic, **when** the C1 exit gate runs, **then** anchor_gui.py measures ≥7,000 lines smaller than the pre-wave sentinel commit and the census re-run finds no embedded frontend blob larger than ~50 lines
-- **Given** John's long-lived browser tab from before the deploy, **when** the new build starts and mints new content hashes, **then** the tab's next navigation fetches fresh assets via the changed ?v= hash (no stale-browser flavor of the documented pitfall)
+**done-when:** The synthetic (N_syn ≥ 200) + real-process fixtures measure recall/precision against ground truth, the ctypes enumerator is parity-checked against psutil in tests only (psutil absent from product per the distro scan), classify passes the fuzz invariant, and the perf gate holds — full suite green.
 
-## Wave 9 — W7 — Route Table Core + Strangler Dispatch
+- **Given** A stale-index.lock orphan and a forged/stale-heartbeat orphan injected into the synthetic corpus, **when** the harness measures recall, **then** both are correctly recalled (frozen/killed), proving corroboration closes the masquerade hole
+- **Given** A product module that imports psutil or WMI, **when** tests/test_reaper_distro_scan.py runs distro.py's import scan, **then** the build mechanically FAILS (psutil is permitted only as a dev/test ground-truth dependency)
+- **Given** An actual detached child tree spawned on the test host with a breakaway grandchild, then abandoned, **when** the real-process integration test enumerates and classifies it, **then** enumeration/liveness/freeze/kill behaves correctly and the re-parented-grandchild ownership is validated — a required fixture that must pass before the arm gate can pass
 
-**Intent:** Stand up the single declarative route table with default-deny-by-construction auditing and strangler fallthrough, so C2 progress becomes a measurable count (Master Plan Phase 2; D3; Integrated 10, 16, 18, 46; Mitigation 16).
+## Wave 10 — Wave 10 — Spec truth: rewrite zombie-hunter SKILL.md to the shipped mechanism
 
-**Deliverables:** Route-table module: every route — including streaming/upgrade specials — gets a ROW (method, pattern, auth policy, handler kind: standard|stream|upgrade); kind≠standard is honestly special-cased at the pre-dispatch hook with the row's auth check invoked FIRST; Strangler dispatch: table first, unmatched falls through to the legacy if-elif chains; a coverage test counts remaining legacy arms; OPEN_ROUTES as a checked-in reviewed artifact with a mandatory justification string per entry + a test asserting the live open set matches it exactly; distro.py-style AST scan failing on any in-method import that shadows a module-level name; First migration batch of handlers to module-level functions; /api/routes (token-authed) dumping the live table (path, method, auth policy, handler kind, legacy-or-migrated)
+**Intent:** Make the documented contract match the shipped ownership-based + positive-liveness reaper so the safety story is verifiable, not contradicted by an identity/psutil/WMI spec. Serves criterion (13).
 
-**Depends on:** W6c — C1 Exit Gate: Census Clean · Shrink ≥7,000 · Freeze Lift
+**Deliverables:** C:\dev\Skill Foundry\skills\zombie-hunter\SKILL.md rewritten to describe the ownership-based (live-owner) + POSITIVE, liveness-CORROBORATED kill predicate model — NOT identity-based; All psutil/WMI references stripped from the product contract (psutil appears only as a Phase-9 test-only ground-truth); Documented contract: abstain-default, owner-enumeration contract (criterion 15), positive-liveness kill predicate (confirmed-death-of-owner, never absence; signals corroborated by owner-alive), detectable-lock signals (index.lock/heartbeat/socket), boot-grace, blast-cap, persisted PROTECT-ONLY frozen-set + restart reconcile (containment non-load-bearing), control-plane integrity/authz model (token-authed arm/advance/disarm, tamper-evident receipts, in-process gate), and the log→freeze→kill arming ladder with the NUMERIC arm bar and kill-switch brake; tests/test_skill_spec_truth.py: a grep gate that FAILS if SKILL.md still asserts identity-based/psutil/WMI language or omits the arm-bar / abstain-default / control-plane-integrity contract
 
-**done-when:** The table dispatches with legacy fallthrough and the audit test proves no route exists without a declared row, OPEN_ROUTES exactly matches the live open set, the legacy-arm counter is wired, and /api/routes serves the live table.
+**Depends on:** Wave 9 — Evidence harness: synthetic orphan injection, real-process integration, enumerator parity (psutil hard-gate), fuzz, perf gate
 
-- **Given** a developer adds a new endpoint without a table row, **when** the route-audit test runs, **then** it fails — the auditable invariant 'no route exists without a declared row' holds by construction
-- **Given** a new route added with auth policy 'open', **when** the OPEN_ROUTES exact-match test runs, **then** it fails until the reviewed OPEN_ROUTES file is edited with a justification string
+**done-when:** SKILL.md documents the shipped ownership-based + positive-liveness mechanism with the abstain-default, boot-grace, blast-cap, numeric arm bar, control-plane integrity, and log→freeze→kill ladder, and contains no identity-based/psutil/WMI language — enforced by test_skill_spec_truth.py.
 
-## Wave 10 — W8 — Route Migration Completion + Warn-Mode Auth Soak
-
-**Intent:** Migrate the remaining dispatch arms in reviewed batches, harden the special transports, rewire the healthcheck to the declared rows, and soak the auth flip in log-only mode on the live service (Master Plan Phase 2; Integrated 11, 12, 17, 45, 51; Mitigation 4).
-
-**Deliverables:** Remaining do_GET/do_POST arms migrated batch-wise to module-level handlers (legacy-arm counter driven to zero or a small named residual), killing the os/datetime import-shadowing class structurally; Socket-level 401-before-101 regression test for term_ws: an unauthenticated upgrade attempt receives 401 before any handshake bytes; Healthcheck endpoint walk rewired to iterate the declared rows (skipping kind=upgrade), asserting auth behavior per declared policy; ANCHOR_AUTH_WARN log-only mode: the gated data-plane batch (/artifact, /report, /summary, /project, /api/rnd/projects, /api/rnd/tail, /api/rnd/jobs) flipped to 'warn' on the live service for a soak day; the warn log reviewed as a gate artifact; Sequencing rule honored in the merge checklist: no auth flip ships in the same deploy as JS calling the flipped routes
-
-**Depends on:** W7 — Route Table Core + Strangler Dispatch
-
-**done-when:** The healthcheck walks the declared rows asserting per-policy behavior, the 401-before-101 test is green, the AST shadowing scan is green with handlers module-level, and the live warn-mode soak log shows zero unexplained would-401 consumers.
-
-- **Given** ANCHOR_TOKEN set and a term_ws upgrade attempted without credentials, **when** the socket-level test inspects the response, **then** a 401 arrives before any 101/handshake bytes, preserving the hand-rolled RFC-6455 ordering
-- **Given** the data-plane routes in warn mode on the live service for the soak day, **when** the warn log is reviewed, **then** every would-401 entry maps to a W2-enumerated consumer with a token path, or the flip is held until it does
-
-## Wave 11 — W9 — Auth Enforce + Cookie Navigation + Ops Cutover (C2 gate)
-
-**Intent:** Apply the W3 cookie-through-WS verdict, flip the gated data plane from warn to enforce, and execute the ops cutover with the live tokenless-401 assert that makes C2 demonstrated, not narrated (Master Plan Phase 2; D3; Integrated 14, 15; Mitigation 3).
-
-**Deliverables:** Cookie-based browser page navigation per the spike verdict; ?token= retained only where the spike proved WS/SSE demands it (no URL tokens elsewhere); Enforce flip for the gated data plane, deployed separately from any JS change per the sequencing rule; Ops cutover with teeth: mint token → set NSSM AppEnvironmentExtra → restart → a healthcheck probe asserting the LIVE :8777 returns 401 on tokenless /api/rnd/projects (a John-declines outcome is recorded via the amendment path, never silently); Cookie/auth healthcheck walk entering the 20× nightly repetition pipeline
-
-**Depends on:** W8 — Route Migration Completion + Warn-Mode Auth Soak
-
-**done-when:** The live :8777 service returns 401 on tokenless /api/rnd/projects while browser navigation (desktop + iPhone PWA over Tailscale) still works via cookie, and the zero-shadowing-imports scan and full suite are green.
-
-- **Given** ANCHOR_TOKEN set on the live service after the cutover, **when** a tokenless GET hits /api/rnd/projects, **then** the healthcheck probe observes a 401 from the real :8777 service
-- **Given** the same cutover state, **when** John navigates the dashboard and a project window in a browser holding the auth cookie, **then** pages load and WS/SSE terminals attach, with URL tokens present only on the transports the spike proved need them
-
-## Wave 12 — W10 — anchor_md.py De-fork + anchor_server.py Deletion (C5)
-
-**Intent:** Collapse the three markdown-parser copies to one: extract the shared parsing module, prove parse-identity on the real corpus, and delete the confirmed-dead anchor_server.py after the pre-deletion sweep (Master Plan Phase 3; Integrated 37, 38; Mitigation 17).
-
-**Deliverables:** anchor_md.py: the byte-identical twin parsers (task/project/inbox/archived) extracted to one shared module imported by both anchor_gui.py and anchor.py; Golden-corpus gate: today's REAL markdown files parsed identically pre/post de-fork; Pre-deletion sweep results (Get-ScheduledTask scan, *.lnk target search for :5000/anchor_server, _archive/ grep) checked in; anchor_server.py DELETED with a one-line changelog tombstone
-
-**Depends on:** W9 — Auth Enforce + Cookie Navigation + Ops Cutover (C2 gate)
-
-**done-when:** anchor_gui.py and anchor.py both import anchor_md with the golden-corpus gate proving identical parses of the real markdown files, anchor_server.py is deleted with sweep results recorded, and the full suite plus live smoke are green.
-
-- **Given** the complete set of real DASHBOARD.md/domains/INBOX/archive files as a golden corpus, **when** parsed via the pre-de-fork copies and via anchor_md, **then** the parsed structures are identical, byte-for-byte on serialization
-
-## Wave 13 — W11 — Data-Dir Migration + Git Hygiene (C6)
-
-> AMENDMENT (2026-07-04, supervisor autonomous judgment — human-authorized away-mode):
-> W11 moves the data dir outside the repo and adds real git work (persist-to-main
-> commits + `git worktree add`) to the advance path. A Playwright FLOW HELPER
-> (`tests/rearch_flows.py::flow_pending_paste_flush`) polled on a budget too tight
-> for that added git work under a loaded gate, causing a timing flake. Widening the
-> poll bound (80→240 iterations) is AUTHORIZED as a consequent test-infrastructure
-> adaptation — it changes only a timeout, not any assertion or the intent (session
-> is created server-side before the POST responds; the helper only waits longer).
-> This citation satisfies the test-immutability guard for that helper edit.
-
-**Intent:** Move runtime state out of the repo as ONE scripted, rollback-able unit — before the journal exists, so journals are born outside the repo — and make the repo provably stay clean (Master Plan Phase 3; Integrated 39, 40, 41; Mitigation 11).
-
-**Deliverables:** Path-audit tool scanning every durable store (registry folder_path, worktree_path, discovery.json, job dirs, session records) for repo-rooted absolute paths, emitting a rewrite map; Scripted migration unit: stop service → migrate_data (existing paths.py seam) → path-rewrite pass → start → healthcheck, with rollback; old dir preserved read-only for a week; ANCHOR_REAPER_DRYRUN: worktrees.reap_orphans report-only on the first post-move boot, re-armed only after a clean report; Git hygiene as its own commit + gate: git rm --cached the ~62 tracked runtime artifacts + .gitignore, then a gate running a full healthcheck cycle and asserting `git status --porcelain` is empty
-
-**Depends on:** W10 — anchor_md.py De-fork + anchor_server.py Deletion (C5)
-
-**done-when:** The live service runs with ANCHOR_DATA_DIR outside C:\dev\Anchor with the healthcheck green from the relocated dir, and `git status --porcelain` is empty and STAYS empty through a full healthcheck cycle.
-
-- **Given** the migration script run against the live data set, **when** the service restarts from the relocated ANCHOR_DATA_DIR, **then** the dashboard is fully operational, the reaper's dry-run report shows zero would-delete parked/live worktrees from path misses, and rollback restores the pre-move state if any step fails
-- **Given** the post-hygiene repo, **when** a full healthcheck cycle runs (which writes reports, journals-to-be, job records), **then** `git status --porcelain` remains empty — runtime writes all land outside the repo
-
-## Wave 14 — W12 — journal.py Core: emit() Choke Point + Butler Envelope
-
-**Intent:** Lay the C3 spine: one schema-validated append-only emit() path, the Butler-shaped envelope proven against the three user stories, journal-first write order, and the first blessed wrappers on session lifecycle (Master Plan Phase 4; D1; Integrated 19, 21, 23, 24; Mitigations 6, 13).
-
-**Deliverables:** journal.py with ONE emit() choke point: schema validation, monotonic per-project seq, atomic append under WRITE_LOCK, O(1) open-append-close, configurable fsync policy; journals born in the relocated data dir; Butler envelope: mandatory correlation_id, causation_id, actor{kind,id} (user-click|auto-advance|healthcheck-synthetic|cli), per-project seq + wall ts, schema_ver; a test answering the three W3 Butler user stories from envelope fields alone; Schema-evolution rule (additive-only within a major ver, unknown-field-tolerant readers) as a binding module-docstring convention + a v1-through-v-current round-trip test; distro.py-style scan forbidding json.dump/open-for-write to journal paths outside the module; blessed legacy-store wrappers as the only emit() call sites; Journal-first-then-legacy write order by decree on the first instrumented class (session started/closed/killed/advanced), with 'journal-ahead' documented as benign crash residue; journal-emission off-switch flag functional
-
-**Depends on:** W11 — Data-Dir Migration + Git Hygiene (C6)
-
-**done-when:** emit() is the scan-enforced only journal write path, session-lifecycle mutations write journal-first alongside (never instead of) the legacy stores, the v1→current round-trip test is green, and the three Butler user stories are answerable from envelope fields in a passing test.
-
-- **Given** a session started, advanced, and killed through the normal terminal_session paths, **when** the per-project journal is read back, **then** schema-versioned events exist for each transition with monotonic seq, correct actor kind, and correlation/causation ids linking the advance to its parent — while the registry/index stores remain byte-equivalent to their pre-journal behavior
-- **Given** a crash between emit() and the legacy-store write, **when** the parity classification (landing in W14) later inspects the divergence, **then** the orphaned journal event classifies as benign journal-ahead intent, replayable idempotently — never a lost legacy write
-
-## Wave 15 — W13 — Full Mutation-Set Instrumentation + Events CLI + Perf Budget
-
-> AMENDMENT (2026-07-04, supervisor autonomous judgment — human-authorized away-mode):
-> (1) W13's own suite tests/test_journal_full_w13.py is added to the gate (same
-> standalone-test gating gap as W10-W12). (2) Its `pytest.skip("fake_claude stub
-> absent")` is AUTHORIZED — a test-environment guard that skips when the fake_claude
-> stub fixture is unavailable (mirrors the repo's documented optional-dependency
-> importorskip convention); it weakens no assertion. This citation satisfies the
-> test-integrity guard for that skip. The 15 W13 tests pass.
-
-**Intent:** Instrument every mutation class the W1 tripwire enumerated, flip the tripwire to the permanent enforcing completeness gate, and ship the first queryable taste of the journal — under a hard perf budget (Master Plan Phase 4; Integrated 20, 26, 47; Mitigation 19).
-
-**Deliverables:** All enumerated mutation-of-record classes instrumented via blessed wrappers: doc persisted, job launched/finished/cancelled, effort promoted, grass idea lifecycle, deliverable pinned/launched, project lifecycle, handoff recorded, boneyard capture (per-tick/telemetry writes excluded BY RULE); Write-site tripwire flipped to permanent enforce mode — the C3 completeness gate, on forever; `anchor.py rnd events <pid> [--since seq]` journal-tail CLI following the v3–v12 CLI-mirror convention; Perf budget gate: the healthcheck's v2–v5 walks timed journal-on vs journal-off with a hard <5% regression budget
-
-**Depends on:** W12 — journal.py Core: emit() Choke Point + Butler Envelope
-
-**done-when:** The full suite + healthcheck run green under the ENFORCING tripwire (every mutation-of-record journals; nothing else does), the events CLI tails a real project journal with --since, and the measured journal-on overhead is <5%.
-
-- **Given** the enforcing tripwire active across the full suite and stubbed healthcheck, **when** any code path mutates a store under the data dir without a paired journal event, **then** the run fails naming the write site — completeness is mechanical, not narrated
-- **Given** a project with recent session, job, and grass activity, **when** `anchor.py rnd events <pid> --since <seq>` runs, **then** it prints the schema-versioned events after seq, newest-last, with no model call and no server dependency
-
-## Wave 16 — W14 — Parity Gate + Recovery & Replay Tools (C3 gate)
-
-**Intent:** Close C3's proof obligations: the quiescent classifying parity gate in tests AND the healthcheck, rebuild_index.py proving the 'lost from an index' class recoverable-by-construction, and the idempotent replay/reconcile tools (Master Plan Phase 4; D1; Integrated 22, 25, 48; Mitigation 6).
-
-**Deliverables:** Quiescent classifying parity gate: derive session/effort views from a WRITE_LOCK-bracketed snapshot copy, tolerate a bounded tail window, classify divergence (journal-ahead=OK/crash-residue · legacy-ahead=BUG · conflict=BUG); wired into tests AND a healthcheck walk entering the 20× nightly pipeline; rebuild_index.py: re-derives a deleted/torn index.json (and sessions.json rows) from the journal, proven by a test that deletes the index mid-suite; documented operator runbook; Idempotent event-replay tool (bounded, dry-run-first) converging legacy stores to the journal — the operational answer to legacy-ahead/conflict; reconcile-report tool alongside
-
-**Depends on:** W13 — Full Mutation-Set Instrumentation + Events CLI + Perf Budget
-
-**done-when:** The parity gate reports zero divergence (bounded-tail-tolerant, classified) in tests and in the healthcheck walk, and the mid-suite delete-then-rebuild test restores index.json from the journal to parity.
-
-- **Given** a project's index.json deleted mid-suite after real journaled activity, **when** rebuild_index.py runs against the journal, **then** the rebuilt index passes the parity gate with zero divergence against the derived views
-- **Given** a seeded legacy-ahead divergence (legacy store mutated without its journal event), **when** the parity gate runs, **then** it classifies the row as BUG (never OK), and the replay/reconcile tooling reports it dry-run-first without mutating anything unasked
-
-## Wave 17 — W15 — Supervisor Core: Inline Seam + IPC Contract + Restart Matrix
-
-**Intent:** Move job ownership behind the ANCHOR_SUPERVISOR=inline|external interface with the IPC contract table written BEFORE code, durable gate answers, the in-memory rebuild table, and the literal automated restart-survival test matrix (Master Plan Phase 5; D2; Integrated 27, 28, 29, 30, 35, 49; Mitigations 7, 8).
-
-**Deliverables:** IPC contract table as a checked-in artifact BEFORE code: every dashboard↔job interaction (launch, tail-since, cancel, gate-answer, cost/rollup, swarm-register) with state owner, idempotency key, defined behavior when EITHER side restarts mid-interaction — including the tail-cursor-durability row (per-job read offsets persisted in the job dir); ANCHOR_SUPERVISOR=inline|external Python interface with the in-process implementation (tests, healthcheck, degraded mode) fully wired: job_runner ownership routed through the seam; Gate-answer durability: an AskUserQuestion answer durably queued + persisted to the job dir and ACKed before the dashboard POST returns; the stdin write happens supervisor-side against the handle it owns; In-memory-structure rebuild table: every dashboard-side structure (_LIVE, _JOB_DIRS, _ACTIVE_LANE, _FOLDER_BUILD, lane locks, SSE attach points) with a rebuild-source column (durable record | supervisor query); zero unresolved rows before EXECUTE; The LITERAL automated gate: a stub-seam test matrix that kills each side mid-interaction per contract row, and restarts the dashboard side with a job in flight asserting the restarted dashboard lists the SAME job_id running, serves an advancing tail cursor, and can cancel it
-
-**Depends on:** W14 — Parity Gate + Recovery & Replay Tools (C3 gate)
-
-**done-when:** The full suite + healthcheck run green through the inline supervisor seam, the rebuild table has no unresolved rows, and the restart test matrix passes for every contract-table row including dashboard-restart-mid-job with same-job_id/advancing-tail/cancellable asserted.
-
-- **Given** a fake_claude-driven job in flight through the inline seam, **when** the dashboard side is torn down and restarted in-test, **then** the restarted dashboard lists the SAME job_id as running, its /api/rnd/tail cursor advances, and cancel tree-kills it
-- **Given** a gate question answered via POST /api/rnd/answer_gate while the IPC hop is killed mid-interaction, **when** the interaction retries per the contract row, **then** the durably-queued answer is delivered exactly once to the job's stdin — retryable, never lost, never doubled
-
-## Wave 18 — W16 — External Supervisor Service + Live Probes
-
-**Intent:** Stand up the real second process: the stdlib supervisor as its own NSSM service with loopback token-authed IPC, the scripted installer honoring John's account + no-console discipline, durable tail cursors, and the two live probes the inline seam can never cover (Master Plan Phase 5; D2; Integrated 31, 32, 49).
-
-**Deliverables:** Stdlib supervisor process: loopback token-authed HTTP IPC implementing the contract table; the external client implementation of the ANCHOR_SUPERVISOR seam; defined degraded behavior when the supervisor is down; install_supervisor.ps1 — scripted, not documented: nssm install + ObjectName .\john + AppEnvironmentExtra cloned from the anchor service + CREATE_NO_WINDOW discipline throughout; Per-job persisted read offsets in the job dir so /api/rnd/tail cursors survive a SUPERVISOR restart; Two live healthcheck probes: (a) the LIVE supervisor spawns a trivial claude.exe --version child and reports output (credentials + PATH under the real service account); (b) the SUPERVISOR restarts with a sacrificial child running and the child survives (job-object breakaway proven)
-
-**Depends on:** W15 — Supervisor Core: Inline Seam + IPC Contract + Restart Matrix
-
-**done-when:** The supervisor NSSM service is installed via the script and running as .\john with no visible console, both live probes are green, the dashboard operates in external mode on the live service while tests/healthcheck stay green in inline mode, and a supervisor restart preserves tail cursors.
-
-- **Given** the live supervisor service installed by install_supervisor.ps1, **when** the healthcheck asks it to spawn claude.exe --version, **then** the child runs under John's profile with output reported and no console window appears
-- **Given** a sacrificial long-running child owned by the live supervisor, **when** the SUPERVISOR service is restarted, **then** the child survives the restart and the restarted supervisor re-adopts it with its persisted tail offset intact
-
-## Wave 19 — W17 — C4 Live Demo + ConPTY Verdict Application
-
-**Intent:** Prove restart survival on the real service with John per the runbook — the criterion is honestly unmet until the runbook has run once — and apply the W3 ConPTY spike verdict for PTYs (adoption follow-on or the drain + honestly-recorded narrowing) (Master Plan Phase 5; Integrated 33, 34, 36; Mitigations 10, 18).
-
-**Deliverables:** C4 runbook as an executed artifact: dedicated throwaway R&D project on the real service, a harmless long-running real job through the REAL launch path (fake_claude-driven), exact elevated commands, expected observations, rollback steps (supervisor stop + lane-lock clear) — run WITH John; `nssm restart anchor` executed mid-flight on the real service: the job keeps running and the restarted dashboard reports it live; ConPTY verdict applied: if YES — the PTY-adoption follow-on wave scheduled inside this phase's plan; if NO — the W3 pre-designed drain (close_session park + capture_session_docs + warm-resume seed, automated in the deploy script) ships in THIS wave together with the narrowing recorded via the North-Star amendment path
-
-**Depends on:** W16 — External Supervisor Service + Live Probes
-
-**done-when:** The C4 runbook has run once on the real service with the in-flight job surviving `nssm restart anchor` and reporting live afterward, and the ConPTY verdict's branch (PTY adoption scheduled, or drain shipped + narrowing recorded) is merged.
-
-- **Given** a real fake_claude-driven lane job in flight on the live :8777 service, launched through the real path with John observing, **when** `nssm restart anchor` runs from an elevated shell, **then** the job never stops, and the restarted dashboard lists the same job_id live with an advancing tail — the C4 live demo recorded in the runbook artifact
-- **Given** the ConPTY spike verdict was NO, **when** any subsequent deploy of this effort restarts the dashboard, **then** the automated drain parks every live PTY with docs captured and warm-resume seeds, so the restart costs a warm reconnect, not dead context, and the narrowing is recorded via the amendment path — never silently
-
-## Wave 20 — W18 — Closure: Hybrid Hardening + North-Star Scorecard (C7)
-
-**Intent:** Convert 'we built it' into 'the daily 5AM run and the live service prove it, continuously': finalize the hybrid-state matrix, promote the four soaked healthcheck walks, run the one-sitting live sign-offs with John, and emit the demonstrated scorecard + Appendix-A reconciliation (Master Plan Phase 6; Integrated 15, 36, 41, 43, 44, 52).
-
-**Deliverables:** Finalized named hybrid-state matrix with a one-line support statement per flag combination; the healthcheck asserting the CURRENT live configuration is a named state; The four new walks (journal parity, supervisor probes, cookie/auth, relocated-data-dir) joined to the 5AM run — each only after 20× green nightly repetition under the SLO (wall-time cap, zero-known-flakes, quiescence, retry-with-classification, 'Auto-fixes applied' degradation); Final live sign-offs in one sitting with John: the C4 runbook re-confirmation, the C2 tokenless-401 live assert, a C6 healthcheck-cycle-then-clean-git check, the per-wave smoke on the final merged state; North-Star scorecard: C1–C7 each marked met/narrowed/unmet with its proving gate artifact (census+byte-diff · OPEN_ROUTES+live-401 · parity+rebuild test · runbook execution · golden-corpus+tombstone · clean-porcelain gate · green suite+smoke log); any narrowing recorded via the amendment path; Appendix-A reconciliation: every idea 1–52 + mitigation 1–20 resolved to a landed or explicitly-amended item; scaffolding retired (legacy-arm counter at zero or named debt, merge freeze formally lifted, old data dir's read-only week concluded + archived)
-
-**Depends on:** W17 — C4 Live Demo + ConPTY Verdict Application
-
-**done-when:** The scorecard is emitted with every C1–C7 criterion met or narrowed-by-recorded-amendment and its proving artifact linked, the 5AM healthcheck carries all four new walks green after their 20× soak, the Appendix-A reconciliation shows zero silently-dropped ideas, and the final live smoke on the merged state passes.
-
-- **Given** the four pillar flags in the final production configuration, **when** the 5AM healthcheck runs, **then** it asserts the configuration is a named hybrid state and all four new walks (parity, supervisor, auth, data-dir) pass within the SLO's wall-time cap with zero known flakes
-- **Given** the completed effort, **when** the scorecard's Appendix-A reconciliation runs, **then** every integrated idea 1–52 and mitigation 1–20 (including Mitigation 9) resolves to a landed phase item or a documented amendment — demonstrated, not narrated
+- **Given** The rewritten SKILL.md, **when** tests/test_skill_spec_truth.py greps it, **then** it fails if any identity-based/psutil/WMI language remains or the arm-bar / abstain-default / control-plane-integrity contract is omitted, and passes only when the spec matches the shipped mechanism
