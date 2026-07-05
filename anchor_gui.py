@@ -10002,7 +10002,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if not self._term_token_ok():
                     self._send_json({"ok": False, "error": "unauthorized"}, 401)
                     return
-                import zombie_hunter
+                import reaper
                 import pty_manager
                 try:
                     attached = set(pty_manager.live_sessions())
@@ -10011,19 +10011,23 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 orphans = []
                 try:
                     running_recs = _sessreg.list_sessions(status="running")
-                    # (#1, safety-critical) An orphan is a RUNNING session with NO
+                    # (#3, single source) An orphan is a RUNNING session with NO
                     # LIVE OWNER — not merely one absent from the PTY-attached set.
-                    # Broaden "attached" to the full live-owner set (attached ∪
-                    # job-owned ∪ parent-owned) so a legit, work-doing session with
-                    # no open browser stream is never falsely flagged as a runaway.
+                    # Build the ONE immutable liveness snapshot for this sweep and
+                    # classify every record against it (the identical
+                    # snapshot/provider all 5 call sites share) so a legit,
+                    # work-doing session with no open browser stream is never
+                    # falsely flagged as a runaway.
                     try:
-                        live_ids = zombie_hunter.live_owner_ids(attached, records=running_recs)
+                        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs)
+                        live_ids = reaper.live_owner_ids(_snap)
                     except Exception:
+                        _snap = None
                         live_ids = attached
                     for rec in running_recs:
                         sid = rec.get("session_id", "")
                         try:
-                            verdict = zombie_hunter.classify(rec, live_ids)
+                            verdict = reaper.classify_record(rec, _snap)
                         except Exception:
                             verdict = "kill" if (sid and sid not in live_ids) else "alive"
                         # Only alert on orphans born DURING THIS server's life.
@@ -10051,6 +10055,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "unauthorized"}, 401)
                     return
                 import zombie_hunter
+                import reaper
                 import pty_manager
                 import subprocess
                 # NOTE: do NOT import json/sys/os/datetime function-locally here —
@@ -10192,14 +10197,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-                # (#1, safety-critical) This view marks orphans AND FREEZES them
-                # (pause_orphan). Use the full live-owner discriminator so a legit
+                # (#3, single source) This view marks orphans AND FREEZES them
+                # (pause_orphan). Build the ONE immutable snapshot for this sweep
+                # and classify against it (the shared provider) so a legit
                 # work-doing session with no open stream is never frozen/killed:
                 # an orphan has NO live owner (not job-owned, not parent-owned),
                 # not merely "no attached PTY stream".
                 try:
-                    live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+                    _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records)
+                    live_ids = reaper.live_owner_ids(_snap)
                 except Exception:
+                    _snap = None
                     live_ids = attached
 
                 # Group by OWNER (project title, or project_id, or "(unowned)")
@@ -10250,7 +10258,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             status = rec.get("status", "")
                             
                             try:
-                                is_orphaned = (zombie_hunter.classify(rec, live_ids) == "kill")
+                                is_orphaned = (reaper.classify_record(rec, _snap) == "kill")
                             except Exception:
                                 is_orphaned = (sid not in live_ids)
                                 
@@ -11912,6 +11920,7 @@ function startZombieTerminal(btn) {
         elif self.path == "/api/rnd/zombie_terminal_start":
             import shutil
             import zombie_hunter
+            import reaper
             import pty_manager
 
             backend = "claude"
@@ -11943,12 +11952,15 @@ function startZombieTerminal(btn) {
             except Exception:
                 pass
 
-            # (#1, safety-critical) Classify against the full live-owner set so a
-            # legit work-doing session with no open stream is not briefed as an
-            # orphan: attached ∪ job-owned ∪ parent-owned.
+            # (#3, single source) Classify against the ONE immutable snapshot for
+            # this sweep (the shared provider) so a legit work-doing session with
+            # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
+            # parent-owned.
             try:
-                live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+                _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records)
+                live_ids = reaper.live_owner_ids(_snap)
             except Exception:
+                _snap = None
                 live_ids = attached
 
             session_briefs = []
@@ -11969,7 +11981,7 @@ function startZombieTerminal(btn) {
                         owner = proj_id
 
                 try:
-                    classification = zombie_hunter.classify(rec, live_ids)
+                    classification = reaper.classify_record(rec, _snap)
                 except Exception:
                     classification = "kill" if sid not in live_ids else "alive"
                     
@@ -13465,26 +13477,26 @@ def main():
         _logger.error(f"gandalf boot reconcile failed: {e}")
 
     try:
-        # (#1, safety-critical) Reconcile managed-terminal-session registry
+        # (#3, single source) Reconcile managed-terminal-session registry
         # "running" records by PROCESS liveness on boot: a record whose recorded
         # PID no longer resolves to a live process is reconciled to a terminal
         # (idle) status, so a stale prior-instance "running" record can never feed
-        # the startup orphan banner. Liveness is by PROCESS, not by attached
-        # stream — a record with a live PID (genuine work OR a true orphan the
-        # banner/daemon handles) is LEFT running; only dead PIDs are reconciled.
+        # the startup orphan banner. Derive the alive-by-PID set from the SAME
+        # immutable snapshot/provider the banner + daemon use (reaper.live_pid_ids
+        # — process liveness, NOT ownership): a record with a live PID (genuine
+        # work OR a true orphan the banner/daemon handles) is LEFT running; only
+        # dead PIDs are reconciled.
         import session_registry as _sr_boot
-        import proc_probe as _pp_boot
-        _alive_pids = set()
-        for _rec in _sr_boot.list_sessions(status="running"):
-            _sid = _rec.get("session_id")
-            _pid = _rec.get("pid")
-            if not _sid or not _pid:
-                continue
-            try:
-                if _pp_boot.creation_time(_pid) is not None:
-                    _alive_pids.add(_sid)
-            except Exception:
-                pass
+        import reaper
+        # Boot reconcile only needs PROCESS liveness (reaper.live_pid_ids reads
+        # the snapshot's PID probe), so build it probe-only: no attached/owning-job
+        # enumeration — this preserves the pre-Wave-1 boot behavior exactly (a
+        # plain per-PID probe, no owner/job side effects at startup).
+        _snap_boot = reaper.build_snapshot(
+            attached_pty_ids=set(),
+            records=_sr_boot.list_sessions(status="running"),
+            job_active=lambda _sid: False)
+        _alive_pids = reaper.live_pid_ids(_snap_boot)
         _sr_boot.reconcile(live_session_ids=_alive_pids)
     except Exception as e:
         _logger.error(f"session_registry boot reconcile failed: {e}")
@@ -13532,15 +13544,19 @@ def main():
         if "PYTEST_CURRENT_TEST" not in os.environ and not _zombie_hunter_started:
             _zombie_hunter_started = True
             import zombie_hunter
+            import reaper
             import pty_manager
             def _live_provider():
-                # (#1, safety-critical) The daemon KILLS verdict==kill sessions
-                # when armed (ANCHOR_ZOMBIE_HUNTER=1). Hand it the full live-owner
-                # set, not just the PTY-attached one, so a legit job-owned /
-                # parent-owned session is never reaped for lacking a browser stream.
+                # (#3, single source) The daemon KILLS verdict==kill sessions
+                # when armed (ANCHOR_ZOMBIE_HUNTER=1). Build the ONE immutable
+                # snapshot for the sweep and hand it the full live-owner set (the
+                # shared provider), not just the PTY-attached one, so a legit
+                # job-owned / parent-owned session is never reaped for lacking a
+                # browser stream.
                 attached = set(pty_manager._LIVE.keys())
                 try:
-                    return zombie_hunter.live_owner_ids(attached)
+                    _snap = reaper.build_snapshot(attached_pty_ids=attached)
+                    return reaper.live_owner_ids(_snap)
                 except Exception:
                     return attached
             zombie_hunter.start_hunter(_live_provider)
