@@ -99,6 +99,148 @@ def health_reports_dir() -> Path:
     return data_dir() / HEALTH_REPORTS_DIRNAME
 
 
+# ── Reaper (zombie-hunter → safe-to-arm) tuning knobs (Wave 2) ─────────────
+# Positive-liveness corroboration windows, read at call time so a test/deploy
+# can tune them via env. Each has a conservative default (over-protect: a wider
+# window keeps MORE sessions, which is the safe direction). All are seconds.
+
+REAPER_WORK_MTIME_SECS_ENV = "ANCHOR_REAPER_WORK_MTIME_SECS"
+REAPER_CPU_WINDOW_SECS_ENV = "ANCHOR_REAPER_CPU_WINDOW_SECS"
+REAPER_HEARTBEAT_STALE_SECS_ENV = "ANCHOR_REAPER_HEARTBEAT_STALE_SECS"
+
+#: A worktree write within this window counts as a (corroborated) work signal.
+REAPER_WORK_MTIME_SECS_DEFAULT = 120.0
+#: The window over which a CPU sample is judged "active".
+REAPER_CPU_WINDOW_SECS_DEFAULT = 5.0
+#: A session heartbeat file older than this is STALE (grants no liveness).
+REAPER_HEARTBEAT_STALE_SECS_DEFAULT = 90.0
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a float env knob at call time; blank/invalid → ``default``."""
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return default
+    # A non-positive window is meaningless; fall back to the safe default.
+    return val if val > 0 else default
+
+
+def reaper_work_mtime_secs() -> float:
+    """Worktree-write freshness window (``ANCHOR_REAPER_WORK_MTIME_SECS``)."""
+    return _env_float(REAPER_WORK_MTIME_SECS_ENV, REAPER_WORK_MTIME_SECS_DEFAULT)
+
+
+def reaper_cpu_window_secs() -> float:
+    """CPU-sample activity window (``ANCHOR_REAPER_CPU_WINDOW_SECS``)."""
+    return _env_float(REAPER_CPU_WINDOW_SECS_ENV, REAPER_CPU_WINDOW_SECS_DEFAULT)
+
+
+def reaper_heartbeat_stale_secs() -> float:
+    """Heartbeat staleness threshold (``ANCHOR_REAPER_HEARTBEAT_STALE_SECS``)."""
+    return _env_float(REAPER_HEARTBEAT_STALE_SECS_ENV,
+                      REAPER_HEARTBEAT_STALE_SECS_DEFAULT)
+
+
+# ── Reaper bounds knobs (Wave 4 — bounded blast radius + boot grace) ────────
+# The worst-case containment: a per-cycle blast-radius cap so a runaway sweep
+# can never cascade, a boot/startup grace window so a freshly-started session is
+# never touched before it can establish ownership, and a hard lineage-walk depth
+# cap so a malformed/looping chain can never spin the transitive-parent walk.
+# All read at call time so a test/deploy can tune them via env. Defaults chosen
+# in the SAFE direction (small blast cap, wide grace).
+
+REAPER_MAX_ACTIONS_PER_SWEEP_ENV = "ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP"
+REAPER_BOOT_GRACE_SECS_ENV = "ANCHOR_REAPER_BOOT_GRACE_SECS"
+REAPER_LINEAGE_MAX_DEPTH_ENV = "ANCHOR_REAPER_LINEAGE_MAX_DEPTH"
+
+#: At most this many freeze/kill actions may fire per sweep cycle; the remainder
+#: is deferred (logged) to the next sweep. Small on purpose — a runaway sweep is
+#: halted long before it can cascade across a whole swarm.
+REAPER_MAX_ACTIONS_PER_SWEEP_DEFAULT = 3
+#: A session younger than this (seconds) is inside the boot/startup grace window
+#: and is NEVER frozen or killed — it has not yet had time to attach a PTY,
+#: register its owning job, or write its first heartbeat.
+REAPER_BOOT_GRACE_SECS_DEFAULT = 300.0
+#: Hard cap on how many parent hops the transitive-lineage walk may take before
+#: it declares the chain malformed and abstains (PROTECT) on the whole branch.
+REAPER_LINEAGE_MAX_DEPTH_DEFAULT = 64
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env knob at call time; blank/invalid/non-positive → default."""
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        val = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    # A non-positive cap/depth is meaningless; fall back to the safe default.
+    return val if val > 0 else default
+
+
+def reaper_max_actions_per_sweep() -> int:
+    """Per-sweep blast-radius cap (``ANCHOR_REAPER_MAX_ACTIONS_PER_SWEEP``)."""
+    return _env_int(REAPER_MAX_ACTIONS_PER_SWEEP_ENV,
+                    REAPER_MAX_ACTIONS_PER_SWEEP_DEFAULT)
+
+
+def reaper_boot_grace_secs() -> float:
+    """Boot/startup grace window (``ANCHOR_REAPER_BOOT_GRACE_SECS``)."""
+    return _env_float(REAPER_BOOT_GRACE_SECS_ENV,
+                      REAPER_BOOT_GRACE_SECS_DEFAULT)
+
+
+def reaper_lineage_max_depth() -> int:
+    """Transitive-lineage walk hard depth cap (``ANCHOR_REAPER_LINEAGE_MAX_DEPTH``)."""
+    return _env_int(REAPER_LINEAGE_MAX_DEPTH_ENV,
+                    REAPER_LINEAGE_MAX_DEPTH_DEFAULT)
+
+
+# ── Arming ladder knobs (Wave 8 — safe-to-arm control plane) ────────────────
+# The daemon ships UNARMED (dry-run) and advances a rung (log → freeze → kill)
+# only when a numeric bar is met, recomputed IN-PROCESS from the tamper-evident
+# receipt chain. All read at call time (env-tunable) with conservative defaults
+# in the SAFE direction (a HIGH sweep bar, a LOW abstain-banner threshold, a
+# BOUNDED auto-thaw so a freeze can never be forgotten forever).
+
+REAPER_ARM_MIN_SWEEPS_ENV = "ANCHOR_REAPER_ARM_MIN_SWEEPS"
+REAPER_ABSTAIN_BANNER_K_ENV = "ANCHOR_REAPER_ABSTAIN_BANNER_K"
+REAPER_FREEZE_MAX_SECS_ENV = "ANCHOR_REAPER_FREEZE_MAX_SECS"
+
+#: How many CONSECUTIVE clean dry-run/observation sweeps the receipt chain must
+#: show before a rung may be armed/advanced. Deliberately high — the arm bar is
+#: earned by observed evidence, never asserted.
+REAPER_ARM_MIN_SWEEPS_DEFAULT = 10
+#: The dashboard health-banner trips when the reaper has ABSTAINED (degraded /
+#: could-not-observe liveness) for MORE than this many consecutive sweeps — a
+#: signal the liveness inputs are broken and the reaper is flying blind.
+REAPER_ABSTAIN_BANNER_K_DEFAULT = 5
+#: An auto-thaw watchdog bounds every freeze: a session frozen by the freeze-only
+#: tier is automatically resumed after this many seconds so a freeze can never be
+#: forgotten indefinitely (fully-reversible, self-healing first rung).
+REAPER_FREEZE_MAX_SECS_DEFAULT = 3600.0
+
+
+def reaper_arm_min_sweeps() -> int:
+    """Consecutive-clean-sweep arm bar (``ANCHOR_REAPER_ARM_MIN_SWEEPS``)."""
+    return _env_int(REAPER_ARM_MIN_SWEEPS_ENV, REAPER_ARM_MIN_SWEEPS_DEFAULT)
+
+
+def reaper_abstain_banner_k() -> int:
+    """Consecutive-abstain health-banner threshold (``ANCHOR_REAPER_ABSTAIN_BANNER_K``)."""
+    return _env_int(REAPER_ABSTAIN_BANNER_K_ENV, REAPER_ABSTAIN_BANNER_K_DEFAULT)
+
+
+def reaper_freeze_max_secs() -> float:
+    """Auto-thaw watchdog bound for a freeze (``ANCHOR_REAPER_FREEZE_MAX_SECS``)."""
+    return _env_float(REAPER_FREEZE_MAX_SECS_ENV, REAPER_FREEZE_MAX_SECS_DEFAULT)
+
+
 def ensure_data_dirs() -> None:
     """Create the data subdirectories that Anchor writes into.
 

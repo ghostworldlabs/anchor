@@ -132,6 +132,12 @@ def classify(record, live_session_ids, probe=proc_probe, tol=2.0) -> str:
     ``creation_time(pid)`` (injectable for tests). ``tol`` is the allowed
     creation-time drift in seconds (FILETIME vs. recorded epoch jitter).
 
+    Backward-compatible shim (Wave 1, single-source): the verdict LOGIC now lives
+    in :func:`reaper.classify`. This shim samples the ONE identity signal
+    ``reaper.classify`` needs for THIS record from the injected probe (a one-entry
+    positive-liveness map) and delegates, so there is a single source of the
+    verdict taxonomy.
+
     Verdicts:
       - ``"skip"``          — record is not RUNNING; not our concern.
       - ``"abstain"``       — missing identity (no token / pid / create-time):
@@ -141,33 +147,25 @@ def classify(record, live_session_ids, probe=proc_probe, tol=2.0) -> str:
       - ``"reap_recycled"`` — the PID is live but its creation time differs: the
                               PID was reused by a DIFFERENT process; update our
                               registry, NEVER kill the new owner.
-      - ``"alive"``         — our process, still running, still attached: leave it.
-      - ``"kill"``          — our process, still running, NOT attached → orphan →
+      - ``"alive"``         — our process, still running, and OWNED: leave it.
+      - ``"kill"``          — our process, still running, NO live owner → orphan →
                               kill + reap.
     """
-    if record.get("status") != session_registry.STATUS_RUNNING:
-        return VERDICT_SKIP
+    import reaper
 
+    sid = record.get("session_id")
     pid = record.get("pid")
-    ctime = record.get("proc_create_time")
-    token = record.get("crypt_token")
+    positive = {}
+    if sid and pid:
+        try:
+            actual = probe.creation_time(pid)
+        except Exception:
+            actual = None
+        positive[sid] = reaper.PositiveSignals(owner_pid=pid,
+                                               owner_create_time=actual)
 
-    # Missing identity → never killable / never auto-reapable.
-    if not token or not pid or ctime is None:
-        return VERDICT_ABSTAIN
-
-    actual = probe.creation_time(pid)
-    if actual is None:
-        # Process already gone — just reconcile the registry.
-        return VERDICT_REAP_DEAD
-    if abs(actual - ctime) > tol:
-        # PID recycled by a different process — never kill the new owner.
-        return VERDICT_REAP_RECYCLED
-
-    # Creation time matches → this PID still hosts OUR process.
-    if record.get("session_id") in live_session_ids:
-        return VERDICT_ALIVE
-    return VERDICT_KILL
+    owners = set(live_session_ids or ())
+    return reaper.classify(record, owners, positive, tol=tol)
 
 
 # ── Orphan discriminator — the "live owner" set ─────────────────────────────
@@ -198,49 +196,21 @@ def live_owner_ids(attached_ids, records=None, job_active=None):
     OR (transitively) its ``parent_session_id`` has a live owner. Returns a NEW
     set that is always a superset of ``attached_ids``. Best-effort: any probe
     failure degrades to "not owned via that path", never raises.
+
+    Backward-compatible shim (Wave 1, single-source): the owner-enumeration LOGIC
+    now lives in :mod:`reaper`. This builds an ownership-only snapshot (no PID
+    probe — ``reaper.NO_PROBE``) and returns ``reaper.live_owner_ids`` over it, so
+    every caller shares the ONE canonical live-owner computation.
     """
-    owners = set(attached_ids or ())
+    import reaper
 
-    if job_active is None:
-        try:
-            import job_runner
-            job_active = job_runner._holder_is_active
-        except Exception:  # pragma: no cover - defensive against an import cycle
-            job_active = lambda _sid: False
-
-    if records is None:
-        try:
-            records = session_registry.list_sessions(status="running")
-        except Exception:
-            records = []
-
-    by_id = {}
-    for rec in records or []:
-        sid = rec.get("session_id")
-        if not sid:
-            continue
-        by_id[sid] = rec
-        if sid in owners:
-            continue
-        try:
-            if job_active(sid):
-                owners.add(sid)
-        except Exception:  # pragma: no cover - a probe failure is "not owned"
-            pass
-
-    # Transitive parent ownership: a child of a live owner is itself owned.
-    # Iterate to a fixpoint (bounded by the record count — small).
-    changed = True
-    while changed:
-        changed = False
-        for sid, rec in by_id.items():
-            if sid in owners:
-                continue
-            parent = rec.get("parent_session_id")
-            if parent and parent in owners:
-                owners.add(sid)
-                changed = True
-    return owners
+    snap = reaper.build_snapshot(
+        attached_pty_ids=attached_ids,
+        records=records,
+        job_active=job_active,
+        probe=reaper.NO_PROBE,
+    )
+    return reaper.live_owner_ids(snap)
 
 
 # ── Report persistence ──────────────────────────────────────────────────────
@@ -359,7 +329,7 @@ _stop_event = None
 _hunter_lock = threading.Lock()
 
 
-def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
+def start_hunter(live_ids_provider, interval_sec=600, enabled=None, sweep_fn=None):
     """Start the background sweep daemon. Returns the thread, or ``None``.
 
     By default, starting is enabled (runs in dry-run mode, apply=False, unless
@@ -371,6 +341,13 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
     ``interval_sec`` seconds, swallowing+logging any exception so the loop never
     dies. ``live_ids_provider`` is a zero-arg callable returning the set of
     currently-attached session ids.
+
+    ``sweep_fn`` (Wave 8) — an optional zero-arg callable run INSTEAD of the
+    legacy ``sweep`` each cycle. The boot daemon passes the arming-ladder sweep
+    (:func:`reaper_arming.armed_sweep`, governed by the effective arm tier +
+    kill-switch brake) so the daemon is UNARMED by default and only ever kills
+    through the in-process, gate-authorized ladder. When ``None`` the legacy
+    dry-run/env-armed behavior is unchanged.
     """
     global _hunter_thread, _stop_event
 
@@ -390,8 +367,11 @@ def start_hunter(live_ids_provider, interval_sec=600, enabled=None):
             # Sweep immediately on start, then every interval until stopped.
             while not stop.is_set():
                 try:
-                    apply_kills = os.environ.get(HUNTER_ENV) == "1"
-                    sweep(live_ids_provider(), apply=apply_kills)
+                    if sweep_fn is not None:
+                        sweep_fn()
+                    else:
+                        apply_kills = os.environ.get(HUNTER_ENV) == "1"
+                        sweep(live_ids_provider(), apply=apply_kills)
                 except Exception as exc:  # never let the loop die
                     try:
                         print(f"[zombie_hunter] sweep error: {exc!r}")

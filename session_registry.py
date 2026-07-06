@@ -31,12 +31,23 @@ Stdlib only. No third-party imports.
 """
 
 import json
+import logging
 import os
 import time
 import uuid
 from pathlib import Path
 
 import paths as _paths
+
+_log = logging.getLogger("anchor.session_registry")
+
+
+def _log_rejected_transition(session_id, from_status, to_status) -> None:
+    """Audit a rejected status transition (Wave 5 terminal-lock guard)."""
+    _log.info(
+        "session_registry: rejected terminal transition %s: %s -> %s "
+        "(kept %s — a terminal-locked state is never resurrected)",
+        session_id, from_status, to_status, from_status)
 
 # Sessions JSON filename, stored under ``.anchor/`` at the data-dir root.
 SESSIONS_NAME = "sessions.json"
@@ -68,6 +79,23 @@ STATUS_IDLE = "idle"
 #: having ``_normalize`` coerce the unknown status to ``idle``.
 STATUS_CANCELLED = "cancelled"
 
+# ── zombie-hunter safe-to-arm, Wave 5: split the overloaded STATUS_IDLE ───────
+#
+# The historical ``STATUS_IDLE`` meant BOTH "parked warm — a graceful "×" close,
+# resumable, keeps its worktree" AND "reaped orphan — reconciled dead, worktree
+# gone". Those two meanings drive OPPOSITE worktree-retention decisions, so the
+# reaper cannot trust a bare ``idle`` to decide whether a worktree may be
+# removed. Wave 5 disambiguates them into two EXPLICIT states:
+#
+#   STATUS_PARKED_WARM    → non-running, RESUMABLE, KEEPS its worktree (grey).
+#   STATUS_REAPED_ORPHAN  → non-running, reconciled dead, worktree NOT retained.
+#
+# Legacy ``STATUS_IDLE`` records are conservatively read as PARKED_WARM
+# (over-protect only — an idle record kept its worktree, so warm-park is the safe
+# reading) and are migrated forward by :func:`migrate_idle_to_parked_warm`.
+STATUS_PARKED_WARM = "parked-warm"
+STATUS_REAPED_ORPHAN = "reaped-orphan"
+
 #: Every recognized status.
 VALID_STATUSES = {
     STATUS_RUNNING,
@@ -76,12 +104,82 @@ VALID_STATUSES = {
     STATUS_FAILED,
     STATUS_IDLE,
     STATUS_CANCELLED,
+    STATUS_PARKED_WARM,
+    STATUS_REAPED_ORPHAN,
 }
 
 #: Terminal statuses — a session in one of these has no live process and is
 #: never "running". (``idle`` is non-running too, but it is the parked/recovered
 #: state rather than a finished one.)
 TERMINAL_STATUSES = frozenset((STATUS_DONE, STATUS_FAILED))
+
+# ── Wave 5: state-transition table (STATUS_CANCELLED strictly terminal) ───────
+#
+# A terminal-LOCKED status is one no transition can ever leave: a CANCELLED run
+# is never re-adopted / reconciled-to-running / resurrected, and a REAPED_ORPHAN
+# is gone. :func:`can_transition` is the single authority the mutating CRUD
+# entrypoints consult so a status change OUT of a locked state is REJECTED
+# (the locked status is kept, the record is never resurrected).
+TERMINAL_LOCKED_STATUSES = frozenset((STATUS_CANCELLED, STATUS_REAPED_ORPHAN))
+
+#: Non-running statuses whose managed worktree is RETAINED (resumable warm).
+#: Legacy ``STATUS_IDLE`` folds in here — the conservative over-protect reading.
+WORKTREE_RETAINING_STATUSES = frozenset((STATUS_PARKED_WARM, STATUS_IDLE))
+
+#: Non-running statuses whose managed worktree is explicitly NOT retained.
+WORKTREE_DROPPING_STATUSES = frozenset((STATUS_REAPED_ORPHAN, STATUS_CANCELLED))
+
+#: Live / finished statuses that are NOT "parked warm" (so :func:`is_parked_warm`
+#: reports False — a live session is kept by the active-id check, a finished one
+#: is handled by its own teardown). Enumerated so an UNRECOGNIZED status is the
+#: only thing left to the fail-SAFE branch.
+_NON_PARKED_KNOWN_STATUSES = frozenset(
+    (STATUS_RUNNING, STATUS_NEEDS_ATTENTION, STATUS_DONE, STATUS_FAILED))
+
+
+def can_transition(from_status, to_status) -> bool:
+    """Is a status change ``from_status`` → ``to_status`` permitted? (Wave 5.)
+
+    The state-transition table is intentionally minimal: it locks ONLY the
+    terminal states. A record already in a :data:`TERMINAL_LOCKED_STATUSES`
+    status (``cancelled`` / ``reaped-orphan``) may NEVER transition to a
+    different status — the sole permitted "transition" is the identity (staying
+    put). Every other transition stays permissive so the non-terminal lifecycle
+    is unchanged. This is the single guard that makes ``STATUS_CANCELLED``
+    strictly terminal (never re-adopted, never reconciled to running).
+    """
+    if from_status == to_status:
+        return True
+    if from_status in TERMINAL_LOCKED_STATUSES:
+        return False
+    return True
+
+
+def is_parked_warm(record_or_status) -> bool:
+    """Does this record/status mean "parked WARM — keep the worktree"? (Wave 5.)
+
+    Retention is keyed on the EXPLICIT state field, not the overloaded ``idle``:
+
+    - ``STATUS_PARKED_WARM`` / legacy ``STATUS_IDLE`` → **True** (keep; resumable).
+    - ``STATUS_REAPED_ORPHAN`` / ``STATUS_CANCELLED`` → **False** (no worktree).
+    - a live / finished status (running/needs-attention/done/failed) → **False**
+      (a live session is retained by the active-id check; a finished one by its
+      own teardown — neither is "parked warm").
+    - anything else (an ambiguous / UNRECOGNIZED status) → fail **SAFE** to
+      **True** (parked/keep) so an unknown state is NEVER reaped.
+
+    Accepts either a record dict or a bare status string.
+    """
+    status = (record_or_status.get("status")
+              if isinstance(record_or_status, dict) else record_or_status)
+    if status in WORKTREE_DROPPING_STATUSES:
+        return False
+    if status in WORKTREE_RETAINING_STATUSES:
+        return True
+    if status in _NON_PARKED_KNOWN_STATUSES:
+        return False
+    # Unknown / ambiguous → fail SAFE (keep, never reap).
+    return True
 
 #: Recognized backends.
 BACKEND_CLAUDE = "claude"
@@ -231,6 +329,27 @@ def _normalize(record: dict) -> dict:
     except (TypeError, ValueError):
         proc_create_time = None
     crypt_token = record.get("crypt_token", "") or ""
+    # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
+    # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
+    # ids — the reference-counted ownership the teardown path (``kill`` /
+    # ``delete_session``) walks to reap every job the session owns via a targeted
+    # per-``job_id`` cancel (never a full ``list_records`` scan). A job handed off
+    # to a live successor stays claimed by that successor, so the reference count
+    # keeps it alive across the predecessor's kill. Back-compat: every pre-Wave-6
+    # record (no key) normalizes to ``[]``. Sanitized to a de-duped list of
+    # non-empty id strings, order preserved.
+    raw_jobs = record.get("owned_job_ids")
+    owned_job_ids = []
+    if isinstance(raw_jobs, (list, tuple)):
+        _seen_jobs = set()
+        for j in raw_jobs:
+            if j is None:
+                continue
+            js = str(j)
+            if not js or js in _seen_jobs:
+                continue
+            _seen_jobs.add(js)
+            owned_job_ids.append(js)
     return {
         "session_id": sid,
         "project_id": record.get("project_id", ""),
@@ -279,27 +398,78 @@ def _normalize(record: dict) -> dict:
         "pid": pid,
         "proc_create_time": proc_create_time,
         "crypt_token": crypt_token,
+        # zombie-hunter safe-to-arm, Wave 6: reference-counted owned-job claims.
+        "owned_job_ids": owned_job_ids,
     }
 
 
-def _save_sessions(reg: dict) -> None:
+#: Bounded retry for the atomic ``os.replace`` on Windows. A concurrent
+#: read-only sweep (``load_sessions`` → ``read_text``) momentarily holds the
+#: target file open; Windows then denies the rename with ``PermissionError(13,
+#: 'Access is denied')`` (a transient sharing violation, NOT a real permission
+#: fault). The reader's handle is released within microseconds, so a few short
+#: backed-off retries turn the race into a correct, atomic write instead of a
+#: spurious crash. POSIX ``os.replace`` never hits this — the loop is a no-op
+#: there (first attempt succeeds).
+_REPLACE_RETRIES = 40
+_REPLACE_BACKOFF_S = 0.005
+
+
+def _atomic_replace(tmp: str, target: str) -> None:
+    """``os.replace`` with a bounded retry over the transient Windows sharing
+    violation raised while a concurrent reader has ``target`` open. Re-raises
+    the last error if the window never clears within the retry budget."""
+    for attempt in range(_REPLACE_RETRIES):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == _REPLACE_RETRIES - 1:
+                raise
+            time.sleep(_REPLACE_BACKOFF_S)
+
+
+def _write_sessions_locked(reg: dict) -> None:
+    """The atomic write itself — the caller MUST already hold ``paths.WRITE_LOCK``.
+
+    Writes to a temp file in the same directory then ``os.replace`` over the
+    target so a crash mid-write can never leave a truncated/corrupt store
+    (durability discipline). Ensures the ``.anchor/`` dir exists first.
+
+    The replace goes through :func:`_atomic_replace` so a concurrent read-only
+    sweep holding the target open (the Windows sharing-violation race) is
+    tolerated with a bounded retry rather than surfacing a spurious
+    ``PermissionError``.
+    """
+    d = anchor_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    items = [reg[k] for k in reg]
+    target = sessions_path()
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(
+        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    _atomic_replace(str(tmp), str(target))
+
+
+def _save_sessions(reg: dict, *, _locked: bool = False) -> None:
     """Persist the registry (dict keyed by id) as a JSON list, atomically.
 
-    Runs under ``paths.WRITE_LOCK`` (matching ``rnd_registry``). Writes to a
-    temp file in the same directory then ``os.replace`` over the target so a
-    crash mid-write can never leave a truncated/corrupt store (durability
-    discipline). Ensures the ``.anchor/`` dir exists first.
+    WRITE_LOCK reentrancy (zombie-hunter → safe-to-arm, Wave 3): the mutating
+    CRUD entrypoints (:func:`register_session`, :func:`update_session`,
+    :func:`set_current_stage`, :func:`remove_session`, :func:`reconcile`) already
+    run inside ``with paths.WRITE_LOCK``. They call this with ``_locked=True`` so
+    the write does NOT re-acquire the lock — the critical section is SPLIT (the
+    held lock is passed down as the ``_locked`` flag), rather than relying on the
+    lock being reentrant. The code is therefore correct even if ``WRITE_LOCK`` is
+    a plain, non-reentrant ``threading.Lock`` — no self-deadlock on a held lock.
+    A standalone caller (the default ``_locked=False``) acquires the lock here.
     """
-    with _paths.WRITE_LOCK:
-        d = anchor_dir()
-        d.mkdir(parents=True, exist_ok=True)
-        items = [reg[k] for k in reg]
-        target = sessions_path()
-        tmp = target.with_name(target.name + ".tmp")
-        tmp.write_text(
-            json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        os.replace(str(tmp), str(target))
+    if _locked:
+        _write_sessions_locked(reg)
+    else:
+        with _paths.WRITE_LOCK:
+            _write_sessions_locked(reg)
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────
@@ -351,7 +521,7 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "crypt_token": crypt_token or "",
         })
         reg[sid] = record
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return record
 
 
@@ -524,7 +694,7 @@ def set_current_stage(session_id: str, stage: str, store_lane: str,
         rec = _normalize(rec)
         rec["session_id"] = session_id
         reg[session_id] = rec
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return rec
 
 
@@ -546,19 +716,30 @@ def update_session(session_id: str, **fields) -> dict:
                "kind", "current_stage", "stage_history", "seeded_stages",
                "effort_id", "effort_managed",
                # zombie-hunter v2: process-identity fields.
-               "pid", "proc_create_time", "crypt_token"}
+               "pid", "proc_create_time", "crypt_token",
+               # zombie-hunter safe-to-arm, Wave 6: owned-job claim set.
+               "owned_job_ids"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
             raise KeyError(session_id)
         rec = dict(reg[session_id])
+        # Wave 5: the state-transition table is the single authority that makes
+        # STATUS_CANCELLED (and STATUS_REAPED_ORPHAN) strictly terminal. A status
+        # change OUT of a terminal-locked state is REJECTED here — the locked
+        # status is kept so the record is never resurrected — while every other
+        # field in the same call still applies.
+        orig_status = reg[session_id].get("status")
         for k, v in fields.items():
             if k in allowed and v is not None:
+                if k == "status" and not can_transition(orig_status, v):
+                    _log_rejected_transition(session_id, orig_status, v)
+                    continue
                 rec[k] = v
         rec = _normalize(rec)
         rec["session_id"] = session_id
         reg[session_id] = rec
-        _save_sessions(reg)
+        _save_sessions(reg, _locked=True)
         return rec
 
 
@@ -568,9 +749,127 @@ def remove_session(session_id: str) -> bool:
         reg = load_sessions()
         if session_id in reg:
             del reg[session_id]
-            _save_sessions(reg)
+            _save_sessions(reg, _locked=True)
             return True
         return False
+
+
+# ── Reference-counted owned-job claims (zombie-hunter safe-to-arm, Wave 6) ───
+#
+# A managed trio session OWNS the ``job_runner`` jobs it spawned (Gemini-swarm
+# sub-agents, previews). When the session dies its jobs must die WITH it — the
+# exact orphan-swarm the reaper exists to prevent — via a targeted per-``job_id``
+# cancel walked off this explicit claim set (never a full ``list_records``
+# scan). Ownership is REFERENCE-COUNTED: a job handed off to / shared with a live
+# successor in the chain (e.g. plan→build, a shared preview) is claimed by that
+# successor too, so it survives the predecessor's teardown. These helpers are the
+# storage seam; the teardown orchestration lives in ``terminal_session``.
+
+def owned_jobs(session_id_or_record) -> list:
+    """Return the list of ``job_id``s a session explicitly claims (owns).
+
+    Accepts a ``session_id`` string OR a record dict. An unknown id / a record
+    with no claim set yields ``[]``. The returned list is a fresh copy — mutating
+    it never touches the stored record.
+    """
+    rec = session_id_or_record
+    if isinstance(rec, str):
+        rec = load_sessions().get(rec)
+    if not isinstance(rec, dict):
+        return []
+    jobs = rec.get("owned_job_ids")
+    return list(jobs) if isinstance(jobs, (list, tuple)) else []
+
+
+def claim_job(session_id: str, job_id: str) -> bool:
+    """Record that ``session_id`` owns ``job_id`` (append to its claim set).
+
+    Idempotent + de-duped: claiming the same ``job_id`` twice is a no-op. Returns
+    True when a NEW claim was recorded, False when the session is unknown or the
+    claim already existed. A CANCELLED/terminal-locked record can still take a
+    claim — the terminal lock only guards ``status`` (Wave 5), not bookkeeping —
+    but the teardown only honors claims held by LIVE sessions, so a claim on a
+    dead session never keeps a job alive.
+    """
+    if not session_id or not job_id:
+        return False
+    job_id = str(job_id)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        if session_id not in reg:
+            return False
+        rec = dict(reg[session_id])
+        jobs = list(rec.get("owned_job_ids") or [])
+        if job_id in jobs:
+            return False
+        jobs.append(job_id)
+        rec["owned_job_ids"] = jobs
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
+
+
+def release_job(session_id: str, job_id: str) -> bool:
+    """Drop ``session_id``'s claim over ``job_id`` (ownership hand-off / reap).
+
+    Returns True when a claim was removed, False when the session is unknown or
+    did not hold the claim. Used to record an explicit ownership transfer: when a
+    dying session's job survives because a live successor still claims it, the
+    dying session releases its claim so the successor is the sole owner.
+    """
+    if not session_id or not job_id:
+        return False
+    job_id = str(job_id)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        if session_id not in reg:
+            return False
+        rec = dict(reg[session_id])
+        jobs = list(rec.get("owned_job_ids") or [])
+        if job_id not in jobs:
+            return False
+        jobs = [j for j in jobs if j != job_id]
+        rec["owned_job_ids"] = jobs
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
+
+
+def job_claimants(job_id, records=None, *, exclude=None) -> list:
+    """Return the session RECORDS that explicitly claim ``job_id``.
+
+    Reference-count primitive: walks the SESSION registry (never
+    ``job_runner.list_records``) for every record whose ``owned_job_ids`` holds
+    ``job_id``. ``exclude`` (a session_id or an iterable of them) drops the caller
+    from its own count. ``records`` may pre-supply the record list (one snapshot
+    per teardown) so the walk is not re-read per job.
+    """
+    if not job_id:
+        return []
+    job_id = str(job_id)
+    if records is None:
+        records = list(load_sessions().values())
+    if exclude is None:
+        excl = frozenset()
+    elif isinstance(exclude, str):
+        excl = frozenset((exclude,))
+    else:
+        excl = frozenset(exclude)
+    out = []
+    for rec in records or []:
+        if not isinstance(rec, dict):
+            continue
+        sid = rec.get("session_id")
+        if sid in excl:
+            continue
+        jobs = rec.get("owned_job_ids")
+        if isinstance(jobs, (list, tuple)) and job_id in [str(j) for j in jobs]:
+            out.append(rec)
+    return out
 
 
 # ── Recovery / reconcile (MASTER-PLAN §I) ─────────────────────────────────
@@ -652,7 +951,62 @@ def reconcile(live_session_ids=None, worktree_exists=None,
                 reg[sid] = _normalize(rec)
                 marked.append(sid)
         if marked:
-            _save_sessions(reg)
+            _save_sessions(reg, _locked=True)
         report["marked"] = marked
         report["applied"] = True
+    return report
+
+
+# ── Wave 5: conservative legacy STATUS_IDLE → STATUS_PARKED_WARM migration ────
+
+def migrate_idle_to_parked_warm(apply=True) -> dict:
+    """Migrate every legacy ``STATUS_IDLE`` record forward to ``PARKED_WARM``.
+
+    The Wave-5 split disambiguated the overloaded ``idle`` into ``parked-warm``
+    (keeps its worktree) and ``reaped-orphan`` (no worktree). A legacy ``idle``
+    record kept its worktree, so ``parked-warm`` is the CONSERVATIVE (over-protect
+    only) reading — the migration NEVER downgrades a record to reaped-orphan.
+
+    On the FIRST boot that actually migrates a record, the reaper's persistent
+    dry-run marker is armed (via :func:`worktrees.arm_reaper_dryrun`) so that the
+    first post-migration sweep is REPORT-ONLY (log, delete nothing) — reap is
+    re-armed only after one clean dry report, so a migration can never race a live
+    delete. Best-effort and never raises.
+
+    Returns ``{"migrated": [session_id, ...], "applied": bool}``.
+    """
+    reg = load_sessions()
+    targets = [sid for sid, rec in reg.items()
+               if rec.get("status") == STATUS_IDLE]
+    report = {"migrated": [], "applied": bool(apply)}
+    if not targets:
+        report["applied"] = False
+        return report
+    if not apply:
+        report["migrated"] = list(targets)
+        report["applied"] = False
+        return report
+
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        migrated = []
+        for sid in targets:
+            if sid in reg and reg[sid].get("status") == STATUS_IDLE:
+                rec = dict(reg[sid])
+                rec["status"] = STATUS_PARKED_WARM
+                reg[sid] = _normalize(rec)
+                migrated.append(sid)
+        if migrated:
+            _save_sessions(reg, _locked=True)
+        report["migrated"] = migrated
+
+    if report["migrated"]:
+        # First post-migration boot sweeps report-only (never a live delete on the
+        # boot that just rewrote the state). Best-effort — arming is a safety belt.
+        try:
+            import worktrees as _wt
+            _wt.arm_reaper_dryrun()
+        except Exception:
+            _log.info("session_registry: reaper dry-run arm skipped after "
+                      "idle→parked-warm migration (best-effort)")
     return report

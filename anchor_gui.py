@@ -1909,6 +1909,10 @@ _SESSION_STATUS_COLOR = {
     _sessreg.STATUS_DONE: "amber",
     _sessreg.STATUS_FAILED: "red",
     _sessreg.STATUS_IDLE: "grey",
+    # Wave 5: the split of the overloaded idle — a parked-warm session is a grey
+    # reopenable tile (like idle); a reaped orphan is a spent grey tile.
+    _sessreg.STATUS_PARKED_WARM: "grey",
+    _sessreg.STATUS_REAPED_ORPHAN: "grey",
 }
 
 
@@ -2597,6 +2601,10 @@ _REG_STATUS_LIGHT = {
     _sessreg.STATUS_DONE: "amber",
     _sessreg.STATUS_FAILED: "red",
     _sessreg.STATUS_IDLE: "grey",
+    # Wave 5: the split of the overloaded idle — both render grey (parked-warm is
+    # a reopenable tile like idle; a reaped orphan is a spent grey tile).
+    _sessreg.STATUS_PARKED_WARM: "grey",
+    _sessreg.STATUS_REAPED_ORPHAN: "grey",
 }
 
 
@@ -2624,6 +2632,11 @@ def _registry_session_view(rec):
         pill_cls, pill_lbl = "done", "done"
     elif status == _sessreg.STATUS_FAILED:
         pill_cls, pill_lbl = "fail", "failed"
+    elif status == _sessreg.STATUS_PARKED_WARM:
+        # Wave 5: a parked-warm session is the reopenable grey tile the pre-split
+        # STATUS_IDLE produced — keep the same "idle" pill so a migrated record
+        # renders identically.
+        pill_cls, pill_lbl = "", "idle"
     else:
         pill_cls, pill_lbl = "", (status or "idle")
     label = (rec.get("label") or "").strip()
@@ -5631,6 +5644,25 @@ def generate_html(projects, tasks, inbox):
                 f'health_reports/{html_lib.escape(report_date)}.md</code> for details.'
                 f'</div>'
             )
+
+    # Wave 8 — the reaper consecutive-abstain health banner. Trips when the reaper
+    # has abstained (could-not-observe liveness) for > K consecutive sweeps, or
+    # the owner-evidence receipt chain fails verification — a signal the reaper is
+    # flying blind / the audit log may be tampered. Best-effort: never break the
+    # dashboard render over a reaper diagnostic.
+    try:
+        import reaper_arming as _reaper_arm
+        _rb = _reaper_arm.health_banner()
+        if _rb and _rb.get("tripped"):
+            health_banner_html += (
+                f'<div style="background:#3b2a1f;border:1px solid #9b6a3a;color:#ffd9b3;'
+                f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;">'
+                f'<strong style="color:#ffb37a">&#9888; Reaper health</strong> '
+                f'{html_lib.escape(str(_rb.get("message", "")))}'
+                f'</div>'
+            )
+    except Exception:
+        pass
 
     # Domain sort order: commercial first, then academic, family, writing, personal
     domain_sort_order = {"commercial": 0, "academic": 1, "family": 2, "writing": 3, "personal": 4}
@@ -10002,7 +10034,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if not self._term_token_ok():
                     self._send_json({"ok": False, "error": "unauthorized"}, 401)
                     return
-                import zombie_hunter
+                import reaper
                 import pty_manager
                 try:
                     attached = set(pty_manager.live_sessions())
@@ -10011,21 +10043,29 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 orphans = []
                 try:
                     running_recs = _sessreg.list_sessions(status="running")
-                    # (#1, safety-critical) An orphan is a RUNNING session with NO
+                    # (#3, single source) An orphan is a RUNNING session with NO
                     # LIVE OWNER — not merely one absent from the PTY-attached set.
-                    # Broaden "attached" to the full live-owner set (attached ∪
-                    # job-owned ∪ parent-owned) so a legit, work-doing session with
-                    # no open browser stream is never falsely flagged as a runaway.
+                    # Build the ONE immutable liveness snapshot for this sweep and
+                    # classify every record against it (the identical
+                    # snapshot/provider all 5 call sites share) so a legit,
+                    # work-doing session with no open browser stream is never
+                    # falsely flagged as a runaway.
                     try:
-                        live_ids = zombie_hunter.live_owner_ids(attached, records=running_recs)
+                        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs,
+                                                      enumerate_pids=reaper.enumerate_live_pids)
+                        live_ids = reaper.live_owner_ids(_snap)
                     except Exception:
+                        _snap = None
                         live_ids = attached
                     for rec in running_recs:
                         sid = rec.get("session_id", "")
                         try:
-                            verdict = zombie_hunter.classify(rec, live_ids)
+                            verdict = reaper.classify_record(rec, _snap)
                         except Exception:
-                            verdict = "kill" if (sid and sid not in live_ids) else "alive"
+                            # Defensive boundary (Wave 2, criterion 1): a fault
+                            # NEVER produces a "kill" — abstain-safe (OWNED/alive)
+                            # so the startup banner can't false-alarm on a hiccup.
+                            verdict = reaper.VERDICT_ABSTAIN
                         # Only alert on orphans born DURING THIS server's life.
                         # After a restart, prior-instance 'running' records whose
                         # backend survived classify as 'kill' against an empty
@@ -10051,6 +10091,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"ok": False, "error": "unauthorized"}, 401)
                     return
                 import zombie_hunter
+                import reaper
                 import pty_manager
                 import subprocess
                 # NOTE: do NOT import json/sys/os/datetime function-locally here —
@@ -10192,14 +10233,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
-                # (#1, safety-critical) This view marks orphans AND FREEZES them
-                # (pause_orphan). Use the full live-owner discriminator so a legit
+                # (#3, single source) This view marks orphans AND FREEZES them
+                # (pause_orphan). Build the ONE immutable snapshot for this sweep
+                # and classify against it (the shared provider) so a legit
                 # work-doing session with no open stream is never frozen/killed:
                 # an orphan has NO live owner (not job-owned, not parent-owned),
                 # not merely "no attached PTY stream".
                 try:
-                    live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+                    _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                                  enumerate_pids=reaper.enumerate_live_pids)
+                    live_ids = reaper.live_owner_ids(_snap)
                 except Exception:
+                    _snap = None
                     live_ids = attached
 
                 # Group by OWNER (project title, or project_id, or "(unowned)")
@@ -10250,9 +10295,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             status = rec.get("status", "")
                             
                             try:
-                                is_orphaned = (zombie_hunter.classify(rec, live_ids) == "kill")
+                                is_orphaned = (reaper.classify_record(rec, _snap) == "kill")
                             except Exception:
-                                is_orphaned = (sid not in live_ids)
+                                # Defensive boundary (Wave 2, criterion 1): a
+                                # fault NEVER freezes — treat as OWNED/alive so
+                                # pause_orphan can't freeze a legit session.
+                                is_orphaned = False
                                 
                             if is_orphaned:
                                 # FREEZE the orphan while it waits to be killed so
@@ -10464,6 +10512,23 @@ function startZombieTerminal(btn) {
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
+            elif self.path.startswith("/api/rnd/reaper_status"):
+                # Read-only (Wave 8): the reaper-explain inspection surface — the
+                # current arm tier + distance-to-bar, the disarm/brake state, the
+                # abstain-streak health banner, and every running session's
+                # classification + latest owner-evidence receipt. NO mutation, NO
+                # kill/freeze — pure inspection. AUTH: ``?token=`` (read-only GET;
+                # back-compat when no token set). Global (not project-scoped).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
+                import reaper_arming as _arm
+                try:
+                    dump = _arm.explain()
+                except Exception as exc:
+                    self._send_json({"ok": False, "error": str(exc)}, 500)
+                else:
+                    self._send_json({"ok": True, "reaper": dump})
             elif self.path.startswith("/api/rnd/boneyard"):
                 # Read-only (v10 Wave 7): the project's per-project Boneyard — a
                 # searchable list of DISCARDED material (hard-killed sessions w/
@@ -11912,6 +11977,7 @@ function startZombieTerminal(btn) {
         elif self.path == "/api/rnd/zombie_terminal_start":
             import shutil
             import zombie_hunter
+            import reaper
             import pty_manager
 
             backend = "claude"
@@ -11943,12 +12009,16 @@ function startZombieTerminal(btn) {
             except Exception:
                 pass
 
-            # (#1, safety-critical) Classify against the full live-owner set so a
-            # legit work-doing session with no open stream is not briefed as an
-            # orphan: attached ∪ job-owned ∪ parent-owned.
+            # (#3, single source) Classify against the ONE immutable snapshot for
+            # this sweep (the shared provider) so a legit work-doing session with
+            # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
+            # parent-owned.
             try:
-                live_ids = zombie_hunter.live_owner_ids(attached, records=running_records)
+                _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                              enumerate_pids=reaper.enumerate_live_pids)
+                live_ids = reaper.live_owner_ids(_snap)
             except Exception:
+                _snap = None
                 live_ids = attached
 
             session_briefs = []
@@ -11969,9 +12039,11 @@ function startZombieTerminal(btn) {
                         owner = proj_id
 
                 try:
-                    classification = zombie_hunter.classify(rec, live_ids)
+                    classification = reaper.classify_record(rec, _snap)
                 except Exception:
-                    classification = "kill" if sid not in live_ids else "alive"
+                    # Defensive boundary (Wave 2, criterion 1): a fault NEVER
+                    # briefs a session as an orphan-pending-kill — abstain-safe.
+                    classification = reaper.VERDICT_ABSTAIN
                     
                 if classification == "kill":
                     orphaned_ids.append(sid)
@@ -12189,6 +12261,33 @@ function startZombieTerminal(btn) {
                 else:
                     self._send_json({"ok": True,
                                      "removed": out.get("removed", [])})
+
+        elif self.path in ("/api/rnd/reaper_arm", "/api/rnd/reaper_advance",
+                            "/api/rnd/reaper_disarm"):
+            # Wave 8 — the reaper ARMING CONTROL PLANE. arm/advance/disarm are
+            # exposed ONLY through these mutating endpoints, already token-gated by
+            # the do_POST middleware above (default-deny: an unauthed request is
+            # 401'd before it reaches here, with NO state change). Defense in
+            # depth: the module functions ALSO re-check paths.auth_ok(provided) —
+            # they refuse with no state change on a bad token. The persisted tier
+            # only ENABLES the in-process gate; every destructive action is
+            # re-derived live in the sweep (protect-only). arm/advance are gated by
+            # the numeric bar recomputed in-process from the tamper-evident receipt
+            # chain; an under-bar advance is refused.
+            import reaper_arming as _arm
+            try:
+                if self.path == "/api/rnd/reaper_arm":
+                    out = _arm.arm(provided)
+                elif self.path == "/api/rnd/reaper_advance":
+                    out = _arm.advance(provided)
+                else:
+                    out = _arm.disarm(provided)
+            except Exception as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 500)
+            else:
+                code = 200 if out.get("ok") else (
+                    401 if out.get("error") == "unauthorized" else 409)
+                self._send_json(out, code)
 
         elif self.path == "/api/rnd/term_set_engine":
             # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
@@ -13465,29 +13564,63 @@ def main():
         _logger.error(f"gandalf boot reconcile failed: {e}")
 
     try:
-        # (#1, safety-critical) Reconcile managed-terminal-session registry
+        # (#3, single source) Reconcile managed-terminal-session registry
         # "running" records by PROCESS liveness on boot: a record whose recorded
         # PID no longer resolves to a live process is reconciled to a terminal
         # (idle) status, so a stale prior-instance "running" record can never feed
-        # the startup orphan banner. Liveness is by PROCESS, not by attached
-        # stream — a record with a live PID (genuine work OR a true orphan the
-        # banner/daemon handles) is LEFT running; only dead PIDs are reconciled.
+        # the startup orphan banner. Derive the alive-by-PID set from the SAME
+        # immutable snapshot/provider the banner + daemon use (reaper.live_pid_ids
+        # — process liveness, NOT ownership): a record with a live PID (genuine
+        # work OR a true orphan the banner/daemon handles) is LEFT running; only
+        # dead PIDs are reconciled.
         import session_registry as _sr_boot
-        import proc_probe as _pp_boot
-        _alive_pids = set()
-        for _rec in _sr_boot.list_sessions(status="running"):
-            _sid = _rec.get("session_id")
-            _pid = _rec.get("pid")
-            if not _sid or not _pid:
-                continue
-            try:
-                if _pp_boot.creation_time(_pid) is not None:
-                    _alive_pids.add(_sid)
-            except Exception:
-                pass
+        import reaper
+        # Boot reconcile only needs PROCESS liveness (reaper.live_pid_ids reads
+        # the snapshot's PID probe), so build it probe-only: no attached/owning-job
+        # enumeration — this preserves the pre-Wave-1 boot behavior exactly (a
+        # plain per-PID probe, no owner/job side effects at startup).
+        _snap_boot = reaper.build_snapshot(
+            attached_pty_ids=set(),
+            records=_sr_boot.list_sessions(status="running"),
+            job_active=lambda _sid: False,
+            enumerate_pids=reaper.enumerate_live_pids)
+        _alive_pids = reaper.live_pid_ids(_snap_boot)
         _sr_boot.reconcile(live_session_ids=_alive_pids)
+        # zombie-hunter safe-to-arm Wave 5: conservatively migrate every legacy
+        # STATUS_IDLE record forward to STATUS_PARKED_WARM (over-protect only) so
+        # worktree-retention keys on the explicit split state. On the first boot
+        # that actually migrates a record this arms the reaper dry-run, so the
+        # first post-migration worktree sweep below is report-only.
+        try:
+            _mig = _sr_boot.migrate_idle_to_parked_warm()
+            if _mig.get("migrated"):
+                _logger.info(
+                    "session_registry: migrated %d legacy idle record(s) to "
+                    "parked-warm (reaper sweep armed report-only for this boot)",
+                    len(_mig["migrated"]))
+        except Exception as e:
+            _logger.error(f"session_registry idle→parked-warm migration failed: {e}")
     except Exception as e:
         _logger.error(f"session_registry boot reconcile failed: {e}")
+
+    try:
+        # zombie-hunter safe-to-arm Wave 7: re-honor the persisted, PROTECT-ONLY
+        # frozen-set across the NSSM restart. Re-probe each frozen entry's owning
+        # PID (identity-tuple reuse guard) and re-establish the per-PID freeze
+        # from scratch — a dead/recycled PID is dropped (never touched), and a
+        # persisted 'would-kill' marker is INERT (kept pending; a kill is only
+        # ever re-derived in-process from a fresh live probe). Relies on NO
+        # cross-restart OS containment; never kills.
+        import freeze_state
+        _fz = freeze_state.reconcile_after_restart()
+        if _fz.re_frozen or _fz.thawed or _fz.would_kill_pending:
+            _logger.info(
+                "freeze_state boot reconcile: re-froze %d, dropped %d "
+                "(dead/recycled), %d would-kill marker(s) pending",
+                len(_fz.re_frozen), len(_fz.thawed),
+                len(_fz.would_kill_pending))
+    except Exception as e:
+        _logger.error(f"freeze_state boot reconcile failed: {e}")
 
     try:
         import preview_server
@@ -13532,18 +13665,55 @@ def main():
         if "PYTEST_CURRENT_TEST" not in os.environ and not _zombie_hunter_started:
             _zombie_hunter_started = True
             import zombie_hunter
+            import reaper
             import pty_manager
+            import session_registry as _sr_daemon
+            # Wave 8 — the daemon is governed by the ARMING LADDER, UNARMED by
+            # default. Each cycle does ONE running-record read and builds the ONE
+            # immutable snapshot (the single shared provider — same source the
+            # banner/view/brief/boot-reconcile sites use), derives the live-owner
+            # set from THAT snapshot (abstain-safe), caches it for _live_provider,
+            # then routes the SAME snapshot + records through
+            # reaper_arming.armed_sweep, whose effective tier (log → freeze → kill)
+            # honors the persisted arm state AND the restart-durable
+            # .anchor/reaper.disarmed kill-switch brake. Every destructive action
+            # is re-derived in-process from the fresh snapshot (protect-only) — a
+            # persisted 'kill' tier never kills a session whose owner is alive. A
+            # second build_snapshot here would violate the single-source contract.
+            import reaper_arming
+            _daemon_owners = {"set": set()}
             def _live_provider():
-                # (#1, safety-critical) The daemon KILLS verdict==kill sessions
-                # when armed (ANCHOR_ZOMBIE_HUNTER=1). Hand it the full live-owner
-                # set, not just the PTY-attached one, so a legit job-owned /
-                # parent-owned session is never reaped for lacking a browser stream.
+                # The daemon's live-owner set, derived from the most-recent sweep
+                # snapshot (abstain-safe PTY-attached fallback before the first
+                # sweep). Never builds a second snapshot.
+                return _daemon_owners["set"] or set(pty_manager._LIVE.keys())
+            def _armed_sweep_cycle():
+                try:
+                    running = _sr_daemon.list_sessions(status="running")
+                except Exception:
+                    running = []
                 attached = set(pty_manager._LIVE.keys())
                 try:
-                    return zombie_hunter.live_owner_ids(attached)
+                    snap = reaper.build_snapshot(attached_pty_ids=attached,
+                                                 records=running,
+                                                 enumerate_pids=reaper.enumerate_live_pids)
                 except Exception:
-                    return attached
-            zombie_hunter.start_hunter(_live_provider)
+                    snap = None
+                # Derive the live-owner set DIRECTLY from the one snapshot via the
+                # shared provider. Defensive boundary (Wave 2, criterion 1): a
+                # degraded/None snapshot → owner_ids_or_abstain returns EVERY
+                # running id as "owned", so a single fetch hiccup can never feed
+                # the armed daemon a narrowed live set → mass-kill.
+                try:
+                    if snap is not None and not getattr(snap, "degraded", False):
+                        _daemon_owners["set"] = reaper.live_owner_ids(snap) or attached
+                    else:
+                        _daemon_owners["set"] = (
+                            reaper.owner_ids_or_abstain(snap, running) or attached)
+                except Exception:
+                    _daemon_owners["set"] = attached
+                reaper_arming.armed_sweep(running, snap)
+            zombie_hunter.start_hunter(_live_provider, sweep_fn=_armed_sweep_cycle)
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")
 

@@ -539,7 +539,11 @@ class TestMutationInventoryArtifact:
             # the registry's atomic save is attributed to PRODUCT code
             reg_sites = {r["site"] for r in inv
                          if r["store"] == ".anchor/sessions.json"}
-            assert "session_registry.py:_save_sessions" in reg_sites
+            # Intent: the write site is a session_registry.py function (product
+            # code, never test code). The safe-to-arm reaper's lock-reentrancy fix
+            # split the former _save_sessions into _write_sessions_locked (write)
+            # + _atomic_replace (replace) — attribution stays in product code.
+            assert any(s.startswith("session_registry.py:") for s in reg_sites), reg_sites
             reg_ops = {r["op"] for r in inv
                        if r["store"] == ".anchor/sessions.json"}
             assert {"write", "replace"} <= reg_ops

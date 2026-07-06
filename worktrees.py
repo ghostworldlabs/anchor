@@ -291,22 +291,35 @@ def list_managed_worktrees(base=None) -> list:
 
 
 def _is_parked_idle(session_id):
-    """True if ``session_id``'s registry record is parked at ``STATUS_IDLE`` (W6).
+    """True if ``session_id``'s registry record is parked WARM — keep its worktree.
 
     The crucible-improve W6 graceful panel "×" CLOSE stops the PTY but KEEPS the
-    worktree + registry record at ``STATUS_IDLE`` so the session is resumable WARM
-    (W3/W4). The boot orphan-reaper must therefore KEEP such a worktree even though
-    it has no live PTY — otherwise a parked session's worktree is reaped on restart
-    and the work is lost. Best-effort: any registry-lookup failure → NOT parked
-    (the pre-W6 reap behavior), never raises. Imported lazily to avoid a
-    module-load cycle (``session_registry`` is a higher-level module).
+    worktree + registry record so the session is resumable WARM (W3/W4). The boot
+    orphan-reaper must therefore KEEP such a worktree even though it has no live
+    PTY — otherwise a parked session's worktree is reaped on restart and the work
+    is lost.
+
+    zombie-hunter safe-to-arm Wave 5: retention is keyed on the EXPLICIT state
+    field via :func:`session_registry.is_parked_warm`, NOT the overloaded ``idle``
+    string — ``STATUS_PARKED_WARM`` / legacy ``STATUS_IDLE`` are kept, while
+    ``STATUS_REAPED_ORPHAN`` / ``STATUS_CANCELLED`` are reapable (no worktree).
+
+    Fail SAFE (Wave 5): a *registry-lookup failure* now returns **True** (keep,
+    never reap) — an unknown/ambiguous state must never cost a session its
+    worktree. A record that is genuinely ABSENT (``None``) is still reapable
+    (``False``): a managed worktree with no owning record is a true orphan and is
+    the whole point of the sweep. ``session_registry`` is imported lazily to avoid
+    a module-load cycle.
     """
     try:
         import session_registry as _sr
         rec = _sr.get_session(session_id)
-        return bool(rec) and rec.get("status") == _sr.STATUS_IDLE
+        if rec is None:
+            return False  # no owning record → genuine orphan, reapable
+        return _sr.is_parked_warm(rec)
     except Exception:
-        return False
+        # Fail SAFE — a lookup failure must never authorize a reap.
+        return True
 
 
 def reaper_dryrun_marker(base=None) -> Path:
