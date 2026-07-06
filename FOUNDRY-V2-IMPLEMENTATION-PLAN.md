@@ -1,9 +1,15 @@
 # Skill Foundry v2 — Implementation Plan (Foreman-ready)
 
-test-command: python -m pytest -q
+test-command: python -m pytest tests/ -v -k "foundry or gandalf or reaper or manifest or skill_runner or journal or sleep or telemetry or map_json or library or isolation or scaffold or north_star"
 
-> **Build root:** `C:/dev/Anchor` · **Gate:** `python -m pytest -q` (Anchor's suite; new waves add coverage).
-> Node-side units (kernel parser, GUI) are exercised via pytest integration so the single gate covers them.
+> **Build root:** `C:/dev/Anchor` · **Gate:** the scoped, VERBOSE pytest above (fast: ~75s / ~300 tests, and
+> `-v` emits the per-test `PASSED` events Foreman's vacuous-GREEN guard requires; the full 2261-test suite
+> takes >13min and blows the gate timeout — do NOT use bare `pytest -q`).
+> **TEST-NAMING CONVENTION (mandatory):** every wave's NEW test file MUST be named `test_foundry_<area>_w<N>.py`
+> (e.g. `test_foundry_decisions_w1.py`) so the `-k "foundry …"` gate always collects the wave's own tests
+> (keeps the gate non-vacuous). Waves touching existing modules (gandalf, reaper, skill_runner, journaling,
+> the sleep kernel, map.json, the GUI) also KEEP those modules' existing tests green — they are already in the
+> `-k` scope. A full `python -m pytest tests/` regression run is the human MERGE gate (before foundry-v2 → master).
 > **Design:** `DESCRIPTION.md`. **North Star:** `../NORTH-STAR.md`. Every wave is gated against the North Star
 > (anti-drift) and preserves the invariant set in DESCRIPTION. Claude writes code; a 3-Gemini panel reviews
 > each wave (5:1). **Single-source:** skills are CONSUMED from `Skill Foundry/skills/<skill>`, never forked.
