@@ -361,30 +361,33 @@ def _build_claude_argv(prompt, output_dir, gated, permission_mode=None) -> list:
     return argv
 
 
-def _build_gemini_argv(prompt, output_dir, gated) -> list:
-    """Build a VALID ``gemini`` argv for a real (override-unset) launch.
+def _build_gemini_argv(prompt, output_dir, gated, permission_mode=None) -> list:
+    """Build the argv for a real Gemini launch — routed through the host ``agy`` CLI.
 
-    Verified-real gemini flags only (gemini --help): ``--skip-trust`` (REQUIRED —
-    untrusted folders are forced read-only otherwise, and jobs run inside the
-    project folder), ``-p/--prompt <value>`` (the prompt is the VALUE),
-    ``--output-format stream-json``, ``--approval-mode {…}`` (``auto_edit`` lets
-    the skill write its report; ``plan`` is read-only and would block it), and
-    ``--include-directories <dir>`` (NOT ``--output-dir``) to grant access to the
-    output dir.
+    This host has NO bare ``gemini`` binary; Gemini IS the ``agy`` CLI, whose old
+    ``--skip-trust`` / ``--output-format stream-json`` flags are DEAD (hard-error).
+    So a real Gemini launch runs the thin Node adapter ``agy_job_adapter.mjs``, which
+    drives the sanctioned ``agy-dispatch.mjs`` transport (no-shell STEER + transcript
+    polling + windowsHide) and re-emits the reply as ONE stream-json ``result`` line —
+    parsed unchanged by :func:`extract_assistant_text` and by ``gandalf._map_shards`` /
+    ``summarizer``. The (possibly large) prompt is written to a temp FILE, never put on
+    argv (agy's argv ceiling is ~32KB). Read-only posture (``--readonly``) for plan-mode
+    reads (e.g. gandalf shards); edit posture (agy ``--sandbox --add-dir``, applied by
+    the dispatcher) when the lane must write its report (research). Overrides:
+    ``ANCHOR_AGY_ADAPTER`` (adapter path), ``ANCHOR_AGY_DISPATCH`` (dispatch path),
+    ``GEMINI_MODEL``/``TRIO_MODEL`` (model).
     """
-    argv = ["gemini", "--skip-trust"]
-    if gated:
-        argv += ["-p", " "]
-        argv += ["--approval-mode", "plan" if gated == "plan" else "auto_edit"]
-    else:
-        argv += ["-p"]
-        if prompt:
-            argv.append(prompt)
-        argv += ["--approval-mode", "auto_edit"]
-
-    argv += ["--output-format", "stream-json"]
-    if output_dir:
-        argv += ["--include-directories", str(output_dir)]
+    import tempfile
+    fd, prompt_file = tempfile.mkstemp(prefix="agyprompt-", suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(prompt or "")
+    adapter = (os.environ.get("ANCHOR_AGY_ADAPTER") or
+               os.path.join(os.path.dirname(os.path.abspath(__file__)), "agy_job_adapter.mjs"))
+    model = (os.environ.get("GEMINI_MODEL") or os.environ.get("TRIO_MODEL") or "gemini-3.1-pro")
+    argv = ["node", adapter, "--prompt-file", prompt_file, "--model", model,
+            "--target", str(output_dir or ".")]
+    if permission_mode == "plan" or gated == "plan":
+        argv.append("--readonly")
     return argv
 
 
@@ -396,7 +399,7 @@ def build_backend_argv(backend, prompt, output_dir, gated, permission_mode=None)
     (truthy) for the gated lanes (claude only — gemini is research-only).
     """
     if backend == BACKEND_GEMINI:
-        return _build_gemini_argv(prompt, output_dir, gated)
+        return _build_gemini_argv(prompt, output_dir, gated, permission_mode=permission_mode)
     return _build_claude_argv(prompt, output_dir, gated, permission_mode=permission_mode)
 
 
