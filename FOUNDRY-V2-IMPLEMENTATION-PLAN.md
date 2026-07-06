@@ -14,17 +14,24 @@ test-command: python -m pytest tests/ -v -k "foundry or gandalf or reaper or man
 > (anti-drift) and preserves the invariant set in DESCRIPTION. Claude writes code; a 3-Gemini panel reviews
 > each wave (5:1). **Single-source:** skills are CONSUMED from `Skill Foundry/skills/<skill>`, never forked.
 
-## Wave 1 — Phase 0: de-risking spikes → decision records
-**Deliverables:** four committed, North-Star-tagged DECISION RECORDS (no production code): (1) Anchor API
-contract — a two-column map of native READ/EXECUTE endpoints + on-disk artifact contracts vs. the MUTATIVE
-verbs the control plane must supply; (2) isolation-runtime choice (WASM/container/microVM/Deno-perms) with a
-measured cost/latency envelope, reconciled with lazy activation — or an explicit "permissions advisory for v2"
-downgrade; (3) test-provenance taxonomy (human / agent+cross-model-verified / agent+human-ratified /
-frozen-benchmark-delta) with per-class trust ceilings; (4) process-telemetry depth + droppable side-channel
-design. A pytest checks each record exists and carries the required fields.
-**done-when:** `python -m pytest -q` passes a test asserting the four decision records exist, are
-North-Star-tagged, and name (a) the isolation runtime + cost, (b) the accepted provenance classes, (c) the
-mutative-verb inventory for Wave 9–10.
+## Wave 1 — Phase 0: de-risking spikes → decisions (as CODE + rationale docs)
+**IMPORTANT (Foreman §5): a wave must change real CODE exercised by a test — a docs-only wave HALTs. So the
+four Phase-0 decisions are encoded as an IMPORTABLE Python module, not just prose.**
+**Deliverables:** (A) a new source module **`foundry_decisions.py`** (in the Anchor build root) that encodes
+the four resolved decisions as machine-readable constants/enums that LATER waves import (this puts the
+decisions on the consumption path): (1) `ANCHOR_API_CONTRACT` — the native READ/EXECUTE surface vs. the
+MUTATIVE verbs the control plane must supply (Wave 9–10's op inventory); (2) `ISOLATION_RUNTIME` — the chosen
+OS-level primitive (WASM/container/microVM/Deno-perms) + its cost/latency envelope, or an explicit
+`PERMISSIONS_ADVISORY_V2` downgrade; (3) `TEST_PROVENANCE_CLASSES` — the taxonomy (human /
+agent+cross-model-verified / agent+human-ratified / frozen-benchmark-delta) with per-class trust ceilings;
+(4) `PROCESS_TELEMETRY_DEPTH` + the droppable-side-channel design. Each decision also carries a
+`traces_to_north_star` tag. (B) the four `DR-0*.md` rationale docs (the human-readable justification behind
+each constant). Keep `foundry_decisions.py` stdlib-only (Anchor's no-dep rule).
+**done-when:** `python -m pytest tests/ -v -k "foundry ..."` passes `tests/test_foundry_decisions_w1.py`,
+which **imports `foundry_decisions`** and asserts (a) the isolation runtime + cost constant is set, (b) the
+accepted provenance classes are enumerated, (c) the mutative-verb inventory for Wave 9–10 is present, and (d)
+every decision carries a `traces_to_north_star` tag — so a real SOURCE module (not just docs) is exercised by
+the test (satisfies the §5 vacuous-GREEN guard).
 
 ## Wave 2 — Phase 1: host-enforced journaling write-back seam
 **Deliverables:** the write-back seam in `gandalf.py`'s finalize path (Anchor already holds inputs/verdict/
