@@ -23,7 +23,7 @@ import pytest
 
 
 NOW = 4_000_000.0
-TOKEN = "s3cr3t-anchor-token"
+TOKEN = "placeholder"  # distro no-secrets scan: exempt placeholder value (not a real secret)
 
 
 class FakeProbe:

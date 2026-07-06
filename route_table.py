@@ -183,6 +183,12 @@ ROUTES = [
     _r("GET", "/api/rnd/gandalf_status_all", AUTH_TOKEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/orphan_check", AUTH_TOKEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/zombie_hunter_report", AUTH_TOKEN, match=MATCH_PREFIX),
+    # Reaper control plane (token-authed; safe-to-arm build) — status read + the
+    # arm/advance/disarm mutations. Sensitive control surface: token, never open.
+    _r("GET", "/api/rnd/reaper_status", AUTH_TOKEN, match=MATCH_PREFIX),
+    _r("POST", "/api/rnd/reaper_arm", AUTH_TOKEN),
+    _r("POST", "/api/rnd/reaper_advance", AUTH_TOKEN),
+    _r("POST", "/api/rnd/reaper_disarm", AUTH_TOKEN),
     _r("GET", "/api/rnd/boneyard", AUTH_TOKEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/remote_status", AUTH_TOKEN, match=MATCH_PREFIX),
     _r("GET", "/api/rnd/project_rollup", AUTH_TOKEN, match=MATCH_PREFIX),
