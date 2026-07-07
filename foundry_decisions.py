@@ -308,6 +308,31 @@ SIDE_CHANNEL_DESIGN = {
 
 
 # ---------------------------------------------------------------------------
+# Wave 11 (Phase 8 — safety before scale): NATIVE BUILT-INS.
+# The process-lifecycle reaper (zombie-hunter + its liveness/arming/freeze
+# modules) is a NATIVE, in-process subsystem — deliberately NOT forced into
+# the skill-action manifest registry.  It must run before/without any skill
+# dispatch (the boot daemon), its authority comes from the arming ladder +
+# the token-authed control plane (never a runner confirm token), and
+# manifest-registering it would put kill authority behind the very surface
+# it polices.  ``skill_runner`` CONSUMES this tuple and refuses a manifest
+# that tries to register one of these names as a skill (name-normalized:
+# lowercase, "-" == "_"), so the decision is enforced on the dispatch path.
+# ---------------------------------------------------------------------------
+
+NATIVE_BUILTINS = (
+    "zombie_hunter",
+    "reaper",
+    "reaper_arming",
+    "freeze_state",
+    "proc_probe",
+)
+
+#: The North-Star clause the native-built-in decision traces to.
+NATIVE_BUILTINS_TRACE = (NS_SAFETY_ENVELOPE,)
+
+
+# ---------------------------------------------------------------------------
 # The decision registry — one record per Phase-0 gap, each North-Star-tagged.
 # Later phases cite decisions by ``id``; the Wave-1 gate asserts every record
 # carries a non-empty ``traces_to_north_star``.

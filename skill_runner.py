@@ -48,6 +48,15 @@ refused, ``mutate`` included — auto-appends the 7-field skeleton entry via
 module never writes a journal file itself). Capture is a by-product of the
 run, zero author action.
 
+WAVE 11 (Phase 8 — safety before scale): the PER-HOST concurrent-skill-run
+budget is enforced HERE, in the one seam every dispatched op passes through,
+BEFORE default-on fan-out. At most :func:`concurrency_budget` ops execute at
+once host-wide; an over-budget dispatch is REFUSED honestly (and journaled),
+never silently queued. The process-lifecycle reaper family
+(``foundry_decisions.NATIVE_BUILTINS`` — zombie-hunter et al.) stays a NATIVE
+built-in: :func:`validate_manifest` refuses to register those names as
+manifest skill actions.
+
 Stdlib only (Anchor's no-dep rule) + the product seams ``paths`` /
 ``foundry_decisions`` / ``foundry_journal``.
 """
@@ -112,6 +121,17 @@ _MAX_SKILL_BYTES = 64 * 1024
 #: Confirm tokens are single-use and expire (a stale approval is no approval).
 CONFIRM_TOKEN_TTL_S = 3600.0
 
+#: Wave 11 — the per-host concurrent-skill-run budget. Env override (floor 1);
+#: a missing/invalid value falls back to the default. Kept deliberately small:
+#: fan-out earns scale AFTER the safety envelope, never before.
+MAX_CONCURRENT_ENV = "ANCHOR_SKILL_RUNNER_MAX_CONCURRENT"
+DEFAULT_MAX_CONCURRENT = 3
+
+#: Wave 11 — the process-lifecycle reaper family stays NATIVE (in-process);
+#: these names may never be manifest-registered as skill actions. Consumed
+#: from the Wave-1 decision module so the decision sits on the dispatch path.
+NATIVE_BUILTINS = tuple(_fd.NATIVE_BUILTINS)
+
 
 # ── Confirm tokens (the DR-02 mutate gate) ───────────────────────────────────
 
@@ -158,6 +178,58 @@ def _peek_confirm_token(token, skill):
 def _consume_confirm_token(token) -> None:
     with _CONFIRM_LOCK:
         _CONFIRM_TOKENS.pop(token, None)
+
+
+# ── The per-host concurrency budget (Wave 11 — safety before scale) ──────────
+
+#: In-flight dispatched-op count, host-wide; mutated only under the lock.
+_INFLIGHT = {"count": 0}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def concurrency_budget() -> int:
+    """The per-host budget: how many runner ops may execute CONCURRENTLY.
+
+    ``ANCHOR_SKILL_RUNNER_MAX_CONCURRENT`` overrides (floor 1 — a budget can
+    throttle fan-out, never wedge the runner shut); a missing / invalid /
+    non-positive value falls back to :data:`DEFAULT_MAX_CONCURRENT`.
+    """
+    raw = (os.environ.get(MAX_CONCURRENT_ENV) or "").strip()
+    if raw:
+        try:
+            n = int(raw)
+        except ValueError:
+            n = 0
+        if n >= 1:
+            return n
+    return DEFAULT_MAX_CONCURRENT
+
+
+def inflight_runs() -> int:
+    """How many dispatched ops are executing RIGHT NOW (host-wide)."""
+    with _INFLIGHT_LOCK:
+        return _INFLIGHT["count"]
+
+
+def _acquire_run_slot():
+    """Try to take one budget slot → ``(ok, refusal_reason)``.
+
+    Refusal is honest and immediate — the runner never queues an over-budget
+    op (a silent queue would hide the pressure the budget exists to surface).
+    """
+    budget = concurrency_budget()
+    with _INFLIGHT_LOCK:
+        if _INFLIGHT["count"] >= budget:
+            return False, ("concurrency-budget-exceeded:%d/%d"
+                           % (_INFLIGHT["count"], budget))
+        _INFLIGHT["count"] += 1
+    return True, None
+
+
+def _release_run_slot() -> None:
+    with _INFLIGHT_LOCK:
+        if _INFLIGHT["count"] > 0:
+            _INFLIGHT["count"] -= 1
 
 
 # ── Manifest: load / validate / normalize ────────────────────────────────────
@@ -215,6 +287,12 @@ def validate_manifest(manifest) -> list:
     skill = manifest.get("skill")
     if not (isinstance(skill, str) and skill.strip()):
         problems.append("missing/empty skill name")
+    elif skill.strip().lower().replace("-", "_") in NATIVE_BUILTINS:
+        # Wave 11: zombie-hunter/reaper stay in-process — kill authority never
+        # moves behind the skill-action surface it polices.
+        problems.append("skill %r is a native built-in — the process-"
+                        "lifecycle reaper is never manifest-registered"
+                        % skill)
 
     if not str(manifest.get("skill_dir") or "").strip():
         problems.append("missing skill_dir")
@@ -697,12 +775,16 @@ def run_op(dispatch, skill, *, payload=None, confirm_token=None,
        entries that never saw their declared trigger are REFUSED, not
        silently activated;
     3. runtime pre-flight probe over the declared capabilities;
-    4. ``mutate`` only: a valid single-use confirm token AND every declared
+    4. the Wave-11 per-host concurrency budget: at most
+       :func:`concurrency_budget` ops execute at once — an over-budget
+       dispatch is REFUSED honestly, never queued. Checked BEFORE the mutate
+       gate so a budget refusal never burns a single-use confirm token;
+    5. ``mutate`` only: a valid single-use confirm token AND every declared
        write target inside the manifest's ``write_scope`` — else refused;
-    5. execute the skill's own host (``executor`` is the injectable seam;
+    6. execute the skill's own host (``executor`` is the injectable seam;
        default = the manifest's ``host_cmd`` subprocess);
-    6. apply the declared output contract;
-    7. journal the op — done, failed, or refused — through the Wave-2 seam.
+    7. apply the declared output contract;
+    8. journal the op — done, failed, or refused — through the Wave-2 seam.
 
     Returns the result record (``ok`` / ``outcome`` / ``reason`` / ``output``).
     """
@@ -738,43 +820,56 @@ def run_op(dispatch, skill, *, payload=None, confirm_token=None,
     if problems:
         return _refuse("preflight:" + "; ".join(problems))
 
-    # 4 — the mutate gate: confirm token + declared write-scope.
-    if entry["op_kind"] == OP_MUTATE:
-        token_problem = _peek_confirm_token(confirm_token, entry["skill"])
-        if token_problem:
-            return _refuse(token_problem)
-        targets = list(write_targets or ())
-        if not targets:
-            return _refuse("write-targets-undeclared")
-        for target in targets:
-            if not _in_write_scope(target, entry["write_scope"]):
-                return _refuse("write-scope-violation:%s" % target)
-        # Everything checked — the approval is spent by the execution.
-        _consume_confirm_token(confirm_token)
+    # 4 — the Wave-11 per-host concurrency budget (Phase 8: safety before
+    # scale). Checked BEFORE the mutate gate so an over-budget dispatch never
+    # burns a single-use confirm token; over budget → an honest, journaled
+    # refusal — default-on fan-out must degrade loudly, never queue silently.
+    slot_ok, slot_reason = _acquire_run_slot()
+    if not slot_ok:
+        return _refuse(slot_reason)
+    try:
+        # 5 — the mutate gate: confirm token + declared write-scope.
+        if entry["op_kind"] == OP_MUTATE:
+            token_problem = _peek_confirm_token(confirm_token, entry["skill"])
+            if token_problem:
+                return _refuse(token_problem)
+            targets = list(write_targets or ())
+            if not targets:
+                return _refuse("write-targets-undeclared")
+            for target in targets:
+                if not _in_write_scope(target, entry["write_scope"]):
+                    return _refuse("write-scope-violation:%s" % target)
+            # Everything checked — the approval is spent by the execution.
+            _consume_confirm_token(confirm_token)
 
-    # 5 — execute the skill's OWN host (never imported, only spawned).
-    if executor is not None:
-        try:
-            stdout_text, reason = executor(entry, payload), None
-        except Exception as e:
-            stdout_text, reason = None, "executor-failed:%s" % e
-    else:
-        stdout_text, reason = _execute_host(entry, payload)
+        # 6 — execute the skill's OWN host (never imported, only spawned).
+        if executor is not None:
+            try:
+                stdout_text, reason = executor(entry, payload), None
+            except Exception as e:
+                stdout_text, reason = None, "executor-failed:%s" % e
+        else:
+            stdout_text, reason = _execute_host(entry, payload)
 
-    # 6 — the declared output contract.
-    output = None
-    if reason is None:
-        output, reason = _check_output_contract(entry, stdout_text)
+        # 7 — the declared output contract.
+        output = None
+        if reason is None:
+            output, reason = _check_output_contract(entry, stdout_text)
 
-    outcome = "done" if reason is None else "failed"
-    verdict = reason if reason else "ok"
-    if isinstance(output, dict) and output.get("verdict"):
-        verdict = str(output["verdict"])
+        outcome = "done" if reason is None else "failed"
+        verdict = reason if reason else "ok"
+        if isinstance(output, dict) and output.get("verdict"):
+            verdict = str(output["verdict"])
 
-    # 7 — the Wave-2 seam, now living in the runner: capture is a by-product.
-    _journal_op(entry, run_id, started_ts=started, outcome=outcome,
-                verdict=verdict, payload=payload,
-                write_targets=write_targets, reason=reason, output=output)
+        # 8 — the Wave-2 seam, now living in the runner: capture is a
+        # by-product.
+        _journal_op(entry, run_id, started_ts=started, outcome=outcome,
+                    verdict=verdict, payload=payload,
+                    write_targets=write_targets, reason=reason, output=output)
 
-    return _result(entry, run_id, ok=(reason is None), outcome=outcome,
-                   reason=reason, output=output, started_ts=started)
+        return _result(entry, run_id, ok=(reason is None), outcome=outcome,
+                       reason=reason, output=output, started_ts=started)
+    finally:
+        # The slot is released whatever happened — a refused mutate, a failed
+        # host, a done run: the budget can never leak shut.
+        _release_run_slot()

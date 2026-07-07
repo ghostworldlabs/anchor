@@ -12331,7 +12331,14 @@ function startZombieTerminal(btn) {
             import reaper_arming as _arm
             try:
                 if self.path == "/api/rnd/reaper_arm":
-                    out = _arm.arm(provided)
+                    # Wave 11 (foundry-v2, safety before scale): the ARM rung
+                    # (log→freeze) goes through the sanctioned Wave-11 path,
+                    # which RE-CHECKS the 2026-07-05 fail-deadly finding before
+                    # delegating to the token-authed, receipt-gated ladder —
+                    # an open finding refuses the arm with no state change.
+                    # Targets FREEZE only; this endpoint can never arm KILL.
+                    import foundry_safety as _fsafety
+                    out = _fsafety.arm_reaper_to_freeze(provided)
                 elif self.path == "/api/rnd/reaper_advance":
                     out = _arm.advance(provided)
                 else:
