@@ -38,14 +38,23 @@ building the registry imports/executes NO skill code (the single-source
 invariant: skills are CONSUMED from their canonical on-disk dirs, never
 forked, never imported).
 
-Stdlib only (Anchor's no-dep rule) + the product seams ``gandalf`` /
-``skill_runner``.
+Wave 6 put **map.json v2 on the consumption path**: the canonical registry
+build reads the Wave-5 graph (``foundry_map``) and REFUSES to build when the
+registry and the graph disagree — a skill missing from the map, a declared
+composition without its typed ``compose`` edge (the wrong/empty-edge case),
+an edge the runner doesn't honor, or a tier mismatch
+(:func:`verify_registry_against_map`). The drift gates themselves live in
+``foundry_map_gates``.
+
+Stdlib only (Anchor's no-dep rule) + the product seams ``foundry_map`` /
+``gandalf`` / ``skill_runner``.
 """
 
 import inspect
 import os
 from pathlib import Path
 
+import foundry_map as _fm
 import gandalf as _gandalf
 import skill_runner as _sr
 
@@ -194,11 +203,82 @@ def registry_manifests(overrides=None) -> list:
     ]
 
 
-def build_registry_dispatch(manifests=None) -> dict:
-    """Declare-then-resolve the registry into a runner dispatch table."""
+def verify_registry_against_map(manifests, map_doc) -> list:
+    """Cross-check the registry against map.json v2 → problem list.
+
+    The Wave-6 consumption contract (the real consumer READS the graph, so a
+    wrong or empty edge breaks a build, loudly):
+
+    * the map itself must validate clean (``map-invalid:*`` — an invalid
+      graph is never consumed);
+    * every registry skill must exist in the map by name
+      (``skill-not-in-map``);
+    * a manifest's declared ``composes`` must be backed, dependency for
+      dependency, by a typed ``compose`` edge in the map
+      (``compose-edge-missing`` — the EMPTY/wrongly-typed/wrong-target edge
+      case), and every ``compose`` edge the map declares for that skill must
+      appear in the manifest (``compose-edge-undeclared`` — the graph and
+      the runner may not silently disagree in either direction);
+    * the manifest's runner ``tier`` must match the map's
+      (``tier-mismatch``)."""
+    problems = _fm.validate_map(map_doc)
+    if problems:
+        return ["map-invalid:%s" % p for p in problems]
+    by_name = {s["name"]: s for s in map_doc["skills"]}
+    by_ref = {s["ref"]: s for s in map_doc["skills"]}
+    out = []
+    for m in manifests:
+        name = str((m or {}).get("skill") or "") if isinstance(m, dict) else ""
+        entry = by_name.get(name)
+        if entry is None:
+            out.append("skill-not-in-map:%s" % (name or "?"))
+            continue
+        tier = m.get("tier")
+        if tier is not None and entry["tier"] != tier:
+            out.append("tier-mismatch:%s:map=%r,manifest=%r"
+                       % (name, entry["tier"], tier))
+        declared = [str(c) for c in (m.get("composes") or ())]
+        edge_names = [by_ref[e["to"]]["name"] for e in entry["edges"]
+                      if e["type"] == "compose"]
+        for dep in declared:
+            if dep not in edge_names:
+                out.append("compose-edge-missing:%s->%s" % (name, dep))
+        for dep in edge_names:
+            if dep not in declared:
+                out.append("compose-edge-undeclared:%s->%s" % (name, dep))
+    return out
+
+
+def build_registry_dispatch(manifests=None, map_doc=None) -> dict:
+    """Declare-then-resolve the registry into a runner dispatch table.
+
+    Wave 6 put map.json v2 ON THE CONSUMPTION PATH: the canonical build
+    (``manifests=None``) — and any build handed a ``map_doc`` explicitly —
+    verifies the registry against the graph FIRST and refuses to build on
+    any disagreement (``ValueError`` naming every problem; a wrong or empty
+    edge breaks the build here, before a dispatch table exists). A consumed
+    build's entries then carry the map's pin under ``entry["map"]``
+    (ref/version/status/tier — graph data genuinely read into the build
+    product). An explicit-manifests build WITHOUT a map stays the pure
+    Wave-3/4 seam (hermetic subset/fixture dispatches)."""
+    consume = manifests is None or map_doc is not None
     if manifests is None:
         manifests = registry_manifests()
-    return _sr.build_dispatch(manifests)
+    if consume:
+        if map_doc is None:
+            map_doc = _fm.load_map()
+        problems = verify_registry_against_map(manifests, map_doc)
+        if problems:
+            raise ValueError("map-consumption-refused: "
+                             + "; ".join(problems))
+    dispatch = _sr.build_dispatch(manifests)
+    if consume:
+        by_name = {s["name"]: s for s in map_doc["skills"]}
+        for name, entry in dispatch.items():
+            skill = by_name[name]
+            entry["map"] = {"ref": skill["ref"], "version": skill["version"],
+                            "status": skill["status"], "tier": skill["tier"]}
+    return dispatch
 
 
 # ── Executors (ANCHOR adapters mounted on the runner's executor seam) ────────
