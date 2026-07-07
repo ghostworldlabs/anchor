@@ -285,6 +285,12 @@ ROUTES = [
     _r("POST", "/api/rnd/advance_stage", AUTH_TOKEN),
     _r("POST", "/api/rnd/handoff_to_fresh", AUTH_TOKEN),
     _r("POST", "/api/rnd/finish_to_build", AUTH_TOKEN),
+    # Skill Foundry v2 — the Foundry GUI page (open, like /project/) + its mutative ops (token-gated).
+    _r("GET", "/foundry", AUTH_OPEN),
+    _r("POST", "/api/foundry/create_skill", AUTH_TOKEN),
+    _r("POST", "/api/foundry/north_star", AUTH_TOKEN),
+    _r("POST", "/api/foundry/sleep_session", AUTH_TOKEN),
+    _r("POST", "/api/foundry/sync_autoload", AUTH_TOKEN),
 ]
 
 
