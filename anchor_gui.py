@@ -408,6 +408,7 @@ import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard 
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
+import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
 import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
@@ -11203,6 +11204,46 @@ function startZombieTerminal(btn) {
             text = body.get("text", "")
             ok = mark_done(text)
             self._send_json({"ok": ok, "message": f"Marked done: {text}" if ok else f"Not found: {text}"})
+
+        elif self.path == "/api/foundry/create_skill":
+            # foundry-v2 Wave 10: EVERY Foundry GUI mutation is a confirm-
+            # gated control-plane op dispatched through job_runner (auto-
+            # journaled) — never a GUI-side file write. Create a skill →
+            # foundry.scaffold_skill (refuses to overwrite; branch commit).
+            self._send_json(_fgw.create_skill(
+                body.get("name"),
+                confirm=bool(body.get("confirm")),
+                title=body.get("title") or None,
+                description=body.get("description") or None))
+
+        elif self.path == "/api/foundry/north_star":
+            # foundry-v2 Wave 10: edit a per-skill North Star via the ONLY
+            # sanctioned mutation path (foundry.edit_north_star) — propose
+            # parks a reviewable diff; apply spends the explicit confirm
+            # (prior version retained, branch commit).
+            if str(body.get("mode") or "propose") == "apply":
+                self._send_json(_fgw.north_star_apply(
+                    body.get("skill"), body.get("proposal_id"),
+                    confirm=bool(body.get("confirm"))))
+            else:
+                self._send_json(_fgw.north_star_propose(
+                    body.get("skill"), body.get("new_text"),
+                    confirm=bool(body.get("confirm"))))
+
+        elif self.path == "/api/foundry/sync_autoload":
+            # foundry-v2 Wave 10: regenerate Anchor's clickable skill set
+            # from map.json v2 alone (foundry.register_autoload — every
+            # foundry skill auto-loaded, never hand-wired).
+            self._send_json(_fgw.sync_autoload(
+                confirm=bool(body.get("confirm"))))
+
+        elif self.path == "/api/foundry/sleep_session":
+            # foundry-v2 Wave 10 SPLIT seam: targets the DECLARED op
+            # interface foundry.sleep_session; until the separate foundry
+            # build delivers the op body this answers the honest pending
+            # status — nothing is faked, nothing dispatched.
+            self._send_json(_fgw.run_sleep_session(
+                confirm=bool(body.get("confirm"))))
 
         elif self.path == "/api/rnd/upload_batch":
             project_id = body.get("project_id", "__dashboard__")

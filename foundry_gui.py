@@ -34,6 +34,12 @@ anything: no file creation, no caching, no registry of its own. Stdlib
 only (Anchor's no-dep rule) + the product seams ``paths`` /
 ``foundry_decisions`` / ``foundry_autoload`` / ``foundry_journal`` /
 ``foundry_map`` / ``job_runner``.
+
+Wave 10: the page additionally embeds the WRITE surface panel from
+``foundry_gui_write`` — action cards whose every mutation is a confirm-
+gated control-plane op invocation through job_runner (never a GUI-side
+file mutation), plus the declared ``foundry.sleep_session`` seam with its
+honest pending status. The read layer here stays pure.
 """
 
 import html as _htmlmod
@@ -47,6 +53,7 @@ import paths as _paths
 import foundry_autoload as _fa
 import foundry_decisions as _fd
 import foundry_journal as _fj
+import foundry_gui_write as _fgw
 import foundry_map as _fm
 import job_runner as _jr
 
@@ -582,6 +589,10 @@ def render_foundry_page(*, home=None, map_path=None, lock_path=None,
         "store). <a href='/'>&larr; Anchor</a> &middot; "
         "<a href='/foundry'>refresh</a></div>",
     ]
+    # Wave 10: the write-surface panel (create / edit North Star / clickable
+    # sync / sleep seam) — rendered by foundry_gui_write; every button is an
+    # op invocation POST, so the read layer here stays mutation-free.
+    parts.append(_fgw.render_write_panel())
     if job_id:
         parts.extend(_render_monitor(monitor_view(job_id, since=since)))
     lib = library_view(home=home)
