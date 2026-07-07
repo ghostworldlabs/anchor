@@ -131,12 +131,17 @@ def _gandalf_mode() -> str:
     return m if m in (MODE_AGENTIC, MODE_MAPREDUCE) else DEFAULT_MODE
 
 
-#: Permission posture for the agentic run. ``acceptEdits`` lets the skill WRITE
-#: its report into the run dir; a host whose skill must spawn Bash→agy for the
-#: 5:1 may need ``bypassPermissions`` — overridable WITHOUT a code change so a
-#: live smoke test can tune it.
+#: Permission posture for the agentic run. The canonical Gandalf skill MUST spawn
+#: a shell → agy (the Gemini 5:1) AND reach its grading host in the skill folder
+#: (outside the analyzed repo); ``acceptEdits`` sandboxes headless Bash and blocks
+#: BOTH — proven by the 2026-07-07 live smoke test (agy unreachable → single-family
+#: ``degraded:true``). ``bypassPermissions`` unblocks them (re-run under the fix:
+#: agy dispatched a Gemini 3.1 Pro shard, grader ran → ``degraded:false``). This is
+#: broad (arbitrary shell + full-FS for the read-only advisor) but REQUIRED for the
+#: canonical skill and consistent with an interactive ``gandalf-heavy`` run. Still
+#: env-overridable (``ANCHOR_GANDALF_PERMISSION_MODE``) for a locked-down host.
 GANDALF_PERMISSION_ENV = "ANCHOR_GANDALF_PERMISSION_MODE"
-DEFAULT_PERMISSION_MODE = "acceptEdits"
+DEFAULT_PERMISSION_MODE = "bypassPermissions"
 
 
 def _gandalf_permission_mode() -> str:
