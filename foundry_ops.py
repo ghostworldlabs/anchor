@@ -1,11 +1,11 @@
-"""Skill Foundry v2 — Wave 7: control-plane ops (scaffold + gen_manifest).
+"""Skill Foundry v2 — Waves 7+8: the Phase-6 control-plane ops.
 
 DR-01's contract is "mutations are runs, not endpoints": Anchor's execution
 API stays read/execute, and every mutation the Foundry needs ships as a
 manifest-registered ``mutate`` op on the Wave-3 generic runner, dispatched
 through ``job_runner`` — therefore confirm-token-gated, write-scoped, and
 auto-journaled, with NO new server, DB, or store. This module delivers the
-first two ops of that inventory (the keys come FROM
+Phase-6 ops of that inventory (the keys come FROM
 ``foundry_decisions.MUTATIVE_VERBS`` — the DR-01 decision stays on the
 consumption path):
 
@@ -19,6 +19,19 @@ consumption path):
 * **``foundry.gen_manifest``** — derive (or update) a skill's runner manifest,
   validated against the Wave-3 schema (``skill_runner.validate_manifest``)
   BEFORE anything is written; an invalid result refuses without touching disk.
+* **``foundry.edit_north_star``** (Wave 8) — the ONLY sanctioned per-skill
+  North-Star mutation path: proposal-diff → explicit human confirm token →
+  apply as a branch commit with the prior version retained. The core (and
+  the out-of-band drift gates) lives in ``foundry_north_star``; this module
+  is the confirm-gated dispatch surface.
+* **``foundry.register_autoload``** (Wave 8) — regenerate Anchor's CLICKABLE
+  skill set from map.json v2 alone (``foundry_autoload``): a skill added to
+  the map appears, a skill dropped disappears — never hand-wired.
+
+The Wave-7 registry builders (``control_plane_manifests`` /
+``build_control_dispatch``) stay frozen to their original pair; the Wave-8
+ops are ADDITIVE via ``full_control_plane_manifests`` /
+``build_full_control_dispatch``.
 
 Execution shape — both directions of the same manifest:
 
@@ -57,9 +70,11 @@ import uuid
 from pathlib import Path
 
 import paths as _paths
+import foundry_autoload as _fa
 import foundry_decisions as _fd
 import foundry_journal as _fj
 import foundry_map as _fm
+import foundry_north_star as _fns
 import skill_runner as _sr
 
 
@@ -72,9 +87,14 @@ _THIS_FILE = Path(__file__).resolve()
 #: decision record, so a renamed/dropped verb breaks loudly here.
 OP_SCAFFOLD = "foundry.scaffold_skill"
 OP_GEN_MANIFEST = "foundry.gen_manifest"
+OP_EDIT_NORTH_STAR = "foundry.edit_north_star"
+OP_REGISTER_AUTOLOAD = "foundry.register_autoload"
 
 #: op registry key → the CLI subcommand its host_cmd runs.
-OP_CLI_NAMES = {OP_SCAFFOLD: "scaffold_skill", OP_GEN_MANIFEST: "gen_manifest"}
+OP_CLI_NAMES = {OP_SCAFFOLD: "scaffold_skill",
+                OP_GEN_MANIFEST: "gen_manifest",
+                OP_EDIT_NORTH_STAR: "edit_north_star",
+                OP_REGISTER_AUTOLOAD: "register_autoload"}
 
 #: The job_runner lane control-plane op jobs run under (free-form label — the
 #: ops go through the plain ``launch`` path; the Wave-11 concurrency budget
@@ -88,6 +108,10 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 #: The dedicated branch a scaffold commits on (DR-02 compensating control:
 #: mutations apply on a branch, never straight to main).
 SCAFFOLD_BRANCH_PREFIX = "foundry/scaffold-"
+
+#: The dedicated branch a North-Star apply commits on (same DR-02 control;
+#: repeat edits of one skill stack commits on the same branch).
+NORTH_STAR_BRANCH_PREFIX = "foundry/north-star-"
 
 #: New scaffolds enter the map at the bottom of the PyPI status ladder.
 DEFAULT_SCAFFOLD_STATUS = "1 - Planning"
@@ -120,6 +144,14 @@ def ops_home() -> Path:
     ``<ops_home>/journal/``.
     """
     home = _paths.data_dir() / "foundry_ops"
+    home.mkdir(parents=True, exist_ok=True)
+    return home
+
+
+def _ns_proposals_home() -> Path:
+    """Where ``foundry.edit_north_star`` parks its proposals (under the
+    control-plane home — the propose leg's declared write target)."""
+    home = ops_home() / _fns.PROPOSALS_DIRNAME
     home.mkdir(parents=True, exist_ok=True)
     return home
 
@@ -245,14 +277,17 @@ _GIT_IDENT = ("-c", "user.name=Anchor Foundry",
               "-c", "user.email=foundry@anchor.invalid")
 
 
-def _git_commit_scaffold(skills_root: Path, paths_to_add, name) -> dict:
-    """Commit the scaffold on a dedicated branch → an honest report dict.
+def _git_commit_on_branch(skills_root: Path, paths_to_add, *, branch,
+                          message) -> dict:
+    """Commit ``paths_to_add`` on a dedicated branch → an honest report dict.
 
     ``{"committed": bool, "branch": str|None, "reason": str|None}``. Only
     paths inside the enclosing repo are staged (the map may live in a
     different tree); no repo at all degrades honestly — the files stand, the
     result says why nothing was committed. Uses the ONE sanctioned git seam
-    (``worktrees._git`` — git as an external CLI, never a dep).
+    (``worktrees._git`` — git as an external CLI, never a dep). An already-
+    existing branch is switched to, not a failure — repeat mutations of the
+    same subject stack commits on the same branch.
 
     SAFETY: git's toplevel discovery walks UP arbitrarily far, so a stray
     ancestor ``.git`` (a temp dir, a home dir) could hijack the commit — and
@@ -273,11 +308,14 @@ def _git_commit_scaffold(skills_root: Path, paths_to_add, name) -> dict:
                         os.path.normcase(str(root_resolved.parent))):
         return {"committed": False, "branch": None,
                 "reason": "repo-not-foundry-rooted:" + top.as_posix()}
-    branch = SCAFFOLD_BRANCH_PREFIX + str(name)
+    branch = str(branch)
     ok, _rc, _out, err = _wt._git(top, ["checkout", "-b", branch])
     if not ok:
-        return {"committed": False, "branch": branch,
-                "reason": "branch-failed:" + (err or "").strip()[:160]}
+        ok, _rc, _out, err2 = _wt._git(top, ["checkout", branch])
+        if not ok:
+            return {"committed": False, "branch": branch,
+                    "reason": "branch-failed:"
+                    + (err or err2 or "").strip()[:160]}
     inside = []
     for p in paths_to_add:
         try:
@@ -294,13 +332,21 @@ def _git_commit_scaffold(skills_root: Path, paths_to_add, name) -> dict:
     if not ok:
         return {"committed": False, "branch": branch,
                 "reason": "add-failed:" + (err or "").strip()[:160]}
-    msg = "foundry.scaffold_skill: %s (template + manifest + map v2)" % name
     ok, _rc, _out, err = _wt._git(
-        top, list(_GIT_IDENT) + ["commit", "-m", msg])
+        top, list(_GIT_IDENT) + ["commit", "-m", str(message)])
     if not ok:
         return {"committed": False, "branch": branch,
                 "reason": "commit-failed:" + (err or "").strip()[:160]}
     return {"committed": True, "branch": branch, "reason": None}
+
+
+def _git_commit_scaffold(skills_root: Path, paths_to_add, name) -> dict:
+    """The Wave-7 scaffold commit (branch + message preserved verbatim)."""
+    return _git_commit_on_branch(
+        skills_root, paths_to_add,
+        branch=SCAFFOLD_BRANCH_PREFIX + str(name),
+        message="foundry.scaffold_skill: %s (template + manifest + map v2)"
+        % name)
 
 
 # ── Op 1: foundry.scaffold_skill ─────────────────────────────────────────────
@@ -383,6 +429,10 @@ def scaffold_skill(name, *, skills_root=None, map_path=None, lock_path=None,
         _atomic_write(skill_dir / "NORTH-STAR.md",
                       _NORTH_STAR_TEMPLATE.format(name=name))
         created.append("NORTH-STAR.md")
+        # Seed the Wave-8 hash ledger: the North Star is drift-tracked from
+        # birth, so the ONLY way it changes cleanly is foundry.edit_north_star.
+        _fns.record_version(skill_dir, action=_fns.ACTION_SCAFFOLD)
+        created.append(_fns.HISTORY_DIRNAME + "/" + _fns.LEDGER_FILENAME)
         _atomic_write(skill_dir / "host.py", _HOST_TEMPLATE.format(name=name))
         created.append("host.py")
         _write_manifest(skill_dir, manifest)
@@ -491,8 +541,118 @@ def gen_manifest(skill, *, skills_root=None, host_cmd=None, python_exe=None,
     }
 
 
+# ── Op 3: foundry.edit_north_star (Wave 8) ───────────────────────────────────
+
+def edit_north_star(skill, *, skills_root=None, mode="propose", new_text=None,
+                    proposal_id=None, git=True) -> dict:
+    """The ONLY sanctioned per-skill North-Star mutation path.
+
+    Two legs of one round-trip (both dispatched as the same confirm-gated
+    ``mutate`` op; the core lives in ``foundry_north_star``):
+
+    * ``mode="propose"`` — compute the unified diff of the current
+      ``NORTH-STAR.md`` against ``new_text`` and PARK it as a proposal;
+      nothing on the skill is written. The human reads the returned diff.
+    * ``mode="apply"`` — apply a parked ``proposal_id``: refused when the
+      file changed since the proposal (a stale approval is no approval);
+      the prior version is RETAINED in ``north-star-history/`` + the hash
+      ledger, and the change is committed on a dedicated git branch
+      (``foundry/north-star-<skill>`` — DR-02: mutations on a branch).
+    """
+    op = "edit_north_star"
+    skill = str(skill or "")
+    if not _SLUG_RE.match(skill):
+        return _refusal(op, "invalid-skill-name:%r" % skill)
+    root = Path(skills_root) if skills_root else _default_skills_root()
+    skill_dir = root / skill
+    if not skill_dir.is_dir():
+        return _refusal(op, "unknown-skill:%s" % skill)
+    mode = str(mode or "propose")
+
+    if mode == "propose":
+        if not (isinstance(new_text, str) and new_text.strip()):
+            return _refusal(op, "new-text-missing")
+        res = _fns.propose_edit(skill, skill_dir, new_text,
+                                proposals_home=_ns_proposals_home())
+        if not res.get("ok"):
+            return _refusal(op, res.get("reason"))
+        return {
+            "ok": True,
+            "op": op,
+            "mode": "propose",
+            "skill": skill,
+            "applied": False,
+            "proposal_id": res["proposal_id"],
+            "diff": res["diff"],
+            "base_sha256": res["base_sha256"],
+            "verdict": "north-star-proposed:%s" % skill,
+        }
+
+    if mode == "apply":
+        proposal = _fns.load_proposal(proposal_id,
+                                      proposals_home=_ns_proposals_home())
+        if proposal is None:
+            return _refusal(op, "unknown-proposal:%s" % (proposal_id or "?"))
+        if proposal.get("skill") != skill:
+            return _refusal(op, "proposal-skill-mismatch:%s"
+                            % proposal.get("skill"))
+        res = _fns.apply_edit(skill_dir, proposal)
+        if not res.get("ok"):
+            return _refusal(op, res.get("reason"))
+        git_report = {"committed": False, "branch": None,
+                      "reason": "git-disabled"}
+        if git:
+            git_report = _git_commit_on_branch(
+                root,
+                [skill_dir / _fns.NORTH_STAR_FILENAME,
+                 _fns.history_dir(skill_dir)],
+                branch=NORTH_STAR_BRANCH_PREFIX + skill,
+                message="foundry.edit_north_star: %s (proposal %s)"
+                % (skill, proposal.get("proposal_id")))
+        return {
+            "ok": True,
+            "op": op,
+            "mode": "apply",
+            "skill": skill,
+            "applied": True,
+            "proposal_id": proposal.get("proposal_id"),
+            "sha256": res["sha256"],
+            "prior_retained": res["prior_retained"],
+            "history_entry": res["entry"],
+            "git": git_report,
+            "verdict": "north-star-applied:%s" % skill,
+        }
+
+    return _refusal(op, "unknown-mode:%s" % mode)
+
+
+# ── Op 4: foundry.register_autoload (Wave 8) ─────────────────────────────────
+
+def register_autoload(*, map_path=None, home=None, root=None) -> dict:
+    """Regenerate Anchor's clickable skill set from map.json v2 alone.
+
+    The op body — a thin dispatch over ``foundry_autoload.sync_registrations``
+    (the projection is rebuilt whole from the graph each run; an unreadable
+    or invalid map refuses without touching the registry)."""
+    op = "register_autoload"
+    res = _fa.sync_registrations(map_path=map_path, home=home, root=root)
+    if not res.get("ok"):
+        return _refusal(op, res.get("reason"))
+    return {
+        "ok": True,
+        "op": op,
+        "count": res["count"],
+        "registered": res["registered"],
+        "runnable": res["runnable"],
+        "registry_path": res["path"],
+        "verdict": "autoload-registered:%d" % res["count"],
+    }
+
+
 #: CLI subcommand → op implementation.
-_OP_IMPLS = {"scaffold_skill": scaffold_skill, "gen_manifest": gen_manifest}
+_OP_IMPLS = {"scaffold_skill": scaffold_skill, "gen_manifest": gen_manifest,
+             "edit_north_star": edit_north_star,
+             "register_autoload": register_autoload}
 
 
 # ── The op manifests (manifest-registered mutate ops) ────────────────────────
@@ -545,9 +705,26 @@ def gen_manifest_op_manifest(skills_root=None, **over) -> dict:
     return _op_manifest(OP_GEN_MANIFEST, [root], **over)
 
 
+def edit_north_star_op_manifest(skills_root=None, **over) -> dict:
+    """The Wave-8 North-Star op manifest. Write scope: the skills root (the
+    apply leg) + the proposals home (the propose leg parks there)."""
+    root = Path(skills_root) if skills_root else _default_skills_root()
+    return _op_manifest(OP_EDIT_NORTH_STAR, [root, _ns_proposals_home()],
+                        **over)
+
+
+def register_autoload_op_manifest(home=None, **over) -> dict:
+    """The Wave-8 autoload op manifest. Write scope: the registration home
+    under the Anchor data dir (the DR-01 "Anchor skill-registration state")."""
+    h = Path(home) if home else _fa.autoload_home()
+    return _op_manifest(OP_REGISTER_AUTOLOAD, [h], **over)
+
+
 def control_plane_manifests(skills_root=None, map_path=None,
                             lock_path=None) -> list:
-    """The Wave-7 op registry — pure data (declare-then-resolve)."""
+    """The Wave-7 op registry — pure data (declare-then-resolve). Frozen to
+    its original pair; the full Phase-6 set is
+    :func:`full_control_plane_manifests`."""
     return [
         scaffold_op_manifest(skills_root=skills_root, map_path=map_path,
                              lock_path=lock_path),
@@ -555,11 +732,29 @@ def control_plane_manifests(skills_root=None, map_path=None,
     ]
 
 
+def full_control_plane_manifests(skills_root=None, map_path=None,
+                                 lock_path=None, autoload_home=None) -> list:
+    """The FULL Phase-6 op registry: the Wave-7 pair + the Wave-8 pair."""
+    return control_plane_manifests(
+        skills_root=skills_root, map_path=map_path, lock_path=lock_path) + [
+        edit_north_star_op_manifest(skills_root=skills_root),
+        register_autoload_op_manifest(home=autoload_home),
+    ]
+
+
 def build_control_dispatch(skills_root=None, map_path=None,
                            lock_path=None) -> dict:
-    """Declare-then-resolve the control-plane ops into a runner dispatch."""
+    """Declare-then-resolve the Wave-7 control-plane ops into a dispatch."""
     return _sr.build_dispatch(control_plane_manifests(
         skills_root=skills_root, map_path=map_path, lock_path=lock_path))
+
+
+def build_full_control_dispatch(skills_root=None, map_path=None,
+                                lock_path=None, autoload_home=None) -> dict:
+    """Declare-then-resolve ALL Phase-6 ops (Waves 7+8) into a dispatch."""
+    return _sr.build_dispatch(full_control_plane_manifests(
+        skills_root=skills_root, map_path=map_path, lock_path=lock_path,
+        autoload_home=autoload_home))
 
 
 def write_targets_for(op, payload, *, skills_root=None, map_path=None,
@@ -578,6 +773,13 @@ def write_targets_for(op, payload, *, skills_root=None, map_path=None,
         return [str(root / str(p.get("name") or "")), str(mp), str(lp)]
     if op == OP_GEN_MANIFEST:
         return [str(root / str(p.get("skill") or "") / _sr.MANIFEST_FILENAME)]
+    if op == OP_EDIT_NORTH_STAR:
+        if str(p.get("mode") or "propose") == "apply":
+            return [str(root / str(p.get("skill") or ""))]
+        return [str(_ns_proposals_home())]
+    if op == OP_REGISTER_AUTOLOAD:
+        home = Path(p.get("home")) if p.get("home") else _fa.autoload_home()
+        return [str(home / _fa.REGISTRY_FILENAME)]
     raise ValueError("unknown-control-op:%s" % op)
 
 
