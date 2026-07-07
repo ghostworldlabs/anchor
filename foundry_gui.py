@@ -593,6 +593,14 @@ def render_foundry_page(*, home=None, map_path=None, lock_path=None,
     # sync / sleep seam) — rendered by foundry_gui_write; every button is an
     # op invocation POST, so the read layer here stays mutation-free.
     parts.append(_fgw.render_write_panel())
+    # Wave 12: the North-Star acceptance scorecard — every DONE= clause
+    # probed live against the same engine artifacts; the sleep-loop clause
+    # stays the single declared open item (recorded, never dropped) until
+    # the foundry-kernel integration registers the op body. Lazy import:
+    # foundry_acceptance reads THROUGH this module's views.
+    import foundry_acceptance as _facc
+    parts.append(_facc.render_acceptance_panel(home=home, map_path=map_path,
+                                               lock_path=lock_path))
     if job_id:
         parts.extend(_render_monitor(monitor_view(job_id, since=since)))
     lib = library_view(home=home)
