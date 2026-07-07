@@ -407,6 +407,7 @@ import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
+import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
@@ -6944,6 +6945,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>R&amp;D Projects</h2>
           <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
+          <!-- foundry-v2 Wave 9: the Anchor button that launches the Foundry GUI (stateless read surface over the live engine) -->
+          <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px" title="Skill Foundry — library, knowledge graph, runs (stateless read surface)">&#9874; Foundry</button>
         </div>
         <div class="date">{today_str}</div>
       </div>
@@ -9314,6 +9317,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
+            elif _path_only == "/foundry":
+                # Foundry GUI READ surface (foundry-v2 Wave 9): a STATELESS
+                # render over the real engine artifacts — autoload registry,
+                # map.json v2 + lockfile, job_runner records/logs, skill
+                # journals. No parallel run/progress store lives behind this
+                # page; ?job=<id> drills into one job's live job_runner state.
+                q = parse_qs(urlparse(self.path).query)
+                self._send_html(_fgui.render_foundry_page(
+                    lane=(q.get("lane") or [None])[0],
+                    job_id=(q.get("job") or [None])[0]))
             # /api/version migrated to route_table (handle_version, W7 batch 1) —
             # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
