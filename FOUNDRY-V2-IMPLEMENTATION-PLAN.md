@@ -16,6 +16,11 @@ test-command: python -m pytest tests/ -v -k "foundry or gandalf or reaper or man
 > so the `-k "foundry …"` gate always collects the wave's own tests (keeps the gate non-vacuous). Each wave must
 > change real WORKTREE code (in `C:/dev/Anchor`) exercised by its test — NEVER edit files outside the worktree
 > (e.g. the foundry) in this build. A full `python -m pytest tests/` regression run is the human MERGE gate.
+> **EXECUTE SELF-VERIFY (mandatory — avoids the §5 test-immutability halt):** before finishing, EXECUTE MUST run
+> its own new test (`python -m pytest tests/test_foundry_<area>_w<N>.py -q`) and ensure it PASSES against the code
+> it just wrote. The FIX loop may NOT edit test files (Foreman §5), so any wrong assertion you leave for "fix"
+> will HALT the wave — correct a wrong assertion in EXECUTE now, not later. Keep tests deterministic (no
+> time/id-dependent assertions).
 > **Design:** `DESCRIPTION.md`. **North Star:** `../NORTH-STAR.md`. Claude writes code; a 3-Gemini panel reviews
 > each wave (5:1). **Single-source:** skills/kernel are CONSUMED from `Skill Foundry`, never forked.
 
