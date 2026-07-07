@@ -4421,8 +4421,14 @@ def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
     prev_skill = os.environ.get("ANCHOR_GANDALF_SKILL_DIR")
     prev_proactive = os.environ.get("ANCHOR_PROACTIVE_SUMMARY")
     prev_hostfail = os.environ.get("STUB_GANDALF_HOST_FAIL")
+    prev_mode = os.environ.get("ANCHOR_GANDALF_MODE")
     os.environ["ANCHOR_RUNNER_CMD"] = draft_cmd
     os.environ["ANCHOR_GANDALF_HOST_CMD"] = host_cmd
+    # This check stubs the DETERMINISTIC map-reduce (draft+host) path — the
+    # retained fallback (ANCHOR_GANDALF_MODE=mapreduce). The DEFAULT agentic path
+    # runs the real skill (live claude), which can't be stubbed the same way and
+    # is covered by tests/test_gandalf_agentic.py.
+    os.environ["ANCHOR_GANDALF_MODE"] = "mapreduce"
     os.environ.pop("ANCHOR_PROACTIVE_SUMMARY", None)  # OFF
     os.environ.pop("STUB_GANDALF_HOST_FAIL", None)
 
@@ -4551,7 +4557,8 @@ def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
                           ("ANCHOR_GANDALF_HOST_CMD", prev_host),
                           ("ANCHOR_GANDALF_SKILL_DIR", prev_skill),
                           ("ANCHOR_PROACTIVE_SUMMARY", prev_proactive),
-                          ("STUB_GANDALF_HOST_FAIL", prev_hostfail)):
+                          ("STUB_GANDALF_HOST_FAIL", prev_hostfail),
+                          ("ANCHOR_GANDALF_MODE", prev_mode)):
             if prev is None:
                 os.environ.pop(var, None)
             else:

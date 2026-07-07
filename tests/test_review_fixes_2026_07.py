@@ -38,6 +38,9 @@ def gandalf(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_GANDALF_HOST_CMD", f"{sys.executable} {HOST_STUB}")
     monkeypatch.setenv("ANCHOR_PROACTIVE_SUMMARY", "")
     monkeypatch.setenv("ANCHOR_GANDALF_SKILL_DIR", str(tmp_path / "no-skill"))
+    # The fusion tests exercise the LEGACY map-reduce path (retained fallback);
+    # the DEFAULT is now the agentic canonical-skill run.
+    monkeypatch.setenv("ANCHOR_GANDALF_MODE", "mapreduce")
     import paths
     importlib.reload(paths)
     import job_runner
@@ -202,9 +205,25 @@ def test_fusion_augments_multi_shard_draft(gandalf, multi_project, monkeypatch):
     assert draft["shard_count"] == len(shards)
     for lbl in draft["groups"]:
         assert [f for f in draft["findings"] if f.get("group") == lbl]
-    # The fusion job's brain is pinned to the frontier tier unless pre-routed.
+    # The fusion job's brain inherits the run's TIER reasoner model (2026-07-07):
+    # a default/standard run fuses on Opus (heavy fuses on Fable-5, below).
+    fusion_env = launches[-1].get("env") or {}
+    assert fusion_env.get("ANTHROPIC_MODEL") == "claude-opus-4-8"
+    assert fusion_env.get("TRIO_TIER") == "standard"
+
+
+def test_fusion_uses_fable5_when_heavy(gandalf, multi_project, monkeypatch):
+    """A Gandalf-Heavy run fuses on the top-tier Claude seat (Fable-5)."""
+    folder, pid = multi_project
+    launches = []
+    orig_launch = gandalf._jr.launch
+    monkeypatch.setattr(gandalf._jr, "launch",
+                        lambda *a, **k: (launches.append(k), orig_launch(*a, **k))[1])
+    out = gandalf.run_gandalf(str(folder), pid, tier="heavy")
+    assert out["ok"] is True and out["tier"] == "heavy"
     fusion_env = launches[-1].get("env") or {}
     assert fusion_env.get("ANTHROPIC_MODEL") == "claude-fable-5"
+    assert fusion_env.get("TRIO_TIER") == "heavy"
 
 
 def test_fusion_skipped_single_shard_and_when_disabled(gandalf, scoped_folders,

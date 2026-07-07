@@ -35,6 +35,9 @@ def gandalf(tmp_path, monkeypatch):
     # best-effort and degrades to a bare protocol when absent).
     monkeypatch.setenv("ANCHOR_PROACTIVE_SUMMARY", "")
     monkeypatch.setenv("ANCHOR_GANDALF_SKILL_DIR", str(tmp_path / "no-skill"))
+    # This suite exercises the LEGACY map-reduce/grade path (the retained
+    # fallback); the DEFAULT is now the agentic canonical-skill run.
+    monkeypatch.setenv("ANCHOR_GANDALF_MODE", "mapreduce")
     import paths
     importlib.reload(paths)
     import job_runner

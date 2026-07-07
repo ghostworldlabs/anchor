@@ -2485,8 +2485,13 @@ def finalize_effort(folder_path, project_id: str, lane: str, job_id: str,
 # git's "nothing staged" no-op) and best-effort (never raises into the kill path).
 
 #: Top-level worktree directories whose produced docs we persist into the main
-#: project. The trio writes its docs under these lane output dirs.
-_DOC_DIRS = ("planning", "research", "build", "deliverables")
+#: project. The trio writes its docs under these lane output dirs. ``general`` is
+#: included (2026-07-07) so a bare "Open terminal" general session's produced docs
+#: — its autosaved transcript + RESTART.md, and any .md it writes under general/ —
+#: are persisted like any trio lane's; without it a general session (John's
+#: runaway case) stranded everything it generated. The sweep is git-diff-scoped to
+#: the session's own isolated worktree, so only session-produced general/ docs match.
+_DOC_DIRS = ("planning", "research", "build", "deliverables", "general")
 
 #: Directories we NEVER sweep, even if git reports changes under them — Anchor's
 #: own per-project store, git internals, dependency trees, and managed worktrees.

@@ -132,9 +132,16 @@ def test_open_path_invokes_fit(gui, tmp_path):
     # The OPEN path (openPanel) re-fits the terminal on open so it spans the
     # full column immediately, not only after maximize→restore.
     body = _slice_fn(html, "openPanel")
-    assert "_fitPanelTerminal(sessionId)" in body, \
-        "openPanel must invoke _fitPanelTerminal (fit on open)"
-    # The fit is gated on a live session (a historical/discovered tile has no
-    # live term to fit) and fires after layout settles.
+    # Gated on a live session (a historical/discovered tile has no live term).
     assert "if (isLive) {" in body
-    assert "}, 80);" in body, "expected a deferred post-layout fit on open"
+    assert "_fitPanelTerminalDeferred(sessionId)" in body, \
+        "openPanel must invoke _fitPanelTerminalDeferred (fit on open)"
+    # The deferred fitter waits for the browser to COMMIT layout (rAF-until the
+    # host has a real non-zero width) rather than racing it with a fixed
+    # setTimeout — that race left the terminal at ~1/3 column width on open and
+    # only "fixed itself" on a later resize. Assert the rAF-based mechanism.
+    dfit = _slice_fn(html, "_fitPanelTerminalDeferred")
+    assert "requestAnimationFrame" in dfit, \
+        "the open-fit must defer to requestAnimationFrame (wait for layout)"
+    assert "clientWidth > 0" in dfit, \
+        "the open-fit must wait until the host reports a real non-zero width"

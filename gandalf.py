@@ -44,6 +44,7 @@ Stdlib only. No third-party imports.
 import fnmatch
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -89,6 +90,229 @@ TIMEOUT_ENV = "ANCHOR_GANDALF_TIMEOUT"
 # daemon (never blocks a render), so a generous default just lets big repos finish;
 # override per-run via ANCHOR_GANDALF_TIMEOUT.
 DEFAULT_TIMEOUT = 900.0
+
+# ── Tier (regular vs Gandalf-Heavy) ──────────────────────────────────────────
+#: The canonical Gandalf reasoner seat is Claude (the skill run by a Claude agent
+#: → RAW draft). The trio ALREADY wires the tier→model choice
+#: (``drivers/claude.mjs``: ``TRIO_TIER=heavy`` → ``claude-fable-5``,
+#: ``standard`` → ``claude-opus-4-8``). Anchor's Stage-A launcher honors
+#: ``ANTHROPIC_MODEL`` (the seam the fusion pass already uses), so pinning it from
+#: the chosen tier runs the tile's read on the SAME top-tier Claude seat the
+#: canonical regular/heavy runs use — nothing is reimplemented, just made
+#: available. ``TRIO_TIER`` is also forwarded so any tier-honoring seat downstream
+#: (e.g. a Gemini checker) resolves at the matching tier.
+TIER_ANTHROPIC_MODEL = {"heavy": "claude-fable-5", "standard": "claude-opus-4-8"}
+VALID_TIERS = ("standard", "heavy")
+DEFAULT_TIER = "standard"
+
+
+def _normalize_tier(tier) -> str:
+    t = (tier or DEFAULT_TIER)
+    t = t.strip().lower() if isinstance(t, str) else DEFAULT_TIER
+    return t if t in VALID_TIERS else DEFAULT_TIER
+
+
+# ── Run mode: agentic (canonical skill) vs legacy map-reduce ─────────────────
+#: How Stage A produces the read. ``agentic`` (the DEFAULT, 2026-07-07) runs the
+#: REAL ``gandalf`` / ``gandalf-heavy`` skill as a background Claude agent over
+#: the folder — the skill decides map-reduce (its own context-sizer), writes the
+#: report, and runs its own 5:1 Gemini reviews — exactly what a terminal
+#: ``run gandalf-heavy`` does, just captured into the tile. ``mapreduce`` is the
+#: legacy homegrown Python shard→grade, retained as a fallback so nothing
+#: regresses if the live agentic run misbehaves on a given host.
+MODE_AGENTIC = "agentic"
+MODE_MAPREDUCE = "mapreduce"
+GANDALF_MODE_ENV = "ANCHOR_GANDALF_MODE"
+DEFAULT_MODE = MODE_AGENTIC
+
+
+def _gandalf_mode() -> str:
+    m = (os.environ.get(GANDALF_MODE_ENV) or "").strip().lower()
+    return m if m in (MODE_AGENTIC, MODE_MAPREDUCE) else DEFAULT_MODE
+
+
+#: Permission posture for the agentic run. ``acceptEdits`` lets the skill WRITE
+#: its report into the run dir; a host whose skill must spawn Bash→agy for the
+#: 5:1 may need ``bypassPermissions`` — overridable WITHOUT a code change so a
+#: live smoke test can tune it.
+GANDALF_PERMISSION_ENV = "ANCHOR_GANDALF_PERMISSION_MODE"
+DEFAULT_PERMISSION_MODE = "acceptEdits"
+
+
+def _gandalf_permission_mode() -> str:
+    return (os.environ.get(GANDALF_PERMISSION_ENV) or "").strip() or DEFAULT_PERMISSION_MODE
+
+
+#: The canonical Gandalf reasoner is a CLAUDE-Code skill (it spawns its own Gemini
+#: 5:1 via agy); force the claude backend for the agentic run so it never routes
+#: the reasoner itself to Gemini. ``ANCHOR_RUNNER_CMD`` still overrides in tests.
+_AGENTIC_BACKEND = "claude"
+
+#: Matches the ``VERDICT: <one sentence>`` the agentic prompt requests. ``search``
+#: (not ``match``) + optional ``**`` so it is caught even when the model emits it
+#: INLINE with the last sentence or markdown-bolded (``**VERDICT:**``).
+_VERDICT_RE = re.compile(r"(?i)\*{0,2}\s*VERDICT\s*\*{0,2}\s*:\s*(.+?)\s*$")
+
+
+def _build_agentic_prompt(folder_path, tier, report_abs) -> str:
+    """The natural-language seed that invokes the canonical skill — the same
+    thing a user types in a terminal (``run gandalf`` / ``run gandalf-heavy`` +
+    a description), plus an instruction to WRITE the report to a known path and
+    print a capturable summary + ``VERDICT:`` line."""
+    skill = "gandalf-heavy" if tier == "heavy" else "gandalf"
+    return (
+        f"Run the {skill} skill to analyze the project folder at:\n{folder_path}\n\n"
+        "Objective: provide a concise summary of what this project/folder is, its "
+        "key points of weakness, and the potential next steps.\n\n"
+        "Write the full report as Markdown to this exact path:\n"
+        f"{report_abs}\n\n"
+        "If the skill produces a graded advisor-output JSON, also write it next to "
+        "the report as 'advisor-output.json' in the same directory.\n\n"
+        "Then, as your FINAL message, print a one-paragraph executive summary of "
+        "the read, followed by a single final line in exactly this form:\n"
+        "VERDICT: <one sentence overall assessment>")
+
+
+def _parse_agentic_summary(text):
+    """Split the agent's final text into ``(verdict, summary)``: the verdict is
+    the ``VERDICT:`` line (if present); the summary is the remaining prose."""
+    if not text:
+        return "", ""
+    verdict = ""
+    keep = []
+    for ln in text.splitlines():
+        m = _VERDICT_RE.search(ln)
+        if m:
+            verdict = m.group(1).strip().strip("*").strip()
+            # Keep any prose that preceded an INLINE verdict marker on the line.
+            before = ln[:m.start()].rstrip()
+            if before:
+                keep.append(before)
+            continue
+        keep.append(ln)
+    return verdict, "\n".join(keep).strip()
+
+
+def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
+                       status_cb=None) -> dict:
+    """Canonical path: run the real ``gandalf``/``gandalf-heavy`` skill agentically
+    over the folder as ONE background job. The skill writes its own report (to the
+    path in the prompt) and runs its own 5:1; Anchor captures the report + the
+    printed summary/verdict. Returns the finalize dict — never raises."""
+    res = {"ok": False, "reason": "unknown", "verdict": "",
+           "report_rel": None, "exec_rel": None, "advisor_rel": None,
+           "degraded": True, "cross_model": False}
+    run_dir = _runs_dir(store) / run_id
+    try:
+        run_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        res["reason"] = "artifact-write-failed:" + str(exc)[:160]
+        return res
+    report_abs = str(run_dir / REPORT_MD)
+    prompt = _build_agentic_prompt(folder_path, tier, report_abs)
+    if status_cb:
+        status_cb("Running gandalf-heavy..." if tier == "heavy"
+                  else "Running gandalf...")
+    try:
+        rec = _jr.launch("research", cwd=str(folder_path), prompt=prompt,
+                         output_dir=str(run_dir), env=(env or None),
+                         permission_mode=_gandalf_permission_mode(),
+                         backend=_AGENTIC_BACKEND)
+    except Exception:
+        res["reason"] = "launch-failed"
+        return res
+    jid = rec.get("job_id")
+    with _ACTIVE_RUNS_LOCK:
+        r = _ACTIVE_RUNS.get(run_id)
+        if r is not None:
+            r["job_id"] = jid
+            r.setdefault("job_ids", []).append(jid)
+            if r.get("cancelled"):
+                try:
+                    _jr.cancel(jid)
+                except Exception:
+                    pass
+                res["reason"] = "cancelled"
+                return res
+    _jr.wait(jid, timeout=_timeout())
+    final = _jr.load_record(jid) or {}
+    st = final.get("status")
+
+    # SWARM SAFETY (2026-07-07): _jr.wait only BOUNDS the wait — it never kills the
+    # job. If the run is not terminal (timed out / still running), TREE-KILL it now
+    # so the write-capable agentic job AND the nested 5:1 (agy/Gemini) it spawned
+    # can never orphan past this run's lifecycle (a live-owner-less swarm the
+    # zombie-hunter would otherwise have to reap). cancel is idempotent — a no-op
+    # on an already-exited job.
+    if st != _jr.STATUS_DONE:
+        try:
+            _jr.cancel(jid)
+        except Exception:
+            pass
+
+    with _ACTIVE_RUNS_LOCK:
+        r = _ACTIVE_RUNS.get(run_id)
+        if r is not None and r.get("cancelled"):
+            res["reason"] = "cancelled"
+            return res
+    if st == "cancelled":
+        res["reason"] = "cancelled"
+        return res
+
+    # HONESTY: a successful Gandalf read REQUIRES a COMPLETED job (STATUS_DONE)
+    # that actually produced a NON-EMPTY report. A timed-out/failed run — or a
+    # finished run that only printed prose (or emitted JSON) but wrote no report —
+    # is an honest FAILURE, never a green tile. A stray/empty report file can NEVER
+    # bypass the completion check.
+    if st != _jr.STATUS_DONE:
+        res["reason"] = "agentic-run-incomplete:" + str(st or "unknown")
+        return res
+    try:
+        report_written = ((run_dir / REPORT_MD).is_file()
+                          and (run_dir / REPORT_MD).stat().st_size > 0)
+    except OSError:
+        report_written = False
+    if not report_written:
+        res["reason"] = "no-report-produced"
+        return res
+
+    text = "\n".join(_jr.extract_assistant_text(_jr.all_lines(jid)))
+    verdict, summary = _parse_agentic_summary(text)
+
+    # exec-summary.md from the printed summary (fallback: the verdict).
+    exec_body = summary or verdict or "(report produced; no summary text printed)"
+    try:
+        (run_dir / EXEC_SUMMARY_MD).write_text(
+            "# Gandalf executive summary\n\n" + exec_body + "\n", encoding="utf-8")
+        res["exec_rel"] = f"{run_rel}/{EXEC_SUMMARY_MD}"
+    except OSError:
+        pass
+    res["report_rel"] = f"{run_rel}/{REPORT_MD}"
+
+    # If the skill also emitted its graded advisor-output.json, honor its honesty
+    # stamps (cross_model/degraded) + verdict; otherwise leave the honest defaults
+    # (a report without the graded envelope is NOT claimed cross-model).
+    adv = run_dir / ADVISOR_OUTPUT_JSON
+    if adv.is_file():
+        try:
+            graded = json.loads(adv.read_text(encoding="utf-8"))
+            if isinstance(graded, dict):
+                res["advisor_rel"] = f"{run_rel}/{ADVISOR_OUTPUT_JSON}"
+                res["degraded"] = bool(graded.get("degraded", res["degraded"]))
+                res["cross_model"] = bool(graded.get("cross_model", res["cross_model"]))
+                if not verdict:
+                    verdict = _one_line_verdict(graded)
+        except (OSError, ValueError):
+            pass
+
+    if not verdict:
+        verdict = (summary.split(". ")[0][:200] if summary
+                   else "Gandalf read complete.")
+    res["verdict"] = verdict
+    res["ok"] = True
+    res["reason"] = None
+    _add_gitignore_best_effort(store)
+    return res
 
 #: Project-root subdir holding the served run artifacts (NOT under .anchor, which
 #: /artifact rejects). One ``run-<ts>/`` per run.
@@ -1086,7 +1310,7 @@ def _add_gitignore_best_effort(folder_path) -> None:
 # ── Public engine ────────────────────────────────────────────────────────────
 
 def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None,
-                store_folder=None) -> dict:
+                store_folder=None, tier=DEFAULT_TIER) -> dict:
     """Run one full two-stage Gandalf analysis and store the result.
 
     ``folder_path`` is the ANALYSIS scope (what Gandalf reads); ``store_folder``
@@ -1098,6 +1322,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     folder = str(folder_path)
     store = str(store_folder) if store_folder else folder
     pid = str(project_id)
+    tier = _normalize_tier(tier)
     ts = time.time()
     run_id = "run-" + str(int(ts * 1000))
     run_rel = f"{GANDALF_DIRNAME}/{run_id}"
@@ -1137,6 +1362,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 "degraded": True, "cross_model": False,
                 "report_rel": None, "exec_rel": None, "advisor_rel": None,
                 "session_id": run_id, "status": "running", "in_progress": True,
+                "tier": tier,
             })
         except Exception:
             pass
@@ -1145,6 +1371,14 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     reason = "unknown"
     graded = None
     finalized = False
+    # Shared finalize locals (set by whichever mode branch runs; read by the
+    # single record build below).
+    verdict = ""
+    report_rel = None
+    exec_rel = None
+    advisor_rel = None
+    degraded = True
+    cross_model = False
 
     try:
         # Check if cancelled early
@@ -1164,6 +1398,17 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 frontier_max = 100000.0
 
             actual_env = dict(env) if env is not None else {}
+            # Tier → the canonical Claude reasoner model. The tile's read now runs
+            # on the SAME top-tier Claude seat the canonical regular/heavy Gandalf
+            # uses (heavy=claude-fable-5, standard=claude-opus-4-8) — the fix for
+            # the shallow reads (Stage A previously ran on the CLI's default
+            # model). The chosen tier is AUTHORITATIVE (overrides any inherited
+            # ANTHROPIC_MODEL). TRIO_TIER rides along for tier-honoring seats.
+            actual_env["ANTHROPIC_MODEL"] = TIER_ANTHROPIC_MODEL[tier]
+            actual_env["TRIO_TIER"] = tier
+            # Let the agentic skill's canonical live 5:1 (Claude reasoner + Gemini
+            # adversarial reviews) actually fire; harmless for the legacy path.
+            actual_env.setdefault("CRUCIBLE_AGENT_LIVE", "1")
             if context_size > frontier_max:
                 # Over-cap trees route Gemini-backend shards to the strong
                 # long-context tier. (Was the RETIRED gemini-1.5-pro — a dead
@@ -1171,55 +1416,70 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 actual_env["GEMINI_MODEL"] = "gemini-3.1-pro"
                 actual_env["TRIO_MODEL"] = "gemini-3.1-pro"
 
-            # Wave 9: map-reduce Stage A — shard the tree, fan out one read per
-            # shard (W8 substrate), reduce into a merged raw draft with grouped
-            # findings. (The legacy single-pass _run_stage_a is retained for the
-            # runner-contract test.)
-            draft, reason = _run_stage_a_mapreduce(folder, env=actual_env, run_id=run_id)
-
-            with _ACTIVE_RUNS_LOCK:
-                is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
-            if is_cancelled:
-                reason = "cancelled"
-            elif draft is not None:
-                if status_cb: status_cb("Synthesizing (Stage B)...")
-                graded, reason = _run_stage_b(draft, run_id=run_id)
-
-            with _ACTIVE_RUNS_LOCK:
-                is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
-            if is_cancelled:
-                reason = "cancelled"
-
-        ok = (graded is not None) and (reason != "cancelled")
-
-        report_rel = None
-        exec_rel = None
-        verdict = ""
-        degraded = True
-        cross_model = False
-
-        if ok:
-            verdict = _one_line_verdict(graded)
-            degraded = bool(graded.get("degraded"))
-            cross_model = bool(graded.get("cross_model"))
-            try:
-                run_dir = _runs_dir(store) / run_id
-                run_dir.mkdir(parents=True, exist_ok=True)
-                report_md = _render_full_report(graded, run_id=run_id, when=ts)
-                exec_md = _render_exec_summary(graded, run_id=run_id, when=ts)
-                (run_dir / REPORT_MD).write_text(report_md, encoding="utf-8")
-                (run_dir / EXEC_SUMMARY_MD).write_text(exec_md, encoding="utf-8")
-                (run_dir / ADVISOR_OUTPUT_JSON).write_text(
-                    json.dumps(graded, indent=2, ensure_ascii=False),
-                    encoding="utf-8")
-                report_rel = f"{run_rel}/{REPORT_MD}"
-                exec_rel = f"{run_rel}/{EXEC_SUMMARY_MD}"
-                _add_gitignore_best_effort(store)
-            except OSError as exc:
-                ok = False
-                reason = "artifact-write-failed:" + str(exc)[:160]
-                report_rel = None
-                exec_rel = None
+            _use_mapreduce = _gandalf_mode() != MODE_AGENTIC
+            if not _use_mapreduce:
+                # CANONICAL path (default): run the real gandalf/gandalf-heavy
+                # skill agentically over the folder — the skill decides map-reduce,
+                # writes its report, and runs its own 5:1. Capture report + summary.
+                _res = _run_stage_agentic(folder, store, run_id, run_rel, ts, tier,
+                                          env=actual_env, status_cb=status_cb)
+                if (not _res.get("ok")) and _res.get("reason") == "launch-failed":
+                    # Claude unavailable / spawn failed (e.g. a Claude-absent
+                    # collaborator host) → fall back to the legacy map-reduce path
+                    # so a read is still produced (honest degrade, not a hard fail).
+                    if status_cb:
+                        status_cb("Claude unavailable; falling back to map-reduce...")
+                    _use_mapreduce = True
+                else:
+                    ok = bool(_res.get("ok"))
+                    reason = _res.get("reason") or reason
+                    verdict = _res.get("verdict") or ""
+                    report_rel = _res.get("report_rel")
+                    exec_rel = _res.get("exec_rel")
+                    advisor_rel = _res.get("advisor_rel")
+                    degraded = bool(_res.get("degraded", True))
+                    cross_model = bool(_res.get("cross_model", False))
+            if _use_mapreduce:
+                # LEGACY / FALLBACK (ANCHOR_GANDALF_MODE=mapreduce, or the agentic
+                # launch failed on a Claude-absent host): homegrown shard→grade.
+                draft, reason = _run_stage_a_mapreduce(folder, env=actual_env,
+                                                       run_id=run_id)
+                with _ACTIVE_RUNS_LOCK:
+                    is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+                if is_cancelled:
+                    reason = "cancelled"
+                elif draft is not None:
+                    if status_cb: status_cb("Synthesizing (Stage B)...")
+                    graded, reason = _run_stage_b(draft, run_id=run_id)
+                with _ACTIVE_RUNS_LOCK:
+                    is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+                if is_cancelled:
+                    reason = "cancelled"
+                ok = (graded is not None) and (reason != "cancelled")
+                if ok:
+                    verdict = _one_line_verdict(graded)
+                    degraded = bool(graded.get("degraded"))
+                    cross_model = bool(graded.get("cross_model"))
+                    try:
+                        run_dir = _runs_dir(store) / run_id
+                        run_dir.mkdir(parents=True, exist_ok=True)
+                        report_md = _render_full_report(graded, run_id=run_id, when=ts)
+                        exec_md = _render_exec_summary(graded, run_id=run_id, when=ts)
+                        (run_dir / REPORT_MD).write_text(report_md, encoding="utf-8")
+                        (run_dir / EXEC_SUMMARY_MD).write_text(exec_md, encoding="utf-8")
+                        (run_dir / ADVISOR_OUTPUT_JSON).write_text(
+                            json.dumps(graded, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+                        report_rel = f"{run_rel}/{REPORT_MD}"
+                        exec_rel = f"{run_rel}/{EXEC_SUMMARY_MD}"
+                        advisor_rel = f"{run_rel}/{ADVISOR_OUTPUT_JSON}"
+                        _add_gitignore_best_effort(store)
+                    except OSError as exc:
+                        ok = False
+                        reason = "artifact-write-failed:" + str(exc)[:160]
+                        report_rel = None
+                        exec_rel = None
+                        advisor_rel = None
 
         record = {
             "schema_version": GANDALF_INDEX_SCHEMA_VERSION,
@@ -1231,10 +1491,11 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             "cross_model": bool(cross_model),
             "report_rel": report_rel,
             "exec_rel": exec_rel,
-            "advisor_rel": (f"{run_rel}/{ADVISOR_OUTPUT_JSON}" if ok else None),
+            "advisor_rel": advisor_rel,
             "session_id": run_id,
             "status": "cancelled" if reason == "cancelled" else ("done" if ok else "failed"),
             "in_progress": False,
+            "tier": tier,
         }
         if not ok:
             record["reason"] = reason or "unknown"
@@ -1278,6 +1539,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                         "report_rel": None, "exec_rel": None, "advisor_rel": None,
                         "session_id": run_id, "status": "failed",
                         "in_progress": False, "reason": "run-crashed",
+                        "tier": tier,
                     })
                 except Exception:
                     pass
@@ -1298,7 +1560,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
 
 
 def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None,
-                          store_folder=None) -> dict:
+                          store_folder=None, tier=DEFAULT_TIER) -> dict:
     """First-scan idempotent: run Gandalf ONLY if no prior run exists.
 
     The absence check reads the STORE index (where the dashboard reads), so a
@@ -1309,7 +1571,7 @@ def run_gandalf_if_absent(folder_path, project_id, env=None, status_cb=None,
     except Exception:
         pass
     return run_gandalf(folder_path, project_id, env=env, status_cb=status_cb,
-                       store_folder=store_folder)
+                       store_folder=store_folder, tier=tier)
 
 
 def _session_running_alive(run_id) -> bool:
@@ -1400,6 +1662,9 @@ def _safe_run_view(record: dict) -> dict:
         # indicator while a map-reduce run is still fanning out (index ok:false).
         "status": str(r.get("status") or ""),
         "in_progress": bool(r.get("in_progress")),
+        # Which tier produced this read (regular Opus vs Gandalf-Heavy Fable-5),
+        # so the tile can badge it. Older records w/o the field read "standard".
+        "tier": _normalize_tier(r.get("tier")),
     }
     reason = r.get("reason")
     if reason:

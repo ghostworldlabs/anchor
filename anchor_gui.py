@@ -1257,13 +1257,21 @@ def _gandalf_runner_env():
     """Snapshot the runner-seam env at trigger time (mirror of the summary
     triggers) so a late daemon thread uses the runner configured NOW. Also
     forwards the Gandalf-specific seams so a forwarded job grades through the
-    same host/skill/timeout."""
+    same host/skill/timeout, PLUS the trio model/driver/tier seams so the Claude
+    reasoner + Gemini checker resolve at the chosen tier on the real host (the
+    explicit-driver-init rule): TRIO_TIER (heavy→fable-5 / standard→opus-4-8),
+    CLAUDE_MODEL[_ROLE], ANTHROPIC_MODEL, GEMINI_MODEL, TRIO_MODEL[_ROLE],
+    TRIO_DRIVER[_ROLE], CRUCIBLE_AGENT_LIVE."""
+    _prefixes = ("STUB_", "FAKE_", "ANCHOR_GANDALF_",
+                 "CLAUDE_MODEL", "TRIO_MODEL", "TRIO_DRIVER")
+    _keys = {"ANCHOR_RUNNER_CMD", "TRIO_TIER", "ANTHROPIC_MODEL",
+             "GEMINI_MODEL", "CRUCIBLE_AGENT_LIVE"}
     return {k: v for k, v in os.environ.items()
-            if k == "ANCHOR_RUNNER_CMD" or k.startswith("STUB_")
-            or k.startswith("FAKE_") or k.startswith("ANCHOR_GANDALF_")}
+            if k in _keys or any(k.startswith(p) for p in _prefixes)}
 
 
-def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False):
+def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False,
+                     tier="standard"):
     """Schedule a Gandalf run in a daemon thread WITHOUT blocking the caller.
 
     Mirrors ``_trigger_project_summary``: snapshots the runner-seam env at
@@ -1313,11 +1321,11 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False)
             if first_scan:
                 _gandalf.run_gandalf_if_absent(folder_path, project_id,
                                                env=(runner_env or None), status_cb=_cb,
-                                               store_folder=store_folder)
+                                               store_folder=store_folder, tier=tier)
             else:
                 _gandalf.run_gandalf(folder_path, project_id,
                                      env=(runner_env or None), status_cb=_cb,
-                                     store_folder=store_folder)
+                                     store_folder=store_folder, tier=tier)
         except Exception:
             pass
         finally:
@@ -3755,6 +3763,9 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
             "No Gandalf read yet."
             "<button class='btn sm primary gandalf-run' "
             f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Run</button>"
+            "<button class='btn sm gandalf-run gandalf-heavy' "
+            "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
+            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Run Heavy</button>"
             "</div>")
         return (
             "<div class='panel gandalf-panel' id='gandalfPanel'>"
@@ -3762,7 +3773,10 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
             ""
             f"{icon}<span class='gt'>Gandalf</span>"
             "<button class='btn sm gandalf-run gandalf-rerun' "
-            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
+            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button>"
+            "<button class='btn sm gandalf-run gandalf-heavy' "
+            "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
+            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Heavy</button></div>"
             f"<div class='gandalf-panel-body' id='gandalfPanelBody'>{body}</div>"
             "</div>")
 
@@ -3776,8 +3790,16 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         exec_rel = r.get("exec_rel") or ""
         adv_rel = r.get("advisor_rel") or ""
 
+        # A still-running record (the up-front in-progress row a background run
+        # writes before it finishes) is neither a success nor an error — render it
+        # as a RUNNING row, never a red "Run did not complete" error.
+        running = bool(r.get("in_progress")) or (r.get("status") == "running")
+
         # Verdict / honest-error one-liner.
-        if ok:
+        if running:
+            vtxt = "Running&hellip;"
+            vcls = "verdict"
+        elif ok:
             vtxt = html_lib.escape(verdict or "(no verdict)")
             vcls = "verdict"
         else:
@@ -3788,7 +3810,9 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         # Grade chips. The v1 honesty floor: Tier-1 elevations land SPECULATIVE,
         # single-family is cross_model:false. An error run gets a single Error chip.
         chips = []
-        if not ok:
+        if running:
+            chips.append("<span class='chip run'>Running</span>")
+        elif not ok:
             chips.append("<span class='chip deg'>Error</span>")
         else:
             if r.get("cross_model"):
@@ -3798,6 +3822,10 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
                 chips.append("<span class='chip sf'>single-family</span>")
             if r.get("degraded"):
                 chips.append("<span class='chip deg'>degraded</span>")
+        # Tier badge — mark a Gandalf-Heavy (Fable-5) read so it's distinguishable
+        # from a regular (Opus) read at a glance.
+        if r.get("tier") == "heavy":
+            chips.append("<span class='chip heavy'>Heavy</span>")
         chips_html = "".join(chips)
 
         # SAFE links — only when the artifact rel paths exist (an error run has
@@ -3839,7 +3867,16 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         retire = (
             "<span class='gretire' title='Retire / archive this run' "
             f"onclick=\"gandalfArchiveRun(event, '{run_id}')\">&times;</span>")
-        if ok:
+        if running:
+            # Non-expandable RUNNING row: no caret, no error class, no retire
+            # control (a live run can't be archived) — just a live status line.
+            rows.append(
+                f"<div class='grun run-row' data-run='{run_id}'>"
+                f"<div class='grtop'><span class='{vcls}'>{vtxt}</span></div>"
+                "<div class='gmeta'>"
+                f"<span class='gts'>{ts_lbl}</span>{chips_html}</div>"
+                "</div>")
+        elif ok:
             rows.append(
                 f"<div class='grun' data-run='{run_id}'{body_attr} "
                 "onclick='gandalfToggleRun(this)'>"
@@ -3861,7 +3898,8 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
 
     # "Clear failed" — bulk-retire every failed/error run. Rendered ONLY when at
     # least one failed run exists (POST /api/rnd/gandalf_clear_failed).
-    n_failed = sum(1 for r in runs if not bool(r.get("ok")))
+    n_failed = sum(1 for r in runs if not bool(r.get("ok"))
+                   and not (r.get("in_progress") or r.get("status") == "running"))
     clear_failed_btn = ""
     if n_failed:
         clear_failed_btn = (
@@ -3881,7 +3919,10 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         f"<span class='cnt'>{n} read{'s' if n != 1 else ''}</span>"
         f"{clear_failed_btn}"
         "<button class='btn sm gandalf-run gandalf-rerun' "
-        f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button></div>"
+        f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button>"
+        "<button class='btn sm gandalf-run gandalf-heavy' "
+        "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
+        f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Heavy</button></div>"
         f"<div class='gandalf-panel-body' id='gandalfPanelBody'>"
         f"<div class='gruns collapsed' id='gandalfRuns'>{''.join(rows)}</div>"
         "</div>"
@@ -12356,9 +12397,17 @@ function startZombieTerminal(btn) {
                 if out.get("ok"):
                     self._send_json({"ok": True})
                 elif out.get("reason") == "unknown-session":
-                    self._send_json({"ok": False,
-                                     "error": f"unknown session: {session}",
-                                     "reason": "unknown-session"}, 404)
+                    # A resize is ADVISORY: a session with no live PTY
+                    # (parked / closed-to-tile / reconnecting, or a stale panel
+                    # caught mid-teardown or window-reuse) simply has nothing to
+                    # resize — a benign no-op, NOT a client error. Returning 404
+                    # here surfaced a spurious "Failed to load resource: 404"
+                    # browser console error on every reopen/continue, because
+                    # the terminal fit path fires term_resize as the panel lays
+                    # out. Report the no-op at HTTP 200 so it never reads as a
+                    # failed request. (Genuinely bad cols/rows still 400 below.)
+                    self._send_json({"ok": False, "noop": True,
+                                     "reason": "unknown-session"})
                 else:
                     self._send_json({"ok": False,
                                      "error": out.get("detail", "bad request"),
@@ -13006,8 +13055,13 @@ function startZombieTerminal(btn) {
                                      "error": "Unknown project"}, 404)
                 else:
                     folder = proj.get("folder_path", "")
-                    scheduled = _trigger_gandalf(folder, pid, manual=True)
-                    self._send_json({"ok": True, "scheduled": bool(scheduled)})
+                    # tier: "standard" (Opus) | "heavy" (Fable-5). Validated in
+                    # gandalf.run_gandalf (_normalize_tier); default standard.
+                    tier = (body.get("tier", "") or "standard").strip().lower()
+                    scheduled = _trigger_gandalf(folder, pid, manual=True,
+                                                 tier=tier)
+                    self._send_json({"ok": True, "scheduled": bool(scheduled),
+                                     "tier": tier})
 
         elif self.path == "/api/rnd/gandalf_delete":
             pid = (body.get("project_id", "") or body.get("id", "")).strip()
@@ -13585,6 +13639,27 @@ def main():
             job_active=lambda _sid: False,
             enumerate_pids=reaper.enumerate_live_pids)
         _alive_pids = reaper.live_pid_ids(_snap_boot)
+        # Durability (2026-07-07): a RUNNING record whose process is gone is about
+        # to be reconciled to IDLE. PERSIST its produced worktree docs into MAIN
+        # FIRST so a hung/crashed session — notably a bare `general` session, which
+        # boot-recovery skips (effort_managed=False) — never strands its work as
+        # orphaned worktree files (the "found and manually saved later" case). The
+        # worktree is IDLE-retained across the reap, so its files are still on disk
+        # here. Best-effort; a persist failure never blocks the reconcile/boot.
+        try:
+            _dry = _sr_boot.reconcile(live_session_ids=_alive_pids, apply=False)
+            _stale = _dry.get("stale") or []
+            if _stale:
+                import terminal_session as _ts_boot
+                for _sid in _stale:
+                    try:
+                        _ts_boot.capture_session_docs(_sid)
+                    except Exception:
+                        pass
+                _logger.info("boot: persisted docs for %d stale running "
+                             "session(s) before reconcile→idle", len(_stale))
+        except Exception as _e:
+            _logger.error(f"boot persist-before-reconcile failed: {_e}")
         _sr_boot.reconcile(live_session_ids=_alive_pids)
         # zombie-hunter safe-to-arm Wave 5: conservatively migrate every legacy
         # STATUS_IDLE record forward to STATUS_PARKED_WARM (over-protect only) so
@@ -13716,6 +13791,19 @@ def main():
             zombie_hunter.start_hunter(_live_provider, sweep_fn=_armed_sweep_cycle)
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")
+
+    try:
+        # Durability (2026-07-07): the incremental-autosave heartbeat — every
+        # ~120s it snapshots each RUNNING session's transcript + copies its
+        # produced docs into MAIN + refreshes RESTART.md, so a hung/long session
+        # never loses more than one interval of work and is warm-restartable. One
+        # main-process-owned daemon; spawns no subprocess (no console popups).
+        import terminal_session as _ts_auto
+        if _ts_auto.start_autosave_daemon():
+            _logger.info("session autosave heartbeat started (interval %ss)",
+                         int(_ts_auto._autosave_interval()))
+    except Exception as e:
+        _logger.error(f"session autosave daemon start failed: {e}")
 
     try:
         server.serve_forever()

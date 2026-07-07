@@ -38,6 +38,9 @@ def gandalf(tmp_path, monkeypatch):
     # shard, mechanical merge). The 2026-07 FUSION pass is its own feature with
     # its own gates (tests/test_review_fixes_2026_07.py) — off here.
     monkeypatch.setenv("ANCHOR_GANDALF_FUSION", "0")
+    # This suite asserts the LEGACY map-reduce contract (the retained fallback);
+    # the DEFAULT is now the agentic canonical-skill run.
+    monkeypatch.setenv("ANCHOR_GANDALF_MODE", "mapreduce")
     import paths
     importlib.reload(paths)
     import job_runner

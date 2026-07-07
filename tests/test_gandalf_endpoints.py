@@ -57,6 +57,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"{sys.executable} {DRAFT_STUB}")
     monkeypatch.setenv("ANCHOR_GANDALF_HOST_CMD", f"{sys.executable} {HOST_STUB}")
     monkeypatch.setenv("ANCHOR_GANDALF_SKILL_DIR", str(tmp_path / "no-skill"))
+    # These endpoint tests drive runs via the map-reduce draft+host stubs (the
+    # retained fallback); the DEFAULT is now the agentic canonical-skill run.
+    monkeypatch.setenv("ANCHOR_GANDALF_MODE", "mapreduce")
 
     for mod in ("paths", "job_runner", "rnd_registry", "effort_history",
                 "summarizer", "report_viewer", "gandalf"):

@@ -651,19 +651,22 @@ function gandalfToggleRun(el) {
 }
 
 var _gandalfPolling = false;
-function gandalfRun(pid) {
+function gandalfRun(pid, tier) {
   pid = pid || PROJECT_ID;
+  // tier: 'standard' (regular, Opus reasoner) | 'heavy' (Gandalf-Heavy, Fable-5).
+  tier = (tier === 'heavy') ? 'heavy' : 'standard';
   var btns = document.querySelectorAll('#gandalfPanel .gandalf-run');
-  for (var i = 0; i < btns.length; i++) { 
+  var runningLabel = (tier === 'heavy') ? 'Running Heavy...' : 'Running...';
+  for (var i = 0; i < btns.length; i++) {
     btns[i].disabled = true;
     btns[i].setAttribute('data-og', btns[i].textContent);
-    btns[i].textContent = 'Running...';
+    btns[i].textContent = runningLabel;
   }
   var before = _gandalfRunCount();
-  _postJson('/api/rnd/gandalf_run', {project_id: pid}).then(function (r) {
+  _postJson('/api/rnd/gandalf_run', {project_id: pid, tier: tier}).then(function (r) {
     return r.json().catch(function () { return {}; }).then(function (data) {
       if (_isUnauthorized(r, data)) {
-        if (setAnchorToken()) return gandalfRun(pid);
+        if (setAnchorToken()) return gandalfRun(pid, tier);
         return;
       }
       if (!data || !data.ok) {
@@ -2572,8 +2575,7 @@ function openPanel(sessionId) {
   // the time the panel paints the host is full width; re-fit once now and once
   // after layout settles (guarded: _fitPanelTerminal no-ops without a live term).
   if (isLive) {
-    _fitPanelTerminal(sessionId);
-    setTimeout(function () { _fitPanelTerminal(sessionId); }, 80);
+    _fitPanelTerminalDeferred(sessionId);
   }
   panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
   renderSessionBar();
@@ -3450,6 +3452,49 @@ function _fitPanelTerminal(sessionId, rec) {
   } catch (e) {}
 }
 
+// _fitPanelTerminalDeferred(): fit a freshly-opened terminal to its column
+// AFTER the browser has committed layout. The bug this fixes: on open the host
+// is frequently NOT yet laid out — offsetParent === null / clientWidth === 0 —
+// so _fitPanelTerminal bails and xterm stays at its constructor default of 80
+// cols (≈ the left third of a wide column); or the panel's ancestors haven't
+// stretched yet so we measure the `.pin` min-width (~360px) instead of its
+// settled width:100%. A synchronous fit + a fixed setTimeout(60/80ms) races
+// both — which is why the terminal only filled ~1/3 on open and "fixed itself"
+// on a later resize (when the ResizeObserver refired post-layout). This waits
+// on requestAnimationFrame until the host reports a real (non-zero, visible)
+// width, then fits across a few consecutive frames so a late min-width→100% /
+// column reflow is also caught. xterm.resize no-ops when cols/rows are
+// unchanged, so the extra frames are free. Bounded so it can never spin.
+function _fitPanelTerminalDeferred(sessionId, rec) {
+  if (typeof requestAnimationFrame === 'undefined') {
+    // No rAF (shouldn't happen in a browser) — fall back to the old timing.
+    _fitPanelTerminal(sessionId, rec);
+    setTimeout(function () { _fitPanelTerminal(sessionId, rec); }, 80);
+    return;
+  }
+  var tries = 0;         // frames spent waiting for the host to lay out (~0.7s cap)
+  function attempt() {
+    var p = rec || PANELS[sessionId];
+    if (!p || !p.term) return;                       // panel torn down — stop
+    var host = p.body;
+    var ready = host && host.offsetParent !== null
+                && host.clientHeight > 0 && host.clientWidth > 0;
+    if (!ready) {
+      if (++tries > 40) return;                      // give up quietly (~0.7s)
+      requestAnimationFrame(attempt);
+      return;
+    }
+    // Layout committed with a real width — fit ONCE. Any LATER reflow (a
+    // min-width→100% settle, a splitter drag, a window resize) is caught by
+    // the per-host ResizeObserver (w.fitRo) wired in _mountTerminal, so we do
+    // NOT keep re-fitting on a timer here: repeated fits emit a term_resize
+    // POST every frame, which races window-reuse/teardown (continueSession
+    // swaps the session in the slot) and 404s on the swapped-out session.
+    _fitPanelTerminal(sessionId, rec);
+  }
+  requestAnimationFrame(attempt);
+}
+
 // _tokenQ(): the ?token= suffix for read-only GET endpoints that gate via the
 // query param (same semantics as the WS/SSE transport token).
 function _tokenQ() {
@@ -3752,9 +3797,10 @@ function _mountTerminal(sessionId, body, rec) {
   var tok = _anchorToken();
   var tq = tok ? ('&token=' + encodeURIComponent(tok)) : '';
 
-  // Fit to the host NOW + shortly after layout settles (xterm starts at 80 cols).
-  _fitPanelTerminal(sessionId, w);
-  setTimeout(function () { _fitPanelTerminal(sessionId, w); }, 60);
+  // Fit to the host once layout is committed (xterm starts at 80 cols). The
+  // rAF-until-visible loop replaces the old sync + setTimeout(60ms), which
+  // raced the layout and left the terminal at ~1/3 column width on open.
+  _fitPanelTerminalDeferred(sessionId, w);
 
   // v10.1 FIX 4 — make _mountTerminal self-sufficient about reflow. The board
   // path wires a ResizeObserver in _wirePanelResize, but the grass mounts never
@@ -4032,8 +4078,10 @@ function openEffortDock(sessionId, tile) {
   // Wire the draggable splitter (debounced fit) + start the context-status poll.
   _wireDockSplitter();
   _startDockContextPoll();
-  // Fit once the layout has settled.
-  setTimeout(function () { _fitPanelTerminal(sessionId, DOCK); }, 80);
+  // Fit once the dock's <details>/flex layout has actually committed — the dock
+  // is un-hidden in this same tick, so a fixed setTimeout raced it (general
+  // "Open terminal" sessions open into the dock and were the worst-hit).
+  _fitPanelTerminalDeferred(sessionId, DOCK);
 }
 
 // _dockTeardownTerminal: dispose the dock's xterm + transport + observer (no

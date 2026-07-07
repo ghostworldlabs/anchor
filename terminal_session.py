@@ -2517,6 +2517,218 @@ def capture_session_docs(session_id, project_id=None, record=None):
         return {"ok": False, "reason": "error", "persisted": []}
 
 
+# ── Incremental autosave — periodically persist a RUNNING session's work ─────
+#
+# The durability gap (2026-07-07): a session's produced docs + transcript were
+# only ever persisted to the MAIN project at a BOUNDARY event (kill / close /
+# finish / advance / suspend / boot-recover). A long-running session — notably a
+# bare ``general`` session (``effort_managed=False``, which boot-recovery skips)
+# — that HUNG lost everything it had generated: reconcile and the zombie sweep
+# flip it RUNNING→IDLE WITHOUT persisting, so the work survived only as orphaned
+# worktree files ("found and manually saved later"). This heartbeat closes the
+# window: every AUTOSAVE_INTERVAL seconds it snapshots each live session's
+# transcript and copies its produced docs into MAIN (the byte-identical skip in
+# :func:`effort_history.persist_session_docs` makes an unchanged session a true
+# no-op), and refreshes a mechanical ``RESTART.md`` resume aid. Combined with the
+# boot-reconcile persist (anchor_gui boot), a hang can never strand work older
+# than one interval, and any session is warm-restartable from MAIN.
+
+#: Env seam: disable the autosave heartbeat entirely (``0``/``false``/``off``).
+#: ON by default in production; tests exercise :func:`autosave_running_sessions`
+#: / :func:`autosave_session` DIRECTLY (synchronously) and leave the daemon off.
+AUTOSAVE_ENABLED_ENV = "ANCHOR_SESSION_AUTOSAVE"
+#: Env seam: the heartbeat interval in seconds (default 120 — John 2026-07-07).
+AUTOSAVE_INTERVAL_ENV = "ANCHOR_SESSION_AUTOSAVE_INTERVAL"
+DEFAULT_AUTOSAVE_INTERVAL = 120.0
+
+#: The restart/resume aid written into a session's worktree lane dir. It rides
+#: into MAIN with the rest of the docs (a lane-dir ``.md`` → classified as a
+#: produced doc), so a later resume can find it.
+RESTART_DOC_FILENAME = "RESTART.md"
+
+#: Single-start guard for the daemon (a repeated boot never stacks a 2nd loop).
+_AUTOSAVE_STARTED = False
+_AUTOSAVE_GUARD = threading.Lock()
+
+
+def _autosave_enabled() -> bool:
+    return (os.environ.get(AUTOSAVE_ENABLED_ENV, "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
+def _autosave_interval() -> float:
+    raw = (os.environ.get(AUTOSAVE_INTERVAL_ENV) or "").strip()
+    if not raw:
+        return DEFAULT_AUTOSAVE_INTERVAL
+    try:
+        v = float(raw)
+        return v if v > 0 else DEFAULT_AUTOSAVE_INTERVAL
+    except ValueError:
+        return DEFAULT_AUTOSAVE_INTERVAL
+
+
+def _write_restart_seed(record, persisted_rels=None):
+    """Write a mechanical ``RESTART.md`` resume aid into the session's worktree.
+
+    Pure string assembly from the registry record + the produced-doc list — NO
+    model call. A deterministic path (``<store_lane>/RESTART.md``) so a re-write
+    overwrites the same file (idempotent), and the lane dir means
+    :func:`effort_history.persist_session_docs` classifies + copies it into MAIN
+    with the other docs. Skips an identical re-write so autosave stays a true
+    no-op when nothing changed. Returns the repo-relative POSIX path written, or
+    ``None`` on any failure. Never raises."""
+    try:
+        if not isinstance(record, dict):
+            return None
+        worktree_path = (record.get("worktree_path") or "").strip()
+        lane = (record.get("lane") or "").strip()
+        if not worktree_path or not lane:
+            return None
+        wt = Path(worktree_path)
+        if not wt.is_dir():
+            return None
+        store_lane = _eh._resolve_subdir(lane)
+        sid = record.get("session_id") or ""
+        short_sid = sid[:12] or "session"
+        engine = record.get("backend") or record.get("engine") or "?"
+        seed = (record.get("seed_text") or "").strip()
+        seed_line = (seed.splitlines()[0][:200] if seed
+                     else "(bare session — no seed)")
+        docs = sorted(d for d in (persisted_rels or [])
+                      if d and not d.endswith("/" + RESTART_DOC_FILENAME)
+                      and not d == "%s/%s" % (store_lane, RESTART_DOC_FILENAME))
+        doc_block = ("\n".join("- %s" % d for d in docs) if docs
+                     else "- (no documents produced yet)")
+        body = (
+            "# Session restart — %s (%s)\n\n"
+            "This session is autosaved: its produced documents and latest "
+            "transcript are copied into the main project so it can be resumed "
+            "even if the live terminal is lost.\n\n"
+            "- **Session id:** %s\n"
+            "- **Lane:** %s\n"
+            "- **Engine:** %s\n"
+            "- **Skill / seed:** %s\n\n"
+            "## Produced documents\n%s\n\n"
+            "## To resume\n"
+            "Reopen this session's tile in the Anchor project window, or use "
+            "\"Continue in a live session\" — the resume seed loads the "
+            "documents above.\n"
+            % (lane.title(), short_sid, sid, lane, engine, seed_line, doc_block))
+        rel = "%s/%s" % (store_lane, RESTART_DOC_FILENAME)
+        dest = wt / store_lane / RESTART_DOC_FILENAME
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if dest.is_file() and dest.read_text(encoding="utf-8") == body:
+                return rel
+        except OSError:
+            pass
+        dest.write_text(body, encoding="utf-8")
+        return rel
+    except Exception:
+        return None
+
+
+def autosave_session(session_id, record=None):
+    """Persist ONE running session's work into MAIN (transcript + docs + RESTART).
+
+    Best-effort, idempotent, never raises. A no-op for a session that is not
+    RUNNING. Returns ``{"session_id", "persisted": [...], "ok": bool, "reason"?}``.
+    """
+    out = {"session_id": session_id, "persisted": [], "ok": False}
+    try:
+        rec = record if record is not None else _reg.get_session(session_id)
+        if not isinstance(rec, dict):
+            out["reason"] = "unknown-session"
+            return out
+        if rec.get("status") != _reg.STATUS_RUNNING:
+            out["reason"] = "not-running"
+            return out
+        worktree_path = (rec.get("worktree_path") or "").strip()
+        # 1. Snapshot the live PTY transcript into a worktree doc (best-effort; a
+        #    session with no live PTY simply yields nothing to snapshot).
+        _snapshot_transcript_doc(rec, session_id)
+        # 2. Write the mechanical restart aid, listing the docs produced so far.
+        try:
+            doc_rels = (_eh._produced_doc_rels(worktree_path)
+                        if worktree_path else [])
+        except Exception:
+            doc_rels = []
+        _write_restart_seed(rec, persisted_rels=doc_rels)
+        # 3. Copy the produced docs (transcript + RESTART.md + any docs) to MAIN.
+        res = capture_session_docs(session_id, record=rec)
+        if isinstance(res, dict):
+            out["persisted"] = res.get("persisted", [])
+            out["ok"] = bool(res.get("ok"))
+        return out
+    except Exception:
+        out["reason"] = "error"
+        return out
+
+
+def autosave_running_sessions():
+    """Autosave every RUNNING managed session (the heartbeat body).
+
+    Directly callable + synchronous (the unit tests drive it without the daemon).
+    Best-effort per session; never raises. Returns the number of sessions swept."""
+    n = 0
+    try:
+        running = _reg.list_sessions(status=_reg.STATUS_RUNNING)
+    except Exception:
+        running = []
+    for rec in running:
+        try:
+            sid = rec.get("session_id") if isinstance(rec, dict) else None
+            if not sid:
+                continue
+            autosave_session(sid, record=rec)
+            n += 1
+        except Exception:
+            continue
+    return n
+
+
+def start_autosave_daemon():
+    """Launch the autosave heartbeat as ONE daemon thread (single-start guarded).
+
+    ON by default; a hard NO-OP when ``ANCHOR_SESSION_AUTOSAVE`` is disabled.
+    Owned by the main service process (never a disposable subagent). It spawns NO
+    subprocess — only in-process file copies + git through the existing seam — so
+    it can never pop a console window. Returns ``True`` if a loop was started,
+    ``False`` if disabled / already running."""
+    global _AUTOSAVE_STARTED
+    if not _autosave_enabled():
+        return False
+    with _AUTOSAVE_GUARD:
+        if _AUTOSAVE_STARTED:
+            return False
+        _AUTOSAVE_STARTED = True
+
+    interval = _autosave_interval()
+
+    def _loop():
+        import time as _t
+        while True:
+            try:
+                _t.sleep(interval)
+            except Exception:
+                return
+            if not _autosave_enabled():
+                continue
+            try:
+                autosave_running_sessions()
+            except Exception:
+                pass
+
+    try:
+        threading.Thread(target=_loop, daemon=True,
+                         name="anchor-autosave").start()
+        return True
+    except Exception:
+        with _AUTOSAVE_GUARD:
+            _AUTOSAVE_STARTED = False
+        return False
+
+
 # ── Graceful CLOSE — park a session, resumable WARM (crucible-improve W6) ─────
 
 def close_session(session_id, project_id=None, actor=None):
