@@ -254,6 +254,26 @@ def ensure_data_dirs() -> None:
     health_reports_dir().mkdir(parents=True, exist_ok=True)
 
 
+# ── Crash-safe atomic text write (data-loss guard) ─────────────────────────
+
+def atomic_write_text(path, text, encoding="utf-8"):
+    """Crash-safe text write: write to a temp file in the SAME directory, fsync, then
+    os.replace() onto the target — so a crash never leaves the target truncated/partial.
+    os.replace is atomic on Windows and POSIX for same-directory (same-volume) renames.
+
+    Behaves like ``Path.write_text`` except for atomicity: pass the SAME string the
+    caller already builds. Callers already hold :data:`WRITE_LOCK`, so the fixed
+    ``.tmp`` sidecar name is safe from concurrent collision.
+    """
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding=encoding, newline="") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
 # ── Auth helper (Wave 2) ───────────────────────────────────────────────────
 
 AUTH_TOKEN_ENV = "ANCHOR_TOKEN"

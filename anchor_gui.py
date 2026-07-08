@@ -5231,7 +5231,7 @@ def log_change(message):
     log_file = LOGS_DIR / f"{today}.md"
     if not log_file.exists():
         day_name = datetime.now().strftime("%A")
-        log_file.write_text(f"# {today} — {day_name}\n\n## Changes\n", encoding="utf-8")
+        _paths.atomic_write_text(log_file, f"# {today} — {day_name}\n\n## Changes\n")
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"- {now} — {message}\n")
     print(f"  Logged: {now} — {message}")
@@ -5255,7 +5255,7 @@ def mark_done(task_text):
             else:
                 new_lines.append(line)
         if changed:
-            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _paths.atomic_write_text(md_file, "\n".join(new_lines) + "\n")
     if found:
         log_change(f"Completed: {task_text}")
     return found
@@ -5279,7 +5279,7 @@ def mark_undone(task_text):
             else:
                 new_lines.append(line)
         if changed:
-            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _paths.atomic_write_text(md_file, "\n".join(new_lines) + "\n")
     if found:
         log_change(f"Reopened: {task_text}")
     return found
@@ -5302,7 +5302,7 @@ def add_task(text, domain="academic", priority=2, energy="med", due="", notes=""
                 if ns < 0:
                     ns = len(content)
                 content = content[:ns].rstrip() + "\n" + line + "\n\n" + content[ns:]
-                filepath.write_text(content, encoding="utf-8")
+                _paths.atomic_write_text(filepath, content)
                 return True
         return False
 
@@ -5321,10 +5321,10 @@ def capture_inbox(text, domain=""):
     if not INBOX_MD.exists():
         # Fresh/empty data dir: create a minimal inbox so the capture is never
         # silently dropped.
-        INBOX_MD.write_text("# Inbox\n\n", encoding="utf-8")
+        _paths.atomic_write_text(INBOX_MD, "# Inbox\n\n")
     content = _read_md_text(INBOX_MD)
     content = content.rstrip() + "\n" + line + "\n"
-    INBOX_MD.write_text(content, encoding="utf-8")
+    _paths.atomic_write_text(INBOX_MD, content)
     log_change(f"Captured: {text}")
 
 
@@ -5365,7 +5365,7 @@ def link_task(task_text, project_id):
             else:
                 new_lines.append(line)
         if changed:
-            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _paths.atomic_write_text(md_file, "\n".join(new_lines) + "\n")
     if found:
         log_change(f"Linked task '{task_text}' to project {new_id}" if new_id
                    else f"Unlinked task '{task_text}'")
@@ -5447,7 +5447,7 @@ def edit_task(old_text, new_text=None, new_priority=None, new_domain=None, new_e
             else:
                 new_lines.append(line)
         if changed:
-            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _paths.atomic_write_text(md_file, "\n".join(new_lines) + "\n")
     if found:
         changes = []
         if new_text and new_text != old_text:
@@ -5524,7 +5524,7 @@ def edit_project(old_name, new_name=None, new_priority=None, new_domain=None,
                     in_project = False
                 new_lines.append(line)
             i += 1
-        proj_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        _paths.atomic_write_text(proj_file, "\n".join(new_lines) + "\n")
 
     if found:
         changes = []
@@ -5574,7 +5574,7 @@ def _remove_task_from_files(task_text):
                 continue  # skip this line (remove it)
             new_lines.append(line)
         if changed:
-            md_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+            _paths.atomic_write_text(md_file, "\n".join(new_lines) + "\n")
     return found_task
 
 
@@ -5589,10 +5589,10 @@ def _append_to_archive(filepath, task_dict):
     line = f"- {today}: {task_dict['text']}{domain_str}{priority_str}{notes_str}"
 
     if not filepath.exists():
-        filepath.write_text(f"# {filepath.stem.replace('_', ' ').title()}\n\n", encoding="utf-8")
+        _paths.atomic_write_text(filepath, f"# {filepath.stem.replace('_', ' ').title()}\n\n")
     content = _read_md_text(filepath)
     content = content.rstrip() + "\n" + line + "\n"
-    filepath.write_text(content, encoding="utf-8")
+    _paths.atomic_write_text(filepath, content)
 
 
 @_with_write_lock
@@ -5641,7 +5641,7 @@ def restore_task(task_text, from_archive="saved"):
             continue  # remove from archive
         new_lines.append(line)
     if found:
-        archive_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        _paths.atomic_write_text(archive_file, "\n".join(new_lines) + "\n")
         add_task(found["text"], found["domain"], found["priority"], "med", "", found["notes"])
         log_change(f"Restored from {from_archive}: {task_text}")
         return True
@@ -8714,6 +8714,535 @@ def handle_auth_logout(handler, path, body):
         handler, {"ok": True, "auth": "cookie-cleared"}, cookie)
 
 
+# ── R&D mutation + data handlers (strangler calibration batch) ──────────────
+def handle_set_priority(handler, path, body):
+    """POST /api/rnd/set_priority — set a project's dashboard priority.
+
+    Token-gated by the do_POST middleware (which runs before the strangler)."""
+    pid = body.get("id", "")
+    try:
+        entry = _rnd.set_priority(pid, int(body.get("priority", 2)))
+        handler._send_json({"ok": True, "entry": entry})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_set_group(handler, path, body):
+    """POST /api/rnd/set_group — reassign a project's dashboard FOLDER (group).
+
+    Organization-only: this NEVER moves anything on disk (that is the guarded
+    on-disk move). Token-gated by the do_POST middleware.
+    """
+    pid = body.get("project_id", "") or body.get("id", "")
+    group = body.get("group", "")
+    try:
+        entry = _rnd.set_group(pid, group)
+        handler._send_json({
+            "ok": True,
+            "entry": entry,
+            "message": (f"Grouped under '{entry.get('group')}'"
+                        if entry.get("group")
+                        else "Moved to Ungrouped"),
+        })
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_add_idea(handler, path, body):
+    """POST /api/rnd/add_idea — manually add an idea to a project's Grass
+    Catchers lane (a real Anchor-created idea card, NOT a discovered artifact).
+    Auth is enforced by the middleware. Clean 404 for an unknown project; 400
+    for empty text.
+    """
+    pid = body.get("project_id", "") or body.get("id", "")
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        folder = proj.get("folder_path", "")
+        try:
+            rec = _eh.add_idea(folder, pid,
+                               body.get("text", ""),
+                               notes=body.get("notes", ""))
+            handler._send_json({"ok": True, "effort": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_pin_deliverable(handler, path, body):
+    """POST /api/rnd/pin_deliverable — pin a path (e.g. anchor_gui.py) as a
+    deliverable so it surfaces as a deliverables-lane effort even though it is
+    not under a deliverables/ directory. With ``declare:true``, instead pin
+    every deliverable declared in the folder's Anchor.md marker block. Auth is
+    enforced by the middleware.
+    """
+    pid = body.get("project_id", "")
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        folder = proj.get("folder_path", "")
+        if body.get("declare"):
+            res = _deliv.declare_deliverables_from_marker(folder, pid)
+            handler._send_json({"ok": True, **res})
+        else:
+            target = body.get("path", "") or body.get("target", "")
+            if not target:
+                handler._send_json({"ok": False,
+                                    "error": "path required"}, 400)
+            else:
+                try:
+                    rec = _deliv.pin_deliverable(
+                        folder, pid, target,
+                        name=body.get("name"),
+                        dtype=body.get("type"),
+                        description=body.get("description", ""),
+                    )
+                except ValueError as e:
+                    # A path that escapes the project folder is rejected
+                    # cleanly (400), never a 500-crash.
+                    handler._send_json({"ok": False, "error": str(e)}, 400)
+                else:
+                    handler._send_json({"ok": True, "effort": rec})
+
+
+def handle_remote_status(handler, path, body):
+    """GET /api/rnd/remote_status — the project's GitHub link state for the
+    header control: {linked, remote_url, auto_push}. NO mutation, NO network.
+
+    Token-authed by the route row (the strangler applies the row's auth via
+    ``_term_token_ok`` BEFORE this handler runs), so no inline auth check is
+    needed. Reads ``?project_id=`` off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("pid", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    if not pid:
+        handler._send_json({"ok": False, "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        st = _remote.remote_status(pid)
+        handler._send_json({"ok": True, "linked": st["linked"],
+                            "remote_url": st["remote_url"],
+                            "auto_push": st["auto_push"]})
+
+
+def handle_chain(handler, path, body):
+    """GET /api/rnd/chain — the ordered lineage chain a session belongs to, for
+    the panel-header breadcrumb (R-1 → P-2 → …). Emits a SAFE projection of each
+    member (never worktree_path / branch).
+
+    Token-authed by the route row (the strangler applies the row's auth BEFORE
+    this handler runs). Reads ``?session=`` off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    sid = (q.get("session", [""])[0]
+           or q.get("session_id", [""])[0] or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    else:
+        try:
+            chain_id = _sessreg.chain_for(sid)
+            members = (_sessreg.chain_members(chain_id)
+                       if chain_id else [])
+        except Exception:
+            chain_id = None
+            members = []
+        safe = []
+        for r in members:
+            if not isinstance(r, dict):
+                continue
+            safe.append({
+                "session_id": r.get("session_id"),
+                "lane": r.get("lane", ""),
+                "label": r.get("label", ""),
+                "status": r.get("status", ""),
+                "parent_session_id": r.get("parent_session_id", ""),
+                "chain_id": r.get("chain_id", ""),
+                # v10 Wave 4: grass→project lineage (SAFE — idea id only).
+                "grass_origin": r.get("grass_origin", ""),
+            })
+        handler._send_json({"ok": True, "chain_id": chain_id or "",
+                            "members": safe})
+
+
+def handle_done(handler, path, body):
+    """POST /api/done — mark a task done. Token-gated by the do_POST middleware."""
+    text = body.get("text", "")
+    ok = mark_done(text)
+    handler._send_json({"ok": ok, "message": f"Marked done: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_undone(handler, path, body):
+    """POST /api/undone — reopen a completed task. Token-gated by the middleware."""
+    text = body.get("text", "")
+    ok = mark_undone(text)
+    handler._send_json({"ok": ok, "message": f"Reopened: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_add(handler, path, body):
+    """POST /api/add — add a new task. Token-gated by the do_POST middleware."""
+    text = body.get("text", "")
+    domain = body.get("domain", "academic")
+    priority = body.get("priority", 2)
+    energy = body.get("energy", "med")
+    due = body.get("due", "")
+    notes = body.get("notes", "")
+    add_task(text, domain, priority, energy, due, notes)
+    handler._send_json({"ok": True, "message": f"Added: {text} [{domain}] P{priority}"})
+
+
+def handle_capture(handler, path, body):
+    """POST /api/capture — capture an inbox item. Token-gated by the middleware."""
+    text = body.get("text", "")
+    domain = body.get("domain", "")
+    capture_inbox(text, domain)
+    handler._send_json({"ok": True, "message": f"Captured: {text}"})
+
+
+def handle_edit_task(handler, path, body):
+    """POST /api/edit_task — edit a task's properties. Token-gated by the middleware."""
+    old_text = body.get("old_text", "")
+    ok = edit_task(
+        old_text,
+        new_text=body.get("new_text"),
+        new_priority=body.get("new_priority"),
+        new_domain=body.get("new_domain"),
+        new_energy=body.get("new_energy"),
+        new_due=body.get("new_due"),
+        new_notes=body.get("new_notes"),
+    )
+    handler._send_json({"ok": ok, "message": f"Updated task" if ok else f"Task not found: {old_text}"})
+
+
+def handle_edit_project(handler, path, body):
+    """POST /api/edit_project — edit a project's properties. Token-gated by the middleware."""
+    old_name = body.get("old_name", "")
+    ok = edit_project(
+        old_name,
+        new_name=body.get("new_name"),
+        new_priority=body.get("new_priority"),
+        new_domain=body.get("new_domain"),
+        new_status=body.get("new_status"),
+        new_effort=body.get("new_effort"),
+        new_due=body.get("new_due"),
+        new_next=body.get("new_next"),
+    )
+    handler._send_json({"ok": ok, "message": f"Updated project" if ok else f"Project not found: {old_name}"})
+
+
+def handle_promote_task(handler, path, body):
+    """POST /api/promote_task — promote a task to P1. Token-gated by the middleware."""
+    text = body.get("text", "")
+    ok = edit_task(text, new_priority=1)
+    handler._send_json({"ok": ok, "message": f"Promoted to P1: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_demote_task(handler, path, body):
+    """POST /api/demote_task — demote a task to P2. Token-gated by the middleware."""
+    text = body.get("text", "")
+    ok = edit_task(text, new_priority=2)
+    handler._send_json({"ok": ok, "message": f"Demoted to P2: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_cancel(handler, path, body):
+    """POST /api/cancel — cancel a task (→ CANCELLED.md). Token-gated by the middleware."""
+    text = body.get("text", "")
+    ok = cancel_task(text)
+    handler._send_json({"ok": ok, "message": f"Cancelled: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_save_for_later(handler, path, body):
+    """POST /api/save_for_later — save a task for later (→ SAVED_FOR_LATER.md). Token-gated by the middleware."""
+    text = body.get("text", "")
+    ok = save_for_later(text)
+    handler._send_json({"ok": ok, "message": f"Saved for later: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_restore(handler, path, body):
+    """POST /api/restore — restore a task from an archive (saved/cancelled). Token-gated by the middleware."""
+    text = body.get("text", "")
+    from_archive = body.get("from", "saved")
+    ok = restore_task(text, from_archive)
+    handler._send_json({"ok": ok, "message": f"Restored: {text}" if ok else f"Not found: {text}"})
+
+
+def handle_promote_project(handler, path, body):
+    """POST /api/promote_project — promote a project to P1. Token-gated by the middleware."""
+    name = body.get("name", "")
+    ok = edit_project(name, new_priority=1)
+    handler._send_json({"ok": ok, "message": f"Promoted to P1: {name}" if ok else f"Not found: {name}"})
+
+
+def handle_demote_project(handler, path, body):
+    """POST /api/demote_project — demote a project to P2. Token-gated by the middleware."""
+    name = body.get("name", "")
+    ok = edit_project(name, new_priority=2)
+    handler._send_json({"ok": ok, "message": f"Demoted to P2: {name}" if ok else f"Not found: {name}"})
+
+
+def handle_new_project(handler, path, body):
+    """POST /api/rnd/new_project — register a new/existing R&D project. Token-gated by the middleware."""
+    mode = body.get("mode", "existing")
+    name = body.get("name", "")
+    priority = body.get("priority", 2)
+    if mode == "new_folder":
+        res = create_new_folder_project(
+            name, body.get("parent_path", ""),
+            priority=priority,
+            git_init=bool(body.get("git_init", False)),
+        )
+    else:
+        res = select_existing_project(
+            name, body.get("folder_path", ""), priority=priority,
+        )
+    handler._send_json({"ok": True, **res})
+
+
+def handle_open_project(handler, path, body):
+    """POST /api/rnd/open_project — open a project instance. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    handler._send_json({"ok": True, **open_project_instance(pid)})
+
+
+def handle_rescan(handler, path, body):
+    """POST /api/rnd/rescan — re-discover + re-adopt a brownfield project's on-disk artifacts.
+
+    scan -> adopt -> reconcile (prune deletions) -> rewrite marker. Idempotent
+    (no dupes). Clean JSON; never a 500 for a bad folder. Token-gated by the
+    middleware.
+    """
+    pid = body.get("id", "") or body.get("project_id", "")
+    res = discover_and_adopt(pid)
+    code = 200 if res.get("ok") else 404
+    handler._send_json(res, code)
+
+
+def handle_archive_project(handler, path, body):
+    """POST /api/rnd/archive_project — archive a project. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.archive_project(pid)})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_future_project(handler, path, body):
+    """POST /api/rnd/future_project — mark a project as future. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.mark_future(pid)})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_retire_project(handler, path, body):
+    """POST /api/rnd/retire_project — retire a project. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.retire_project(pid)})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_reactivate_project(handler, path, body):
+    """POST /api/rnd/reactivate_project — reactivate a project. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.reactivate_project(pid)})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_set_notes(handler, path, body):
+    """POST /api/rnd/set_notes — set a project's free-text notes. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.set_notes(pid, body.get("notes", ""))})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_set_blurb(handler, path, body):
+    """POST /api/rnd/set_blurb — set a project's blurb. Token-gated by the middleware."""
+    pid = body.get("id", "")
+    try:
+        handler._send_json({"ok": True,
+                            "entry": _rnd.set_blurb(pid, body.get("blurb", ""))})
+    except KeyError:
+        handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def handle_link_task(handler, path, body):
+    """POST /api/rnd/link_task — link/unlink a task ↔ R&D project (activates the
+    Project: field). Token-gated by the do_POST middleware."""
+    text = body.get("text", "")
+    pid = body.get("project_id", "")
+    ok = link_task(text, pid)
+    handler._send_json({
+        "ok": ok,
+        "message": (f"Linked '{text}' → {pid}" if pid else
+                    f"Unlinked '{text}'") if ok
+                   else f"Task not found: {text}",
+    })
+
+
+def handle_project_rollup(handler, path, body):
+    """GET /api/rnd/project_rollup — the per-project cost/tokens/time rollup
+    (effort_history.project_effort_rollup) for the header's lifetime/30-day toggle.
+    RUN-session totals only (imported/discovered contribute 0 — never fabricated).
+    Returns both the raw fields and a pre-formatted ``text`` for the header swap.
+
+    Token-authed by the route row (the strangler applies the row's auth BEFORE
+    this handler runs). Reads the query off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0]
+           or q.get("project_id", [""])[0] or "").strip()
+    window = (q.get("window", ["lifetime"])[0] or "lifetime").strip()
+    if window not in (_eh.WINDOW_LIFETIME, _eh.WINDOW_30D):
+        window = _eh.WINDOW_LIFETIME
+    if not pid:
+        handler._send_json({"ok": False, "error": "pid required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        try:
+            roll = _eh.project_effort_rollup(pid, window=window)
+        except Exception:
+            roll = {"tokens": 0, "cost_usd": 0.0,
+                    "wall_clock_ms": 0, "sessions": 0}
+        handler._send_json({"ok": True, "window": window,
+                            "rollup": roll,
+                            "text": _fmt_rollup_line(roll)})
+
+
+def handle_effort_rollup(handler, path, body):
+    """GET /api/rnd/effort_rollup — the SELECTED effort's cost/tokens/wall-clock
+    rollup, summed over the effort's per-stage job_runner cost records
+    (effort_view.effort_rollup). SAFE — numbers only (no worktree/branch).
+
+    Token-authed by the route row (the strangler applies the row's auth BEFORE
+    this handler runs). Reads the query off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0]
+           or q.get("project_id", [""])[0] or "").strip()
+    effort = (q.get("effort", [""])[0]
+              or q.get("session", [""])[0] or "").strip()
+    if not pid or not effort:
+        handler._send_json({"ok": False,
+                            "error": "pid, effort required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        folder = (proj or {}).get("folder_path", "")
+        roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0}
+        try:
+            roll = _effview.effort_rollup(folder, pid, effort)
+        except Exception:
+            pass
+        handler._send_json({
+            "ok": True,
+            "tokens": int(roll.get("tokens", 0) or 0),
+            "cost_usd": float(roll.get("cost_usd", 0.0) or 0.0),
+            "wall_clock_ms": int(roll.get("wall_clock_ms", 0) or 0),
+        })
+
+
+def handle_boneyard(handler, path, body):
+    """GET /api/rnd/boneyard — the project's per-project Boneyard: a searchable
+    list of DISCARDED material (hard-killed sessions w/ material, v9-deleted
+    sessions, deleted grass ideas). Project-scoped. Empty ``q`` → ALL entries
+    (newest-first); else boneyard.search. Each entry is the SAFE projection PLUS
+    server-built, traversal-safe ``doc_links`` (href via the existing /artifact
+    route).
+
+    Token-authed by the route row (the strangler applies the row's auth BEFORE
+    this handler runs). Reads the query off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("pid", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    query = (q.get("q", [""])[0] or "").strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                            "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                if query:
+                    entries = _boneyard.search(folder, pid, query)
+                else:
+                    entries = _boneyard.list_entries(folder, pid)
+            except Exception:
+                entries = []
+            out = [_boneyard_entry_view(pid, e) for e in entries]
+            handler._send_json({"ok": True, "entries": out, "q": query})
+
+
+def handle_build_deliverable(handler, path, body):
+    """GET /api/rnd/build_deliverable — resolve the DELIVERABLE one BUILD session
+    produced — explicit signals only, never fabricated. Honest
+    ``{resolved:false, deliverable:null}`` when unresolved. NO mutation, NO model
+    call.
+
+    Token-authed by the route row (the strangler applies the row's auth BEFORE
+    this handler runs). Reads the query off ``handler.path``.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0]
+           or q.get("project_id", [""])[0] or "").strip()
+    lane = (q.get("lane", ["build"])[0] or "build").strip()
+    session_id = (q.get("session", [""])[0] or "").strip()
+    if not pid or not session_id:
+        handler._send_json({"ok": False,
+                            "error": "pid, session required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    elif _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        folder = (proj or {}).get("folder_path", "")
+        result = {"resolved": False, "deliverable": None,
+                  "reason": "no deliverable pinned yet"}
+        try:
+            session = None
+            for s in _sessions.list_sessions(folder, pid, lane):
+                if s.get("session_id") == session_id:
+                    session = s
+                    break
+            if session is not None:
+                result = _deliv.resolve_build_deliverable(
+                    folder, pid, session)
+        except Exception:
+            result = {"resolved": False, "deliverable": None,
+                      "reason": "no deliverable pinned yet"}
+        handler._send_json({"ok": True,
+                            "resolved": bool(result.get("resolved")),
+                            "deliverable": result.get("deliverable"),
+                            "reason": result.get("reason", "")})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -8724,6 +9253,39 @@ _MIGRATED_HANDLERS = {
     "handle_dir_browse": handle_dir_browse,
     "handle_auth_login": handle_auth_login,
     "handle_auth_logout": handle_auth_logout,
+    "handle_set_priority": handle_set_priority,
+    "handle_set_group": handle_set_group,
+    "handle_add_idea": handle_add_idea,
+    "handle_pin_deliverable": handle_pin_deliverable,
+    "handle_remote_status": handle_remote_status,
+    "handle_chain": handle_chain,
+    "handle_done": handle_done,
+    "handle_undone": handle_undone,
+    "handle_add": handle_add,
+    "handle_capture": handle_capture,
+    "handle_edit_task": handle_edit_task,
+    "handle_edit_project": handle_edit_project,
+    "handle_promote_task": handle_promote_task,
+    "handle_demote_task": handle_demote_task,
+    "handle_cancel": handle_cancel,
+    "handle_save_for_later": handle_save_for_later,
+    "handle_restore": handle_restore,
+    "handle_promote_project": handle_promote_project,
+    "handle_demote_project": handle_demote_project,
+    "handle_new_project": handle_new_project,
+    "handle_open_project": handle_open_project,
+    "handle_rescan": handle_rescan,
+    "handle_archive_project": handle_archive_project,
+    "handle_future_project": handle_future_project,
+    "handle_retire_project": handle_retire_project,
+    "handle_reactivate_project": handle_reactivate_project,
+    "handle_set_notes": handle_set_notes,
+    "handle_set_blurb": handle_set_blurb,
+    "handle_link_task": handle_link_task,
+    "handle_project_rollup": handle_project_rollup,
+    "handle_effort_rollup": handle_effort_rollup,
+    "handle_boneyard": handle_boneyard,
+    "handle_build_deliverable": handle_build_deliverable,
 }
 
 
@@ -9880,83 +10442,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "observed_bytes": cf.get("observed_bytes", 0),
                         "budget": cf.get("budget", 0),
                     })
-            elif self.path.startswith("/api/rnd/effort_rollup"):
-                # Read-only (v12 W10 fix #3): the SELECTED effort's cost/tokens/
-                # wall-clock rollup, summed over the effort's per-stage job_runner
-                # cost records (effort_view.effort_rollup). The dock summary header
-                # renders "Σ <tok> tok · <time> · $<cost>" from this. SAFE — numbers
-                # only (no worktree/branch). NO mutation, NO model call. AUTH:
-                # ``?token=``. /api/rnd/effort_rollup?pid=<id>&effort=<sid>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("pid", [""])[0]
-                       or q.get("project_id", [""])[0] or "").strip()
-                effort = (q.get("effort", [""])[0]
-                          or q.get("session", [""])[0] or "").strip()
-                if not pid or not effort:
-                    self._send_json({"ok": False,
-                                     "error": "pid, effort required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    folder = (proj or {}).get("folder_path", "")
-                    roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0}
-                    try:
-                        roll = _effview.effort_rollup(folder, pid, effort)
-                    except Exception:
-                        pass
-                    self._send_json({
-                        "ok": True,
-                        "tokens": int(roll.get("tokens", 0) or 0),
-                        "cost_usd": float(roll.get("cost_usd", 0.0) or 0.0),
-                        "wall_clock_ms": int(roll.get("wall_clock_ms", 0) or 0),
-                    })
-            elif self.path.startswith("/api/rnd/build_deliverable"):
-                # Read-only (v5 Wave 4): resolve the DELIVERABLE one BUILD session
-                # produced — explicit signals only, never fabricated. The build
-                # panel fetches this to show the deliverable (name/type/link) or an
-                # honest "no deliverable pinned yet" placeholder when unresolved.
-                # NO mutation, NO model call. AUTH: ``?token=`` (read-only GET).
-                # /api/rnd/build_deliverable?pid=<id>&lane=build&session=<sid>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("pid", [""])[0]
-                       or q.get("project_id", [""])[0] or "").strip()
-                lane = (q.get("lane", ["build"])[0] or "build").strip()
-                session_id = (q.get("session", [""])[0] or "").strip()
-                if not pid or not session_id:
-                    self._send_json({"ok": False,
-                                     "error": "pid, session required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                elif _unsafe_path_seg(lane):
-                    self._send_json({"ok": False, "error": "bad lane"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    folder = (proj or {}).get("folder_path", "")
-                    result = {"resolved": False, "deliverable": None,
-                              "reason": "no deliverable pinned yet"}
-                    try:
-                        session = None
-                        for s in _sessions.list_sessions(folder, pid, lane):
-                            if s.get("session_id") == session_id:
-                                session = s
-                                break
-                        if session is not None:
-                            result = _deliv.resolve_build_deliverable(
-                                folder, pid, session)
-                    except Exception:
-                        result = {"resolved": False, "deliverable": None,
-                                  "reason": "no deliverable pinned yet"}
-                    self._send_json({"ok": True,
-                                     "resolved": bool(result.get("resolved")),
-                                     "deliverable": result.get("deliverable"),
-                                     "reason": result.get("reason", "")})
+            # /api/rnd/effort_rollup migrated to route_table
+            # (handle_effort_rollup) — served by the strangler above.
+            # /api/rnd/build_deliverable migrated to route_table
+            # (handle_build_deliverable) — served by the strangler above.
             elif self.path.startswith("/api/rnd/grass"):
                 # Read-only (v5 Wave 5): the project's Grass ideas + their status
                 # + versioned refinements, for the two-pane idea workbench. NO
@@ -10570,103 +11059,12 @@ function startZombieTerminal(btn) {
                     self._send_json({"ok": False, "error": str(exc)}, 500)
                 else:
                     self._send_json({"ok": True, "reaper": dump})
-            elif self.path.startswith("/api/rnd/boneyard"):
-                # Read-only (v10 Wave 7): the project's per-project Boneyard — a
-                # searchable list of DISCARDED material (hard-killed sessions w/
-                # material, v9-deleted sessions, deleted grass ideas). NO mutation,
-                # NO model call. AUTH: ``?token=`` (read-only GET; back-compat when
-                # no token set), mirroring /api/rnd/grass. Project-scoped (D4 —
-                # never a cross-project view).
-                #   /api/rnd/boneyard?project_id=<id>&q=<query>
-                # Empty ``q`` → ALL entries (newest-first); else boneyard.search.
-                # Each entry is the SAFE projection (boneyard._SAFE_KEYS — never an
-                # absolute path / worktree / branch) PLUS server-built, traversal-
-                # safe ``doc_links`` (href via the existing /artifact route — the
-                # file survives on disk by rel path regardless of source, Option A,
-                # so /artifact is ALWAYS resolvable and consistent across sources).
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("pid", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                query = (q.get("q", [""])[0] or "").strip()
-                if not pid:
-                    self._send_json({"ok": False,
-                                     "error": "project_id required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    if proj is None:
-                        self._send_json({"ok": False,
-                                         "error": "Unknown project"}, 404)
-                    else:
-                        folder = proj.get("folder_path", "")
-                        try:
-                            if query:
-                                entries = _boneyard.search(folder, pid, query)
-                            else:
-                                entries = _boneyard.list_entries(folder, pid)
-                        except Exception:
-                            entries = []
-                        out = [_boneyard_entry_view(pid, e) for e in entries]
-                        self._send_json({"ok": True, "entries": out, "q": query})
-            elif self.path.startswith("/api/rnd/remote_status"):
-                # Read-only (v8 Wave 3): the project's GitHub link state for the
-                # header control — {linked, remote_url, auto_push}. NO mutation,
-                # NO network. AUTH: ``?token=`` (read-only GET; back-compat when
-                # no token set). /api/rnd/remote_status?project_id=<id>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("pid", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                if not pid:
-                    self._send_json({"ok": False,
-                                     "error": "project_id required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                elif _rnd.get_project(pid) is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    st = _remote.remote_status(pid)
-                    self._send_json({"ok": True, "linked": st["linked"],
-                                     "remote_url": st["remote_url"],
-                                     "auto_push": st["auto_push"]})
-            elif self.path.startswith("/api/rnd/project_rollup"):
-                # Read-only (v4 Wave 5): the per-project cost/tokens/time rollup
-                # (effort_history.project_effort_rollup, Wave 3) for the header's
-                # lifetime/30-day toggle. RUN-session totals only (imported /
-                # discovered contribute 0 — never fabricated). Returns both the
-                # raw fields and a pre-formatted ``text`` for the header swap.
-                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("pid", [""])[0]
-                       or q.get("project_id", [""])[0] or "").strip()
-                window = (q.get("window", ["lifetime"])[0] or "lifetime").strip()
-                if window not in (_eh.WINDOW_LIFETIME, _eh.WINDOW_30D):
-                    window = _eh.WINDOW_LIFETIME
-                if not pid:
-                    self._send_json({"ok": False, "error": "pid required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                else:
-                    try:
-                        roll = _eh.project_effort_rollup(pid, window=window)
-                    except Exception:
-                        roll = {"tokens": 0, "cost_usd": 0.0,
-                                "wall_clock_ms": 0, "sessions": 0}
-                    self._send_json({"ok": True, "window": window,
-                                     "rollup": roll,
-                                     "text": _fmt_rollup_line(roll)})
+            # /api/rnd/boneyard migrated to route_table (handle_boneyard) —
+            # served by the strangler above.
+            # /api/rnd/remote_status migrated to route_table (handle_remote_status)
+            # — served by the strangler above.
+            # /api/rnd/project_rollup migrated to route_table
+            # (handle_project_rollup) — served by the strangler above.
             elif self.path.startswith("/artifact/"):
                 # Read-only serving of a DISCOVERED (brownfield) artifact from a
                 # project's folder (Wave 4). Traversal-safe via the proven
@@ -11007,47 +11405,8 @@ function startZombieTerminal(btn) {
                         "effort_managed": bool(r.get("effort_managed", False)),
                     })
                 self._send_json({"ok": True, "sessions": safe})
-            elif self.path.startswith("/api/rnd/chain"):
-                # Read-only (v6 Wave 5): the ordered lineage chain a session
-                # belongs to, for the panel-header breadcrumb (R-1 → P-2 → …).
-                # Resolves chain_for(session) → chain_members(chain_id) and emits
-                # a SAFE projection of each member (session_id / lane / label /
-                # status / parent_session_id / chain_id — NEVER worktree_path or
-                # branch). AUTH: ``?token=`` (read-only GET; back-compat when no
-                # token configured). /api/rnd/chain?project_id=<id>&session=<sid>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                sid = (q.get("session", [""])[0]
-                       or q.get("session_id", [""])[0] or "").strip()
-                if not sid:
-                    self._send_json({"ok": False,
-                                     "error": "session required"}, 400)
-                else:
-                    try:
-                        chain_id = _sessreg.chain_for(sid)
-                        members = (_sessreg.chain_members(chain_id)
-                                   if chain_id else [])
-                    except Exception:
-                        chain_id = None
-                        members = []
-                    safe = []
-                    for r in members:
-                        if not isinstance(r, dict):
-                            continue
-                        safe.append({
-                            "session_id": r.get("session_id"),
-                            "lane": r.get("lane", ""),
-                            "label": r.get("label", ""),
-                            "status": r.get("status", ""),
-                            "parent_session_id": r.get("parent_session_id", ""),
-                            "chain_id": r.get("chain_id", ""),
-                            # v10 Wave 4: grass→project lineage (SAFE — idea id only).
-                            "grass_origin": r.get("grass_origin", ""),
-                        })
-                    self._send_json({"ok": True, "chain_id": chain_id or "",
-                                     "members": safe})
+            # /api/rnd/chain migrated to route_table (handle_chain) — served by
+            # the strangler above.
             elif self.path.startswith("/api/rnd/board_html"):
                 # Read-only (v7 Wave 6): the project's rendered 5-lane board
                 # FRAGMENT, so an already-open project window can refresh the
@@ -11241,12 +11600,7 @@ function startZombieTerminal(btn) {
         if self._strangler_dispatch("POST", self.path, body):
             return
 
-        if self.path == "/api/done":
-            text = body.get("text", "")
-            ok = mark_done(text)
-            self._send_json({"ok": ok, "message": f"Marked done: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/rnd/upload_batch":
+        if self.path == "/api/rnd/upload_batch":
             project_id = body.get("project_id", "__dashboard__")
             files = body.get("files", [])
             
@@ -11345,199 +11699,16 @@ function startZombieTerminal(btn) {
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)})
 
-        elif self.path == "/api/undone":
-            text = body.get("text", "")
-            ok = mark_undone(text)
-            self._send_json({"ok": ok, "message": f"Reopened: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/add":
-            text = body.get("text", "")
-            domain = body.get("domain", "academic")
-            priority = body.get("priority", 2)
-            energy = body.get("energy", "med")
-            due = body.get("due", "")
-            notes = body.get("notes", "")
-            add_task(text, domain, priority, energy, due, notes)
-            self._send_json({"ok": True, "message": f"Added: {text} [{domain}] P{priority}"})
-
-        elif self.path == "/api/capture":
-            text = body.get("text", "")
-            domain = body.get("domain", "")
-            capture_inbox(text, domain)
-            self._send_json({"ok": True, "message": f"Captured: {text}"})
-
-        elif self.path == "/api/edit_task":
-            old_text = body.get("old_text", "")
-            ok = edit_task(
-                old_text,
-                new_text=body.get("new_text"),
-                new_priority=body.get("new_priority"),
-                new_domain=body.get("new_domain"),
-                new_energy=body.get("new_energy"),
-                new_due=body.get("new_due"),
-                new_notes=body.get("new_notes"),
-            )
-            self._send_json({"ok": ok, "message": f"Updated task" if ok else f"Task not found: {old_text}"})
-
-        elif self.path == "/api/edit_project":
-            old_name = body.get("old_name", "")
-            ok = edit_project(
-                old_name,
-                new_name=body.get("new_name"),
-                new_priority=body.get("new_priority"),
-                new_domain=body.get("new_domain"),
-                new_status=body.get("new_status"),
-                new_effort=body.get("new_effort"),
-                new_due=body.get("new_due"),
-                new_next=body.get("new_next"),
-            )
-            self._send_json({"ok": ok, "message": f"Updated project" if ok else f"Project not found: {old_name}"})
-
-        elif self.path == "/api/promote_project":
-            name = body.get("name", "")
-            ok = edit_project(name, new_priority=1)
-            self._send_json({"ok": ok, "message": f"Promoted to P1: {name}" if ok else f"Not found: {name}"})
-
-        elif self.path == "/api/demote_project":
-            name = body.get("name", "")
-            ok = edit_project(name, new_priority=2)
-            self._send_json({"ok": ok, "message": f"Demoted to P2: {name}" if ok else f"Not found: {name}"})
-
-        elif self.path == "/api/promote_task":
-            text = body.get("text", "")
-            ok = edit_task(text, new_priority=1)
-            self._send_json({"ok": ok, "message": f"Promoted to P1: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/demote_task":
-            text = body.get("text", "")
-            ok = edit_task(text, new_priority=2)
-            self._send_json({"ok": ok, "message": f"Demoted to P2: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/cancel":
-            text = body.get("text", "")
-            ok = cancel_task(text)
-            self._send_json({"ok": ok, "message": f"Cancelled: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/save_for_later":
-            text = body.get("text", "")
-            ok = save_for_later(text)
-            self._send_json({"ok": ok, "message": f"Saved for later: {text}" if ok else f"Not found: {text}"})
-
-        elif self.path == "/api/restore":
-            text = body.get("text", "")
-            from_archive = body.get("from", "saved")
-            ok = restore_task(text, from_archive)
-            self._send_json({"ok": ok, "message": f"Restored: {text}" if ok else f"Not found: {text}"})
-
         elif self.path == "/api/heartbeat":
             global _last_heartbeat
             _last_heartbeat = datetime.now()
             self._send_json({"ok": True})
 
-        # ── R&D control surface (Wave 3) ──────────────────────────────
-        elif self.path == "/api/rnd/new_project":
-            mode = body.get("mode", "existing")
-            name = body.get("name", "")
-            priority = body.get("priority", 2)
-            if mode == "new_folder":
-                res = create_new_folder_project(
-                    name, body.get("parent_path", ""),
-                    priority=priority,
-                    git_init=bool(body.get("git_init", False)),
-                )
-            else:
-                res = select_existing_project(
-                    name, body.get("folder_path", ""), priority=priority,
-                )
-            self._send_json({"ok": True, **res})
-
-        elif self.path == "/api/rnd/open_project":
-            pid = body.get("id", "")
-            self._send_json({"ok": True, **open_project_instance(pid)})
-
-        elif self.path == "/api/rnd/rescan":
-            # Re-discover + re-adopt a brownfield project's on-disk artifacts:
-            # scan -> adopt -> reconcile (prune deletions) -> rewrite marker.
-            # Idempotent (no dupes). Clean JSON; never a 500 for a bad folder.
-            pid = body.get("id", "") or body.get("project_id", "")
-            res = discover_and_adopt(pid)
-            code = 200 if res.get("ok") else 404
-            self._send_json(res, code)
-
-        elif self.path == "/api/rnd/set_priority":
-            pid = body.get("id", "")
-            try:
-                entry = _rnd.set_priority(pid, int(body.get("priority", 2)))
-                self._send_json({"ok": True, "entry": entry})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/archive_project":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.archive_project(pid)})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/future_project":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.mark_future(pid)})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/retire_project":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.retire_project(pid)})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/reactivate_project":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.reactivate_project(pid)})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/set_notes":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.set_notes(pid, body.get("notes", ""))})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/set_blurb":
-            pid = body.get("id", "")
-            try:
-                self._send_json({"ok": True,
-                                 "entry": _rnd.set_blurb(pid, body.get("blurb", ""))})
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
-        elif self.path == "/api/rnd/set_group":
-            # v9 Wave 3 — reassign a project's dashboard FOLDER (group) only.
-            # Organization-only: this NEVER moves anything on disk (that is the
-            # v9 Wave 4 guarded on-disk move). Token-gated by the do_POST middleware.
-            pid = body.get("project_id", "") or body.get("id", "")
-            group = body.get("group", "")
-            try:
-                entry = _rnd.set_group(pid, group)
-                self._send_json({
-                    "ok": True,
-                    "entry": entry,
-                    "message": (f"Grouped under '{entry.get('group')}'"
-                                if entry.get("group")
-                                else "Moved to Ungrouped"),
-                })
-            except KeyError:
-                self._send_json({"ok": False, "error": "Not found"}, 404)
-
+        # /api/rnd/retire_project, /api/rnd/reactivate_project,
+        # /api/rnd/set_notes, /api/rnd/set_blurb migrated to route_table —
+        # served by the strangler above.
+        # /api/rnd/set_group migrated to route_table (handle_set_group) —
+        # served by the strangler above.
         elif self.path == "/api/rnd/move_project":
             # v9 Wave 4 — GUARDED on-disk move: relocate a project's directory
             # into a group subfolder and re-point registry+worktrees+discovery.
@@ -11567,18 +11738,8 @@ function startZombieTerminal(btn) {
                     self._send_json(out, status)
 
         # ── R&D control surface (Wave 9) ──────────────────────────────
-        elif self.path == "/api/rnd/link_task":
-            # Link/unlink a task ↔ R&D project (activates the Project: field).
-            text = body.get("text", "")
-            pid = body.get("project_id", "")
-            ok = link_task(text, pid)
-            self._send_json({
-                "ok": ok,
-                "message": (f"Linked '{text}' → {pid}" if pid else
-                            f"Unlinked '{text}'") if ok
-                           else f"Task not found: {text}",
-            })
-
+        # /api/rnd/link_task migrated to route_table (handle_link_task) —
+        # served by the strangler above.
         elif self.path == "/api/rnd/run_deliverable":
             # Run a deliverable per its type contract; persist + report status.
             pid = body.get("project_id", "")
@@ -11603,40 +11764,8 @@ function startZombieTerminal(btn) {
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
 
-        elif self.path == "/api/rnd/pin_deliverable":
-            # Pin a path (e.g. anchor_gui.py) as a deliverable so it surfaces as
-            # a deliverables-lane effort even though it is not under a
-            # deliverables/ directory. With "declare":true, instead pin every
-            # deliverable declared in the folder's Anchor.md marker block.
-            pid = body.get("project_id", "")
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                folder = proj.get("folder_path", "")
-                if body.get("declare"):
-                    res = _deliv.declare_deliverables_from_marker(folder, pid)
-                    self._send_json({"ok": True, **res})
-                else:
-                    path = body.get("path", "") or body.get("target", "")
-                    if not path:
-                        self._send_json({"ok": False,
-                                         "error": "path required"}, 400)
-                    else:
-                        try:
-                            rec = _deliv.pin_deliverable(
-                                folder, pid, path,
-                                name=body.get("name"),
-                                dtype=body.get("type"),
-                                description=body.get("description", ""),
-                            )
-                        except ValueError as e:
-                            # A path that escapes the project folder is rejected
-                            # cleanly (400), never a 500-crash.
-                            self._send_json({"ok": False, "error": str(e)}, 400)
-                        else:
-                            self._send_json({"ok": True, "effort": rec})
-
+        # /api/rnd/pin_deliverable migrated to route_table (handle_pin_deliverable)
+        # — served by the strangler above.
         elif self.path == "/api/rnd/launch_deliverable":
             # v4 Wave 7: TYPE-AWARE launch of a pinned deliverable. Dispatches on
             # the deliverable's type — skill/tool VERIFY status (no spawn);
@@ -12479,25 +12608,8 @@ function startZombieTerminal(btn) {
                     self._send_json({"ok": True, "summary": summary})
 
         # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
-        elif self.path == "/api/rnd/add_idea":
-            # Manually add an idea to a project's Grass Catchers lane (a real
-            # Anchor-created idea card, NOT a discovered artifact). Auth is
-            # already enforced by the middleware above. Clean 404 for an unknown
-            # project; 400 for empty text.
-            pid = body.get("project_id", "") or body.get("id", "")
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                folder = proj.get("folder_path", "")
-                try:
-                    rec = _eh.add_idea(folder, pid,
-                                       body.get("text", ""),
-                                       notes=body.get("notes", ""))
-                    self._send_json({"ok": True, "effort": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-
+        # /api/rnd/add_idea migrated to route_table (handle_add_idea) —
+        # served by the strangler above.
         elif self.path == "/api/rnd/promote_inbox":
             # Promote an EXISTING INBOX.md item into a project's Grass Catchers
             # (copy-by-default: the inbox item is NOT removed). Reuses the

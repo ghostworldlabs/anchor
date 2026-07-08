@@ -175,8 +175,8 @@ def record_effort(folder_path, project_id: str, lane: str, job_id: str,
             rec["prompt_seed"] = prompt_seed
         if extra:
             rec.update(extra)
-        ppath.write_text(json.dumps(rec, indent=2, ensure_ascii=False),
-                         encoding="utf-8")
+        _paths.atomic_write_text(
+            ppath, json.dumps(rec, indent=2, ensure_ascii=False))
         # Append to the index iff this job_id is new (preserve prior order).
         order = _load_index(folder_path, project_id, lane)
         if job_id not in order:
@@ -1902,8 +1902,8 @@ def _set_created_at(folder_path, project_id: str, lane: str, job_id: str,
         except (json.JSONDecodeError, OSError):
             return {}
         rec["created_at"] = ts
-        ppath.write_text(json.dumps(rec, indent=2, ensure_ascii=False),
-                         encoding="utf-8")
+        _paths.atomic_write_text(
+            ppath, json.dumps(rec, indent=2, ensure_ascii=False))
         return rec
 
 

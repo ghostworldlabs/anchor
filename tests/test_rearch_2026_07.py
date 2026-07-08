@@ -2675,7 +2675,7 @@ class TestW7RouteTable:
                                "handler"}
         assert sample["status"] == "migrated"
         assert sample["handler"] == "handle_routes"
-        legacy = next(d for d in dump if d["path"] == "/api/done")
+        legacy = next(d for d in dump if d["path"] == "/api/upload")
         assert legacy["status"] == "legacy" and legacy["handler"] is None
 
 
