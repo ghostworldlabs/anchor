@@ -2764,6 +2764,26 @@ def close_session(session_id, project_id=None, actor=None):
     if project_id is None:
         project_id = record.get("project_id") or None
 
+    # Resume-warm fix (2026-07-08): a bare `general` (or any doc-less) session
+    # produces no trio docs, so the git-diff `capture_session_docs` below finds
+    # nothing and the resume seed / summarizer collapse to empty ("No grounded
+    # claims…"). Snapshot the LIVE PTY transcript into a durable worktree doc
+    # BEFORE the kill (a killed PTY can't be read) — mirroring `autosave_session`
+    # — so the actual session log survives, gets persisted to MAIN by
+    # `capture_session_docs`, becomes a groundable member doc for the summarizer,
+    # and warms the reopen seed. Best-effort; never blocks the park.
+    try:
+        _snapshot_transcript_doc(record, session_id)
+        worktree_path = (record.get("worktree_path") or "").strip()
+        try:
+            _doc_rels = (_eh._produced_doc_rels(worktree_path)
+                         if worktree_path else [])
+        except Exception:
+            _doc_rels = []
+        _write_restart_seed(record, persisted_rels=_doc_rels)
+    except Exception:
+        pass
+
     # Stop the live PTY (tolerant of an already-dead / never-live session).
     pty_killed = False
     try:
