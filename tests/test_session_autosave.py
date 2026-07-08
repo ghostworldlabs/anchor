@@ -153,6 +153,36 @@ def test_autosave_covers_general_session(env):
     ts.kill(sid)
 
 
+def test_autosave_snapshots_general_transcript(env):
+    """The heartbeat must capture a bare `general` session's LIVE scrollback —
+    not only files it happens to write to the worktree. This is the durability
+    of a plain interactive terminal (John, 2026-07-08): even a session that
+    never writes a .md has its transcript snapshotted + persisted into MAIN, so a
+    later resume is warm (has the log of what was going on)."""
+    import pty_manager
+    ts, repo, pid = env["ts"], env["repo"], env["pid"]
+
+    sess = ts.start_session(pid, "general", backend="claude")
+    sid = sess["session_id"]
+    # Seed simulated interactive scrollback onto the live PTY (stub echoes a
+    # write into its read buffer) — NO file written to the worktree.
+    pty_manager.write(sid, "\n$ what were we doing here\n"
+                           "We were triaging the molten-salt cooling loop.\n")
+
+    res = ts.autosave_session(sid)
+    assert res["ok"] is True
+
+    rel = f"general/{sid[:12]}-transcript.md"
+    persisted = repo / rel
+    assert persisted.is_file(), (
+        "a general session's live transcript must be autosaved into MAIN")
+    body = persisted.read_text(encoding="utf-8")
+    assert "molten-salt" in body, "the actual scrollback content must survive"
+    assert rel in res["persisted"]
+
+    ts.kill(sid)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # (3) autosave_running_sessions sweeps every RUNNING session; skips terminal ones
 # ════════════════════════════════════════════════════════════════════════════

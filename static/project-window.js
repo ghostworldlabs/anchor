@@ -3818,11 +3818,30 @@ function _mountTerminal(sessionId, body, rec) {
     w.fitRo = fro;
   }
 
-  // Outbound user keystrokes → term_input2 (works for BOTH transports; the WS
-  // also accepts frames, but routing input through the POST keeps one path).
-  term.onData(function (d) {
-    _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
-  });
+  // Outbound user keystrokes. Ordering fix (2026-07-08): characters were sent
+  // as independent fire-and-forget POSTs to term_input2 that RACED — the browser
+  // issues them on parallel connections and the threaded server writes each on
+  // its own thread — so fast typing arrived at the PTY muddled/out of order.
+  // Prefer the already-connected WebSocket: it is a single FIFO stream whose
+  // frames the one server pump-loop applies to the PTY strictly in order. When
+  // the WS isn't OPEN (SSE fallback / not yet upgraded) fall back to a
+  // PROMISE-CHAINED POST queue so at most ONE term_input2 POST is in flight per
+  // session (POST N resolves before POST N+1 is issued) — never two concurrent
+  // writes. All input paths (keystrokes, paste) route through _sendInput so they
+  // share the one ordered channel.
+  var _sendChain = Promise.resolve();
+  function _sendInput(d) {
+    if (d === '' || d == null) return;
+    var t = w.transport;
+    if (t && typeof WebSocket !== 'undefined' && t instanceof WebSocket &&
+        t.readyState === 1 /* OPEN */) {
+      try { t.send(d); return; } catch (e) { /* fall through to POST */ }
+    }
+    _sendChain = _sendChain.then(function () {
+      return _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
+    }).catch(function () {});
+  }
+  term.onData(function (d) { _sendInput(d); });
   // Keyboard paste: xterm emits Ctrl+V as the control byte \x16, so paste never
   // happened (only right-click, which uses the browser's native paste event).
   // Intercept Ctrl/Cmd+V → read the clipboard → term.paste (honors bracketed
@@ -3834,8 +3853,7 @@ function _mountTerminal(sessionId, body, rec) {
     if (mod && !e.altKey && (e.key === 'v' || e.key === 'V')) {
       if (navigator.clipboard && navigator.clipboard.readText) {
         navigator.clipboard.readText().then(function (t) {
-          if (t) { try { term.paste(t); } catch (err) {
-            _postJson('/api/rnd/term_input2', {session: sessionId, data: t}); } }
+          if (t) { try { term.paste(t); } catch (err) { _sendInput(t); } }
         }).catch(function () {});
       }
       return false;  // suppress the \x16 control byte

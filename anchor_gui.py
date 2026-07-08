@@ -10788,20 +10788,30 @@ function startZombieTerminal(btn) {
       window.addEventListener('resize', fitTerminal);
       setTimeout(fitTerminal, 100);
       
-      term.onData(function (d) {
+      // Ordering fix (2026-07-08): keystrokes used to fire independent, racing
+      // POSTs (browser parallel connections + threaded server) → muddled typing.
+      // Prefer the ordered WebSocket (single FIFO stream applied to the PTY in
+      // frame order by the one server pump); fall back to a PROMISE-CHAINED POST
+      // queue (one term_input2 POST in flight at a time) when the WS isn't OPEN.
+      let activeWs = null;
+      let _sendChain = Promise.resolve();
+      function _sendInput(d) {
+        if (d === '' || d == null) return;
+        if (activeWs && activeWs.readyState === 1 /* OPEN */) {
+          try { activeWs.send(d); return; } catch (e) { /* fall through */ }
+        }
         const headers = { 'Content-Type': 'application/json' };
         if (token) headers['X-Anchor-Token'] = token;
-        
         const body = { session: sessionId, data: d };
         if (token) body.token = token;
-        
-        fetch('/api/rnd/term_input2', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body)
+        _sendChain = _sendChain.then(function () {
+          return fetch('/api/rnd/term_input2', {
+            method: 'POST', headers: headers, body: JSON.stringify(body)
+          });
         }).catch(err => console.error('input error:', err));
-      });
-      
+      }
+      term.onData(function (d) { _sendInput(d); });
+
       const tq = token ? ('&token=' + encodeURIComponent(token)) : '';
       const wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
       const wsUrl = wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
@@ -10825,15 +10835,19 @@ function startZombieTerminal(btn) {
       
       try {
         const ws = new WebSocket(wsUrl);
+        activeWs = ws;  // ordered input channel (see _sendInput above)
         ws.onmessage = function (ev) { term.write(ev.data); };
         ws.onclose = function () {
+          activeWs = null;
           if (!sseStarted) startSSE();
         };
         ws.onerror = function () {
+          activeWs = null;
           try { ws.close(); } catch (e) {}
           startSSE();
         };
       } catch (e) {
+        activeWs = null;
         startSSE();
       }
     })();
