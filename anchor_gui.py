@@ -9243,6 +9243,75 @@ def handle_build_deliverable(handler, path, body):
                             "reason": result.get("reason", "")})
 
 
+def handle_orphan_check(handler, path, body):
+    """GET /api/rnd/orphan_check — lightweight read-only poll for the dashboard's
+    orphan-swarm alert banner: the session_ids of RUNNING sessions currently
+    classified ORPHANED (verdict "kill"). Token-gated (the strangler applies the
+    row's auth FIRST); a no-op when ANCHOR_TOKEN is unset. Global (not
+    project-scoped).
+    """
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    import reaper
+    import pty_manager
+    try:
+        attached = set(pty_manager.live_sessions())
+    except Exception:
+        attached = set()
+    orphans = []
+    try:
+        running_recs = _sessreg.list_sessions(status="running")
+        # (#3, single source) An orphan is a RUNNING session with NO LIVE OWNER —
+        # not merely one absent from the PTY-attached set. Build the ONE immutable
+        # liveness snapshot for this sweep and classify every record against it so
+        # a legit, work-doing session with no open browser stream is never falsely
+        # flagged as a runaway.
+        try:
+            _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs,
+                                          enumerate_pids=reaper.enumerate_live_pids)
+            live_ids = reaper.live_owner_ids(_snap)
+        except Exception:
+            _snap = None
+            live_ids = attached
+        for rec in running_recs:
+            sid = rec.get("session_id", "")
+            try:
+                verdict = reaper.classify_record(rec, _snap)
+            except Exception:
+                # Defensive: a fault NEVER produces a "kill" — abstain-safe so the
+                # startup banner can't false-alarm on a hiccup.
+                verdict = reaper.VERDICT_ABSTAIN
+            # Only alert on orphans born DURING THIS server's life (a restart's
+            # prior-instance 'running' records must not fire the startup banner).
+            if (verdict == "kill" and sid
+                    and float(rec.get("created_at") or 0) >= _SERVER_BOOT_TS):
+                orphans.append(sid)
+    except Exception:
+        pass
+    handler._send_json({"ok": True, "orphans": orphans})
+
+
+def handle_reaper_status(handler, path, body):
+    """GET /api/rnd/reaper_status — read-only reaper-explain inspection surface:
+    the current arm tier + distance-to-bar, the disarm/brake state, the
+    abstain-streak health banner, and every running session's classification +
+    latest owner-evidence receipt. NO mutation, NO kill/freeze — pure inspection.
+    Token-gated (the strangler applies the row's auth FIRST); back-compat when no
+    token set. Global (not project-scoped).
+    """
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    import reaper_arming as _arm
+    try:
+        dump = _arm.explain()
+    except Exception as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 500)
+    else:
+        handler._send_json({"ok": True, "reaper": dump})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -9286,6 +9355,8 @@ _MIGRATED_HANDLERS = {
     "handle_effort_rollup": handle_effort_rollup,
     "handle_boneyard": handle_boneyard,
     "handle_build_deliverable": handle_build_deliverable,
+    "handle_orphan_check": handle_orphan_check,
+    "handle_reaper_status": handle_reaper_status,
 }
 
 
@@ -10556,61 +10627,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         if st:
                             statuses[_pid] = st
                 self._send_json({"ok": True, "statuses": statuses})
-            elif self.path.startswith("/api/rnd/orphan_check"):
-                # Lightweight read-only poll for the dashboard's orphan-swarm
-                # alert banner: returns the session_ids of RUNNING sessions
-                # currently classified ORPHANED (verdict "kill"). Token-gated
-                # like the other read-API GETs; a no-op when ANCHOR_TOKEN unset.
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                import reaper
-                import pty_manager
-                try:
-                    attached = set(pty_manager.live_sessions())
-                except Exception:
-                    attached = set()
-                orphans = []
-                try:
-                    running_recs = _sessreg.list_sessions(status="running")
-                    # (#3, single source) An orphan is a RUNNING session with NO
-                    # LIVE OWNER — not merely one absent from the PTY-attached set.
-                    # Build the ONE immutable liveness snapshot for this sweep and
-                    # classify every record against it (the identical
-                    # snapshot/provider all 5 call sites share) so a legit,
-                    # work-doing session with no open browser stream is never
-                    # falsely flagged as a runaway.
-                    try:
-                        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_recs,
-                                                      enumerate_pids=reaper.enumerate_live_pids)
-                        live_ids = reaper.live_owner_ids(_snap)
-                    except Exception:
-                        _snap = None
-                        live_ids = attached
-                    for rec in running_recs:
-                        sid = rec.get("session_id", "")
-                        try:
-                            verdict = reaper.classify_record(rec, _snap)
-                        except Exception:
-                            # Defensive boundary (Wave 2, criterion 1): a fault
-                            # NEVER produces a "kill" — abstain-safe (OWNED/alive)
-                            # so the startup banner can't false-alarm on a hiccup.
-                            verdict = reaper.VERDICT_ABSTAIN
-                        # Only alert on orphans born DURING THIS server's life.
-                        # After a restart, prior-instance 'running' records whose
-                        # backend survived classify as 'kill' against an empty
-                        # live set — those are not a fresh runaway swarm, so the
-                        # startup banner must not fire for them (the zombie report
-                        # still lists any true survivor). _SERVER_BOOT_TS defaults
-                        # to 0.0, so a record with no timestamp never spuriously
-                        # alerts.
-                        if (verdict == "kill" and sid
-                                and float(rec.get("created_at") or 0) >= _SERVER_BOOT_TS):
-                            orphans.append(sid)
-                except Exception:
-                    pass
-                self._send_json({"ok": True, "orphans": orphans})
-
+            # /api/rnd/orphan_check migrated to route_table (handle_orphan_check)
+            # — served by the strangler above.
             elif self.path.startswith("/api/rnd/zombie_hunter_report"):
                 # Auth gate (defense-in-depth): the radar report exposes process
                 # metadata (PIDs / session ids). Token-gated like the other
@@ -11042,23 +11060,8 @@ function startZombieTerminal(btn) {
                 html += "</div></body></html>"
                 self.wfile.write(html.encode("utf-8"))
                 return
-            elif self.path.startswith("/api/rnd/reaper_status"):
-                # Read-only (Wave 8): the reaper-explain inspection surface — the
-                # current arm tier + distance-to-bar, the disarm/brake state, the
-                # abstain-streak health banner, and every running session's
-                # classification + latest owner-evidence receipt. NO mutation, NO
-                # kill/freeze — pure inspection. AUTH: ``?token=`` (read-only GET;
-                # back-compat when no token set). Global (not project-scoped).
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                import reaper_arming as _arm
-                try:
-                    dump = _arm.explain()
-                except Exception as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 500)
-                else:
-                    self._send_json({"ok": True, "reaper": dump})
+            # /api/rnd/reaper_status migrated to route_table (handle_reaper_status)
+            # — served by the strangler above.
             # /api/rnd/boneyard migrated to route_table (handle_boneyard) —
             # served by the strangler above.
             # /api/rnd/remote_status migrated to route_table (handle_remote_status)
