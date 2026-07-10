@@ -1,0 +1,132 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-black text-slate-100;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  /* Scrollbar styles for dark theme dashboard */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-black;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-800 rounded hover:bg-slate-700 transition-colors;
+  }
+}
+
+/* Glassmorphism custom classes */
+.glass-panel {
+  @apply bg-[#08080A] backdrop-blur-md border border-[#16161A];
+}
+
+.glass-panel-hover {
+  @apply hover:bg-[#0C0C10] hover:border-[#00F0FF] transition-all duration-300;
+  box-shadow: 0 0 20px rgba(0, 240, 255, 0.05);
+}
+
+.font-display {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.panel {
+  background-color: #08080a;
+  border: 1px solid #16161a;
+  border-radius: 12px;
+}
+
+.panel-hover {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.panel-hover:hover {
+  background-color: #0c0c10;
+  border-color: #00F0FF;
+  box-shadow: 0 0 25px rgba(0, 240, 255, 0.12);
+}
+
+.chevron {
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.node {
+  cursor: pointer;
+  transition: filter 0.2s, fill 0.2s;
+}
+
+.node:hover {
+  filter: drop-shadow(0 0 12px #00F0FF);
+}
+
+.node-label {
+  pointer-events: none;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.5px;
+}
+
+.sparkline {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: draw 2s ease-out forwards;
+}
+
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Terminal Popover styles */
+#terminal-view {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: calc(100% - 320px);
+  height: 100vh;
+  max-height: 100vh;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-left: 1px solid #16161A;
+  background-color: #050505;
+  box-shadow: -20px 0 50px rgba(0, 0, 0, 0.9);
+  overscroll-behavior: contain;
+  z-index: 9999;
+  transform: translateX(100%);
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), display 0.4s allow-discrete, overlay 0.4s allow-discrete;
+}
+
+#terminal-view:popover-open {
+  display: flex;
+  flex-direction: column;
+  transform: translateX(0);
+}
+
+/* Robust guard: the overlay must be FULLY hidden unless actually open —
+   it otherwise intrudes on the right column and blocks the graph. */
+#terminal-view:not(:popover-open) {
+  display: none !important;
+}
+
+#terminal-view::backdrop {
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+}
+
+@starting-style {
+  #terminal-view:popover-open {
+    transform: translateX(100%);
+  }
+}
+

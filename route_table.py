@@ -389,6 +389,18 @@ ROUTES = [
        handler="handle_handoff_to_fresh", migrated=True),
     _r("POST", "/api/rnd/finish_to_build", AUTH_TOKEN,
        handler="handle_finish_to_build", migrated=True),
+    # Skill Foundry v2 — the Foundry GUI page (open, like /project/) + its
+    # mutative ops (token-gated). The GET page is served by the inline do_GET
+    # fall-through (auth-only row); the POST ops are strangler-migrated.
+    _r("GET", "/foundry", AUTH_OPEN),
+    _r("POST", "/api/foundry/create_skill", AUTH_TOKEN,
+       handler="handle_foundry_create_skill", migrated=True),
+    _r("POST", "/api/foundry/north_star", AUTH_TOKEN,
+       handler="handle_foundry_north_star", migrated=True),
+    _r("POST", "/api/foundry/sleep_session", AUTH_TOKEN,
+       handler="handle_foundry_sleep_session", migrated=True),
+    _r("POST", "/api/foundry/sync_autoload", AUTH_TOKEN,
+       handler="handle_foundry_sync_autoload", migrated=True),
 ]
 
 

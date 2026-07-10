@@ -55,6 +55,7 @@ import paths as _paths
 import job_runner as _jr
 import lanes as _lanes
 import summarizer as _summarizer
+import foundry_journal as _fj
 
 
 # ── Active-run registry (Wave 1: active cancel) ──────────────────────────────
@@ -1314,6 +1315,117 @@ def _add_gitignore_best_effort(folder_path) -> None:
 
 # ── Public engine ────────────────────────────────────────────────────────────
 
+# ── Wave 2 (foundry-v2) — the HOST-ENFORCED journaling write-back ────────────
+
+def _aggregate_model_cost(job_ids) -> dict:
+    """Best-effort model + billed-cost + cache-token rollup over a run's jobs.
+
+    Reads only what ``job_runner`` already persisted: each record's ``backend``
+    + ``cost`` block, plus the stream result envelope's cache-token counters
+    (``usage.cache_read_input_tokens`` / ``cache_creation_input_tokens``).
+    Honest zeros / ``unrecorded`` when the runner reported nothing (a stubbed
+    run has no cost). Never raises."""
+    models = set()
+    billed = 0.0
+    inp = out = cache = jobs = 0
+    for jid in (job_ids or []):
+        try:
+            rec = _jr.load_record(jid) or {}
+        except Exception:
+            continue
+        jobs += 1
+        if rec.get("backend"):
+            models.add(str(rec["backend"]))
+        c = rec.get("cost") or {}
+        try:
+            billed += float(c.get("total_cost_usd") or 0.0)
+            inp += int(c.get("input_tokens") or 0)
+            out += int(c.get("output_tokens") or 0)
+        except (TypeError, ValueError):
+            pass
+        try:
+            for line in reversed(_jr.all_lines(jid)):
+                s = line.strip()
+                if not (s.startswith("{") and '"usage"' in s):
+                    continue
+                try:
+                    obj = json.loads(s)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                usage = obj.get("usage") or {}
+                try:
+                    cache += int(usage.get("cache_read_input_tokens") or 0)
+                    cache += int(usage.get("cache_creation_input_tokens") or 0)
+                except (TypeError, ValueError):
+                    pass
+                break
+        except Exception:
+            pass
+    return {
+        "model": ",".join(sorted(models)) if models else "unrecorded",
+        "billed_cost_usd": round(billed, 6),
+        "cache_tokens": cache,
+        "input_tokens": inp,
+        "output_tokens": out,
+        "jobs": jobs,
+    }
+
+
+def _journal_writeback(run_id, ts, pid, folder, record, *, graded=None,
+                       draft=None):
+    """Wave 2 (foundry-v2): auto-journal one finished run through the seam.
+
+    Every gandalf run through Anchor — done, failed, or cancelled — appends
+    the 7-field skeleton entry to ``<skill_dir>/journal/`` via the ONE
+    write-back seam (``foundry_journal.journal_run_writeback``), with the
+    heavy payloads (raw draft, graded output, index record) shunted to the
+    droppable side channel. Capture is a by-product of the run — zero author
+    action, no env toggle. Best-effort: journaling never crashes or blocks
+    the run it records."""
+    try:
+        skill = _skill_dir()
+        with _ACTIVE_RUNS_LOCK:
+            r = _ACTIVE_RUNS.get(run_id) or {}
+            job_ids = list(r.get("job_ids") or [])
+            jid0 = r.get("job_id")
+        if jid0 and jid0 not in job_ids:
+            job_ids.insert(0, jid0)
+        finished = time.time()
+        outcome = record.get("status") or ("done" if record.get("ok")
+                                           else "failed")
+        linkage = {
+            "project_id": str(pid),
+            "run_id": run_id,
+            "session_id": record.get("session_id") or run_id,
+            "report_rel": record.get("report_rel"),
+            "advisor_rel": record.get("advisor_rel"),
+        }
+        if record.get("reason"):
+            linkage["reason"] = str(record["reason"])[:160]
+        _fj.journal_run_writeback(
+            skill,
+            run_id=run_id,
+            operation_kind="run",
+            provenance="host-enforced:anchor.gandalf",
+            model_cost=_aggregate_model_cost(job_ids),
+            inputs={"analysis_folder": str(folder), "project_id": str(pid),
+                    "job_ids": job_ids, "skill_dir": str(skill)},
+            outputs={"index_record": record, "graded": graded,
+                     "raw_draft": draft},
+            verdict=(record.get("verdict") or record.get("reason")
+                     or outcome),
+            timing={"started_ts": round(float(ts), 3),
+                    "finished_ts": round(finished, 3),
+                    "duration_s": round(finished - float(ts), 3)},
+            outcome=outcome,
+            linkage=linkage,
+        )
+    except Exception:
+        pass
+
+
 def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=None,
                 store_folder=None, tier=DEFAULT_TIER) -> dict:
     """Run one full two-stage Gandalf analysis and store the result.
@@ -1375,6 +1487,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
     ok = False
     reason = "unknown"
     graded = None
+    draft = None
     finalized = False
     # Shared finalize locals (set by whichever mode branch runs; read by the
     # single record build below).
@@ -1519,6 +1632,13 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             except Exception:
                 # Even if the index write somehow fails, return the honest result.
                 pass
+
+        # Wave 2 (foundry-v2): host-enforced journaling — EVERY run through
+        # Anchor (done/failed/cancelled) auto-appends its 7-field skeleton
+        # entry to the skill journal via the write-back seam. Zero author
+        # action; never raises.
+        _journal_writeback(run_id, ts, pid, folder, record, graded=graded,
+                           draft=(draft if isinstance(draft, dict) else None))
         finalized = True
 
         out = dict(record)
@@ -1548,6 +1668,13 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                     })
                 except Exception:
                     pass
+            # Wave 2 (foundry-v2): a crashed run still journals — the
+            # host-enforced skeleton entry records the honest failure.
+            _journal_writeback(run_id, ts, pid, folder, {
+                "run_id": run_id, "ok": False, "status": "failed",
+                "reason": "run-crashed", "session_id": run_id,
+                "verdict": "", "report_rel": None, "advisor_rel": None,
+            })
         try:
             import session_registry
             with _ACTIVE_RUNS_LOCK:

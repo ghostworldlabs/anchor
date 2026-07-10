@@ -483,7 +483,8 @@ def _relaunch_env_seed(env) -> dict:
 
 def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
                          permission_mode, backend, env,
-                         project_id=None, folder_path=None) -> dict:
+                         project_id=None, folder_path=None,
+                         command=None) -> dict:
     """Everything a guarded launch needs to start an equivalent job (Wave 1).
 
     Persisted on the job record at launch time so an ``interrupted`` job can be
@@ -492,9 +493,12 @@ def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
     ``project_id``/``folder_path`` (approved amendment, 2026-07-02) carry the
     concurrency-policy context so a relaunch goes through :func:`launch_guarded`
     exactly as the first launch did; a direct :func:`launch` records them as
-    ``None``.
+    ``None``. ``command`` (foundry-v2 Wave 7) preserves an explicit
+    control-plane argv so an interrupted op job never relaunches as a model
+    job; the key is present ONLY on such launches (a model job's spec shape
+    is unchanged).
     """
-    return {
+    spec = {
         "lane": lane,
         "cwd": str(cwd) if cwd else None,
         "prompt": prompt,
@@ -506,13 +510,26 @@ def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
         "project_id": project_id,
         "folder_path": str(folder_path) if folder_path else None,
     }
+    if command:
+        spec["command"] = [str(a) for a in command]
+    return spec
 
 
 def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
            prompt=None, output_dir=None, gated=False,
-           permission_mode=None, project_id=None, folder_path=None) -> dict:
+           permission_mode=None, project_id=None, folder_path=None,
+           command=None) -> dict:
     """Launch a server-owned job. Returns the job record.
+
+    ``command`` (foundry-v2 Wave 7 — the control-plane dispatch seam): when
+    set (an argv list), it IS the launched command verbatim. The caller
+    (``foundry_ops``) resolved it from a validated op manifest; backend
+    resolution and the ``ANCHOR_RUNNER_CMD`` test indirection are MODEL-run
+    seams and deliberately do not apply — a control-plane op body is
+    deterministic local code that must genuinely run (headlessly), in tests
+    and production alike. Everything else (durable log, ring buffer, record,
+    reconcile, cancel tree-kill) applies unchanged.
 
     The record holds at least ``{job_id, lane, pid, status, log_path, backend}``.
     stdout is streamed by a daemon reader thread into a durable log file *and* an
@@ -559,9 +576,14 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     # Truncate/create the durable log up front so tail() always has a target.
     lp.write_text("", encoding="utf-8")
 
-    argv = resolve_runner_cmd(extra_args, backend=backend, prompt=prompt,
-                              output_dir=output_dir, gated=gated,
-                              permission_mode=permission_mode)
+    if command:
+        # Explicit control-plane argv (Wave 7): the op manifest already
+        # resolved the exact command — no model-seam resolution applies.
+        argv = [str(a) for a in command]
+    else:
+        argv = resolve_runner_cmd(extra_args, backend=backend, prompt=prompt,
+                                  output_dir=output_dir, gated=gated,
+                                  permission_mode=permission_mode)
 
     full_env = dict(os.environ)
     if backend == BACKEND_GEMINI:
@@ -664,7 +686,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         # when the launch came through launch_guarded().
         "relaunch_spec": _build_relaunch_spec(
             lane, cwd, prompt, output_dir, gated, permission_mode, backend, env,
-            project_id=project_id, folder_path=folder_path),
+            project_id=project_id, folder_path=folder_path, command=command),
     }
     # W13 (C3): journal the launch. Use the project_id/folder_path PARAMETERS
     # (a guarded launch passes them) — the rec dict carries them only inside
@@ -1376,6 +1398,7 @@ def relaunch(job_id: str) -> dict:
             output_dir=spec.get("output_dir"),
             gated=spec.get("gated") or False,
             permission_mode=spec.get("permission_mode"),
+            command=spec.get("command") or None,
         )
     except LaneBusyError as e:
         return {"ok": False, "reason": str(e.reason), "holder": e.holder}
@@ -1557,7 +1580,7 @@ def folder_build_holder(folder_path: str):
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                    extra_args=None, env=None, job_id: str = None,
                    backend=DEFAULT_BACKEND, prompt=None, output_dir=None,
-                   gated=False, permission_mode=None) -> dict:
+                   gated=False, permission_mode=None, command=None) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -1619,7 +1642,8 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                      job_id=job_id, backend=backend, prompt=prompt,
                      output_dir=output_dir, gated=gated,
                      permission_mode=permission_mode,
-                     project_id=project_id, folder_path=folder_path)
+                     project_id=project_id, folder_path=folder_path,
+                     command=command)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:

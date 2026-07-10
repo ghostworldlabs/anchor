@@ -407,6 +407,8 @@ import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
+import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
+import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
 import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
@@ -6834,6 +6836,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
           <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/vendor/brand/zombie-hunter-radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Hunter</button>
+          <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Skill Foundry — library, knowledge graph, sleep runs"><img src="/vendor/brand/skill-foundry-icon.jpg?v={BUILD_ID}" style="width:14px;height:14px;border-radius:2px;" alt="" /> Skill Foundry</button>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -6985,6 +6988,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>R&amp;D Projects</h2>
           <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
+          <!-- foundry-v2 Wave 9: the Anchor button that launches the Foundry GUI (stateless read surface over the live engine) -->
+          <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px;display:inline-flex;align-items:center;gap:5px" title="Skill Foundry — library, knowledge graph, runs (stateless read surface)"><img src="/vendor/brand/skill-foundry-icon.jpg?v={BUILD_ID}" style="height:15px;width:15px;border-radius:3px;object-fit:cover" alt=""> Foundry</button>
         </div>
         <div class="date">{today_str}</div>
       </div>
@@ -12493,8 +12498,25 @@ def _reaper_control(handler, body, action):
 
 
 def handle_reaper_arm(handler, path, body):
-    """POST /api/rnd/reaper_arm — the reaper ARMING control plane (arm)."""
-    _reaper_control(handler, body, "arm")
+    """POST /api/rnd/reaper_arm — the reaper ARMING control plane (arm).
+
+    Wave 11 (foundry-v2, safety before scale): the ARM rung (log->freeze) goes
+    through the sanctioned Wave-11 path, which RE-CHECKS the 2026-07-05
+    fail-deadly finding before delegating to the token-authed, receipt-gated
+    ladder — an open finding refuses the arm with no state change. Targets
+    FREEZE only; this endpoint can never arm KILL. Mirrors ``_reaper_control``'s
+    token reconstruction + error/response handling (the middleware token-gates
+    this row FIRST; the reaper module re-checks paths.auth_ok in depth)."""
+    provided = _request_presented_token(handler, body)
+    import foundry_safety as _fsafety
+    try:
+        out = _fsafety.arm_reaper_to_freeze(provided)
+    except Exception as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 500)
+    else:
+        code = 200 if out.get("ok") else (
+            401 if out.get("error") == "unauthorized" else 409)
+        handler._send_json(out, code)
 
 
 def handle_reaper_advance(handler, path, body):
@@ -12505,6 +12527,53 @@ def handle_reaper_advance(handler, path, body):
 def handle_reaper_disarm(handler, path, body):
     """POST /api/rnd/reaper_disarm — reaper arming control plane (disarm)."""
     _reaper_control(handler, body, "disarm")
+
+
+# ── Skill Foundry v2 GUI write surface (foundry-v2 Wave 10) ──────────────────
+# EVERY Foundry GUI mutation is a confirm-gated control-plane op dispatched
+# through job_runner (auto-journaled) — never a GUI-side file write. Token-gated
+# by the do_POST middleware (the strangler applies the row auth BEFORE these run).
+
+def handle_foundry_create_skill(handler, path, body):
+    """POST /api/foundry/create_skill — create a skill → foundry.scaffold_skill
+    (refuses to overwrite; branch commit)."""
+    handler._send_json(_fgw.create_skill(
+        body.get("name"),
+        confirm=bool(body.get("confirm")),
+        title=body.get("title") or None,
+        description=body.get("description") or None))
+
+
+def handle_foundry_north_star(handler, path, body):
+    """POST /api/foundry/north_star — edit a per-skill North Star via the ONLY
+    sanctioned mutation path (foundry.edit_north_star): propose parks a
+    reviewable diff; apply spends the explicit confirm (prior version retained,
+    branch commit)."""
+    if str(body.get("mode") or "propose") == "apply":
+        handler._send_json(_fgw.north_star_apply(
+            body.get("skill"), body.get("proposal_id"),
+            confirm=bool(body.get("confirm"))))
+    else:
+        handler._send_json(_fgw.north_star_propose(
+            body.get("skill"), body.get("new_text"),
+            confirm=bool(body.get("confirm"))))
+
+
+def handle_foundry_sleep_session(handler, path, body):
+    """POST /api/foundry/sleep_session — SPLIT seam: targets the DECLARED op
+    interface foundry.sleep_session; until the separate foundry build delivers
+    the op body this answers the honest pending status — nothing is faked,
+    nothing dispatched."""
+    handler._send_json(_fgw.run_sleep_session(
+        confirm=bool(body.get("confirm"))))
+
+
+def handle_foundry_sync_autoload(handler, path, body):
+    """POST /api/foundry/sync_autoload — regenerate Anchor's clickable skill set
+    from map.json v2 alone (foundry.register_autoload — every foundry skill
+    auto-loaded, never hand-wired)."""
+    handler._send_json(_fgw.sync_autoload(
+        confirm=bool(body.get("confirm"))))
 
 
 # Route-table handler name -> module-level function. route_table rows reference
@@ -12623,6 +12692,10 @@ _MIGRATED_HANDLERS = {
     "handle_reaper_arm": handle_reaper_arm,
     "handle_reaper_advance": handle_reaper_advance,
     "handle_reaper_disarm": handle_reaper_disarm,
+    "handle_foundry_create_skill": handle_foundry_create_skill,
+    "handle_foundry_north_star": handle_foundry_north_star,
+    "handle_foundry_sleep_session": handle_foundry_sleep_session,
+    "handle_foundry_sync_autoload": handle_foundry_sync_autoload,
 }
 
 
@@ -13254,6 +13327,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
+            elif _path_only == "/foundry":
+                # Foundry GUI READ surface (foundry-v2 Wave 9): a STATELESS
+                # render over the real engine artifacts — autoload registry,
+                # map.json v2 + lockfile, job_runner records/logs, skill
+                # journals. No parallel run/progress store lives behind this
+                # page; ?job=<id> drills into one job's live job_runner state.
+                q = parse_qs(urlparse(self.path).query)
+                self._send_html(_fgui.render_foundry_page(
+                    lane=(q.get("lane") or [None])[0],
+                    job_id=(q.get("job") or [None])[0]))
             # /api/version migrated to route_table (handle_version, W7 batch 1) —
             # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):

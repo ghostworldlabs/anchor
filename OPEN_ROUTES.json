@@ -37,6 +37,7 @@
     {"method": "GET", "pattern": "/api/rnd/dir_browse", "justification": "Read-only directory picker for the new-project flow; unchanged from pre-rearch behavior."},
     {"method": "GET", "pattern": "/api/rnd/tail", "justification": "W8/W9 — cursor-stable incremental job-log read; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
     {"method": "GET", "pattern": "/api/rnd/jobs", "justification": "W8/W9 — read-only job listing; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
-    {"method": "GET", "pattern": "/api/rnd/previews", "justification": "Read-only SAFE projection of ephemeral deliverable previews (no absolute paths); unchanged from pre-rearch behavior."}
+    {"method": "GET", "pattern": "/api/rnd/previews", "justification": "Read-only SAFE projection of ephemeral deliverable previews (no absolute paths); unchanged from pre-rearch behavior."},
+    {"method": "GET", "pattern": "/foundry", "justification": "Skill Foundry v2 GUI page bootstrap; mirrors /project/ — the page loads open, all its mutative actions (/api/foundry/*) are token-gated. Scheduled to move open -> token (cookie-nav) under the same warn-then-enforce soak as /project/."}
   ]
 }

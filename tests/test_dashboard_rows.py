@@ -196,6 +196,10 @@ def test_every_brand_img_uses_single_vendored_svg(env):
     ALLOWED_BRAND_SRCS = {
         "/vendor/brand/gwl-m-icon.svg",
         "/vendor/brand/zombie-hunter-radar.jpg",
+        # Skill Foundry v2 launch button — a real shipped feature icon on disk
+        # (vendor/brand/skill-foundry-icon.jpg), the documented sibling of the
+        # Zombie Hunter radar icon; not a duplicate brand MARK.
+        "/vendor/brand/skill-foundry-icon.jpg",
     }
     srcs = set(
         s.split("?", 1)[0]
