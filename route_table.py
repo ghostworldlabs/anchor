@@ -205,9 +205,12 @@ ROUTES = [
     # arm/advance/disarm mutations. Sensitive control surface: token, never open.
     _r("GET", "/api/rnd/reaper_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_reaper_status", migrated=True),
-    _r("POST", "/api/rnd/reaper_arm", AUTH_TOKEN),
-    _r("POST", "/api/rnd/reaper_advance", AUTH_TOKEN),
-    _r("POST", "/api/rnd/reaper_disarm", AUTH_TOKEN),
+    _r("POST", "/api/rnd/reaper_arm", AUTH_TOKEN,
+       handler="handle_reaper_arm", migrated=True),
+    _r("POST", "/api/rnd/reaper_advance", AUTH_TOKEN,
+       handler="handle_reaper_advance", migrated=True),
+    _r("POST", "/api/rnd/reaper_disarm", AUTH_TOKEN,
+       handler="handle_reaper_disarm", migrated=True),
     _r("GET", "/api/rnd/boneyard", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_boneyard", migrated=True),
     _r("GET", "/api/rnd/remote_status", AUTH_TOKEN, match=MATCH_PREFIX,
@@ -231,8 +234,10 @@ ROUTES = [
 
     # ── POST: every mutating arm (token; do_POST middleware enforces) ──────
     _r("POST", "/api/done", AUTH_TOKEN, handler="handle_done", migrated=True),
-    _r("POST", "/api/rnd/upload_batch", AUTH_TOKEN),
-    _r("POST", "/api/upload", AUTH_TOKEN),
+    _r("POST", "/api/rnd/upload_batch", AUTH_TOKEN,
+       handler="handle_upload_batch", migrated=True),
+    _r("POST", "/api/upload", AUTH_TOKEN,
+       handler="handle_upload", migrated=True),
     _r("POST", "/api/undone", AUTH_TOKEN, handler="handle_undone",
        migrated=True),
     _r("POST", "/api/add", AUTH_TOKEN, handler="handle_add", migrated=True),

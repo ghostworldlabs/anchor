@@ -12365,6 +12365,148 @@ def handle_zombie_resume(handler, path, body):
         handler._send_json({"ok": True, "session_id": sid, "resumed": resumed})
 
 
+def handle_upload_batch(handler, path, body):
+    """POST /api/rnd/upload_batch — write a batch of base64-encoded files into a
+    project's folder (or the dashboard 'dev' dir), traversal-safe. Auth enforced by
+    the do_POST middleware (the strangler runs after it).
+    """
+    project_id = body.get("project_id", "__dashboard__")
+    files = body.get("files", [])
+
+    if not isinstance(files, list):
+        handler._send_json({"ok": False, "error": "files must be a list"})
+        return
+
+    if project_id == "__dashboard__" or project_id == "dev" or not project_id:
+        upload_dir = ANCHOR_DIR / "dev"
+    else:
+        entry = _rnd.get_project(project_id)
+        if entry and entry.get("folder_path"):
+            upload_dir = Path(entry["folder_path"])
+        else:
+            upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
+
+    upload_dir = upload_dir.resolve()
+
+    import base64
+    import tempfile
+
+    try:
+        for file_info in files:
+            rel_path_str = file_info.get("path", "")
+            content_b64 = file_info.get("content_b64", "")
+
+            if not rel_path_str or content_b64 is None:
+                handler._send_json({"ok": False, "error": "missing path or content_b64 for a file"})
+                return
+
+            p = Path(rel_path_str)
+            if p.is_absolute() or os.path.isabs(rel_path_str):
+                handler._send_json({"ok": False, "error": f"Absolute paths not allowed: {rel_path_str}"})
+                return
+
+            for part in p.parts:
+                if part == ".." or part == ".":
+                    handler._send_json({"ok": False, "error": f"Path traversal/invalid directory name: {rel_path_str}"})
+                    return
+
+            dest_path = (upload_dir / p).resolve()
+            try:
+                dest_path.relative_to(upload_dir)
+                if dest_path == upload_dir:
+                    handler._send_json({"ok": False, "error": "Cannot overwrite project root directory"})
+                    return
+            except ValueError:
+                handler._send_json({"ok": False, "error": f"Path containment check failed for {rel_path_str}"})
+                return
+
+            file_data = base64.b64decode(content_b64)
+
+            parent_dir = dest_path.parent
+            parent_dir.mkdir(parents=True, exist_ok=True)
+
+            tmp_fd, tmp_name = tempfile.mkstemp(dir=str(parent_dir))
+            try:
+                with os.fdopen(tmp_fd, 'wb') as tmp_file:
+                    tmp_file.write(file_data)
+                os.replace(tmp_name, dest_path)
+            except Exception:
+                if os.path.exists(tmp_name):
+                    os.unlink(tmp_name)
+                raise
+
+        handler._send_json({"ok": True, "message": f"Uploaded {len(files)} files successfully."})
+    except Exception as e:
+        handler._send_json({"ok": False, "error": str(e)})
+
+
+def handle_upload(handler, path, body):
+    """POST /api/upload — write a single base64-encoded file into a project's
+    folder (or the dashboard 'dev' dir). Auth enforced by the do_POST middleware.
+    """
+    project_id = body.get("project_id", "__dashboard__")
+    filename = body.get("filename", "")
+    content_b64 = body.get("content_b64", "")
+
+    if not filename or not content_b64:
+        handler._send_json({"ok": False, "error": "missing filename or content"})
+        return
+
+    import base64
+    try:
+        file_data = base64.b64decode(content_b64)
+        if project_id == "__dashboard__" or project_id == "dev" or not project_id:
+            upload_dir = ANCHOR_DIR / "dev"
+        else:
+            entry = _rnd.get_project(project_id)
+            if entry and entry.get("folder_path"):
+                upload_dir = Path(entry["folder_path"])
+            else:
+                upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
+
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = upload_dir / filename
+        dest_path.write_bytes(file_data)
+
+        handler._send_json({"ok": True, "message": f"Uploaded {filename} successfully."})
+    except Exception as e:
+        handler._send_json({"ok": False, "error": str(e)})
+
+
+def _reaper_control(handler, body, action):
+    """Shared body for the reaper arm/advance/disarm control-plane handlers.
+
+    Already token-gated by the do_POST middleware; the reaper module fns ALSO
+    re-check paths.auth_ok(provided) (defense in depth), so the presented token is
+    reconstructed here (mirroring the middleware's order) and passed through.
+    """
+    provided = _request_presented_token(handler, body)
+    import reaper_arming as _arm
+    try:
+        out = getattr(_arm, action)(provided)
+    except Exception as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 500)
+    else:
+        code = 200 if out.get("ok") else (
+            401 if out.get("error") == "unauthorized" else 409)
+        handler._send_json(out, code)
+
+
+def handle_reaper_arm(handler, path, body):
+    """POST /api/rnd/reaper_arm — the reaper ARMING control plane (arm)."""
+    _reaper_control(handler, body, "arm")
+
+
+def handle_reaper_advance(handler, path, body):
+    """POST /api/rnd/reaper_advance — reaper arming control plane (advance)."""
+    _reaper_control(handler, body, "advance")
+
+
+def handle_reaper_disarm(handler, path, body):
+    """POST /api/rnd/reaper_disarm — reaper arming control plane (disarm)."""
+    _reaper_control(handler, body, "disarm")
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -12476,6 +12618,11 @@ _MIGRATED_HANDLERS = {
     "handle_previews": handle_previews,
     "handle_zombie_kill": handle_zombie_kill,
     "handle_zombie_resume": handle_zombie_resume,
+    "handle_upload_batch": handle_upload_batch,
+    "handle_upload": handle_upload,
+    "handle_reaper_arm": handle_reaper_arm,
+    "handle_reaper_advance": handle_reaper_advance,
+    "handle_reaper_disarm": handle_reaper_disarm,
 }
 
 
@@ -13499,246 +13646,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
         if self._strangler_dispatch("POST", self.path, body):
             return
 
-        if self.path == "/api/rnd/upload_batch":
-            project_id = body.get("project_id", "__dashboard__")
-            files = body.get("files", [])
-            
-            if not isinstance(files, list):
-                self._send_json({"ok": False, "error": "files must be a list"})
-                return
-                
-            if project_id == "__dashboard__" or project_id == "dev" or not project_id:
-                upload_dir = ANCHOR_DIR / "dev"
-            else:
-                entry = _rnd.get_project(project_id)
-                if entry and entry.get("folder_path"):
-                    upload_dir = Path(entry["folder_path"])
-                else:
-                    upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
-            
-            upload_dir = upload_dir.resolve()
-            
-            import base64
-            import tempfile
-
-            try:
-                for file_info in files:
-                    rel_path_str = file_info.get("path", "")
-                    content_b64 = file_info.get("content_b64", "")
-                    
-                    if not rel_path_str or content_b64 is None:
-                        self._send_json({"ok": False, "error": "missing path or content_b64 for a file"})
-                        return
-                    
-                    p = Path(rel_path_str)
-                    if p.is_absolute() or os.path.isabs(rel_path_str):
-                        self._send_json({"ok": False, "error": f"Absolute paths not allowed: {rel_path_str}"})
-                        return
-                    
-                    for part in p.parts:
-                        if part == ".." or part == ".":
-                            self._send_json({"ok": False, "error": f"Path traversal/invalid directory name: {rel_path_str}"})
-                            return
-                    
-                    dest_path = (upload_dir / p).resolve()
-                    try:
-                        dest_path.relative_to(upload_dir)
-                        if dest_path == upload_dir:
-                            self._send_json({"ok": False, "error": "Cannot overwrite project root directory"})
-                            return
-                    except ValueError:
-                        self._send_json({"ok": False, "error": f"Path containment check failed for {rel_path_str}"})
-                        return
-                        
-                    file_data = base64.b64decode(content_b64)
-                    
-                    parent_dir = dest_path.parent
-                    parent_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    tmp_fd, tmp_name = tempfile.mkstemp(dir=str(parent_dir))
-                    try:
-                        with os.fdopen(tmp_fd, 'wb') as tmp_file:
-                            tmp_file.write(file_data)
-                        os.replace(tmp_name, dest_path)
-                    except Exception:
-                        if os.path.exists(tmp_name):
-                            os.unlink(tmp_name)
-                        raise
-                        
-                self._send_json({"ok": True, "message": f"Uploaded {len(files)} files successfully."})
-            except Exception as e:
-                self._send_json({"ok": False, "error": str(e)})
-
-        elif self.path == "/api/upload":
-            project_id = body.get("project_id", "__dashboard__")
-            filename = body.get("filename", "")
-            content_b64 = body.get("content_b64", "")
-            
-            if not filename or not content_b64:
-                self._send_json({"ok": False, "error": "missing filename or content"})
-                return
-                
-            import base64
-            try:
-                file_data = base64.b64decode(content_b64)
-                if project_id == "__dashboard__" or project_id == "dev" or not project_id:
-                    upload_dir = ANCHOR_DIR / "dev"
-                else:
-                    entry = _rnd.get_project(project_id)
-                    if entry and entry.get("folder_path"):
-                        upload_dir = Path(entry["folder_path"])
-                    else:
-                        upload_dir = ANCHOR_DIR / ".anchor" / "projects" / project_id / "uploads"
-                    
-                upload_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = upload_dir / filename
-                dest_path.write_bytes(file_data)
-                
-                self._send_json({"ok": True, "message": f"Uploaded {filename} successfully."})
-            except Exception as e:
-                self._send_json({"ok": False, "error": str(e)})
-
-        # /api/heartbeat migrated to route_table (handle_heartbeat) — served by the strangler above.
-
-        # /api/rnd/retire_project, /api/rnd/reactivate_project,
-        # /api/rnd/set_notes, /api/rnd/set_blurb migrated to route_table —
-        # served by the strangler above.
-        # /api/rnd/set_group migrated to route_table (handle_set_group) —
-        # served by the strangler above.
-        # /api/rnd/move_project migrated to route_table (handle_move_project) — served by the strangler above.
-
-        # ── R&D control surface (Wave 9) ──────────────────────────────
-        # /api/rnd/link_task migrated to route_table (handle_link_task) —
-        # served by the strangler above.
-        # /api/rnd/run_deliverable migrated to route_table (handle_run_deliverable) — served by the strangler above.
-
-        # /api/rnd/pin_deliverable migrated to route_table (handle_pin_deliverable)
-        # — served by the strangler above.
-        # /api/rnd/launch_deliverable migrated to route_table (handle_launch_deliverable) — served by the strangler above.
-
-        # ── R&D control surface — lane launch + gate answer (UI wiring) ──
-        # /api/rnd/launch_lane migrated to route_table (handle_launch_lane) — served by the strangler above.
-
-        # /api/rnd/answer_gate migrated to route_table (handle_answer_gate) — served by the strangler above.
-
-        # ── R&D interactive terminal (Wave 7) ─────────────────────────
-        # /api/rnd/start_terminal migrated to route_table (handle_start_terminal) — served by the strangler above.
-        # /api/rnd/term_input migrated to route_table (handle_term_input) — served by the strangler above.
-        # /api/rnd/term_discover migrated to route_table (handle_term_discover) — served by the strangler above.
-        # /api/rnd/term_adopt migrated to route_table (handle_term_adopt) — served by the strangler above.
-        # /api/rnd/cancel_job migrated to route_table (handle_cancel_job) — served by the strangler above.
-
-        # /api/rnd/zombie_kill migrated to route_table (handle_zombie_kill) — served by the strangler above.
-
-        # /api/rnd/zombie_resume migrated to route_table (handle_zombie_resume) — served by the strangler above.
-
-        # /api/rnd/gandalf_cancel migrated to route_table (handle_gandalf_cancel) — served by the strangler above.
-
-        # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
-        # /api/rnd/preview_start migrated to route_table (handle_preview_start) — served by the strangler above.
-
-        # /api/rnd/preview_stop migrated to route_table (handle_preview_stop) — served by the strangler above.
-
-        # ── ConPTY terminal session lifecycle (Wave 3) ────────────────
-        # These are the NEW ConPTY surface — distinct from the v2 REPL
-        # endpoints (start_terminal/term_input/term_stream). Auth is enforced
-        # by the middleware above (mutating POSTs).
-        # /api/rnd/term_start migrated to route_table (handle_term_start) — served by the strangler above.
-
-        # /api/rnd/zombie_terminal_start migrated to route_table (handle_zombie_terminal_start) — served by the strangler above.
-
-        # /api/rnd/term_kill migrated to route_table (handle_term_kill) — served by the strangler above.
-
-        # /api/rnd/term_close migrated to route_table (handle_term_close) — served by the strangler above.
-
-        # /api/rnd/term_delete migrated to route_table (handle_term_delete) — served by the strangler above.
-
-        # /api/rnd/cleanup_ghost_sessions migrated to route_table (handle_cleanup_ghost_sessions) — served by the strangler above.
-
-        elif self.path in ("/api/rnd/reaper_arm", "/api/rnd/reaper_advance",
-                            "/api/rnd/reaper_disarm"):
-            # Wave 8 — the reaper ARMING CONTROL PLANE. arm/advance/disarm are
-            # exposed ONLY through these mutating endpoints, already token-gated by
-            # the do_POST middleware above (default-deny: an unauthed request is
-            # 401'd before it reaches here, with NO state change). Defense in
-            # depth: the module functions ALSO re-check paths.auth_ok(provided) —
-            # they refuse with no state change on a bad token. The persisted tier
-            # only ENABLES the in-process gate; every destructive action is
-            # re-derived live in the sweep (protect-only). arm/advance are gated by
-            # the numeric bar recomputed in-process from the tamper-evident receipt
-            # chain; an under-bar advance is refused.
-            import reaper_arming as _arm
-            try:
-                if self.path == "/api/rnd/reaper_arm":
-                    out = _arm.arm(provided)
-                elif self.path == "/api/rnd/reaper_advance":
-                    out = _arm.advance(provided)
-                else:
-                    out = _arm.disarm(provided)
-            except Exception as exc:
-                self._send_json({"ok": False, "error": str(exc)}, 500)
-            else:
-                code = 200 if out.get("ok") else (
-                    401 if out.get("error") == "unauthorized" else 409)
-                self._send_json(out, code)
-
-        # /api/rnd/term_set_engine migrated to route_table (handle_term_set_engine) — served by the strangler above.
-
-        # /api/rnd/switch_terminal_engine migrated to route_table (handle_switch_terminal_engine) — served by the strangler above.
-
-        # /api/rnd/term_resize migrated to route_table (handle_term_resize) — served by the strangler above.
-
-        # /api/rnd/term_input2 migrated to route_table (handle_term_input2) — served by the strangler above.
-
-        # ── R&D validated, cached session summary (Wave 6) ────────────
-        # /api/rnd/regenerate_summary migrated to route_table (handle_regenerate_summary) — served by the strangler above.
-
-        # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
-        # /api/rnd/add_idea migrated to route_table (handle_add_idea) —
-        # served by the strangler above.
-        # /api/rnd/promote_inbox migrated to route_table (handle_promote_inbox) — served by the strangler above.
-
-        # /api/rnd/promote_grass migrated to route_table (handle_promote_grass) — served by the strangler above.
-        # /api/rnd/grass_develop migrated to route_table (handle_grass_develop) — served by the strangler above.
-        # /api/rnd/grass_workbench migrated to route_table (handle_grass_workbench) — served by the strangler above.
-        # /api/rnd/grass_save_refinement migrated to route_table (handle_grass_save_refinement) — served by the strangler above.
-        # /api/rnd/grass_set_status migrated to route_table (handle_grass_set_status) — served by the strangler above.
-        # /api/rnd/grass_pull migrated to route_table (handle_grass_pull) — served by the strangler above.
-        # /api/rnd/grass_export migrated to route_table (handle_grass_export) — served by the strangler above.
-        # /api/rnd/grass_archive migrated to route_table (handle_grass_archive) — served by the strangler above.
-        # /api/rnd/grass_advance migrated to route_table (handle_grass_advance) — served by the strangler above.
-        # /api/rnd/grass_delete migrated to route_table (handle_grass_delete) — served by the strangler above.
-
-        # /api/rnd/link_github migrated to route_table (handle_link_github) — served by the strangler above.
-
-        # /api/rnd/set_auto_push migrated to route_table (handle_set_auto_push) — served by the strangler above.
-
-        # /api/rnd/push_now migrated to route_table (handle_push_now) — served by the strangler above.
-
-        # /api/rnd/continue_session migrated to route_table (handle_continue_session) — served by the strangler above.
-
-        # /api/rnd/advance_session migrated to route_table (handle_advance_session) — served by the strangler above.
-
-        # /api/rnd/gandalf_run migrated to route_table (handle_gandalf_run) — served by the strangler above.
-
-        # /api/rnd/gandalf_delete migrated to route_table (handle_gandalf_delete) — served by the strangler above.
-
-        # /api/rnd/gandalf_archive migrated to route_table (handle_gandalf_archive) — served by the strangler above.
-
-        # /api/rnd/gandalf_clear_failed migrated to route_table (handle_gandalf_clear_failed) — served by the strangler above.
-
-        # /api/rnd/advance_stage migrated to route_table (handle_advance_stage) — served by the strangler above.
-
-        # /api/rnd/handoff_to_fresh migrated to route_table (handle_handoff_to_fresh) — served by the strangler above.
-
-        # /api/rnd/finish_to_build migrated to route_table (handle_finish_to_build) — served by the strangler above.
-
-        # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
-        # gwl-server owns process lifecycle. To restart: run `nssm restart
-        # anchor` on gwl-server. The dashboard cannot kill the server.
-
-        else:
-            self._send_json({"ok": False, "error": "Unknown endpoint"}, 404)
+        # /api/rnd/upload_batch migrated to route_table (handle_upload_batch) — served by the strangler above.
+        # /api/upload migrated to route_table (handle_upload) — served by the strangler above.
+        # /api/rnd/reaper_arm, /api/rnd/reaper_advance, /api/rnd/reaper_disarm
+        # migrated to route_table — served by the strangler above.
+        # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service owns
+        # process lifecycle; the dashboard cannot kill the server.
+        # Any POST not handled by the strangler above is an unknown endpoint.
+        self._send_json({"ok": False, "error": "Unknown endpoint"}, 404)
       except Exception as e:
             if _is_benign_disconnect(e):
                 # Client closed the connection mid-POST. Not a server error.

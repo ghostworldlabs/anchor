@@ -2675,7 +2675,11 @@ class TestW7RouteTable:
                                "handler"}
         assert sample["status"] == "migrated"
         assert sample["handler"] == "handle_routes"
-        legacy = next(d for d in dump if d["path"] == "/api/upload")
+        # A permanently-residual route as the legacy sample. /api/upload was the
+        # prior sample but got migrated (C2 sweep, 2026-07-09); /dashboard is a
+        # whole-page render that stays legacy by design (sanctioned residual), so
+        # this sample won't need re-pointing as the migration completes.
+        legacy = next(d for d in dump if d["path"] == "/dashboard")
         assert legacy["status"] == "legacy" and legacy["handler"] is None
 
 
