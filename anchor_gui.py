@@ -9312,6 +9312,307 @@ def handle_reaper_status(handler, path, body):
         handler._send_json({"ok": True, "reaper": dump})
 
 
+def handle_promote_grass(handler, path, body):
+    # v4 Wave 6: promote a Grass Catcher idea into a NEW seeded session in
+    # the target lane (research|plan). Reuses the Wave-1 seed path via
+    # effort_history.promote_grass_to_lane → terminal_session.start_session
+    # so the opening turn loads the lane skill AND carries the idea text.
+    # The idea REMAINS in grass (copy, never destroy). Auth enforced above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    lane = (body.get("lane", "") or "").strip()
+    # Claude-first policy: a promote opens a NEW session with no prior
+    # engine choice, so it defaults to Claude — never the project's sticky
+    # last_engine (which could be Gemini from an unrelated per-session
+    # toggle). Gemini stays reachable via the session engine toggle.
+    backend = ((body.get("backend", "") or "").strip()
+               or _termsess.DEFAULT_ENGINE)
+    if not pid or not idea_id or not lane:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, idea_id and lane required"}, 400)
+    elif lane not in _eh.PROMOTE_LANES:
+        handler._send_json(
+            {"ok": False,
+             "error": "lane must be one of %s"
+             % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            rec = _eh.promote_grass_to_lane(pid, idea_id, lane,
+                                            backend=backend)
+            handler._send_json({"ok": True, "session": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_grass_develop(handler, path, body):
+    # v5 Wave 5: DEVELOP a grass idea in a seeded WORKBENCH session in the
+    # target lane (research|plan). Reuses the Wave-1 seed path via
+    # effort_history.develop_grass_idea → terminal_session.start_session,
+    # seeding the idea text + its latest refinements. The idea STAYS in
+    # grass (copy, never destroy). Auth enforced by the middleware above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    lane = (body.get("lane", "") or "").strip()
+    backend = (body.get("backend", "") or "").strip() or None
+    if not pid or not idea_id or not lane:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, idea_id and lane required"}, 400)
+    elif lane not in _eh.PROMOTE_LANES:
+        handler._send_json(
+            {"ok": False, "error": "lane must be one of %s"
+             % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            rec = _eh.develop_grass_idea(pid, idea_id, lane,
+                                         backend=backend)
+            handler._send_json({"ok": True, "session": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_grass_workbench(handler, path, body):
+    # v12 Wave 11 (SC5): open the idea's SINGLE one-session workbench — ONE
+    # stage-carrying effort_managed grass-dev session per idea (no Research/
+    # Plan split). Starts at research (researchPrime seeds) and advances
+    # research→plan IN-SESSION via /api/rnd/advance_stage; the grass
+    # second-advance is gated off for effort_managed ideas (W7). Dedupes/
+    # focuses an existing live workbench session (incl. a pre-v12 idea's
+    # most-advanced lane session — back-compat A10). Auth enforced above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    backend = (body.get("backend", "") or "").strip() or None
+    if not pid or not idea_id:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id and idea_id required"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            rec = _eh.develop_grass_workbench(pid, idea_id,
+                                              backend=backend)
+            handler._send_json({"ok": True, "session": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_grass_save_refinement(handler, path, body):
+    # v5 Wave 5: save a NEW versioned refinement (grass-<id>/dev-N) for an
+    # idea (append-only; auto-incrementing N). Marks the idea REFINED.
+    # Auth enforced above. 404 unknown project, 400 unknown idea/empty.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    if not pid or not idea_id:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id and idea_id required"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                rec = _eh.save_grass_refinement(
+                    folder, pid, idea_id,
+                    text=body.get("text", ""),
+                    label=body.get("label", ""),
+                    artifacts=body.get("artifacts") or [],
+                    session_id=body.get("session_id") or None)
+                handler._send_json({"ok": True, "refinement": rec})
+            except ValueError as ve:
+                handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_grass_set_status(handler, path, body):
+    # v5 Wave 5: set a grass idea's lifecycle status (raw/refined/
+    # promoted), validating the transition. Auth enforced above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    status = (body.get("status", "") or "").strip()
+    if not pid or not idea_id or not status:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, idea_id and status required"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                rec = _eh.set_grass_status(
+                    folder, pid, idea_id, status,
+                    promoted_to_session=body.get("promoted_to_session"),
+                    promoted_to_lane=body.get("promoted_to_lane"))
+                handler._send_json({"ok": True, "idea": rec})
+            except ValueError as ve:
+                handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_grass_pull(handler, path, body):
+    # v5 Wave 5: PULL a chosen refinement version into a NEW seeded session
+    # (research|plan). Reuses the Wave-1 seed path. Idea + refinement are
+    # left untouched. Auth enforced above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    refinement_id = (body.get("refinement_id", "") or "").strip()
+    lane = (body.get("lane", "") or "").strip()
+    backend = (body.get("backend", "") or "").strip() or None
+    if not pid or not idea_id or not refinement_id or not lane:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, idea_id, refinement_id and lane "
+                      "required"}, 400)
+    elif lane not in _eh.PROMOTE_LANES:
+        handler._send_json(
+            {"ok": False, "error": "lane must be one of %s"
+             % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            rec = _eh.pull_grass_refinement(
+                pid, idea_id, refinement_id, lane, backend=backend)
+            handler._send_json({"ok": True, "session": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_grass_export(handler, path, body):
+    # v8 Wave 6: EXPORT an idea's research/plan develop WORK up into REAL
+    # lane tiles (Option B): copy the develop docs up as board-visible
+    # lane sessions AND mark the idea "promoted" with a link. The idea
+    # STAYS in grass (copy, never destroy). Auth enforced above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    if not pid or not idea_id:
+        handler._send_json(
+            {"ok": False, "error": "project_id and idea_id required"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            res = _eh.export_grass_to_project(pid, idea_id)
+            code = 200 if res.get("ok") else 400
+            handler._send_json(res, code)
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_grass_archive(handler, path, body):
+    # v10 Wave 4 (D7): ARCHIVE a grass dev session's produced docs +
+    # summary into a per-idea bundle (survives kill; available at
+    # promotion). Distinct from grass_save_refinement (a text snapshot).
+    # Token-gated by the do_POST middleware above. The idea STAYS in grass.
+    # HONEST: ok:false + reason when there is no dev session / no docs.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    lane = (body.get("lane", "") or "").strip()
+    if not pid or not idea_id or not lane:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, idea_id and lane required"}, 400)
+    elif lane not in _eh.PROMOTE_LANES:
+        handler._send_json(
+            {"ok": False, "error": "lane must be one of %s"
+             % (", ".join(_eh.PROMOTE_LANES),)}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            res = _eh.archive_grass_session(pid, idea_id, lane)
+            # ok:false is an honest "nothing to archive" (200, not an
+            # error) — the bundle is None + a reason; never fabricated.
+            handler._send_json(res, 200)
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_grass_advance(handler, path, body):
+    # v10 Wave 5 (Pillar 2 #2): ADVANCE a grass idea's RESEARCH dev session
+    # → a linked grass PLAN dev session, staying INSIDE the workbench, using
+    # the SAME paste-NOT-submit seeded handoff as the project-level advance
+    # (Wave 1/2). effort_history.advance_grass_research_to_plan builds the
+    # research→plan prompt from the research dev session's persisted docs,
+    # starts (or focuses) the CONTAINED (idea, 'plan') dev session with
+    # paste_prompt (held UNSENT) + parent_session_id (links the chain) +
+    # grass_origin, and records the stage edge. Token-gated by the do_POST
+    # middleware above. v11.1 Wave 2: the keystone snapshots a research
+    # CONVERSATION's transcript when no file was written, so the plan session
+    # ALWAYS opens (transcript-backed or honest-minimal prompt); the only
+    # ok:false left is no-research-session (no research dev session at all to
+    # advance FROM). The idea STAYS in grass.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    backend = (body.get("backend", "") or "").strip() or None
+    if not pid or not idea_id:
+        handler._send_json(
+            {"ok": False, "error": "project_id and idea_id required"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        try:
+            res = _eh.advance_grass_research_to_plan(
+                pid, idea_id, backend=backend)
+            # ok:false is an honest "nothing to advance" (200, not an
+            # error) — session is None + a reason; never fabricated.
+            handler._send_json(res, 200)
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_grass_delete(handler, path, body):
+    # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side
+    # stores (pointer-record + index entry + refinements dir + the
+    # contained dev_sessions). Token-gated by the do_POST middleware above
+    # AND requires an explicit confirm:true (a deliberate, irreversible
+    # removal). Project-scoped — never touches another project's grass.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    idea_id = (body.get("idea_id", "") or "").strip()
+    confirm = bool(body.get("confirm"))
+    if not pid or not idea_id:
+        handler._send_json(
+            {"ok": False, "error": "project_id and idea_id required"}, 400)
+    elif not confirm:
+        handler._send_json({"ok": False,
+                            "error": "delete requires confirm:true",
+                            "reason": "confirm-required"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                out = _eh.delete_grass_idea(folder, pid, idea_id)
+            except Exception as exc:
+                handler._send_json({"ok": False, "error": str(exc)}, 500)
+            else:
+                handler._send_json({"ok": True,
+                                    "deleted": bool(out.get("deleted")),
+                                    "result": out})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -9357,6 +9658,16 @@ _MIGRATED_HANDLERS = {
     "handle_build_deliverable": handle_build_deliverable,
     "handle_orphan_check": handle_orphan_check,
     "handle_reaper_status": handle_reaper_status,
+    "handle_promote_grass": handle_promote_grass,
+    "handle_grass_develop": handle_grass_develop,
+    "handle_grass_workbench": handle_grass_workbench,
+    "handle_grass_save_refinement": handle_grass_save_refinement,
+    "handle_grass_set_status": handle_grass_set_status,
+    "handle_grass_pull": handle_grass_pull,
+    "handle_grass_export": handle_grass_export,
+    "handle_grass_archive": handle_grass_archive,
+    "handle_grass_advance": handle_grass_advance,
+    "handle_grass_delete": handle_grass_delete,
 }
 
 
@@ -12632,296 +12943,16 @@ function startZombieTerminal(btn) {
                 except ValueError as ve:
                     self._send_json({"ok": False, "error": str(ve)}, 400)
 
-        elif self.path == "/api/rnd/promote_grass":
-            # v4 Wave 6: promote a Grass Catcher idea into a NEW seeded session in
-            # the target lane (research|plan). Reuses the Wave-1 seed path via
-            # effort_history.promote_grass_to_lane → terminal_session.start_session
-            # so the opening turn loads the lane skill AND carries the idea text.
-            # The idea REMAINS in grass (copy, never destroy). Auth enforced above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            lane = (body.get("lane", "") or "").strip()
-            # Claude-first policy: a promote opens a NEW session with no prior
-            # engine choice, so it defaults to Claude — never the project's sticky
-            # last_engine (which could be Gemini from an unrelated per-session
-            # toggle). Gemini stays reachable via the session engine toggle.
-            backend = ((body.get("backend", "") or "").strip()
-                       or _termsess.DEFAULT_ENGINE)
-            if not pid or not idea_id or not lane:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, idea_id and lane required"}, 400)
-            elif lane not in _eh.PROMOTE_LANES:
-                self._send_json(
-                    {"ok": False,
-                     "error": "lane must be one of %s"
-                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    rec = _eh.promote_grass_to_lane(pid, idea_id, lane,
-                                                    backend=backend)
-                    self._send_json({"ok": True, "session": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-
-        elif self.path == "/api/rnd/grass_develop":
-            # v5 Wave 5: DEVELOP a grass idea in a seeded WORKBENCH session in the
-            # target lane (research|plan). Reuses the Wave-1 seed path via
-            # effort_history.develop_grass_idea → terminal_session.start_session,
-            # seeding the idea text + its latest refinements. The idea STAYS in
-            # grass (copy, never destroy). Auth enforced by the middleware above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            lane = (body.get("lane", "") or "").strip()
-            backend = (body.get("backend", "") or "").strip() or None
-            if not pid or not idea_id or not lane:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, idea_id and lane required"}, 400)
-            elif lane not in _eh.PROMOTE_LANES:
-                self._send_json(
-                    {"ok": False, "error": "lane must be one of %s"
-                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    rec = _eh.develop_grass_idea(pid, idea_id, lane,
-                                                 backend=backend)
-                    self._send_json({"ok": True, "session": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-
-        elif self.path == "/api/rnd/grass_workbench":
-            # v12 Wave 11 (SC5): open the idea's SINGLE one-session workbench — ONE
-            # stage-carrying effort_managed grass-dev session per idea (no Research/
-            # Plan split). Starts at research (researchPrime seeds) and advances
-            # research→plan IN-SESSION via /api/rnd/advance_stage; the grass
-            # second-advance is gated off for effort_managed ideas (W7). Dedupes/
-            # focuses an existing live workbench session (incl. a pre-v12 idea's
-            # most-advanced lane session — back-compat A10). Auth enforced above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            backend = (body.get("backend", "") or "").strip() or None
-            if not pid or not idea_id:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id and idea_id required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    rec = _eh.develop_grass_workbench(pid, idea_id,
-                                                      backend=backend)
-                    self._send_json({"ok": True, "session": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-
-        elif self.path == "/api/rnd/grass_save_refinement":
-            # v5 Wave 5: save a NEW versioned refinement (grass-<id>/dev-N) for an
-            # idea (append-only; auto-incrementing N). Marks the idea REFINED.
-            # Auth enforced above. 404 unknown project, 400 unknown idea/empty.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            if not pid or not idea_id:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id and idea_id required"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        rec = _eh.save_grass_refinement(
-                            folder, pid, idea_id,
-                            text=body.get("text", ""),
-                            label=body.get("label", ""),
-                            artifacts=body.get("artifacts") or [],
-                            session_id=body.get("session_id") or None)
-                        self._send_json({"ok": True, "refinement": rec})
-                    except ValueError as ve:
-                        self._send_json({"ok": False, "error": str(ve)}, 400)
-
-        elif self.path == "/api/rnd/grass_set_status":
-            # v5 Wave 5: set a grass idea's lifecycle status (raw/refined/
-            # promoted), validating the transition. Auth enforced above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            status = (body.get("status", "") or "").strip()
-            if not pid or not idea_id or not status:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, idea_id and status required"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        rec = _eh.set_grass_status(
-                            folder, pid, idea_id, status,
-                            promoted_to_session=body.get("promoted_to_session"),
-                            promoted_to_lane=body.get("promoted_to_lane"))
-                        self._send_json({"ok": True, "idea": rec})
-                    except ValueError as ve:
-                        self._send_json({"ok": False, "error": str(ve)}, 400)
-
-        elif self.path == "/api/rnd/grass_pull":
-            # v5 Wave 5: PULL a chosen refinement version into a NEW seeded session
-            # (research|plan). Reuses the Wave-1 seed path. Idea + refinement are
-            # left untouched. Auth enforced above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            refinement_id = (body.get("refinement_id", "") or "").strip()
-            lane = (body.get("lane", "") or "").strip()
-            backend = (body.get("backend", "") or "").strip() or None
-            if not pid or not idea_id or not refinement_id or not lane:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, idea_id, refinement_id and lane "
-                              "required"}, 400)
-            elif lane not in _eh.PROMOTE_LANES:
-                self._send_json(
-                    {"ok": False, "error": "lane must be one of %s"
-                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    rec = _eh.pull_grass_refinement(
-                        pid, idea_id, refinement_id, lane, backend=backend)
-                    self._send_json({"ok": True, "session": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-
-        elif self.path == "/api/rnd/grass_export":
-            # v8 Wave 6: EXPORT an idea's research/plan develop WORK up into REAL
-            # lane tiles (Option B): copy the develop docs up as board-visible
-            # lane sessions AND mark the idea "promoted" with a link. The idea
-            # STAYS in grass (copy, never destroy). Auth enforced above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            if not pid or not idea_id:
-                self._send_json(
-                    {"ok": False, "error": "project_id and idea_id required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    res = _eh.export_grass_to_project(pid, idea_id)
-                    code = 200 if res.get("ok") else 400
-                    self._send_json(res, code)
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-
-        elif self.path == "/api/rnd/grass_archive":
-            # v10 Wave 4 (D7): ARCHIVE a grass dev session's produced docs +
-            # summary into a per-idea bundle (survives kill; available at
-            # promotion). Distinct from grass_save_refinement (a text snapshot).
-            # Token-gated by the do_POST middleware above. The idea STAYS in grass.
-            # HONEST: ok:false + reason when there is no dev session / no docs.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            lane = (body.get("lane", "") or "").strip()
-            if not pid or not idea_id or not lane:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, idea_id and lane required"}, 400)
-            elif lane not in _eh.PROMOTE_LANES:
-                self._send_json(
-                    {"ok": False, "error": "lane must be one of %s"
-                     % (", ".join(_eh.PROMOTE_LANES),)}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    res = _eh.archive_grass_session(pid, idea_id, lane)
-                    # ok:false is an honest "nothing to archive" (200, not an
-                    # error) — the bundle is None + a reason; never fabricated.
-                    self._send_json(res, 200)
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-
-        elif self.path == "/api/rnd/grass_advance":
-            # v10 Wave 5 (Pillar 2 #2): ADVANCE a grass idea's RESEARCH dev session
-            # → a linked grass PLAN dev session, staying INSIDE the workbench, using
-            # the SAME paste-NOT-submit seeded handoff as the project-level advance
-            # (Wave 1/2). effort_history.advance_grass_research_to_plan builds the
-            # research→plan prompt from the research dev session's persisted docs,
-            # starts (or focuses) the CONTAINED (idea, 'plan') dev session with
-            # paste_prompt (held UNSENT) + parent_session_id (links the chain) +
-            # grass_origin, and records the stage edge. Token-gated by the do_POST
-            # middleware above. v11.1 Wave 2: the keystone snapshots a research
-            # CONVERSATION's transcript when no file was written, so the plan session
-            # ALWAYS opens (transcript-backed or honest-minimal prompt); the only
-            # ok:false left is no-research-session (no research dev session at all to
-            # advance FROM). The idea STAYS in grass.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            backend = (body.get("backend", "") or "").strip() or None
-            if not pid or not idea_id:
-                self._send_json(
-                    {"ok": False, "error": "project_id and idea_id required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                try:
-                    res = _eh.advance_grass_research_to_plan(
-                        pid, idea_id, backend=backend)
-                    # ok:false is an honest "nothing to advance" (200, not an
-                    # error) — session is None + a reason; never fabricated.
-                    self._send_json(res, 200)
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-
-        elif self.path == "/api/rnd/grass_delete":
-            # v9 Wave 2 — permanently DELETE a grass idea + all its grass-side
-            # stores (pointer-record + index entry + refinements dir + the
-            # contained dev_sessions). Token-gated by the do_POST middleware above
-            # AND requires an explicit confirm:true (a deliberate, irreversible
-            # removal). Project-scoped — never touches another project's grass.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            idea_id = (body.get("idea_id", "") or "").strip()
-            confirm = bool(body.get("confirm"))
-            if not pid or not idea_id:
-                self._send_json(
-                    {"ok": False, "error": "project_id and idea_id required"}, 400)
-            elif not confirm:
-                self._send_json({"ok": False,
-                                 "error": "delete requires confirm:true",
-                                 "reason": "confirm-required"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        out = _eh.delete_grass_idea(folder, pid, idea_id)
-                    except Exception as exc:
-                        self._send_json({"ok": False, "error": str(exc)}, 500)
-                    else:
-                        self._send_json({"ok": True,
-                                         "deleted": bool(out.get("deleted")),
-                                         "result": out})
+        # /api/rnd/promote_grass migrated to route_table (handle_promote_grass) — served by the strangler above.
+        # /api/rnd/grass_develop migrated to route_table (handle_grass_develop) — served by the strangler above.
+        # /api/rnd/grass_workbench migrated to route_table (handle_grass_workbench) — served by the strangler above.
+        # /api/rnd/grass_save_refinement migrated to route_table (handle_grass_save_refinement) — served by the strangler above.
+        # /api/rnd/grass_set_status migrated to route_table (handle_grass_set_status) — served by the strangler above.
+        # /api/rnd/grass_pull migrated to route_table (handle_grass_pull) — served by the strangler above.
+        # /api/rnd/grass_export migrated to route_table (handle_grass_export) — served by the strangler above.
+        # /api/rnd/grass_archive migrated to route_table (handle_grass_archive) — served by the strangler above.
+        # /api/rnd/grass_advance migrated to route_table (handle_grass_advance) — served by the strangler above.
+        # /api/rnd/grass_delete migrated to route_table (handle_grass_delete) — served by the strangler above.
 
         elif self.path == "/api/rnd/link_github":
             # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
