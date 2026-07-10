@@ -10281,6 +10281,493 @@ def handle_term_input2(handler, path, body):
                              "reason": "unknown-session"}, 404)
 
 
+def handle_answer_gate(handler, path, body):
+    # Answer a pending in-session gate through the supervisor seam
+    # (rearch W15): the answer is durably QUEUED + ACKed to the job dir
+    # BEFORE this POST returns, then delivered to the session's stdin
+    # supervisor-side — exactly once, retryable across a killed hop.
+    # ``written`` is kept for the legacy endpoint contract (== delivered).
+    job_id = body.get("job_id", "")
+    choice = body.get("choice", "")
+    res = _sup.get_supervisor().answer_gate(job_id, choice)
+    handler._send_json({
+        "ok": bool(res.get("ok")) and bool(res.get("delivered")),
+        "written": bool(res.get("delivered")),
+        "delivered": bool(res.get("delivered")),
+        "deferred": bool(res.get("deferred")),
+        "queued": bool(res.get("queued")),
+        "reason": res.get("reason"),
+        "job_id": res.get("job_id"),
+    })
+
+
+def handle_cancel_job(handler, path, body):
+    # Stop a running job (tree-kill via job_runner.cancel). Acts on the
+    # job_id supplied by the ATTACHED console session only — the caller
+    # passes the exact job_id, so two concurrent sessions never cross-
+    # wire. A clean 404 for an unknown id; auth is already enforced by the
+    # middleware above (this is a mutating POST).
+    job_id = (body.get("job_id", "") or "").strip()
+    rec = _jr.load_record(job_id) if job_id else None
+    if rec is None:
+        handler._send_json({"ok": False, "error": f"unknown job: {job_id}",
+                         "reason": "unknown-job"}, 404)
+    else:
+        # rearch W15: cancel through the supervisor seam (it owns the
+        # process tree). Tree-kill is idempotent; a re-cancel no-ops.
+        out = _sup.get_supervisor().cancel(job_id)
+        handler._send_json({
+            "ok": True,
+            "job_id": job_id,
+            "status": (out or {}).get("status"),
+        })
+
+
+def handle_regenerate_summary(handler, path, body):
+    # Force re-run + re-cache a session's validated summary. Auth is
+    # already enforced by the middleware above (mutating POST). The
+    # session's members are summarized again through the runner seam and
+    # summary.json + summary.md are overwritten. Clean 404 for an unknown
+    # project or session.
+    pid = body.get("project_id", "") or body.get("id", "")
+    lane = body.get("lane", "")
+    session_id = body.get("session_id", "")
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    elif not lane or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "lane and session_id required"}, 400)
+    else:
+        folder = proj.get("folder_path", "")
+        session = None
+        try:
+            for s in _sessions.list_sessions(folder, pid, lane):
+                if s.get("session_id") == session_id:
+                    session = s
+                    break
+        except Exception:
+            session = None
+        if session is None:
+            handler._send_json({"ok": False,
+                             "error": f"Unknown session: {session_id}"},
+                            404)
+        else:
+            summary = _summarizer.summarize_session(
+                folder, pid, lane, session, force=True)
+            handler._send_json({"ok": True, "summary": summary})
+
+
+def handle_continue_session(handler, path, body):
+    # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
+    # historical session, SEEDED with that prior session's context (its
+    # cached summary, else a deterministic digest of its members). The
+    # ORIGINAL session/registry record is NEVER mutated (Risk R2) — we
+    # only READ it. Reuses terminal_session.start_session(seed_context=…)
+    # (the Wave-1 seed path), so the new session's single opening turn
+    # loads the lane skill AND carries the prior context. Auth enforced by
+    # the do_POST middleware above (mutating/terminal).
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    lane = (body.get("lane", "") or "").strip()
+    source = (body.get("source_session", "")
+              or body.get("session", "") or "").strip()
+    # Claude-first policy: continuing a past session opens a NEW session;
+    # default it to Claude rather than the project's sticky last_engine
+    # (which could be Gemini from an unrelated toggle). Explicit backend
+    # in the body still wins; Gemini stays reachable via the toggle.
+    backend = ((body.get("backend", "") or "").strip()
+               or _termsess.DEFAULT_ENGINE)
+    if not pid or not lane or not source:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id, lane and source_session required"},
+            400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            seed_context = _build_continue_seed(
+                folder, pid, lane, source)
+            try:
+                if backend:
+                    rec = _termsess.start_session(
+                        pid, lane, backend=backend,
+                        seed_context=seed_context)
+                else:
+                    rec = _termsess.start_session(
+                        pid, lane, seed_context=seed_context)
+            except _termsess.TerminalSessionError as exc:
+                handler._send_json({"ok": False, "error": str(exc)}, 400)
+            else:
+                handler._send_json({"ok": True, "session": rec,
+                                 "seeded_from": source})
+
+
+def handle_advance_session(handler, path, body):
+    # v6 Wave 5: MANUAL advance research → planning. Starts a NEW live
+    # session in ``to_lane`` (defaults 'planning' for a research source),
+    # LINKED to the source via ``parent_session_id`` (so it inherits the
+    # source's ``chain_id`` — see session_registry.start_session / Wave 2),
+    # and SEEDED with the source session's grounded summary/report context.
+    # The seed is built by the SAME read-only _build_continue_seed helper
+    # (its cached summary, else a member digest), so the SOURCE session /
+    # registry record is NEVER mutated — we only READ it. Returns the new
+    # session record in the same JSON shape as continue_session. Auth is
+    # enforced by the do_POST token middleware above (mutating/terminal).
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    source = (body.get("source_session", "")
+              or body.get("session", "") or "").strip()
+    to_lane = (body.get("to_lane", "") or "").strip() or "planning"
+    backend = (body.get("backend", "") or "").strip() or None
+    if not pid or not source:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id and source_session required"},
+            400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        elif (_termsess.get_session(source) or {}).get("effort_managed"):
+            # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
+            # advances IN-SESSION via /api/rnd/advance_stage; the legacy
+            # research→plan advance must mint NOTHING for it. Early-return
+            # so the effort's session-id set is unchanged. Gate on the
+            # SOURCE session's ``effort_managed`` ONLY (never lane/kind).
+            # Legacy records (False) fall through to the full v6/v11
+            # advance path below, unchanged.
+            handler._send_json(
+                {"ok": False, "session": None,
+                 "reason": "effort-managed-use-advance-stage"}, 409)
+        else:
+            folder = proj.get("folder_path", "")
+            # Resolve the SOURCE session's lane for the seed lookup. The
+            # seed reads the source's CACHED summary in ITS lane; default
+            # to 'research' (the only source this wave advances).
+            src_lane = "research"
+            try:
+                for r in _termsess.list_sessions(project_id=pid):
+                    if r.get("session_id") == source:
+                        src_lane = r.get("lane") or src_lane
+                        break
+            except Exception:
+                pass
+            # v11 Wave 2 — THE user-facing fix: route research→plan through
+            # the SHARED handoff KEYSTONE (terminal_session.prepare_stage_
+            # handoff), mirroring finish_to_build's capture-before-advance.
+            # The keystone (a) PERSISTS the live source session's produced
+            # docs into the MAIN project (copy + commit to main HEAD,
+            # session-tagged efforts — best-effort, idempotent, never raises)
+            # so they ride into the planning worktree (checked out off main
+            # HEAD); (b) BUILDS the REAL doc-referencing prompt (names the
+            # actual persisted paths + "read these first, then plan" + load
+            # Crucible — honest minimal only when there are genuinely no
+            # docs, never fabricated); (c) resolves doc_rels + skill + the
+            # source's cached summary for HANDOFF.md. This is the fix for the
+            # reported failure: the pre-v11 path NEVER persisted the live
+            # research docs, so the prompt was a bare "load Crucible" with no
+            # paths and no HANDOFF.md.
+            hk = _termsess.prepare_stage_handoff(pid, source, to_lane)
+            # v11 honesty guard: if the keystone could NOT resolve the
+            # source session (ok=False → no record / unknown id → empty
+            # prompt + empty doc_rels), do NOT mint an orphan planning
+            # session with an empty paste. Return an honest error instead
+            # (matching the honest-degradation discipline). The
+            # no-DOCS-but-valid-source path keeps ok=True and proceeds with
+            # the honest minimal prompt — only the source-unresolvable case
+            # is guarded here.
+            if not hk.get("ok"):
+                handler._send_json(
+                    {"ok": False,
+                     "error": "could not resolve source session"}, 400)
+                return
+            # The reviewable TASK PROMPT is delivered as a PENDING PASTE
+            # (held in the new PTY input UNSENT until the user presses
+            # Enter — paste-NOT-submit, unchanged). The grounded summary
+            # context still seeds phase-1 (load+greet) so the model greets
+            # with prior context. Best-effort: an empty prompt → falls back
+            # to today's seed-context-only path (honest, no fabrication).
+            seed_context = _build_continue_seed(
+                folder, pid, src_lane, source)
+            paste = (hk.get("prompt", "") or "").strip() or None
+            try:
+                if backend:
+                    rec = _termsess.start_session(
+                        pid, to_lane, backend=backend,
+                        seed_context=seed_context,
+                        paste_prompt=paste,
+                        parent_session_id=source)
+                else:
+                    rec = _termsess.start_session(
+                        pid, to_lane, seed_context=seed_context,
+                        paste_prompt=paste,
+                        parent_session_id=source)
+            except _termsess.TerminalSessionError as exc:
+                handler._send_json({"ok": False, "error": str(exc)}, 400)
+            else:
+                # The planning worktree now EXISTS (off main HEAD, which the
+                # keystone just committed the research docs to). Write BOTH
+                # durable artifacts into it: the real HANDOFF.md (lists the
+                # persisted upstream doc paths + the Crucible skill + the
+                # source's cached summary) AND NEXT-PROMPT.md (the reviewable
+                # pasted prompt). Then record the research->plan stage edge.
+                # All best-effort — a write hiccup never strands the advance.
+                new_wt = rec.get("worktree_path", "")
+                new_sid = rec.get("session_id", "")
+                if new_wt:
+                    try:
+                        _handoff.write_handoff_md(
+                            new_wt, hk.get("doc_rels", []),
+                            hk.get("skill", "") or "Crucible",
+                            hk.get("summary_text", ""))
+                    except Exception:
+                        pass
+                    if paste:
+                        try:
+                            _handoff.write_next_prompt(new_wt, paste)
+                        except Exception:
+                            pass
+                try:
+                    _handoff.record_stage_link(
+                        folder, pid, source, new_sid,
+                        kind="research->plan")
+                except Exception:
+                    pass
+                handler._send_json({"ok": True, "session": rec,
+                                 "advanced_from": source,
+                                 "to_lane": to_lane,
+                                 "persisted": hk.get("persisted", [])})
+
+
+def handle_advance_stage(handler, path, body):
+    # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME
+    # session (no new session minted, NOTHING injected into the PTY by
+    # default): terminal_session.advance_stage persists+summarizes the
+    # current stage (Wave 5, no reap) and flips current_stage to the next
+    # trio stage. Auth is enforced by the do_POST token middleware above.
+    session = (body.get("session", "")
+               or body.get("session_id", "") or "").strip()
+    to_stage = (body.get("to_stage", "") or "").strip() or None
+    pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
+    if not session:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    elif _termsess.get_session(session) is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        out = _termsess.advance_stage(
+            session, to_stage=to_stage, mode="manual", project_id=pid)
+        rec = out.get("record")
+        # SAFE projection of the updated record — NEVER worktree_path /
+        # branch (those must not leak into the page).
+        safe = None
+        if isinstance(rec, dict):
+            safe = {
+                "session_id": rec.get("session_id", ""),
+                "project_id": rec.get("project_id", ""),
+                "lane": rec.get("lane", ""),
+                "status": rec.get("status", ""),
+                "label": rec.get("label", ""),
+                "kind": rec.get("kind", ""),
+                "current_stage": rec.get("current_stage", ""),
+                "effort_id": rec.get("effort_id", ""),
+                "effort_managed": rec.get("effort_managed", False),
+                # project stage_history to SAFE fields — drop baseline_ref
+                # (a git SHA) + store_lane (Reviewer W6-R2-05).
+                "stage_history": [
+                    {"stage": e.get("stage", ""),
+                     "state": e.get("state", ""),
+                     "started_at": e.get("started_at"),
+                     "ended_at": e.get("ended_at"),
+                     "doc_count": e.get("doc_count", 0),
+                     "summary_ref": e.get("summary_ref")}
+                    for e in (rec.get("stage_history") or [])
+                    if isinstance(e, dict)
+                ],
+            }
+        handler._send_json({"ok": bool(out.get("ok")),
+                         "advanced": bool(out.get("advanced")),
+                         "reason": out.get("reason"),
+                         "from_stage": out.get("from_stage"),
+                         "to_stage": out.get("to_stage"),
+                         "session": safe},
+                        200 if out.get("ok") else 400)
+
+
+def handle_handoff_to_fresh(handler, path, body):
+    # v12 Wave 8: the context-relief valve. Continue the effort in a FRESH
+    # session that JOINS the same effort (same effort_id / tile / lineage),
+    # carrying the prior stage's docs + the real next prompt forward via the
+    # v11.1 machinery — held as a PENDING PASTE (UNSENT; NOTHING
+    # auto-submitted). The old session's stage is closed (done); its
+    # worktree is NOT reaped. Auth is enforced by the do_POST token
+    # middleware above (mutating).
+    session = (body.get("session", "")
+               or body.get("session_id", "")
+               or body.get("effort_id", "")).strip()
+    pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
+    if not session:
+        handler._send_json(
+            {"ok": False,
+             "error": "session or effort_id required"}, 400)
+    else:
+        out = _termsess.handoff_to_fresh(session, project_id=pid)
+        if not out.get("ok"):
+            code = 404 if out.get("reason") == "unknown-session" else 400
+            handler._send_json({"ok": False,
+                             "reason": out.get("reason"),
+                             "error": out.get("reason", "handoff failed")},
+                            code)
+        else:
+            new_rec = out.get("new_session") or {}
+            old_rec = out.get("old_session") or {}
+
+            def _safe(rec):
+                # SAFE projection — NEVER worktree_path / branch.
+                if not isinstance(rec, dict):
+                    return None
+                return {
+                    "session_id": rec.get("session_id", ""),
+                    "project_id": rec.get("project_id", ""),
+                    "lane": rec.get("lane", ""),
+                    "status": rec.get("status", ""),
+                    "kind": rec.get("kind", ""),
+                    "current_stage": rec.get("current_stage", ""),
+                    "effort_id": rec.get("effort_id", ""),
+                    "effort_managed": rec.get("effort_managed", False),
+                    "parent_session_id": rec.get("parent_session_id", ""),
+                    "chain_id": rec.get("chain_id", ""),
+                    "pending_paste": rec.get("pending_paste", ""),
+                    "paste_flushed": rec.get("paste_flushed", False),
+                }
+
+            handler._send_json({
+                "ok": True,
+                "effort_id": out.get("effort_id", ""),
+                "new_session": _safe(new_rec),
+                "old_session": _safe(old_rec),
+                "persisted": out.get("persisted", []),
+            })
+
+
+def handle_finish_to_build(handler, path, body):
+    # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
+    # Mirrors the term_kill auto-advance trigger, but WITHOUT reaping the
+    # planning session's worktree: it stays a reopenable, finished tile
+    # (close-to-tile philosophy). Steps:
+    #   1. capture the plan set NOW (before any reap) via capture_plan_set;
+    #   2. mark THIS planning session DONE via session_registry
+    #      .update_session(status=STATUS_DONE) — NOT kill() (worktree kept);
+    #   3. auto_advance_planning_to_build(..., plan_set=…) — idempotent on
+    #      parent_session_id, so a second call never duplicates the build.
+    # No plan set ⇒ {ok:true, auto_build:null, reason:"no plan set yet"} so
+    # the UI can be honest (never a fabricated build). Auth is enforced by
+    # the do_POST token middleware above (mutating).
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    session = (body.get("session", "")
+               or body.get("source_session", "") or "").strip()
+    if not pid or not session:
+        handler._send_json(
+            {"ok": False,
+             "error": "project_id and session required"}, 400)
+    else:
+        rec = _termsess.get_session(session)
+        if rec is None:
+            handler._send_json({"ok": False,
+                             "error": f"unknown session: {session}",
+                             "reason": "unknown-session"}, 404)
+        elif rec.get("lane") not in _termsess._PLANNING_LANES:
+            handler._send_json(
+                {"ok": False,
+                 "error": "finish→build applies only to a planning "
+                          "session",
+                 "reason": "not-planning"}, 400)
+        elif rec.get("effort_managed"):
+            # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
+            # advances IN-SESSION via /api/rnd/advance_stage; the legacy
+            # finish→build path must mint NOTHING for it. Early-return
+            # (no persist-DONE-mark, no auto-advance) so the effort's
+            # session-id set is unchanged. Gate on ``effort_managed``
+            # ONLY (never lane/kind). Legacy records (False) fall through
+            # to the full v6 finish→build path below, unchanged.
+            handler._send_json(
+                {"ok": False, "auto_build": None,
+                 "reason": "effort-managed-use-advance-stage"}, 409)
+        else:
+            # 0) v11 Wave 3 — route the persist through the SHARED keystone
+            #    (:func:`prepare_stage_handoff`), unifying this path with
+            #    research→plan + auto-advance. The keystone PERSISTS the
+            #    planning session's produced docs into the MAIN project (copy
+            #    + commit to main HEAD, session-tagged efforts — best-effort,
+            #    idempotent, never raises) WITHOUT reaping the worktree, so the
+            #    planning session stays a reopenable finished tile (v6
+            #    non-destructive finish semantics preserved). This is the
+            #    North-Star hole fix (the finish→build path marks the session
+            #    DONE via update_session WITHOUT kill(), so persist is NOT
+            #    otherwise run — the plan docs authored in the planning
+            #    worktree would never reach main, and the build worktree
+            #    created off main HEAD by auto_advance would lack the
+            #    HANDOFF.md/NEXT-PROMPT.md referenced paths). It is ALSO what
+            #    makes the just-authored plan set DISCOVERABLE to the
+            #    capture_plan_set() below: discovery reads the session-tagged
+            #    effort pointer-records the persist creates, so the persist
+            #    MUST run here, before capture, on the worktree-only finish
+            #    flow (the docs are not yet on main / not yet recorded as
+            #    efforts otherwise). The build prompt itself is (re)built by
+            #    auto_advance_planning_to_build through the SAME keystone
+            #    (idempotent re-persist), so there is ONE persist+prompt
+            #    mechanism across every advance path.
+            try:
+                _termsess.prepare_stage_handoff(pid, session, "build")
+            except Exception:
+                pass
+            # 1) Capture the plan set AFTER persisting (so the just-authored
+            #    plan docs are now on main HEAD and discoverable). No reap
+            #    here, so the worktree survives either way.
+            plan_set = _termsess.capture_plan_set(pid, session)
+            if not plan_set:
+                # Honest: no plan set yet ⇒ no build (worktree untouched;
+                # the session stays exactly as it was — we do NOT mark it
+                # done if there is nothing to advance to).
+                handler._send_json({"ok": True, "auto_build": None,
+                                 "reason": "no plan set yet"})
+            else:
+                # 2) Mark the planning session DONE WITHOUT reaping its
+                #    worktree (non-destructive — reopenable finished tile).
+                try:
+                    _sessreg.update_session(
+                        session, status=_sessreg.STATUS_DONE)
+                except KeyError:
+                    pass
+                # v7 Wave 2: the finished planning session is DONE —
+                # schedule a background session-summary (best-effort,
+                # non-blocking, idempotent). Never delays this response.
+                try:
+                    _trigger_session_summary_on_finish(
+                        pid, rec.get("lane"), session)
+                except Exception:
+                    pass
+                # 3) Auto-advance to ONE linked build (idempotent).
+                try:
+                    auto_build = _termsess.auto_advance_planning_to_build(
+                        pid, session, plan_set=plan_set)
+                except Exception:
+                    auto_build = None
+                if auto_build is None:
+                    handler._send_json(
+                        {"ok": True, "auto_build": None,
+                         "reason": "no build (already advanced or "
+                                   "discovery failed)"})
+                else:
+                    handler._send_json({"ok": True,
+                                     "auto_build": auto_build})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -10355,6 +10842,14 @@ _MIGRATED_HANDLERS = {
     "handle_term_start": handle_term_start,
     "handle_zombie_terminal_start": handle_zombie_terminal_start,
     "handle_term_input2": handle_term_input2,
+    "handle_answer_gate": handle_answer_gate,
+    "handle_cancel_job": handle_cancel_job,
+    "handle_regenerate_summary": handle_regenerate_summary,
+    "handle_continue_session": handle_continue_session,
+    "handle_advance_session": handle_advance_session,
+    "handle_advance_stage": handle_advance_stage,
+    "handle_handoff_to_fresh": handle_handoff_to_fresh,
+    "handle_finish_to_build": handle_finish_to_build,
 }
 
 
@@ -12856,50 +13351,14 @@ function startZombieTerminal(btn) {
                         "holder": busy.holder,
                     }, 409)
 
-        elif self.path == "/api/rnd/answer_gate":
-            # Answer a pending in-session gate through the supervisor seam
-            # (rearch W15): the answer is durably QUEUED + ACKed to the job dir
-            # BEFORE this POST returns, then delivered to the session's stdin
-            # supervisor-side — exactly once, retryable across a killed hop.
-            # ``written`` is kept for the legacy endpoint contract (== delivered).
-            job_id = body.get("job_id", "")
-            choice = body.get("choice", "")
-            res = _sup.get_supervisor().answer_gate(job_id, choice)
-            self._send_json({
-                "ok": bool(res.get("ok")) and bool(res.get("delivered")),
-                "written": bool(res.get("delivered")),
-                "delivered": bool(res.get("delivered")),
-                "deferred": bool(res.get("deferred")),
-                "queued": bool(res.get("queued")),
-                "reason": res.get("reason"),
-                "job_id": res.get("job_id"),
-            })
+        # /api/rnd/answer_gate migrated to route_table (handle_answer_gate) — served by the strangler above.
 
         # ── R&D interactive terminal (Wave 7) ─────────────────────────
         # /api/rnd/start_terminal migrated to route_table (handle_start_terminal) — served by the strangler above.
         # /api/rnd/term_input migrated to route_table (handle_term_input) — served by the strangler above.
         # /api/rnd/term_discover migrated to route_table (handle_term_discover) — served by the strangler above.
         # /api/rnd/term_adopt migrated to route_table (handle_term_adopt) — served by the strangler above.
-        elif self.path == "/api/rnd/cancel_job":
-            # Stop a running job (tree-kill via job_runner.cancel). Acts on the
-            # job_id supplied by the ATTACHED console session only — the caller
-            # passes the exact job_id, so two concurrent sessions never cross-
-            # wire. A clean 404 for an unknown id; auth is already enforced by the
-            # middleware above (this is a mutating POST).
-            job_id = (body.get("job_id", "") or "").strip()
-            rec = _jr.load_record(job_id) if job_id else None
-            if rec is None:
-                self._send_json({"ok": False, "error": f"unknown job: {job_id}",
-                                 "reason": "unknown-job"}, 404)
-            else:
-                # rearch W15: cancel through the supervisor seam (it owns the
-                # process tree). Tree-kill is idempotent; a re-cancel no-ops.
-                out = _sup.get_supervisor().cancel(job_id)
-                self._send_json({
-                    "ok": True,
-                    "job_id": job_id,
-                    "status": (out or {}).get("status"),
-                })
+        # /api/rnd/cancel_job migrated to route_table (handle_cancel_job) — served by the strangler above.
 
         elif self.path == "/api/rnd/zombie_kill":
             # Kill an orphaned swarm/terminal session by its SESSION id. The swarm
@@ -13048,39 +13507,7 @@ function startZombieTerminal(btn) {
         # /api/rnd/term_input2 migrated to route_table (handle_term_input2) — served by the strangler above.
 
         # ── R&D validated, cached session summary (Wave 6) ────────────
-        elif self.path == "/api/rnd/regenerate_summary":
-            # Force re-run + re-cache a session's validated summary. Auth is
-            # already enforced by the middleware above (mutating POST). The
-            # session's members are summarized again through the runner seam and
-            # summary.json + summary.md are overwritten. Clean 404 for an unknown
-            # project or session.
-            pid = body.get("project_id", "") or body.get("id", "")
-            lane = body.get("lane", "")
-            session_id = body.get("session_id", "")
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            elif not lane or not session_id:
-                self._send_json({"ok": False,
-                                 "error": "lane and session_id required"}, 400)
-            else:
-                folder = proj.get("folder_path", "")
-                session = None
-                try:
-                    for s in _sessions.list_sessions(folder, pid, lane):
-                        if s.get("session_id") == session_id:
-                            session = s
-                            break
-                except Exception:
-                    session = None
-                if session is None:
-                    self._send_json({"ok": False,
-                                     "error": f"Unknown session: {session_id}"},
-                                    404)
-                else:
-                    summary = _summarizer.summarize_session(
-                        folder, pid, lane, session, force=True)
-                    self._send_json({"ok": True, "summary": summary})
+        # /api/rnd/regenerate_summary migrated to route_table (handle_regenerate_summary) — served by the strangler above.
 
         # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
         # /api/rnd/add_idea migrated to route_table (handle_add_idea) —
@@ -13174,188 +13601,9 @@ function startZombieTerminal(btn) {
                 code = 200 if res.get("ok") else 400
                 self._send_json(res, code)
 
-        elif self.path == "/api/rnd/continue_session":
-            # v5 Wave 2: open a NEW live session in the SAME lane as a DONE/
-            # historical session, SEEDED with that prior session's context (its
-            # cached summary, else a deterministic digest of its members). The
-            # ORIGINAL session/registry record is NEVER mutated (Risk R2) — we
-            # only READ it. Reuses terminal_session.start_session(seed_context=…)
-            # (the Wave-1 seed path), so the new session's single opening turn
-            # loads the lane skill AND carries the prior context. Auth enforced by
-            # the do_POST middleware above (mutating/terminal).
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            lane = (body.get("lane", "") or "").strip()
-            source = (body.get("source_session", "")
-                      or body.get("session", "") or "").strip()
-            # Claude-first policy: continuing a past session opens a NEW session;
-            # default it to Claude rather than the project's sticky last_engine
-            # (which could be Gemini from an unrelated toggle). Explicit backend
-            # in the body still wins; Gemini stays reachable via the toggle.
-            backend = ((body.get("backend", "") or "").strip()
-                       or _termsess.DEFAULT_ENGINE)
-            if not pid or not lane or not source:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id, lane and source_session required"},
-                    400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    seed_context = _build_continue_seed(
-                        folder, pid, lane, source)
-                    try:
-                        if backend:
-                            rec = _termsess.start_session(
-                                pid, lane, backend=backend,
-                                seed_context=seed_context)
-                        else:
-                            rec = _termsess.start_session(
-                                pid, lane, seed_context=seed_context)
-                    except _termsess.TerminalSessionError as exc:
-                        self._send_json({"ok": False, "error": str(exc)}, 400)
-                    else:
-                        self._send_json({"ok": True, "session": rec,
-                                         "seeded_from": source})
+        # /api/rnd/continue_session migrated to route_table (handle_continue_session) — served by the strangler above.
 
-        elif self.path == "/api/rnd/advance_session":
-            # v6 Wave 5: MANUAL advance research → planning. Starts a NEW live
-            # session in ``to_lane`` (defaults 'planning' for a research source),
-            # LINKED to the source via ``parent_session_id`` (so it inherits the
-            # source's ``chain_id`` — see session_registry.start_session / Wave 2),
-            # and SEEDED with the source session's grounded summary/report context.
-            # The seed is built by the SAME read-only _build_continue_seed helper
-            # (its cached summary, else a member digest), so the SOURCE session /
-            # registry record is NEVER mutated — we only READ it. Returns the new
-            # session record in the same JSON shape as continue_session. Auth is
-            # enforced by the do_POST token middleware above (mutating/terminal).
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            source = (body.get("source_session", "")
-                      or body.get("session", "") or "").strip()
-            to_lane = (body.get("to_lane", "") or "").strip() or "planning"
-            backend = (body.get("backend", "") or "").strip() or None
-            if not pid or not source:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id and source_session required"},
-                    400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                elif (_termsess.get_session(source) or {}).get("effort_managed"):
-                    # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
-                    # advances IN-SESSION via /api/rnd/advance_stage; the legacy
-                    # research→plan advance must mint NOTHING for it. Early-return
-                    # so the effort's session-id set is unchanged. Gate on the
-                    # SOURCE session's ``effort_managed`` ONLY (never lane/kind).
-                    # Legacy records (False) fall through to the full v6/v11
-                    # advance path below, unchanged.
-                    self._send_json(
-                        {"ok": False, "session": None,
-                         "reason": "effort-managed-use-advance-stage"}, 409)
-                else:
-                    folder = proj.get("folder_path", "")
-                    # Resolve the SOURCE session's lane for the seed lookup. The
-                    # seed reads the source's CACHED summary in ITS lane; default
-                    # to 'research' (the only source this wave advances).
-                    src_lane = "research"
-                    try:
-                        for r in _termsess.list_sessions(project_id=pid):
-                            if r.get("session_id") == source:
-                                src_lane = r.get("lane") or src_lane
-                                break
-                    except Exception:
-                        pass
-                    # v11 Wave 2 — THE user-facing fix: route research→plan through
-                    # the SHARED handoff KEYSTONE (terminal_session.prepare_stage_
-                    # handoff), mirroring finish_to_build's capture-before-advance.
-                    # The keystone (a) PERSISTS the live source session's produced
-                    # docs into the MAIN project (copy + commit to main HEAD,
-                    # session-tagged efforts — best-effort, idempotent, never raises)
-                    # so they ride into the planning worktree (checked out off main
-                    # HEAD); (b) BUILDS the REAL doc-referencing prompt (names the
-                    # actual persisted paths + "read these first, then plan" + load
-                    # Crucible — honest minimal only when there are genuinely no
-                    # docs, never fabricated); (c) resolves doc_rels + skill + the
-                    # source's cached summary for HANDOFF.md. This is the fix for the
-                    # reported failure: the pre-v11 path NEVER persisted the live
-                    # research docs, so the prompt was a bare "load Crucible" with no
-                    # paths and no HANDOFF.md.
-                    hk = _termsess.prepare_stage_handoff(pid, source, to_lane)
-                    # v11 honesty guard: if the keystone could NOT resolve the
-                    # source session (ok=False → no record / unknown id → empty
-                    # prompt + empty doc_rels), do NOT mint an orphan planning
-                    # session with an empty paste. Return an honest error instead
-                    # (matching the honest-degradation discipline). The
-                    # no-DOCS-but-valid-source path keeps ok=True and proceeds with
-                    # the honest minimal prompt — only the source-unresolvable case
-                    # is guarded here.
-                    if not hk.get("ok"):
-                        self._send_json(
-                            {"ok": False,
-                             "error": "could not resolve source session"}, 400)
-                        return
-                    # The reviewable TASK PROMPT is delivered as a PENDING PASTE
-                    # (held in the new PTY input UNSENT until the user presses
-                    # Enter — paste-NOT-submit, unchanged). The grounded summary
-                    # context still seeds phase-1 (load+greet) so the model greets
-                    # with prior context. Best-effort: an empty prompt → falls back
-                    # to today's seed-context-only path (honest, no fabrication).
-                    seed_context = _build_continue_seed(
-                        folder, pid, src_lane, source)
-                    paste = (hk.get("prompt", "") or "").strip() or None
-                    try:
-                        if backend:
-                            rec = _termsess.start_session(
-                                pid, to_lane, backend=backend,
-                                seed_context=seed_context,
-                                paste_prompt=paste,
-                                parent_session_id=source)
-                        else:
-                            rec = _termsess.start_session(
-                                pid, to_lane, seed_context=seed_context,
-                                paste_prompt=paste,
-                                parent_session_id=source)
-                    except _termsess.TerminalSessionError as exc:
-                        self._send_json({"ok": False, "error": str(exc)}, 400)
-                    else:
-                        # The planning worktree now EXISTS (off main HEAD, which the
-                        # keystone just committed the research docs to). Write BOTH
-                        # durable artifacts into it: the real HANDOFF.md (lists the
-                        # persisted upstream doc paths + the Crucible skill + the
-                        # source's cached summary) AND NEXT-PROMPT.md (the reviewable
-                        # pasted prompt). Then record the research->plan stage edge.
-                        # All best-effort — a write hiccup never strands the advance.
-                        new_wt = rec.get("worktree_path", "")
-                        new_sid = rec.get("session_id", "")
-                        if new_wt:
-                            try:
-                                _handoff.write_handoff_md(
-                                    new_wt, hk.get("doc_rels", []),
-                                    hk.get("skill", "") or "Crucible",
-                                    hk.get("summary_text", ""))
-                            except Exception:
-                                pass
-                            if paste:
-                                try:
-                                    _handoff.write_next_prompt(new_wt, paste)
-                                except Exception:
-                                    pass
-                        try:
-                            _handoff.record_stage_link(
-                                folder, pid, source, new_sid,
-                                kind="research->plan")
-                        except Exception:
-                            pass
-                        self._send_json({"ok": True, "session": rec,
-                                         "advanced_from": source,
-                                         "to_lane": to_lane,
-                                         "persisted": hk.get("persisted", [])})
+        # /api/rnd/advance_session migrated to route_table (handle_advance_session) — served by the strangler above.
 
         # /api/rnd/gandalf_run migrated to route_table (handle_gandalf_run) — served by the strangler above.
 
@@ -13365,227 +13613,11 @@ function startZombieTerminal(btn) {
 
         # /api/rnd/gandalf_clear_failed migrated to route_table (handle_gandalf_clear_failed) — served by the strangler above.
 
-        elif self.path == "/api/rnd/advance_stage":
-            # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME
-            # session (no new session minted, NOTHING injected into the PTY by
-            # default): terminal_session.advance_stage persists+summarizes the
-            # current stage (Wave 5, no reap) and flips current_stage to the next
-            # trio stage. Auth is enforced by the do_POST token middleware above.
-            session = (body.get("session", "")
-                       or body.get("session_id", "") or "").strip()
-            to_stage = (body.get("to_stage", "") or "").strip() or None
-            pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
-            if not session:
-                self._send_json({"ok": False, "error": "session required"}, 400)
-            elif _termsess.get_session(session) is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                out = _termsess.advance_stage(
-                    session, to_stage=to_stage, mode="manual", project_id=pid)
-                rec = out.get("record")
-                # SAFE projection of the updated record — NEVER worktree_path /
-                # branch (those must not leak into the page).
-                safe = None
-                if isinstance(rec, dict):
-                    safe = {
-                        "session_id": rec.get("session_id", ""),
-                        "project_id": rec.get("project_id", ""),
-                        "lane": rec.get("lane", ""),
-                        "status": rec.get("status", ""),
-                        "label": rec.get("label", ""),
-                        "kind": rec.get("kind", ""),
-                        "current_stage": rec.get("current_stage", ""),
-                        "effort_id": rec.get("effort_id", ""),
-                        "effort_managed": rec.get("effort_managed", False),
-                        # project stage_history to SAFE fields — drop baseline_ref
-                        # (a git SHA) + store_lane (Reviewer W6-R2-05).
-                        "stage_history": [
-                            {"stage": e.get("stage", ""),
-                             "state": e.get("state", ""),
-                             "started_at": e.get("started_at"),
-                             "ended_at": e.get("ended_at"),
-                             "doc_count": e.get("doc_count", 0),
-                             "summary_ref": e.get("summary_ref")}
-                            for e in (rec.get("stage_history") or [])
-                            if isinstance(e, dict)
-                        ],
-                    }
-                self._send_json({"ok": bool(out.get("ok")),
-                                 "advanced": bool(out.get("advanced")),
-                                 "reason": out.get("reason"),
-                                 "from_stage": out.get("from_stage"),
-                                 "to_stage": out.get("to_stage"),
-                                 "session": safe},
-                                200 if out.get("ok") else 400)
+        # /api/rnd/advance_stage migrated to route_table (handle_advance_stage) — served by the strangler above.
 
-        elif self.path == "/api/rnd/handoff_to_fresh":
-            # v12 Wave 8: the context-relief valve. Continue the effort in a FRESH
-            # session that JOINS the same effort (same effort_id / tile / lineage),
-            # carrying the prior stage's docs + the real next prompt forward via the
-            # v11.1 machinery — held as a PENDING PASTE (UNSENT; NOTHING
-            # auto-submitted). The old session's stage is closed (done); its
-            # worktree is NOT reaped. Auth is enforced by the do_POST token
-            # middleware above (mutating).
-            session = (body.get("session", "")
-                       or body.get("session_id", "")
-                       or body.get("effort_id", "")).strip()
-            pid = (body.get("project_id", "") or body.get("id", "")).strip() or None
-            if not session:
-                self._send_json(
-                    {"ok": False,
-                     "error": "session or effort_id required"}, 400)
-            else:
-                out = _termsess.handoff_to_fresh(session, project_id=pid)
-                if not out.get("ok"):
-                    code = 404 if out.get("reason") == "unknown-session" else 400
-                    self._send_json({"ok": False,
-                                     "reason": out.get("reason"),
-                                     "error": out.get("reason", "handoff failed")},
-                                    code)
-                else:
-                    new_rec = out.get("new_session") or {}
-                    old_rec = out.get("old_session") or {}
+        # /api/rnd/handoff_to_fresh migrated to route_table (handle_handoff_to_fresh) — served by the strangler above.
 
-                    def _safe(rec):
-                        # SAFE projection — NEVER worktree_path / branch.
-                        if not isinstance(rec, dict):
-                            return None
-                        return {
-                            "session_id": rec.get("session_id", ""),
-                            "project_id": rec.get("project_id", ""),
-                            "lane": rec.get("lane", ""),
-                            "status": rec.get("status", ""),
-                            "kind": rec.get("kind", ""),
-                            "current_stage": rec.get("current_stage", ""),
-                            "effort_id": rec.get("effort_id", ""),
-                            "effort_managed": rec.get("effort_managed", False),
-                            "parent_session_id": rec.get("parent_session_id", ""),
-                            "chain_id": rec.get("chain_id", ""),
-                            "pending_paste": rec.get("pending_paste", ""),
-                            "paste_flushed": rec.get("paste_flushed", False),
-                        }
-
-                    self._send_json({
-                        "ok": True,
-                        "effort_id": out.get("effort_id", ""),
-                        "new_session": _safe(new_rec),
-                        "old_session": _safe(old_rec),
-                        "persisted": out.get("persisted", []),
-                    })
-
-        elif self.path == "/api/rnd/finish_to_build":
-            # v6 Wave 9 (polish 1): EXPLICIT, NON-DESTRUCTIVE plan→build advance.
-            # Mirrors the term_kill auto-advance trigger, but WITHOUT reaping the
-            # planning session's worktree: it stays a reopenable, finished tile
-            # (close-to-tile philosophy). Steps:
-            #   1. capture the plan set NOW (before any reap) via capture_plan_set;
-            #   2. mark THIS planning session DONE via session_registry
-            #      .update_session(status=STATUS_DONE) — NOT kill() (worktree kept);
-            #   3. auto_advance_planning_to_build(..., plan_set=…) — idempotent on
-            #      parent_session_id, so a second call never duplicates the build.
-            # No plan set ⇒ {ok:true, auto_build:null, reason:"no plan set yet"} so
-            # the UI can be honest (never a fabricated build). Auth is enforced by
-            # the do_POST token middleware above (mutating).
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            session = (body.get("session", "")
-                       or body.get("source_session", "") or "").strip()
-            if not pid or not session:
-                self._send_json(
-                    {"ok": False,
-                     "error": "project_id and session required"}, 400)
-            else:
-                rec = _termsess.get_session(session)
-                if rec is None:
-                    self._send_json({"ok": False,
-                                     "error": f"unknown session: {session}",
-                                     "reason": "unknown-session"}, 404)
-                elif rec.get("lane") not in _termsess._PLANNING_LANES:
-                    self._send_json(
-                        {"ok": False,
-                         "error": "finish→build applies only to a planning "
-                                  "session",
-                         "reason": "not-planning"}, 400)
-                elif rec.get("effort_managed"):
-                    # v12 Wave 7 — RETIREMENT MAP (Shark C2/C3): a v12 EFFORT
-                    # advances IN-SESSION via /api/rnd/advance_stage; the legacy
-                    # finish→build path must mint NOTHING for it. Early-return
-                    # (no persist-DONE-mark, no auto-advance) so the effort's
-                    # session-id set is unchanged. Gate on ``effort_managed``
-                    # ONLY (never lane/kind). Legacy records (False) fall through
-                    # to the full v6 finish→build path below, unchanged.
-                    self._send_json(
-                        {"ok": False, "auto_build": None,
-                         "reason": "effort-managed-use-advance-stage"}, 409)
-                else:
-                    # 0) v11 Wave 3 — route the persist through the SHARED keystone
-                    #    (:func:`prepare_stage_handoff`), unifying this path with
-                    #    research→plan + auto-advance. The keystone PERSISTS the
-                    #    planning session's produced docs into the MAIN project (copy
-                    #    + commit to main HEAD, session-tagged efforts — best-effort,
-                    #    idempotent, never raises) WITHOUT reaping the worktree, so the
-                    #    planning session stays a reopenable finished tile (v6
-                    #    non-destructive finish semantics preserved). This is the
-                    #    North-Star hole fix (the finish→build path marks the session
-                    #    DONE via update_session WITHOUT kill(), so persist is NOT
-                    #    otherwise run — the plan docs authored in the planning
-                    #    worktree would never reach main, and the build worktree
-                    #    created off main HEAD by auto_advance would lack the
-                    #    HANDOFF.md/NEXT-PROMPT.md referenced paths). It is ALSO what
-                    #    makes the just-authored plan set DISCOVERABLE to the
-                    #    capture_plan_set() below: discovery reads the session-tagged
-                    #    effort pointer-records the persist creates, so the persist
-                    #    MUST run here, before capture, on the worktree-only finish
-                    #    flow (the docs are not yet on main / not yet recorded as
-                    #    efforts otherwise). The build prompt itself is (re)built by
-                    #    auto_advance_planning_to_build through the SAME keystone
-                    #    (idempotent re-persist), so there is ONE persist+prompt
-                    #    mechanism across every advance path.
-                    try:
-                        _termsess.prepare_stage_handoff(pid, session, "build")
-                    except Exception:
-                        pass
-                    # 1) Capture the plan set AFTER persisting (so the just-authored
-                    #    plan docs are now on main HEAD and discoverable). No reap
-                    #    here, so the worktree survives either way.
-                    plan_set = _termsess.capture_plan_set(pid, session)
-                    if not plan_set:
-                        # Honest: no plan set yet ⇒ no build (worktree untouched;
-                        # the session stays exactly as it was — we do NOT mark it
-                        # done if there is nothing to advance to).
-                        self._send_json({"ok": True, "auto_build": None,
-                                         "reason": "no plan set yet"})
-                    else:
-                        # 2) Mark the planning session DONE WITHOUT reaping its
-                        #    worktree (non-destructive — reopenable finished tile).
-                        try:
-                            _sessreg.update_session(
-                                session, status=_sessreg.STATUS_DONE)
-                        except KeyError:
-                            pass
-                        # v7 Wave 2: the finished planning session is DONE —
-                        # schedule a background session-summary (best-effort,
-                        # non-blocking, idempotent). Never delays this response.
-                        try:
-                            _trigger_session_summary_on_finish(
-                                pid, rec.get("lane"), session)
-                        except Exception:
-                            pass
-                        # 3) Auto-advance to ONE linked build (idempotent).
-                        try:
-                            auto_build = _termsess.auto_advance_planning_to_build(
-                                pid, session, plan_set=plan_set)
-                        except Exception:
-                            auto_build = None
-                        if auto_build is None:
-                            self._send_json(
-                                {"ok": True, "auto_build": None,
-                                 "reason": "no build (already advanced or "
-                                           "discovery failed)"})
-                        else:
-                            self._send_json({"ok": True,
-                                             "auto_build": auto_build})
+        # /api/rnd/finish_to_build migrated to route_table (handle_finish_to_build) — served by the strangler above.
 
         # 2026-05-12: /api/shutdown removed. The NSSM "anchor" service on
         # gwl-server owns process lifecycle. To restart: run `nssm restart
