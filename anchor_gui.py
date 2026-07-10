@@ -9727,6 +9727,247 @@ def handle_gandalf_cancel(handler, path, body):
         })
 
 
+def handle_term_kill(handler, path, body):
+    session = (body.get("session", "") or "").strip()
+    if not session:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    elif _termsess.get_session(session) is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        rec = _termsess.get_session(session)
+        if rec and rec.get("lane") == "gandalf":
+            cancelled = _gandalf.cancel_run(session)
+            handler._send_json({"ok": True, "result": {"ok": True, "cancelled": cancelled}})
+            return
+        # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
+        # DONE transition that may auto-advance to build.
+        #
+        # v8 Wave 4 (ordering fix): kill() PERSISTS the session's
+        # freshly-produced docs into the MAIN folder (Wave 2,
+        # capture-before-reap) BEFORE the worktree is reaped. The plan-set
+        # capture (discover_recent_plan_set) reads the MAIN folder, so it
+        # must run AFTER kill() — otherwise it sees the project as it was
+        # before this session and the auto-opened build gets a stale (or no)
+        # plan. So: kill (persists docs + sets STATUS_DONE + reaps), THEN
+        # capture the now-persisted plan set, THEN auto-advance (idempotent
+        # on parent_session_id; no plan ⇒ no advance). Best-effort.
+        pid_for_advance = rec.get("project_id") if rec else None
+        # v12 Wave 7 — RETIREMENT MAP (Shark C1/C3): a v12 EFFORT
+        # advances IN-SESSION (advance_stage / detect_stage_progress) and
+        # must NEVER trigger the legacy plan→build auto-advance mint. Gate
+        # on ``effort_managed`` ONLY (never lane/kind/current_stage —
+        # legacy records carry those too). A legacy record (False) keeps
+        # the v6 planning-kill auto-advance fully live.
+        planning_kill = (
+            rec is not None
+            and not rec.get("effort_managed")
+            and rec.get("lane") in _termsess._PLANNING_LANES
+            and pid_for_advance)
+        out = _termsess.kill(session)
+        # v7 Wave 2: a killed session is DONE — schedule a background
+        # session-summary so the finished tile opens to a real summary
+        # (and so it's restartable). Best-effort + non-blocking +
+        # idempotent (skips a cached one); never delays the kill response.
+        try:
+            _trigger_session_summary_on_finish(
+                pid_for_advance or (rec.get("project_id") if rec else None),
+                rec.get("lane") if rec else None, session)
+        except Exception:
+            pass
+        # v8 Wave 3: auto-push the project AFTER kill() persisted the
+        # produced docs (Wave 2, capture-before-reap) — but ONLY when the
+        # project is linked to a remote AND has opted in. A non-linked or
+        # non-opted project never pushes. Best-effort + never blocks the
+        # kill response; in tests origin is a LOCAL BARE repo (no network).
+        try:
+            _auto_push_on_finish(
+                pid_for_advance or (rec.get("project_id") if rec else None))
+        except Exception:
+            pass
+        auto_build = None
+        if planning_kill:
+            # Capture the plan set AFTER kill() persisted this session's
+            # produced docs into the main folder (the ordering fix above).
+            try:
+                post_plan_set = _termsess.capture_plan_set(
+                    pid_for_advance, session)
+            except Exception:
+                post_plan_set = None
+            try:
+                auto_build = _termsess.auto_advance_planning_to_build(
+                    pid_for_advance, session,
+                    plan_set=post_plan_set)
+            except Exception:
+                auto_build = None
+        handler._send_json({"ok": True, "result": out,
+                         "auto_build": auto_build})
+
+
+def handle_term_close(handler, path, body):
+    # crucible-improve W6 — the panel "×" GRACEFUL CLOSE. Stop the PTY but
+    # PRESERVE the worktree + KEEP the registry record (parked STATUS_IDLE,
+    # resumable WARM via W3/W4). close_session persists the produced docs to
+    # MAIN (so the boot reaper can't lose them and the W3 resume seed reads
+    # them); here we ALSO schedule the SAME best-effort, non-blocking,
+    # idempotent background session-summary hook kill/finish use, so a later
+    # resume opens WARM, not cold. Token-gated by the do_POST middleware. A
+    # park is NOT a finish — never auto-advances. Best-effort throughout.
+    session = (body.get("session", "") or "").strip()
+    if not session:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    elif _termsess.get_session(session) is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        rec = _termsess.get_session(session)
+        out = _termsess.close_session(session)
+        try:
+            _trigger_session_summary_on_finish(
+                rec.get("project_id") if rec else None,
+                rec.get("lane") if rec else None, session)
+        except Exception:
+            pass
+        handler._send_json({"ok": True, "result": out})
+
+
+def handle_term_delete(handler, path, body):
+    # v9 Wave 1 — TRUE session delete (DISTINCT from term_kill). Removes
+    # the session from Anchor entirely: hard-deletes the registry record
+    # (so the tile stays gone across a reload), drops its lane effort
+    # pointer-records / index entries / cached summary, and (if still
+    # live) kills it first. The produced DOCUMENTS are KEPT (Option A).
+    # Token-gated by the do_POST middleware above AND requires an explicit
+    # confirm:true in the body (a deliberate, irreversible removal).
+    session = (body.get("session", "") or "").strip()
+    confirm = bool(body.get("confirm"))
+    if not session:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    elif not confirm:
+        handler._send_json({"ok": False,
+                         "error": "delete requires confirm:true",
+                         "reason": "confirm-required"}, 400)
+    else:
+        try:
+            out = _termsess.delete_session(session)
+        except Exception as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 500)
+        else:
+            handler._send_json({"ok": True,
+                             "deleted": bool(out.get("deleted")),
+                             "result": out})
+
+
+def handle_cleanup_ghost_sessions(handler, path, body):
+    # v9 Wave 1 — sweep a project's empty GHOST sessions (terminal/idle
+    # registry records with NO tied efforts). Token-gated + confirm-gated
+    # (it deletes records). Project-scoped.
+    pid = (body.get("project_id", "") or "").strip()
+    confirm = bool(body.get("confirm"))
+    if not pid:
+        handler._send_json({"ok": False, "error": "project_id required"}, 400)
+    elif not confirm:
+        handler._send_json({"ok": False,
+                         "error": "cleanup requires confirm:true",
+                         "reason": "confirm-required"}, 400)
+    else:
+        try:
+            out = _termsess.cleanup_ghost_sessions(pid)
+        except Exception as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 500)
+        else:
+            handler._send_json({"ok": True,
+                             "removed": out.get("removed", [])})
+
+
+def handle_term_set_engine(handler, path, body):
+    # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
+    # Token-gated by the do_POST middleware above. Reaps + relaunches in
+    # the SAME worktree, re-seeds once, updates the registry backend.
+    session = (body.get("session", "") or "").strip()
+    engine = (body.get("engine", "") or "").strip()
+    if not session or not engine:
+        handler._send_json({"ok": False,
+                         "error": "session and engine required"}, 400)
+    elif engine not in _termsess.VALID_BACKENDS:
+        handler._send_json({"ok": False,
+                         "error": "invalid engine (expected claude|gemini)",
+                         "reason": "invalid-engine"}, 400)
+    elif _termsess.get_session(session) is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        try:
+            rec = _termsess.switch_engine(session, engine)
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+        else:
+            handler._send_json({"ok": True, "session": rec})
+
+
+def handle_switch_terminal_engine(handler, path, body):
+    # Wave 4: toggle engine (Gemini ↔ Claude) with graceful suspension and summary context handoff.
+    # Token-gated by the do_POST middleware above.
+    session = (body.get("session", "") or body.get("session_id", "") or "").strip()
+    engine = (body.get("engine", "") or "").strip()
+    if not session or not engine:
+        handler._send_json({"ok": False,
+                         "error": "session and engine required"}, 400)
+    elif engine not in _termsess.VALID_BACKENDS:
+        handler._send_json({"ok": False,
+                         "error": "invalid engine (expected claude|gemini)",
+                         "reason": "invalid-engine"}, 400)
+    elif _termsess.get_session(session) is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        try:
+            # 1) Suspend & Summarize
+            summary_text = _termsess.suspend_session(session)
+            # 2) Switch engine and inject summary
+            rec = _termsess.switch_engine(session, engine, seed_context=summary_text)
+            handler._send_json({
+                "ok": True,
+                "session": rec,
+                "context_loaded": bool(summary_text)
+            })
+        except _termsess.TerminalSessionError as exc:
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+
+
+def handle_term_resize(handler, path, body):
+    session = (body.get("session", "") or "").strip()
+    cols = body.get("cols")
+    rows = body.get("rows")
+    if not session or cols is None or rows is None:
+        handler._send_json({"ok": False,
+                         "error": "session, cols, rows required"}, 400)
+    else:
+        out = _termsess.resize(session, cols, rows)
+        if out.get("ok"):
+            handler._send_json({"ok": True})
+        elif out.get("reason") == "unknown-session":
+            # A resize is ADVISORY: a session with no live PTY
+            # (parked / closed-to-tile / reconnecting, or a stale panel
+            # caught mid-teardown or window-reuse) simply has nothing to
+            # resize — a benign no-op, NOT a client error. Returning 404
+            # here surfaced a spurious "Failed to load resource: 404"
+            # browser console error on every reopen/continue, because
+            # the terminal fit path fires term_resize as the panel lays
+            # out. Report the no-op at HTTP 200 so it never reads as a
+            # failed request. (Genuinely bad cols/rows still 400 below.)
+            handler._send_json({"ok": False, "noop": True,
+                             "reason": "unknown-session"})
+        else:
+            handler._send_json({"ok": False,
+                             "error": out.get("detail", "bad request"),
+                             "reason": out.get("reason")}, 400)
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -9787,6 +10028,13 @@ _MIGRATED_HANDLERS = {
     "handle_gandalf_archive": handle_gandalf_archive,
     "handle_gandalf_clear_failed": handle_gandalf_clear_failed,
     "handle_gandalf_cancel": handle_gandalf_cancel,
+    "handle_term_kill": handle_term_kill,
+    "handle_term_close": handle_term_close,
+    "handle_term_delete": handle_term_delete,
+    "handle_cleanup_ghost_sessions": handle_cleanup_ghost_sessions,
+    "handle_term_set_engine": handle_term_set_engine,
+    "handle_switch_terminal_engine": handle_switch_terminal_engine,
+    "handle_term_resize": handle_term_resize,
 }
 
 
@@ -12718,156 +12966,13 @@ function startZombieTerminal(btn) {
                     "backend": rec.get("backend")
                 })
 
-        elif self.path == "/api/rnd/term_kill":
-            session = (body.get("session", "") or "").strip()
-            if not session:
-                self._send_json({"ok": False, "error": "session required"}, 400)
-            elif _termsess.get_session(session) is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                rec = _termsess.get_session(session)
-                if rec and rec.get("lane") == "gandalf":
-                    cancelled = _gandalf.cancel_run(session)
-                    self._send_json({"ok": True, "result": {"ok": True, "cancelled": cancelled}})
-                    return
-                # v6 Wave 6: a DELIBERATE hard-kill of a PLANNING session is a
-                # DONE transition that may auto-advance to build.
-                #
-                # v8 Wave 4 (ordering fix): kill() PERSISTS the session's
-                # freshly-produced docs into the MAIN folder (Wave 2,
-                # capture-before-reap) BEFORE the worktree is reaped. The plan-set
-                # capture (discover_recent_plan_set) reads the MAIN folder, so it
-                # must run AFTER kill() — otherwise it sees the project as it was
-                # before this session and the auto-opened build gets a stale (or no)
-                # plan. So: kill (persists docs + sets STATUS_DONE + reaps), THEN
-                # capture the now-persisted plan set, THEN auto-advance (idempotent
-                # on parent_session_id; no plan ⇒ no advance). Best-effort.
-                pid_for_advance = rec.get("project_id") if rec else None
-                # v12 Wave 7 — RETIREMENT MAP (Shark C1/C3): a v12 EFFORT
-                # advances IN-SESSION (advance_stage / detect_stage_progress) and
-                # must NEVER trigger the legacy plan→build auto-advance mint. Gate
-                # on ``effort_managed`` ONLY (never lane/kind/current_stage —
-                # legacy records carry those too). A legacy record (False) keeps
-                # the v6 planning-kill auto-advance fully live.
-                planning_kill = (
-                    rec is not None
-                    and not rec.get("effort_managed")
-                    and rec.get("lane") in _termsess._PLANNING_LANES
-                    and pid_for_advance)
-                out = _termsess.kill(session)
-                # v7 Wave 2: a killed session is DONE — schedule a background
-                # session-summary so the finished tile opens to a real summary
-                # (and so it's restartable). Best-effort + non-blocking +
-                # idempotent (skips a cached one); never delays the kill response.
-                try:
-                    _trigger_session_summary_on_finish(
-                        pid_for_advance or (rec.get("project_id") if rec else None),
-                        rec.get("lane") if rec else None, session)
-                except Exception:
-                    pass
-                # v8 Wave 3: auto-push the project AFTER kill() persisted the
-                # produced docs (Wave 2, capture-before-reap) — but ONLY when the
-                # project is linked to a remote AND has opted in. A non-linked or
-                # non-opted project never pushes. Best-effort + never blocks the
-                # kill response; in tests origin is a LOCAL BARE repo (no network).
-                try:
-                    _auto_push_on_finish(
-                        pid_for_advance or (rec.get("project_id") if rec else None))
-                except Exception:
-                    pass
-                auto_build = None
-                if planning_kill:
-                    # Capture the plan set AFTER kill() persisted this session's
-                    # produced docs into the main folder (the ordering fix above).
-                    try:
-                        post_plan_set = _termsess.capture_plan_set(
-                            pid_for_advance, session)
-                    except Exception:
-                        post_plan_set = None
-                    try:
-                        auto_build = _termsess.auto_advance_planning_to_build(
-                            pid_for_advance, session,
-                            plan_set=post_plan_set)
-                    except Exception:
-                        auto_build = None
-                self._send_json({"ok": True, "result": out,
-                                 "auto_build": auto_build})
+        # /api/rnd/term_kill migrated to route_table (handle_term_kill) — served by the strangler above.
 
-        elif self.path == "/api/rnd/term_close":
-            # crucible-improve W6 — the panel "×" GRACEFUL CLOSE. Stop the PTY but
-            # PRESERVE the worktree + KEEP the registry record (parked STATUS_IDLE,
-            # resumable WARM via W3/W4). close_session persists the produced docs to
-            # MAIN (so the boot reaper can't lose them and the W3 resume seed reads
-            # them); here we ALSO schedule the SAME best-effort, non-blocking,
-            # idempotent background session-summary hook kill/finish use, so a later
-            # resume opens WARM, not cold. Token-gated by the do_POST middleware. A
-            # park is NOT a finish — never auto-advances. Best-effort throughout.
-            session = (body.get("session", "") or "").strip()
-            if not session:
-                self._send_json({"ok": False, "error": "session required"}, 400)
-            elif _termsess.get_session(session) is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                rec = _termsess.get_session(session)
-                out = _termsess.close_session(session)
-                try:
-                    _trigger_session_summary_on_finish(
-                        rec.get("project_id") if rec else None,
-                        rec.get("lane") if rec else None, session)
-                except Exception:
-                    pass
-                self._send_json({"ok": True, "result": out})
+        # /api/rnd/term_close migrated to route_table (handle_term_close) — served by the strangler above.
 
-        elif self.path == "/api/rnd/term_delete":
-            # v9 Wave 1 — TRUE session delete (DISTINCT from term_kill). Removes
-            # the session from Anchor entirely: hard-deletes the registry record
-            # (so the tile stays gone across a reload), drops its lane effort
-            # pointer-records / index entries / cached summary, and (if still
-            # live) kills it first. The produced DOCUMENTS are KEPT (Option A).
-            # Token-gated by the do_POST middleware above AND requires an explicit
-            # confirm:true in the body (a deliberate, irreversible removal).
-            session = (body.get("session", "") or "").strip()
-            confirm = bool(body.get("confirm"))
-            if not session:
-                self._send_json({"ok": False, "error": "session required"}, 400)
-            elif not confirm:
-                self._send_json({"ok": False,
-                                 "error": "delete requires confirm:true",
-                                 "reason": "confirm-required"}, 400)
-            else:
-                try:
-                    out = _termsess.delete_session(session)
-                except Exception as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 500)
-                else:
-                    self._send_json({"ok": True,
-                                     "deleted": bool(out.get("deleted")),
-                                     "result": out})
+        # /api/rnd/term_delete migrated to route_table (handle_term_delete) — served by the strangler above.
 
-        elif self.path == "/api/rnd/cleanup_ghost_sessions":
-            # v9 Wave 1 — sweep a project's empty GHOST sessions (terminal/idle
-            # registry records with NO tied efforts). Token-gated + confirm-gated
-            # (it deletes records). Project-scoped.
-            pid = (body.get("project_id", "") or "").strip()
-            confirm = bool(body.get("confirm"))
-            if not pid:
-                self._send_json({"ok": False, "error": "project_id required"}, 400)
-            elif not confirm:
-                self._send_json({"ok": False,
-                                 "error": "cleanup requires confirm:true",
-                                 "reason": "confirm-required"}, 400)
-            else:
-                try:
-                    out = _termsess.cleanup_ghost_sessions(pid)
-                except Exception as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 500)
-                else:
-                    self._send_json({"ok": True,
-                                     "removed": out.get("removed", [])})
+        # /api/rnd/cleanup_ghost_sessions migrated to route_table (handle_cleanup_ghost_sessions) — served by the strangler above.
 
         elif self.path in ("/api/rnd/reaper_arm", "/api/rnd/reaper_advance",
                             "/api/rnd/reaper_disarm"):
@@ -12896,88 +13001,11 @@ function startZombieTerminal(btn) {
                     401 if out.get("error") == "unauthorized" else 409)
                 self._send_json(out, code)
 
-        elif self.path == "/api/rnd/term_set_engine":
-            # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
-            # Token-gated by the do_POST middleware above. Reaps + relaunches in
-            # the SAME worktree, re-seeds once, updates the registry backend.
-            session = (body.get("session", "") or "").strip()
-            engine = (body.get("engine", "") or "").strip()
-            if not session or not engine:
-                self._send_json({"ok": False,
-                                 "error": "session and engine required"}, 400)
-            elif engine not in _termsess.VALID_BACKENDS:
-                self._send_json({"ok": False,
-                                 "error": "invalid engine (expected claude|gemini)",
-                                 "reason": "invalid-engine"}, 400)
-            elif _termsess.get_session(session) is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                try:
-                    rec = _termsess.switch_engine(session, engine)
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-                else:
-                    self._send_json({"ok": True, "session": rec})
+        # /api/rnd/term_set_engine migrated to route_table (handle_term_set_engine) — served by the strangler above.
 
-        elif self.path == "/api/rnd/switch_terminal_engine":
-            # Wave 4: toggle engine (Gemini ↔ Claude) with graceful suspension and summary context handoff.
-            # Token-gated by the do_POST middleware above.
-            session = (body.get("session", "") or body.get("session_id", "") or "").strip()
-            engine = (body.get("engine", "") or "").strip()
-            if not session or not engine:
-                self._send_json({"ok": False,
-                                 "error": "session and engine required"}, 400)
-            elif engine not in _termsess.VALID_BACKENDS:
-                self._send_json({"ok": False,
-                                 "error": "invalid engine (expected claude|gemini)",
-                                 "reason": "invalid-engine"}, 400)
-            elif _termsess.get_session(session) is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                try:
-                    # 1) Suspend & Summarize
-                    summary_text = _termsess.suspend_session(session)
-                    # 2) Switch engine and inject summary
-                    rec = _termsess.switch_engine(session, engine, seed_context=summary_text)
-                    self._send_json({
-                        "ok": True,
-                        "session": rec,
-                        "context_loaded": bool(summary_text)
-                    })
-                except _termsess.TerminalSessionError as exc:
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
+        # /api/rnd/switch_terminal_engine migrated to route_table (handle_switch_terminal_engine) — served by the strangler above.
 
-        elif self.path == "/api/rnd/term_resize":
-            session = (body.get("session", "") or "").strip()
-            cols = body.get("cols")
-            rows = body.get("rows")
-            if not session or cols is None or rows is None:
-                self._send_json({"ok": False,
-                                 "error": "session, cols, rows required"}, 400)
-            else:
-                out = _termsess.resize(session, cols, rows)
-                if out.get("ok"):
-                    self._send_json({"ok": True})
-                elif out.get("reason") == "unknown-session":
-                    # A resize is ADVISORY: a session with no live PTY
-                    # (parked / closed-to-tile / reconnecting, or a stale panel
-                    # caught mid-teardown or window-reuse) simply has nothing to
-                    # resize — a benign no-op, NOT a client error. Returning 404
-                    # here surfaced a spurious "Failed to load resource: 404"
-                    # browser console error on every reopen/continue, because
-                    # the terminal fit path fires term_resize as the panel lays
-                    # out. Report the no-op at HTTP 200 so it never reads as a
-                    # failed request. (Genuinely bad cols/rows still 400 below.)
-                    self._send_json({"ok": False, "noop": True,
-                                     "reason": "unknown-session"})
-                else:
-                    self._send_json({"ok": False,
-                                     "error": out.get("detail", "bad request"),
-                                     "reason": out.get("reason")}, 400)
+        # /api/rnd/term_resize migrated to route_table (handle_term_resize) — served by the strangler above.
 
         elif self.path == "/api/rnd/term_input2":
             # POST-in half of the SSE-out + POST-in fallback transport. Authed by
