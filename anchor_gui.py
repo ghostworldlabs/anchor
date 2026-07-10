@@ -12027,6 +12027,344 @@ def handle_board_html(handler, path, body):
     handler._send_json({"ok": True, "html": frag})
 
 
+def handle_handoff_proposal(handler, path, body):
+    # Read-only stage-handoff PROPOSAL (v3 Wave 7): the UI shows
+    # "execute on this plan set?" BEFORE launching a build session.
+    # Pure metadata (structure-only, no contents) — read endpoint,
+    # consistent with the other read GETs (no token required).
+    # /api/rnd/handoff_proposal?project_id=<id>&lane=build[&seed_session=<sid>]
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    lane = (q.get("lane", ["build"])[0] or "build").strip()
+    seed = (q.get("seed_session", [""])[0] or "").strip() or None
+    if not pid:
+        handler._send_json({"ok": False,
+                         "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    elif _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+    elif seed and _unsafe_path_seg(seed):
+        handler._send_json({"ok": False, "error": "bad seed"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                prop = _handoff.propose_handoff(
+                    folder, pid, lane, source_session_id=seed)
+            except Exception:
+                prop = {"has_plan_set": False}
+            handler._send_json({"ok": True, **prop})
+
+
+def handle_session_summary(handler, path, body):
+    # Read-only structured SESSION summary as JSON (v3 Wave 6): the
+    # in-place accordion fetches this instead of navigating to the
+    # /summary page. If cached → return it. If NOT cached → kick off
+    # background generation (run-once, runner seam) and return a
+    # {status:"generating"} fallback so the panel can re-fetch. This
+    # NEVER runs the model synchronously on the request thread.
+    # /api/rnd/session_summary?pid=<id>&lane=<lane>&session=<sid>
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0] or "").strip()
+    lane = (q.get("lane", [""])[0] or "").strip()
+    session_id = (q.get("session", [""])[0] or "").strip()
+    if not pid or not lane or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "pid, lane, session required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    elif _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        folder = (proj or {}).get("folder_path", "")
+        store_lane = _eh._resolve_subdir(lane)
+        cached = None
+        try:
+            cached = _summarizer.load_cached(
+                folder, pid, store_lane, session_id)
+        except Exception:
+            cached = None
+        if isinstance(cached, dict) and not cached.get("error"):
+            handler._send_json({"ok": True, "status": "ready",
+                             "summary": cached})
+        elif proj is None:
+            # Unknown / unregistered project → TERMINAL status so a
+            # polling panel STOPS (never an endless "generating").
+            handler._send_json({"ok": True, "status": "unknown"})
+        else:
+            # Not cached (or a prior failed/uncached run): resolve the
+            # session so generation can seed from its members. v8 Wave
+            # 5 — a killed managed session's produced docs are persisted
+            # tagged with its id (they GROUP elsewhere in list_sessions),
+            # so resolve via _resolve_finished_session which TIES the
+            # managed id to those exact docs. Unresolvable → TERMINAL
+            # "unknown" (the panel stops polling); else kick off
+            # background generation run-once and tell the panel to poll.
+            session = None
+            try:
+                session = _resolve_finished_session(
+                    folder, pid, lane, session_id)
+            except Exception:
+                session = None
+            if session is None:
+                handler._send_json({"ok": True, "status": "unknown"})
+            else:
+                _trigger_session_summary(
+                    folder, pid, lane, session)
+                handler._send_json({"ok": True, "status": "generating"})
+
+
+def handle_term_sessions(handler, path, body):
+    # Read-only: managed terminal sessions for a project — the
+    # repopulate-from-registry hook the cockpit tiles row paints from
+    # on load. Returns a SAFE projection of each registry record (NO
+    # absolute worktree_path / branch — the UI has no need for them,
+    # and they MUST NOT leak). Consistent with /api/rnd/projects
+    # (GET, no mutation, no auth gate).
+    #
+    # v6 Wave 4: this projection now INCLUDES terminal-status
+    # (done/failed) sessions too — finished tiles stay in the row as
+    # greyed, reopenable tiles (newest-prominent + "previously done").
+    # It also carries the Wave-2 lineage fields
+    # (parent_session_id / chain_id) so the front end can group a
+    # chain. Still SAFE: worktree_path / branch are NEVER included.
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
+    # project-window refresh/poll path. Before listing, reconcile the
+    # registry against the LIVE PTY set: a managed planning session
+    # whose process is gone is re-statused DONE and (idempotently)
+    # auto-advanced to ONE linked build — so a planning session that
+    # DIED (not just an explicit hard-kill) advances on the next
+    # refresh. Idempotent on parent_session_id → repeated polls are
+    # no-ops. Best-effort + fully guarded: an error here NEVER breaks
+    # the (read-only) session list response. live_session_ids MUST be
+    # passed (the function default treats NO session as live, which
+    # would wrongly mark live ones stale).
+    try:
+        live = list(_termsess._pty.live_sessions())
+        # v12 Wave 8 — restart recovery MUST run BEFORE reconcile
+        # (Reviewer W8-R2-01): reconcile_and_advance blanket-marks every
+        # RUNNING-but-PTY-gone session DONE (no effort exemption), and
+        # recover only acts on RUNNING records — so recover has to claim
+        # an ``effort_managed`` effort whose PTY is gone FIRST (persist
+        # its active stage's worktree docs [no reap], mark the stage entry
+        # 'interrupted' [≠ done/failed], re-status IDLE so it is honestly
+        # not-running + reopenable; NEVER auto-spawns/advances) — otherwise
+        # reconcile would mark it DONE and its uncommitted docs would be
+        # LOST. Once recover sets it IDLE, the reconcile pass below leaves
+        # it alone (it only re-statuses RUNNING-but-gone). Best-effort +
+        # fully guarded: an error here NEVER breaks the read-only list.
+        try:
+            _termsess.recover_interrupted_efforts(
+                live_session_ids=live)
+        except Exception:
+            pass
+        _rec_out = _termsess.reconcile_and_advance(
+            live_session_ids=live)
+        # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
+        # use the legacy reconcile→auto_advance_planning_to_build mint
+        # (which is gated off for it anyway). Instead, on the SAME
+        # refresh poll, run the on-disk-only ``detect_stage_progress``
+        # over the project's LIVE efforts — it auto-advances IN-SESSION
+        # on a committed plan-set / build signal (ZERO PTY bytes,
+        # idempotent, mints nothing). Legacy sessions stay on the
+        # reconcile_and_advance path above. Best-effort + fully guarded
+        # (never breaks the read-only session-list response).
+        try:
+            for _er in _termsess.list_sessions(
+                    project_id=pid or None):
+                if not isinstance(_er, dict):
+                    continue
+                if not _er.get("effort_managed"):
+                    continue
+                if _er.get("status") != _termsess._reg.STATUS_RUNNING:
+                    continue
+                try:
+                    _termsess.detect_stage_progress(
+                        _er.get("session_id"),
+                        project_id=_er.get("project_id") or None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # v7 Wave 2: any session newly re-statused DONE by the
+        # reconcile-dead path gets a background session-summary
+        # scheduled (best-effort, non-blocking, idempotent — a cached
+        # one is skipped, so repeated polls don't re-run the model).
+        # Never breaks the read-only session-list response.
+        try:
+            marked = ((_rec_out or {}).get("reconcile", {})
+                      or {}).get("marked", []) or []
+            for _sid in marked:
+                _r = _termsess.get_session(_sid)
+                if _r is None:
+                    continue
+                _trigger_session_summary_on_finish(
+                    _r.get("project_id"), _r.get("lane"), _sid)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    try:
+        recs = _termsess.list_sessions(project_id=pid or None)
+    except Exception:
+        recs = []
+    safe = []
+    for r in recs:
+        if not isinstance(r, dict):
+            continue
+        # v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench
+        # develop session (research/plan, [grass-dev] label) must NOT
+        # surface on the top strip. It is mounted by session id
+        # directly in the workbench pane (developGrass), not via this
+        # projection, so dropping it here keeps the contained promise
+        # at the source (the JS top-strip guard is the belt-and-braces
+        # second line). Nothing else consumes this projection for
+        # grass-dev sessions (the chain breadcrumb uses chain_members).
+        if _eh.is_grass_dev_label(r.get("label")):
+            continue
+        # Phantom-tile fix: a Gandalf run registers a lane='gandalf'
+        # status/cancel record, and the Zombie-Hunter terminal runs
+        # under lane='zombie' (legacy records: lane='general',
+        # label='zombie-hunter'). NONE of these are cockpit terminals
+        # — exclude them so they never paint a workstation tile. The
+        # label clause clears ALREADY-PERSISTED zombie records that
+        # still carry lane='general'. Real general-tab terminals
+        # (lane='general', no zombie-hunter label) are unaffected.
+        if (r.get("lane") in ("gandalf", "zombie")
+                or r.get("label") == "zombie-hunter"):
+            continue
+        safe.append({
+            "session_id": r.get("session_id"),
+            "project_id": r.get("project_id", ""),
+            "lane": r.get("lane", ""),
+            "backend": r.get("backend", ""),
+            "status": r.get("status", ""),
+            "label": r.get("label", ""),
+            "created_at": r.get("created_at"),
+            "parent_session_id": r.get("parent_session_id", ""),
+            "chain_id": r.get("chain_id", ""),
+            # v10 Wave 4: grass→project lineage (SAFE — idea id only,
+            # never worktree_path/branch).
+            "grass_origin": r.get("grass_origin", ""),
+            # v12 Wave 7: the effort discriminator (SAFE — a bool).
+            # The JS uses it to HIDE the retired legacy advance bars
+            # (research "Advance to Planning →" / planning
+            # "Finish → Build →") for a v12 effort, so the old
+            # session-minting affordances are not reachable for it.
+            "effort_managed": bool(r.get("effort_managed", False)),
+        })
+    handler._send_json({"ok": True, "sessions": safe})
+
+
+def handle_projects_html(handler, path, body):
+    # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
+    # already-open main dashboard can poll for changes (new session,
+    # added idea, priority/notes/blurb edit, archive, new project,
+    # refreshed summary, rollups) and swap them in WITHOUT a full
+    # page reload. REUSES render_projects_view_html (which reads
+    # ONLY the cached summaries — no synchronous model run here). No
+    # mutation, no auth gate (consistent with /api/rnd/projects).
+    try:
+        frag = render_projects_view_html()
+    except Exception:
+        frag = ('<div class="rnd-projects"><p class="rnd-empty">'
+                'No active R&amp;D projects.</p></div>')
+    handler._send_json({"ok": True, "html": frag})
+
+
+def handle_previews(handler, path, body):
+    # Read-only: list ephemeral deliverable previews for a project
+    # (reconciles dead previews → stopped so the UI repopulates
+    # truthfully on reconnect). Wave 8. Returns a SAFE projection of
+    # each registry record — NO absolute filesystem paths
+    # (data_dir / folder_path); the UI only needs the id/url/port/
+    # status. Consistent with the term_sessions projection (which
+    # strips worktree_path). The persisted record (.anchor/
+    # previews.json) keeps the full fields for reaping.
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip() or None
+    safe = []
+    for r in _preview.list_previews(pid):
+        if not isinstance(r, dict):
+            continue
+        safe.append({
+            "preview_id": r.get("preview_id"),
+            "project_id": r.get("project_id"),
+            "target": r.get("target", ""),
+            "port": r.get("port"),
+            "url": r.get("url", ""),
+            "status": r.get("status", ""),
+            "started_at": r.get("started_at"),
+            "stopped_at": r.get("stopped_at"),
+        })
+    handler._send_json({"ok": True, "previews": safe})
+
+
+def handle_zombie_kill(handler, path, body):
+    # Kill an orphaned swarm/terminal session by its SESSION id. The swarm
+    # & owner view lists session_registry records, so it passes a
+    # session_id (NOT a job_runner job_id) — cancel_job's _jr.load_record
+    # would 404 on it. Here we tree-kill the recorded PID directly and mark
+    # the registry record CANCELLED so it drops out of the running list and
+    # never reappears on refresh. Idempotent; clean 404 for an unknown id.
+    # Auth is enforced by the mutating-POST middleware above.
+    import proc_probe
+    sid = (body.get("session_id", "") or body.get("session", "")
+           or body.get("job_id", "") or "").strip()
+    rec = _sessreg.get_session(sid) if sid else None
+    if rec is None:
+        handler._send_json({"ok": False, "error": f"unknown session: {sid}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        pid = rec.get("pid")
+        killed = False
+        try:
+            if pid not in (None, ""):
+                killed = bool(proc_probe.tree_kill(int(pid)))
+        except Exception:
+            killed = False
+        try:
+            _sessreg.update_session(sid, status=_sessreg.STATUS_CANCELLED)
+        except Exception:
+            pass
+        try:
+            import zombie_hunter
+            zombie_hunter.forget_pid(pid)
+        except Exception:
+            pass
+        handler._send_json({"ok": True, "session_id": sid, "killed": killed})
+
+
+def handle_zombie_resume(handler, path, body):
+    # Un-freeze an orphan that was auto-paused in the report while it
+    # waited to be killed (the swarm & owner view's Resume button). Acts
+    # by session_id. Clean 404 for an unknown id; auth enforced above.
+    sid = (body.get("session_id", "") or body.get("session", "")).strip()
+    rec = _sessreg.get_session(sid) if sid else None
+    if rec is None:
+        handler._send_json({"ok": False, "error": f"unknown session: {sid}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        pid = rec.get("pid")
+        resumed = False
+        try:
+            if pid not in (None, ""):
+                import zombie_hunter
+                resumed = bool(zombie_hunter.resume_pid(pid))
+        except Exception:
+            resumed = False
+        handler._send_json({"ok": True, "session_id": sid, "resumed": resumed})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -12131,6 +12469,13 @@ _MIGRATED_HANDLERS = {
     "handle_zombie_hunter_report": handle_zombie_hunter_report,
     "handle_zombie_terminal": handle_zombie_terminal,
     "handle_board_html": handle_board_html,
+    "handle_handoff_proposal": handle_handoff_proposal,
+    "handle_session_summary": handle_session_summary,
+    "handle_term_sessions": handle_term_sessions,
+    "handle_projects_html": handle_projects_html,
+    "handle_previews": handle_previews,
+    "handle_zombie_kill": handle_zombie_kill,
+    "handle_zombie_resume": handle_zombie_resume,
 }
 
 
@@ -12945,100 +13290,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     if isinstance(body, str):
                         body = body.encode("utf-8")
                     self._send_bytes(body, out["content_type"])
-            elif self.path.startswith("/api/rnd/handoff_proposal"):
-                # Read-only stage-handoff PROPOSAL (v3 Wave 7): the UI shows
-                # "execute on this plan set?" BEFORE launching a build session.
-                # Pure metadata (structure-only, no contents) — read endpoint,
-                # consistent with the other read GETs (no token required).
-                # /api/rnd/handoff_proposal?project_id=<id>&lane=build[&seed_session=<sid>]
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                lane = (q.get("lane", ["build"])[0] or "build").strip()
-                seed = (q.get("seed_session", [""])[0] or "").strip() or None
-                if not pid:
-                    self._send_json({"ok": False,
-                                     "error": "project_id required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                elif _unsafe_path_seg(lane):
-                    self._send_json({"ok": False, "error": "bad lane"}, 400)
-                elif seed and _unsafe_path_seg(seed):
-                    self._send_json({"ok": False, "error": "bad seed"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    if proj is None:
-                        self._send_json({"ok": False,
-                                         "error": "Unknown project"}, 404)
-                    else:
-                        folder = proj.get("folder_path", "")
-                        try:
-                            prop = _handoff.propose_handoff(
-                                folder, pid, lane, source_session_id=seed)
-                        except Exception:
-                            prop = {"has_plan_set": False}
-                        self._send_json({"ok": True, **prop})
+            # /api/rnd/handoff_proposal migrated to route_table (handle_handoff_proposal) — served by the strangler above.
             # /api/rnd/project_files migrated to route_table (handle_project_files) — served by the strangler above.
 
             # /api/rnd/project_file_content migrated to route_table (handle_project_file_content) — served by the strangler above.
 
-            elif self.path.startswith("/api/rnd/session_summary"):
-                # Read-only structured SESSION summary as JSON (v3 Wave 6): the
-                # in-place accordion fetches this instead of navigating to the
-                # /summary page. If cached → return it. If NOT cached → kick off
-                # background generation (run-once, runner seam) and return a
-                # {status:"generating"} fallback so the panel can re-fetch. This
-                # NEVER runs the model synchronously on the request thread.
-                # /api/rnd/session_summary?pid=<id>&lane=<lane>&session=<sid>
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("pid", [""])[0] or "").strip()
-                lane = (q.get("lane", [""])[0] or "").strip()
-                session_id = (q.get("session", [""])[0] or "").strip()
-                if not pid or not lane or not session_id:
-                    self._send_json({"ok": False,
-                                     "error": "pid, lane, session required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                elif _unsafe_path_seg(lane):
-                    self._send_json({"ok": False, "error": "bad lane"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    folder = (proj or {}).get("folder_path", "")
-                    store_lane = _eh._resolve_subdir(lane)
-                    cached = None
-                    try:
-                        cached = _summarizer.load_cached(
-                            folder, pid, store_lane, session_id)
-                    except Exception:
-                        cached = None
-                    if isinstance(cached, dict) and not cached.get("error"):
-                        self._send_json({"ok": True, "status": "ready",
-                                         "summary": cached})
-                    elif proj is None:
-                        # Unknown / unregistered project → TERMINAL status so a
-                        # polling panel STOPS (never an endless "generating").
-                        self._send_json({"ok": True, "status": "unknown"})
-                    else:
-                        # Not cached (or a prior failed/uncached run): resolve the
-                        # session so generation can seed from its members. v8 Wave
-                        # 5 — a killed managed session's produced docs are persisted
-                        # tagged with its id (they GROUP elsewhere in list_sessions),
-                        # so resolve via _resolve_finished_session which TIES the
-                        # managed id to those exact docs. Unresolvable → TERMINAL
-                        # "unknown" (the panel stops polling); else kick off
-                        # background generation run-once and tell the panel to poll.
-                        session = None
-                        try:
-                            session = _resolve_finished_session(
-                                folder, pid, lane, session_id)
-                        except Exception:
-                            session = None
-                        if session is None:
-                            self._send_json({"ok": True, "status": "unknown"})
-                        else:
-                            _trigger_session_summary(
-                                folder, pid, lane, session)
-                            self._send_json({"ok": True, "status": "generating"})
+            # /api/rnd/session_summary migrated to route_table (handle_session_summary) — served by the strangler above.
             # /api/rnd/session_doc_roles migrated to route_table (handle_session_doc_roles) — served by the strangler above.
             # /api/rnd/context_status migrated to route_table (handle_context_status) — served by the strangler above.
             # /api/rnd/effort_rollup migrated to route_table
@@ -13117,165 +13374,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass  # discovery is best-effort; never block the view
                 self._send_html(render_project_window_html(pid))
-            elif self.path.startswith("/api/rnd/term_sessions"):
-                # Read-only: managed terminal sessions for a project — the
-                # repopulate-from-registry hook the cockpit tiles row paints from
-                # on load. Returns a SAFE projection of each registry record (NO
-                # absolute worktree_path / branch — the UI has no need for them,
-                # and they MUST NOT leak). Consistent with /api/rnd/projects
-                # (GET, no mutation, no auth gate).
-                #
-                # v6 Wave 4: this projection now INCLUDES terminal-status
-                # (done/failed) sessions too — finished tiles stay in the row as
-                # greyed, reopenable tiles (newest-prominent + "previously done").
-                # It also carries the Wave-2 lineage fields
-                # (parent_session_id / chain_id) so the front end can group a
-                # chain. Still SAFE: worktree_path / branch are NEVER included.
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0] or "").strip()
-                # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
-                # project-window refresh/poll path. Before listing, reconcile the
-                # registry against the LIVE PTY set: a managed planning session
-                # whose process is gone is re-statused DONE and (idempotently)
-                # auto-advanced to ONE linked build — so a planning session that
-                # DIED (not just an explicit hard-kill) advances on the next
-                # refresh. Idempotent on parent_session_id → repeated polls are
-                # no-ops. Best-effort + fully guarded: an error here NEVER breaks
-                # the (read-only) session list response. live_session_ids MUST be
-                # passed (the function default treats NO session as live, which
-                # would wrongly mark live ones stale).
-                try:
-                    live = list(_termsess._pty.live_sessions())
-                    # v12 Wave 8 — restart recovery MUST run BEFORE reconcile
-                    # (Reviewer W8-R2-01): reconcile_and_advance blanket-marks every
-                    # RUNNING-but-PTY-gone session DONE (no effort exemption), and
-                    # recover only acts on RUNNING records — so recover has to claim
-                    # an ``effort_managed`` effort whose PTY is gone FIRST (persist
-                    # its active stage's worktree docs [no reap], mark the stage entry
-                    # 'interrupted' [≠ done/failed], re-status IDLE so it is honestly
-                    # not-running + reopenable; NEVER auto-spawns/advances) — otherwise
-                    # reconcile would mark it DONE and its uncommitted docs would be
-                    # LOST. Once recover sets it IDLE, the reconcile pass below leaves
-                    # it alone (it only re-statuses RUNNING-but-gone). Best-effort +
-                    # fully guarded: an error here NEVER breaks the read-only list.
-                    try:
-                        _termsess.recover_interrupted_efforts(
-                            live_session_ids=live)
-                    except Exception:
-                        pass
-                    _rec_out = _termsess.reconcile_and_advance(
-                        live_session_ids=live)
-                    # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
-                    # use the legacy reconcile→auto_advance_planning_to_build mint
-                    # (which is gated off for it anyway). Instead, on the SAME
-                    # refresh poll, run the on-disk-only ``detect_stage_progress``
-                    # over the project's LIVE efforts — it auto-advances IN-SESSION
-                    # on a committed plan-set / build signal (ZERO PTY bytes,
-                    # idempotent, mints nothing). Legacy sessions stay on the
-                    # reconcile_and_advance path above. Best-effort + fully guarded
-                    # (never breaks the read-only session-list response).
-                    try:
-                        for _er in _termsess.list_sessions(
-                                project_id=pid or None):
-                            if not isinstance(_er, dict):
-                                continue
-                            if not _er.get("effort_managed"):
-                                continue
-                            if _er.get("status") != _termsess._reg.STATUS_RUNNING:
-                                continue
-                            try:
-                                _termsess.detect_stage_progress(
-                                    _er.get("session_id"),
-                                    project_id=_er.get("project_id") or None)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    # v7 Wave 2: any session newly re-statused DONE by the
-                    # reconcile-dead path gets a background session-summary
-                    # scheduled (best-effort, non-blocking, idempotent — a cached
-                    # one is skipped, so repeated polls don't re-run the model).
-                    # Never breaks the read-only session-list response.
-                    try:
-                        marked = ((_rec_out or {}).get("reconcile", {})
-                                  or {}).get("marked", []) or []
-                        for _sid in marked:
-                            _r = _termsess.get_session(_sid)
-                            if _r is None:
-                                continue
-                            _trigger_session_summary_on_finish(
-                                _r.get("project_id"), _r.get("lane"), _sid)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-                try:
-                    recs = _termsess.list_sessions(project_id=pid or None)
-                except Exception:
-                    recs = []
-                safe = []
-                for r in recs:
-                    if not isinstance(r, dict):
-                        continue
-                    # v10 Wave 5 (DEFECT-2 fix): a CONTAINED grass-workbench
-                    # develop session (research/plan, [grass-dev] label) must NOT
-                    # surface on the top strip. It is mounted by session id
-                    # directly in the workbench pane (developGrass), not via this
-                    # projection, so dropping it here keeps the contained promise
-                    # at the source (the JS top-strip guard is the belt-and-braces
-                    # second line). Nothing else consumes this projection for
-                    # grass-dev sessions (the chain breadcrumb uses chain_members).
-                    if _eh.is_grass_dev_label(r.get("label")):
-                        continue
-                    # Phantom-tile fix: a Gandalf run registers a lane='gandalf'
-                    # status/cancel record, and the Zombie-Hunter terminal runs
-                    # under lane='zombie' (legacy records: lane='general',
-                    # label='zombie-hunter'). NONE of these are cockpit terminals
-                    # — exclude them so they never paint a workstation tile. The
-                    # label clause clears ALREADY-PERSISTED zombie records that
-                    # still carry lane='general'. Real general-tab terminals
-                    # (lane='general', no zombie-hunter label) are unaffected.
-                    if (r.get("lane") in ("gandalf", "zombie")
-                            or r.get("label") == "zombie-hunter"):
-                        continue
-                    safe.append({
-                        "session_id": r.get("session_id"),
-                        "project_id": r.get("project_id", ""),
-                        "lane": r.get("lane", ""),
-                        "backend": r.get("backend", ""),
-                        "status": r.get("status", ""),
-                        "label": r.get("label", ""),
-                        "created_at": r.get("created_at"),
-                        "parent_session_id": r.get("parent_session_id", ""),
-                        "chain_id": r.get("chain_id", ""),
-                        # v10 Wave 4: grass→project lineage (SAFE — idea id only,
-                        # never worktree_path/branch).
-                        "grass_origin": r.get("grass_origin", ""),
-                        # v12 Wave 7: the effort discriminator (SAFE — a bool).
-                        # The JS uses it to HIDE the retired legacy advance bars
-                        # (research "Advance to Planning →" / planning
-                        # "Finish → Build →") for a v12 effort, so the old
-                        # session-minting affordances are not reachable for it.
-                        "effort_managed": bool(r.get("effort_managed", False)),
-                    })
-                self._send_json({"ok": True, "sessions": safe})
+            # /api/rnd/term_sessions migrated to route_table (handle_term_sessions) — served by the strangler above.
             # /api/rnd/chain migrated to route_table (handle_chain) — served by
             # the strangler above.
             # /api/rnd/board_html migrated to route_table (handle_board_html) — served by the strangler above.
-            elif self.path.startswith("/api/rnd/projects_html"):
-                # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
-                # already-open main dashboard can poll for changes (new session,
-                # added idea, priority/notes/blurb edit, archive, new project,
-                # refreshed summary, rollups) and swap them in WITHOUT a full
-                # page reload. REUSES render_projects_view_html (which reads
-                # ONLY the cached summaries — no synchronous model run here). No
-                # mutation, no auth gate (consistent with /api/rnd/projects).
-                try:
-                    frag = render_projects_view_html()
-                except Exception:
-                    frag = ('<div class="rnd-projects"><p class="rnd-empty">'
-                            'No active R&amp;D projects.</p></div>')
-                self._send_json({"ok": True, "html": frag})
+            # /api/rnd/projects_html migrated to route_table (handle_projects_html) — served by the strangler above.
             elif self.path.startswith("/api/rnd/projects"):
                 # Read-only: folder-grouped registry listing.
                 self._send_json({"ok": True,
@@ -13321,32 +13424,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         if not pid or r.get("project_id") == pid]
                 jobs.sort(key=lambda r: r.get("started_at") or 0, reverse=True)
                 self._send_json({"ok": True, "jobs": jobs})
-            elif self.path.startswith("/api/rnd/previews"):
-                # Read-only: list ephemeral deliverable previews for a project
-                # (reconciles dead previews → stopped so the UI repopulates
-                # truthfully on reconnect). Wave 8. Returns a SAFE projection of
-                # each registry record — NO absolute filesystem paths
-                # (data_dir / folder_path); the UI only needs the id/url/port/
-                # status. Consistent with the term_sessions projection (which
-                # strips worktree_path). The persisted record (.anchor/
-                # previews.json) keeps the full fields for reaping.
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0] or "").strip() or None
-                safe = []
-                for r in _preview.list_previews(pid):
-                    if not isinstance(r, dict):
-                        continue
-                    safe.append({
-                        "preview_id": r.get("preview_id"),
-                        "project_id": r.get("project_id"),
-                        "target": r.get("target", ""),
-                        "port": r.get("port"),
-                        "url": r.get("url", ""),
-                        "status": r.get("status", ""),
-                        "started_at": r.get("started_at"),
-                        "stopped_at": r.get("stopped_at"),
-                    })
-                self._send_json({"ok": True, "previews": safe})
+            # /api/rnd/previews migrated to route_table (handle_previews) — served by the strangler above.
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -13550,59 +13628,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # /api/rnd/term_adopt migrated to route_table (handle_term_adopt) — served by the strangler above.
         # /api/rnd/cancel_job migrated to route_table (handle_cancel_job) — served by the strangler above.
 
-        elif self.path == "/api/rnd/zombie_kill":
-            # Kill an orphaned swarm/terminal session by its SESSION id. The swarm
-            # & owner view lists session_registry records, so it passes a
-            # session_id (NOT a job_runner job_id) — cancel_job's _jr.load_record
-            # would 404 on it. Here we tree-kill the recorded PID directly and mark
-            # the registry record CANCELLED so it drops out of the running list and
-            # never reappears on refresh. Idempotent; clean 404 for an unknown id.
-            # Auth is enforced by the mutating-POST middleware above.
-            import proc_probe
-            sid = (body.get("session_id", "") or body.get("session", "")
-                   or body.get("job_id", "") or "").strip()
-            rec = _sessreg.get_session(sid) if sid else None
-            if rec is None:
-                self._send_json({"ok": False, "error": f"unknown session: {sid}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                pid = rec.get("pid")
-                killed = False
-                try:
-                    if pid not in (None, ""):
-                        killed = bool(proc_probe.tree_kill(int(pid)))
-                except Exception:
-                    killed = False
-                try:
-                    _sessreg.update_session(sid, status=_sessreg.STATUS_CANCELLED)
-                except Exception:
-                    pass
-                try:
-                    import zombie_hunter
-                    zombie_hunter.forget_pid(pid)
-                except Exception:
-                    pass
-                self._send_json({"ok": True, "session_id": sid, "killed": killed})
+        # /api/rnd/zombie_kill migrated to route_table (handle_zombie_kill) — served by the strangler above.
 
-        elif self.path == "/api/rnd/zombie_resume":
-            # Un-freeze an orphan that was auto-paused in the report while it
-            # waited to be killed (the swarm & owner view's Resume button). Acts
-            # by session_id. Clean 404 for an unknown id; auth enforced above.
-            sid = (body.get("session_id", "") or body.get("session", "")).strip()
-            rec = _sessreg.get_session(sid) if sid else None
-            if rec is None:
-                self._send_json({"ok": False, "error": f"unknown session: {sid}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                pid = rec.get("pid")
-                resumed = False
-                try:
-                    if pid not in (None, ""):
-                        import zombie_hunter
-                        resumed = bool(zombie_hunter.resume_pid(pid))
-                except Exception:
-                    resumed = False
-                self._send_json({"ok": True, "session_id": sid, "resumed": resumed})
+        # /api/rnd/zombie_resume migrated to route_table (handle_zombie_resume) — served by the strangler above.
 
         # /api/rnd/gandalf_cancel migrated to route_table (handle_gandalf_cancel) — served by the strangler above.
 
