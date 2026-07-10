@@ -9,9 +9,9 @@
 _Last updated: 2026-07-10._
 
 ## Deployment status
-- **master HEAD:** `bfe02df` (pushed to origin `E:\anchor.git`).
-- **Live service (`:8777`) is being restarted to DEPLOY this.** Until the restart completes,
-  the running service is on pre-merge code. Restart: `nssm restart anchor` (elevated).
+- **master HEAD:** `c3f37c7` (`bfe02df` code + this doc; pushed to origin `E:\anchor.git`).
+- **DEPLOY CONFIRMED LIVE (2026-07-10):** `nssm anchor` Running, `GET /` → 200, `GET
+  /api/routes` reports `migrated_count: 112` — the running service is post-merge code.
 - **Auto-push:** ENABLED for the Anchor project (finishes push to `E:\anchor.git` automatically).
 
 ## What just shipped to master (2026-07-08 → 07-10)
@@ -23,8 +23,8 @@ _Last updated: 2026-07-10._
    legacy so the do_GET W8/W9 auth overlay still runs). 10 gate-green + Gemini-reviewed commits.
 
 ## Next actions (priority order)
-1. **Verify the deploy is live** (after restart): `:8777` loads with no red banner; `GET
-   /api/routes?token=…` reports `migrated_count: 112`; smoke a GET + a dashboard POST.
+1. ~~**Verify the deploy is live**~~ ✅ DONE 2026-07-10 — service Running, `GET /` 200,
+   `/api/routes` migrated_count 112 (post-merge code confirmed serving).
 2. **Harden agy / 5:1 in the skill** (John's ask, 2026-07-10): put a reusable `agy-review`
    entry point + a hard "never hand-roll agy / prompt small / agy-dispatch --readonly" rule
    INTO the `agy-dispatch` skill so 5:1 is automatic and host-independent (not model-memory).
