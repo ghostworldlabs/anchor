@@ -9613,6 +9613,120 @@ def handle_grass_delete(handler, path, body):
                                     "result": out})
 
 
+def handle_gandalf_run(handler, path, body):
+    # Gandalf v1 (Wave 2): MANUAL re-run. Schedule a fresh two-stage
+    # Gandalf run in a daemon thread and return immediately
+    # ({ok, scheduled}). NOT module-flag-gated (manual is explicit); a
+    # per-project in-flight guard prevents duplicate pile-up. Auth is
+    # enforced by the do_POST token middleware above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                            "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            # tier: "standard" (Opus) | "heavy" (Fable-5). Validated in
+            # gandalf.run_gandalf (_normalize_tier); default standard.
+            tier = (body.get("tier", "") or "standard").strip().lower()
+            scheduled = _trigger_gandalf(folder, pid, manual=True,
+                                         tier=tier)
+            handler._send_json({"ok": True, "scheduled": bool(scheduled),
+                                "tier": tier})
+
+
+def handle_gandalf_delete(handler, path, body):
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    run_id = (body.get("run_id", "") or body.get("session_id", "")).strip()
+    if not pid or not run_id:
+        handler._send_json({"ok": False, "error": "project_id and run_id required"}, 400)
+    elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
+        handler._send_json({"ok": False, "error": "bad project_id or run_id"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                res = _gandalf.delete_run(folder, pid, run_id)
+            except Exception:
+                res = {"ok": False, "removed": False}
+            handler._send_json({"ok": bool(res.get("ok")), "deleted": bool(res.get("removed"))})
+
+
+def handle_gandalf_archive(handler, path, body):
+    # Archive/retire ONE Gandalf run: drop it from the index + remove its
+    # artifact dir (gandalf.delete_run). Mutating; auth enforced by the
+    # do_POST token middleware above. Project-scoped + path-seg guarded.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    run_id = (body.get("run_id", "") or "").strip()
+    if not pid or not run_id:
+        handler._send_json({"ok": False,
+                            "error": "project_id and run_id required"}, 400)
+    elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
+        handler._send_json({"ok": False, "error": "bad pid/run_id"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                res = _gandalf.delete_run(folder, pid, run_id)
+            except Exception:
+                res = {"ok": False, "removed": False}
+            handler._send_json({"ok": bool(res.get("ok")),
+                                "removed": bool(res.get("removed"))},
+                               200 if res.get("ok") else 500)
+
+
+def handle_gandalf_clear_failed(handler, path, body):
+    # Bulk-retire every FAILED Gandalf run (gandalf.clear_failed_runs);
+    # completed runs are retained. Mutating; auth enforced by the do_POST
+    # token middleware above. Project-scoped.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                            "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                                "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                res = _gandalf.clear_failed_runs(folder, pid)
+            except Exception:
+                res = {"ok": False, "removed": 0}
+            handler._send_json({"ok": bool(res.get("ok")),
+                                "removed": int(res.get("removed") or 0)},
+                               200 if res.get("ok") else 500)
+
+
+def handle_gandalf_cancel(handler, path, body):
+    project_id = (body.get("project_id", "") or "").strip()
+    if not project_id:
+        handler._send_json({"ok": False, "error": "missing project_id"}, 400)
+    else:
+        cancelled = _gandalf.cancel_gandalf_run(project_id)
+        handler._send_json({
+            "ok": True,
+            "project_id": project_id,
+            "cancelled": cancelled,
+        })
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -9668,6 +9782,11 @@ _MIGRATED_HANDLERS = {
     "handle_grass_archive": handle_grass_archive,
     "handle_grass_advance": handle_grass_advance,
     "handle_grass_delete": handle_grass_delete,
+    "handle_gandalf_run": handle_gandalf_run,
+    "handle_gandalf_delete": handle_gandalf_delete,
+    "handle_gandalf_archive": handle_gandalf_archive,
+    "handle_gandalf_clear_failed": handle_gandalf_clear_failed,
+    "handle_gandalf_cancel": handle_gandalf_cancel,
 }
 
 
@@ -12358,17 +12477,7 @@ function startZombieTerminal(btn) {
                     resumed = False
                 self._send_json({"ok": True, "session_id": sid, "resumed": resumed})
 
-        elif self.path == "/api/rnd/gandalf_cancel":
-            project_id = (body.get("project_id", "") or "").strip()
-            if not project_id:
-                self._send_json({"ok": False, "error": "missing project_id"}, 400)
-            else:
-                cancelled = _gandalf.cancel_gandalf_run(project_id)
-                self._send_json({
-                    "ok": True,
-                    "project_id": project_id,
-                    "cancelled": cancelled,
-                })
+        # /api/rnd/gandalf_cancel migrated to route_table (handle_gandalf_cancel) — served by the strangler above.
 
         # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
         elif self.path == "/api/rnd/preview_start":
@@ -13196,102 +13305,13 @@ function startZombieTerminal(btn) {
                                          "to_lane": to_lane,
                                          "persisted": hk.get("persisted", [])})
 
-        elif self.path == "/api/rnd/gandalf_run":
-            # Gandalf v1 (Wave 2): MANUAL re-run. Schedule a fresh two-stage
-            # Gandalf run in a daemon thread and return immediately
-            # ({ok, scheduled}). NOT module-flag-gated (manual is explicit); a
-            # per-project in-flight guard prevents duplicate pile-up. Auth is
-            # enforced by the do_POST token middleware above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            if not pid:
-                self._send_json({"ok": False,
-                                 "error": "project_id required"}, 400)
-            elif _unsafe_path_seg(pid):
-                self._send_json({"ok": False, "error": "bad pid"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    # tier: "standard" (Opus) | "heavy" (Fable-5). Validated in
-                    # gandalf.run_gandalf (_normalize_tier); default standard.
-                    tier = (body.get("tier", "") or "standard").strip().lower()
-                    scheduled = _trigger_gandalf(folder, pid, manual=True,
-                                                 tier=tier)
-                    self._send_json({"ok": True, "scheduled": bool(scheduled),
-                                     "tier": tier})
+        # /api/rnd/gandalf_run migrated to route_table (handle_gandalf_run) — served by the strangler above.
 
-        elif self.path == "/api/rnd/gandalf_delete":
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            run_id = (body.get("run_id", "") or body.get("session_id", "")).strip()
-            if not pid or not run_id:
-                self._send_json({"ok": False, "error": "project_id and run_id required"}, 400)
-            elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
-                self._send_json({"ok": False, "error": "bad project_id or run_id"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        res = _gandalf.delete_run(folder, pid, run_id)
-                    except Exception:
-                        res = {"ok": False, "removed": False}
-                    self._send_json({"ok": bool(res.get("ok")), "deleted": bool(res.get("removed"))})
+        # /api/rnd/gandalf_delete migrated to route_table (handle_gandalf_delete) — served by the strangler above.
 
-        elif self.path == "/api/rnd/gandalf_archive":
-            # Archive/retire ONE Gandalf run: drop it from the index + remove its
-            # artifact dir (gandalf.delete_run). Mutating; auth enforced by the
-            # do_POST token middleware above. Project-scoped + path-seg guarded.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            run_id = (body.get("run_id", "") or "").strip()
-            if not pid or not run_id:
-                self._send_json({"ok": False,
-                                 "error": "project_id and run_id required"}, 400)
-            elif _unsafe_path_seg(pid) or _unsafe_path_seg(run_id):
-                self._send_json({"ok": False, "error": "bad pid/run_id"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        res = _gandalf.delete_run(folder, pid, run_id)
-                    except Exception:
-                        res = {"ok": False, "removed": False}
-                    self._send_json({"ok": bool(res.get("ok")),
-                                     "removed": bool(res.get("removed"))},
-                                    200 if res.get("ok") else 500)
+        # /api/rnd/gandalf_archive migrated to route_table (handle_gandalf_archive) — served by the strangler above.
 
-        elif self.path == "/api/rnd/gandalf_clear_failed":
-            # Bulk-retire every FAILED Gandalf run (gandalf.clear_failed_runs);
-            # completed runs are retained. Mutating; auth enforced by the do_POST
-            # token middleware above. Project-scoped.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            if not pid:
-                self._send_json({"ok": False,
-                                 "error": "project_id required"}, 400)
-            elif _unsafe_path_seg(pid):
-                self._send_json({"ok": False, "error": "bad pid"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    try:
-                        res = _gandalf.clear_failed_runs(folder, pid)
-                    except Exception:
-                        res = {"ok": False, "removed": 0}
-                    self._send_json({"ok": bool(res.get("ok")),
-                                     "removed": int(res.get("removed") or 0)},
-                                    200 if res.get("ok") else 500)
+        # /api/rnd/gandalf_clear_failed migrated to route_table (handle_gandalf_clear_failed) — served by the strangler above.
 
         elif self.path == "/api/rnd/advance_stage":
             # v12 Wave 6: in-session "Advance" = relabel + save. Keeps the SAME
