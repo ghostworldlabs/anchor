@@ -11040,6 +11040,993 @@ def handle_push_now(handler, path, body):
         handler._send_json(res, code)
 
 
+def handle_project_files(handler, path, body):
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    project_id = (q.get("project_id", [""])[0] or "").strip()
+    path_param = (q.get("path", [""])[0] or "").strip()
+    recursive_param = (q.get("recursive", [""])[0] or "").strip().lower() == "true"
+
+    if not project_id:
+        handler._send_json({"ok": False, "error": "project_id required"}, 400)
+        return
+    if _unsafe_path_seg(project_id):
+        handler._send_json({"ok": False, "error": "invalid project_id"}, 400)
+        return
+
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+
+    project_root = Path(proj["folder_path"]).resolve()
+
+    # Traversal check
+    p = Path(path_param) if path_param else Path(".")
+    if p.is_absolute() or ".." in p.parts:
+        handler._send_json({"ok": False, "error": "Path traversal detected"}, 400)
+        return
+
+    target_path = (project_root / p).resolve()
+    try:
+        target_path.relative_to(project_root)
+    except ValueError:
+        handler._send_json({"ok": False, "error": "Path containment check failed"}, 400)
+        return
+
+    if not target_path.exists():
+        handler._send_json({"ok": False, "error": "Path not found"}, 404)
+        return
+    if not target_path.is_dir():
+        handler._send_json({"ok": False, "error": "Not a directory"}, 400)
+        return
+
+    patterns = _load_gitignore(project_root)
+    dirs_list = []
+    files_list = []
+
+    if recursive_param:
+        for root, dirs, files in os.walk(target_path):
+            # Filter ignored directories in-place to prevent scanning them
+            dirs_to_keep = []
+            for d in dirs:
+                full_d = Path(root) / d
+                try:
+                    resolved_d = full_d.resolve()
+                    resolved_d.relative_to(project_root)
+                    rel_d = full_d.relative_to(project_root)
+                    if not _should_ignore_file(rel_d, patterns):
+                        dirs_to_keep.append(d)
+                except (ValueError, OSError):
+                    continue
+            dirs[:] = dirs_to_keep
+
+            for file in files:
+                full_f = Path(root) / file
+                try:
+                    resolved_f = full_f.resolve()
+                    resolved_f.relative_to(project_root)
+                    rel_f = full_f.relative_to(project_root)
+                    if not _should_ignore_file(rel_f, patterns):
+                        stat = full_f.stat()
+                        files_list.append({
+                            "name": rel_f.as_posix(),
+                            "path": rel_f.as_posix(),
+                            "size": stat.st_size,
+                            "mtime": stat.st_mtime
+                        })
+                except (ValueError, OSError):
+                    continue
+
+            for d in dirs:
+                full_d = Path(root) / d
+                try:
+                    rel_d = full_d.relative_to(project_root)
+                    dirs_list.append(rel_d.as_posix())
+                except (ValueError, OSError):
+                    continue
+    else:
+        try:
+            for entry in sorted(target_path.iterdir(), key=lambda x: x.name.lower()):
+                try:
+                    # Strict symlink containment check
+                    resolved_entry = entry.resolve()
+                    resolved_entry.relative_to(project_root)
+                except (ValueError, OSError):
+                    continue
+
+                rel_entry = entry.relative_to(project_root)
+                if _should_ignore_file(rel_entry, patterns):
+                    continue
+
+                if entry.is_dir():
+                    dirs_list.append(rel_entry.as_posix())
+                elif entry.is_file():
+                    try:
+                        stat = entry.stat()
+                        files_list.append({
+                            "name": rel_entry.name,
+                            "path": rel_entry.as_posix(),
+                            "size": stat.st_size,
+                            "mtime": stat.st_mtime
+                        })
+                    except OSError:
+                        continue
+        except PermissionError:
+            handler._send_json({"ok": False, "error": "permission-denied"}, 403)
+            return
+        except OSError as exc:
+            handler._send_json({"ok": False, "error": f"os-error: {exc}"}, 500)
+            return
+
+    handler._send_json({
+        "ok": True,
+        "path": p.as_posix() if path_param else "",
+        "dirs": sorted(dirs_list, key=lambda x: x.lower()),
+        "files": sorted(files_list, key=lambda x: x["name"].lower())
+    })
+
+
+def handle_project_file_content(handler, path, body):
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    project_id = (q.get("project_id", [""])[0] or "").strip()
+    path_param = (q.get("path", [""])[0] or "").strip()
+
+    if not project_id or not path_param:
+        handler._send_json({"ok": False, "error": "project_id and path required"}, 400)
+        return
+    if _unsafe_path_seg(project_id):
+        handler._send_json({"ok": False, "error": "invalid project_id"}, 400)
+        return
+
+    proj = _rnd.get_project(project_id)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+
+    project_root = Path(proj["folder_path"]).resolve()
+
+    # Traversal check
+    p = Path(path_param)
+    if p.is_absolute() or ".." in p.parts:
+        handler._send_json({"ok": False, "error": "Path traversal detected"}, 400)
+        return
+
+    target_path = (project_root / p).resolve()
+    try:
+        target_path.relative_to(project_root)
+    except ValueError:
+        handler._send_json({"ok": False, "error": "Path containment check failed"}, 400)
+        return
+
+    if not target_path.exists():
+        handler._send_json({"ok": False, "error": "File not found"}, 404)
+        return
+    if not target_path.is_file():
+        handler._send_json({"ok": False, "error": "Not a file"}, 400)
+        return
+
+    patterns = _load_gitignore(project_root)
+    if _should_ignore_file(p, patterns):
+        handler._send_json({"ok": False, "error": "Access denied (file is ignored)"}, 403)
+        return
+
+    # Size cap check: 1 MB limit
+    SIZE_CAP = 1 * 1024 * 1024
+    try:
+        stat = target_path.stat()
+        if stat.st_size > SIZE_CAP:
+            handler._send_json({"ok": False, "error": f"File exceeds size limit of {SIZE_CAP} bytes"}, 400)
+            return
+
+        with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+
+        handler._send_json({
+            "ok": True,
+            "path": path_param,
+            "content": content,
+            "size": stat.st_size
+        })
+    except Exception as exc:
+        handler._send_json({"ok": False, "error": f"Failed to read file: {exc}"}, 500)
+        return
+
+
+def handle_session_doc_roles(handler, path, body):
+    # Read-only (v4 Wave 5): the per-lane ROLE→doc map for one
+    # session (summarizer.session_doc_roles, Wave 3). The cockpit's
+    # split-summary RIGHT column (.slinks) renders these role-tagged
+    # links. Each href reuses the EXISTING /report and /artifact
+    # routes; absent roles are simply omitted (never fabricated).
+    # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0] or "").strip()
+    lane = (q.get("lane", [""])[0] or "").strip()
+    session_id = (q.get("session", [""])[0] or "").strip()
+    if not pid or not lane or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "pid, lane, session required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    elif _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+    else:
+        try:
+            roles = _summarizer.session_doc_roles(
+                pid, lane, session_id)
+        except Exception:
+            roles = {}
+        handler._send_json({"ok": True, "roles": roles})
+
+
+def handle_context_status(handler, path, body):
+    # Read-only (v12 Wave 8): the live session's context-fullness
+    # heuristic — the data behind the cockpit's "context getting full"
+    # warn banner + one-click handoff. NO mutation, NO model call.
+    # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
+    #   /api/rnd/context_status?session=<sid>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    sid = (q.get("session", [""])[0]
+           or q.get("session_id", [""])[0] or "").strip()
+    if not sid:
+        handler._send_json({"ok": False,
+                         "error": "session required"}, 400)
+    else:
+        try:
+            cf = _termsess.context_fullness(sid)
+        except Exception:
+            cf = {"ratio": 0.0, "over_threshold": False,
+                  "observed_bytes": 0, "budget": 0}
+        handler._send_json({
+            "ok": True,
+            "ratio": cf.get("ratio", 0.0),
+            "over_threshold": bool(cf.get("over_threshold", False)),
+            "observed_bytes": cf.get("observed_bytes", 0),
+            "budget": cf.get("budget", 0),
+        })
+
+
+def handle_grass(handler, path, body):
+    # Read-only (v5 Wave 5): the project's Grass ideas + their status
+    # + versioned refinements, for the two-pane idea workbench. NO
+    # mutation, NO model call. AUTH: ``?token=`` (read-only GET;
+    # back-compat when no token set). Project-scoped (no cross-project
+    # grass view). /api/rnd/grass?project_id=<id>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("pid", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                         "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                ideas = _eh.grass_workbench_data(folder, pid)
+            except Exception:
+                ideas = []
+            handler._send_json({"ok": True, "ideas": ideas})
+
+
+def handle_gandalf(handler, path, body):
+    # Read-only (Gandalf v1): the project's Gandalf run history —
+    # newest-first SAFE projections (verdict · chips · report/exec
+    # rel paths; NEVER absolute paths). NO mutation, NO model call.
+    # AUTH: ``?token=`` (read-only GET; back-compat when no token
+    # set), mirroring /api/rnd/grass. Project-scoped.
+    #   /api/rnd/gandalf?project_id=<id>
+    # NOTE: this GET prefix must NOT match the POST /api/rnd/gandalf_run.
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("pid", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                         "error": "project_id required"}, 400)
+    elif _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            try:
+                runs = _gandalf.list_runs(folder, pid)
+            except Exception:
+                runs = []
+            handler._send_json({"ok": True, "runs": runs})
+
+
+def handle_gandalf_status(handler, path, body):
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0]
+           or q.get("pid", [""])[0]
+           or q.get("id", [""])[0] or "").strip()
+    if not pid:
+        handler._send_json({"ok": False, "error": "project_id required"}, 400)
+    else:
+        with _GANDALF_INFLIGHT_GUARD:
+            rec = _GANDALF_INFLIGHT.get(pid, None)
+            if isinstance(rec, dict):
+                if time.time() - rec.get("ts", 0) > 1800:
+                    _GANDALF_INFLIGHT.pop(pid, None)
+                    status = None
+                else:
+                    status = rec.get("status")
+            else:
+                status = rec
+        handler._send_json({"ok": True, "status": status})
+
+
+def handle_gandalf_status_all(handler, path, body):
+    # BULK in-flight status for ALL projects with a live Gandalf run —
+    # one request the dashboard polls instead of N single-project
+    # calls. Returns {ok, statuses:{project_id: status_string}} for
+    # every project currently in-flight; finished/absent projects are
+    # simply omitted. Mirrors the single endpoint's token gate, ok/err
+    # envelope, and the >30-min staleness sweep.
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    statuses = {}
+    now = time.time()
+    with _GANDALF_INFLIGHT_GUARD:
+        for _pid, rec in list(_GANDALF_INFLIGHT.items()):
+            if isinstance(rec, dict):
+                if now - rec.get("ts", 0) > 1800:
+                    _GANDALF_INFLIGHT.pop(_pid, None)
+                    continue
+                st = rec.get("status")
+            else:
+                st = rec
+            if st:
+                statuses[_pid] = st
+    handler._send_json({"ok": True, "statuses": statuses})
+
+
+def handle_zombie_hunter_report(handler, path, body):
+    # Auth gate (defense-in-depth): the radar report exposes process
+    # metadata (PIDs / session ids). Token-gated like the other
+    # read-API GET routes; a no-op when ANCHOR_TOKEN is unset (local
+    # single-user), enforced in remote mode. The dashboard button
+    # passes ?token= via _anchorToken().
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    import zombie_hunter
+    import reaper
+    import pty_manager
+    import subprocess
+    # NOTE: do NOT import json/sys/os/datetime function-locally here —
+    # they are module-global (top of file). A function-local import
+    # makes the name local to the ENTIRE do_GET method, so an earlier
+    # branch referencing it before this line raises UnboundLocalError
+    # -> a 500 on every page load. (rearch W8: the shadowing class is
+    # structurally eliminated — route_import_scan proves it stays 0.)
+
+                    # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
+    report_path = zombie_hunter._last_report_path()
+    is_stale = True
+    report_data = None
+
+    if report_path.exists():
+        try:
+            report_data = json.loads(report_path.read_text("utf-8"))
+            swept_at = report_data.get("swept_at", 0)
+            mtime = report_path.stat().st_mtime
+            now = time.time()
+            if abs(now - mtime) < 60 and abs(now - swept_at) < 60:
+                is_stale = False
+        except Exception:
+            is_stale = True
+
+    # Observe phase: classify processes using the dry-run sweep (apply=False).
+    # This is read-only (NO kills, NO registry updates) and writes/refreshes
+    # zombie_hunter_last.json. Only refresh a STALE-but-PRESENT report; when the
+    # report file is ABSENT we deliberately fall through to the live-process
+    # fallback below (do NOT synthesize a cached report), so a fresh install with
+    # no daemon sweep yet still shows real OS processes.
+    if is_stale and report_path.exists():
+        try:
+            live_ids = pty_manager.live_sessions()
+            report = zombie_hunter.sweep(live_session_ids=live_ids, apply=False)
+            zombie_hunter._persist_report(report)
+            report_data = report
+            is_stale = False
+        except Exception:
+            pass
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.end_headers()
+
+    html = "<html><head><title>Zombie Hunter Report</title>"
+    html += "<style>"
+    html += "body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0c; color: #e4e4e7; padding: 30px; margin: 0; }"
+    html += ".container { max-width: 900px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }"
+    html += "h1 { margin-top: 0; color: #fafafa; font-size: 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #27272a; padding-bottom: 12px; }"
+    html += "h2 { color: #f4f4f5; font-size: 18px; margin-top: 24px; margin-bottom: 12px; }"
+    html += "table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 16px; }"
+    html += "th { background: #27272a; color: #a1a1aa; font-weight: 500; text-align: left; padding: 10px 12px; font-size: 14px; border-bottom: 2px solid #3f3f46; }"
+    html += "td { padding: 10px 12px; border-bottom: 1px solid #27272a; font-size: 14px; color: #d4d4d8; }"
+    html += ".badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 600; }"
+    html += ".badge-info { background: #1e3a8a; color: #93c5fd; }"
+    html += ".badge-warning { background: #78350f; color: #fde047; }"
+    html += ".badge-danger { background: #7f1d1d; color: #fca5a5; }"
+    html += ".badge-success { background: #064e3b; color: #6ee7b7; }"
+    html += ".badge-secondary { background: #27272a; color: #d4d4d8; }"
+    html += "pre { font-family: monospace; font-size: 13px; background: #09090b; padding: 16px; border: 1px solid #27272a; border-radius: 6px; overflow-x: auto; max-height: 500px; color: #4ade80; }"
+    html += ".meta { font-size: 13px; color: #71717a; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; background: #202024; padding: 10px 16px; border-radius: 6px; }"
+    html += ".meta-label { font-weight: bold; color: #a1a1aa; }"
+    html += "</style></head><body>"
+    html += "<div class='container'>"
+    html += "<h1><img src=\"/vendor/brand/zombie-hunter-radar.jpg\" style=\"width:32px;height:32px;border-radius:6px;vertical-align:middle;\" /> Zombie Hunter Radar</h1>"
+
+    if not is_stale and report_data:
+        swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
+        html += f"<div class='meta'>"
+        html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-success'>Cached Sweep Report</span></div>"
+        html += f"<div><span class='meta-label'>Swept At:</span> {swept_time_str}</div>"
+        html += f"</div>"
+
+        html += "<h2>Sweep Status Summary</h2>"
+        html += "<table>"
+        html += "<tr><th>Category</th><th>Count</th><th>Description</th></tr>"
+
+        killed_cnt = len(report_data.get("killed", []))
+        alive_cnt = len(report_data.get("alive", []))
+        abst_cnt = len(report_data.get("abstained", []))
+        reap_d_cnt = len(report_data.get("reaped_dead", []))
+        reap_r_cnt = len(report_data.get("reaped_recycled", []))
+
+        html += f"<tr><td><span class='badge badge-danger'>Orphaned (Pending Kill)</span></td><td>{killed_cnt}</td><td>Process is ours, running, but no longer attached.</td></tr>"
+        html += f"<tr><td><span class='badge badge-success'>Alive (Attached)</span></td><td>{alive_cnt}</td><td>Process is ours, running, and actively attached.</td></tr>"
+        html += f"<tr><td><span class='badge badge-warning'>Abstained (Manual Review)</span></td><td>{abst_cnt}</td><td>Identity missing or incomplete. Never auto-killed.</td></tr>"
+        html += f"<tr><td><span class='badge badge-secondary'>Reaped (Dead)</span></td><td>{reap_d_cnt}</td><td>Process exited naturally. Registry updated.</td></tr>"
+        html += f"<tr><td><span class='badge badge-secondary'>Reaped (Recycled PID)</span></td><td>{reap_r_cnt}</td><td>PID recycled by another process. Registry updated, new process spared.</td></tr>"
+        html += "</table>"
+
+        # Detail lists if any
+        for cat_name, cat_list, badge_class in [
+            ("Orphaned (Pending Kill) Session IDs", report_data.get("killed", []), "badge-danger"),
+            ("Active/Attached Session IDs", report_data.get("alive", []), "badge-success"),
+            ("Abstained Session IDs", report_data.get("abstained", []), "badge-warning")
+        ]:
+            if cat_list:
+                html += f"<h2>{cat_name}</h2>"
+                html += "<ul>"
+                for sid in cat_list:
+                    html += f"<li><code>{sid}</code></li>"
+                html += "</ul>"
+    else:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        html += f"<div class='meta'>"
+        html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-warning'>Live Process Query Fallback</span></div>"
+        html += f"<div><span class='meta-label'>Query Time:</span> {now_str} (Sweep report stale or absent)</div>"
+        html += f"</div>"
+
+        html += "<h2>System Process List</h2>"
+        cmd_output = ""
+        try:
+            if sys.platform.startswith("win"):
+                creationflags = 0x08000000  # CREATE_NO_WINDOW
+                res = subprocess.run(["tasklist"], capture_output=True, text=True, creationflags=creationflags, timeout=10)
+                cmd_output = res.stdout
+            else:
+                res = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+                cmd_output = res.stdout
+        except Exception as e:
+            cmd_output = f"Error running fallback process query: {e}"
+
+        html += f"<pre>{html_lib.escape(cmd_output)}</pre>"
+
+    # ── Swarm & Owner View ────────────────────────────────────────
+    # NOTE: _sessreg / _rnd are the MODULE-LEVEL aliases (imported at top).
+    # Do NOT re-import them locally here — a local `import ... as _rnd`
+    # makes _rnd function-local for ALL of do_GET, breaking earlier routes
+    # in this method with UnboundLocalError.
+    try:
+        attached = set(pty_manager.live_sessions())
+    except Exception:
+        attached = set()
+
+    running_records = []
+    try:
+        running_records = _sessreg.list_sessions(status="running")
+    except Exception:
+        pass
+
+    # (#3, single source) This view marks orphans AND FREEZES them
+    # (pause_orphan). Build the ONE immutable snapshot for this sweep
+    # and classify against it (the shared provider) so a legit
+    # work-doing session with no open stream is never frozen/killed:
+    # an orphan has NO live owner (not job-owned, not parent-owned),
+    # not merely "no attached PTY stream".
+    try:
+        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                      enumerate_pids=reaper.enumerate_live_pids)
+        live_ids = reaper.live_owner_ids(_snap)
+    except Exception:
+        _snap = None
+        live_ids = attached
+
+    # Group by OWNER (project title, or project_id, or "(unowned)")
+    groups = {}
+    for rec in running_records:
+        proj_id = rec.get("project_id", "")
+        if proj_id:
+            proj = _rnd.get_project(proj_id)
+            owner = proj.get("name") if (proj and proj.get("name")) else proj_id
+        else:
+            owner = "(unowned)"
+
+        if owner not in groups:
+            groups[owner] = []
+        groups[owner].append(rec)
+
+    # Add new section Swarm & Owner View
+    html += "<h2>Swarm & Owner View</h2>"
+    html += "<style>"
+    html += ".btn-kill { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 8px; }"
+    html += ".btn-kill:hover { background: #991b1b; }"
+    html += ".btn-kill:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+    html += ".btn-resume { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 6px; }"
+    html += ".btn-resume:hover { background: #065f46; }"
+    html += ".btn-resume:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+    html += ".btn-start { background: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s; }"
+    html += ".btn-start:hover { background: #1e40af; }"
+    html += ".btn-start:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
+    html += ".owner-heading { color: #f4f4f5; font-size: 16px; margin-top: 20px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #27272a; font-weight: bold; }"
+    html += "</style>"
+
+    if not running_records:
+        html += "<p style='color: #a1a1aa; font-style: italic;'>No active swarms or sessions.</p>"
+    else:
+        sorted_owners = sorted(groups.keys(), key=lambda o: (o == "(unowned)", o.lower()))
+        for owner in sorted_owners:
+            html += f"<div class='owner-heading'>Owner: {html_lib.escape(owner)}</div>"
+            html += "<table>"
+            html += "<thead><tr><th>Swarm/Lane</th><th>Session</th><th>PID</th><th>Backend</th><th>Status</th><th>State</th></tr></thead>"
+            html += "<tbody>"
+            for rec in groups[owner]:
+                sid = rec.get("session_id", "")
+                short_sid = sid[:8]
+                lane = rec.get("lane", "")
+                pid = rec.get("pid")
+                pid_str = str(pid) if pid is not None else ""
+                backend = rec.get("backend", "")
+                status = rec.get("status", "")
+
+                try:
+                    is_orphaned = (reaper.classify_record(rec, _snap) == "kill")
+                except Exception:
+                    # Defensive boundary (Wave 2, criterion 1): a
+                    # fault NEVER freezes — treat as OWNED/alive so
+                    # pause_orphan can't freeze a legit session.
+                    is_orphaned = False
+
+                if is_orphaned:
+                    # FREEZE the orphan while it waits to be killed so
+                    # it stops burning CPU (pytest-guarded inside).
+                    paused = False
+                    try:
+                        paused = zombie_hunter.pause_orphan(pid)
+                    except Exception:
+                        paused = False
+                    pause_badge = ("<span class='badge badge-warning' title='Process frozen while it waits to be killed'>Paused</span> "
+                                   if paused else "")
+                    resume_btn = (f" <button class='btn-resume' onclick=\"resumeSession('{sid}', this)\">Resume</button>"
+                                  if paused else "")
+                    state_html = (
+                        f"<span class='badge badge-danger'>Orphaned</span> {pause_badge}"
+                        f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>{resume_btn}")
+                else:
+                    state_html = (
+                        "<span class='badge badge-success'>Attached</span> "
+                        f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>")
+
+                html += f"<tr id='row-{sid}'>"
+                html += f"<td>{html_lib.escape(lane)}</td>"
+                html += f"<td title='{html_lib.escape(sid)}'><code>{html_lib.escape(short_sid)}</code></td>"
+                html += f"<td>{html_lib.escape(pid_str)}</td>"
+                html += f"<td><code>{html_lib.escape(backend)}</code></td>"
+                html += f"<td><span class='badge badge-success'>{html_lib.escape(status)}</span></td>"
+                html += f"<td>{state_html}</td>"
+                html += "</tr>"
+            html += "</tbody>"
+            html += "</table>"
+
+    html += "<script>"
+    html += """
+function getAnchorToken() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const tok = params.get('token');
+    if (tok) return tok;
+  } catch(e) {}
+  try {
+    return localStorage.getItem('anchor_token') || '';
+  } catch(e) {
+    return '';
+  }
+}
+function killSession(sessionId, btn) {
+  if (!confirm("Are you sure you want to kill session " + sessionId + "?")) {
+    return;
+  }
+  btn.disabled = true;
+  btn.innerText = "Killing...";
+
+  const token = getAnchorToken();
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (token) {
+    headers['X-Anchor-Token'] = token;
+  }
+
+  const payload = {
+    session_id: sessionId
+  };
+  if (token) {
+    payload.token = token;
+  }
+
+  fetch('/api/rnd/zombie_kill', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(payload)
+  })
+  .then(response => {
+    if (response.ok) {
+      return response.json();
+    }
+    throw new Error("HTTP error " + response.status);
+  })
+  .then(data => {
+    if (data.ok) {
+      btn.innerText = "Killed";
+      btn.className = "badge badge-secondary";
+      btn.style.border = "none";
+      btn.disabled = true;
+      const row = document.getElementById("row-" + sessionId);
+      if (row) {
+        row.style.transition = "opacity 0.5s ease";
+        row.style.opacity = "0";
+        setTimeout(function () { if (row && row.parentNode) row.parentNode.removeChild(row); }, 550);
+      }
+    } else {
+      alert("Failed to kill session: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Kill";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Kill";
+  });
+}
+function resumeSession(sessionId, btn) {
+  btn.disabled = true;
+  btn.innerText = "Resuming...";
+  const token = getAnchorToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) { headers['X-Anchor-Token'] = token; }
+  const payload = { session_id: sessionId };
+  if (token) { payload.token = token; }
+  fetch('/api/rnd/zombie_resume', {
+    method: 'POST', headers: headers, body: JSON.stringify(payload)
+  })
+  .then(response => { if (response.ok) return response.json(); throw new Error("HTTP error " + response.status); })
+  .then(data => {
+    if (data.ok) {
+      btn.innerText = "Resumed";
+      btn.disabled = true;
+      btn.className = "badge badge-secondary";
+      btn.style.border = "none";
+    } else {
+      alert("Failed to resume session: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Resume";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Resume";
+  });
+}
+function startZombieTerminal(btn) {
+  btn.disabled = true;
+  btn.innerText = "Starting terminal...";
+
+  const token = getAnchorToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['X-Anchor-Token'] = token;
+
+  const payload = {};
+  if (token) payload.token = token;
+
+  fetch('/api/rnd/zombie_terminal_start', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify(payload)
+  })
+  .then(response => {
+    if (response.ok) return response.json();
+    throw new Error("HTTP error " + response.status);
+  })
+  .then(data => {
+    if (data.ok && data.session_id) {
+      const iframe = document.getElementById('terminal-iframe');
+      const placeholder = document.getElementById('terminal-placeholder');
+      const tokenQuery = token ? ('&token=' + encodeURIComponent(token)) : '';
+      iframe.src = '/zombie_terminal?session=' + encodeURIComponent(data.session_id) + tokenQuery;
+      placeholder.style.display = 'none';
+      iframe.style.display = 'block';
+    } else {
+      alert("Failed to start terminal: " + (data.error || "unknown error"));
+      btn.disabled = false;
+      btn.innerText = "Start Terminal";
+    }
+  })
+  .catch(err => {
+    alert("Error communicating with server: " + err.message);
+    btn.disabled = false;
+    btn.innerText = "Start Terminal";
+  });
+}
+"""
+    html += "</script>"
+
+    html += "<h2>Zombie-Hunter Terminal</h2>"
+    html += "<div id='terminal-container' style='background:#0c0e14; border:1px solid #27272a; border-radius:8px; padding:16px; margin-top:12px; margin-bottom:24px; min-height:100px; display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
+    html += "  <div id='terminal-placeholder' style='text-align:center;'>"
+    html += "    <p style='color:#a1a1aa; font-size:14px; margin-bottom:12px;'>Start an interactive, seeded terminal session with an agent to investigate and manage zombie processes.</p>"
+    html += "    <button class='btn-start' onclick='startZombieTerminal(this)'>Start Terminal</button>"
+    html += "  </div>"
+    html += "  <iframe id='terminal-iframe' style='width:100%; height:450px; border:none; display:none; border-radius:6px;'></iframe>"
+    html += "</div>"
+
+    # Wave 1 (#12a): bounded LIVE auto-refresh of the radar so it
+    # updates during a sweep WITHOUT a manual reload. Bounded by
+    # ZOMBIE_MAX_TICKS so it never churns forever; it SKIPS the
+    # reload while the investigation terminal is open (so an active
+    # session is never nuked) and while the tab is hidden.
+    html += "<script id='zombie-auto-refresh'>"
+    html += """
+(function () {
+  var ZOMBIE_REFRESH_MS = 6000;   // poll cadence
+  var ZOMBIE_MAX_TICKS = 100;     // bounded: ~10 min then stop
+  var ticks = 0;
+  var timer = setInterval(function () {
+    ticks += 1;
+    if (ticks > ZOMBIE_MAX_TICKS) { clearInterval(timer); return; }
+    var iframe = document.getElementById('terminal-iframe');
+    if (iframe && iframe.style.display !== 'none') { return; }  // terminal open -> skip
+    if (document.hidden) { return; }                            // tab hidden  -> skip
+    window.location.reload();
+  }, ZOMBIE_REFRESH_MS);
+})();
+"""
+    html += "</script>"
+
+    html += "</div></body></html>"
+    handler.wfile.write(html.encode("utf-8"))
+    return
+
+
+def handle_zombie_terminal(handler, path, body):
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    sid = (q.get("session", [""])[0] or "").strip()
+    token = (q.get("token", [""])[0] or "").strip()
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.end_headers()
+
+    html = """<!DOCTYPE html>
+<html>
+<head>
+  <title>Zombie Hunter Terminal</title>
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+  <script src="/vendor/xterm/xterm.js"></script>
+  <style>
+    body {
+      background: #0c0e14;
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #terminal {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <script>
+    (function() {
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session');
+      const token = params.get('token') || '';
+
+      if (!sessionId) {
+        document.getElementById('terminal').textContent = 'Error: session parameter required';
+        return;
+      }
+
+      const term = new Terminal({
+        convertEol: true,
+        fontSize: 12,
+        theme: { background: '#0c0e14' },
+        scrollback: 5000
+      });
+      term.open(document.getElementById('terminal'));
+
+      function fitTerminal() {
+        const cols = Math.floor(window.innerWidth / 7.2) || 80;
+        const rows = Math.floor(window.innerHeight / 17) || 24;
+        term.resize(cols, rows);
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['X-Anchor-Token'] = token;
+
+        const body = { session: sessionId, cols: cols, rows: rows };
+        if (token) body.token = token;
+
+        fetch('/api/rnd/term_resize', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(body)
+        }).catch(err => console.error('resize error:', err));
+      }
+
+      window.addEventListener('resize', fitTerminal);
+      setTimeout(fitTerminal, 100);
+
+      // Ordering fix (2026-07-08): keystrokes used to fire independent, racing
+      // POSTs (browser parallel connections + threaded server) → muddled typing.
+      // Prefer the ordered WebSocket (single FIFO stream applied to the PTY in
+      // frame order by the one server pump); fall back to a PROMISE-CHAINED POST
+      // queue (one term_input2 POST in flight at a time) when the WS isn't OPEN.
+      let activeWs = null;
+      let _sendChain = Promise.resolve();
+      function _sendInput(d) {
+        if (d === '' || d == null) return;
+        if (activeWs && activeWs.readyState === 1 /* OPEN */) {
+          try { activeWs.send(d); return; } catch (e) { /* fall through */ }
+        }
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['X-Anchor-Token'] = token;
+        const body = { session: sessionId, data: d };
+        if (token) body.token = token;
+        _sendChain = _sendChain.then(function () {
+          return fetch('/api/rnd/term_input2', {
+            method: 'POST', headers: headers, body: JSON.stringify(body)
+          });
+        }).catch(err => console.error('input error:', err));
+      }
+      term.onData(function (d) { _sendInput(d); });
+
+      const tq = token ? ('&token=' + encodeURIComponent(token)) : '';
+      const wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+      const wsUrl = wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
+
+      let sseStarted = false;
+      function startSSE() {
+        if (sseStarted) return;
+        sseStarted = true;
+        const sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
+        const es = new EventSource(sseUrl);
+        es.addEventListener('output', function (ev) {
+          try {
+            const p = JSON.parse(ev.data);
+            if (p.text) term.write(p.text);
+          } catch (e) {}
+        });
+        es.addEventListener('done', function () {
+          try { es.close(); } catch (e) {}
+        });
+      }
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        activeWs = ws;  // ordered input channel (see _sendInput above)
+        ws.onmessage = function (ev) { term.write(ev.data); };
+        ws.onclose = function () {
+          activeWs = null;
+          if (!sseStarted) startSSE();
+        };
+        ws.onerror = function () {
+          activeWs = null;
+          try { ws.close(); } catch (e) {}
+          startSSE();
+        };
+      } catch (e) {
+        activeWs = null;
+        startSSE();
+      }
+    })();
+  </script>
+</body>
+</html>"""
+    handler.wfile.write(html.encode("utf-8"))
+
+
+def handle_board_html(handler, path, body):
+    # Read-only (v7 Wave 6): the project's rendered 5-lane board
+    # FRAGMENT, so an already-open project window can refresh the
+    # board IN PLACE after a session-lifecycle mutation (start /
+    # finish / advance / promote / develop) and the lane-column
+    # tile appears WITHOUT a full page reload. REUSES
+    # _render_kanban_html (the SAME server render the page used) —
+    # the board is the single source of truth, so the JS just
+    # re-fetches it (no duplicate JS-injected tile; dedupe stays
+    # correct = exactly one tile per session in its lane). SAFE: the
+    # kanban render already emits SAFE tiles (no absolute
+    # worktree_path / branch). AUTH: ``?token=`` (read-only GET;
+    # back-compat when no token configured), consistent with the
+    # other ?token= GET seams. /api/rnd/board_html?project_id=<id>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    entry = _rnd.get_project(pid) if pid else None
+    if not pid or entry is None:
+        handler._send_json({"ok": False,
+                         "error": "unknown project"}, 404)
+        return
+    folder_raw = entry.get("folder_path", "")
+    try:
+        # v12 Wave 2: the in-place refresh fragment is now the
+        # Layout-D board (the SAME render the page emits), so a
+        # refreshBoard() swap keeps the headline/shelf structure.
+        frag = _render_layoutd_html(folder_raw, pid)
+    except Exception:
+        frag = ("<div class='pgrid layoutd'><p class='rnd-empty'>"
+                "Board unavailable.</p></div>")
+    handler._send_json({"ok": True, "html": frag})
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -11133,6 +12120,17 @@ _MIGRATED_HANDLERS = {
     "handle_link_github": handle_link_github,
     "handle_set_auto_push": handle_set_auto_push,
     "handle_push_now": handle_push_now,
+    "handle_project_files": handle_project_files,
+    "handle_project_file_content": handle_project_file_content,
+    "handle_session_doc_roles": handle_session_doc_roles,
+    "handle_context_status": handle_context_status,
+    "handle_grass": handle_grass,
+    "handle_gandalf": handle_gandalf,
+    "handle_gandalf_status": handle_gandalf_status,
+    "handle_gandalf_status_all": handle_gandalf_status_all,
+    "handle_zombie_hunter_report": handle_zombie_hunter_report,
+    "handle_zombie_terminal": handle_zombie_terminal,
+    "handle_board_html": handle_board_html,
 }
 
 
@@ -11980,201 +12978,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         except Exception:
                             prop = {"has_plan_set": False}
                         self._send_json({"ok": True, **prop})
-            elif self.path.startswith("/api/rnd/project_files"):
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                project_id = (q.get("project_id", [""])[0] or "").strip()
-                path_param = (q.get("path", [""])[0] or "").strip()
-                recursive_param = (q.get("recursive", [""])[0] or "").strip().lower() == "true"
+            # /api/rnd/project_files migrated to route_table (handle_project_files) — served by the strangler above.
 
-                if not project_id:
-                    self._send_json({"ok": False, "error": "project_id required"}, 400)
-                    return
-                if _unsafe_path_seg(project_id):
-                    self._send_json({"ok": False, "error": "invalid project_id"}, 400)
-                    return
-
-                proj = _rnd.get_project(project_id)
-                if proj is None:
-                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
-                    return
-
-                project_root = Path(proj["folder_path"]).resolve()
-
-                # Traversal check
-                p = Path(path_param) if path_param else Path(".")
-                if p.is_absolute() or ".." in p.parts:
-                    self._send_json({"ok": False, "error": "Path traversal detected"}, 400)
-                    return
-
-                target_path = (project_root / p).resolve()
-                try:
-                    target_path.relative_to(project_root)
-                except ValueError:
-                    self._send_json({"ok": False, "error": "Path containment check failed"}, 400)
-                    return
-
-                if not target_path.exists():
-                    self._send_json({"ok": False, "error": "Path not found"}, 404)
-                    return
-                if not target_path.is_dir():
-                    self._send_json({"ok": False, "error": "Not a directory"}, 400)
-                    return
-
-                patterns = _load_gitignore(project_root)
-                dirs_list = []
-                files_list = []
-
-                if recursive_param:
-                    for root, dirs, files in os.walk(target_path):
-                        # Filter ignored directories in-place to prevent scanning them
-                        dirs_to_keep = []
-                        for d in dirs:
-                            full_d = Path(root) / d
-                            try:
-                                resolved_d = full_d.resolve()
-                                resolved_d.relative_to(project_root)
-                                rel_d = full_d.relative_to(project_root)
-                                if not _should_ignore_file(rel_d, patterns):
-                                    dirs_to_keep.append(d)
-                            except (ValueError, OSError):
-                                continue
-                        dirs[:] = dirs_to_keep
-
-                        for file in files:
-                            full_f = Path(root) / file
-                            try:
-                                resolved_f = full_f.resolve()
-                                resolved_f.relative_to(project_root)
-                                rel_f = full_f.relative_to(project_root)
-                                if not _should_ignore_file(rel_f, patterns):
-                                    stat = full_f.stat()
-                                    files_list.append({
-                                        "name": rel_f.as_posix(),
-                                        "path": rel_f.as_posix(),
-                                        "size": stat.st_size,
-                                        "mtime": stat.st_mtime
-                                    })
-                            except (ValueError, OSError):
-                                continue
-
-                        for d in dirs:
-                            full_d = Path(root) / d
-                            try:
-                                rel_d = full_d.relative_to(project_root)
-                                dirs_list.append(rel_d.as_posix())
-                            except (ValueError, OSError):
-                                continue
-                else:
-                    try:
-                        for entry in sorted(target_path.iterdir(), key=lambda x: x.name.lower()):
-                            try:
-                                # Strict symlink containment check
-                                resolved_entry = entry.resolve()
-                                resolved_entry.relative_to(project_root)
-                            except (ValueError, OSError):
-                                continue
-
-                            rel_entry = entry.relative_to(project_root)
-                            if _should_ignore_file(rel_entry, patterns):
-                                continue
-
-                            if entry.is_dir():
-                                dirs_list.append(rel_entry.as_posix())
-                            elif entry.is_file():
-                                try:
-                                    stat = entry.stat()
-                                    files_list.append({
-                                        "name": rel_entry.name,
-                                        "path": rel_entry.as_posix(),
-                                        "size": stat.st_size,
-                                        "mtime": stat.st_mtime
-                                    })
-                                except OSError:
-                                    continue
-                    except PermissionError:
-                        self._send_json({"ok": False, "error": "permission-denied"}, 403)
-                        return
-                    except OSError as exc:
-                        self._send_json({"ok": False, "error": f"os-error: {exc}"}, 500)
-                        return
-
-                self._send_json({
-                    "ok": True,
-                    "path": p.as_posix() if path_param else "",
-                    "dirs": sorted(dirs_list, key=lambda x: x.lower()),
-                    "files": sorted(files_list, key=lambda x: x["name"].lower())
-                })
-
-            elif self.path.startswith("/api/rnd/project_file_content"):
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                project_id = (q.get("project_id", [""])[0] or "").strip()
-                path_param = (q.get("path", [""])[0] or "").strip()
-
-                if not project_id or not path_param:
-                    self._send_json({"ok": False, "error": "project_id and path required"}, 400)
-                    return
-                if _unsafe_path_seg(project_id):
-                    self._send_json({"ok": False, "error": "invalid project_id"}, 400)
-                    return
-
-                proj = _rnd.get_project(project_id)
-                if proj is None:
-                    self._send_json({"ok": False, "error": "Unknown project"}, 404)
-                    return
-
-                project_root = Path(proj["folder_path"]).resolve()
-
-                # Traversal check
-                p = Path(path_param)
-                if p.is_absolute() or ".." in p.parts:
-                    self._send_json({"ok": False, "error": "Path traversal detected"}, 400)
-                    return
-
-                target_path = (project_root / p).resolve()
-                try:
-                    target_path.relative_to(project_root)
-                except ValueError:
-                    self._send_json({"ok": False, "error": "Path containment check failed"}, 400)
-                    return
-
-                if not target_path.exists():
-                    self._send_json({"ok": False, "error": "File not found"}, 404)
-                    return
-                if not target_path.is_file():
-                    self._send_json({"ok": False, "error": "Not a file"}, 400)
-                    return
-
-                patterns = _load_gitignore(project_root)
-                if _should_ignore_file(p, patterns):
-                    self._send_json({"ok": False, "error": "Access denied (file is ignored)"}, 403)
-                    return
-
-                # Size cap check: 1 MB limit
-                SIZE_CAP = 1 * 1024 * 1024
-                try:
-                    stat = target_path.stat()
-                    if stat.st_size > SIZE_CAP:
-                        self._send_json({"ok": False, "error": f"File exceeds size limit of {SIZE_CAP} bytes"}, 400)
-                        return
-
-                    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-
-                    self._send_json({
-                        "ok": True,
-                        "path": path_param,
-                        "content": content,
-                        "size": stat.st_size
-                    })
-                except Exception as exc:
-                    self._send_json({"ok": False, "error": f"Failed to read file: {exc}"}, 500)
-                    return
+            # /api/rnd/project_file_content migrated to route_table (handle_project_file_content) — served by the strangler above.
 
             elif self.path.startswith("/api/rnd/session_summary"):
                 # Read-only structured SESSION summary as JSON (v3 Wave 6): the
@@ -12233,609 +13039,19 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             _trigger_session_summary(
                                 folder, pid, lane, session)
                             self._send_json({"ok": True, "status": "generating"})
-            elif self.path.startswith("/api/rnd/session_doc_roles"):
-                # Read-only (v4 Wave 5): the per-lane ROLE→doc map for one
-                # session (summarizer.session_doc_roles, Wave 3). The cockpit's
-                # split-summary RIGHT column (.slinks) renders these role-tagged
-                # links. Each href reuses the EXISTING /report and /artifact
-                # routes; absent roles are simply omitted (never fabricated).
-                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("pid", [""])[0] or "").strip()
-                lane = (q.get("lane", [""])[0] or "").strip()
-                session_id = (q.get("session", [""])[0] or "").strip()
-                if not pid or not lane or not session_id:
-                    self._send_json({"ok": False,
-                                     "error": "pid, lane, session required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                elif _unsafe_path_seg(lane):
-                    self._send_json({"ok": False, "error": "bad lane"}, 400)
-                else:
-                    try:
-                        roles = _summarizer.session_doc_roles(
-                            pid, lane, session_id)
-                    except Exception:
-                        roles = {}
-                    self._send_json({"ok": True, "roles": roles})
-            elif self.path.startswith("/api/rnd/context_status"):
-                # Read-only (v12 Wave 8): the live session's context-fullness
-                # heuristic — the data behind the cockpit's "context getting full"
-                # warn banner + one-click handoff. NO mutation, NO model call.
-                # AUTH: ``?token=`` (read-only GET; back-compat when no token set).
-                #   /api/rnd/context_status?session=<sid>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                sid = (q.get("session", [""])[0]
-                       or q.get("session_id", [""])[0] or "").strip()
-                if not sid:
-                    self._send_json({"ok": False,
-                                     "error": "session required"}, 400)
-                else:
-                    try:
-                        cf = _termsess.context_fullness(sid)
-                    except Exception:
-                        cf = {"ratio": 0.0, "over_threshold": False,
-                              "observed_bytes": 0, "budget": 0}
-                    self._send_json({
-                        "ok": True,
-                        "ratio": cf.get("ratio", 0.0),
-                        "over_threshold": bool(cf.get("over_threshold", False)),
-                        "observed_bytes": cf.get("observed_bytes", 0),
-                        "budget": cf.get("budget", 0),
-                    })
+            # /api/rnd/session_doc_roles migrated to route_table (handle_session_doc_roles) — served by the strangler above.
+            # /api/rnd/context_status migrated to route_table (handle_context_status) — served by the strangler above.
             # /api/rnd/effort_rollup migrated to route_table
             # (handle_effort_rollup) — served by the strangler above.
             # /api/rnd/build_deliverable migrated to route_table
             # (handle_build_deliverable) — served by the strangler above.
-            elif self.path.startswith("/api/rnd/grass"):
-                # Read-only (v5 Wave 5): the project's Grass ideas + their status
-                # + versioned refinements, for the two-pane idea workbench. NO
-                # mutation, NO model call. AUTH: ``?token=`` (read-only GET;
-                # back-compat when no token set). Project-scoped (no cross-project
-                # grass view). /api/rnd/grass?project_id=<id>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("pid", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                if not pid:
-                    self._send_json({"ok": False,
-                                     "error": "project_id required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    if proj is None:
-                        self._send_json({"ok": False,
-                                         "error": "Unknown project"}, 404)
-                    else:
-                        folder = proj.get("folder_path", "")
-                        try:
-                            ideas = _eh.grass_workbench_data(folder, pid)
-                        except Exception:
-                            ideas = []
-                        self._send_json({"ok": True, "ideas": ideas})
-            elif (self.path.startswith("/api/rnd/gandalf")
-                  and not self.path.startswith("/api/rnd/gandalf_status")):
-                # Read-only (Gandalf v1): the project's Gandalf run history —
-                # newest-first SAFE projections (verdict · chips · report/exec
-                # rel paths; NEVER absolute paths). NO mutation, NO model call.
-                # AUTH: ``?token=`` (read-only GET; back-compat when no token
-                # set), mirroring /api/rnd/grass. Project-scoped.
-                #   /api/rnd/gandalf?project_id=<id>
-                # NOTE: this GET prefix must NOT match the POST /api/rnd/gandalf_run.
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("pid", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                if not pid:
-                    self._send_json({"ok": False,
-                                     "error": "project_id required"}, 400)
-                elif _unsafe_path_seg(pid):
-                    self._send_json({"ok": False, "error": "bad pid"}, 400)
-                else:
-                    proj = _rnd.get_project(pid)
-                    if proj is None:
-                        self._send_json({"ok": False,
-                                         "error": "Unknown project"}, 404)
-                    else:
-                        folder = proj.get("folder_path", "")
-                        try:
-                            runs = _gandalf.list_runs(folder, pid)
-                        except Exception:
-                            runs = []
-                        self._send_json({"ok": True, "runs": runs})
-            elif (self.path.startswith("/api/rnd/gandalf_status")
-                  and not self.path.startswith("/api/rnd/gandalf_status_all")):
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0]
-                       or q.get("pid", [""])[0]
-                       or q.get("id", [""])[0] or "").strip()
-                if not pid:
-                    self._send_json({"ok": False, "error": "project_id required"}, 400)
-                else:
-                    with _GANDALF_INFLIGHT_GUARD:
-                        rec = _GANDALF_INFLIGHT.get(pid, None)
-                        if isinstance(rec, dict):
-                            if time.time() - rec.get("ts", 0) > 1800:
-                                _GANDALF_INFLIGHT.pop(pid, None)
-                                status = None
-                            else:
-                                status = rec.get("status")
-                        else:
-                            status = rec
-                    self._send_json({"ok": True, "status": status})
-            elif self.path.startswith("/api/rnd/gandalf_status_all"):
-                # BULK in-flight status for ALL projects with a live Gandalf run —
-                # one request the dashboard polls instead of N single-project
-                # calls. Returns {ok, statuses:{project_id: status_string}} for
-                # every project currently in-flight; finished/absent projects are
-                # simply omitted. Mirrors the single endpoint's token gate, ok/err
-                # envelope, and the >30-min staleness sweep.
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                statuses = {}
-                now = time.time()
-                with _GANDALF_INFLIGHT_GUARD:
-                    for _pid, rec in list(_GANDALF_INFLIGHT.items()):
-                        if isinstance(rec, dict):
-                            if now - rec.get("ts", 0) > 1800:
-                                _GANDALF_INFLIGHT.pop(_pid, None)
-                                continue
-                            st = rec.get("status")
-                        else:
-                            st = rec
-                        if st:
-                            statuses[_pid] = st
-                self._send_json({"ok": True, "statuses": statuses})
+            # /api/rnd/grass migrated to route_table (handle_grass) — served by the strangler above.
+            # /api/rnd/gandalf migrated to route_table (handle_gandalf) — served by the strangler above.
+            # /api/rnd/gandalf_status migrated to route_table (handle_gandalf_status) — served by the strangler above.
+            # /api/rnd/gandalf_status_all migrated to route_table (handle_gandalf_status_all) — served by the strangler above.
             # /api/rnd/orphan_check migrated to route_table (handle_orphan_check)
             # — served by the strangler above.
-            elif self.path.startswith("/api/rnd/zombie_hunter_report"):
-                # Auth gate (defense-in-depth): the radar report exposes process
-                # metadata (PIDs / session ids). Token-gated like the other
-                # read-API GET routes; a no-op when ANCHOR_TOKEN is unset (local
-                # single-user), enforced in remote mode. The dashboard button
-                # passes ?token= via _anchorToken().
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                import zombie_hunter
-                import reaper
-                import pty_manager
-                import subprocess
-                # NOTE: do NOT import json/sys/os/datetime function-locally here —
-                # they are module-global (top of file). A function-local import
-                # makes the name local to the ENTIRE do_GET method, so an earlier
-                # branch referencing it before this line raises UnboundLocalError
-                # -> a 500 on every page load. (rearch W8: the shadowing class is
-                # structurally eliminated — route_import_scan proves it stays 0.)
-
-                                # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
-                report_path = zombie_hunter._last_report_path()
-                is_stale = True
-                report_data = None
-
-                if report_path.exists():
-                    try:
-                        report_data = json.loads(report_path.read_text("utf-8"))
-                        swept_at = report_data.get("swept_at", 0)
-                        mtime = report_path.stat().st_mtime
-                        now = time.time()
-                        if abs(now - mtime) < 60 and abs(now - swept_at) < 60:
-                            is_stale = False
-                    except Exception:
-                        is_stale = True
-
-                # Observe phase: classify processes using the dry-run sweep (apply=False).
-                # This is read-only (NO kills, NO registry updates) and writes/refreshes
-                # zombie_hunter_last.json. Only refresh a STALE-but-PRESENT report; when the
-                # report file is ABSENT we deliberately fall through to the live-process
-                # fallback below (do NOT synthesize a cached report), so a fresh install with
-                # no daemon sweep yet still shows real OS processes.
-                if is_stale and report_path.exists():
-                    try:
-                        live_ids = pty_manager.live_sessions()
-                        report = zombie_hunter.sweep(live_session_ids=live_ids, apply=False)
-                        zombie_hunter._persist_report(report)
-                        report_data = report
-                        is_stale = False
-                    except Exception:
-                        pass
-
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-
-                html = "<html><head><title>Zombie Hunter Report</title>"
-                html += "<style>"
-                html += "body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0c; color: #e4e4e7; padding: 30px; margin: 0; }"
-                html += ".container { max-width: 900px; margin: 0 auto; background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 24px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); }"
-                html += "h1 { margin-top: 0; color: #fafafa; font-size: 24px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #27272a; padding-bottom: 12px; }"
-                html += "h2 { color: #f4f4f5; font-size: 18px; margin-top: 24px; margin-bottom: 12px; }"
-                html += "table { width: 100%; border-collapse: collapse; margin-top: 8px; margin-bottom: 16px; }"
-                html += "th { background: #27272a; color: #a1a1aa; font-weight: 500; text-align: left; padding: 10px 12px; font-size: 14px; border-bottom: 2px solid #3f3f46; }"
-                html += "td { padding: 10px 12px; border-bottom: 1px solid #27272a; font-size: 14px; color: #d4d4d8; }"
-                html += ".badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: 600; }"
-                html += ".badge-info { background: #1e3a8a; color: #93c5fd; }"
-                html += ".badge-warning { background: #78350f; color: #fde047; }"
-                html += ".badge-danger { background: #7f1d1d; color: #fca5a5; }"
-                html += ".badge-success { background: #064e3b; color: #6ee7b7; }"
-                html += ".badge-secondary { background: #27272a; color: #d4d4d8; }"
-                html += "pre { font-family: monospace; font-size: 13px; background: #09090b; padding: 16px; border: 1px solid #27272a; border-radius: 6px; overflow-x: auto; max-height: 500px; color: #4ade80; }"
-                html += ".meta { font-size: 13px; color: #71717a; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; background: #202024; padding: 10px 16px; border-radius: 6px; }"
-                html += ".meta-label { font-weight: bold; color: #a1a1aa; }"
-                html += "</style></head><body>"
-                html += "<div class='container'>"
-                html += "<h1><img src=\"/vendor/brand/zombie-hunter-radar.jpg\" style=\"width:32px;height:32px;border-radius:6px;vertical-align:middle;\" /> Zombie Hunter Radar</h1>"
-
-                if not is_stale and report_data:
-                    swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
-                    html += f"<div class='meta'>"
-                    html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-success'>Cached Sweep Report</span></div>"
-                    html += f"<div><span class='meta-label'>Swept At:</span> {swept_time_str}</div>"
-                    html += f"</div>"
-
-                    html += "<h2>Sweep Status Summary</h2>"
-                    html += "<table>"
-                    html += "<tr><th>Category</th><th>Count</th><th>Description</th></tr>"
-
-                    killed_cnt = len(report_data.get("killed", []))
-                    alive_cnt = len(report_data.get("alive", []))
-                    abst_cnt = len(report_data.get("abstained", []))
-                    reap_d_cnt = len(report_data.get("reaped_dead", []))
-                    reap_r_cnt = len(report_data.get("reaped_recycled", []))
-
-                    html += f"<tr><td><span class='badge badge-danger'>Orphaned (Pending Kill)</span></td><td>{killed_cnt}</td><td>Process is ours, running, but no longer attached.</td></tr>"
-                    html += f"<tr><td><span class='badge badge-success'>Alive (Attached)</span></td><td>{alive_cnt}</td><td>Process is ours, running, and actively attached.</td></tr>"
-                    html += f"<tr><td><span class='badge badge-warning'>Abstained (Manual Review)</span></td><td>{abst_cnt}</td><td>Identity missing or incomplete. Never auto-killed.</td></tr>"
-                    html += f"<tr><td><span class='badge badge-secondary'>Reaped (Dead)</span></td><td>{reap_d_cnt}</td><td>Process exited naturally. Registry updated.</td></tr>"
-                    html += f"<tr><td><span class='badge badge-secondary'>Reaped (Recycled PID)</span></td><td>{reap_r_cnt}</td><td>PID recycled by another process. Registry updated, new process spared.</td></tr>"
-                    html += "</table>"
-
-                    # Detail lists if any
-                    for cat_name, cat_list, badge_class in [
-                        ("Orphaned (Pending Kill) Session IDs", report_data.get("killed", []), "badge-danger"),
-                        ("Active/Attached Session IDs", report_data.get("alive", []), "badge-success"),
-                        ("Abstained Session IDs", report_data.get("abstained", []), "badge-warning")
-                    ]:
-                        if cat_list:
-                            html += f"<h2>{cat_name}</h2>"
-                            html += "<ul>"
-                            for sid in cat_list:
-                                html += f"<li><code>{sid}</code></li>"
-                            html += "</ul>"
-                else:
-                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    html += f"<div class='meta'>"
-                    html += f"<div><span class='meta-label'>Source:</span> <span class='badge badge-warning'>Live Process Query Fallback</span></div>"
-                    html += f"<div><span class='meta-label'>Query Time:</span> {now_str} (Sweep report stale or absent)</div>"
-                    html += f"</div>"
-
-                    html += "<h2>System Process List</h2>"
-                    cmd_output = ""
-                    try:
-                        if sys.platform.startswith("win"):
-                            creationflags = 0x08000000  # CREATE_NO_WINDOW
-                            res = subprocess.run(["tasklist"], capture_output=True, text=True, creationflags=creationflags, timeout=10)
-                            cmd_output = res.stdout
-                        else:
-                            res = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
-                            cmd_output = res.stdout
-                    except Exception as e:
-                        cmd_output = f"Error running fallback process query: {e}"
-
-                    html += f"<pre>{html_lib.escape(cmd_output)}</pre>"
-
-                # ── Swarm & Owner View ────────────────────────────────────────
-                # NOTE: _sessreg / _rnd are the MODULE-LEVEL aliases (imported at top).
-                # Do NOT re-import them locally here — a local `import ... as _rnd`
-                # makes _rnd function-local for ALL of do_GET, breaking earlier routes
-                # in this method with UnboundLocalError.
-                try:
-                    attached = set(pty_manager.live_sessions())
-                except Exception:
-                    attached = set()
-
-                running_records = []
-                try:
-                    running_records = _sessreg.list_sessions(status="running")
-                except Exception:
-                    pass
-
-                # (#3, single source) This view marks orphans AND FREEZES them
-                # (pause_orphan). Build the ONE immutable snapshot for this sweep
-                # and classify against it (the shared provider) so a legit
-                # work-doing session with no open stream is never frozen/killed:
-                # an orphan has NO live owner (not job-owned, not parent-owned),
-                # not merely "no attached PTY stream".
-                try:
-                    _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
-                                                  enumerate_pids=reaper.enumerate_live_pids)
-                    live_ids = reaper.live_owner_ids(_snap)
-                except Exception:
-                    _snap = None
-                    live_ids = attached
-
-                # Group by OWNER (project title, or project_id, or "(unowned)")
-                groups = {}
-                for rec in running_records:
-                    proj_id = rec.get("project_id", "")
-                    if proj_id:
-                        proj = _rnd.get_project(proj_id)
-                        owner = proj.get("name") if (proj and proj.get("name")) else proj_id
-                    else:
-                        owner = "(unowned)"
-                    
-                    if owner not in groups:
-                        groups[owner] = []
-                    groups[owner].append(rec)
-
-                # Add new section Swarm & Owner View
-                html += "<h2>Swarm & Owner View</h2>"
-                html += "<style>"
-                html += ".btn-kill { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 8px; }"
-                html += ".btn-kill:hover { background: #991b1b; }"
-                html += ".btn-kill:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
-                html += ".btn-resume { background: #064e3b; color: #6ee7b7; border: 1px solid #059669; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; font-weight: 600; transition: background 0.2s; margin-left: 6px; }"
-                html += ".btn-resume:hover { background: #065f46; }"
-                html += ".btn-resume:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
-                html += ".btn-start { background: #1e3a8a; color: #93c5fd; border: 1px solid #2563eb; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 600; transition: background 0.2s; }"
-                html += ".btn-start:hover { background: #1e40af; }"
-                html += ".btn-start:disabled { background: #27272a; color: #71717a; border-color: #3f3f46; cursor: not-allowed; }"
-                html += ".owner-heading { color: #f4f4f5; font-size: 16px; margin-top: 20px; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #27272a; font-weight: bold; }"
-                html += "</style>"
-
-                if not running_records:
-                    html += "<p style='color: #a1a1aa; font-style: italic;'>No active swarms or sessions.</p>"
-                else:
-                    sorted_owners = sorted(groups.keys(), key=lambda o: (o == "(unowned)", o.lower()))
-                    for owner in sorted_owners:
-                        html += f"<div class='owner-heading'>Owner: {html_lib.escape(owner)}</div>"
-                        html += "<table>"
-                        html += "<thead><tr><th>Swarm/Lane</th><th>Session</th><th>PID</th><th>Backend</th><th>Status</th><th>State</th></tr></thead>"
-                        html += "<tbody>"
-                        for rec in groups[owner]:
-                            sid = rec.get("session_id", "")
-                            short_sid = sid[:8]
-                            lane = rec.get("lane", "")
-                            pid = rec.get("pid")
-                            pid_str = str(pid) if pid is not None else ""
-                            backend = rec.get("backend", "")
-                            status = rec.get("status", "")
-                            
-                            try:
-                                is_orphaned = (reaper.classify_record(rec, _snap) == "kill")
-                            except Exception:
-                                # Defensive boundary (Wave 2, criterion 1): a
-                                # fault NEVER freezes — treat as OWNED/alive so
-                                # pause_orphan can't freeze a legit session.
-                                is_orphaned = False
-                                
-                            if is_orphaned:
-                                # FREEZE the orphan while it waits to be killed so
-                                # it stops burning CPU (pytest-guarded inside).
-                                paused = False
-                                try:
-                                    paused = zombie_hunter.pause_orphan(pid)
-                                except Exception:
-                                    paused = False
-                                pause_badge = ("<span class='badge badge-warning' title='Process frozen while it waits to be killed'>Paused</span> "
-                                               if paused else "")
-                                resume_btn = (f" <button class='btn-resume' onclick=\"resumeSession('{sid}', this)\">Resume</button>"
-                                              if paused else "")
-                                state_html = (
-                                    f"<span class='badge badge-danger'>Orphaned</span> {pause_badge}"
-                                    f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>{resume_btn}")
-                            else:
-                                state_html = (
-                                    "<span class='badge badge-success'>Attached</span> "
-                                    f"<button class='btn-kill' onclick=\"killSession('{sid}', this)\">Kill</button>")
-
-                            html += f"<tr id='row-{sid}'>"
-                            html += f"<td>{html_lib.escape(lane)}</td>"
-                            html += f"<td title='{html_lib.escape(sid)}'><code>{html_lib.escape(short_sid)}</code></td>"
-                            html += f"<td>{html_lib.escape(pid_str)}</td>"
-                            html += f"<td><code>{html_lib.escape(backend)}</code></td>"
-                            html += f"<td><span class='badge badge-success'>{html_lib.escape(status)}</span></td>"
-                            html += f"<td>{state_html}</td>"
-                            html += "</tr>"
-                        html += "</tbody>"
-                        html += "</table>"
-
-                html += "<script>"
-                html += """
-function getAnchorToken() {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const tok = params.get('token');
-    if (tok) return tok;
-  } catch(e) {}
-  try {
-    return localStorage.getItem('anchor_token') || '';
-  } catch(e) {
-    return '';
-  }
-}
-function killSession(sessionId, btn) {
-  if (!confirm("Are you sure you want to kill session " + sessionId + "?")) {
-    return;
-  }
-  btn.disabled = true;
-  btn.innerText = "Killing...";
-  
-  const token = getAnchorToken();
-  const headers = {
-    'Content-Type': 'application/json'
-  };
-  if (token) {
-    headers['X-Anchor-Token'] = token;
-  }
-  
-  const payload = {
-    session_id: sessionId
-  };
-  if (token) {
-    payload.token = token;
-  }
-
-  fetch('/api/rnd/zombie_kill', {
-    method: 'POST',
-    headers: headers,
-    body: JSON.stringify(payload)
-  })
-  .then(response => {
-    if (response.ok) {
-      return response.json();
-    }
-    throw new Error("HTTP error " + response.status);
-  })
-  .then(data => {
-    if (data.ok) {
-      btn.innerText = "Killed";
-      btn.className = "badge badge-secondary";
-      btn.style.border = "none";
-      btn.disabled = true;
-      const row = document.getElementById("row-" + sessionId);
-      if (row) {
-        row.style.transition = "opacity 0.5s ease";
-        row.style.opacity = "0";
-        setTimeout(function () { if (row && row.parentNode) row.parentNode.removeChild(row); }, 550);
-      }
-    } else {
-      alert("Failed to kill session: " + (data.error || "unknown error"));
-      btn.disabled = false;
-      btn.innerText = "Kill";
-    }
-  })
-  .catch(err => {
-    alert("Error communicating with server: " + err.message);
-    btn.disabled = false;
-    btn.innerText = "Kill";
-  });
-}
-function resumeSession(sessionId, btn) {
-  btn.disabled = true;
-  btn.innerText = "Resuming...";
-  const token = getAnchorToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) { headers['X-Anchor-Token'] = token; }
-  const payload = { session_id: sessionId };
-  if (token) { payload.token = token; }
-  fetch('/api/rnd/zombie_resume', {
-    method: 'POST', headers: headers, body: JSON.stringify(payload)
-  })
-  .then(response => { if (response.ok) return response.json(); throw new Error("HTTP error " + response.status); })
-  .then(data => {
-    if (data.ok) {
-      btn.innerText = "Resumed";
-      btn.disabled = true;
-      btn.className = "badge badge-secondary";
-      btn.style.border = "none";
-    } else {
-      alert("Failed to resume session: " + (data.error || "unknown error"));
-      btn.disabled = false;
-      btn.innerText = "Resume";
-    }
-  })
-  .catch(err => {
-    alert("Error communicating with server: " + err.message);
-    btn.disabled = false;
-    btn.innerText = "Resume";
-  });
-}
-function startZombieTerminal(btn) {
-  btn.disabled = true;
-  btn.innerText = "Starting terminal...";
-  
-  const token = getAnchorToken();
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['X-Anchor-Token'] = token;
-  
-  const payload = {};
-  if (token) payload.token = token;
-  
-  fetch('/api/rnd/zombie_terminal_start', {
-    method: 'POST',
-    headers: headers,
-    body: JSON.stringify(payload)
-  })
-  .then(response => {
-    if (response.ok) return response.json();
-    throw new Error("HTTP error " + response.status);
-  })
-  .then(data => {
-    if (data.ok && data.session_id) {
-      const iframe = document.getElementById('terminal-iframe');
-      const placeholder = document.getElementById('terminal-placeholder');
-      const tokenQuery = token ? ('&token=' + encodeURIComponent(token)) : '';
-      iframe.src = '/zombie_terminal?session=' + encodeURIComponent(data.session_id) + tokenQuery;
-      placeholder.style.display = 'none';
-      iframe.style.display = 'block';
-    } else {
-      alert("Failed to start terminal: " + (data.error || "unknown error"));
-      btn.disabled = false;
-      btn.innerText = "Start Terminal";
-    }
-  })
-  .catch(err => {
-    alert("Error communicating with server: " + err.message);
-    btn.disabled = false;
-    btn.innerText = "Start Terminal";
-  });
-}
-"""
-                html += "</script>"
-
-                html += "<h2>Zombie-Hunter Terminal</h2>"
-                html += "<div id='terminal-container' style='background:#0c0e14; border:1px solid #27272a; border-radius:8px; padding:16px; margin-top:12px; margin-bottom:24px; min-height:100px; display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
-                html += "  <div id='terminal-placeholder' style='text-align:center;'>"
-                html += "    <p style='color:#a1a1aa; font-size:14px; margin-bottom:12px;'>Start an interactive, seeded terminal session with an agent to investigate and manage zombie processes.</p>"
-                html += "    <button class='btn-start' onclick='startZombieTerminal(this)'>Start Terminal</button>"
-                html += "  </div>"
-                html += "  <iframe id='terminal-iframe' style='width:100%; height:450px; border:none; display:none; border-radius:6px;'></iframe>"
-                html += "</div>"
-
-                # Wave 1 (#12a): bounded LIVE auto-refresh of the radar so it
-                # updates during a sweep WITHOUT a manual reload. Bounded by
-                # ZOMBIE_MAX_TICKS so it never churns forever; it SKIPS the
-                # reload while the investigation terminal is open (so an active
-                # session is never nuked) and while the tab is hidden.
-                html += "<script id='zombie-auto-refresh'>"
-                html += """
-(function () {
-  var ZOMBIE_REFRESH_MS = 6000;   // poll cadence
-  var ZOMBIE_MAX_TICKS = 100;     // bounded: ~10 min then stop
-  var ticks = 0;
-  var timer = setInterval(function () {
-    ticks += 1;
-    if (ticks > ZOMBIE_MAX_TICKS) { clearInterval(timer); return; }
-    var iframe = document.getElementById('terminal-iframe');
-    if (iframe && iframe.style.display !== 'none') { return; }  // terminal open -> skip
-    if (document.hidden) { return; }                            // tab hidden  -> skip
-    window.location.reload();
-  }, ZOMBIE_REFRESH_MS);
-})();
-"""
-                html += "</script>"
-
-                html += "</div></body></html>"
-                self.wfile.write(html.encode("utf-8"))
-                return
+            # /api/rnd/zombie_hunter_report migrated to route_table (handle_zombie_hunter_report) — served by the strangler above.
             # /api/rnd/reaper_status migrated to route_table (handle_reaper_status)
             # — served by the strangler above.
             # /api/rnd/boneyard migrated to route_table (handle_boneyard) —
@@ -12890,148 +13106,7 @@ function startZombieTerminal(btn) {
                             self._send_bytes(data, ctype)
                     else:
                         self._send_bytes(data, ctype)
-            elif self.path.startswith("/zombie_terminal"):
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                sid = (q.get("session", [""])[0] or "").strip()
-                token = (q.get("token", [""])[0] or "").strip()
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                
-                html = """<!DOCTYPE html>
-<html>
-<head>
-  <title>Zombie Hunter Terminal</title>
-  <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
-  <script src="/vendor/xterm/xterm.js"></script>
-  <style>
-    body {
-      background: #0c0e14;
-      margin: 0;
-      padding: 0;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-    }
-    #terminal {
-      width: 100%;
-      height: 100%;
-    }
-  </style>
-</head>
-<body>
-  <div id="terminal"></div>
-  <script>
-    (function() {
-      const params = new URLSearchParams(window.location.search);
-      const sessionId = params.get('session');
-      const token = params.get('token') || '';
-      
-      if (!sessionId) {
-        document.getElementById('terminal').textContent = 'Error: session parameter required';
-        return;
-      }
-      
-      const term = new Terminal({
-        convertEol: true,
-        fontSize: 12,
-        theme: { background: '#0c0e14' },
-        scrollback: 5000
-      });
-      term.open(document.getElementById('terminal'));
-      
-      function fitTerminal() {
-        const cols = Math.floor(window.innerWidth / 7.2) || 80;
-        const rows = Math.floor(window.innerHeight / 17) || 24;
-        term.resize(cols, rows);
-        
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['X-Anchor-Token'] = token;
-        
-        const body = { session: sessionId, cols: cols, rows: rows };
-        if (token) body.token = token;
-        
-        fetch('/api/rnd/term_resize', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify(body)
-        }).catch(err => console.error('resize error:', err));
-      }
-      
-      window.addEventListener('resize', fitTerminal);
-      setTimeout(fitTerminal, 100);
-      
-      // Ordering fix (2026-07-08): keystrokes used to fire independent, racing
-      // POSTs (browser parallel connections + threaded server) → muddled typing.
-      // Prefer the ordered WebSocket (single FIFO stream applied to the PTY in
-      // frame order by the one server pump); fall back to a PROMISE-CHAINED POST
-      // queue (one term_input2 POST in flight at a time) when the WS isn't OPEN.
-      let activeWs = null;
-      let _sendChain = Promise.resolve();
-      function _sendInput(d) {
-        if (d === '' || d == null) return;
-        if (activeWs && activeWs.readyState === 1 /* OPEN */) {
-          try { activeWs.send(d); return; } catch (e) { /* fall through */ }
-        }
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['X-Anchor-Token'] = token;
-        const body = { session: sessionId, data: d };
-        if (token) body.token = token;
-        _sendChain = _sendChain.then(function () {
-          return fetch('/api/rnd/term_input2', {
-            method: 'POST', headers: headers, body: JSON.stringify(body)
-          });
-        }).catch(err => console.error('input error:', err));
-      }
-      term.onData(function (d) { _sendInput(d); });
-
-      const tq = token ? ('&token=' + encodeURIComponent(token)) : '';
-      const wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
-      const wsUrl = wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
-      
-      let sseStarted = false;
-      function startSSE() {
-        if (sseStarted) return;
-        sseStarted = true;
-        const sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
-        const es = new EventSource(sseUrl);
-        es.addEventListener('output', function (ev) {
-          try {
-            const p = JSON.parse(ev.data);
-            if (p.text) term.write(p.text);
-          } catch (e) {}
-        });
-        es.addEventListener('done', function () {
-          try { es.close(); } catch (e) {}
-        });
-      }
-      
-      try {
-        const ws = new WebSocket(wsUrl);
-        activeWs = ws;  // ordered input channel (see _sendInput above)
-        ws.onmessage = function (ev) { term.write(ev.data); };
-        ws.onclose = function () {
-          activeWs = null;
-          if (!sseStarted) startSSE();
-        };
-        ws.onerror = function () {
-          activeWs = null;
-          try { ws.close(); } catch (e) {}
-          startSSE();
-        };
-      } catch (e) {
-        activeWs = null;
-        startSSE();
-      }
-    })();
-  </script>
-</body>
-</html>"""
-                self.wfile.write(html.encode("utf-8"))
+            # /zombie_terminal migrated to route_table (handle_zombie_terminal) — served by the strangler above.
             elif self.path.startswith("/project/"):
                 # Per-project window (Wave 3 basic view + 4-state status line).
                 # Opening a brownfield project DISCOVERS + ADOPTS its on-disk
@@ -13186,40 +13261,7 @@ function startZombieTerminal(btn) {
                 self._send_json({"ok": True, "sessions": safe})
             # /api/rnd/chain migrated to route_table (handle_chain) — served by
             # the strangler above.
-            elif self.path.startswith("/api/rnd/board_html"):
-                # Read-only (v7 Wave 6): the project's rendered 5-lane board
-                # FRAGMENT, so an already-open project window can refresh the
-                # board IN PLACE after a session-lifecycle mutation (start /
-                # finish / advance / promote / develop) and the lane-column
-                # tile appears WITHOUT a full page reload. REUSES
-                # _render_kanban_html (the SAME server render the page used) —
-                # the board is the single source of truth, so the JS just
-                # re-fetches it (no duplicate JS-injected tile; dedupe stays
-                # correct = exactly one tile per session in its lane). SAFE: the
-                # kanban render already emits SAFE tiles (no absolute
-                # worktree_path / branch). AUTH: ``?token=`` (read-only GET;
-                # back-compat when no token configured), consistent with the
-                # other ?token= GET seams. /api/rnd/board_html?project_id=<id>
-                if not self._term_token_ok():
-                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
-                    return
-                q = parse_qs(urlparse(self.path).query)
-                pid = (q.get("project_id", [""])[0] or "").strip()
-                entry = _rnd.get_project(pid) if pid else None
-                if not pid or entry is None:
-                    self._send_json({"ok": False,
-                                     "error": "unknown project"}, 404)
-                    return
-                folder_raw = entry.get("folder_path", "")
-                try:
-                    # v12 Wave 2: the in-place refresh fragment is now the
-                    # Layout-D board (the SAME render the page emits), so a
-                    # refreshBoard() swap keeps the headline/shelf structure.
-                    frag = _render_layoutd_html(folder_raw, pid)
-                except Exception:
-                    frag = ("<div class='pgrid layoutd'><p class='rnd-empty'>"
-                            "Board unavailable.</p></div>")
-                self._send_json({"ok": True, "html": frag})
+            # /api/rnd/board_html migrated to route_table (handle_board_html) — served by the strangler above.
             elif self.path.startswith("/api/rnd/projects_html"):
                 # Read-only (v5 Wave 3): the rendered R&D rows FRAGMENT, so an
                 # already-open main dashboard can poll for changes (new session,
