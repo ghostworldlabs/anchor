@@ -2486,16 +2486,32 @@ class TestW6aMechanismOnly:
 # green IS waves 7-8's work. Plan citation: IMPLEMENTATION-PLAN.md §Wave 6
 # amendment + §Wave 7/8.
 #
-# DEFERRED 2026-07-04 (John's decision): the C1 frontend-extraction epic is a
-# maintainability refactor, NOT a durability prerequisite. It proved to be a
-# large mechanical transform ill-suited to the autonomous execute/fix loop
-# (waves 6-8 left ~3 of 4 static mirrors uncreated). Per John, C1 is DEFERRED so
-# the build proceeds to the durability substrate (W7+); these exit tests are
-# skipped (NOT deleted) and re-arm if C1 is taken up as its own effort. The W6a
-# substrate (slot_renderer/extract_dashboard/map + their green unit tests) is
-# kept. This skip is human-authorized; no autonomous agent may add it.
-@pytest.mark.skip(reason="C1 frontend extraction DEFERRED by John 2026-07-04 "
-                         "(maintainability refactor, not a durability prereq)")
+# CLOSED 2026-07-10 (John's decision): C1 is a DELIBERATE, closed architecture
+# choice, not an open blocker. Anchor's chosen model is server-side rendering
+# (SSR) — a valid best-in-class choice for a local single-user tool (no build
+# pipeline, no client-state framework, easy for a collaborator to read). The
+# heaviest frontend surface (the project window: ~4,700-line JS + CSS) IS
+# already extracted to static/project-window.{js,css} and served from disk. The
+# home dashboard is INTENTIONALLY still server-rendered; its mechanical
+# extraction remains an OPTIONAL, well-scoped follow-up (NOT rushed): the
+# extractor (tools/extract_home_dashboard.py) needs a refresh for the drifted
+# generate_html (now 5 return f-strings, not 1), and the static-vs-embedded
+# paths differ in asset-delivery seams (<link>/<script src> vs inline), so true
+# byte-parity needs the multi-seam reconciliation the plan already flagged (see
+# the skipped test_byte_parity_and_only_bootstrap_seam_differs). Until/unless a
+# collaborator needs to hand-edit the home markup, that follow-up is not worth
+# the regression risk. The exit assertions below encode the MAXIMAL-extraction
+# bar (delete the embedded twin, ≥7,000-line shrink) which we deliberately do
+# NOT pursue — keeping the embedded twin is an intentional byte-parity reference
+# + zero-500 fallback. Retained (skipped, NOT deleted) as the executable record
+# of that maximal bar should the follow-up ever be taken up. Rationale + the
+# scoped follow-up live in ANCHOR-STATE.md §5. This skip is human-authorized
+# (John, 2026-07-10); no autonomous agent may add it.
+@pytest.mark.skip(reason="C1 CLOSED 2026-07-10 (John): SSR is the deliberate "
+                         "architecture; project-window frontend extracted, home "
+                         "dashboard server-rendered by design. Full home "
+                         "extraction is an optional documented follow-up "
+                         "(ANCHOR-STATE.md §5), not an open blocker.")
 class TestC1ExitGate:
     # anchor_gui.py measured 17,359 lines at the pre-C1 sentinel (master,
     # 2026-07-04); the plan's C1 exit bar is a NET shrink ≥ 7,000 lines.

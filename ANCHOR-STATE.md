@@ -37,8 +37,25 @@ _Last updated: 2026-07-10._
 4. ~~**Fix the clobbered `IMPLEMENTATION-PLAN.md`**~~ ✅ DONE 2026-07-10 (`d6b9079`): restored the
    real rearch "Butler substrate" plan from `f994f34`; zombie-hunter plan keeps its own home;
    W3 Appendix A Ledger + full rearch suite green.
-5. **C1 frontend extraction** — still BLOCKED on a plan-level decision (unsatisfiable exit
-   gate; ~14k-line embedded JS blob). Separate effort; needs thinking, not grinding.
+5. **C1 frontend extraction — CLOSED 2026-07-10 (John).** Decision: **server-side rendering
+   (SSR) is Anchor's deliberate architecture** — a valid best-in-class choice for a local
+   single-user tool (no build pipeline / client-state framework; easy for a collaborator to
+   read). Status: the heavy project-window frontend (~4,700-line JS + 41KB CSS) IS extracted to
+   `static/project-window.{js,css}`; the home dashboard is INTENTIONALLY still server-rendered.
+   The old "unsatisfiable exit gate" was a false ghost — retired: `TestC1ExitGate` reason now
+   documents the closed decision (it stays skipped as the executable record of the maximal-
+   extraction bar we deliberately don't pursue — keeping the embedded twin is an intentional
+   byte-parity reference + zero-500 fallback).
+   OPTIONAL follow-up (only if a collaborator needs to hand-edit the home markup; NOT worth the
+   regression risk otherwise): finish the home extraction — (a) refresh
+   `tools/extract_home_dashboard.py` for the drifted `generate_html` (now 5 return f-strings,
+   not 1), (b) reconcile the static-vs-embedded asset-delivery seams (`<link>`/`<script src>`
+   vs inline) so the paths are truly byte-identical (the multi-seam rewrite the plan flagged,
+   `test_byte_parity_and_only_bootstrap_seam_differs`), (c) live-smoke each view, (d) flip the
+   `frontend` pillar flag to `static`. A focused Crucible→Foreman effort, never a rushed cut.
+   Note: this is a maintainability/tidiness item — Anchor is fully functional + share-ready
+   without it (the frontend text living in the Python file is a code-organization nit, not a
+   bug or an instability).
 
 ## Resume-after-restart facts
 - Full dossier: the `anchor-deploy-resume-2026-07-10` memory (pinned in MEMORY.md).
