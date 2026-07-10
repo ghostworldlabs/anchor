@@ -10768,6 +10768,278 @@ def handle_finish_to_build(handler, path, body):
                                      "auto_build": auto_build})
 
 
+def handle_heartbeat(handler, path, body):
+    global _last_heartbeat
+    _last_heartbeat = datetime.now()
+    handler._send_json({"ok": True})
+
+
+def handle_move_project(handler, path, body):
+    # v9 Wave 4 — GUARDED on-disk move: relocate a project's directory
+    # into a group subfolder and re-point registry+worktrees+discovery.
+    # Token-gated by the do_POST middleware above AND requires an
+    # explicit confirm:true (a real, irreversible filesystem move).
+    # REFUSES (no fs change) the running Anchor repo + any live-session
+    # project, surfacing the refusal reason. NEVER raises into here.
+    import project_move as _pmove
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    group = body.get("group", "")
+    confirm = bool(body.get("confirm"))
+    if not pid:
+        handler._send_json(
+            {"ok": False, "error": "project_id required"}, 400)
+    elif not confirm:
+        handler._send_json({"ok": False,
+                         "error": "move requires confirm:true",
+                         "reason": "confirm-required"}, 400)
+    else:
+        try:
+            out = _pmove.move_to_group(pid, group)
+        except Exception as exc:  # defensive — move_to_group never raises
+            handler._send_json({"ok": False, "error": str(exc)}, 500)
+        else:
+            status = 200 if out.get("ok") else (
+                404 if out.get("reason") == "unknown-project" else 400)
+            handler._send_json(out, status)
+
+
+def handle_run_deliverable(handler, path, body):
+    # Run a deliverable per its type contract; persist + report status.
+    pid = body.get("project_id", "")
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        folder = proj.get("folder_path", "")
+        try:
+            rec = _deliv.run_deliverable(
+                body.get("type", ""),
+                target=body.get("target"),
+                argv=body.get("argv"),
+                cwd=body.get("cwd") or folder or None,
+                timeout=float(body.get("timeout",
+                                       _deliv.DEFAULT_TIMEOUT)),
+                folder_path=folder,
+                project_id=pid,
+                name=body.get("name"),
+            )
+            handler._send_json({"ok": True, "status": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_launch_deliverable(handler, path, body):
+    # v4 Wave 7: TYPE-AWARE launch of a pinned deliverable. Dispatches on
+    # the deliverable's type — skill/tool VERIFY status (no spawn);
+    # service launches/pulls-up a persistent preview (free port != 8777,
+    # isolated temp data dir); program runs to result; doc returns the
+    # rendered view href. Auth is enforced by the middleware above.
+    pid = (body.get("project_id", "") or body.get("pid", "")).strip()
+    deliverable_id = (body.get("deliverable_id", "") or "").strip()
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    elif not deliverable_id:
+        handler._send_json({"ok": False,
+                         "error": "deliverable_id required"}, 400)
+    else:
+        folder = proj.get("folder_path", "")
+        try:
+            res = _deliv.launch_deliverable(folder, pid, deliverable_id)
+        except Exception as exc:  # never a 500 to the UI
+            handler._send_json({"ok": False, "error": str(exc)}, 400)
+        else:
+            if not res.get("ok") and \
+                    res.get("reason") == "unknown deliverable":
+                # Unknown deliverable id → clean 404 (not a crash).
+                handler._send_json({"ok": False,
+                                 "error": "unknown deliverable",
+                                 "reason": "unknown-deliverable"}, 404)
+            elif not res.get("ok"):
+                # Type-specific clean failure (e.g. service never came
+                # up / program failed its contract) → 400, not a 500.
+                handler._send_json({"ok": False,
+                                 "error": res.get("reason")
+                                 or "launch failed",
+                                 "type": res.get("type"),
+                                 "port": res.get("port")}, 400)
+            else:
+                handler._send_json({"ok": True, **res})
+
+
+def handle_launch_lane(handler, path, body):
+    # Launch a trio lane (research|plan|build) for a project. Returns a
+    # clean JSON error (not a 500) for an unknown project / invalid lane
+    # / a concurrency refusal (same-lane-busy or folder-build-lock).
+    pid = body.get("project_id", "")
+    lane = body.get("lane", "")
+    backend = body.get("backend") or _lanes.DEFAULT_BACKEND
+    if lane not in _lanes.LANES:
+        handler._send_json({"ok": False, "error": f"invalid lane: {lane}",
+                         "reason": "invalid-lane"}, 400)
+    elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+        handler._send_json({"ok": False,
+                         "error": f"invalid engine: {backend}",
+                         "reason": "invalid-engine"}, 400)
+    else:
+        try:
+            rec = _lanes.launch_lane(pid, lane, backend=backend)
+            handler._send_json({
+                "ok": True,
+                "job_id": rec.get("job_id"),
+                "lane": lane,
+                "backend": rec.get("backend"),
+                "status": rec.get("status"),
+                "skill": rec.get("skill"),
+                "gates": rec.get("gates"),
+            })
+        except _lanes.EngineNotAllowedError as eng:
+            # Engine policy refused (e.g. gemini on plan/build) — clean
+            # JSON error, NOT a 500.
+            handler._send_json({
+                "ok": False,
+                "error": str(eng),
+                "reason": "engine-not-allowed",
+                "lane": eng.lane,
+                "backend": eng.backend,
+            }, 400)
+        except KeyError:
+            handler._send_json({"ok": False,
+                             "error": f"unknown project: {pid}",
+                             "reason": "unknown-project"}, 404)
+        except _jr.LaneBusyError as busy:
+            # Concurrency policy refused the launch — surface a clean
+            # indicator (same-lane-busy / folder-build-lock), not a 500.
+            handler._send_json({
+                "ok": False,
+                "error": str(busy),
+                "reason": busy.reason,
+                "holder": busy.holder,
+            }, 409)
+
+
+def handle_preview_start(handler, path, body):
+    # Spin up an EPHEMERAL preview of the project's deliverable web app
+    # (e.g. anchor_gui.py) on an OS-assigned free port (NEVER 8777) in an
+    # isolated TEMP ANCHOR_DATA_DIR — so it can never bind or disturb the
+    # live :8777 service. Auth is enforced by the middleware above.
+    pid = (body.get("project_id", "") or "").strip()
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        folder = proj.get("folder_path", "")
+        target = (body.get("deliverable") or body.get("target")
+                  or _preview.DEFAULT_TARGET)
+        res = _preview.start_preview(folder, pid, target=target)
+        if res.get("ok"):
+            handler._send_json({"ok": True, "url": res.get("url"),
+                             "preview_id": res.get("preview_id"),
+                             "port": res.get("port"),
+                             "pid": res.get("pid")})
+        else:
+            # Clean 400 (e.g. target missing / never came up), not a 500.
+            handler._send_json({"ok": False,
+                             "error": res.get("reason", "preview failed"),
+                             "port": res.get("port")}, 400)
+
+
+def handle_preview_stop(handler, path, body):
+    # Tree-kill + reap a running preview. Idempotent; 404 for unknown id.
+    preview_id = (body.get("preview_id", "") or "").strip()
+    res = _preview.stop_preview(preview_id)
+    if res.get("ok"):
+        handler._send_json({"ok": True,
+                         "preview_id": res.get("preview_id"),
+                         "status": res.get("status")})
+    else:
+        handler._send_json({"ok": False,
+                         "error": res.get("reason", "unknown preview"),
+                         "reason": "unknown-preview"}, 404)
+
+
+def handle_promote_inbox(handler, path, body):
+    # Promote an EXISTING INBOX.md item into a project's Grass Catchers
+    # (copy-by-default: the inbox item is NOT removed). Reuses the
+    # existing inbox parser — no new format. Auth enforced above.
+    pid = body.get("project_id", "") or body.get("id", "")
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        folder = proj.get("folder_path", "")
+        inbox_items = parse_inbox_from_md(INBOX_MD)
+        try:
+            rec = _eh.promote_inbox(folder, pid,
+                                    body.get("text", ""),
+                                    inbox_items=inbox_items)
+            handler._send_json({"ok": True, "effort": rec})
+        except ValueError as ve:
+            handler._send_json({"ok": False, "error": str(ve)}, 400)
+
+
+def handle_link_github(handler, path, body):
+    # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
+    # → gh repo create <name> --private (through the ANCHOR_GH_CMD seam —
+    # NEVER real github.com in tests); mode=existing → git remote add
+    # origin <url> (local). Persists the remote on the project record.
+    # Default repos are PRIVATE. Auth enforced by the middleware above.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    mode = (body.get("mode", "") or "").strip().lower()
+    value = (body.get("value", "") or "").strip()
+    if not pid or not mode:
+        handler._send_json(
+            {"ok": False, "error": "project_id and mode required"}, 400)
+    elif mode not in ("create", "existing"):
+        handler._send_json(
+            {"ok": False,
+             "error": "mode must be 'create' or 'existing'"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            folder = proj.get("folder_path", "")
+            res = _remote.link_github(folder, mode, value,
+                                      project_id=pid)
+            code = 200 if res.get("ok") else 400
+            handler._send_json(res, code)
+
+
+def handle_set_auto_push(handler, path, body):
+    # v8 Wave 3: persist the per-project auto-push-on-finish opt-in flag.
+    # Auth enforced above. A non-opted project never pushes.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                         "error": "project_id required"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        enabled = bool(body.get("enabled"))
+        _remote.set_auto_push(pid, enabled)
+        handler._send_json({"ok": True, "auto_push": enabled})
+
+
+def handle_push_now(handler, path, body):
+    # v8 Wave 3: manual "Push now" — git push -u origin <branch>. In tests
+    # origin is a LOCAL BARE repo (file://) so there is NO network. Auth
+    # enforced above. 400 when not linked (no origin). Never raises.
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    if not pid:
+        handler._send_json({"ok": False,
+                         "error": "project_id required"}, 400)
+    elif _rnd.get_project(pid) is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+    else:
+        proj = _rnd.get_project(pid)
+        folder = proj.get("folder_path", "")
+        res = _remote.push_project(folder, pid)
+        code = 200 if res.get("ok") else 400
+        handler._send_json(res, code)
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -10850,6 +11122,17 @@ _MIGRATED_HANDLERS = {
     "handle_advance_stage": handle_advance_stage,
     "handle_handoff_to_fresh": handle_handoff_to_fresh,
     "handle_finish_to_build": handle_finish_to_build,
+    "handle_heartbeat": handle_heartbeat,
+    "handle_move_project": handle_move_project,
+    "handle_run_deliverable": handle_run_deliverable,
+    "handle_launch_deliverable": handle_launch_deliverable,
+    "handle_launch_lane": handle_launch_lane,
+    "handle_preview_start": handle_preview_start,
+    "handle_preview_stop": handle_preview_stop,
+    "handle_promote_inbox": handle_promote_inbox,
+    "handle_link_github": handle_link_github,
+    "handle_set_auto_push": handle_set_auto_push,
+    "handle_push_now": handle_push_now,
 }
 
 
@@ -13195,161 +13478,26 @@ function startZombieTerminal(btn) {
             except Exception as e:
                 self._send_json({"ok": False, "error": str(e)})
 
-        elif self.path == "/api/heartbeat":
-            global _last_heartbeat
-            _last_heartbeat = datetime.now()
-            self._send_json({"ok": True})
+        # /api/heartbeat migrated to route_table (handle_heartbeat) — served by the strangler above.
 
         # /api/rnd/retire_project, /api/rnd/reactivate_project,
         # /api/rnd/set_notes, /api/rnd/set_blurb migrated to route_table —
         # served by the strangler above.
         # /api/rnd/set_group migrated to route_table (handle_set_group) —
         # served by the strangler above.
-        elif self.path == "/api/rnd/move_project":
-            # v9 Wave 4 — GUARDED on-disk move: relocate a project's directory
-            # into a group subfolder and re-point registry+worktrees+discovery.
-            # Token-gated by the do_POST middleware above AND requires an
-            # explicit confirm:true (a real, irreversible filesystem move).
-            # REFUSES (no fs change) the running Anchor repo + any live-session
-            # project, surfacing the refusal reason. NEVER raises into here.
-            import project_move as _pmove
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            group = body.get("group", "")
-            confirm = bool(body.get("confirm"))
-            if not pid:
-                self._send_json(
-                    {"ok": False, "error": "project_id required"}, 400)
-            elif not confirm:
-                self._send_json({"ok": False,
-                                 "error": "move requires confirm:true",
-                                 "reason": "confirm-required"}, 400)
-            else:
-                try:
-                    out = _pmove.move_to_group(pid, group)
-                except Exception as exc:  # defensive — move_to_group never raises
-                    self._send_json({"ok": False, "error": str(exc)}, 500)
-                else:
-                    status = 200 if out.get("ok") else (
-                        404 if out.get("reason") == "unknown-project" else 400)
-                    self._send_json(out, status)
+        # /api/rnd/move_project migrated to route_table (handle_move_project) — served by the strangler above.
 
         # ── R&D control surface (Wave 9) ──────────────────────────────
         # /api/rnd/link_task migrated to route_table (handle_link_task) —
         # served by the strangler above.
-        elif self.path == "/api/rnd/run_deliverable":
-            # Run a deliverable per its type contract; persist + report status.
-            pid = body.get("project_id", "")
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                folder = proj.get("folder_path", "")
-                try:
-                    rec = _deliv.run_deliverable(
-                        body.get("type", ""),
-                        target=body.get("target"),
-                        argv=body.get("argv"),
-                        cwd=body.get("cwd") or folder or None,
-                        timeout=float(body.get("timeout",
-                                               _deliv.DEFAULT_TIMEOUT)),
-                        folder_path=folder,
-                        project_id=pid,
-                        name=body.get("name"),
-                    )
-                    self._send_json({"ok": True, "status": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
+        # /api/rnd/run_deliverable migrated to route_table (handle_run_deliverable) — served by the strangler above.
 
         # /api/rnd/pin_deliverable migrated to route_table (handle_pin_deliverable)
         # — served by the strangler above.
-        elif self.path == "/api/rnd/launch_deliverable":
-            # v4 Wave 7: TYPE-AWARE launch of a pinned deliverable. Dispatches on
-            # the deliverable's type — skill/tool VERIFY status (no spawn);
-            # service launches/pulls-up a persistent preview (free port != 8777,
-            # isolated temp data dir); program runs to result; doc returns the
-            # rendered view href. Auth is enforced by the middleware above.
-            pid = (body.get("project_id", "") or body.get("pid", "")).strip()
-            deliverable_id = (body.get("deliverable_id", "") or "").strip()
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            elif not deliverable_id:
-                self._send_json({"ok": False,
-                                 "error": "deliverable_id required"}, 400)
-            else:
-                folder = proj.get("folder_path", "")
-                try:
-                    res = _deliv.launch_deliverable(folder, pid, deliverable_id)
-                except Exception as exc:  # never a 500 to the UI
-                    self._send_json({"ok": False, "error": str(exc)}, 400)
-                else:
-                    if not res.get("ok") and \
-                            res.get("reason") == "unknown deliverable":
-                        # Unknown deliverable id → clean 404 (not a crash).
-                        self._send_json({"ok": False,
-                                         "error": "unknown deliverable",
-                                         "reason": "unknown-deliverable"}, 404)
-                    elif not res.get("ok"):
-                        # Type-specific clean failure (e.g. service never came
-                        # up / program failed its contract) → 400, not a 500.
-                        self._send_json({"ok": False,
-                                         "error": res.get("reason")
-                                         or "launch failed",
-                                         "type": res.get("type"),
-                                         "port": res.get("port")}, 400)
-                    else:
-                        self._send_json({"ok": True, **res})
+        # /api/rnd/launch_deliverable migrated to route_table (handle_launch_deliverable) — served by the strangler above.
 
         # ── R&D control surface — lane launch + gate answer (UI wiring) ──
-        elif self.path == "/api/rnd/launch_lane":
-            # Launch a trio lane (research|plan|build) for a project. Returns a
-            # clean JSON error (not a 500) for an unknown project / invalid lane
-            # / a concurrency refusal (same-lane-busy or folder-build-lock).
-            pid = body.get("project_id", "")
-            lane = body.get("lane", "")
-            backend = body.get("backend") or _lanes.DEFAULT_BACKEND
-            if lane not in _lanes.LANES:
-                self._send_json({"ok": False, "error": f"invalid lane: {lane}",
-                                 "reason": "invalid-lane"}, 400)
-            elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
-                self._send_json({"ok": False,
-                                 "error": f"invalid engine: {backend}",
-                                 "reason": "invalid-engine"}, 400)
-            else:
-                try:
-                    rec = _lanes.launch_lane(pid, lane, backend=backend)
-                    self._send_json({
-                        "ok": True,
-                        "job_id": rec.get("job_id"),
-                        "lane": lane,
-                        "backend": rec.get("backend"),
-                        "status": rec.get("status"),
-                        "skill": rec.get("skill"),
-                        "gates": rec.get("gates"),
-                    })
-                except _lanes.EngineNotAllowedError as eng:
-                    # Engine policy refused (e.g. gemini on plan/build) — clean
-                    # JSON error, NOT a 500.
-                    self._send_json({
-                        "ok": False,
-                        "error": str(eng),
-                        "reason": "engine-not-allowed",
-                        "lane": eng.lane,
-                        "backend": eng.backend,
-                    }, 400)
-                except KeyError:
-                    self._send_json({"ok": False,
-                                     "error": f"unknown project: {pid}",
-                                     "reason": "unknown-project"}, 404)
-                except _jr.LaneBusyError as busy:
-                    # Concurrency policy refused the launch — surface a clean
-                    # indicator (same-lane-busy / folder-build-lock), not a 500.
-                    self._send_json({
-                        "ok": False,
-                        "error": str(busy),
-                        "reason": busy.reason,
-                        "holder": busy.holder,
-                    }, 409)
+        # /api/rnd/launch_lane migrated to route_table (handle_launch_lane) — served by the strangler above.
 
         # /api/rnd/answer_gate migrated to route_table (handle_answer_gate) — served by the strangler above.
 
@@ -13417,43 +13565,9 @@ function startZombieTerminal(btn) {
         # /api/rnd/gandalf_cancel migrated to route_table (handle_gandalf_cancel) — served by the strangler above.
 
         # ── Runnable Anchor deliverable — ephemeral preview (Wave 8) ──
-        elif self.path == "/api/rnd/preview_start":
-            # Spin up an EPHEMERAL preview of the project's deliverable web app
-            # (e.g. anchor_gui.py) on an OS-assigned free port (NEVER 8777) in an
-            # isolated TEMP ANCHOR_DATA_DIR — so it can never bind or disturb the
-            # live :8777 service. Auth is enforced by the middleware above.
-            pid = (body.get("project_id", "") or "").strip()
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                folder = proj.get("folder_path", "")
-                target = (body.get("deliverable") or body.get("target")
-                          or _preview.DEFAULT_TARGET)
-                res = _preview.start_preview(folder, pid, target=target)
-                if res.get("ok"):
-                    self._send_json({"ok": True, "url": res.get("url"),
-                                     "preview_id": res.get("preview_id"),
-                                     "port": res.get("port"),
-                                     "pid": res.get("pid")})
-                else:
-                    # Clean 400 (e.g. target missing / never came up), not a 500.
-                    self._send_json({"ok": False,
-                                     "error": res.get("reason", "preview failed"),
-                                     "port": res.get("port")}, 400)
+        # /api/rnd/preview_start migrated to route_table (handle_preview_start) — served by the strangler above.
 
-        elif self.path == "/api/rnd/preview_stop":
-            # Tree-kill + reap a running preview. Idempotent; 404 for unknown id.
-            preview_id = (body.get("preview_id", "") or "").strip()
-            res = _preview.stop_preview(preview_id)
-            if res.get("ok"):
-                self._send_json({"ok": True,
-                                 "preview_id": res.get("preview_id"),
-                                 "status": res.get("status")})
-            else:
-                self._send_json({"ok": False,
-                                 "error": res.get("reason", "unknown preview"),
-                                 "reason": "unknown-preview"}, 404)
+        # /api/rnd/preview_stop migrated to route_table (handle_preview_stop) — served by the strangler above.
 
         # ── ConPTY terminal session lifecycle (Wave 3) ────────────────
         # These are the NEW ConPTY surface — distinct from the v2 REPL
@@ -13512,24 +13626,7 @@ function startZombieTerminal(btn) {
         # ── R&D Grass Catchers content feeds (Wave 5) ─────────────────
         # /api/rnd/add_idea migrated to route_table (handle_add_idea) —
         # served by the strangler above.
-        elif self.path == "/api/rnd/promote_inbox":
-            # Promote an EXISTING INBOX.md item into a project's Grass Catchers
-            # (copy-by-default: the inbox item is NOT removed). Reuses the
-            # existing inbox parser — no new format. Auth enforced above.
-            pid = body.get("project_id", "") or body.get("id", "")
-            proj = _rnd.get_project(pid)
-            if proj is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                folder = proj.get("folder_path", "")
-                inbox_items = parse_inbox_from_md(INBOX_MD)
-                try:
-                    rec = _eh.promote_inbox(folder, pid,
-                                            body.get("text", ""),
-                                            inbox_items=inbox_items)
-                    self._send_json({"ok": True, "effort": rec})
-                except ValueError as ve:
-                    self._send_json({"ok": False, "error": str(ve)}, 400)
+        # /api/rnd/promote_inbox migrated to route_table (handle_promote_inbox) — served by the strangler above.
 
         # /api/rnd/promote_grass migrated to route_table (handle_promote_grass) — served by the strangler above.
         # /api/rnd/grass_develop migrated to route_table (handle_grass_develop) — served by the strangler above.
@@ -13542,64 +13639,11 @@ function startZombieTerminal(btn) {
         # /api/rnd/grass_advance migrated to route_table (handle_grass_advance) — served by the strangler above.
         # /api/rnd/grass_delete migrated to route_table (handle_grass_delete) — served by the strangler above.
 
-        elif self.path == "/api/rnd/link_github":
-            # v8 Wave 3: link the project's repo to a GitHub remote. mode=create
-            # → gh repo create <name> --private (through the ANCHOR_GH_CMD seam —
-            # NEVER real github.com in tests); mode=existing → git remote add
-            # origin <url> (local). Persists the remote on the project record.
-            # Default repos are PRIVATE. Auth enforced by the middleware above.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            mode = (body.get("mode", "") or "").strip().lower()
-            value = (body.get("value", "") or "").strip()
-            if not pid or not mode:
-                self._send_json(
-                    {"ok": False, "error": "project_id and mode required"}, 400)
-            elif mode not in ("create", "existing"):
-                self._send_json(
-                    {"ok": False,
-                     "error": "mode must be 'create' or 'existing'"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    folder = proj.get("folder_path", "")
-                    res = _remote.link_github(folder, mode, value,
-                                              project_id=pid)
-                    code = 200 if res.get("ok") else 400
-                    self._send_json(res, code)
+        # /api/rnd/link_github migrated to route_table (handle_link_github) — served by the strangler above.
 
-        elif self.path == "/api/rnd/set_auto_push":
-            # v8 Wave 3: persist the per-project auto-push-on-finish opt-in flag.
-            # Auth enforced above. A non-opted project never pushes.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            if not pid:
-                self._send_json({"ok": False,
-                                 "error": "project_id required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                enabled = bool(body.get("enabled"))
-                _remote.set_auto_push(pid, enabled)
-                self._send_json({"ok": True, "auto_push": enabled})
+        # /api/rnd/set_auto_push migrated to route_table (handle_set_auto_push) — served by the strangler above.
 
-        elif self.path == "/api/rnd/push_now":
-            # v8 Wave 3: manual "Push now" — git push -u origin <branch>. In tests
-            # origin is a LOCAL BARE repo (file://) so there is NO network. Auth
-            # enforced above. 400 when not linked (no origin). Never raises.
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            if not pid:
-                self._send_json({"ok": False,
-                                 "error": "project_id required"}, 400)
-            elif _rnd.get_project(pid) is None:
-                self._send_json({"ok": False, "error": "Unknown project"}, 404)
-            else:
-                proj = _rnd.get_project(pid)
-                folder = proj.get("folder_path", "")
-                res = _remote.push_project(folder, pid)
-                code = 200 if res.get("ok") else 400
-                self._send_json(res, code)
+        # /api/rnd/push_now migrated to route_table (handle_push_now) — served by the strangler above.
 
         # /api/rnd/continue_session migrated to route_table (handle_continue_session) — served by the strangler above.
 
