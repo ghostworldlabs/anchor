@@ -28,10 +28,15 @@ _Last updated: 2026-07-10._
 2. **Harden agy / 5:1 in the skill** (John's ask, 2026-07-10): put a reusable `agy-review`
    entry point + a hard "never hand-roll agy / prompt small / agy-dispatch --readonly" rule
    INTO the `agy-dispatch` skill so 5:1 is automatic and host-independent (not model-memory).
-3. **Phase-2 of durable saving** (this doc's own follow-up): wire `pre_restart_drain.py` into
-   the restart path (warm-by-design restarts) + a Claude-Code Stop/SessionStart hook.
-4. **Fix the clobbered `IMPLEMENTATION-PLAN.md`** — on-disk file is the zombie-hunter plan,
-   not the rearch plan (filename collision); restore the real one from git. Bookkeeping only.
+3. **Phase-2 of durable saving** — restart-path wiring ✅ DONE 2026-07-10: `restart_anchor.ps1`
+   is the canonical WARM restart (drain-while-up → restart → verify); `pre_restart_drain.py`
+   wired in, guarded by `tests/test_warm_restart_wiring.py` (drain-before-stop invariant),
+   CLAUDE.md updated. REMAINING (deeper, deferred for a decision): an in-process shutdown hook
+   (server drains itself on any stop — captures live PTY transcripts the out-of-process wrapper
+   can't) and/or a Claude-Code Stop/SessionStart hook. See the "durability options" writeup.
+4. ~~**Fix the clobbered `IMPLEMENTATION-PLAN.md`**~~ ✅ DONE 2026-07-10 (`d6b9079`): restored the
+   real rearch "Butler substrate" plan from `f994f34`; zombie-hunter plan keeps its own home;
+   W3 Appendix A Ledger + full rearch suite green.
 5. **C1 frontend extraction** — still BLOCKED on a plan-level decision (unsatisfiable exit
    gate; ~14k-line embedded JS blob). Separate effort; needs thinking, not grinding.
 

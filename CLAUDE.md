@@ -9,7 +9,8 @@ The Anchor server runs **persistently in the background** — you do not normall
 
 **Host:** this is the same physical machine throughout — hostname `PUTER`, also referred to as **`gwl-server`** (its friendly / Tailscale name). Any code comment, doc, or plan that says `gwl-server` means this desktop; they are not two different boxes.
 
-- **Restart the server:** `nssm restart anchor` (requires an elevated shell)
+- **Restart the server (WARM — preferred):** `powershell -ExecutionPolicy Bypass -File .\restart_anchor.ps1` (elevated). Runs the graceful pre-restart drain (`tools/pre_restart_drain.py`) first — parks every live session warm (persists its docs + caches its resume summary to disk) — THEN restarts, so open terminals resume warm on reopen instead of cold. Fail-open: a drain failure still restarts.
+- **Restart the server (COLD fallback):** `nssm restart anchor` (elevated) — skips the drain; live sessions come back cold.
 - **Stop / start:** `nssm stop anchor` / `nssm start anchor`
 - **Status:** `Get-Service anchor`
 
