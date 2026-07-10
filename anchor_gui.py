@@ -9968,6 +9968,319 @@ def handle_term_resize(handler, path, body):
                              "reason": out.get("reason")}, 400)
 
 
+def handle_start_terminal(handler, path, body):
+    # Start a persistent interactive terminal session for a lane. The
+    # returned job_id is the terminal session id the SSE stream + input
+    # endpoints key off of. Clean JSON errors (not 500s) for unknown
+    # project / invalid lane / engine or concurrency refusals.
+    pid = body.get("project_id", "")
+    lane = body.get("lane", "")
+    backend = body.get("backend") or _lanes.DEFAULT_BACKEND
+    if lane not in _lanes.LANES:
+        handler._send_json({"ok": False, "error": f"invalid lane: {lane}",
+                         "reason": "invalid-lane"}, 400)
+    elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+        handler._send_json({"ok": False,
+                         "error": f"invalid engine: {backend}",
+                         "reason": "invalid-engine"}, 400)
+    else:
+        try:
+            rec = _term.start_terminal(pid, lane, backend=backend)
+            handler._send_json({
+                "ok": True,
+                "session": rec.get("job_id"),
+                "job_id": rec.get("job_id"),
+                "lane": lane,
+                "backend": rec.get("backend"),
+                "status": rec.get("status"),
+                "skill": rec.get("skill"),
+                "gates": rec.get("gates"),
+            })
+        except _lanes.EngineNotAllowedError as eng:
+            handler._send_json({"ok": False, "error": str(eng),
+                             "reason": "engine-not-allowed",
+                             "lane": eng.lane, "backend": eng.backend},
+                            400)
+        except KeyError:
+            handler._send_json({"ok": False,
+                             "error": f"unknown project: {pid}",
+                             "reason": "unknown-project"}, 404)
+        except _jr.LaneBusyError as busy:
+            handler._send_json({"ok": False, "error": str(busy),
+                             "reason": busy.reason,
+                             "holder": busy.holder}, 409)
+
+
+def handle_term_input(handler, path, body):
+    # Write ONE user turn onto a live terminal session's stdin (reuses the
+    # gate-adapter stdin sink — never forks it). Auth is enforced by the
+    # middleware above. Clean JSON for an unknown/terminal session.
+    session = (body.get("session", "") or body.get("job_id", "")).strip()
+    text = body.get("text", "")
+    if not session:
+        handler._send_json({"ok": False, "error": "missing session"}, 400)
+    elif text is None or not str(text).strip():
+        # Reject an empty/whitespace-only turn cleanly (nothing written).
+        handler._send_json({"ok": False, "written": False,
+                         "session": session, "error": "empty turn",
+                         "reason": "empty"}, 400)
+    elif len(str(text)) > _term.MAX_TURN_CHARS:
+        # Reject an oversized turn cleanly (nothing written).
+        handler._send_json({"ok": False, "written": False,
+                         "session": session, "error": "turn too large",
+                         "reason": "too-large"}, 413)
+    else:
+        ok = _term.send_turn(session, text)
+        handler._send_json({"ok": bool(ok), "written": bool(ok),
+                         "session": session,
+                         "reason": None if ok else "not-writable"})
+
+
+def handle_term_discover(handler, path, body):
+    # On session exit, return the adoption PROPOSAL (files this session
+    # produced under its output dir) for the UI to confirm. Read-style but
+    # POSTed so the token-aware client path is uniform.
+    session = (body.get("session", "") or body.get("job_id", "")).strip()
+    proposal = _term.discover_produced(session) if session else None
+    if proposal is None:
+        handler._send_json({"ok": False,
+                         "error": f"unknown session: {session}",
+                         "reason": "unknown-session"}, 404)
+    else:
+        handler._send_json({"ok": True, "proposal": proposal})
+
+
+def handle_term_adopt(handler, path, body):
+    # Confirm-adopt a terminal session's produced files as ONE session in
+    # the lane (Wave 1 grouping + Wave 2 adopt paths). Auth enforced above.
+    session = (body.get("session", "") or body.get("job_id", "")).strip()
+    if not session:
+        handler._send_json({"ok": False, "error": "missing session"}, 400)
+    else:
+        sess = _term.adopt_produced(session)
+        if sess is None:
+            handler._send_json({"ok": False,
+                             "error": "nothing to adopt",
+                             "reason": "nothing-adoptable"}, 404)
+        else:
+            handler._send_json({"ok": True, "session": sess})
+
+
+def handle_term_start(handler, path, body):
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    lane = (body.get("lane", "") or "").strip()
+    backend = (body.get("backend", "") or "claude").strip() or "claude"
+    label = body.get("label", "") or ""
+    # Wave 6 seam → Wave 7: a launch-from-panel carries the source
+    # session id as a seed hint. On a BUILD launch we now consume it:
+    # after start_session creates the session+worktree, we discover the
+    # most-recent plan set (preferring this seed_session's plan docs),
+    # prime the worktree with a HANDOFF reference file, and record the
+    # handoff in the per-project Anchor reference. The bare-PTY launch
+    # still works when there is no plan set (no crash; priming skipped).
+    _seed_session = (body.get("seed_session", "") or "").strip() or None
+    # v12 Wave 10: the "+ New effort" control starts an effort_managed trio
+    # session (the v12 discriminator — set ONLY by the v12 entrypoints). A
+    # legacy launch omits it (default False), so the legacy paths are
+    # unaffected. Coerced to a real bool.
+    _effort_managed = bool(body.get("effort_managed", False))
+    if not pid or not lane:
+        handler._send_json({"ok": False,
+                         "error": "project_id and lane required"}, 400)
+    else:
+        proj = _rnd.get_project(pid)
+        if proj is None:
+            handler._send_json({"ok": False,
+                             "error": "Unknown project"}, 404)
+        else:
+            try:
+                rec = _termsess.start_session(pid, lane, backend=backend,
+                                              label=label,
+                                              effort_managed=_effort_managed)
+            except _termsess.TerminalSessionError as exc:
+                handler._send_json({"ok": False, "error": str(exc)}, 400)
+            else:
+                handoff_info = None
+                if lane in _handoff.BUILD_LANES:
+                    folder = proj.get("folder_path", "")
+                    try:
+                        plan_set = _handoff.discover_recent_plan_set(
+                            folder, pid, source_session_id=_seed_session)
+                    except Exception:
+                        plan_set = None
+                    if plan_set:
+                        primed = _handoff.prime_worktree(
+                            rec.get("worktree_path", ""), plan_set,
+                            project_id=pid)
+                        recorded = _handoff.record_handoff(
+                            folder, pid, rec.get("session_id", ""),
+                            plan_set)
+                        handoff_info = {
+                            "plan_set": plan_set,
+                            "primed": primed,
+                            "recorded": bool(recorded.get("ok")),
+                        }
+                resp = {"ok": True, "session": rec}
+                if handoff_info is not None:
+                    resp["handoff"] = handoff_info
+                handler._send_json(resp)
+
+
+def handle_zombie_terminal_start(handler, path, body):
+    import shutil
+    import zombie_hunter
+    import reaper
+    import pty_manager
+
+    backend = "claude"
+    if not shutil.which("claude"):
+        backend = "gemini"
+
+    try:
+        attached = set(pty_manager.live_sessions())
+    except Exception:
+        attached = set()
+
+    report_path = zombie_hunter._last_report_path()
+    report_data = None
+    if report_path.exists():
+        try:
+            report_data = json.loads(report_path.read_text("utf-8"))
+        except Exception:
+            pass
+
+    if not report_data:
+        try:
+            report_data = zombie_hunter.sweep(live_session_ids=list(attached), apply=False)
+        except Exception:
+            report_data = {}
+
+    running_records = []
+    try:
+        running_records = _sessreg.list_sessions(status="running")
+    except Exception:
+        pass
+
+    # (#3, single source) Classify against the ONE immutable snapshot for
+    # this sweep (the shared provider) so a legit work-doing session with
+    # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
+    # parent-owned.
+    try:
+        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
+                                      enumerate_pids=reaper.enumerate_live_pids)
+        live_ids = reaper.live_owner_ids(_snap)
+    except Exception:
+        _snap = None
+        live_ids = attached
+
+    session_briefs = []
+    orphaned_ids = []
+    for rec in running_records:
+        sid = rec.get("session_id", "")
+        lane_name = rec.get("lane", "")
+        pid = rec.get("pid")
+        rec_backend = rec.get("backend", "")
+        proj_id = rec.get("project_id", "")
+
+        owner = "(unowned)"
+        if proj_id:
+            proj = _rnd.get_project(proj_id)
+            if proj and proj.get("name"):
+                owner = proj["name"]
+            else:
+                owner = proj_id
+
+        try:
+            classification = reaper.classify_record(rec, _snap)
+        except Exception:
+            # Defensive boundary (Wave 2, criterion 1): a fault NEVER
+            # briefs a session as an orphan-pending-kill — abstain-safe.
+            classification = reaper.VERDICT_ABSTAIN
+
+        if classification == "kill":
+            orphaned_ids.append(sid)
+            cls_str = "ORPHANED (Pending Kill)"
+        elif classification == "alive":
+            cls_str = "ALIVE (Attached)"
+        else:
+            cls_str = classification.upper()
+
+        session_briefs.append(
+            f"- Session ID: {sid}\n  Lane: {lane_name}\n  PID: {pid}\n  Backend: {rec_backend}\n  Owner Project: {owner}\n  Classification: {cls_str}"
+        )
+
+    briefing = "# ZOMBIE-HUNTER LIVE BRIEFING\n\n"
+    briefing += "You are the user's zombie-hunting assistant inside Anchor.\n"
+    briefing += "Your role is to help the user investigate the current swarm/owner/orphan state of the terminal sessions, "
+    briefing += "and when the user confirms, cancel (kill) orphaned sessions.\n\n"
+
+    if orphaned_ids:
+        briefing += "## Orphaned Sessions (Pending Kill)\n"
+        briefing += "These are orphaned sessions that can be killed:\n"
+        for oid in orphaned_ids:
+            briefing += f"- `{oid}`\n"
+        briefing += "\n"
+    else:
+        briefing += "No orphaned sessions detected.\n\n"
+
+    briefing += "## Sweep Report Summary\n"
+    if report_data:
+        swept_time_str = "unknown"
+        try:
+            swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+        briefing += f"- Swept At: {swept_time_str}\n"
+        briefing += f"- Killed count (orphaned): {len(report_data.get('killed', []))}\n"
+        briefing += f"- Alive count (attached): {len(report_data.get('alive', []))}\n"
+        briefing += f"- Abstained count (manual): {len(report_data.get('abstained', []))}\n"
+        briefing += f"- Reaped (dead): {len(report_data.get('reaped_dead', []))}\n"
+        briefing += f"- Reaped (recycled): {len(report_data.get('reaped_recycled', []))}\n"
+    else:
+        briefing += "No sweep report data available.\n"
+    briefing += "\n"
+
+    briefing += "## Running Sessions Details\n"
+    if session_briefs:
+        briefing += "\n".join(session_briefs)
+    else:
+        briefing += "No running sessions found in the registry."
+
+    try:
+        rec = _termsess.start_session(
+            project_id="__dashboard__",
+            lane="zombie",
+            backend=backend,
+            label="zombie-hunter",
+            seed_context=briefing
+        )
+    except _termsess.TerminalSessionError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 400)
+    else:
+        handler._send_json({
+            "ok": True,
+            "session_id": rec.get("session_id"),
+            "backend": rec.get("backend")
+        })
+
+
+def handle_term_input2(handler, path, body):
+    # POST-in half of the SSE-out + POST-in fallback transport. Authed by
+    # the middleware above.
+    session = (body.get("session", "") or "").strip()
+    data = body.get("data", "")
+    if not session:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+    else:
+        out = _termsess.input(session, data)
+        if out.get("ok"):
+            handler._send_json({"ok": True})
+        else:
+            handler._send_json({"ok": False,
+                             "error": f"unknown session: {session}",
+                             "reason": "unknown-session"}, 404)
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -10035,6 +10348,13 @@ _MIGRATED_HANDLERS = {
     "handle_term_set_engine": handle_term_set_engine,
     "handle_switch_terminal_engine": handle_switch_terminal_engine,
     "handle_term_resize": handle_term_resize,
+    "handle_start_terminal": handle_start_terminal,
+    "handle_term_input": handle_term_input,
+    "handle_term_discover": handle_term_discover,
+    "handle_term_adopt": handle_term_adopt,
+    "handle_term_start": handle_term_start,
+    "handle_zombie_terminal_start": handle_zombie_terminal_start,
+    "handle_term_input2": handle_term_input2,
 }
 
 
@@ -12556,100 +12876,10 @@ function startZombieTerminal(btn) {
             })
 
         # ── R&D interactive terminal (Wave 7) ─────────────────────────
-        elif self.path == "/api/rnd/start_terminal":
-            # Start a persistent interactive terminal session for a lane. The
-            # returned job_id is the terminal session id the SSE stream + input
-            # endpoints key off of. Clean JSON errors (not 500s) for unknown
-            # project / invalid lane / engine or concurrency refusals.
-            pid = body.get("project_id", "")
-            lane = body.get("lane", "")
-            backend = body.get("backend") or _lanes.DEFAULT_BACKEND
-            if lane not in _lanes.LANES:
-                self._send_json({"ok": False, "error": f"invalid lane: {lane}",
-                                 "reason": "invalid-lane"}, 400)
-            elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
-                self._send_json({"ok": False,
-                                 "error": f"invalid engine: {backend}",
-                                 "reason": "invalid-engine"}, 400)
-            else:
-                try:
-                    rec = _term.start_terminal(pid, lane, backend=backend)
-                    self._send_json({
-                        "ok": True,
-                        "session": rec.get("job_id"),
-                        "job_id": rec.get("job_id"),
-                        "lane": lane,
-                        "backend": rec.get("backend"),
-                        "status": rec.get("status"),
-                        "skill": rec.get("skill"),
-                        "gates": rec.get("gates"),
-                    })
-                except _lanes.EngineNotAllowedError as eng:
-                    self._send_json({"ok": False, "error": str(eng),
-                                     "reason": "engine-not-allowed",
-                                     "lane": eng.lane, "backend": eng.backend},
-                                    400)
-                except KeyError:
-                    self._send_json({"ok": False,
-                                     "error": f"unknown project: {pid}",
-                                     "reason": "unknown-project"}, 404)
-                except _jr.LaneBusyError as busy:
-                    self._send_json({"ok": False, "error": str(busy),
-                                     "reason": busy.reason,
-                                     "holder": busy.holder}, 409)
-
-        elif self.path == "/api/rnd/term_input":
-            # Write ONE user turn onto a live terminal session's stdin (reuses the
-            # gate-adapter stdin sink — never forks it). Auth is enforced by the
-            # middleware above. Clean JSON for an unknown/terminal session.
-            session = (body.get("session", "") or body.get("job_id", "")).strip()
-            text = body.get("text", "")
-            if not session:
-                self._send_json({"ok": False, "error": "missing session"}, 400)
-            elif text is None or not str(text).strip():
-                # Reject an empty/whitespace-only turn cleanly (nothing written).
-                self._send_json({"ok": False, "written": False,
-                                 "session": session, "error": "empty turn",
-                                 "reason": "empty"}, 400)
-            elif len(str(text)) > _term.MAX_TURN_CHARS:
-                # Reject an oversized turn cleanly (nothing written).
-                self._send_json({"ok": False, "written": False,
-                                 "session": session, "error": "turn too large",
-                                 "reason": "too-large"}, 413)
-            else:
-                ok = _term.send_turn(session, text)
-                self._send_json({"ok": bool(ok), "written": bool(ok),
-                                 "session": session,
-                                 "reason": None if ok else "not-writable"})
-
-        elif self.path == "/api/rnd/term_discover":
-            # On session exit, return the adoption PROPOSAL (files this session
-            # produced under its output dir) for the UI to confirm. Read-style but
-            # POSTed so the token-aware client path is uniform.
-            session = (body.get("session", "") or body.get("job_id", "")).strip()
-            proposal = _term.discover_produced(session) if session else None
-            if proposal is None:
-                self._send_json({"ok": False,
-                                 "error": f"unknown session: {session}",
-                                 "reason": "unknown-session"}, 404)
-            else:
-                self._send_json({"ok": True, "proposal": proposal})
-
-        elif self.path == "/api/rnd/term_adopt":
-            # Confirm-adopt a terminal session's produced files as ONE session in
-            # the lane (Wave 1 grouping + Wave 2 adopt paths). Auth enforced above.
-            session = (body.get("session", "") or body.get("job_id", "")).strip()
-            if not session:
-                self._send_json({"ok": False, "error": "missing session"}, 400)
-            else:
-                sess = _term.adopt_produced(session)
-                if sess is None:
-                    self._send_json({"ok": False,
-                                     "error": "nothing to adopt",
-                                     "reason": "nothing-adoptable"}, 404)
-                else:
-                    self._send_json({"ok": True, "session": sess})
-
+        # /api/rnd/start_terminal migrated to route_table (handle_start_terminal) — served by the strangler above.
+        # /api/rnd/term_input migrated to route_table (handle_term_input) — served by the strangler above.
+        # /api/rnd/term_discover migrated to route_table (handle_term_discover) — served by the strangler above.
+        # /api/rnd/term_adopt migrated to route_table (handle_term_adopt) — served by the strangler above.
         elif self.path == "/api/rnd/cancel_job":
             # Stop a running job (tree-kill via job_runner.cancel). Acts on the
             # job_id supplied by the ATTACHED console session only — the caller
@@ -12770,201 +13000,9 @@ function startZombieTerminal(btn) {
         # These are the NEW ConPTY surface — distinct from the v2 REPL
         # endpoints (start_terminal/term_input/term_stream). Auth is enforced
         # by the middleware above (mutating POSTs).
-        elif self.path == "/api/rnd/term_start":
-            pid = (body.get("project_id", "") or body.get("id", "")).strip()
-            lane = (body.get("lane", "") or "").strip()
-            backend = (body.get("backend", "") or "claude").strip() or "claude"
-            label = body.get("label", "") or ""
-            # Wave 6 seam → Wave 7: a launch-from-panel carries the source
-            # session id as a seed hint. On a BUILD launch we now consume it:
-            # after start_session creates the session+worktree, we discover the
-            # most-recent plan set (preferring this seed_session's plan docs),
-            # prime the worktree with a HANDOFF reference file, and record the
-            # handoff in the per-project Anchor reference. The bare-PTY launch
-            # still works when there is no plan set (no crash; priming skipped).
-            _seed_session = (body.get("seed_session", "") or "").strip() or None
-            # v12 Wave 10: the "+ New effort" control starts an effort_managed trio
-            # session (the v12 discriminator — set ONLY by the v12 entrypoints). A
-            # legacy launch omits it (default False), so the legacy paths are
-            # unaffected. Coerced to a real bool.
-            _effort_managed = bool(body.get("effort_managed", False))
-            if not pid or not lane:
-                self._send_json({"ok": False,
-                                 "error": "project_id and lane required"}, 400)
-            else:
-                proj = _rnd.get_project(pid)
-                if proj is None:
-                    self._send_json({"ok": False,
-                                     "error": "Unknown project"}, 404)
-                else:
-                    try:
-                        rec = _termsess.start_session(pid, lane, backend=backend,
-                                                      label=label,
-                                                      effort_managed=_effort_managed)
-                    except _termsess.TerminalSessionError as exc:
-                        self._send_json({"ok": False, "error": str(exc)}, 400)
-                    else:
-                        handoff_info = None
-                        if lane in _handoff.BUILD_LANES:
-                            folder = proj.get("folder_path", "")
-                            try:
-                                plan_set = _handoff.discover_recent_plan_set(
-                                    folder, pid, source_session_id=_seed_session)
-                            except Exception:
-                                plan_set = None
-                            if plan_set:
-                                primed = _handoff.prime_worktree(
-                                    rec.get("worktree_path", ""), plan_set,
-                                    project_id=pid)
-                                recorded = _handoff.record_handoff(
-                                    folder, pid, rec.get("session_id", ""),
-                                    plan_set)
-                                handoff_info = {
-                                    "plan_set": plan_set,
-                                    "primed": primed,
-                                    "recorded": bool(recorded.get("ok")),
-                                }
-                        resp = {"ok": True, "session": rec}
-                        if handoff_info is not None:
-                            resp["handoff"] = handoff_info
-                        self._send_json(resp)
+        # /api/rnd/term_start migrated to route_table (handle_term_start) — served by the strangler above.
 
-        elif self.path == "/api/rnd/zombie_terminal_start":
-            import shutil
-            import zombie_hunter
-            import reaper
-            import pty_manager
-
-            backend = "claude"
-            if not shutil.which("claude"):
-                backend = "gemini"
-
-            try:
-                attached = set(pty_manager.live_sessions())
-            except Exception:
-                attached = set()
-
-            report_path = zombie_hunter._last_report_path()
-            report_data = None
-            if report_path.exists():
-                try:
-                    report_data = json.loads(report_path.read_text("utf-8"))
-                except Exception:
-                    pass
-
-            if not report_data:
-                try:
-                    report_data = zombie_hunter.sweep(live_session_ids=list(attached), apply=False)
-                except Exception:
-                    report_data = {}
-
-            running_records = []
-            try:
-                running_records = _sessreg.list_sessions(status="running")
-            except Exception:
-                pass
-
-            # (#3, single source) Classify against the ONE immutable snapshot for
-            # this sweep (the shared provider) so a legit work-doing session with
-            # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
-            # parent-owned.
-            try:
-                _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
-                                              enumerate_pids=reaper.enumerate_live_pids)
-                live_ids = reaper.live_owner_ids(_snap)
-            except Exception:
-                _snap = None
-                live_ids = attached
-
-            session_briefs = []
-            orphaned_ids = []
-            for rec in running_records:
-                sid = rec.get("session_id", "")
-                lane_name = rec.get("lane", "")
-                pid = rec.get("pid")
-                rec_backend = rec.get("backend", "")
-                proj_id = rec.get("project_id", "")
-                
-                owner = "(unowned)"
-                if proj_id:
-                    proj = _rnd.get_project(proj_id)
-                    if proj and proj.get("name"):
-                        owner = proj["name"]
-                    else:
-                        owner = proj_id
-
-                try:
-                    classification = reaper.classify_record(rec, _snap)
-                except Exception:
-                    # Defensive boundary (Wave 2, criterion 1): a fault NEVER
-                    # briefs a session as an orphan-pending-kill — abstain-safe.
-                    classification = reaper.VERDICT_ABSTAIN
-                    
-                if classification == "kill":
-                    orphaned_ids.append(sid)
-                    cls_str = "ORPHANED (Pending Kill)"
-                elif classification == "alive":
-                    cls_str = "ALIVE (Attached)"
-                else:
-                    cls_str = classification.upper()
-                    
-                session_briefs.append(
-                    f"- Session ID: {sid}\n  Lane: {lane_name}\n  PID: {pid}\n  Backend: {rec_backend}\n  Owner Project: {owner}\n  Classification: {cls_str}"
-                )
-
-            briefing = "# ZOMBIE-HUNTER LIVE BRIEFING\n\n"
-            briefing += "You are the user's zombie-hunting assistant inside Anchor.\n"
-            briefing += "Your role is to help the user investigate the current swarm/owner/orphan state of the terminal sessions, "
-            briefing += "and when the user confirms, cancel (kill) orphaned sessions.\n\n"
-
-            if orphaned_ids:
-                briefing += "## Orphaned Sessions (Pending Kill)\n"
-                briefing += "These are orphaned sessions that can be killed:\n"
-                for oid in orphaned_ids:
-                    briefing += f"- `{oid}`\n"
-                briefing += "\n"
-            else:
-                briefing += "No orphaned sessions detected.\n\n"
-
-            briefing += "## Sweep Report Summary\n"
-            if report_data:
-                swept_time_str = "unknown"
-                try:
-                    swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
-                except Exception:
-                    pass
-                briefing += f"- Swept At: {swept_time_str}\n"
-                briefing += f"- Killed count (orphaned): {len(report_data.get('killed', []))}\n"
-                briefing += f"- Alive count (attached): {len(report_data.get('alive', []))}\n"
-                briefing += f"- Abstained count (manual): {len(report_data.get('abstained', []))}\n"
-                briefing += f"- Reaped (dead): {len(report_data.get('reaped_dead', []))}\n"
-                briefing += f"- Reaped (recycled): {len(report_data.get('reaped_recycled', []))}\n"
-            else:
-                briefing += "No sweep report data available.\n"
-            briefing += "\n"
-
-            briefing += "## Running Sessions Details\n"
-            if session_briefs:
-                briefing += "\n".join(session_briefs)
-            else:
-                briefing += "No running sessions found in the registry."
-
-            try:
-                rec = _termsess.start_session(
-                    project_id="__dashboard__",
-                    lane="zombie",
-                    backend=backend,
-                    label="zombie-hunter",
-                    seed_context=briefing
-                )
-            except _termsess.TerminalSessionError as exc:
-                self._send_json({"ok": False, "error": str(exc)}, 400)
-            else:
-                self._send_json({
-                    "ok": True,
-                    "session_id": rec.get("session_id"),
-                    "backend": rec.get("backend")
-                })
+        # /api/rnd/zombie_terminal_start migrated to route_table (handle_zombie_terminal_start) — served by the strangler above.
 
         # /api/rnd/term_kill migrated to route_table (handle_term_kill) — served by the strangler above.
 
@@ -13007,21 +13045,7 @@ function startZombieTerminal(btn) {
 
         # /api/rnd/term_resize migrated to route_table (handle_term_resize) — served by the strangler above.
 
-        elif self.path == "/api/rnd/term_input2":
-            # POST-in half of the SSE-out + POST-in fallback transport. Authed by
-            # the middleware above.
-            session = (body.get("session", "") or "").strip()
-            data = body.get("data", "")
-            if not session:
-                self._send_json({"ok": False, "error": "session required"}, 400)
-            else:
-                out = _termsess.input(session, data)
-                if out.get("ok"):
-                    self._send_json({"ok": True})
-                else:
-                    self._send_json({"ok": False,
-                                     "error": f"unknown session: {session}",
-                                     "reason": "unknown-session"}, 404)
+        # /api/rnd/term_input2 migrated to route_table (handle_term_input2) — served by the strangler above.
 
         # ── R&D validated, cached session summary (Wave 6) ────────────
         elif self.path == "/api/rnd/regenerate_summary":
