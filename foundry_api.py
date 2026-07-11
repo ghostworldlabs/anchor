@@ -159,6 +159,38 @@ def _extract_sections(body):
     return out
 
 
+def _extract_section_details(body):
+    """Return ``[{title, detail}]`` for each top-level ``## `` section — the
+    heading plus its markdown body (until the next ``## `` or a new ``# ``
+    heading, or the end). Powers the click-to-expand Capabilities tile: each
+    bullet (the title) reveals its section's real content. Long sections are
+    truncated to keep the /api/skills payload sane."""
+    if not body:
+        return []
+    sections = []
+    cur = None
+    for line in re.split(r"\r?\n", body):
+        if re.match(r"^##\s+(.+)$", line):
+            if cur is not None:
+                sections.append(cur)
+            cur = {"title": re.match(r"^##\s+(.+)$", line).group(1).strip(),
+                   "lines": []}
+        elif re.match(r"^#\s+(.+)$", line) and cur is not None:
+            sections.append(cur)  # a new '# ' heading closes the ## section
+            cur = None
+        elif cur is not None:
+            cur["lines"].append(line)
+    if cur is not None:
+        sections.append(cur)
+    out = []
+    for s in sections:
+        detail = "\n".join(s["lines"]).strip()
+        if len(detail) > 12000:
+            detail = detail[:12000].rstrip() + "\n\n…(truncated)"
+        out.append({"title": s["title"], "detail": detail})
+    return out
+
+
 def _first_paragraph(body):
     """First non-empty paragraph (per-skill north-star fallback)."""
     if not body:
@@ -249,6 +281,7 @@ def build_skills():
             "northStar": description or _first_paragraph(body),
             "file_path": (entry.get("source") + "/SKILL.md") if entry.get("source") else "",
             "capabilities": _extract_sections(body),
+            "capabilitySections": _extract_section_details(body),
             "dependencies": [d for d in (
                 re.sub(r"^skill:", "", str(e.get("to", ""))) for e in edges) if d],
             "edges": edges,
