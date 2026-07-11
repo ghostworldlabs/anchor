@@ -661,7 +661,9 @@ def test_boot_wiring_reconciles_each_registered_project(gui_env, tmp_path,
 
     def spy(folder, pid):
         calls.append((str(folder), str(pid)))
-        return 1
+        # __dashboard__ is folded in explicitly (not in the registry); count it 0
+        # so the per-registered-project total stays 2.
+        return 0 if str(pid) == "__dashboard__" else 1
 
     # The boot function goes through the module seam anchor_gui uses.
     monkeypatch.setattr(gui._gandalf, "reconcile_dangling_runs", spy)
@@ -669,6 +671,9 @@ def test_boot_wiring_reconciles_each_registered_project(gui_env, tmp_path,
     assert gui._reconcile_gandalf_boot_runs() == 2
     assert (a["folder_path"], a["id"]) in calls
     assert (b["folder_path"], b["id"]) in calls
+    # The synthetic __dashboard__ project is ALSO reconciled — its dangling gandalf
+    # rows would otherwise never boot-heal (it is not in the registry).
+    assert any(pid == "__dashboard__" for _, pid in calls)
 
 
 def test_boot_wiring_is_best_effort_per_project(gui_env, tmp_path, monkeypatch):
@@ -688,9 +693,14 @@ def test_boot_wiring_is_best_effort_per_project(gui_env, tmp_path, monkeypatch):
         seen.append(str(pid))
         if str(pid) == a["id"]:
             raise RuntimeError("boom")
+        # The synthetic __dashboard__ project is folded in explicitly (it is not in
+        # the registry, so its dangling gandalf rows would otherwise never
+        # boot-reconcile). It contributes 0 here so the per-project count stays 3.
+        if str(pid) == "__dashboard__":
+            return 0
         return 3
 
     monkeypatch.setattr(gui._gandalf, "reconcile_dangling_runs", spy)
 
     assert gui._reconcile_gandalf_boot_runs() == 3
-    assert set(seen) == {a["id"], b["id"]}
+    assert set(seen) == {a["id"], b["id"], "__dashboard__"}

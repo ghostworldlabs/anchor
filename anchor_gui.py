@@ -1385,10 +1385,21 @@ def _reconcile_gandalf_boot_runs() -> int:
     raises."""
     total = 0
     try:
-        projects = _rnd.list_projects()
+        projects = list(_rnd.list_projects())
     except Exception as e:
         _logger.error(f"gandalf boot reconcile: list_projects failed: {e}")
-        return 0
+        projects = []
+    # The synthetic __dashboard__ project (the dashboard's own "project window")
+    # is fabricated on demand and is NOT in the registry, so list_projects never
+    # returns it. Its Gandalf runs (e.g. a Heavy self-read) would therefore never
+    # get boot-reconciled — a restart mid-run left a perpetual "running" ghost.
+    # Fold it in explicitly so its dangling in_progress rows heal too.
+    try:
+        _dash = _rnd.get_project("__dashboard__")
+        if _dash and not any(p.get("id") == "__dashboard__" for p in projects):
+            projects.append(_dash)
+    except Exception:
+        pass
     for proj in projects:
         pid = proj.get("id") or ""
         folder = proj.get("folder_path") or ""
@@ -1795,7 +1806,10 @@ def _trigger_project_session_summaries(folder_path, project_id):
     if not _PROACTIVE_SUMMARY_ENABLED:
         return
     try:
-        lanes = [c[0] for c in _KANBAN_COLUMNS if c[0] != "grass"]
+        # Exclude grass (workbench-only) AND general (bare terminals — proactively
+        # summarizing the many ad-hoc general sessions would add needless
+        # background load; the general tile shows its label without a cached blurb).
+        lanes = [c[0] for c in _KANBAN_COLUMNS if c[0] not in ("grass", "general")]
     except Exception:
         lanes = ["research", "plan", "build", "deliverables"]
     for trio_lane in lanes:
@@ -2304,6 +2318,12 @@ _KANBAN_COLUMNS = (
     ("build", "build", "Build", "\U0001F528", "+ New build run"),
     ("deliverables", "deliverables", "Deliverables", "\U0001F4E6", "+ Add deliverable"),
     ("grass", "grass", "Grass Catchers", "\U0001F33F", "+ Add idea"),
+    # General sessions (bare terminals — NOT a trio lane, stage-less/skill-less).
+    # They were previously only visible on the ephemeral top strip; this column
+    # gives them a durable board zone (most-recent headline + older-runs shelf),
+    # rendered explicitly in _render_layoutd_html. The gather loops fold in the
+    # lane's on-disk efforts + live registry general sessions.
+    ("general", "general", "General", "\U0001F4BB", "+ New general session"),
 )
 
 
@@ -2555,14 +2575,17 @@ def _render_effort_card(ev, store_lane, project_id):
 # The board's trio columns are keyed by the trio-lane values in _KANBAN_COLUMNS
 # (research / plan / build / deliverables / grass). A registry record's ``lane``
 # may use the store form (``planning``) or the trio form (``plan``); both map to
-# the ``plan`` board column. ``general`` (Wave 4) + ``grass`` are NOT trio board
-# columns and are EXCLUDED here.
+# the ``plan`` board column. ``general`` now maps to its OWN board column (a
+# bare-terminal zone); ``grass``/``grass-dev`` remain EXCLUDED (workbench-only).
 _REGISTRY_LANE_TO_COLUMN = {
     "research": "research",
     "plan": "plan",
     "planning": "plan",
     "build": "build",
     "deliverables": "deliverables",
+    # General sessions now get a board zone (a bare-terminal lane, rendered as its
+    # own Layout-D column). grass/grass-dev are still excluded (workbench-only).
+    "general": "general",
 }
 
 # ── v12 Wave 1: effort board-routing accessor ───────────────────────────────
@@ -3379,7 +3402,12 @@ def _layoutd_zones(folder_path, project_id, sessions_by_lane=None):
     # ties (build listed first → slightly newer-leaning, harmless for a skeleton).
     plan_build = sorted(
         plan + build, key=lambda sv: -_sv_created_at(sv))
-    return {"research": research, "plan_build": plan_build}
+    # General sessions (bare terminals) get their own zone: most-recent headline +
+    # older-runs shelf, newest-first (registry created_at drives recency).
+    general = sorted(
+        list(sessions_by_lane.get("general", []) or []),
+        key=lambda sv: -_sv_created_at(sv))
+    return {"research": research, "plan_build": plan_build, "general": general}
 
 
 def _layoutd_tie_chip(sv):
@@ -3536,9 +3564,12 @@ def _render_layoutd_minitile(sv, trio_lane, project_id, folder_path, store_lane,
     state_cls, state_lbl = _session_state_text(rep)
     state_lbl = html_lib.escape(state_lbl)
     age = html_lib.escape(rep.get("age") or "")
-    badge_lane = "build" if trio_lane == "build" else (
-        "plan" if trio_lane in ("plan", "planning") else "research")
-    badge_lbl = badge_lane.capitalize()
+    if trio_lane == "general":
+        badge_lane, badge_lbl = "general", "General"
+    else:
+        badge_lane = "build" if trio_lane == "build" else (
+            "plan" if trio_lane in ("plan", "planning") else "research")
+        badge_lbl = badge_lane.capitalize()
     extra = ""
     if light == "green":
         extra = " running"
@@ -3597,20 +3628,28 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
         blurb = _session_tile_blurb(sv, folder_path, project_id, store_lane)
     blurb_html = (f"<p class='hblurb'>{html_lib.escape(blurb)}</p>"
                   if blurb else "")
-    badge_lane = "build" if trio_lane == "build" else (
-        "plan" if trio_lane in ("plan", "planning") else "research")
-    badge_lbl = badge_lane.capitalize()
+    if trio_lane == "general":
+        badge_lane, badge_lbl = "general", "General"
+    else:
+        badge_lane = "build" if trio_lane == "build" else (
+            "plan" if trio_lane in ("plan", "planning") else "research")
+        badge_lbl = badge_lane.capitalize()
     running_cls = " running" if light == "green" else ""
     running_chip = ("<span style='font-size:11px;color:var(--success)'>"
                     "&#9679; running</span>" if light == "green" else "")
     # v12 W10 / EV-2: light the 3-node stage track by the EFFORT's current_stage
     # (presence-based), falling back to the bare lane when no effort resolves.
-    eff = (effort_index or {}).get(sid)
-    track_stage = (eff.get("current_stage") if eff else "") or trio_lane
-    # research → first node; plan → first two; build → all three.
-    reached = {"research": 1, "plan": 2, "planning": 2, "build": 3}.get(
-        track_stage, 1)
-    track = _render_layoutd_track(track_stage, reached)
+    # General sessions are stage-less (not a trio lane) — no Research→Plan→Build
+    # track (it would be misleading); the dock likewise suppresses it for general.
+    if trio_lane == "general":
+        track = ""
+    else:
+        eff = (effort_index or {}).get(sid)
+        track_stage = (eff.get("current_stage") if eff else "") or trio_lane
+        # research → first node; plan → first two; build → all three.
+        reached = {"research": 1, "plan": 2, "planning": 2, "build": 3}.get(
+            track_stage, 1)
+        track = _render_layoutd_track(track_stage, reached)
     grass_chip = _layoutd_grass_origin_chip(rep, trio_lane)
     tie_data, tie_chip = _layoutd_tie_chip(sv)
     em_data = " data-effort-managed=\"1\"" if rep.get("effort_managed") else ""
@@ -3718,6 +3757,8 @@ def _sv_zone_lane(sv, zone_key):
     representative member's ``trio_lane`` (the merged plan/build zone holds both)."""
     if zone_key == "research":
         return "research"
+    if zone_key == "general":
+        return "general"
     rep = (sv.get("members") or [None])[0]
     if isinstance(rep, dict):
         ln = (rep.get("trio_lane") or "").strip()
@@ -4155,6 +4196,18 @@ def _render_layoutd_html(folder_path, project_id):
     plan_build_zone = _render_layoutd_zone(
         "plan_build", "Plan/Build", "&#128208;&#8594;&#128296; Latest Plan / Build",
         zones["plan_build"], folder_path, project_id, effort_index=effort_index)
+    # General sessions zone (bare terminals): most-recent headline + older-runs
+    # shelf, mirroring the research / plan-build zones. Rendered ONLY when the
+    # project actually has general sessions (unlike the always-present trio zones)
+    # — so a project with no general activity is unchanged, and general sessions
+    # are still started from the existing top "Open terminal" control (newGeneral,
+    # which refreshes the board so this zone appears).
+    general_sessions = zones.get("general", []) or []
+    general_zone = ""
+    if general_sessions:
+        general_zone = _render_layoutd_zone(
+            "general", "General", "&#128187; Latest General session",
+            general_sessions, folder_path, project_id, effort_index=effort_index)
     gandalf_panel = _render_layoutd_gandalf_panel(folder_path, project_id)
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
@@ -4180,6 +4233,7 @@ def _render_layoutd_html(folder_path, project_id):
         f"{new_effort}"
         f"{research_zone}"
         f"{plan_build_zone}"
+        f"{general_zone}"
         "</div>"
         "<div class='rightcol'>"
         f"{gandalf_panel}"

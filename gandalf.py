@@ -92,6 +92,16 @@ TIMEOUT_ENV = "ANCHOR_GANDALF_TIMEOUT"
 # override per-run via ANCHOR_GANDALF_TIMEOUT.
 DEFAULT_TIMEOUT = 900.0
 
+# Gandalf-Heavy (Fable-5 + its OWN whole-tree 5:1 Gemini adversarial reviews) is
+# far slower than a standard Opus read, so it routinely blew past the single
+# shared ceiling — hitting the incomplete/tree-kill path BEFORE the summary was
+# written (report present, exec-summary missing). Heavy therefore gets a
+# multiplied ceiling: an explicit ANCHOR_GANDALF_TIMEOUT_HEAVY wins, else
+# base × ANCHOR_GANDALF_TIMEOUT_HEAVY_MULT (default 2.5×). Env-tunable.
+TIMEOUT_HEAVY_ENV = "ANCHOR_GANDALF_TIMEOUT_HEAVY"
+TIMEOUT_HEAVY_MULT_ENV = "ANCHOR_GANDALF_TIMEOUT_HEAVY_MULT"
+HEAVY_TIMEOUT_MULT = 2.5
+
 # ── Tier (regular vs Gandalf-Heavy) ──────────────────────────────────────────
 #: The canonical Gandalf reasoner seat is Claude (the skill run by a Claude agent
 #: → RAW draft). The trio ALREADY wires the tier→model choice
@@ -240,7 +250,7 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
                     pass
                 res["reason"] = "cancelled"
                 return res
-    _jr.wait(jid, timeout=_timeout())
+    _jr.wait(jid, timeout=_timeout(tier))
     final = _jr.load_record(jid) or {}
     st = final.get("status")
 
@@ -265,20 +275,27 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
         res["reason"] = "cancelled"
         return res
 
-    # HONESTY: a successful Gandalf read REQUIRES a COMPLETED job (STATUS_DONE)
-    # that actually produced a NON-EMPTY report. A timed-out/failed run — or a
-    # finished run that only printed prose (or emitted JSON) but wrote no report —
-    # is an honest FAILURE, never a green tile. A stray/empty report file can NEVER
-    # bypass the completion check.
-    if st != _jr.STATUS_DONE:
-        res["reason"] = "agentic-run-incomplete:" + str(st or "unknown")
-        return res
+    # HONESTY: a successful (GREEN) Gandalf read REQUIRES a COMPLETED job
+    # (STATUS_DONE) that actually produced a NON-EMPTY report. A timed-out/failed
+    # run — or a finished run that only printed prose (or emitted JSON) but wrote
+    # no report — is an honest FAILURE, never a green tile. A stray/empty report
+    # file can NEVER bypass the completion check.
+    #
+    # BUT: if the skill DID write a non-empty report before we bounded the wait
+    # (heavy runs are slow), we still SALVAGE it — capturing the report + whatever
+    # summary text was printed onto the FAILED record — so a time-bounded run
+    # yields a viewable report + exec-summary instead of silently discarding the
+    # work and looking "stuck". ok stays False; the tile is honestly not-green.
     try:
         report_written = ((run_dir / REPORT_MD).is_file()
                           and (run_dir / REPORT_MD).stat().st_size > 0)
     except OSError:
         report_written = False
-    if not report_written:
+    incomplete = st != _jr.STATUS_DONE
+    if incomplete and not report_written:
+        res["reason"] = "agentic-run-incomplete:" + str(st or "unknown")
+        return res
+    if (not incomplete) and not report_written:
         res["reason"] = "no-report-produced"
         return res
 
@@ -287,6 +304,10 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
 
     # exec-summary.md from the printed summary (fallback: the verdict).
     exec_body = summary or verdict or "(report produced; no summary text printed)"
+    if incomplete:
+        exec_body = ("_This run was time-bounded before it fully completed; the "
+                     "report may be partial and was not adversarially graded._\n\n"
+                     + exec_body)
     try:
         (run_dir / EXEC_SUMMARY_MD).write_text(
             "# Gandalf executive summary\n\n" + exec_body + "\n", encoding="utf-8")
@@ -313,11 +334,18 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
 
     if not verdict:
         verdict = (summary.split(". ")[0][:200] if summary
-                   else "Gandalf read complete.")
+                   else ("Gandalf read time-bounded (partial report)."
+                         if incomplete else "Gandalf read complete."))
     res["verdict"] = verdict
+    _add_gitignore_best_effort(store)
+    if incomplete:
+        # Report salvaged, but the run did not fully complete → honest FAILURE.
+        res["ok"] = False
+        res["reason"] = ("agentic-run-incomplete:" + str(st or "unknown")
+                         + "; report-salvaged")
+        return res
     res["ok"] = True
     res["reason"] = None
-    _add_gitignore_best_effort(store)
     return res
 
 #: Project-root subdir holding the served run artifacts (NOT under .anchor, which
@@ -468,14 +496,29 @@ def _skill_dir() -> Path:
     return Path(raw)
 
 
-def _timeout() -> float:
+def _timeout(tier: str = DEFAULT_TIER) -> float:
     raw = (os.environ.get(TIMEOUT_ENV) or "").strip()
-    if not raw:
-        return DEFAULT_TIMEOUT
+    base = DEFAULT_TIMEOUT
+    if raw:
+        try:
+            base = float(raw)
+        except ValueError:
+            base = DEFAULT_TIMEOUT
+    if _normalize_tier(tier) != "heavy":
+        return base
+    # Heavy: an explicit override wins; else a multiplier over the base ceiling.
+    raw_h = (os.environ.get(TIMEOUT_HEAVY_ENV) or "").strip()
+    if raw_h:
+        try:
+            return float(raw_h)
+        except ValueError:
+            pass
     try:
-        return float(raw)
+        mult = float((os.environ.get(TIMEOUT_HEAVY_MULT_ENV) or "").strip()
+                     or HEAVY_TIMEOUT_MULT)
     except ValueError:
-        return DEFAULT_TIMEOUT
+        mult = HEAVY_TIMEOUT_MULT
+    return base * mult
 
 
 def _runs_dir(folder_path) -> Path:
@@ -1626,12 +1669,17 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
             r = _ACTIVE_RUNS.get(run_id)
             if r and r.get("index_recorded"):
                 already_recorded = True
+        wrote_terminal = already_recorded
         if not already_recorded:
             try:
                 _append_index(store, pid, record)
+                wrote_terminal = True
             except Exception:
-                # Even if the index write somehow fails, return the honest result.
-                pass
+                # Terminal index write failed (lock/IO contention). Do NOT mark the
+                # run finalized — leave the finally-block crash-reconcile free to
+                # write an honest terminal row, so a failed write can never leave a
+                # perpetual in_progress "still running" ghost.
+                wrote_terminal = False
 
         # Wave 2 (foundry-v2): host-enforced journaling — EVERY run through
         # Anchor (done/failed/cancelled) auto-appends its 7-field skeleton
@@ -1639,7 +1687,7 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
         # action; never raises.
         _journal_writeback(run_id, ts, pid, folder, record, graded=graded,
                            draft=(draft if isinstance(draft, dict) else None))
-        finalized = True
+        finalized = wrote_terminal
 
         out = dict(record)
         out["ok"] = bool(ok)

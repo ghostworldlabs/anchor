@@ -203,19 +203,23 @@ def test_general_session_starts_bare_no_seed(env):
     ts.kill(res["session_id"])
 
 
-def test_general_not_in_registry_lane_to_column(env):
-    """NEGATIVE: the board's registry→column map has NO 'general' entry, so a
-    general session never produces a trio board tile."""
+def test_general_in_registry_lane_to_column(env):
+    """The board's registry→column map now HAS a 'general' entry: general sessions
+    render in their OWN General board zone (the v7 button-not-column decision was
+    reversed on request — general is now a first-class board zone). grass stays
+    out (workbench-only)."""
     gui = env["gui"]
-    assert "general" not in gui._REGISTRY_LANE_TO_COLUMN
-    # The map's values are only the trio/deliverables columns.
+    assert gui._REGISTRY_LANE_TO_COLUMN.get("general") == "general"
+    # The map's values are the trio/deliverables columns PLUS general.
     assert set(gui._REGISTRY_LANE_TO_COLUMN.values()) <= {
-        "research", "plan", "build", "deliverables"}
-    # And _registry_session_view for a general record maps to trio_lane "".
+        "research", "plan", "build", "deliverables", "general"}
+    assert "grass" not in gui._REGISTRY_LANE_TO_COLUMN, "grass is workbench-only"
+    # And _registry_session_view for a general record maps to trio_lane "general".
     view = gui._registry_session_view(
         {"session_id": "x", "lane": "general", "status": "running",
          "label": "", "created_at": 0.0})
-    assert view["trio_lane"] == "", "general session view leaked a trio column"
+    assert view["trio_lane"] == "general", \
+        "general session view should map to the general column"
 
 
 def test_general_session_never_auto_advances_even_with_plan_set(env):
@@ -318,7 +322,8 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
       1. Load the project window; click "Open terminal".
       2. v12 W11: a bare general session starts → opens in the W10 bottom DOCK
          (bound to the general session id, terminal attached, no stage track/Advance).
-      3. NO new tile is added to any trio board lane column for it.
+      3. It DOES get a board tile — in its own General zone (data-lane='general'),
+         NOT in any trio lane column (button-not-column was reversed on request).
       4. No JS console errors.
 
     Screenshot saved to _devtest/wave4_general.png for orchestrator review.
@@ -364,11 +369,17 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
             "#dockAdvance", "e=>getComputedStyle(e).display") == "none", \
             "general session should not offer Advance"
 
-        # 3) NO trio BOARD tile was created for the general session.
+        # 3) The general session now DOES get a board tile — in its own General
+        #    zone (data-lane='general'), and NEVER in a trio lane column.
         assert pg.eval_on_selector_all(
-            "#kanbanBoard .tile[data-session='%s']" % gsid,
-            "e=>e.length") == 0, \
-            "general session created a board tile"
+            "#kanbanBoard .tile[data-session='%s'][data-lane='general']" % gsid,
+            "e=>e.length") >= 1, \
+            "general session should render a General-zone board tile"
+        for lane in ("research", "plan", "build"):
+            assert pg.eval_on_selector_all(
+                "#kanbanBoard .tile[data-session='%s'][data-lane='%s']"
+                % (gsid, lane), "e=>e.length") == 0, \
+                "general session must not appear in a trio lane column"
 
         _DEVTEST.mkdir(exist_ok=True)
         pg.screenshot(path=str(_DEVTEST / "wave4_general.png"), full_page=True)

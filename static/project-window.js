@@ -337,6 +337,39 @@ async function pushNow() {
 }
 
 // ── Grass Catchers content feeds (Wave 5) ───────────────────────────────────
+// After a grass idea is added/promoted, refresh WITHOUT a full page reload. The
+// old code called location.reload(), which tore down the client-only #grassPanel
+// workbench — so adding an idea from inside the workbench "closed" it on the user
+// (reported glitch). Instead: re-render the board in place (refreshBoard updates
+// the hidden #grassWorkbenchTpl, which now carries the new idea), then, if the
+// workbench is open, swap ONLY its left idea list (.glist) from the fresh
+// template — leaving the right work pane (.gwork, which may host a LIVE grass dev
+// terminal) fully intact — and re-wire the rows + counts.
+async function _refreshAfterGrassMutation() {
+  var wbOpen = !!document.getElementById('grassPanel');
+  try { await refreshBoard(); } catch (e) {}
+  if (!wbOpen) return;
+  try {
+    var panel = document.getElementById('grassPanel');
+    var tpl = document.getElementById('grassWorkbenchTpl');
+    if (!panel || !tpl) return;
+    var freshList = tpl.querySelector('.glist');
+    var curList = panel.querySelector('.glist');
+    if (freshList && curList) {
+      curList.innerHTML = freshList.innerHTML;
+      // Re-wire the (new) rows: click selects the idea.
+      var rows = curList.querySelectorAll('.gli');
+      for (var k = 0; k < rows.length; k++) {
+        rows[k].onclick = (function (row) {
+          return function () { selectGrassIdea(row.getAttribute('data-idea')); };
+        })(rows[k]);
+      }
+      _refreshGrassCounts(panel);
+      filterGrass();                     // honor the active filter tab
+    }
+  } catch (e) { /* never throw into the UI */ }
+}
+
 // Manual add: prompt for idea text, POST /api/rnd/add_idea, then refresh so the
 // new grass card renders. Token-aware via _postJson (retries once on 401).
 async function addIdea() {
@@ -355,7 +388,7 @@ async function addIdea() {
     }
   } catch (e) { alert('[add idea error] ' + e.message); return; }
   if (!data.ok) { alert('[add idea refused] ' + (data.error || 'unknown')); return; }
-  location.reload();
+  await _refreshAfterGrassMutation();
 }
 
 // Promote from INBOX: prompt for the inbox item text, POST /api/rnd/promote_inbox
@@ -376,7 +409,7 @@ async function promoteInbox() {
     }
   } catch (e) { alert('[promote inbox error] ' + e.message); return; }
   if (!data.ok) { alert('[promote inbox refused] ' + (data.error || 'unknown')); return; }
-  location.reload();
+  await _refreshAfterGrassMutation();
 }
 
 // Promote a Grass Catcher idea into a NEW seeded session in a lane (Wave 6).
@@ -4403,9 +4436,15 @@ async function newGeneral(backend) {
     label: rec.label || 'general',
     idx: (_laneCounters['general'] = (_laneCounters['general'] || 0) + 1)};
   renderSessionBar();
-  // Open in the dock (no board tile for general → openEffortDock synthesizes the
-  // record from MANAGED; lane 'general' suppresses the track + Advance).
-  setTimeout(function () { openEffortDock(sid, null); }, 200);
+  // Refresh the board so the new general session appears as a tile in the General
+  // zone immediately (general is now a board column). lane 'general' suppresses
+  // the dock's stage track + Advance.
+  refreshBoard();
+  setTimeout(function () {
+    var tile = document.querySelector(
+      '.tile[data-session="' + _cssEsc(sid) + '"]');
+    openEffortDock(sid, tile);
+  }, 400);
 }
 // --- Wave 2: File Upload (multi-file + folder + drag-drop) ---
 function _anchorReadB64(file) {
