@@ -38,6 +38,15 @@
     {"method": "GET", "pattern": "/api/rnd/tail", "justification": "W8/W9 — cursor-stable incremental job-log read; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
     {"method": "GET", "pattern": "/api/rnd/jobs", "justification": "W8/W9 — read-only job listing; data-plane, scheduled to move open -> token under the warn-then-enforce soak."},
     {"method": "GET", "pattern": "/api/rnd/previews", "justification": "Read-only SAFE projection of ephemeral deliverable previews (no absolute paths); unchanged from pre-rearch behavior."},
-    {"method": "GET", "pattern": "/foundry", "justification": "Skill Foundry v2 GUI page bootstrap; mirrors /project/ — the page loads open, all its mutative actions (/api/foundry/*) are token-gated. Scheduled to move open -> token (cookie-nav) under the same warn-then-enforce soak as /project/."}
+    {"method": "GET", "pattern": "/foundry", "justification": "Skill Foundry v2 GUI page bootstrap; mirrors /project/ — the page loads open, all its mutative actions (/api/foundry/*) are token-gated. Scheduled to move open -> token (cookie-nav) under the same warn-then-enforce soak as /project/."},
+    {"method": "GET", "pattern": "/foundry/", "justification": "Trailing-slash variant of the folded-in Foundry React SPA entry; same posture as /foundry."},
+    {"method": "GET", "pattern": "/assets/", "justification": "Static-asset root for the folded-in Foundry React app (traversal-safe, resolved inside foundry-gui/dist); mirrors /static and /vendor/* static roots — open, read-only, no secret."},
+    {"method": "GET", "pattern": "/brand/", "justification": "Brand/feature-icon root for the folded-in Foundry React app (traversal-safe, foundry-gui/dist/brand); mirrors /vendor/brand — open, read-only, no secret."},
+    {"method": "GET", "pattern": "/api/skills", "justification": "Folded-in Foundry GUI read data-plane — real skill manifest + SKILL.md sections + journal timeline; open, read-only, same posture as /foundry. The app fetches it same-origin/tokenless."},
+    {"method": "GET", "pattern": "/api/north-star", "justification": "Folded-in Foundry GUI read data-plane — the program North Star doc; open, read-only."},
+    {"method": "GET", "pattern": "/api/summary", "justification": "Folded-in Foundry GUI read data-plane — honest sleep-run summary derived from on-disk artifacts; open, read-only."},
+    {"method": "GET", "pattern": "/api/timeline", "justification": "Folded-in Foundry GUI read data-plane — flattened journal timeline across skills; open, read-only."},
+    {"method": "GET", "pattern": "/api/metrics", "justification": "Folded-in Foundry GUI read data-plane — skill/journal/sleep-run counts; open, read-only."},
+    {"method": "GET", "pattern": "/api/agent-payload", "justification": "Folded-in Foundry GUI read data-plane — aggregate north-star/summary/metrics payload; open, read-only."}
   ]
 }

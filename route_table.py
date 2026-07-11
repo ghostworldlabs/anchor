@@ -393,6 +393,18 @@ ROUTES = [
     # mutative ops (token-gated). The GET page is served by the inline do_GET
     # fall-through (auth-only row); the POST ops are strangler-migrated.
     _r("GET", "/foundry", AUTH_OPEN),
+    _r("GET", "/foundry/", AUTH_OPEN),
+    # Folded-in Foundry React app: its static-asset roots (prefix) + read
+    # data-plane (all open, read-only; the app fetches them same-origin and
+    # tokenless, exactly like the /foundry page it is served under).
+    _r("GET", "/assets/", AUTH_OPEN, match=MATCH_PREFIX),
+    _r("GET", "/brand/", AUTH_OPEN, match=MATCH_PREFIX),
+    _r("GET", "/api/skills", AUTH_OPEN),
+    _r("GET", "/api/north-star", AUTH_OPEN),
+    _r("GET", "/api/summary", AUTH_OPEN),
+    _r("GET", "/api/timeline", AUTH_OPEN),
+    _r("GET", "/api/metrics", AUTH_OPEN),
+    _r("GET", "/api/agent-payload", AUTH_OPEN),
     _r("POST", "/api/foundry/create_skill", AUTH_TOKEN,
        handler="handle_foundry_create_skill", migrated=True),
     _r("POST", "/api/foundry/north_star", AUTH_TOKEN,
@@ -401,6 +413,15 @@ ROUTES = [
        handler="handle_foundry_sleep_session", migrated=True),
     _r("POST", "/api/foundry/sync_autoload", AUTH_TOKEN,
        handler="handle_foundry_sync_autoload", migrated=True),
+    # Foundry GUI fold-in — the folded-in React app's REAL sleep-session loop
+    # (each spawns the foundry-v2 kernel CLI via foundry_api). Apply is
+    # confirm-gated. Distinct exact paths from /sleep_session above.
+    _r("POST", "/api/foundry/sleep_session/propose", AUTH_TOKEN,
+       handler="handle_foundry_sleep_propose", migrated=True),
+    _r("POST", "/api/foundry/sleep_session/apply", AUTH_TOKEN,
+       handler="handle_foundry_sleep_apply", migrated=True),
+    _r("POST", "/api/foundry/sleep_session/rollback", AUTH_TOKEN,
+       handler="handle_foundry_sleep_rollback", migrated=True),
 ]
 
 

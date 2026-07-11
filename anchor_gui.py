@@ -409,6 +409,7 @@ import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chai
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
+import foundry_api as _fapi  # foundry GUI fold-in — the React app's real-data API layer (port of server.mjs)
 import pillar_flags as _pillar  # rearch W3/W4 — per-pillar off-switch flags (stdlib-only)
 import paths as _paths  # re-import alias (already imported above; harmless)
 
@@ -12576,6 +12577,30 @@ def handle_foundry_sync_autoload(handler, path, body):
         confirm=bool(body.get("confirm"))))
 
 
+# ── Foundry GUI fold-in: the REAL sleep-session kernel loop (server.mjs port) ─
+# The folded-in React app POSTs these three verbs; each spawns the genuine
+# foundry-v2 kernel CLI (sleep-kernel-cli.mjs) via foundry_api and returns its
+# honest JSON record (0 ok / 3 refused / 1 blocked). Apply is confirm-gated by
+# the kernel AND by foundry_api. Token-gated by the do_POST middleware.
+
+def handle_foundry_sleep_propose(handler, path, body):
+    """POST /api/foundry/sleep_session/propose — kernel `propose`."""
+    payload, code = _fapi.sleep_propose(body)
+    handler._send_json(payload, code)
+
+
+def handle_foundry_sleep_apply(handler, path, body):
+    """POST /api/foundry/sleep_session/apply — confirm-gated kernel `apply`."""
+    payload, code = _fapi.sleep_apply(body)
+    handler._send_json(payload, code)
+
+
+def handle_foundry_sleep_rollback(handler, path, body):
+    """POST /api/foundry/sleep_session/rollback — kernel `rollback`."""
+    payload, code = _fapi.sleep_rollback(body)
+    handler._send_json(payload, code)
+
+
 # Route-table handler name -> module-level function. route_table rows reference
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
@@ -12696,6 +12721,9 @@ _MIGRATED_HANDLERS = {
     "handle_foundry_north_star": handle_foundry_north_star,
     "handle_foundry_sleep_session": handle_foundry_sleep_session,
     "handle_foundry_sync_autoload": handle_foundry_sync_autoload,
+    "handle_foundry_sleep_propose": handle_foundry_sleep_propose,
+    "handle_foundry_sleep_apply": handle_foundry_sleep_apply,
+    "handle_foundry_sleep_rollback": handle_foundry_sleep_rollback,
 }
 
 
@@ -13327,16 +13355,50 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
-            elif _path_only == "/foundry":
-                # Foundry GUI READ surface (foundry-v2 Wave 9): a STATELESS
-                # render over the real engine artifacts — autoload registry,
-                # map.json v2 + lockfile, job_runner records/logs, skill
-                # journals. No parallel run/progress store lives behind this
-                # page; ?job=<id> drills into one job's live job_runner state.
-                q = parse_qs(urlparse(self.path).query)
-                self._send_html(_fgui.render_foundry_page(
-                    lane=(q.get("lane") or [None])[0],
-                    job_id=(q.get("job") or [None])[0]))
+            elif _path_only == "/foundry" or _path_only == "/foundry/":
+                # Foundry GUI (folded-in React app): serve the built SPA
+                # (foundry-gui/dist/index.html). Its absolute /assets, /brand
+                # and /api/* calls are answered by the routes below + the
+                # foundry_api layer — no standalone node sidecar, no port 8780.
+                idx, ctype = _fapi.resolve_dist_file("index.html")
+                if idx is None:
+                    # dist/ missing (React app not built) — fall back to the
+                    # stateless Python read page so /foundry never 404s.
+                    q = parse_qs(urlparse(self.path).query)
+                    self._send_html(_fgui.render_foundry_page(
+                        lane=(q.get("lane") or [None])[0],
+                        job_id=(q.get("job") or [None])[0]))
+                else:
+                    self._send_bytes(idx.read_bytes(), ctype, cache="no-cache")
+            elif _path_only.startswith("/assets/") or _path_only.startswith("/brand/"):
+                # Static assets for the folded-in Foundry React app — traversal-
+                # safe, resolved strictly inside foundry-gui/dist. The bundle's
+                # filenames are content-hashed, so they cache immutably.
+                target, ctype = _fapi.resolve_dist_file(_path_only)
+                if target is None:
+                    self._send_json({"error": "not found"}, 404)
+                else:
+                    self._send_bytes(target.read_bytes(), ctype,
+                                     cache="public, max-age=86400")
+            elif _path_only in ("/api/skills", "/api/north-star", "/api/summary",
+                                "/api/timeline", "/api/metrics",
+                                "/api/agent-payload"):
+                # The folded-in Foundry GUI's READ data-plane (ports of
+                # server.mjs): every value traces to a real file on disk; a
+                # missing file is an honest empty. Read-only, open (same as the
+                # /foundry page); the app calls these same-origin, tokenless.
+                if _path_only == "/api/skills":
+                    self._send_json(_fapi.build_skills())
+                elif _path_only == "/api/north-star":
+                    self._send_json({"northStar": _fapi.load_north_star()})
+                elif _path_only == "/api/summary":
+                    self._send_json({"summary": _fapi.build_summary()})
+                elif _path_only == "/api/timeline":
+                    self._send_json(_fapi.build_timeline())
+                elif _path_only == "/api/metrics":
+                    self._send_json(_fapi.build_metrics())
+                else:
+                    self._send_json(_fapi.build_agent_payload())
             # /api/version migrated to route_table (handle_version, W7 batch 1) —
             # served by the strangler above.
             elif self.path == "/favicon.ico" or self.path.startswith("/anchor.ico"):
