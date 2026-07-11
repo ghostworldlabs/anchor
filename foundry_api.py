@@ -86,6 +86,54 @@ def _resolve_source(source):
     return os.path.join(FOUNDRY_ROOT, source)
 
 
+def _extract_yaml_description(frontmatter):
+    """Extract the ``description:`` value from YAML frontmatter — handling both
+    an INLINE scalar (``description: text``) AND a BLOCK scalar
+    (``description: >-`` / ``|`` folded or literal, the value on the following
+    indented lines). Returns "" when absent.
+
+    server.mjs (and this port's first cut) only read the same line as
+    ``description:``, so a block scalar yielded just the ``>-`` indicator — the
+    reason crucible/foreman showed an empty North Star while inline-description
+    skills (researchPrime, gandalf, …) worked.
+    """
+    lines = re.split(r"\r?\n", frontmatter)
+    for i, line in enumerate(lines):
+        m = re.match(r"^description:[ \t]*(.*)$", line)
+        if not m:
+            continue
+        inline = m.group(1).strip()
+        block = re.match(r"^([>|])[-+]?\s*$", inline)  # >, >-, >+, |, |-, |+
+        if not block:
+            return inline  # a plain inline scalar (or empty)
+        style = block.group(1)  # '>' folded | '|' literal
+        collected = []
+        for cont in lines[i + 1:]:
+            if cont.strip() == "":
+                collected.append("")  # blank line inside the block
+                continue
+            if len(cont) - len(cont.lstrip()) == 0:
+                break  # dedent to a new top-level key — block ended
+            collected.append(cont.strip())
+        while collected and collected[-1] == "":
+            collected.pop()
+        if style == "|":  # literal: keep line breaks
+            return "\n".join(collected)
+        # folded: blank line = paragraph break, otherwise space-join
+        paras, para = [], []
+        for c in collected:
+            if c == "":
+                if para:
+                    paras.append(" ".join(para))
+                    para = []
+            else:
+                para.append(c)
+        if para:
+            paras.append(" ".join(para))
+        return "\n\n".join(paras)
+    return ""
+
+
 def _parse_skill_md(text):
     """Parse SKILL.md into ``{description, body}``. Frontmatter is optional."""
     if not text:
@@ -95,9 +143,7 @@ def _parse_skill_md(text):
     fm = re.match(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?", text)
     if fm:
         body = text[len(fm.group(0)):]
-        desc = re.search(r"^description:\s*(.+)$", fm.group(1), re.MULTILINE)
-        if desc:
-            description = desc.group(1).strip()
+        description = _extract_yaml_description(fm.group(1))
     return {"description": description, "body": body}
 
 
