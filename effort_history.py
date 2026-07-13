@@ -2792,6 +2792,13 @@ def record_stage_baseline(worktree_path) -> str:
     wt = Path(worktree_path) if worktree_path else None
     if not wt or not wt.is_dir():
         return ""
+    # Guard against git's ancestor-repo discovery: `git rev-parse HEAD` run in a
+    # NON-repo dir walks UP the tree and can return an unrelated ANCESTOR repo's
+    # SHA (e.g. the pytest tmp dir living under some git checkout). The docstring
+    # promises a non-repo worktree degrades to "" — so require this dir to be a
+    # real git repo root (its own .git) BEFORE trusting rev-parse.
+    if not _is_git_repo(wt):
+        return ""
     try:
         r = _git(wt, "rev-parse", "HEAD")
     except (OSError, subprocess.SubprocessError):

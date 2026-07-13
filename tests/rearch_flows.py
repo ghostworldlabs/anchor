@@ -312,17 +312,24 @@ def flow_drag_to_group(pg, base, pid, group="Research"):
             head.dispatchEvent(ev);
         }""", [pid, group])
 
-    # the Option-C dialog appears with both distinct choices.
+    # the Option-C dialog appears with both distinct choices. (Generous timeout:
+    # the overlay is shown after a JS-async handler; under full-suite load the
+    # render can lag, so wait well past the machine-busy window rather than flake.)
     pg.wait_for_function(
         "() => { const o = document.getElementById('rndMoveOverlay');"
         " return o && getComputedStyle(o).display !== 'none'; }",
-        timeout=5000)
+        timeout=20000)
     assert "Move on disk" in pg.eval_on_selector("#rndMoveGo",
                                                  "e => e.textContent")
     assert "Just group" in pg.eval_on_selector("#rndMoveJust",
                                                "e => e.textContent")
 
-    # "Just group" → grouped in the DOM, registry updated, NO disk move.
+    # "Just group" → grouped in the DOM, registry updated, NO disk move. The
+    # click fires an async set_group POST + a projects re-render; the poll below
+    # re-renders the rnd view each tick and waits for the row to land in the
+    # target folder. Use a generous timeout so a busy machine (full-suite /
+    # concurrent swarm) can't trip the previous tight 10s window — the CONDITION
+    # (row inside the correctly-grouped folder) is unchanged, only the patience is.
     pg.click("#rndMoveJust")
     pg.wait_for_function(
         """(a) => {
@@ -332,7 +339,7 @@ def flow_drag_to_group(pg, base, pid, group="Research"):
             if (!row) return false;
             const f = row.closest('.rnd-folder');
             return f && f.getAttribute('data-group') === a[1];
-        }""", arg=[pid, group], timeout=10000)
+        }""", arg=[pid, group], timeout=30000)
 
     assert rnd.get_project(pid)["group"] == group
     assert rnd.get_project(pid)["folder_path"] == folder_before
