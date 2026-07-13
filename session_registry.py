@@ -204,6 +204,20 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
+#: Bounded retry for the READ side — the symmetric counterpart of the write-side
+#: ``_atomic_replace`` retry. While a concurrent writer is mid ``os.replace`` over
+#: the store, this reader's ``read_text`` open can be transiently DENIED by
+#: Windows with ``PermissionError`` (a sharing violation, NOT a real fault). The
+#: writer's rename completes within microseconds, so a few short backed-off
+#: retries let the reader see the complete NEW file. Without this, a single
+#: transient would make ``load_sessions`` return ``{}`` — dropping the ENTIRE
+#: registry for that read (a spurious "no sessions"), which under load surfaces
+#: as a session momentarily vanishing from ``list_sessions``. POSIX never hits
+#: the window — the first read succeeds and the loop is a no-op.
+_READ_RETRIES = 40
+_READ_BACKOFF_S = 0.005
+
+
 def load_sessions() -> dict:
     """Load the session registry as a dict ``{session_id: record}``.
 
@@ -211,13 +225,40 @@ def load_sessions() -> dict:
     unreadable/corrupt (a corrupt registry must never crash the dashboard). The
     JSON on disk is a list of records; this returns them keyed by ``session_id``
     for O(1) lookup. A keyed-dict form on disk is also tolerated.
+
+    A transient ``OSError`` (the Windows sharing-violation race with a concurrent
+    atomic write) is RETRIED briefly (see ``_READ_RETRIES``) rather than swallowed
+    — swallowing it would drop the whole registry for that read. A genuine JSON
+    corruption is NOT retried: atomic writes never yield a half-written file, so a
+    decode error is a real fault, and ``{}`` is the honest best-effort fallback.
     """
     p = sessions_path()
     if not p.exists():
         return {}
-    try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, ValueError):
+    raw = None
+    for attempt in range(_READ_RETRIES):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # Raced with a rename where the target briefly did not resolve — the
+            # NEW file is landing; a retry sees it. Exhausted budget → {}.
+            if attempt == _READ_RETRIES - 1:
+                return {}
+            time.sleep(_READ_BACKOFF_S)
+            continue
+        except OSError:
+            # Transient Windows sharing violation while the writer replaces the
+            # store — back off and retry so we read the complete file, not {}.
+            if attempt == _READ_RETRIES - 1:
+                return {}
+            time.sleep(_READ_BACKOFF_S)
+            continue
+        try:
+            raw = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        break
+    if raw is None:
         return {}
     out = {}
     if isinstance(raw, list):

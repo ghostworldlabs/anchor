@@ -1,1229 +1,1250 @@
 {
-  "target": "C:\\dev\\anchor-build-rearch\\anchor_gui.py",
+  "target": "C:\\dev\\Anchor-telemetry-build\\anchor_gui.py",
   "project_window_js": {
     "interpolations": 0,
     "span": [
-      4916,
-      4916
+      5027,
+      5027
     ],
     "lines": 1
   },
   "functions": {
     "generate_html": {
-      "total": 173,
+      "total": 176,
       "counts": {
-        "data": 130,
+        "data": 133,
         "flag": 13,
         "markup-emitting": 30
       },
       "interpolations": [
         {
           "function": "generate_html",
-          "lineno": 5629,
+          "lineno": 5740,
           "class": "data",
           "rule": "default-data",
           "expr": "html_lib.escape(report_date)"
         },
         {
           "function": "generate_html",
-          "lineno": 5631,
+          "lineno": 5742,
           "class": "data",
           "rule": "default-data",
           "expr": "html_lib.escape(report_date)"
         },
         {
           "function": "generate_html",
-          "lineno": 5705,
+          "lineno": 5759,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "html_lib.escape(str(_rb.get(\"message\", \"\")))"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5835,
           "class": "data",
           "rule": "default-data",
           "expr": "linked"
         },
         {
           "function": "generate_html",
-          "lineno": 5750,
+          "lineno": 5880,
           "class": "data",
           "rule": "default-data",
           "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5752,
+          "lineno": 5882,
           "class": "data",
           "rule": "default-data",
           "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5754,
+          "lineno": 5884,
           "class": "flag",
           "rule": "flag-named-var:done_class",
           "expr": "done_class"
         },
         {
           "function": "generate_html",
-          "lineno": 5755,
+          "lineno": 5885,
           "class": "data",
           "rule": "default-data",
           "expr": "action"
         },
         {
           "function": "generate_html",
-          "lineno": 5755,
+          "lineno": 5885,
           "class": "data",
           "rule": "default-data",
           "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5755,
+          "lineno": 5885,
           "class": "flag",
           "rule": "flag-named-var:btn_class",
           "expr": "btn_class"
         },
         {
           "function": "generate_html",
-          "lineno": 5755,
+          "lineno": 5885,
           "class": "data",
           "rule": "default-data",
           "expr": "btn_label"
         },
         {
           "function": "generate_html",
-          "lineno": 5756,
+          "lineno": 5886,
           "class": "data",
           "rule": "default-data",
           "expr": "esc(t[\"text\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5756,
+          "lineno": 5886,
           "class": "markup-emitting",
           "rule": "markup-named-var:notes_html",
           "expr": "notes_html"
         },
         {
           "function": "generate_html",
-          "lineno": 5757,
+          "lineno": 5887,
           "class": "data",
           "rule": "default-data",
           "expr": "esc(t[\"due\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5757,
+          "lineno": 5887,
           "class": "markup-emitting",
           "rule": "literal-contains-<",
           "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
         },
         {
           "function": "generate_html",
-          "lineno": 5758,
+          "lineno": 5888,
           "class": "data",
           "rule": "default-data",
           "expr": "effort"
         },
         {
           "function": "generate_html",
-          "lineno": 5758,
+          "lineno": 5888,
           "class": "data",
           "rule": "default-data",
           "expr": "effort"
         },
         {
           "function": "generate_html",
-          "lineno": 5759,
+          "lineno": 5889,
           "class": "data",
           "rule": "default-data",
           "expr": "esc(t[\"domain\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5759,
+          "lineno": 5889,
           "class": "data",
           "rule": "default-data",
           "expr": "t[\"domain\"]"
         },
         {
           "function": "generate_html",
-          "lineno": 5760,
+          "lineno": 5890,
           "class": "markup-emitting",
           "rule": "markup-named-var:tier_btn",
           "expr": "tier_btn"
         },
         {
           "function": "generate_html",
-          "lineno": 5761,
+          "lineno": 5891,
           "class": "data",
           "rule": "default-data",
           "expr": "tb64"
         },
         {
           "function": "generate_html",
-          "lineno": 5762,
+          "lineno": 5892,
           "class": "data",
           "rule": "default-data",
           "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5763,
+          "lineno": 5893,
           "class": "data",
           "rule": "default-data",
           "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5787,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64p"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5789,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64p"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5793,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(_gpid)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5794,
-          "class": "flag",
-          "rule": "ternary-selection",
-          "expr": "' has-deadline' if p.get('due') else ''"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5794,
-          "class": "markup-emitting",
-          "rule": "markup-named-var:gpid_attr",
-          "expr": "gpid_attr"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5794,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "p[\"priority\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5797,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(p[\"name\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5799,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(p[\"due\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5799,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<span class=\"due-badge\">{esc(p[\"due\"])}</span>' if p.get(\"due\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5800,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "effort"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5800,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "effort"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5801,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(p[\"domain\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5801,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "p[\"domain\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5802,
-          "class": "markup-emitting",
-          "rule": "markup-named-var:tier_btn",
-          "expr": "tier_btn"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5803,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "pb64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5805,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(p[\"next\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5805,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<div class=\"next-text\">Next: {esc(p[\"next\"])}</div>' if p.get(\"next\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5821,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5823,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5825,
-          "class": "flag",
-          "rule": "flag-named-var:done_class",
-          "expr": "done_class"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5826,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "action"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5826,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5826,
-          "class": "flag",
-          "rule": "flag-named-var:btn_class",
-          "expr": "btn_class"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5826,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "btn_label"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5827,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(t[\"text\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5827,
-          "class": "markup-emitting",
-          "rule": "markup-named-var:notes_html",
-          "expr": "notes_html"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5828,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(t[\"due\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5828,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5829,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "effort"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5829,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "effort"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5830,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(t[\"domain\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5830,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "t[\"domain\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5831,
-          "class": "markup-emitting",
-          "rule": "markup-named-var:tier_btn",
-          "expr": "tier_btn"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5832,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "tb64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5833,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5834,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5843,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5843,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5844,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "domain_css_colors.get(d,'var(--text-dim)')"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5845,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "domain_labels.get(d, d.title())"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5846,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "count"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5908,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64c"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5909,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "esc(t[\"text\"])"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5909,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "notes_html_c"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5911,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5911,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "t[\"energy\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5912,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "t[\"priority\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5912,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "t[\"priority\"]"
         },
         {
           "function": "generate_html",
           "lineno": 5917,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "b64p"
         },
         {
           "function": "generate_html",
-          "lineno": 5920,
+          "lineno": 5919,
           "class": "data",
           "rule": "default-data",
-          "expr": "domain_labels.get(d, d.title())"
+          "expr": "b64p"
         },
         {
           "function": "generate_html",
           "lineno": 5923,
           "class": "data",
           "rule": "default-data",
-          "expr": "today_str"
+          "expr": "esc(_gpid)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5924,
+          "class": "flag",
+          "rule": "ternary-selection",
+          "expr": "' has-deadline' if p.get('due') else ''"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5924,
+          "class": "markup-emitting",
+          "rule": "markup-named-var:gpid_attr",
+          "expr": "gpid_attr"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5924,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "p[\"priority\"]"
         },
         {
           "function": "generate_html",
           "lineno": 5927,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "esc(p[\"name\"])"
         },
         {
           "function": "generate_html",
           "lineno": 5929,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "esc(p[\"due\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5929,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<span class=\"due-badge\">{esc(p[\"due\"])}</span>' if p.get(\"due\") else \"\""
         },
         {
           "function": "generate_html",
           "lineno": 5930,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "effort"
         },
         {
           "function": "generate_html",
           "lineno": 5930,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "effort"
         },
         {
           "function": "generate_html",
           "lineno": 5931,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "esc(p[\"domain\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5937,
+          "lineno": 5931,
           "class": "data",
           "rule": "default-data",
-          "expr": "d"
+          "expr": "p[\"domain\"]"
         },
         {
           "function": "generate_html",
-          "lineno": 5938,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5939,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5941,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5942,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5948,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d_top_done"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5948,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "len(d_top_tasks)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5950,
+          "lineno": 5932,
           "class": "markup-emitting",
-          "rule": "markup-named-var:d_top_rows",
-          "expr": "d_top_rows"
+          "rule": "markup-named-var:tier_btn",
+          "expr": "tier_btn"
         },
         {
           "function": "generate_html",
-          "lineno": 5953,
-          "class": "markup-emitting",
-          "rule": "call-to-renderer:project_card",
-          "expr": "\"\".join(project_card(p) for p in d_p1_projects)"
+          "lineno": 5933,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "pb64"
         },
         {
           "function": "generate_html",
-          "lineno": 5953,
+          "lineno": 5935,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(p[\"next\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5935,
           "class": "markup-emitting",
           "rule": "literal-contains-<",
-          "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
+          "expr": "f'<div class=\"next-text\">Next: {esc(p[\"next\"])}</div>' if p.get(\"next\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5951,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5953,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5955,
+          "class": "flag",
+          "rule": "flag-named-var:done_class",
+          "expr": "done_class"
         },
         {
           "function": "generate_html",
           "lineno": 5956,
           "class": "data",
           "rule": "default-data",
-          "expr": "d_active_projects"
+          "expr": "action"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5956,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5956,
+          "class": "flag",
+          "rule": "flag-named-var:btn_class",
+          "expr": "btn_class"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5956,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "btn_label"
         },
         {
           "function": "generate_html",
           "lineno": 5957,
           "class": "data",
           "rule": "default-data",
-          "expr": "len(d_active)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5958,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "len(d_done)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5961,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "\"\".join(task_item(t) for t in d_other_tasks)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5961,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<div class=\"section-header\"><h3>Other Tasks</h3></div><div class=\"task-list\">{\"\".join(task_item(t) for t in d_other..."
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5963,
-          "class": "markup-emitting",
-          "rule": "call-to-renderer:project_card",
-          "expr": "\"\".join(project_card(p) for p in d_p2_projects)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5963,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5965,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "d_completed_items"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5965,
-          "class": "markup-emitting",
-          "rule": "literal-contains-<",
-          "expr": "f'<div class=\"section-header\" style=\"margin-top:24px\"><h3>Completed ({len(d_done)})</h3></div><div class=\"task-list\">..."
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5965,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "len(d_done)"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5974,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "b64c"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5975,
-          "class": "data",
-          "rule": "default-data",
           "expr": "esc(t[\"text\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5975,
+          "lineno": 5957,
           "class": "markup-emitting",
           "rule": "markup-named-var:notes_html",
           "expr": "notes_html"
         },
         {
           "function": "generate_html",
-          "lineno": 5977,
+          "lineno": 5958,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(t[\"due\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5958,
           "class": "markup-emitting",
           "rule": "literal-contains-<",
-          "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
+          "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
         },
         {
           "function": "generate_html",
-          "lineno": 5977,
+          "lineno": 5959,
           "class": "data",
           "rule": "default-data",
-          "expr": "t[\"energy\"]"
+          "expr": "effort"
         },
         {
           "function": "generate_html",
-          "lineno": 5978,
+          "lineno": 5959,
           "class": "data",
           "rule": "default-data",
-          "expr": "t[\"priority\"]"
+          "expr": "effort"
         },
         {
           "function": "generate_html",
-          "lineno": 5978,
-          "class": "data",
-          "rule": "default-data",
-          "expr": "t[\"priority\"]"
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5979,
+          "lineno": 5960,
           "class": "data",
           "rule": "default-data",
           "expr": "esc(t[\"domain\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 5979,
+          "lineno": 5960,
           "class": "data",
           "rule": "default-data",
           "expr": "t[\"domain\"]"
         },
         {
           "function": "generate_html",
-          "lineno": 5990,
+          "lineno": 5961,
+          "class": "markup-emitting",
+          "rule": "markup-named-var:tier_btn",
+          "expr": "tier_btn"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 5962,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(ct[\"notes\"])"
+          "expr": "tb64"
         },
         {
           "function": "generate_html",
-          "lineno": 5993,
+          "lineno": 5963,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(ct[\"text\"])"
+          "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5994,
-          "class": "flag",
-          "rule": "ternary-selection",
-          "expr": "(' &bull; ' + esc(ct[\"domain\"])) if ct.get(\"domain\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 5994,
+          "lineno": 5964,
           "class": "data",
           "rule": "default-data",
-          "expr": "ct.get(\"priority\",2)"
+          "expr": "b64"
         },
         {
           "function": "generate_html",
-          "lineno": 5994,
+          "lineno": 5973,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(ct[\"date\"])"
+          "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 5995,
+          "lineno": 5973,
           "class": "data",
           "rule": "default-data",
-          "expr": "notes_line"
+          "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 5997,
+          "lineno": 5974,
           "class": "data",
           "rule": "default-data",
-          "expr": "b64r"
+          "expr": "domain_css_colors.get(d,'var(--text-dim)')"
         },
         {
           "function": "generate_html",
-          "lineno": 6007,
+          "lineno": 5975,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(st[\"notes\"])"
+          "expr": "domain_labels.get(d, d.title())"
         },
         {
           "function": "generate_html",
-          "lineno": 6010,
+          "lineno": 5976,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(st[\"text\"])"
+          "expr": "count"
         },
         {
           "function": "generate_html",
-          "lineno": 6011,
-          "class": "flag",
-          "rule": "ternary-selection",
-          "expr": "(' &bull; ' + esc(st[\"domain\"])) if st.get(\"domain\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 6011,
+          "lineno": 6038,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(st[\"date\"])"
+          "expr": "b64c"
         },
         {
           "function": "generate_html",
-          "lineno": 6011,
+          "lineno": 6039,
           "class": "data",
           "rule": "default-data",
-          "expr": "st.get(\"priority\",2)"
+          "expr": "esc(t[\"text\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 6012,
+          "lineno": 6039,
           "class": "data",
           "rule": "default-data",
-          "expr": "notes_line"
+          "expr": "notes_html_c"
         },
         {
           "function": "generate_html",
-          "lineno": 6014,
+          "lineno": 6041,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6041,
           "class": "data",
           "rule": "default-data",
-          "expr": "b64r"
+          "expr": "t[\"energy\"]"
         },
         {
           "function": "generate_html",
-          "lineno": 6024,
+          "lineno": 6042,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(item[\"text\"])"
+          "expr": "t[\"priority\"]"
         },
         {
           "function": "generate_html",
-          "lineno": 6025,
-          "class": "flag",
-          "rule": "ternary-selection",
-          "expr": "(' &bull; ' + esc(item[\"domain\"])) if item.get(\"domain\") else \"\""
-        },
-        {
-          "function": "generate_html",
-          "lineno": 6025,
+          "lineno": 6042,
           "class": "data",
           "rule": "default-data",
-          "expr": "esc(item[\"date\"])"
+          "expr": "t[\"priority\"]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6047,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6050,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "domain_labels.get(d, d.title())"
         },
         {
           "function": "generate_html",
           "lineno": 6053,
           "class": "data",
           "rule": "default-data",
-          "expr": "d.title()[:8]"
+          "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6054,
+          "lineno": 6057,
           "class": "data",
           "rule": "default-data",
-          "expr": "color"
+          "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 6054,
+          "lineno": 6059,
           "class": "data",
           "rule": "default-data",
-          "expr": "pct"
+          "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 6055,
+          "lineno": 6060,
           "class": "data",
           "rule": "default-data",
-          "expr": "domain_counts[d]"
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6060,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6061,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6067,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6068,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6069,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6071,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6072,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6078,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d_top_done"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6078,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "len(d_top_tasks)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6080,
+          "class": "markup-emitting",
+          "rule": "markup-named-var:d_top_rows",
+          "expr": "d_top_rows"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6083,
+          "class": "markup-emitting",
+          "rule": "call-to-renderer:project_card",
+          "expr": "\"\".join(project_card(p) for p in d_p1_projects)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6083,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6086,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d_active_projects"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6087,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "len(d_active)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6088,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "len(d_done)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6091,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "\"\".join(task_item(t) for t in d_other_tasks)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6091,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<div class=\"section-header\"><h3>Other Tasks</h3></div><div class=\"task-list\">{\"\".join(task_item(t) for t in d_other..."
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6093,
+          "class": "markup-emitting",
+          "rule": "call-to-renderer:project_card",
+          "expr": "\"\".join(project_card(p) for p in d_p2_projects)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6093,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6095,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d_completed_items"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6095,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<div class=\"section-header\" style=\"margin-top:24px\"><h3>Completed ({len(d_done)})</h3></div><div class=\"task-list\">..."
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6095,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "len(d_done)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6104,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64c"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6105,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(t[\"text\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6105,
+          "class": "markup-emitting",
+          "rule": "markup-named-var:notes_html",
+          "expr": "notes_html"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6107,
+          "class": "markup-emitting",
+          "rule": "literal-contains-<",
+          "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6107,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "t[\"energy\"]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6108,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "t[\"priority\"]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6108,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "t[\"priority\"]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6109,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(t[\"domain\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6109,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "t[\"domain\"]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6120,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(ct[\"notes\"])"
         },
         {
           "function": "generate_html",
           "lineno": 6123,
           "class": "data",
           "rule": "default-data",
-          "expr": "BUILD_ID"
+          "expr": "esc(ct[\"text\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 6706,
+          "lineno": 6124,
+          "class": "flag",
+          "rule": "ternary-selection",
+          "expr": "(' &bull; ' + esc(ct[\"domain\"])) if ct.get(\"domain\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6124,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "ct.get(\"priority\",2)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6124,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(ct[\"date\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6125,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "notes_line"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6127,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64r"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6137,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(st[\"notes\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6140,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(st[\"text\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6141,
+          "class": "flag",
+          "rule": "ternary-selection",
+          "expr": "(' &bull; ' + esc(st[\"domain\"])) if st.get(\"domain\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6141,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(st[\"date\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6141,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "st.get(\"priority\",2)"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6142,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "notes_line"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6144,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "b64r"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6154,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(item[\"text\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6155,
+          "class": "flag",
+          "rule": "ternary-selection",
+          "expr": "(' &bull; ' + esc(item[\"domain\"])) if item.get(\"domain\") else \"\""
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6155,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "esc(item[\"date\"])"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6183,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "d.title()[:8]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6184,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "color"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6184,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "pct"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6185,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "domain_counts[d]"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6253,
           "class": "data",
           "rule": "default-data",
           "expr": "BUILD_ID"
         },
         {
           "function": "generate_html",
-          "lineno": 6718,
+          "lineno": 6836,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "BUILD_ID"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6848,
           "class": "data",
           "rule": "default-data",
           "expr": "len(inbox)"
         },
         {
           "function": "generate_html",
-          "lineno": 6729,
+          "lineno": 6859,
           "class": "data",
           "rule": "default-data",
           "expr": "nav_items"
         },
         {
           "function": "generate_html",
-          "lineno": 6734,
+          "lineno": 6864,
           "class": "markup-emitting",
           "rule": "markup-named-var:balance_rows",
           "expr": "balance_rows"
         },
         {
           "function": "generate_html",
-          "lineno": 6746,
+          "lineno": 6876,
           "class": "data",
           "rule": "default-data",
           "expr": "BUILD_ID"
         },
         {
           "function": "generate_html",
-          "lineno": 6753,
+          "lineno": 6883,
           "class": "flag",
           "rule": "flag-named-var:auth_token_btn_display",
           "expr": "auth_token_btn_display"
         },
         {
           "function": "generate_html",
-          "lineno": 6758,
+          "lineno": 6888,
           "class": "markup-emitting",
           "rule": "markup-named-var:health_banner_html",
           "expr": "health_banner_html"
         },
         {
           "function": "generate_html",
-          "lineno": 6764,
+          "lineno": 6894,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "BUILD_ID"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 6895,
           "class": "data",
           "rule": "default-data",
           "expr": "len(done_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6765,
+          "lineno": 6896,
           "class": "data",
           "rule": "default-data",
           "expr": "len(cancelled_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6766,
+          "lineno": 6897,
           "class": "data",
           "rule": "default-data",
           "expr": "len(saved_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6775,
+          "lineno": 6906,
           "class": "markup-emitting",
           "rule": "call-to-renderer:render_model_flex_badge",
           "expr": "render_model_flex_badge()"
         },
         {
           "function": "generate_html",
-          "lineno": 6777,
+          "lineno": 6908,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6809,
+          "lineno": 6940,
           "class": "data",
           "rule": "default-data",
           "expr": "len(top_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6809,
+          "lineno": 6940,
           "class": "data",
           "rule": "default-data",
           "expr": "top_done"
         },
         {
           "function": "generate_html",
-          "lineno": 6811,
+          "lineno": 6942,
           "class": "markup-emitting",
           "rule": "call-to-renderer:top_task_row",
           "expr": "\"\".join(top_task_row(t) for t in top_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6832,
+          "lineno": 6963,
           "class": "markup-emitting",
           "rule": "markup-named-var:rnd_projects_html",
           "expr": "rnd_projects_html"
         },
         {
           "function": "generate_html",
-          "lineno": 6835,
+          "lineno": 6966,
           "class": "markup-emitting",
           "rule": "call-to-renderer:project_card",
           "expr": "\"\".join(project_card(p) for p in p1_projects)"
         },
         {
           "function": "generate_html",
-          "lineno": 6838,
+          "lineno": 6969,
           "class": "flag",
           "rule": "boolean-expression",
           "expr": "len([p for p in projects if p[\"status\"]==\"active\"])"
         },
         {
           "function": "generate_html",
-          "lineno": 6839,
+          "lineno": 6970,
           "class": "data",
           "rule": "default-data",
           "expr": "len(active)"
         },
         {
           "function": "generate_html",
-          "lineno": 6840,
+          "lineno": 6971,
           "class": "data",
           "rule": "default-data",
           "expr": "len(done_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6841,
+          "lineno": 6972,
           "class": "data",
           "rule": "default-data",
           "expr": "len(inbox)"
         },
         {
           "function": "generate_html",
-          "lineno": 6846,
+          "lineno": 6977,
           "class": "data",
           "rule": "default-data",
           "expr": "\"\".join(task_item(t) for t in other_tasks)"
         },
         {
           "function": "generate_html",
-          "lineno": 6850,
+          "lineno": 6981,
           "class": "markup-emitting",
           "rule": "call-to-renderer:project_card",
           "expr": "\"\".join(project_card(p) for p in p2_projects)"
         },
         {
           "function": "generate_html",
-          "lineno": 6860,
+          "lineno": 6991,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6862,
+          "lineno": 6993,
           "class": "data",
           "rule": "default-data",
           "expr": "completed_items"
         },
         {
           "function": "generate_html",
-          "lineno": 6872,
+          "lineno": 7003,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6875,
+          "lineno": 7006,
           "class": "data",
           "rule": "default-data",
           "expr": "cancelled_items"
         },
         {
           "function": "generate_html",
-          "lineno": 6885,
+          "lineno": 7016,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6888,
+          "lineno": 7019,
           "class": "data",
           "rule": "default-data",
           "expr": "saved_items"
         },
         {
           "function": "generate_html",
-          "lineno": 6906,
+          "lineno": 7037,
           "class": "data",
           "rule": "default-data",
           "expr": "inbox_items"
         },
         {
           "function": "generate_html",
-          "lineno": 6916,
+          "lineno": 7047,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "BUILD_ID"
+        },
+        {
+          "function": "generate_html",
+          "lineno": 7049,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6919,
+          "lineno": 7052,
           "class": "markup-emitting",
           "rule": "markup-named-var:rnd_projects_html",
           "expr": "rnd_projects_html"
         },
         {
           "function": "generate_html",
-          "lineno": 6928,
+          "lineno": 7061,
           "class": "data",
           "rule": "default-data",
           "expr": "today_str"
         },
         {
           "function": "generate_html",
-          "lineno": 6931,
+          "lineno": 7064,
           "class": "markup-emitting",
           "rule": "markup-named-var:rnd_archive_html",
           "expr": "rnd_archive_html"
         },
         {
           "function": "generate_html",
-          "lineno": 6935,
+          "lineno": 7068,
           "class": "data",
           "rule": "default-data",
           "expr": "domain_views"
         },
         {
           "function": "generate_html",
-          "lineno": 6939,
+          "lineno": 7072,
           "class": "data",
           "rule": "default-data",
           "expr": "BUILD_ID"
         },
         {
           "function": "generate_html",
-          "lineno": 7114,
+          "lineno": 7247,
           "class": "flag",
           "rule": "flag-named-var:auth_required_js",
           "expr": "auth_required_js"
         },
         {
           "function": "generate_html",
-          "lineno": 7117,
+          "lineno": 7250,
           "class": "flag",
           "rule": "flag-named-var:anchor_boot_js",
           "expr": "anchor_boot_js"
         },
         {
           "function": "generate_html",
-          "lineno": 7904,
+          "lineno": 8037,
           "class": "data",
           "rule": "default-data",
           "expr": "BUILD_ID"
         },
         {
           "function": "generate_html",
-          "lineno": 8384,
+          "lineno": 8517,
           "class": "data",
           "rule": "default-data",
           "expr": "\" \".join(f\"function toggleAddTask_{d}() {{ toggleAddTask_('{d}'); }}\" for d in domain_order)"
         },
         {
           "function": "generate_html",
-          "lineno": 8384,
+          "lineno": 8517,
           "class": "data",
           "rule": "default-data",
           "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 8384,
+          "lineno": 8517,
           "class": "data",
           "rule": "default-data",
           "expr": "d"
         },
         {
           "function": "generate_html",
-          "lineno": 8395,
+          "lineno": 8528,
           "class": "markup-emitting",
           "rule": "call-to-renderer:cache_bust_script",
           "expr": "cache_bust_script()"
         },
         {
           "function": "generate_html",
-          "lineno": 8396,
+          "lineno": 8529,
           "class": "flag",
           "rule": "flag-named-var:_ORPHAN_ALERT_JS",
           "expr": "_ORPHAN_ALERT_JS"
@@ -1240,245 +1261,245 @@
       "interpolations": [
         {
           "function": "render_project_window_html",
-          "lineno": 4625,
+          "lineno": 4736,
           "class": "data",
           "rule": "default-data",
           "expr": "html_lib.escape(project_id)"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4673,
+          "lineno": 4784,
           "class": "data",
           "rule": "default-data",
           "expr": "project_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4674,
+          "lineno": 4785,
           "class": "data",
           "rule": "default-data",
           "expr": "project_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4681,
+          "lineno": 4792,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4685,
+          "lineno": 4796,
           "class": "data",
           "rule": "default-data",
           "expr": "files_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4686,
+          "lineno": 4797,
           "class": "data",
           "rule": "default-data",
           "expr": "files_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4686,
+          "lineno": 4797,
           "class": "data",
           "rule": "default-data",
           "expr": "files_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4686,
+          "lineno": 4797,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4687,
+          "lineno": 4798,
           "class": "data",
           "rule": "default-data",
           "expr": "folder_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4687,
+          "lineno": 4798,
           "class": "data",
           "rule": "default-data",
           "expr": "folder_id"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4687,
+          "lineno": 4798,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4689,
+          "lineno": 4800,
           "class": "flag",
           "rule": "flag-named-var:_upload_name_js",
           "expr": "_upload_name_js"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4694,
+          "lineno": 4805,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4698,
+          "lineno": 4809,
           "class": "data",
           "rule": "default-data",
           "expr": "p1on"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4698,
+          "lineno": 4809,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4699,
+          "lineno": 4810,
           "class": "data",
           "rule": "default-data",
           "expr": "p2on"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4699,
+          "lineno": 4810,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4700,
+          "lineno": 4811,
           "class": "markup-emitting",
           "rule": "markup-named-var:rescan_btn",
           "expr": "rescan_btn"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4701,
+          "lineno": 4812,
           "class": "markup-emitting",
           "rule": "markup-named-var:upload_btn",
           "expr": "upload_btn"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4702,
+          "lineno": 4813,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4703,
+          "lineno": 4814,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4704,
+          "lineno": 4815,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4705,
+          "lineno": 4816,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4709,
+          "lineno": 4820,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4710,
+          "lineno": 4821,
           "class": "markup-emitting",
           "rule": "markup-named-var:rescan_btn",
           "expr": "rescan_btn"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4711,
+          "lineno": 4822,
           "class": "markup-emitting",
           "rule": "markup-named-var:upload_btn",
           "expr": "upload_btn"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4712,
+          "lineno": 4823,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4713,
+          "lineno": 4824,
           "class": "markup-emitting",
           "rule": "markup-named-var:pid_attr",
           "expr": "pid_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4779,
+          "lineno": 4890,
           "class": "flag",
           "rule": "flag-named-var:pid_js",
           "expr": "pid_js"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4783,
+          "lineno": 4894,
           "class": "data",
           "rule": "default-data",
           "expr": "json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4784,
+          "lineno": 4895,
           "class": "flag",
           "rule": "ternary-selection",
           "expr": "'true' if _paths.expected_token() else 'false'"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4822,
+          "lineno": 4933,
           "class": "data",
           "rule": "default-data",
           "expr": "objective_esc"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4826,
+          "lineno": 4937,
           "class": "markup-emitting",
           "rule": "markup-named-var:blurb_attr",
           "expr": "blurb_attr"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4828,
+          "lineno": 4939,
           "class": "data",
           "rule": "default-data",
           "expr": "blurb_esc"
         },
         {
           "function": "render_project_window_html",
-          "lineno": 4833,
+          "lineno": 4944,
           "class": "data",
           "rule": "default-data",
           "expr": "notes_esc"
@@ -1487,46 +1508,46 @@
     }
   },
   "totals": {
-    "data": 144,
+    "data": 147,
     "flag": 16,
     "markup-emitting": 48,
-    "all": 208
+    "all": 211
   },
   "blob_min_lines": 20,
   "blob_spans": {
     "_PROJECT_WINDOW_JS": [
       [
-        4916,
-        4916
+        5027,
+        5027
       ]
     ],
     "generate_html": [
       [
-        5916,
-        5966
+        6046,
+        6096
       ],
       [
-        6082,
-        6101
+        6212,
+        6231
       ],
       [
-        6117,
-        8398
+        6247,
+        8531
       ]
     ],
     "render_project_window_html": [
       [
-        4835,
-        4860
+        4946,
+        4971
       ]
     ]
   },
-  "derived_shrink_lines": 2380,
+  "derived_shrink_lines": 2383,
   "shrink_bar_lines": 7000,
   "markup_emitting_threshold": 40,
   "amendment_required": true,
   "amendment_reasons": [
     "markup-emitting interpolations = 48 > threshold 40: C1 needs the include-layer design amended in up front (they cannot ride the ANCHOR_BOOT JSON).",
-    "derived shrink = 2380 lines < the locked ≥7000-line bar: the C1 success bar needs amending."
+    "derived shrink = 2383 lines < the locked ≥7000-line bar: the C1 success bar needs amending."
   ]
 }
