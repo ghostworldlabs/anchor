@@ -654,6 +654,18 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
             "failed to register session (%s); rolled back PTY + worktree"
             % (exc,)) from exc
 
+    # Honest Telemetry W5 (RULED Option C): a session STARTED on the gemini/agy
+    # backend carries an unmeasurable segment (gemini gets no --session-id pin), so
+    # stamp the durable mixed-session marker at launch — a gemini-start session
+    # that later switches to claude (and finalizes MEASURED on the claude segment)
+    # is then still honestly flagged 'partial (gemini segment unmeasured)', never a
+    # complete-looking Claude-only number. Best-effort; never breaks the launch.
+    if backend == _reg.BACKEND_GEMINI:
+        try:
+            record = _reg.update_session(sid, usage_gemini_segment=True)
+        except Exception:
+            pass
+
     # 5) Seed the lane's skill EXACTLY ONCE. This is the only place the seed is
     #    ever written — it happens right after a successful launch+register and
     #    is recorded as ``seeded=True`` on the record, so no later attach/input/
@@ -1139,6 +1151,17 @@ def switch_engine(session_id, engine, seed_context=None):
         try:
             record = _reg.add_engine_session_uuid(
                 session_id, stored_engine_uuid_b)
+        except Exception:
+            pass
+    else:
+        # Honest Telemetry W5 (RULED Option C): segment B is NOT UUID-captured
+        # (the gemini/agy engine gets no --session-id flag), so its usage is
+        # unmeasurable. Stamp the durable mixed-session marker so the rollup
+        # renders 'partial (gemini segment unmeasured)' even if the session later
+        # switches back to claude and ends on the claude backend — never a
+        # complete-looking Claude-only number. Best-effort; never blocks the swap.
+        try:
+            record = _reg.update_session(session_id, usage_gemini_segment=True)
         except Exception:
             pass
 

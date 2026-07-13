@@ -408,6 +408,7 @@ import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard 
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import narration as _narr  # telemetry-resume W3 — deterministic narration floor + Layer-1 warm view
 import usage_capture as _usage  # telemetry-resume W4 — usage-capture pipeline (ledger inspection)
+import rollup_honesty as _rollhon  # telemetry-resume W5 — three-state rollup honesty + capture-rate stamp
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
@@ -4623,7 +4624,13 @@ def _fmt_rollup_line(roll: dict) -> str:
         tokstr = f"{toks / 1000.0:.0f}k tok"
     else:
         tokstr = f"{toks} tok"
-    return (f"Σ {tokstr} · ${cost:.2f} · {tstr} "
+    # No-own-pricing-table (LOCKED, telemetry-resume W5): ``$`` is shown ONLY when
+    # the engine itself reported a nonzero ``costUSD``. On the Max-subscription
+    # host the per-message sidecar carries no dollar figure, so a measured session
+    # renders ``… (subscription)`` — Anchor never computes a dollar figure of its
+    # own. (See NORTH-STAR-AMENDMENT.md "No-own-pricing-table".)
+    money = f"${cost:.2f}" if cost > 0 else "(subscription)"
+    return (f"Σ {tokstr} · {money} · {tstr} "
             f"· {n} session{'' if n == 1 else 's'}")
 
 
@@ -4643,9 +4650,22 @@ def render_header_rollup_html(project_id: str) -> str:
         return ""
     pid_attr = html_lib.escape(project_id, quote=True)
     life_txt = html_lib.escape(_fmt_rollup_line(life))
+    # Honest Telemetry W5: the capture-rate stamp beside the numeric rollup —
+    # 'measured N/T sessions (lifetime) · K capture-failed'. capture-failed is
+    # ALWAYS counted separately (never folded into unmeasured) and tinted red when
+    # present. Sibling projection (rollup_honesty) — the numeric rollup dict above
+    # is unchanged (the W1 audit's preferred path). Best-effort; omit on failure.
+    caprate_html = ""
+    try:
+        rate = _rollhon.project_capture_rate(project_id, window="lifetime")
+        if int(rate.get("total", 0) or 0) > 0:
+            caprate_html = " &nbsp;·&nbsp; " + _rollhon.capture_rate_html(rate)
+    except Exception:
+        caprate_html = ""
     return (
         f"<span class='roll' id='hdrRollup' data-window='lifetime' "
         f"data-pid=\"{pid_attr}\">{life_txt}</span>"
+        f"{caprate_html}"
         f"<span class='rolltog' role='group' aria-label='rollup window'>"
         f"<b class='on' data-window='lifetime' "
         f"onclick=\"rndRollupWindow('lifetime',this)\">lifetime</b>"

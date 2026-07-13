@@ -62,6 +62,11 @@ _EXCERPT_MAX = 400
 _SAFE_KEYS = (
     "entry_id", "source", "session_id", "lane", "title",
     "summary_excerpt", "doc_rels", "idea_text", "when",
+    # Honest Telemetry W5: a discarded session carries its FINALIZED cost block
+    # (tokens/time/$ + usage_state/usage_reason) so the Boneyard tells the honest
+    # cost of what was thrown away. The cost block holds only measured facts — no
+    # absolute path / worktree / branch — so it is SAFE to project.
+    "cost", "usage_state", "usage_reason",
 )
 
 
@@ -151,6 +156,12 @@ def _safe_view(entry: dict) -> dict:
         "doc_rels": list(e.get("doc_rels", []) or []),
         "idea_text": e.get("idea_text", ""),
         "when": e.get("when", 0),
+        # Honest Telemetry W5: the finalized cost block + usage verdict (SAFE —
+        # measured facts only). ``cost`` is None for a capture-failed/unmeasured
+        # discard (never a fabricated $0).
+        "cost": e.get("cost", None),
+        "usage_state": e.get("usage_state", ""),
+        "usage_reason": e.get("usage_reason", ""),
     }
 
 
@@ -202,6 +213,14 @@ def record_entry(folder_path, project_id: str, entry: dict) -> dict:
         except (TypeError, ValueError):
             when = time.time()
 
+        # Honest Telemetry W5: carry the finalized cost block + usage verdict
+        # verbatim when the caller supplied them (a discarded RUN session). ``cost``
+        # is kept as-is (a dict or None — never fabricated); the states default to
+        # empty for a non-session (grass) discard.
+        cost = (entry or {}).get("cost", None)
+        usage_state = str((entry or {}).get("usage_state", "") or "")
+        usage_reason = str((entry or {}).get("usage_reason", "") or "")
+
         eid = compute_entry_id(src, key, doc_rels, lane)
         record = {
             "entry_id": eid,
@@ -213,6 +232,9 @@ def record_entry(folder_path, project_id: str, entry: dict) -> dict:
             "doc_rels": doc_rels,
             "idea_text": idea_text,
             "when": when,
+            "cost": cost,
+            "usage_state": usage_state,
+            "usage_reason": usage_reason,
         }
 
         with _paths.WRITE_LOCK, _journal.journaled(project_id, _journal.EV_BONEYARD_CAPTURED, correlation_id=(key or project_id), folder_path=folder_path, payload={"source": src, "entry_id": eid}):
@@ -389,6 +411,14 @@ def build_session_entry(folder_path, project_id: str, lane: str,
 
     excerpt = _summary_excerpt_for_session(folder_path, project_id, lane, sid)
 
+    # Honest Telemetry W5: attach the session's FINALIZED cost block so the
+    # Boneyard tells the honest cost of the discarded work. The eager finalize
+    # (usage_capture) wrote a ``run-cost`` effort record tagged with this
+    # session_id carrying ``cost`` (dict for measured; None for capture-failed/
+    # unmeasured) + ``usage_state``/``usage_reason`` — never a fabricated $0.
+    cost, usage_state, usage_reason = _resolve_finalized_cost(
+        folder_path, project_id, lane, sid, rec)
+
     return {
         "source": source,
         "session_id": sid,
@@ -398,7 +428,37 @@ def build_session_entry(folder_path, project_id: str, lane: str,
         "doc_rels": _norm_doc_rels(doc_rels),
         "idea_text": "",
         "when": time.time(),
+        "cost": cost,
+        "usage_state": usage_state,
+        "usage_reason": usage_reason,
     }
+
+
+def _resolve_finalized_cost(folder_path, project_id, lane, session_id, record):
+    """Resolve a session's finalized (``run-cost``) cost block + usage verdict.
+
+    Prefers the ``run-cost`` effort record (``kind == 'run-cost'``) tagged with
+    this ``session_id``; falls back to the registry record's ``usage_state`` /
+    ``usage_reason`` stamp (an unmeasured session writes NO cost effort record).
+    Returns ``(cost|None, usage_state, usage_reason)``. Best-effort; never raises.
+    """
+    cost = None
+    usage_state = str((record or {}).get("usage_state", "") or "")
+    usage_reason = str((record or {}).get("usage_reason", "") or "")
+    try:
+        import effort_history as _eh
+        for e in _eh.efforts_for_session_id(folder_path, project_id, lane,
+                                            session_id):
+            if e.get("kind") == "run-cost":
+                cost = e.get("cost", None)
+                if e.get("usage_state"):
+                    usage_state = str(e.get("usage_state") or "")
+                if e.get("usage_reason"):
+                    usage_reason = str(e.get("usage_reason") or "")
+                break
+    except Exception:
+        pass
+    return cost, usage_state, usage_reason
 
 
 def build_grass_entry(folder_path, project_id: str, idea: dict,

@@ -113,7 +113,16 @@ def _index_path(folder_path, project_id: str, lane: str) -> Path:
 
 
 def _pointer_path(folder_path, project_id: str, lane: str, job_id: str) -> Path:
-    return efforts_dir(folder_path, project_id, lane) / f"{job_id}{POINTER_SUFFIX}"
+    # The on-disk FILENAME must be filesystem-safe: a run-cost job_id embeds the
+    # session_id (``run-cost-<sid>``) and a managed/lane-qualified session id can
+    # contain ``::`` (e.g. ``build::sess-XYZ``) — illegal in a Windows filename.
+    # Sanitize the filename with the SAME transform the summaries dir uses so the
+    # write and every later read resolve to the identical path; the stored
+    # ``job_id`` field and the append-only index keep the RAW value (lookups are
+    # index-driven, never derived from the filename), so this is a pure
+    # filename-safety mapping and a no-op for ordinary (special-char-free) ids.
+    return efforts_dir(folder_path, project_id, lane) / (
+        f"{_safe_session_segment(job_id)}{POINTER_SUFFIX}")
 
 
 # ── Index (append-only, preserves order; newest-first is computed on read) ──

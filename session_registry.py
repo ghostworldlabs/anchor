@@ -411,6 +411,14 @@ def _normalize(record: dict) -> dict:
         engine_session_uuids.insert(0, engine_session_uuid)
     usage_state = record.get("usage_state", "") or ""
     usage_reason = record.get("usage_reason", "") or ""
+    # Honest Telemetry W5 (RULED Option C): a durable marker that this session
+    # touched a Gemini/agy segment whose usage Anchor cannot capture. Set by
+    # ``terminal_session.switch_engine`` whenever it switches TO an engine whose
+    # segment is not UUID-captured, so a claude→gemini→claude round-trip (which
+    # ends back on the claude backend) is STILL honestly flagged as mixed and the
+    # rollup renders 'partial (gemini segment unmeasured)' instead of a
+    # complete-looking Claude-only number. Back-compat: absent → False.
+    usage_gemini_segment = bool(record.get("usage_gemini_segment", False))
     # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
     # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
     # ids — the reference-counted ownership the teardown path (``kill`` /
@@ -490,6 +498,7 @@ def _normalize(record: dict) -> dict:
         "engine_session_uuids": engine_session_uuids,
         "usage_state": usage_state,
         "usage_reason": usage_reason,
+        "usage_gemini_segment": usage_gemini_segment,
     }
 
 
@@ -822,7 +831,9 @@ def update_session(session_id: str, **fields) -> dict:
                "owned_job_ids",
                # Honest Telemetry W4: engine-session UUID capture + usage state.
                "engine_session_uuid", "engine_session_uuids",
-               "usage_state", "usage_reason"}
+               "usage_state", "usage_reason",
+               # Honest Telemetry W5: durable mixed-session (gemini-segment) marker.
+               "usage_gemini_segment"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
