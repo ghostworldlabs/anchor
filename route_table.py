@@ -183,6 +183,11 @@ ROUTES = [
        handler="handle_project_file_content", migrated=True),
     _r("GET", "/api/rnd/session_doc_roles", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_session_doc_roles", migrated=True),
+    # telemetry-resume W3 — Layer-1 warm narration data (token-authed, ?token=).
+    # A NEW read endpoint carrying per-project data → default-deny token, and it
+    # is enumerated in the W3 auth test (401-before-substance).
+    _r("GET", "/api/rnd/session_narration", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_session_narration", migrated=True),
     _r("GET", "/api/rnd/context_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_context_status", migrated=True),
     _r("GET", "/api/rnd/effort_rollup", AUTH_TOKEN, match=MATCH_PREFIX,

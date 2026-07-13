@@ -1984,6 +1984,11 @@ function rndUnlinkTask(el) {
 // MANAGED: session_id -> {session_id, lane, backend, status, label, idx} for
 // LIVE (non-terminal) managed sessions — these mount a live xterm terminal.
 var MANAGED = {};
+// telemetry-resume W3 — REUSE-NOT-SIBLING: source-effort id -> the LIVE session
+// id a prior '▶ Resume live' minted from it. _resumeLive consults this so a
+// second click on the same effort focuses the already-live window instead of
+// spawning a sibling session/worktree.
+var _RESUMED_FROM = {};
 // FINISHED (v6 Wave 4): session_id -> {session_id, lane, backend, status, label,
 // created_at, chain_id, parent_session_id, idx} for TERMINAL-status (done/failed)
 // managed sessions. v5 dropped these from the row; v6 KEEPS them as greyed,
@@ -2978,6 +2983,141 @@ function _mountReadOnlyBody(sessionId, host, s) {
   };
   var detail = host.querySelector('.ro-detail');
   _fillPastSessionDetail(sessionId, (s && s.lane) || '', detail);
+  // telemetry-resume W3 — the Layer-1 WARM narrated view. Prepend the
+  // deterministic narration spine (done / produced / next) + the '▶ Resume live'
+  // control INTO this same session-window terminal chrome, so the first click on
+  // ANY tile class opens a warm terminal that narrates (the first-click sentence).
+  // Pure render off the token-authed /api/rnd/session_narration data route — NO
+  // PTY, NO synchronous model call, NO network beyond the one cached-data GET.
+  _mountLayer1Narration(sessionId, host, s);
+}
+
+// _mountLayer1Narration (telemetry-resume W3): render the Layer-1 warm narrated
+// view into the session-window terminal-chrome host. The narration SPINE (what
+// was done / produced / comes next) is a PURE deterministic render served from
+// the token-authed /api/rnd/session_narration route — total over every tile class
+// (running, done, failed, parked-idle, EVICTED-parked, reaped-orphan, cancelled,
+// general, discovered, finished one-shot job), so it is structurally never blank.
+// A '▶ Resume live' control (the Layer-2 escalation, fully wired in W6) sits in
+// the same window. Lazy enrichment: while the server reports enrichment
+// 'generating' the spine shows a 'summary generating…' badge OVER the floor and
+// polls a BOUNDED number of times for the enriched line to land, then STOPS (no
+// loop; a failed/absent generation leaves the floor standing).
+function _mountLayer1Narration(sessionId, host, s, _tries) {
+  if (!host) return;
+  _tries = _tries || 0;
+  var block = host.querySelector('.layer1');
+  if (!block) {
+    block = document.createElement('div');
+    block.className = 'layer1';
+    block.setAttribute('data-session', sessionId);
+    block.innerHTML = '<div class="l1-spine"><div class="summ-loading">'
+      + 'loading warm view…</div></div>';
+    var act = document.createElement('div');
+    act.className = 'l1-actions';
+    var rl = document.createElement('button');
+    rl.className = 'resume-live';
+    rl.type = 'button';
+    rl.textContent = '▶ Resume live';
+    rl.onclick = function (e) {
+      e.stopPropagation();
+      _resumeLive(sessionId, (s && s.lane) || '');
+    };
+    act.appendChild(rl);
+    block.appendChild(act);
+    host.insertBefore(block, host.firstChild);
+  }
+  var spine = block.querySelector('.l1-spine');
+  var lane = (s && s.lane) || '';
+  var url = '/api/rnd/session_narration?pid=' + encodeURIComponent(PROJECT_ID)
+    + '&lane=' + encodeURIComponent(lane)
+    + '&session=' + encodeURIComponent(sessionId) + _tokenQ();
+  fetch(url, _jsonHdrs())
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var n = (d && d.ok && d.narration) ? d.narration : null;
+      if (!n) {
+        if (spine) spine.innerHTML = '<div class="ro-note">Warm view '
+          + 'unavailable.</div>';
+        return;
+      }
+      if (spine) spine.innerHTML = _renderLayer1(n);
+      // Lazy enrichment: poll a BOUNDED number of times while generating, then
+      // stop — never an infinite loop; the floor already stands underneath.
+      if (n.enrichment === 'generating' && _tries < 20) {
+        setTimeout(function () {
+          _mountLayer1Narration(sessionId, host, s, _tries + 1);
+        }, 600);
+      }
+    })
+    .catch(function () {
+      if (spine) spine.innerHTML = '<div class="ro-note">Warm view '
+        + 'unavailable.</div>';
+    });
+}
+
+// _renderLayer1(n): the narration SPINE HTML — badges (evicted / summary
+// generating…), the what-was-done line, the produced doc links (/report ·
+// /artifact), and the what-comes-next block. The 'next' is shown PASTE-NOT-SUBMIT
+// (a quoted block carrying data-submit="false") — nothing is ever auto-run.
+function _renderLayer1(n) {
+  var out = [];
+  var badges = n.badges || [];
+  if (badges.length) {
+    var b = ['<div class="l1-badges">'];
+    for (var i = 0; i < badges.length; i++) {
+      var cls = (badges[i] === 'evicted') ? 'l1-badge evicted' : 'l1-badge gen';
+      b.push('<span class="' + cls + '">' + _esc(badges[i]) + '</span>');
+    }
+    b.push('</div>');
+    out.push(b.join(''));
+  }
+  out.push('<div class="l1-sec"><span class="l1-k">What was done</span>'
+    + '<span class="l1-v">' + _esc(n.done || '') + '</span></div>');
+  out.push('<div class="l1-sec"><span class="l1-k">What was produced</span></div>');
+  var produced = n.produced || [];
+  if (produced.length) {
+    var pl = ['<ul class="l1-list">'];
+    for (var j = 0; j < produced.length; j++) {
+      var p = produced[j];
+      var tag = p.role ? (_esc(p.role) + ': ') : '';
+      pl.push('<li><a href="' + _esc(p.href || '') + '" target="anchor_report_window" '
+        + 'rel="noopener">' + tag + _esc(p.label || '') + '</a></li>');
+    }
+    pl.push('</ul>');
+    out.push(pl.join(''));
+  } else {
+    out.push('<div class="ro-note"><i>'
+      + _esc(n.produced_note || 'no recoverable documents') + '</i></div>');
+  }
+  var nx = n.next || {};
+  out.push('<div class="l1-sec"><span class="l1-k">What comes next</span></div>');
+  out.push('<div class="l1-next" data-submit="false">'
+    + _esc(nx.text || '') + '</div>');
+  return out.join('');
+}
+
+// _resumeLive(sessionId, lane): the Layer-2 escalation control. REUSE-NOT-SIBLING
+// — if this effort already has a LIVE session open (either the session itself is
+// live, or a prior Resume minted one that is still live), FOCUS that window
+// instead of spawning a second sibling. Otherwise escalate via the existing
+// continueSession path. The full attach-ack + replay-complete handshake and the
+// read-only plan-mode orientation land in W6; here the control is rendered and
+// wired to the reuse-aware escalation.
+function _resumeLive(sessionId, lane) {
+  var self = MANAGED[sessionId];
+  if (self && self.status === 'running') {
+    if (DOCK && DOCK.session_id === sessionId) { openEffortDock(sessionId); return; }
+    openPanel(sessionId);
+    return;
+  }
+  var prior = _RESUMED_FROM[sessionId];
+  if (prior && MANAGED[prior] && MANAGED[prior].status === 'running') {
+    if (DOCK && DOCK.session_id === prior) { openEffortDock(prior); return; }
+    openPanel(prior);
+    return;
+  }
+  continueSession(sessionId, lane);
 }
 
 // _fillPastSessionDetail: fetch the cached session summary and render the
@@ -3093,6 +3233,9 @@ async function continueSession(sessionId, lane) {
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
+  // W3 reuse-not-sibling: remember which live session this effort resumed into,
+  // so a later '▶ Resume live' focuses it instead of spawning a second sibling.
+  if (sid !== sessionId) _RESUMED_FROM[sessionId] = sid;
   renderSessionBar();
   // v12 W10 — if the source was opened in the bottom DOCK (the effort surface),
   // continue IN the dock: re-bind it to the new live session (a NEW tile lands on

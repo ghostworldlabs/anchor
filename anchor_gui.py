@@ -406,6 +406,7 @@ import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
+import narration as _narr  # telemetry-resume W3 — deterministic narration floor + Layer-1 warm view
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
@@ -12181,6 +12182,116 @@ def handle_session_summary(handler, path, body):
                 handler._send_json({"ok": True, "status": "generating"})
 
 
+def handle_session_narration(handler, path, body):
+    # Read-only Layer-1 WARM NARRATION data (telemetry-resume W3): the
+    # deterministic narration spine (done / produced / next) for ONE session
+    # tile, rendered in the session-window terminal chrome as the first-click
+    # 'warm terminal that narrates'. PURE render off durable local data —
+    # NO PTY spawn, NO synchronous model call, NO network. Cites the North
+    # Star amendment (click contract · first-click sentence · narration floor ·
+    # endpoint auth rule).
+    #
+    # Lazy enrichment (the CHOSEN narration-floor path): the floor is ALWAYS
+    # returned immediately; when the session has no cached summary yet, the
+    # first open triggers the EXISTING v3 background generation (unmodified) and
+    # the view carries an ``enrichment='generating'`` badge — a badge OVER
+    # content, never a spinner instead of content. A failed/absent generation
+    # leaves the floor standing (no loop; a later open may retry once).
+    #
+    # AUTH: ``?token=`` (401-before-substance, like session_summary /
+    # session_doc_roles). The strangler applies the row's token gate FIRST; this
+    # in-handler check is the belt-and-braces second line.
+    #   /api/rnd/session_narration?pid=<id>&lane=<lane>&session=<sid>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0] or "").strip()
+    lane = (q.get("lane", [""])[0] or "").strip()
+    session_id = (q.get("session", [""])[0] or "").strip()
+    if not pid or not lane or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "pid, lane, session required"}, 400)
+        return
+    if _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+        return
+    if _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    folder = (proj or {}).get("folder_path", "")
+    # Resolve the registry record (SAFE — never echoed to the client; only the
+    # narration projection is returned).
+    try:
+        record = _termsess.get_session(session_id) or {}
+    except Exception:
+        record = {}
+    # Finished ONE-SHOT JOB tile (no managed session record): the ``session`` is
+    # a durable job_id. Render the effort record + its /report link directly —
+    # the locked one-shot-job tile-class definition. Guarded; falls through to the
+    # session floor if nothing resolves.
+    if not record:
+        try:
+            eff = _eh.load_effort(folder, pid, _eh._resolve_subdir(lane),
+                                  session_id)
+        except Exception:
+            eff = None
+        if isinstance(eff, dict) and (eff.get("provenance") == "run"
+                                      or isinstance(eff.get("cost"), dict)) \
+                and not (eff.get("session_id") or ""):
+            try:
+                view = _narr.narrate_effort(pid, lane, eff, folder_path=folder)
+                handler._send_json({"ok": True, "narration": view})
+                return
+            except Exception:
+                pass
+    # Lazy enrichment: decide 'generating' vs floor WITHOUT ever blocking on the
+    # model. Cache HIT → 'cached' (build_narration resolves it). Cache MISS on a
+    # registered project → trigger the existing background generation ONCE and
+    # badge 'generating'. Unknown project / unresolvable session → plain floor.
+    enrichment = None
+    store_lane = lane
+    try:
+        store_lane = _eh._resolve_subdir(lane)
+    except Exception:
+        store_lane = lane
+    cached = None
+    try:
+        cached = _summarizer.load_cached(folder, pid, store_lane, session_id)
+    except Exception:
+        cached = None
+    if not (isinstance(cached, dict) and not cached.get("error")) and proj is not None:
+        session_obj = None
+        try:
+            session_obj = _resolve_finished_session(
+                folder, pid, lane, session_id)
+        except Exception:
+            session_obj = None
+        if session_obj is not None:
+            try:
+                _trigger_session_summary(folder, pid, lane, session_obj)
+                enrichment = _narr.ENRICH_GENERATING
+            except Exception:
+                enrichment = None
+    try:
+        view = _narr.narrate_session(
+            pid, lane, session_id, folder_path=folder, record=record,
+            enrichment=enrichment)
+    except Exception:
+        # TOTAL fallback — the narration builder is pure/never-raises, but keep
+        # the endpoint structurally-never-blank even under an unexpected error.
+        view = {
+            "session_id": session_id, "tile_class": "done", "lane": lane,
+            "title": lane, "done": f"ran {lane}", "produced": [],
+            "produced_note": "no recoverable documents",
+            "next": {"text": "Resume this session to continue where it left "
+                             "off.", "source": "stage_derived", "submit": False},
+            "badges": [], "enrichment": "floor", "links_valid": True,
+        }
+    handler._send_json({"ok": True, "narration": view})
+
+
 def handle_term_sessions(handler, path, body):
     # Read-only: managed terminal sessions for a project — the
     # repopulate-from-registry hook the cockpit tiles row paints from
@@ -12761,6 +12872,7 @@ _MIGRATED_HANDLERS = {
     "handle_board_html": handle_board_html,
     "handle_handoff_proposal": handle_handoff_proposal,
     "handle_session_summary": handle_session_summary,
+    "handle_session_narration": handle_session_narration,
     "handle_term_sessions": handle_term_sessions,
     "handle_projects_html": handle_projects_html,
     "handle_previews": handle_previews,
