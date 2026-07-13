@@ -6026,6 +6026,15 @@ def main():
     report = Report()
     server_proc = None
 
+    # Honest-Telemetry W2 durability substrate: mark this process as the
+    # healthcheck so the fail-closed engine-sidecar resolver (paths.sidecar_root)
+    # refuses to resolve the live ~/.claude home store unless a walk explicitly
+    # points ANCHOR_SIDECAR_DIR at a fixture/temp dir. Defense-in-depth — the
+    # capture+finalize walk (W7) sets its own temp ANCHOR_SIDECAR_DIR, but a walk
+    # that forgot to fails CLOSED here instead of touching a real user's private
+    # transcripts. Process-scoped; the healthcheck process exits at the end.
+    os.environ.setdefault("ANCHOR_HEALTHCHECK", "1")
+
     # W1 (rearch 2026-07): opt-in write-site tripwire over the healthcheck's
     # own in-process walks (the v2–v5+ surfaces mutate stubbed .anchor/
     # stores). With ANCHOR_WRITE_TRIPWIRE=inventory set, every such write is

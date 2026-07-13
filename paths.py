@@ -256,6 +256,34 @@ def ensure_data_dirs() -> None:
 
 # ── Crash-safe atomic text write (data-loss guard) ─────────────────────────
 
+#: Bounded retry for the atomic ``os.replace`` on Windows. A concurrent
+#: read-only reader momentarily holds the target file open; Windows then denies
+#: the rename with ``PermissionError`` (a transient sharing violation, NOT a real
+#: permission fault). The reader's handle is released within microseconds, so a
+#: few short backed-off retries turn the race into a correct atomic write rather
+#: than a spurious crash. POSIX ``os.replace`` never hits this — the loop is a
+#: no-op there (the first attempt succeeds).
+_ATOMIC_REPLACE_RETRIES = 40
+_ATOMIC_REPLACE_BACKOFF_S = 0.005
+
+
+def _replace_with_retry(tmp, target) -> None:
+    """``os.replace(tmp, target)`` with a bounded retry over the transient
+    Windows sharing-violation ``PermissionError`` raised while a concurrent
+    reader has ``target`` open. Re-raises the last error if the window never
+    clears within the retry budget."""
+    import time as _time
+
+    for attempt in range(_ATOMIC_REPLACE_RETRIES):
+        try:
+            os.replace(tmp, target)
+            return
+        except PermissionError:
+            if attempt == _ATOMIC_REPLACE_RETRIES - 1:
+                raise
+            _time.sleep(_ATOMIC_REPLACE_BACKOFF_S)
+
+
 def atomic_write_text(path, text, encoding="utf-8"):
     """Crash-safe text write: write to a temp file in the SAME directory, fsync, then
     os.replace() onto the target — so a crash never leaves the target truncated/partial.
@@ -263,7 +291,10 @@ def atomic_write_text(path, text, encoding="utf-8"):
 
     Behaves like ``Path.write_text`` except for atomicity: pass the SAME string the
     caller already builds. Callers already hold :data:`WRITE_LOCK`, so the fixed
-    ``.tmp`` sidecar name is safe from concurrent collision.
+    ``.tmp`` sidecar name is safe from concurrent collision. The final rename goes
+    through :func:`_replace_with_retry` so a concurrent read-only reader holding the
+    target open (the Windows sharing-violation race) is tolerated with a bounded
+    retry rather than surfacing a spurious ``PermissionError``.
     """
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
@@ -271,7 +302,81 @@ def atomic_write_text(path, text, encoding="utf-8"):
         f.write(text)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    _replace_with_retry(str(tmp), str(path))
+
+
+# ── Fail-closed engine-sidecar root resolver (Honest Telemetry, W2) ─────────
+#
+# The Honest-Telemetry capture pipeline (W4) reads Claude Code's per-session
+# usage sidecars from ``~/.claude/projects/<slug>/<session-uuid>.jsonl``. In ANY
+# hermetic context — a pytest run, the daily healthcheck, or a redirected
+# ``ANCHOR_DATA_DIR`` deploy — resolving that live ``~/.claude`` home store would
+# let a test/healthcheck read (or diverge fixtures from) a real user's private
+# transcripts. The resolver therefore FAILS CLOSED: it RAISES unless
+# ``ANCHOR_SIDECAR_DIR`` is explicitly pointed at a fixture/temp dir. This lands
+# BEFORE any finalize/capture code exists (the W2 durability substrate) so the
+# capture pipeline is physically unable to open the live store in tests.
+
+#: Env var that pins the sidecar store root to a fixture/temp dir (the ONLY way a
+#: hermetic context obtains a sidecar root).
+SIDECAR_DIR_ENV = "ANCHOR_SIDECAR_DIR"
+#: Env marker the daily healthcheck sets on its own process (defense-in-depth so
+#: a healthcheck walk that forgot to set ``ANCHOR_SIDECAR_DIR`` still fails closed
+#: rather than resolving the real home store).
+HEALTHCHECK_ENV = "ANCHOR_HEALTHCHECK"
+
+
+class SidecarRootUnavailable(RuntimeError):
+    """Raised by :func:`sidecar_root` when the engine session-JSONL sidecar
+    store root cannot be resolved SAFELY (a hermetic context with
+    ``ANCHOR_SIDECAR_DIR`` unset). The live ``~/.claude`` home store is never
+    resolved in that case — the resolver fails closed."""
+
+
+def _sidecar_hermetic_mode(env=None) -> bool:
+    """True when the sidecar root MUST NOT resolve the live ``~/.claude`` store.
+
+    Hermetic ⇔ any of: pytest is running (``PYTEST_CURRENT_TEST``), the data dir
+    is redirected (``ANCHOR_DATA_DIR`` set — production leaves it unset), or the
+    healthcheck marked its process (``ANCHOR_HEALTHCHECK``). Read at call time so
+    a test/deploy can toggle it. Pure.
+    """
+    e = os.environ if env is None else env
+    if e.get("PYTEST_CURRENT_TEST"):
+        return True
+    if (e.get(DATA_DIR_ENV) or "").strip():
+        return True
+    if (e.get(HEALTHCHECK_ENV) or "").strip():
+        return True
+    return False
+
+
+def sidecar_root(env=None) -> Path:
+    """Resolve the engine session-JSONL sidecar store root — FAIL CLOSED.
+
+    - ``ANCHOR_SIDECAR_DIR`` set (non-blank) → that dir (expanded + resolved).
+      This is the ONLY way a hermetic context (test / healthcheck / redirected
+      data) obtains a sidecar root, and it points at a fixture/temp dir — never
+      the real home store.
+    - Otherwise, in a hermetic context → raise :class:`SidecarRootUnavailable`
+      (the live ``~/.claude`` store is never touched).
+    - Otherwise (genuine production: no redirect, not a test, not the
+      healthcheck) → ``~/.claude/projects``.
+
+    Never OPENS anything — it only resolves and returns the path (the caller
+    reads). Pure aside from reading the environment + the home dir.
+    """
+    e = os.environ if env is None else env
+    raw = e.get(SIDECAR_DIR_ENV)
+    if raw and raw.strip():
+        return Path(raw).expanduser().resolve()
+    if _sidecar_hermetic_mode(e):
+        raise SidecarRootUnavailable(
+            "sidecar root refused: ANCHOR_SIDECAR_DIR is unset in a hermetic "
+            "(test / healthcheck / redirected-data) context — the live "
+            "~/.claude store is never resolved here. Set ANCHOR_SIDECAR_DIR to "
+            "a fixture or temp dir.")
+    return Path.home() / ".claude" / "projects"
 
 
 # ── Auth helper (Wave 2) ───────────────────────────────────────────────────

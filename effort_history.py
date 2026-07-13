@@ -136,7 +136,16 @@ def _save_index(folder_path, project_id: str, lane: str, order: list) -> None:
     p = _index_path(folder_path, project_id, lane)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(list(order), indent=2), encoding="utf-8")
+    # Explicit open + flush + fsync (not Path.write_text) so the temp file's
+    # bytes reach stable storage BEFORE the atomic rename — a crash between the
+    # write and the replace can never leave a torn effort index (W2 durability
+    # substrate). The write stays attributed to effort_history (the write-tripwire
+    # mutation-of-record inventory) and the tmp→target replace keeps the atomic
+    # idiom.
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(list(order), indent=2))
+        f.flush()
+        os.fsync(f.fileno())
     tmp.replace(p)
 
 

@@ -370,6 +370,18 @@ def _normalize(record: dict) -> dict:
     except (TypeError, ValueError):
         proc_create_time = None
     crypt_token = record.get("crypt_token", "") or ""
+    # ── Honest Telemetry W2: terminal cost-finalization latch ───────────────
+    # ``cost_final`` is the compare-and-set flag that makes finalize-on-every-
+    # end-path idempotent: exactly one of the racing end paths (kill / close /
+    # reconcile-dead) sets it (via :func:`finalize_cost_once`) and writes the
+    # session's single RUN cost record. Back-compat: every pre-feature record
+    # (no key) normalizes to ``False`` / ``None``.
+    cost_final = bool(record.get("cost_final", False))
+    cfa = record.get("cost_final_at")
+    try:
+        cost_final_at = float(cfa) if cfa is not None else None
+    except (TypeError, ValueError):
+        cost_final_at = None
     # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
     # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
     # ids — the reference-counted ownership the teardown path (``kill`` /
@@ -441,6 +453,9 @@ def _normalize(record: dict) -> dict:
         "crypt_token": crypt_token,
         # zombie-hunter safe-to-arm, Wave 6: reference-counted owned-job claims.
         "owned_job_ids": owned_job_ids,
+        # Honest Telemetry W2: terminal cost-finalization latch (see above).
+        "cost_final": cost_final,
+        "cost_final_at": cost_final_at,
     }
 
 
@@ -487,9 +502,16 @@ def _write_sessions_locked(reg: dict) -> None:
     items = [reg[k] for k in reg]
     target = sessions_path()
     tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(
-        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    # Explicit open + flush + fsync (not Path.write_text) so the temp file's
+    # bytes are on stable storage BEFORE the atomic rename — a crash between the
+    # write and the replace can never leave a torn store (W2 durability
+    # substrate). The write site stays attributed to session_registry (the
+    # write-tripwire mutation-of-record inventory), and the tmp→target replace
+    # keeps the atomic idiom.
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(items, indent=2, ensure_ascii=False))
+        f.flush()
+        os.fsync(f.fileno())
     _atomic_replace(str(tmp), str(target))
 
 
@@ -793,6 +815,44 @@ def remove_session(session_id: str) -> bool:
             _save_sessions(reg, _locked=True)
             return True
         return False
+
+
+# ── Terminal cost-finalization latch (Honest Telemetry, W2) ─────────────────
+
+def finalize_cost_once(session_id: str) -> bool:
+    """Compare-and-set the terminal cost-finalization flag for a session (W2).
+
+    Finalize-on-every-end-path (kill / close-park / drain / finish /
+    reconcile-dead) can fire CONCURRENTLY against the same session; without a
+    latch each racer would write the session's RUN cost record and the rollup
+    would double-count. This is the atomic gate: it returns ``True`` for EXACTLY
+    ONE caller — the one that wins the race to flip ``cost_final`` from unset to
+    set — and ``False`` for every subsequent caller (and for an unknown id). The
+    caller that gets ``True`` is the sole writer of the finalized cost record.
+
+    Atomicity: the whole read-check-write runs under ``paths.WRITE_LOCK`` and the
+    flag is persisted WITH the record (``cost_final`` + ``cost_final_at``) via the
+    registry's atomic tmp→rename write, so the latch survives a crash and a
+    restart never re-finalizes an already-finalized session. Idempotent by
+    construction: calling again after the win is a no-op that returns ``False``.
+    """
+    if not session_id:
+        return False
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        rec = reg.get(session_id)
+        if rec is None:
+            return False
+        if rec.get("cost_final"):
+            return False  # another end path already finalized this session
+        rec = dict(rec)
+        rec["cost_final"] = True
+        rec["cost_final_at"] = time.time()
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
 
 
 # ── Reference-counted owned-job claims (zombie-hunter safe-to-arm, Wave 6) ───
