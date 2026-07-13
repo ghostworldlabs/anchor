@@ -188,6 +188,11 @@ ROUTES = [
     # is enumerated in the W3 auth test (401-before-substance).
     _r("GET", "/api/rnd/session_narration", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_session_narration", migrated=True),
+    # telemetry-resume W4 — ledger/capture inspection (token-authed, ?token=).
+    # A NEW read endpoint carrying per-session usage data → default-deny token, and
+    # it is enumerated in the auth test (401-before-substance).
+    _r("GET", "/api/rnd/usage_ledger", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_usage_ledger", migrated=True),
     _r("GET", "/api/rnd/context_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_context_status", migrated=True),
     _r("GET", "/api/rnd/effort_rollup", AUTH_TOKEN, match=MATCH_PREFIX,

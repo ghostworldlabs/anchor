@@ -382,6 +382,35 @@ def _normalize(record: dict) -> dict:
         cost_final_at = float(cfa) if cfa is not None else None
     except (TypeError, ValueError):
         cost_final_at = None
+    # ── Honest Telemetry W4: engine-session UUID capture + usage state ───────
+    # ``engine_session_uuid`` is the Claude/engine session UUID captured AT LAUNCH
+    # (``claude --session-id <uuid>`` pins the sidecar filename — never mtime-
+    # guessed), the deterministic correlation the W4 usage-capture pipeline reads
+    # the per-message sidecar by. ``engine_session_uuids`` is the append-only
+    # history of EVERY engine UUID this managed session touched (launch + each
+    # engine switch produces a distinct sidecar segment); finalize sums over all
+    # of them, counted once. ``usage_state``/``usage_reason`` are the terminal
+    # capture verdict stamped at finalize (measured / capture-failed / unmeasured
+    # with a reason enum). Every pre-feature record (no keys) normalizes to
+    # ""/[]/"" — honestly uncorrelated, never a guessed cost.
+    engine_session_uuid = record.get("engine_session_uuid", "") or ""
+    raw_euuids = record.get("engine_session_uuids")
+    engine_session_uuids = []
+    if isinstance(raw_euuids, (list, tuple)):
+        _seen_eu = set()
+        for u in raw_euuids:
+            if u is None:
+                continue
+            us = str(u)
+            if not us or us in _seen_eu:
+                continue
+            _seen_eu.add(us)
+            engine_session_uuids.append(us)
+    # Keep the two consistent: a bare ``engine_session_uuid`` seeds the list.
+    if engine_session_uuid and engine_session_uuid not in engine_session_uuids:
+        engine_session_uuids.insert(0, engine_session_uuid)
+    usage_state = record.get("usage_state", "") or ""
+    usage_reason = record.get("usage_reason", "") or ""
     # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
     # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
     # ids — the reference-counted ownership the teardown path (``kill`` /
@@ -456,6 +485,11 @@ def _normalize(record: dict) -> dict:
         # Honest Telemetry W2: terminal cost-finalization latch (see above).
         "cost_final": cost_final,
         "cost_final_at": cost_final_at,
+        # Honest Telemetry W4: engine-session UUID capture + usage state (above).
+        "engine_session_uuid": engine_session_uuid,
+        "engine_session_uuids": engine_session_uuids,
+        "usage_state": usage_state,
+        "usage_reason": usage_reason,
     }
 
 
@@ -542,7 +576,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      label="", session_id=None, parent_session_id="",
                      chain_id=None, grass_origin="",
                      effort_id=None, effort_managed=False,
-                     pid=None, proc_create_time=None, crypt_token="") -> dict:
+                     pid=None, proc_create_time=None, crypt_token="",
+                     engine_session_uuid="") -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
@@ -582,6 +617,9 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "pid": pid,
             "proc_create_time": proc_create_time,
             "crypt_token": crypt_token or "",
+            # Honest Telemetry W4: engine-session UUID captured at launch (the
+            # deterministic sidecar correlation). Empty when not captured yet.
+            "engine_session_uuid": engine_session_uuid or "",
         })
         reg[sid] = record
         _save_sessions(reg, _locked=True)
@@ -781,7 +819,10 @@ def update_session(session_id: str, **fields) -> dict:
                # zombie-hunter v2: process-identity fields.
                "pid", "proc_create_time", "crypt_token",
                # zombie-hunter safe-to-arm, Wave 6: owned-job claim set.
-               "owned_job_ids"}
+               "owned_job_ids",
+               # Honest Telemetry W4: engine-session UUID capture + usage state.
+               "engine_session_uuid", "engine_session_uuids",
+               "usage_state", "usage_reason"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
@@ -853,6 +894,37 @@ def finalize_cost_once(session_id: str) -> bool:
         reg[session_id] = rec
         _save_sessions(reg, _locked=True)
         return True
+
+
+def add_engine_session_uuid(session_id: str, engine_session_uuid: str) -> dict:
+    """Record an engine-session UUID on a managed session (Honest Telemetry W4).
+
+    Sets ``engine_session_uuid`` (the CURRENT/last segment) and APPENDS it to the
+    append-only ``engine_session_uuids`` history — so a session that switches
+    engine mid-run accumulates BOTH sidecar segments and finalize sums over all of
+    them (counted once). Atomic (under ``paths.WRITE_LOCK``), idempotent (a
+    duplicate uuid is not re-appended). A no-op returning the current record for an
+    unknown id or a blank uuid.
+    """
+    if not session_id or not engine_session_uuid:
+        return get_session(session_id) or {}
+    u = str(engine_session_uuid)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        rec = reg.get(session_id)
+        if rec is None:
+            return {}
+        rec = dict(rec)
+        hist = list(rec.get("engine_session_uuids") or [])
+        if u not in hist:
+            hist.append(u)
+        rec["engine_session_uuids"] = hist
+        rec["engine_session_uuid"] = u
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return rec
 
 
 # ── Reference-counted owned-job claims (zombie-hunter safe-to-arm, Wave 6) ───

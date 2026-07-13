@@ -407,6 +407,7 @@ import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
 import narration as _narr  # telemetry-resume W3 — deterministic narration floor + Layer-1 warm view
+import usage_capture as _usage  # telemetry-resume W4 — usage-capture pipeline (ledger inspection)
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
@@ -10805,6 +10806,12 @@ def handle_finish_to_build(handler, path, body):
                         session, status=_sessreg.STATUS_DONE)
                 except KeyError:
                     pass
+                # Honest Telemetry W4: eager finalize on the FINISH end path
+                # (the DONE mark WITHOUT a reap). Idempotent CAS; best-effort.
+                try:
+                    _termsess.finalize_usage(session, project_id=pid, record=rec)
+                except Exception:
+                    pass
                 # v7 Wave 2: the finished planning session is DONE —
                 # schedule a background session-summary (best-effort,
                 # non-blocking, idempotent). Never delays this response.
@@ -12292,6 +12299,51 @@ def handle_session_narration(handler, path, body):
     handler._send_json({"ok": True, "narration": view})
 
 
+def handle_usage_ledger(handler, path, body):
+    # Read-only ledger/capture inspection (telemetry-resume W4): the finalized
+    # usage verdict + cost block + deduped ledger totals for ONE managed session
+    # — the honest cost trail the rollup renders. PURE read off the durable
+    # ``.anchor/`` store; NO PTY, NO model call, NO network, NO sidecar read (the
+    # ledger is Anchor's own snapshot). SAFE projection: never a worktree_path /
+    # branch / absolute path. Cites the North Star amendment 'Endpoint auth rule'
+    # (LOCKED) — this NEW route is token-authed (``?token=``) and enumerated in the
+    # auth-enumeration test (401-before-substance).
+    #   /api/rnd/usage_ledger?session=<sid>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    sid = (q.get("session", [""])[0]
+           or q.get("session_id", [""])[0] or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+        return
+    try:
+        rec = _sessreg.get_session(sid) or {}
+    except Exception:
+        rec = {}
+    uuids = []
+    try:
+        uuids = _usage._engine_uuids_of(rec)
+    except Exception:
+        uuids = []
+    try:
+        totals = _usage.combined_totals(uuids)
+    except Exception:
+        totals = _usage._zero_totals()
+    usage = {
+        "session_id": sid,
+        # SAFE projection — only the usage verdict + the engine-session UUIDs
+        # (opaque ids, never worktree/branch/absolute paths).
+        "state": rec.get("usage_state", "") or "",
+        "reason": rec.get("usage_reason", "") or "",
+        "cost_final": bool(rec.get("cost_final", False)),
+        "engine_session_uuids": list(uuids),
+        "ledger_totals": totals,
+    }
+    handler._send_json({"ok": True, "usage": usage})
+
+
 def handle_term_sessions(handler, path, body):
     # Read-only: managed terminal sessions for a project — the
     # repopulate-from-registry hook the cockpit tiles row paints from
@@ -12873,6 +12925,7 @@ _MIGRATED_HANDLERS = {
     "handle_handoff_proposal": handle_handoff_proposal,
     "handle_session_summary": handle_session_summary,
     "handle_session_narration": handle_session_narration,
+    "handle_usage_ledger": handle_usage_ledger,
     "handle_term_sessions": handle_term_sessions,
     "handle_projects_html": handle_projects_html,
     "handle_previews": handle_previews,

@@ -25,9 +25,14 @@ import route_table as rt
 # (method, path, sample query) — the sample query carries the required params so
 # the authed probe reaches the handler (proving auth passed), while the tokenless
 # probe must 401 BEFORE any substance is produced.
+# (method, path, sample query, substance_key) — ``substance_key`` is the JSON key
+# the authed response carries (and that a tokenless response must NEVER leak).
 NEW_ROUTES = [
     ("GET", "/api/rnd/session_narration",
-     "pid=proj-x&lane=research&session=sess-x"),
+     "pid=proj-x&lane=research&session=sess-x", "narration"),
+    # telemetry-resume W4 — ledger/capture inspection (usage state + cost + ledger
+    # totals for one session). Token-authed; 401-before-substance.
+    ("GET", "/api/rnd/usage_ledger", "session=sess-x", "usage"),
 ]
 
 
@@ -49,7 +54,7 @@ def test_new_routes_declared_token_authed_in_route_table():
     """Every W3+ new route is declared in the route table as a token-authed,
     migrated GET row (default-deny by construction)."""
     declared = {(r.method, r.pattern): r for r in rt.ROUTES}
-    for method, path, _q in NEW_ROUTES:
+    for method, path, _q, _sub in NEW_ROUTES:
         assert (method, path) in declared, (
             f"{method} {path} must have a declared route_table row "
             "(absence for a new endpoint is a BLOCKER)")
@@ -73,26 +78,26 @@ def test_new_routes_401_before_substance(monkeypatch, tmp_path):
     t.start()
     try:
         base = f"http://127.0.0.1:{port}"
-        for method, path, q in NEW_ROUTES:
+        for method, path, q, sub in NEW_ROUTES:
             url = f"{base}{path}?{q}"
             # No token → 401 BEFORE substance (the body is the unauthorized error,
-            # never a narration payload).
+            # never the route's substance payload).
             code, raw = _get(url)
             assert code == 401, f"{path} must 401 a tokenless GET"
             body = json.loads(raw or b"{}")
             assert body.get("ok") is False
-            assert "narration" not in body, (
-                f"{path} leaked substance before auth")
+            assert sub not in body, (
+                f"{path} leaked substance ({sub!r}) before auth")
             # Bad token → 401.
             code, _ = _get(url, token="nope")
             assert code == 401, f"{path} must 401 a bad token"
             # Correct token → NOT 401 (auth passed; the handler runs and returns
-            # the deterministic floor even for an unknown project).
+            # its substance even for an unknown project/session).
             code, raw = _get(url, token="tok-123")
             assert code != 401, f"{path} must serve an authed GET"
             body = json.loads(raw or b"{}")
             assert body.get("ok") is True
-            assert "narration" in body
+            assert sub in body, f"{path} authed response missing {sub!r}"
     finally:
         server.shutdown()
         server.server_close()
