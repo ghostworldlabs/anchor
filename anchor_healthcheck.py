@@ -4618,6 +4618,393 @@ def check_gandalf_surface(report: Report, server_proc, rnd_env: dict):
         report.check(name, True, f"{len(steps)} steps")
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Honest-Telemetry W7 — Verification: capture+finalize walk + live drift tripwire
+# ══════════════════════════════════════════════════════════════════════════════
+# Cites NORTH-STAR-AMENDMENT.md (tripwire severity · defer-and-badge · endpoint
+# auth rule) + W1-GROUND-TRUTH.md §1 (sidecar shape / dedup by message.id). Serves
+# criteria (1),(6),(7). Two additions land here:
+#   (A) check_telemetry_capture_surface — the fully-stubbed capture+finalize walk:
+#       a pinned fake sidecar in a temp ANCHOR_SIDECAR_DIR, a stub-PTY session
+#       start/kill, a RUN cost record with the fixture's EXACT totals asserted,
+#       PLUS a corrupted-fixture leg that is RED-classified (capture-failed), PLUS
+#       the auth-enumeration of every NEW telemetry route. Never :8777, never a
+#       real ~/.claude home path (the W2 fail-closed seam is enforced).
+#   (B) check_sidecar_drift_tripwire — the split-severity LIVE drift tripwire:
+#       zero sidecars → report.warn (environmental); ≥1 present-but-unparseable /
+#       zero-usage-despite-message-lines → report.check(False) RED, deterministic
+#       and load-independent (parsing, never timing).
+
+#: The pinned canonical sidecar fixtures (shipped under tests/; a distro without
+#: them degrades the walk to a green skip rather than a live-claude risk).
+SIDECAR_FIXTURE_DIR = ANCHOR_DIR / "tests" / "fixtures" / "sidecar"
+
+#: Every NEW telemetry endpoint this build added. The auth-enumeration contract
+#: (W3/W4/W6): the ABSENCE of any new route from the token-gated set is a BLOCKER.
+_NEW_TELEMETRY_ROUTES = (
+    ("GET", "/api/rnd/session_narration"),   # W3 Layer-1 warm narration data
+    ("GET", "/api/rnd/usage_ledger"),        # W4 ledger/capture inspection
+    ("POST", "/api/rnd/resume_live"),        # W6 Layer-2 '▶ Resume live' escalation
+    ("POST", "/api/rnd/orient_session"),     # W6 read-only orientation trigger
+)
+
+
+def _sidecar_fixture_text(name):
+    """Read one pinned sidecar fixture, or None when the fixtures are absent."""
+    try:
+        return (SIDECAR_FIXTURE_DIR / name).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _expected_sidecar_totals():
+    """Load the pinned EXPECTED.json parse results, or {} when absent."""
+    try:
+        return json.loads(
+            (SIDECAR_FIXTURE_DIR / "EXPECTED.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _surface_capture_failed(report: Report, record: dict):
+    """Surface a finalized ``capture-failed`` cost record as a CORRECTNESS failure.
+
+    The LOCKED tripwire severity (NORTH-STAR-AMENDMENT.md): a session whose sidecar
+    is PRESENT but unparseable / zero-usage-despite-message-lines is a correctness
+    failure — ``report.check(False)`` RED, never a soft warn. The red path's
+    MEANING is documented in the detail: new sessions land ``capture-failed`` until
+    the parser is fixed; capture NEVER halts and NOTHING is zeroed. Shared by the
+    stubbed walk (below) and the live drift tripwire so both speak one severity.
+    """
+    rec = record or {}
+    reason = rec.get("usage_reason") or "?"
+    sid = rec.get("session_id") or "?"
+    report.check(
+        f"usage capture-failed [{sid}]", False,
+        f"reason={reason}: sidecar present but unparseable/zero-usage — the parser "
+        f"must be fixed; new sessions land capture-failed until then (capture never "
+        f"halts, nothing zeroed)")
+
+
+def _telemetry_routes_auth_enumeration():
+    """Assert every NEW telemetry route is declared AND default-deny token-gated.
+
+    Deterministic, load-independent, in-process over ``route_table.ROUTES`` — auth
+    is a DECLARED property of the row, so this needs no live server. Returns
+    ``(ok, detail)``; a missing route or a non-``token`` policy fails (the
+    auth-enumeration BLOCKER contract).
+    """
+    try:
+        import route_table as _rt
+    except Exception as e:
+        return False, f"route_table import failed: {type(e).__name__}: {e}"
+    by_key = {(r.method, r.pattern): r for r in _rt.ROUTES}
+    missing, unauthed = [], []
+    for method, pattern in _NEW_TELEMETRY_ROUTES:
+        row = by_key.get((method, pattern))
+        if row is None:
+            missing.append(f"{method} {pattern}")
+        elif row.auth != _rt.AUTH_TOKEN:
+            unauthed.append(f"{method} {pattern}={row.auth}")
+    if missing or unauthed:
+        return False, f"missing={missing} not-token-gated={unauthed}"
+    return True, f"{len(_NEW_TELEMETRY_ROUTES)} new telemetry routes token-gated"
+
+
+def check_telemetry_capture_surface(report: Report, server_proc, rnd_env: dict):
+    """Honest-Telemetry W7 — walk the usage capture+finalize pipeline FULLY STUBBED.
+
+    Mirrors ``tests/test_usage_capture_w4.py`` inside the daily self-test: a temp
+    ``ANCHOR_SIDECAR_DIR`` holding the PINNED fixtures, a stub-PTY session with its
+    engine UUID captured AT LAUNCH, and the eager end-path finalize — but here the
+    two legs prove the SEVERITY MODEL end to end:
+
+      * CLEAN leg — the canonical fixture placed as the session's ``<uuid>.jsonl``
+        → kill → EXACTLY ONE RUN cost record whose token totals + duration match
+        ``EXPECTED.json`` exactly, ``$`` == 0.0 (no-own-pricing-table), stamped
+        ``measured``.
+      * CORRUPTED leg — the zero-usage fixture → kill → EXACTLY ONE
+        ``capture-failed`` record (``cost=None``, ``reason=zero-usage-...``); the
+        session lifecycle completes normally; the RED-surfacing path is exercised
+        against a THROWAWAY probe report (proving ``report.check(False)`` fires)
+        WITHOUT reddening the daily banner (the correct classification is a GREEN
+        outcome for the walk).
+      * AUTH — every new telemetry route (W3/W4/W6) is declared token-gated.
+
+    Fully stubbed + hermetic: ``ANCHOR_PTY_BACKEND=stub`` + the temp
+    ``ANCHOR_SIDECAR_DIR`` (the W2 fail-closed seam means no real ``~/.claude``
+    store is ever resolvable) + a temp worktree base + a throwaway temp git repo.
+    The throwaway ledger docs it writes are removed in ``finally`` so the walk
+    never pollutes live ``.anchor/`` data; never binds :8777.
+    """
+    name = "telemetry capture+finalize walk (W7)"
+    if not rnd_env.get("runner_cmd"):
+        report.check(name, True, "skipped (no stub runner; live claude avoided)")
+        return
+    canon = _sidecar_fixture_text("canonical_3turn.jsonl")
+    corrupt = _sidecar_fixture_text("corrupted_zero_usage.jsonl")
+    expected = _expected_sidecar_totals()
+    if canon is None or corrupt is None or not expected:
+        report.check(name, True, "skipped (pinned sidecar fixtures absent)")
+        return
+
+    import tempfile as _tf
+    steps: list[tuple[str, bool, str]] = []
+    ledger_uuids: list[str] = []
+
+    prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
+    prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
+    prev_sidecar = os.environ.get("ANCHOR_SIDECAR_DIR")
+    prev_id_flag = os.environ.get("ANCHOR_TERMINAL_SESSION_ID_FLAG")
+
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    wt_base = Path(_tf.mkdtemp(prefix="anchor-hc-w7-wt-"))
+    os.environ["ANCHOR_WORKTREE_BASE"] = str(wt_base)
+    sidecars = Path(_tf.mkdtemp(prefix="anchor-hc-w7-sc-"))
+    os.environ["ANCHOR_SIDECAR_DIR"] = str(sidecars)
+    # UUID-at-launch injection must be ON (default). A prior walk that blanked the
+    # seam would otherwise leave every session uncorrelated — force the default.
+    os.environ.pop("ANCHOR_TERMINAL_SESSION_ID_FLAG", None)
+    rnd_env.setdefault("v3_temp_dirs", []).extend([wt_base, sidecars])
+
+    try:
+        import rnd_registry as _rnd
+        import terminal_session as _ts
+        import usage_capture as _uc
+        import effort_history as _eh
+
+        proj_folder = Path(_tf.mkdtemp(prefix="anchor-hc-w7-proj-"))
+        rnd_env["v3_temp_dirs"].append(proj_folder)
+        (proj_folder / "CLAUDE.md").write_text(
+            "# hc w7 telemetry probe\n\nExercises the capture+finalize pipeline.\n",
+            encoding="utf-8")
+        (proj_folder / "README.md").write_text("# hc w7\n", encoding="utf-8")
+        git_ok = _git_init_repo(proj_folder)
+        proj = _rnd.add_project(SYNTHETIC_RND_NAME + " w7", str(proj_folder))
+        pid = proj["id"]
+        rnd_env["created_ids"].append(pid)
+        steps.append(("register w7 project", bool(pid), pid))
+
+        if not git_ok:
+            steps.append(("telemetry walk", True, "skipped (git unavailable)"))
+        else:
+            exp_tot = expected["canonical_3turn.jsonl"]["token_totals"]
+            exp_dur = expected["canonical_3turn.jsonl"]["duration_ms"]
+
+            def _run_cost_records(lane):
+                return [e for e in _eh.list_efforts(str(proj_folder), pid, lane)
+                        if e.get("kind") == "run-cost"]
+
+            # ── CLEAN leg: canonical → ONE measured record, exact totals ──────
+            rec = _ts.start_session(pid, "build", backend="claude")
+            sid = rec["session_id"]
+            euuid = rec.get("engine_session_uuid") or ""
+            if euuid:
+                ledger_uuids.append(euuid)
+                (sidecars / f"{euuid}.jsonl").write_text(canon, encoding="utf-8")
+            _ts.kill(sid, project_id=pid)
+            recs = _run_cost_records("build")
+            clean_ok = False
+            if euuid and len(recs) == 1:
+                rc = recs[0]
+                cost = rc.get("cost") or {}
+                tok_ok = all(cost.get(k) == v for k, v in exp_tot.items())
+                clean_ok = (rc.get("usage_state") == _uc.STATE_MEASURED
+                            and rc.get("session_id") == sid
+                            and tok_ok
+                            and cost.get("total_tokens")
+                            == exp_tot["total_all_classes"]
+                            and cost.get("duration_ms") == exp_dur
+                            and cost.get("total_cost_usd") == 0.0)
+                detail = (f"state={rc.get('usage_state')} tok_ok={tok_ok} "
+                          f"dur={cost.get('duration_ms')} $={cost.get('total_cost_usd')}")
+            else:
+                detail = f"euuid={bool(euuid)} n_recs={len(recs)}"
+            steps.append(("clean leg → one MEASURED run-cost record (exact totals)",
+                          clean_ok, detail))
+
+            # ── CORRUPTED leg: RED-classified capture-failed; lifecycle intact ─
+            rec2 = _ts.start_session(pid, "research", backend="claude")
+            sid2 = rec2["session_id"]
+            euuid2 = rec2.get("engine_session_uuid") or ""
+            if euuid2:
+                ledger_uuids.append(euuid2)
+                (sidecars / f"{euuid2}.jsonl").write_text(corrupt, encoding="utf-8")
+            out2 = _ts.kill(sid2, project_id=pid)
+            lifecycle_ok = not (isinstance(out2, dict) and out2.get("ok") is False)
+            recs2 = _run_cost_records("research")
+            cf_ok = red_surfaced = False
+            if len(recs2) == 1:
+                rc2 = recs2[0]
+                cf_ok = (rc2.get("usage_state") == _uc.STATE_CAPTURE_FAILED
+                         and rc2.get("usage_reason") == _uc.REASON_ZERO_USAGE
+                         and rc2.get("cost") is None)
+                # Prove the RED-surfacing path fires — WITHOUT reddening the daily
+                # banner (a throwaway probe report, discarded).
+                probe = Report()
+                _surface_capture_failed(probe, rc2)
+                red_surfaced = probe.has_issues
+            steps.append(("corrupted leg → capture-failed record RED-classified, "
+                          "lifecycle intact",
+                          cf_ok and lifecycle_ok and red_surfaced,
+                          f"cf={cf_ok} lifecycle={lifecycle_ok} red={red_surfaced} "
+                          f"n_recs={len(recs2)}"))
+
+        # ── AUTH: every NEW telemetry route is token-gated (absence = BLOCKER) ─
+        auth_ok, auth_detail = _telemetry_routes_auth_enumeration()
+        steps.append(("auth-enumeration: new telemetry routes token-gated",
+                      auth_ok, auth_detail))
+
+    except Exception as e:
+        steps.append(("exception", False, f"{type(e).__name__}: {e}"))
+    finally:
+        # Reap any stub PTY this walk left live (defensive).
+        try:
+            import pty_manager as _pty2
+            for s in list(_pty2.live_sessions()):
+                try:
+                    _pty2.kill(s)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Remove the throwaway ledger docs so the walk never pollutes live data.
+        try:
+            import usage_ledger as _ul2
+            for u in ledger_uuids:
+                try:
+                    _ul2.ledger_path(u).unlink()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+                          ("ANCHOR_WORKTREE_BASE", prev_wtbase),
+                          ("ANCHOR_SIDECAR_DIR", prev_sidecar),
+                          ("ANCHOR_TERMINAL_SESSION_ID_FLAG", prev_id_flag)):
+            if prev is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = prev
+
+    failures = [f"{s}: {d}" for s, ok, d in steps if not ok]
+    if failures:
+        report.check(name, False, "; ".join(failures))
+    else:
+        report.check(name, True, f"{len(steps)} steps")
+
+
+def _drift_scan_root():
+    """Resolve the LIVE sidecar scan root for the drift tripwire, or None.
+
+    The tripwire is the ONE healthcheck reader of the real ``~/.claude`` store —
+    read-only, parse-only, NEVER a ledger write. Resolution:
+
+      - ``ANCHOR_SIDECAR_DIR`` explicitly set → that dir (a test points it at a
+        drift-fixture dir);
+      - else a hermetic TEST / redirected-data context
+        (``PYTEST_CURRENT_TEST`` / ``ANCHOR_DATA_DIR``) → None (never read a
+        test-runner's real home);
+      - else (the production 5AM run) → ``~/.claude/projects``.
+
+    ``ANCHOR_HEALTHCHECK`` alone does NOT block this diagnostic read — performing
+    it is the whole point of the daily run.
+    """
+    explicit = os.environ.get(_paths.SIDECAR_DIR_ENV)
+    if explicit and explicit.strip():
+        return Path(explicit).expanduser().resolve()
+    if (os.environ.get("PYTEST_CURRENT_TEST")
+            or (os.environ.get(_paths.DATA_DIR_ENV) or "").strip()):
+        return None
+    return Path.home() / ".claude" / "projects"
+
+
+def _recent_sidecar_files(root, limit=8):
+    """The ``limit`` most-recently-modified ``*.jsonl`` sidecars under ``root``.
+
+    Scans ``root`` itself and one level of slug subdirs (the real store layout),
+    newest-first by mtime. Bounded so a large real ``~/.claude`` never makes the
+    tripwire slow. Read-only; tolerant of races/permission errors."""
+    root = Path(root)
+    if not root.exists():
+        return []
+    found = []
+    try:
+        found.extend(root.glob("*.jsonl"))
+        for child in root.iterdir():
+            if child.is_dir():
+                try:
+                    found.extend(child.glob("*.jsonl"))
+                except OSError:
+                    continue
+    except OSError:
+        return []
+    try:
+        found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        pass
+    return found[:limit]
+
+
+def check_sidecar_drift_tripwire(report: Report):
+    """Honest-Telemetry W7 — split-severity LIVE drift tripwire over real sidecars.
+
+    Deterministic + load-INDEPENDENT (it parses bytes, it never times anything),
+    so it never flaps:
+
+      - ZERO sidecars found → ``report.warn`` (environmental: a fresh box, a
+        pruned store, or simply no Claude runs) — NEVER reddens the banner.
+      - ≥1 recent sidecar that is PRESENT but yields a parse exception OR
+        zero-usage-despite-message-lines → ``report.check(False)`` RED. This is a
+        CORRECTNESS failure — most likely a CLI upgrade renamed the usage schema.
+        Its MEANING (documented in the detail): NEW sessions will land
+        ``capture-failed`` until the parser is fixed; capture is NEVER halted and
+        NOTHING is zeroed.
+      - otherwise (recent files all parse ``measured`` / honest ``unmeasured``) →
+        green.
+
+    Read-only + parse-only: never appends to the ledger, never finalizes, and
+    never resolves a real home path under test (``_drift_scan_root`` returns None
+    in a hermetic test context without an explicit ``ANCHOR_SIDECAR_DIR``).
+    """
+    name = "sidecar drift tripwire (W7)"
+    root = _drift_scan_root()
+    if root is None:
+        report.warn(name, "skipped (hermetic test context; no explicit "
+                          "ANCHOR_SIDECAR_DIR)")
+        return
+    try:
+        import usage_capture as _uc
+    except Exception as e:
+        report.check(name, False,
+                     f"usage_capture import failed: {type(e).__name__}: {e}")
+        return
+    files = _recent_sidecar_files(root)
+    if not files:
+        report.warn(name, f"zero sidecars under {root} — environmental "
+                          f"(no Claude runs / pruned store)")
+        return
+    failed = []
+    for p in files:
+        try:
+            res = _uc.parse_sidecar_file(str(p))
+        except Exception as e:
+            # parse_sidecar_file is designed never to raise; belt-and-suspenders.
+            failed.append(f"{p.name}: parser raised {type(e).__name__}")
+            continue
+        if res.get("state") == _uc.STATE_CAPTURE_FAILED:
+            failed.append(f"{p.name}: {res.get('reason')}")
+    if failed:
+        report.check(
+            name, False,
+            "PRESENT-but-unparseable sidecar(s) — likely a CLI usage-schema drift. "
+            "NEW sessions land capture-failed until the parser is fixed (capture "
+            "never halts, nothing zeroed): " + "; ".join(failed[:6]))
+    else:
+        report.check(name, True,
+                     f"{len(files)} recent sidecar(s) parse cleanly")
+
+
 def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
     """Exercise the v12 "Efforts" R&D surface — FULLY STUBBED.
 
@@ -6099,6 +6486,11 @@ def main():
         check_rnd_v11_1_surface(report, server_proc, rnd_env)
         check_rnd_v12_surface(report, server_proc, rnd_env)
         check_gandalf_surface(report, server_proc, rnd_env)
+        # Honest-Telemetry W7: the fully-stubbed capture+finalize walk (clean +
+        # corrupted RED-classified legs + the new-route auth enumeration) and the
+        # split-severity LIVE drift tripwire over the real sidecar store.
+        check_telemetry_capture_surface(report, server_proc, rnd_env)
+        check_sidecar_drift_tripwire(report)
 
         # rearch W13 (C3): the journal completeness gate (enforce) + the
         # journal-on perf budget (<5%), both hermetic (never the live service).
