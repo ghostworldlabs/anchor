@@ -250,7 +250,37 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
                     pass
                 res["reason"] = "cancelled"
                 return res
-    _jr.wait(jid, timeout=_timeout(tier))
+
+    import time
+    start_t = time.time()
+    t_limit = _timeout(tier)
+    last_status = 0
+    while True:
+        if time.time() - start_t > t_limit:
+            break
+        rec = _jr.load_record(jid) or {}
+        st = rec.get("status")
+        if st in (_jr.STATUS_DONE, _jr.STATUS_FAILED, _jr.STATUS_CANCELLED):
+            break
+        if status_cb and time.time() - last_status > 2.0:
+            elapsed = int(time.time() - start_t)
+            # Try to get the last log line to give a hint of activity
+            lines = _jr.all_lines(jid)
+            hint = ""
+            if lines:
+                extracted = _jr.extract_assistant_text(lines)
+                if extracted:
+                    last_txt = extracted[-1].strip()
+                    if last_txt:
+                        hint = last_txt[:60].replace('\n', ' ') + "..."
+            
+            msg = f"Running ({elapsed}s elapsed)"
+            if hint:
+                msg += f" - {hint}"
+            status_cb(msg)
+            last_status = time.time()
+        time.sleep(1.0)
+
     final = _jr.load_record(jid) or {}
     st = final.get("status")
 
@@ -304,6 +334,12 @@ def _run_stage_agentic(folder_path, store, run_id, run_rel, ts, tier, env=None,
 
     # exec-summary.md from the printed summary (fallback: the verdict).
     exec_body = summary or verdict or "(report produced; no summary text printed)"
+    
+    # If the summary is a massive dump of assistant_parts (because result_text was missing),
+    # truncate it so it doesn't pollute the UI.
+    if len(exec_body) > 2000:
+        exec_body = exec_body[-2000:] + "\n\n...(truncated agent scratchpad)..."
+
     if incomplete:
         exec_body = ("_This run was time-bounded before it fully completed; the "
                      "report may be partial and was not adversarially graded._\n\n"
@@ -1606,14 +1642,14 @@ def run_gandalf(folder_path, project_id, *, force=False, env=None, status_cb=Non
                 draft, reason = _run_stage_a_mapreduce(folder, env=actual_env,
                                                        run_id=run_id)
                 with _ACTIVE_RUNS_LOCK:
-                    is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+                    is_cancelled = _ACTIVE_RUNS.get(run_id, {}).get("cancelled", False)
                 if is_cancelled:
                     reason = "cancelled"
                 elif draft is not None:
                     if status_cb: status_cb("Synthesizing (Stage B)...")
                     graded, reason = _run_stage_b(draft, run_id=run_id)
                 with _ACTIVE_RUNS_LOCK:
-                    is_cancelled = _ACTIVE_RUNS[run_id]["cancelled"]
+                    is_cancelled = _ACTIVE_RUNS.get(run_id, {}).get("cancelled", False)
                 if is_cancelled:
                     reason = "cancelled"
                 ok = (graded is not None) and (reason != "cancelled")

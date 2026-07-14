@@ -5062,6 +5062,14 @@ function initGandalfPanelCollapse() {
       if (tog) tog.classList.add('collapsed-caret');
     }
   } catch (e) {}
+  
+  // Restart polling if the panel indicates a run is already in-flight
+  var panel = document.getElementById('gandalfPanel');
+  if (panel && panel.getAttribute('data-gandalf-inflight') === '1') {
+      var btns = document.querySelectorAll('#gandalfPanel .gandalf-run');
+      var before = _gandalfRunCount();
+      _gandalfPollForNew(PROJECT_ID, before, btns, 0);
+  }
 }
 
 // ── Files panel toggle + browse helpers ──

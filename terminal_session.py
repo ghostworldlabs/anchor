@@ -591,6 +591,16 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     launch_argv = _engine_launch_argv(cmd, backend, engine_uuid)
     stored_engine_uuid = engine_uuid if (len(launch_argv) > 1) else ""
 
+    # 1b) Resolve the lane seed ONCE before launch.
+    seed_text = seed_for_lane(lane, seed_context=seed_context)
+    seed_text_to_write = seed_text
+    
+    # 1c) For gemini/agy, inject the seed via --prompt-interactive (-i) so it
+    # processes it safely instead of dropping stdin.
+    if backend == _reg.BACKEND_GEMINI and seed_text:
+        launch_argv.extend(["-i", seed_text.strip()])
+        seed_text_to_write = None
+
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
     try:
         pty_sid = _pty.start(launch_argv, cwd=worktree_path)
@@ -696,18 +706,24 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     #    bare shell (seed_text == None → nothing written). A write/persist failure
     #    is non-fatal: the session is already live and usable; we simply leave it
     #    un-seeded rather than tearing down a working terminal.
-    seed_text = seed_for_lane(lane, seed_context=seed_context)
-    if seed_text:
+    if seed_text_to_write:
         try:
-            _pty.write(sid, seed_text)
+            _pty.write(sid, seed_text_to_write)
         except Exception:
-            seed_text = None  # seed not delivered → don't claim it was
-        if seed_text:
+            seed_text_to_write = None  # seed not delivered → don't claim it was
+        if seed_text_to_write:
             try:
                 record = _reg.update_session(
-                    sid, seeded=True, seed_text=seed_text)
+                    sid, seeded=True, seed_text=seed_text_to_write)
             except Exception:
                 pass
+    elif seed_text:
+        # Seed was delivered via command line (-i) for gemini
+        try:
+            record = _reg.update_session(
+                sid, seeded=True, seed_text=seed_text)
+        except Exception:
+            pass
 
     # v10 Wave 1: record the task prompt as a PENDING PASTE — held UNSENT in the
     # PTY input until the user presses Enter. It is NOT written here; it is
@@ -1166,6 +1182,18 @@ def switch_engine(session_id, engine, seed_context=None):
     relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid_b)
     stored_engine_uuid_b = engine_uuid_b if (len(relaunch_argv) > 1) else ""
 
+    # 1b) Resolve the lane seed ONCE before launch, folding in the W7 handoff context.
+    seed_text = seed_for_lane(
+        lane, seed_context=(handoff_text or None),
+        context_label=SWITCH_CONTEXT_LABEL)
+    seed_text_to_write = seed_text
+    
+    # 1c) For gemini/agy, inject the seed via --prompt-interactive (-i) so it
+    # processes it safely instead of dropping stdin.
+    if engine == _reg.BACKEND_GEMINI and seed_text:
+        relaunch_argv.extend(["-i", seed_text.strip()])
+        seed_text_to_write = None
+
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
     try:
         pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
@@ -1223,20 +1251,24 @@ def switch_engine(session_id, engine, seed_context=None):
 
     # 5) Re-apply the lane seed ONCE on the new engine (same discipline as start),
     #    folding in the W7 handoff context under an accurate label.
-    seed_text = seed_for_lane(
-        lane, seed_context=(handoff_text or None),
-        context_label=SWITCH_CONTEXT_LABEL)
-    if seed_text:
+    if seed_text_to_write:
         try:
-            _pty.write(session_id, seed_text)
+            _pty.write(session_id, seed_text_to_write)
         except Exception:
-            seed_text = None
-        if seed_text:
+            seed_text_to_write = None
+        if seed_text_to_write:
             try:
                 record = _reg.update_session(
-                    session_id, seeded=True, seed_text=seed_text)
+                    session_id, seeded=True, seed_text=seed_text_to_write)
             except Exception:
                 pass
+    elif seed_text:
+        # Seed was delivered via command line (-i) for gemini
+        try:
+            record = _reg.update_session(
+                session_id, seeded=True, seed_text=seed_text)
+        except Exception:
+            pass
 
     # 6) Remember the now-current engine for the project.
     if project_id is not None:

@@ -3814,6 +3814,11 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
     except Exception:
         runs = []
     n = len(runs)
+    
+    in_flight = False
+    with _GANDALF_INFLIGHT_GUARD:
+        in_flight = project_id in _GANDALF_INFLIGHT
+        
     pid_q = html_lib.escape(str(project_id), quote=True)
     icon = (
         f"<img class='gicon' src='/vendor/brand/gandalf-icon-v5.jpg?v={BUILD_ID}' "
@@ -3821,25 +3826,27 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
 
     if not runs:
         # Honest empty state — no fabricated rows; a single Run control.
+        dis = " disabled" if in_flight else ""
         body = (
             "<div class='gandalf-empty' data-gandalf-empty='1'>"
             "No Gandalf read yet."
-            "<button class='btn sm primary gandalf-run' "
-            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Run</button>"
-            "<button class='btn sm gandalf-run gandalf-heavy' "
+            f"<button class='btn sm primary gandalf-run'{dis} "
+            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; { 'Running...' if in_flight else 'Run' }</button>"
+            f"<button class='btn sm gandalf-run gandalf-heavy'{dis} "
             "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
-            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Run Heavy</button>"
+            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; { 'Running Heavy...' if in_flight else 'Run Heavy' }</button>"
             "</div>")
+        inflight_attr = " data-gandalf-inflight='1'" if in_flight else ""
         return (
-            "<div class='panel gandalf-panel' id='gandalfPanel'>"
+            f"<div class='panel gandalf-panel' id='gandalfPanel'{inflight_attr}>"
             "<div class='ptitle gandalf-head'>"
             ""
             f"{icon}<span class='gt'>Gandalf</span>"
-            "<button class='btn sm gandalf-run gandalf-rerun' "
-            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button>"
-            "<button class='btn sm gandalf-run gandalf-heavy' "
+            f"<button class='btn sm gandalf-run gandalf-rerun'{dis} "
+            f"onclick=\"gandalfRun('{pid_q}')\">&#8635; { 'Running...' if in_flight else 'Re-run' }</button>"
+            f"<button class='btn sm gandalf-run gandalf-heavy'{dis} "
             "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
-            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Heavy</button></div>"
+            f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; { 'Running Heavy...' if in_flight else 'Heavy' }</button></div>"
             f"<div class='gandalf-panel-body' id='gandalfPanelBody'>{body}</div>"
             "</div>")
 
@@ -3973,19 +3980,20 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
     # John tweak: the run list is collapsible IN THE HEADER (caret toggle, mirrors
     # the grass-mini pattern) and starts COLLAPSED on first load (server-rendered
     # .collapsed + the ▸ caret) so there is no flash of expanded content before JS.
+    inflight_attr = " data-gandalf-inflight='1'" if in_flight else ""
     return (
-        "<div class='panel gandalf-panel' id='gandalfPanel'>"
+        f"<div class='panel gandalf-panel' id='gandalfPanel'{inflight_attr}>"
         "<div class='ptitle gandalf-head'>"
         "<span class='gmini-tog' id='gandalfRunsTog' title='Collapse / expand the "
         "run list' onclick='toggleGandalfRuns(this)'>&#9656;</span>"
         f"{icon}<span class='gt'>Gandalf</span>"
         f"<span class='cnt'>{n} read{'s' if n != 1 else ''}</span>"
         f"{clear_failed_btn}"
-        "<button class='btn sm gandalf-run gandalf-rerun' "
-        f"onclick=\"gandalfRun('{pid_q}')\">&#8635; Re-run</button>"
-        "<button class='btn sm gandalf-run gandalf-heavy' "
+        f"<button class='btn sm gandalf-run gandalf-rerun'{dis} "
+        f"onclick=\"gandalfRun('{pid_q}')\">&#8635; { 'Running...' if in_flight else 'Re-run' }</button>"
+        f"<button class='btn sm gandalf-run gandalf-heavy'{dis} "
         "title='Gandalf-Heavy — top-tier Claude (Fable-5) reasoner' "
-        f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; Heavy</button></div>"
+        f"onclick=\"gandalfRun('{pid_q}', 'heavy')\">&#9733; { 'Running Heavy...' if in_flight else 'Heavy' }</button></div>"
         f"<div class='gandalf-panel-body' id='gandalfPanelBody'>"
         f"<div class='gruns collapsed' id='gandalfRuns'>{''.join(rows)}</div>"
         "</div>"
