@@ -980,6 +980,19 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
             rec["cost"] = cost
             if cost.get("session_id") and not rec.get("session_id"):
                 rec["session_id"] = cost["session_id"]
+            # Honest Telemetry W4 — job_runner unification: route this durable
+            # job's captured stream-json usage through the SAME usage ledger as
+            # interactive PTY sessions, keyed by the engine session UUID the
+            # result envelope reported. Lane launches, Gandalf shards, and
+            # summarizer runs all land in one ledger. Best-effort + idempotent
+            # (keyed by job_id) — never breaks job finalization.
+            try:
+                euuid = cost.get("session_id")
+                if euuid:
+                    import usage_capture as _usage_cap
+                    _usage_cap.ingest_job_cost(euuid, cost, job_id)
+            except Exception:
+                pass
         if rec.get("status") in (STATUS_CANCELLED, STATUS_INTERRUPTED):
             # Terminal status already chosen (cancel / reconciliation). Keep it,
             # just stamp the exit code + finish time.

@@ -406,6 +406,9 @@ import project_bootstrap as _bootstrap
 import project_remote as _remote  # v8 Wave 3 — GitHub link + auto-push (seam)
 import boneyard as _boneyard  # v10 Wave 6/7 — per-project searchable discard index
 import effort_view as _effview  # v12 Wave 9 — derived effort view-layer (chains→efforts)
+import narration as _narr  # telemetry-resume W3 — deterministic narration floor + Layer-1 warm view
+import usage_capture as _usage  # telemetry-resume W4 — usage-capture pipeline (ledger inspection)
+import rollup_honesty as _rollhon  # telemetry-resume W5 — three-state rollup honesty + capture-rate stamp
 import gandalf as _gandalf  # Gandalf integration v1 — two-stage honest project read
 import foundry_gui as _fgui  # foundry-v2 Wave 9 — stateless Foundry GUI read surface
 import foundry_gui_write as _fgw  # foundry-v2 Wave 10 — GUI write surface (op invocations only, never a GUI-side file write)
@@ -463,6 +466,22 @@ def encode_close_frame(code=1000, reason=b"") -> bytes:
         reason = reason.encode("utf-8")
     payload = _struct.pack(">H", code) + reason if code is not None else b""
     return _encode_frame(WS_OP_CLOSE, payload)
+
+
+#: telemetry-resume W6 — the WS ATTACH-ACK control-frame protocol prefix. The
+#: term_ws stream is otherwise opaque PTY bytes written straight into xterm; a
+#: structured control message (attach_ack / replay_complete / error) rides the
+#: SAME token-authed socket as a TEXT frame whose payload begins with this
+#: prefix. Real PTY output effectively never starts with a NUL byte, so the
+#: client disambiguates a control frame from terminal bytes by this prefix and
+#: only swaps in the live pane after ``attach_ack ok:true`` + ``replay_complete``
+#: — a blank pane becomes a protocol impossibility (NORTH-STAR-AMENDMENT Layer 2).
+WS_CTL_PREFIX = "\x00ANCHOR-CTL:"
+
+
+def ws_ctl_frame(obj) -> bytes:
+    """Encode a W6 attach-ack control message as a prefixed server TEXT frame."""
+    return encode_text_frame(WS_CTL_PREFIX + json.dumps(obj, separators=(",", ":")))
 
 
 def encode_pong_frame(payload=b"") -> bytes:
@@ -4621,7 +4640,13 @@ def _fmt_rollup_line(roll: dict) -> str:
         tokstr = f"{toks / 1000.0:.0f}k tok"
     else:
         tokstr = f"{toks} tok"
-    return (f"Σ {tokstr} · ${cost:.2f} · {tstr} "
+    # No-own-pricing-table (LOCKED, telemetry-resume W5): ``$`` is shown ONLY when
+    # the engine itself reported a nonzero ``costUSD``. On the Max-subscription
+    # host the per-message sidecar carries no dollar figure, so a measured session
+    # renders ``… (subscription)`` — Anchor never computes a dollar figure of its
+    # own. (See NORTH-STAR-AMENDMENT.md "No-own-pricing-table".)
+    money = f"${cost:.2f}" if cost > 0 else "(subscription)"
+    return (f"Σ {tokstr} · {money} · {tstr} "
             f"· {n} session{'' if n == 1 else 's'}")
 
 
@@ -4641,9 +4666,27 @@ def render_header_rollup_html(project_id: str) -> str:
         return ""
     pid_attr = html_lib.escape(project_id, quote=True)
     life_txt = html_lib.escape(_fmt_rollup_line(life))
+    # Honest Telemetry W5: the capture-rate stamp beside the numeric rollup —
+    # 'measured N/T sessions (lifetime) · K capture-failed'. capture-failed is
+    # ALWAYS counted separately (never folded into unmeasured) and tinted red when
+    # present. Sibling projection (rollup_honesty) — the numeric rollup dict above
+    # is unchanged (the W1 audit's preferred path). Best-effort; omit on failure.
+    caprate_html = ""
+    try:
+        rate = _rollhon.project_capture_rate(project_id, window="lifetime")
+        if int(rate.get("total", 0) or 0) > 0:
+            caprate_html = " &nbsp;·&nbsp; " + _rollhon.capture_rate_html(rate)
+    except Exception:
+        caprate_html = ""
+    # telemetry-resume W6: the bounded parked-worktree budget count (a system
+    # indicator — parked warm worktrees held vs the eviction budget). Best-effort;
+    # omitted when there are no parked worktrees.
+    parked_html = _parked_worktree_stamp()
     return (
         f"<span class='roll' id='hdrRollup' data-window='lifetime' "
         f"data-pid=\"{pid_attr}\">{life_txt}</span>"
+        f"{caprate_html}"
+        f"{parked_html}"
         f"<span class='rolltog' role='group' aria-label='rollup window'>"
         f"<b class='on' data-window='lifetime' "
         f"onclick=\"rndRollupWindow('lifetime',this)\">lifetime</b>"
@@ -4651,6 +4694,29 @@ def render_header_rollup_html(project_id: str) -> str:
         f"onclick=\"rndRollupWindow('30d',this)\">30d</b>"
         f"</span>"
     )
+
+
+def _parked_worktree_stamp() -> str:
+    """The bounded parked-worktree count stamp (telemetry-resume W6, dashboard).
+
+    'N parked worktrees / budget M' — the count of RETAINED-parked worktrees vs
+    the eviction budget, so the user can see how close the system is to graceful
+    oldest-first eviction. Returns '' when nothing is parked (or on any failure).
+    """
+    try:
+        import worktrees as _wt
+        import pty_manager as _pty_c
+        n = _wt.parked_worktree_count(set(_pty_c._LIVE.keys()))
+        if n <= 0:
+            return ""
+        budget = _wt.parked_worktree_budget()
+        over = n > budget
+        tint = " style='color:#dc2626'" if over else ""
+        return (" &nbsp;·&nbsp; <span class='pwbudget'%s title='parked warm "
+                "worktrees held vs the eviction budget'>%d parked / budget %d"
+                "</span>" % (tint, n, budget))
+    except Exception:
+        return ""
 
 
 def render_model_flex_badge(env=None) -> str:
@@ -10451,19 +10517,159 @@ def handle_continue_session(handler, path, body):
             folder = proj.get("folder_path", "")
             seed_context = _build_continue_seed(
                 folder, pid, lane, source)
+            # telemetry-resume W6 — the eviction sub-contract (NORTH-STAR-
+            # AMENDMENT): an EVICTED-parked source (worktree reaped, docs persisted
+            # to main) resumes as a NEW seeded session whose orientation opens with
+            # an explicit 'resumed from persisted docs (worktree evicted)' line —
+            # the UI NEVER claims a reattach it cannot perform. The replacement
+            # joins the SAME chain via parent_session_id below.
+            evicted = False
             try:
+                src_rec = _termsess.get_session(source) or {}
+                evicted = bool(src_rec.get("evicted")) or (
+                    _sessreg.is_parked_warm(src_rec)
+                    and not (src_rec.get("worktree_path") or "").strip())
+            except Exception:
+                evicted = False
+            if evicted:
+                note = ("(resumed from persisted docs (worktree evicted))\n")
+                seed_context = note + (seed_context or "")
+            try:
+                # Join the SAME chain as the source (lineage continuity across
+                # resume/eviction) via parent_session_id; an unknown source id
+                # harmlessly resets to its own chain (start_session guard).
                 if backend:
                     rec = _termsess.start_session(
                         pid, lane, backend=backend,
-                        seed_context=seed_context)
+                        seed_context=seed_context, parent_session_id=source)
                 else:
                     rec = _termsess.start_session(
-                        pid, lane, seed_context=seed_context)
+                        pid, lane, seed_context=seed_context,
+                        parent_session_id=source)
             except _termsess.TerminalSessionError as exc:
                 handler._send_json({"ok": False, "error": str(exc)}, 400)
             else:
                 handler._send_json({"ok": True, "session": rec,
-                                 "seeded_from": source})
+                                 "seeded_from": source, "evicted": evicted})
+
+
+def handle_resume_live(handler, path, body):
+    # telemetry-resume W6 — the Layer-2 '▶ Resume live' escalation, routed by tile
+    # class on the SERVER (so the per-class contract is one testable decision, not
+    # scattered client logic). Cites the NORTH-STAR-AMENDMENT click contract +
+    # eviction sub-contract:
+    #   * RUNNING            → focus the already-live session (mode 'already-live').
+    #   * parked-idle        → WARM REATTACH: relaunch a PTY in the RETAINED
+    #                          worktree under the same id (mode 'reattach').
+    #   * evicted-parked     → NEW seeded session on the SAME chain, seed opens with
+    #                          'resumed from persisted docs (worktree evicted)'
+    #                          (mode 'continue', evicted:true) — NEVER a reattach.
+    #   * done/failed/discovered/one-shot job → the W3/W4 continue-seed path
+    #                          (mode 'continue') on the SAME chain.
+    # Auth: the do_POST token middleware gates this (mutating).
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    lane = (body.get("lane", "") or "").strip()
+    source = (body.get("source_session", "")
+              or body.get("session", "") or "").strip()
+    backend = ((body.get("backend", "") or "").strip()
+               or _termsess.DEFAULT_ENGINE)
+    if not pid or not source:
+        handler._send_json({"ok": False,
+                         "error": "project_id and source_session required"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+    folder = proj.get("folder_path", "")
+    try:
+        src_rec = _termsess.get_session(source) or {}
+    except Exception:
+        src_rec = {}
+    if not lane:
+        lane = (src_rec.get("lane") or "").strip()
+    # RUNNING → focus the existing live session (no new spawn).
+    if src_rec.get("status") == _sessreg.STATUS_RUNNING:
+        handler._send_json({"ok": True, "mode": "already-live",
+                         "session": _safe_session_projection(src_rec)})
+        return
+    # parked-idle (retained worktree) → warm reattach in place.
+    is_parked = _sessreg.is_parked_warm(src_rec)
+    has_worktree = bool((src_rec.get("worktree_path") or "").strip())
+    if is_parked and has_worktree and not src_rec.get("evicted"):
+        res = _termsess.resume_parked_session(source)
+        if res.get("ok"):
+            handler._send_json({"ok": True, "mode": res.get("mode", "reattach"),
+                             "session": _safe_session_projection(
+                                 res.get("session") or {})})
+            return
+        # A reattach that couldn't happen (evicted mid-flight) falls through to
+        # the continue path below — honest, never a false reattach claim.
+    # Everything else (evicted / done / failed / discovered) → continue-seed a NEW
+    # session on the SAME chain (reuse the continue handler's exact policy).
+    handle_continue_session(handler, path, {
+        "project_id": pid, "lane": lane or (src_rec.get("lane") or ""),
+        "source_session": source, "backend": backend})
+
+
+def _safe_session_projection(rec):
+    """SAFE session projection for a Layer-2 escalation response — NEVER leaks
+    ``worktree_path``/``branch`` (the board-projection discipline)."""
+    rec = rec if isinstance(rec, dict) else {}
+    return {
+        "session_id": rec.get("session_id", ""),
+        "lane": rec.get("lane", ""),
+        "backend": rec.get("backend", ""),
+        "status": rec.get("status", ""),
+        "label": rec.get("label", ""),
+        "chain_id": rec.get("chain_id", ""),
+        "parent_session_id": rec.get("parent_session_id", ""),
+        "evicted": bool(rec.get("evicted", False)),
+    }
+
+
+def handle_orient_session(handler, path, body):
+    # telemetry-resume W6 — the read-only plan-mode ORIENTATION trigger (the
+    # Phase-0 orientation fork, NORTH-STAR-AMENDMENT). On a Layer-2 escalation the
+    # orientation narration AUTO-EXECUTES as a read-only ``permission_mode='plan'``
+    # one-shot job through job_runner (the Gandalf-shard substrate) — it prints
+    # what was done / produced / next, and can NEVER edit the tree. It is NEVER a
+    # seeded turn on the live PTY, and any ACTION prompt stays v10 paste-NOT-submit
+    # (nothing is auto-submitted). Returns the launched job id so the client can
+    # tail its output into the terminal chrome.
+    #   POST /api/rnd/orient_session  {project_id, lane, session}
+    # Auth: the do_POST token middleware gates this (mutating — it launches a job).
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    lane = (body.get("lane", "") or "").strip()
+    session_id = (body.get("session", "")
+                  or body.get("source_session", "") or "").strip()
+    if not pid or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "project_id and session required"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+    folder = proj.get("folder_path", "")
+    if not lane:
+        try:
+            lane = (_termsess.get_session(session_id) or {}).get("lane", "")
+        except Exception:
+            lane = ""
+    try:
+        import orientation as _orient
+        out = _orient.orient_session(pid, lane, session_id, folder_path=folder)
+    except Exception as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 500)
+        return
+    if out.get("ok"):
+        handler._send_json({"ok": True, "job_id": out.get("job_id"),
+                         "permission_mode": out.get("permission_mode"),
+                         "owned_until": out.get("owned_until")})
+    else:
+        handler._send_json({"ok": False,
+                         "reason": out.get("reason", "orient-failed")}, 400)
 
 
 def handle_advance_session(handler, path, body):
@@ -10803,6 +11009,12 @@ def handle_finish_to_build(handler, path, body):
                     _sessreg.update_session(
                         session, status=_sessreg.STATUS_DONE)
                 except KeyError:
+                    pass
+                # Honest Telemetry W4: eager finalize on the FINISH end path
+                # (the DONE mark WITHOUT a reap). Idempotent CAS; best-effort.
+                try:
+                    _termsess.finalize_usage(session, project_id=pid, record=rec)
+                except Exception:
                     pass
                 # v7 Wave 2: the finished planning session is DONE —
                 # schedule a background session-summary (best-effort,
@@ -12181,6 +12393,161 @@ def handle_session_summary(handler, path, body):
                 handler._send_json({"ok": True, "status": "generating"})
 
 
+def handle_session_narration(handler, path, body):
+    # Read-only Layer-1 WARM NARRATION data (telemetry-resume W3): the
+    # deterministic narration spine (done / produced / next) for ONE session
+    # tile, rendered in the session-window terminal chrome as the first-click
+    # 'warm terminal that narrates'. PURE render off durable local data —
+    # NO PTY spawn, NO synchronous model call, NO network. Cites the North
+    # Star amendment (click contract · first-click sentence · narration floor ·
+    # endpoint auth rule).
+    #
+    # Lazy enrichment (the CHOSEN narration-floor path): the floor is ALWAYS
+    # returned immediately; when the session has no cached summary yet, the
+    # first open triggers the EXISTING v3 background generation (unmodified) and
+    # the view carries an ``enrichment='generating'`` badge — a badge OVER
+    # content, never a spinner instead of content. A failed/absent generation
+    # leaves the floor standing (no loop; a later open may retry once).
+    #
+    # AUTH: ``?token=`` (401-before-substance, like session_summary /
+    # session_doc_roles). The strangler applies the row's token gate FIRST; this
+    # in-handler check is the belt-and-braces second line.
+    #   /api/rnd/session_narration?pid=<id>&lane=<lane>&session=<sid>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0] or "").strip()
+    lane = (q.get("lane", [""])[0] or "").strip()
+    session_id = (q.get("session", [""])[0] or "").strip()
+    if not pid or not lane or not session_id:
+        handler._send_json({"ok": False,
+                         "error": "pid, lane, session required"}, 400)
+        return
+    if _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+        return
+    if _unsafe_path_seg(lane):
+        handler._send_json({"ok": False, "error": "bad lane"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    folder = (proj or {}).get("folder_path", "")
+    # Resolve the registry record (SAFE — never echoed to the client; only the
+    # narration projection is returned).
+    try:
+        record = _termsess.get_session(session_id) or {}
+    except Exception:
+        record = {}
+    # Finished ONE-SHOT JOB tile (no managed session record): the ``session`` is
+    # a durable job_id. Render the effort record + its /report link directly —
+    # the locked one-shot-job tile-class definition. Guarded; falls through to the
+    # session floor if nothing resolves.
+    if not record:
+        try:
+            eff = _eh.load_effort(folder, pid, _eh._resolve_subdir(lane),
+                                  session_id)
+        except Exception:
+            eff = None
+        if isinstance(eff, dict) and (eff.get("provenance") == "run"
+                                      or isinstance(eff.get("cost"), dict)) \
+                and not (eff.get("session_id") or ""):
+            try:
+                view = _narr.narrate_effort(pid, lane, eff, folder_path=folder)
+                handler._send_json({"ok": True, "narration": view})
+                return
+            except Exception:
+                pass
+    # Lazy enrichment: decide 'generating' vs floor WITHOUT ever blocking on the
+    # model. Cache HIT → 'cached' (build_narration resolves it). Cache MISS on a
+    # registered project → trigger the existing background generation ONCE and
+    # badge 'generating'. Unknown project / unresolvable session → plain floor.
+    enrichment = None
+    store_lane = lane
+    try:
+        store_lane = _eh._resolve_subdir(lane)
+    except Exception:
+        store_lane = lane
+    cached = None
+    try:
+        cached = _summarizer.load_cached(folder, pid, store_lane, session_id)
+    except Exception:
+        cached = None
+    if not (isinstance(cached, dict) and not cached.get("error")) and proj is not None:
+        session_obj = None
+        try:
+            session_obj = _resolve_finished_session(
+                folder, pid, lane, session_id)
+        except Exception:
+            session_obj = None
+        if session_obj is not None:
+            try:
+                _trigger_session_summary(folder, pid, lane, session_obj)
+                enrichment = _narr.ENRICH_GENERATING
+            except Exception:
+                enrichment = None
+    try:
+        view = _narr.narrate_session(
+            pid, lane, session_id, folder_path=folder, record=record,
+            enrichment=enrichment)
+    except Exception:
+        # TOTAL fallback — the narration builder is pure/never-raises, but keep
+        # the endpoint structurally-never-blank even under an unexpected error.
+        view = {
+            "session_id": session_id, "tile_class": "done", "lane": lane,
+            "title": lane, "done": f"ran {lane}", "produced": [],
+            "produced_note": "no recoverable documents",
+            "next": {"text": "Resume this session to continue where it left "
+                             "off.", "source": "stage_derived", "submit": False},
+            "badges": [], "enrichment": "floor", "links_valid": True,
+        }
+    handler._send_json({"ok": True, "narration": view})
+
+
+def handle_usage_ledger(handler, path, body):
+    # Read-only ledger/capture inspection (telemetry-resume W4): the finalized
+    # usage verdict + cost block + deduped ledger totals for ONE managed session
+    # — the honest cost trail the rollup renders. PURE read off the durable
+    # ``.anchor/`` store; NO PTY, NO model call, NO network, NO sidecar read (the
+    # ledger is Anchor's own snapshot). SAFE projection: never a worktree_path /
+    # branch / absolute path. Cites the North Star amendment 'Endpoint auth rule'
+    # (LOCKED) — this NEW route is token-authed (``?token=``) and enumerated in the
+    # auth-enumeration test (401-before-substance).
+    #   /api/rnd/usage_ledger?session=<sid>
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    q = parse_qs(urlparse(handler.path).query)
+    sid = (q.get("session", [""])[0]
+           or q.get("session_id", [""])[0] or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session required"}, 400)
+        return
+    try:
+        rec = _sessreg.get_session(sid) or {}
+    except Exception:
+        rec = {}
+    uuids = []
+    try:
+        uuids = _usage._engine_uuids_of(rec)
+    except Exception:
+        uuids = []
+    try:
+        totals = _usage.combined_totals(uuids)
+    except Exception:
+        totals = _usage._zero_totals()
+    usage = {
+        "session_id": sid,
+        # SAFE projection — only the usage verdict + the engine-session UUIDs
+        # (opaque ids, never worktree/branch/absolute paths).
+        "state": rec.get("usage_state", "") or "",
+        "reason": rec.get("usage_reason", "") or "",
+        "cost_final": bool(rec.get("cost_final", False)),
+        "engine_session_uuids": list(uuids),
+        "ledger_totals": totals,
+    }
+    handler._send_json({"ok": True, "usage": usage})
+
+
 def handle_term_sessions(handler, path, body):
     # Read-only: managed terminal sessions for a project — the
     # repopulate-from-registry hook the cockpit tiles row paints from
@@ -12733,6 +13100,8 @@ _MIGRATED_HANDLERS = {
     "handle_cancel_job": handle_cancel_job,
     "handle_regenerate_summary": handle_regenerate_summary,
     "handle_continue_session": handle_continue_session,
+    "handle_resume_live": handle_resume_live,
+    "handle_orient_session": handle_orient_session,
     "handle_advance_session": handle_advance_session,
     "handle_advance_stage": handle_advance_stage,
     "handle_handoff_to_fresh": handle_handoff_to_fresh,
@@ -12761,6 +13130,8 @@ _MIGRATED_HANDLERS = {
     "handle_board_html": handle_board_html,
     "handle_handoff_proposal": handle_handoff_proposal,
     "handle_session_summary": handle_session_summary,
+    "handle_session_narration": handle_session_narration,
+    "handle_usage_ledger": handle_usage_ledger,
     "handle_term_sessions": handle_term_sessions,
     "handle_projects_html": handle_projects_html,
     "handle_previews": handle_previews,
@@ -13185,6 +13556,30 @@ class AnchorHandler(BaseHTTPRequestHandler):
         last_status = None
         idle = 0
         try:
+            # ── attach-ack / replay-complete handshake (telemetry-resume W6) ──
+            # The SSE fallback mirrors the WS attach-ack: a dead/unknown session
+            # emits an explicit ``attach_ack ok:false`` event (the client paints
+            # its error state) instead of a bare terminating stream; a live one
+            # emits ``attach_ack ok:true`` + a ``replay_complete`` after the first
+            # read, so the pane swaps in only once the buffer is replayed.
+            try:
+                first = _termsess.read_since(session, cursor)
+            except Exception:
+                first = {"ok": False, "reason": "error"}
+            if not first.get("ok", True):
+                self._sse_event("attach_ack", {"ok": False,
+                                               "reason": first.get(
+                                                   "reason", "unknown-session")})
+                self._sse_event("done", {"status": "error",
+                                         "next": cursor, "error": True})
+                return
+            self._sse_event("attach_ack", {"ok": True})
+            ftext = first.get("text", "")
+            if ftext:
+                self._sse_event("output", {"text": ftext,
+                                           "next": first.get("next", cursor)})
+                cursor = first.get("next", cursor)
+            self._sse_event("replay_complete", {"next": cursor})
             for _tick in range(max(1, max_ticks)):
                 try:
                     out = _termsess.read_since(session, cursor)
@@ -13302,6 +13697,38 @@ class AnchorHandler(BaseHTTPRequestHandler):
         cursor = 0
         ws_state = {}  # persistent fragmentation-reassembly state for decode_frames
         try:
+            # ── attach-ack / replay-complete handshake (telemetry-resume W6) ──
+            # Resolve the session BEFORE the pump and send an explicit ack: a
+            # dead/unknown session yields ``attach_ack ok:false`` (the client
+            # paints its styled error state, narration still visible) rather than
+            # the old SILENT break that wrote zero bytes → a blank pane (diag-B2
+            # S1). A live session gets ``attach_ack ok:true``, its buffered output
+            # is replayed, then ``replay_complete`` — the client swaps in the live
+            # pane ONLY after that signal, so a blank pane is a protocol
+            # impossibility.
+            try:
+                first = _termsess.read_since(session, cursor)
+            except Exception:
+                first = {"ok": False, "reason": "error"}
+            if not first.get("ok", True):
+                try:
+                    sock.sendall(ws_ctl_frame({
+                        "type": "attach_ack", "ok": False,
+                        "reason": first.get("reason", "unknown-session")}))
+                except OSError:
+                    pass
+                return  # finally sends the close frame; client shows error state
+            try:
+                sock.sendall(ws_ctl_frame({"type": "attach_ack", "ok": True,
+                                           "session": session}))
+                replay = first.get("text", "")
+                if replay:
+                    sock.sendall(encode_text_frame(replay))
+                cursor = first.get("next", cursor)
+                sock.sendall(ws_ctl_frame({"type": "replay_complete",
+                                           "next": cursor}))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
             for _tick in range(max(1, max_ticks)):
                 # 1) Drain client -> PTY (non-blocking-ish via the socket timeout).
                 try:
@@ -14211,6 +14638,27 @@ def main():
                 and not _reap.get("errors") else "held (report not clean)")
     except Exception as e:
         _logger.error(f"worktrees.reap_orphans failed: {e}")
+
+    try:
+        # telemetry-resume W6 — bounded oldest-first parked-worktree eviction.
+        # After orphan-reaping, if the RETAINED-parked worktree count exceeds the
+        # budget, gracefully evict the OLDEST: only the git worktree is reclaimed —
+        # the registry record, chain lineage, cached summary, and finalized cost
+        # all SURVIVE (the tile renders evicted-parked and stays MEASURED; its
+        # escalation opens a NEW seeded session on the SAME chain). Never in the
+        # post-move dry-run window (reaping was report-only there).
+        import worktrees as _wt_evict
+        import pty_manager as _pty_evict
+        if not _wt_evict.reaper_dryrun_active():
+            _ev = _wt_evict.evict_oldest_parked(set(_pty_evict._LIVE.keys()))
+            if _ev.get("evicted"):
+                _logger.info(
+                    "worktrees.evict_oldest_parked: evicted %d parked worktree(s) "
+                    "(budget %d, parked %d) — records/chains/summaries/cost kept",
+                    len(_ev["evicted"]), _ev.get("budget"),
+                    _ev.get("parked_count"))
+    except Exception as e:
+        _logger.error(f"worktrees.evict_oldest_parked failed: {e}")
 
     try:
         # Purge leaked synthetic health-check probe projects. The daily

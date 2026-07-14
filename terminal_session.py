@@ -63,6 +63,38 @@ try:
 except Exception:  # pragma: no cover - lanes is always importable, defensive
     _lanes = None
 
+try:
+    import usage_capture as _usage  # Honest Telemetry W4: the ONE usage-capture
+    #                                 finalize path (no cycle: usage_capture imports
+    #                                 paths + session_registry + effort_history +
+    #                                 usage_ledger, never this module).
+except Exception:  # pragma: no cover - usage_capture is always importable
+    _usage = None
+
+
+def _finalize_usage_safe(session_id, project_id=None, record=None):
+    """Eager end-path usage finalize — the ONE seam wired into kill / close-park /
+    drain / finish / reconcile-dead. Idempotent (the W2 ``cost_final`` CAS) and
+    BEST-EFFORT: a capture failure or a fail-closed sidecar root can NEVER break
+    or halt the session end path. A no-op when the pipeline is unavailable."""
+    if _usage is None:
+        return None
+    try:
+        return _usage.finalize_session_usage(
+            session_id, project_id=project_id, record=record)
+    except Exception:
+        return None
+
+
+def finalize_usage(session_id, project_id=None, record=None):
+    """Public passthrough for the eager end-path usage finalize (W4).
+
+    The ``finish→build`` endpoint marks a planning session DONE via the registry
+    WITHOUT reaping it (so no ``kill`` runs) — that terminal transition IS a
+    'finish' end path, so it calls this to finalize the session's usage exactly
+    like every other end path. Idempotent + best-effort."""
+    return _finalize_usage_safe(session_id, project_id=project_id, record=record)
+
 
 #: Backends this service accepts (mirrors session_registry.VALID_BACKENDS).
 VALID_BACKENDS = {_reg.BACKEND_CLAUDE, _reg.BACKEND_GEMINI}
@@ -178,6 +210,29 @@ SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
 #: prompt — that is the "the skill loaded and greeted" signal. Matched
 #: case-insensitively on the stable, skill-independent tail of the greet line.
 GREET_MARKER = "what would you like to do?"
+
+#: telemetry-resume W6 (diag-B2 S3 attach-race fix) — the bounded FALLBACK for the
+#: greet-gated pending-paste flush. The greet-count gate above can leave a paste
+#: pending FOREVER when the model paraphrases/omits the greet marker (or an
+#: env-overridden seed lacks it). This is the escape hatch: once a paste has been
+#: pending longer than this many seconds AND the PTY has produced real model
+#: output beyond the echoed seed, the paste is delivered anyway — still
+#: paste-NOT-submit (trailing newline stripped; nothing is auto-submitted). Env
+#: ``ANCHOR_PASTE_FLUSH_FALLBACK_SECS`` overrides (tests set 0 to force it).
+PASTE_FLUSH_FALLBACK_SECS_ENV = "ANCHOR_PASTE_FLUSH_FALLBACK_SECS"
+PASTE_FLUSH_FALLBACK_SECS_DEFAULT = 45.0
+
+
+def _paste_flush_fallback_secs():
+    raw = (os.environ.get(PASTE_FLUSH_FALLBACK_SECS_ENV) or "").strip()
+    if raw:
+        try:
+            v = float(raw)
+            if v >= 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return PASTE_FLUSH_FALLBACK_SECS_DEFAULT
 
 #: Neutral framing for an extra ``seed_context`` payload folded onto a lane seed.
 #: Replaces the old hard-coded "promoted from Grass Catchers" wording, which was
@@ -367,6 +422,46 @@ def _resolve_engine_cmd(engine: str) -> str:
     return engine
 
 
+def _new_engine_session_id() -> str:
+    """Mint a fresh engine-session UUID (dashed) — the value passed to
+    ``claude --session-id`` so the sidecar filename is pinned AT LAUNCH (Honest
+    Telemetry W4, W1-GROUND-TRUTH §1). Distinct from the hex Anchor session id."""
+    return str(uuid.uuid4())
+
+
+#: Env seam: the flag claude accepts to pin its session UUID at launch (so the
+#: ``~/.claude/projects/<slug>/<uuid>.jsonl`` sidecar filename IS this uuid). Set
+#: it EMPTY to disable UUID-at-launch injection entirely (falls back to an
+#: honest ``uncorrelated`` usage state — never an mtime guess).
+_SESSION_ID_FLAG_ENV = "ANCHOR_TERMINAL_SESSION_ID_FLAG"
+_DEFAULT_SESSION_ID_FLAG = "--session-id"
+
+
+def _engine_launch_argv(cmd, backend, engine_uuid):
+    """Build the PTY launch argv, injecting ``--session-id <uuid>`` for claude.
+
+    UUID-at-launch (W4): ``claude --session-id <uuid>`` pins the engine's sidecar
+    filename deterministically at launch — the correlation the usage-capture
+    pipeline reads by, never a fragile mtime/cwd-window guess. Gemini/agy has no
+    equivalent pin (its segment stays honestly unmeasured per the RULED Option C),
+    so only the claude backend gets the flag. The flag name is a test/deploy seam
+    (``ANCHOR_TERMINAL_SESSION_ID_FLAG``); setting it empty disables injection.
+    Pure — returns the argv list.
+    """
+    argv = [cmd]
+    if not engine_uuid:
+        return argv
+    if backend != _reg.BACKEND_CLAUDE:
+        return argv
+    flag = os.environ.get(_SESSION_ID_FLAG_ENV)
+    if flag is None:
+        flag = _DEFAULT_SESSION_ID_FLAG
+    flag = flag.strip()
+    if not flag:
+        return argv  # injection disabled by the seam
+    return [cmd, flag, engine_uuid]
+
+
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   parent_session_id=None, paste_prompt=None, grass_origin=None,
                   effort_id=None, effort_managed=False, actor=None):
@@ -486,9 +581,19 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
 
     cmd = _resolve_engine_cmd(backend)
 
+    # Honest Telemetry W4: capture the engine session UUID AT LAUNCH. For claude
+    # we pin it via ``--session-id <uuid>`` so the sidecar filename IS this uuid
+    # (deterministic correlation, never an mtime guess); it is stored on the
+    # registry record so finalize-on-every-end-path reads the right sidecar. A
+    # backend/seam that can't pin leaves it "" → the session finalizes honestly
+    # ``uncorrelated``.
+    engine_uuid = _new_engine_session_id()
+    launch_argv = _engine_launch_argv(cmd, backend, engine_uuid)
+    stored_engine_uuid = engine_uuid if (len(launch_argv) > 1) else ""
+
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
     try:
-        pty_sid = _pty.start([cmd], cwd=worktree_path)
+        pty_sid = _pty.start(launch_argv, cwd=worktree_path)
     except Exception as exc:
         # Roll back the worktree so a failed launch leaves nothing behind.
         try:
@@ -549,6 +654,9 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                 pid=child_pid,
                 proc_create_time=child_proc_create_time,
                 crypt_token=child_crypt_token,
+                # Honest Telemetry W4: the engine session UUID captured at launch
+                # ("" when the backend/seam could not pin it → uncorrelated).
+                engine_session_uuid=stored_engine_uuid,
             ),
             correlation_id=(chain_id or sid),
             folder_path=proj.get("folder_path", ""),
@@ -568,6 +676,18 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
         raise TerminalSessionError(
             "failed to register session (%s); rolled back PTY + worktree"
             % (exc,)) from exc
+
+    # Honest Telemetry W5 (RULED Option C): a session STARTED on the gemini/agy
+    # backend carries an unmeasurable segment (gemini gets no --session-id pin), so
+    # stamp the durable mixed-session marker at launch — a gemini-start session
+    # that later switches to claude (and finalizes MEASURED on the claude segment)
+    # is then still honestly flagged 'partial (gemini segment unmeasured)', never a
+    # complete-looking Claude-only number. Best-effort; never breaks the launch.
+    if backend == _reg.BACKEND_GEMINI:
+        try:
+            record = _reg.update_session(sid, usage_gemini_segment=True)
+        except Exception:
+            pass
 
     # 5) Seed the lane's skill EXACTLY ONCE. This is the only place the seed is
     #    ever written — it happens right after a successful launch+register and
@@ -600,6 +720,12 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
         try:
             record = _reg.update_session(
                 sid, pending_paste=pending, paste_flushed=False)
+            # W6: stamp when the paste began waiting so the greet-gate has a
+            # bounded fallback flush (a separate call keeps the pending set above
+            # a stable, byte-identical write the B2 repro pins).
+            import time as _time
+            record = _reg.update_session(
+                sid, pending_paste_since=_time.time())
         except Exception:
             pass
 
@@ -708,8 +834,27 @@ def _flush_pending_paste(session_id):
     marker = GREET_MARKER.lower()
     seed_text = rec.get("seed_text") or ""
     base = seed_text.lower().count(marker)
-    if text.lower().count(marker) <= base:
-        return False  # still waiting on the model's actual greet — stay pending
+    greeted = text.lower().count(marker) > base
+    if not greeted:
+        # diag-B2 S3 attach-race fix (telemetry-resume W6): a paraphrased/omitted
+        # greet (or an env-overridden seed with no marker) would otherwise leave
+        # this paste pending FOREVER. Bounded fallback: once the paste has been
+        # pending longer than PASTE_FLUSH_FALLBACK_SECS *and* the PTY has produced
+        # real model output beyond the echoed seed, deliver it anyway — still
+        # paste-NOT-submit (the trailing newline is stripped below; nothing is
+        # ever auto-submitted). If neither the greet nor real output has appeared,
+        # stay pending (we never fabricate a greet we didn't observe).
+        import time as _time
+        since = rec.get("pending_paste_since")
+        if since is None:
+            since = rec.get("created_at")
+        try:
+            waited = _time.time() - float(since) if since is not None else 0.0
+        except (TypeError, ValueError):
+            waited = 0.0
+        has_model_output = len(text.strip()) > len(seed_text.strip())
+        if not (waited >= _paste_flush_fallback_secs() and has_model_output):
+            return False  # still waiting on the greet (or its bounded fallback)
 
     # Compare-and-set the claim under WRITE_LOCK (reentrant; same lock
     # update_session takes). Re-load + re-check inside the lock so exactly ONE
@@ -790,8 +935,10 @@ def queue_paste(session_id, text):
     if (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
         return False
     try:
+        import time as _time
         _reg.update_session(
-            session_id, pending_paste=text, paste_flushed=False)
+            session_id, pending_paste=text, paste_flushed=False,
+            pending_paste_since=_time.time())  # W6: greet-gate fallback stamp
     except Exception:
         return False
     return True
@@ -994,6 +1141,16 @@ def switch_engine(session_id, engine, seed_context=None):
         handoff_text = _switch_handoff_summary(
             session_id, record, timeout=SWITCH_SUMMARY_TIMEOUT)
 
+    # Honest Telemetry W4: BEFORE reaping segment A's PTY, snapshot its usage into
+    # the durable ledger (a non-finalizing ingest — the eager finalize on the
+    # session's real end path is the sole cost-record writer). Segment A's engine
+    # UUID is the record's current one. Best-effort.
+    if _usage is not None:
+        try:
+            _usage.snapshot_session_usage(session_id, record=record)
+        except Exception:
+            pass
+
     # 1) Reap the current PTY child (tolerate an already-dead/unknown one).
     try:
         _pty.kill(session_id)
@@ -1002,9 +1159,16 @@ def switch_engine(session_id, engine, seed_context=None):
 
     cmd = _resolve_engine_cmd(engine)
 
+    # Honest Telemetry W4: mint segment B's engine UUID and pin it at relaunch, so
+    # the switched-to engine's sidecar is a distinct, correlatable segment. The
+    # session accumulates BOTH uuids; finalize sums A + B, counted once.
+    engine_uuid_b = _new_engine_session_id()
+    relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid_b)
+    stored_engine_uuid_b = engine_uuid_b if (len(relaunch_argv) > 1) else ""
+
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
     try:
-        pty_sid = _pty.start([cmd], cwd=worktree_path)
+        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
     except Exception as exc:
         # Relaunch failed: leave the record CONSISTENT. The old PTY is already
         # reaped, so mark the session IDLE (no live process) but keep its prior
@@ -1030,6 +1194,26 @@ def switch_engine(session_id, engine, seed_context=None):
     record = _reg.update_session(
         session_id, backend=engine, status=_reg.STATUS_RUNNING,
         seeded=False, seed_text="")
+
+    # Honest Telemetry W4: append segment B's engine UUID to the session's history
+    # (the current segment), so finalize on the eventual end path sums A + B.
+    if stored_engine_uuid_b:
+        try:
+            record = _reg.add_engine_session_uuid(
+                session_id, stored_engine_uuid_b)
+        except Exception:
+            pass
+    else:
+        # Honest Telemetry W5 (RULED Option C): segment B is NOT UUID-captured
+        # (the gemini/agy engine gets no --session-id flag), so its usage is
+        # unmeasurable. Stamp the durable mixed-session marker so the rollup
+        # renders 'partial (gemini segment unmeasured)' even if the session later
+        # switches back to claude and ends on the claude backend — never a
+        # complete-looking Claude-only number. Best-effort; never blocks the swap.
+        try:
+            record = _reg.update_session(session_id, usage_gemini_segment=True)
+        except Exception:
+            pass
 
     # 4b) v13 W7: write the git-ignored SWITCH-HANDOFF.md and fold it into the new
     #     engine's opening seed so it carries the prior engine's context. Skipped
@@ -1060,6 +1244,102 @@ def switch_engine(session_id, engine, seed_context=None):
     return record
 
 
+def resume_parked_session(session_id):
+    """Warm-REATTACH a PARKED-idle session by relaunching a PTY in its worktree (W6).
+
+    The telemetry-resume Layer-2 escalation for a **parked-idle** tile (worktree
+    RETAINED, PTY dead after a graceful ``close_session``): relaunch a fresh PTY on
+    the session's own engine in the SAME retained worktree, rebound under the SAME
+    ``session_id`` (the ``start_session``/``switch_engine`` rebind trick), flip the
+    record back to RUNNING, and re-seed the lane skill ONCE. Its worktree, chain,
+    summary, and finalized cost are all untouched — this is a genuine warm
+    reattach, not a new sibling session.
+
+    An **evicted-parked** tile (``worktree_path == ""`` — the worktree was
+    reclaimed by the bounded-budget eviction) CANNOT be reattached: this returns
+    ``{"ok": False, "reason": "evicted"}`` so the caller escalates via the W3/W4
+    continue-seed path instead (a NEW seeded session on the SAME chain, with the
+    honest 'resumed from persisted docs (worktree evicted)' line) — the UI NEVER
+    claims a reattach it cannot perform (NORTH-STAR-AMENDMENT eviction sub-contract).
+
+    Returns ``{"ok": True, "session": <record>, "mode": "reattach"}`` on success,
+    else an honest ``{"ok": False, "reason": ...}``. Never raises.
+    """
+    try:
+        record = _reg.get_session(session_id)
+    except Exception:
+        return {"ok": False, "reason": "lookup-failed"}
+    if record is None:
+        return {"ok": False, "reason": "unknown-session"}
+    # An evicted worktree cannot host a reattach — signal the caller to continue.
+    worktree_path = (record.get("worktree_path") or "").strip()
+    if record.get("evicted") or not worktree_path:
+        return {"ok": False, "reason": "evicted"}
+    try:
+        if not Path(worktree_path).is_dir():
+            # The worktree is gone though the record wasn't marked evicted — treat
+            # it as evicted (honest: no tree to reattach to).
+            return {"ok": False, "reason": "evicted"}
+    except (OSError, ValueError):
+        return {"ok": False, "reason": "evicted"}
+    # A still-live session needs no reattach — it is already running.
+    if record.get("status") == _reg.STATUS_RUNNING and session_id in _pty._LIVE:
+        return {"ok": True, "session": record, "mode": "already-live"}
+
+    lane = record.get("lane", "")
+    engine = record.get("backend", DEFAULT_ENGINE)
+    cmd = _resolve_engine_cmd(engine)
+    # Mint a fresh engine UUID for the resumed segment so its sidecar is a
+    # distinct, correlatable segment (finalize sums over all segments, once).
+    engine_uuid = _new_engine_session_id()
+    relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid)
+    stored_engine_uuid = engine_uuid if (len(relaunch_argv) > 1) else ""
+
+    # Reap any stale PTY child (tolerate already-dead), then relaunch in-tree.
+    try:
+        _pty.kill(session_id)
+    except _pty.UnknownSession:
+        pass
+    except Exception:
+        pass
+    try:
+        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
+    except Exception as exc:
+        return {"ok": False, "reason": "relaunch-failed", "detail": str(exc)}
+    # Rebind the new PTY under the EXISTING session_id (one id per session).
+    with _pty._TABLE_LOCK:
+        child = _pty._LIVE.pop(pty_sid, None)
+        if child is not None:
+            _pty._LIVE[session_id] = child
+
+    try:
+        record = _reg.update_session(
+            session_id, status=_reg.STATUS_RUNNING, seeded=False, seed_text="")
+    except Exception:
+        pass
+    if stored_engine_uuid:
+        try:
+            record = _reg.add_engine_session_uuid(session_id, stored_engine_uuid)
+        except Exception:
+            pass
+    # Re-seed the lane skill ONCE (loads the skill + one greet). No ACTION context
+    # is auto-submitted — orientation (a read-only plan-mode job) narrates, and any
+    # ACTION prompt stays v10 paste-NOT-submit.
+    seed_text = seed_for_lane(lane)
+    if seed_text:
+        try:
+            _pty.write(session_id, seed_text)
+        except Exception:
+            seed_text = None
+        if seed_text:
+            try:
+                record = _reg.update_session(
+                    session_id, seeded=True, seed_text=seed_text)
+            except Exception:
+                pass
+    return {"ok": True, "session": record, "mode": "reattach"}
+
+
 def suspend_session(session_id) -> str:
     """Gracefully suspend a live session: snapshot PTY transcript, persist, and summarize.
 
@@ -1088,6 +1368,10 @@ def suspend_session(session_id) -> str:
 
         # 2) Persist the transcript doc to the main folder and record it as an effort.
         capture_session_docs(session_id, project_id=project_id, record=record)
+
+        # Honest Telemetry W4: eager finalize on the DRAIN end path (idempotent
+        # CAS; best-effort — never breaks the graceful suspend).
+        _finalize_usage_safe(session_id, project_id=project_id, record=record)
 
         # 3) Load the session with aggregated member files.
         import summarizer as _sm
@@ -2276,6 +2560,11 @@ def kill(session_id, project_id=None, _record_boneyard=True, actor=None):
     docs_out = _persist_current_stage(session_id, project_id=project_id,
                                       record=record)
 
+    # Honest Telemetry W4: eager finalize on the KILL end path — capture the
+    # engine sidecar's usage into Anchor's own durable ``.anchor/`` store as the
+    # session's single RUN cost record (idempotent CAS; never halts the kill).
+    _finalize_usage_safe(session_id, project_id=project_id, record=record)
+
     # ── zombie-hunter safe-to-arm, Wave 6: teardown owns the PTY AND the jobs ──
     #
     # A dead session must NEVER leave its ``job_runner`` jobs alive — that is the
@@ -2659,6 +2948,27 @@ def autosave_session(session_id, record=None):
         if isinstance(res, dict):
             out["persisted"] = res.get("persisted", [])
             out["ok"] = bool(res.get("ok"))
+        # 4. Honest Telemetry W4: piggyback a NON-finalizing usage snapshot on the
+        #    existing 120s autosave heartbeat (no second timer) — ingest the live
+        #    sidecar's usage into the durable ledger so a weeks-later reconcile of
+        #    a crashed session reads Anchor's own accumulated snapshot, not the
+        #    prunable home store. Does NOT flip the cost_final latch (the end-path
+        #    finalize stays the sole cost-record writer). Best-effort.
+        if _usage is not None:
+            try:
+                _usage.snapshot_session_usage(session_id, record=rec)
+            except Exception:
+                pass
+        # 5. telemetry-resume W6 (diag-B2 S3 attach-race fix): the pending-paste
+        #    flush is normally only evaluated on read_since/attach — an UNMOUNTED
+        #    follow-on session (no open browser stream) would never check, leaving
+        #    its paste pending forever. Evaluate it here on the heartbeat too, so
+        #    the greet-gate (and its bounded fallback) still delivers the paste
+        #    UNSENT even with no viewer. Best-effort; never auto-submits.
+        try:
+            _flush_pending_paste(session_id)
+        except Exception:
+            pass
         return out
     except Exception:
         out["reason"] = "error"
@@ -2798,6 +3108,12 @@ def close_session(session_id, project_id=None, actor=None):
     # Best-effort — never blocks the park.
     docs_out = capture_session_docs(session_id, project_id=project_id,
                                     record=record)
+
+    # Honest Telemetry W4: eager finalize on the CLOSE/PARK end path. A parked
+    # session's worktree may later be evicted; the finalized cost record snapshots
+    # its usage into ``.anchor/`` so the session stays MEASURED across eviction
+    # (idempotent CAS; never blocks the park).
+    _finalize_usage_safe(session_id, project_id=project_id, record=record)
 
     # KEEP the worktree (NO remove_worktree) and KEEP the registry record. Park a
     # still-RUNNING session at STATUS_IDLE (grey, reopenable); leave an already
@@ -3285,6 +3601,15 @@ def reconcile_and_advance(live_session_ids=None, worktree_exists=None,
     report = _reg.reconcile(
         live_session_ids=live_session_ids, worktree_exists=worktree_exists,
         mark_stale_status=mark_stale_status, apply=True)
+    # Honest Telemetry W4: eager finalize on the RECONCILE-DEAD end path — every
+    # session this reconcile just marked terminal gets its usage captured into the
+    # durable ledger/cost record (idempotent CAS; best-effort). This runs for ALL
+    # marked sessions (not just planning ones — every reconcile-dead session is a
+    # real end path), so a crashed session that never hit kill/close is still
+    # measured on the next reconcile.
+    for sid in report.get("marked", []):
+        _finalize_usage_safe(sid)
+
     auto_builds = []
     if mark_stale_status == _reg.STATUS_DONE:
         for sid in report.get("marked", []):

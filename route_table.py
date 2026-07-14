@@ -183,6 +183,16 @@ ROUTES = [
        handler="handle_project_file_content", migrated=True),
     _r("GET", "/api/rnd/session_doc_roles", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_session_doc_roles", migrated=True),
+    # telemetry-resume W3 — Layer-1 warm narration data (token-authed, ?token=).
+    # A NEW read endpoint carrying per-project data → default-deny token, and it
+    # is enumerated in the W3 auth test (401-before-substance).
+    _r("GET", "/api/rnd/session_narration", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_session_narration", migrated=True),
+    # telemetry-resume W4 — ledger/capture inspection (token-authed, ?token=).
+    # A NEW read endpoint carrying per-session usage data → default-deny token, and
+    # it is enumerated in the auth test (401-before-substance).
+    _r("GET", "/api/rnd/usage_ledger", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_usage_ledger", migrated=True),
     _r("GET", "/api/rnd/context_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_context_status", migrated=True),
     _r("GET", "/api/rnd/effort_rollup", AUTH_TOKEN, match=MATCH_PREFIX,
@@ -373,6 +383,14 @@ ROUTES = [
        handler="handle_push_now", migrated=True),
     _r("POST", "/api/rnd/continue_session", AUTH_TOKEN,
        handler="handle_continue_session", migrated=True),
+    # telemetry-resume W6 — Layer-2 '▶ Resume live' escalation (routed by tile
+    # class server-side) + the read-only plan-mode orientation one-shot trigger.
+    # Both mutate (spawn a session / launch a job) → default-deny token; the
+    # orientation trigger is enumerated in the auth-enumeration test.
+    _r("POST", "/api/rnd/resume_live", AUTH_TOKEN,
+       handler="handle_resume_live", migrated=True),
+    _r("POST", "/api/rnd/orient_session", AUTH_TOKEN,
+       handler="handle_orient_session", migrated=True),
     _r("POST", "/api/rnd/advance_session", AUTH_TOKEN,
        handler="handle_advance_session", migrated=True),
     _r("POST", "/api/rnd/gandalf_run", AUTH_TOKEN,

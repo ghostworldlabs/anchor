@@ -105,22 +105,33 @@ def test_claude_build_argv_gated_bypass_permissions(jr):
 # ── gemini RESEARCH (research-only) ───────────────────────────────────────────
 
 def test_gemini_research_argv_is_valid_and_has_no_dead_flags(jr):
+    # This host has NO bare `gemini` binary — a real Gemini launch routes through
+    # the thin Node adapter `agy_job_adapter.mjs`, which drives the sanctioned
+    # `agy-dispatch` transport and re-emits one stream-json `result` line. The old
+    # `gemini --skip-trust -p … --output-format stream-json --approval-mode …`
+    # CLI flags are DEAD (they hard-error on the agy CLI).
     argv = jr.resolve_runner_cmd(backend="gemini", prompt=SEED,
                                  output_dir=OUT, gated=False)
-    assert argv[0] == "gemini"
-    assert "--skip-trust" in argv          # untrusted-folder write requirement
-    assert "-p" in argv
-    # The prompt is the VALUE of -p (appears immediately after it).
-    assert argv[argv.index("-p") + 1] == SEED
-    assert "--output-format" in argv and "stream-json" in argv
-    # WRITE-capable approval mode (research writes its report).
-    i = argv.index("--approval-mode")
-    assert argv[i + 1] == "auto_edit"
-    assert argv[i + 1] != "plan"           # 'plan' is read-only → would block
-    # Output dir via the REAL flag (--include-directories, NOT --output-dir).
-    assert "--include-directories" in argv
-    assert OUT in argv
-    for dead in DEAD_FLAGS:
+    assert argv[0] == "node"
+    # The adapter is the script argument.
+    assert argv[1].endswith("agy_job_adapter.mjs")
+    # The (possibly large) prompt is delivered via a temp FILE, never on argv
+    # (agy's argv ceiling is ~32KB) — so the seed must NOT leak into argv.
+    assert "--prompt-file" in argv
+    assert SEED not in argv
+    prompt_file = argv[argv.index("--prompt-file") + 1]
+    assert prompt_file and prompt_file != SEED
+    # The model is passed explicitly.
+    assert "--model" in argv and argv[argv.index("--model") + 1]
+    # Output dir via the adapter's --target (NOT the dead --output-dir).
+    assert "--target" in argv
+    assert argv[argv.index("--target") + 1] == OUT
+    # WRITE-capable posture: research writes its report, so the read-only
+    # `--readonly` flag must NOT be present on a non-gated research launch.
+    assert "--readonly" not in argv
+    # NONE of the retired gemini CLI flags survive.
+    for dead in DEAD_FLAGS + ("--skip-trust", "-p", "--output-format",
+                              "--approval-mode", "--include-directories"):
         assert dead not in argv
 
 

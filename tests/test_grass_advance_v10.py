@@ -467,13 +467,20 @@ def test_grass_advance_endpoint_still_wired_for_legacy_v12():
     ``advanceGrassToPlan``/``data-advance`` is no longer wired into the one-session
     workbench template."""
     import anchor_gui
+    import route_table
     import inspect
-    # The endpoint route is still REGISTERED in the request handler (server truth;
-    # its HTTP behavior for a legacy idea is exercised by
-    # test_grass_advance_to_plan_over_http_legacy_v12 below). (R1 W11-F-noop fix:
-    # was `... in js or True`, a no-op — the endpoint lives in the handler, not the JS.)
-    assert "/api/rnd/grass_advance" in inspect.getsource(anchor_gui), \
-        "the legacy grass_advance endpoint route must still be registered"
+    # The endpoint route is still REGISTERED — after the rearch W7/C2 route
+    # migration the declarative route row lives in route_table.py (migrated=True),
+    # dispatching to handle_grass_advance in anchor_gui (server truth; its HTTP
+    # behavior for a legacy idea is exercised by
+    # test_grass_advance_to_plan_over_http_legacy_v12 below).
+    assert "/api/rnd/grass_advance" in inspect.getsource(route_table), \
+        "the legacy grass_advance endpoint route must still be registered in the route table"
+    # And its migrated handler is wired in anchor_gui's handler dispatch map.
+    assert hasattr(anchor_gui, "handle_grass_advance"), \
+        "the grass_advance handler must still exist in anchor_gui"
+    assert "handle_grass_advance" in inspect.getsource(anchor_gui), \
+        "the grass_advance handler must be wired into anchor_gui's dispatch map"
     # The retired control is NOT wired in the new workbench template.
     tmpl = _select_grass_idea_html()
     assert "data-advance" not in tmpl, \

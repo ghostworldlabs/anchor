@@ -86,7 +86,7 @@ def test_agentic_launches_one_job_named_skill(gandalf, project, monkeypatch):
     # Exactly ONE launch — the canonical single agentic run, not per-shard fan-out.
     assert len(calls) == 1, f"expected ONE agentic job, got {len(calls)}"
     k = calls[0]["kwargs"]
-    assert k.get("permission_mode") == "acceptEdits", "must be write-capable, not read-only"
+    assert k.get("permission_mode") == "bypassPermissions", "must be write-capable, not read-only"
     prompt = k.get("prompt") or ""
     assert "gandalf-heavy" in prompt, "heavy run must invoke the gandalf-heavy skill"
     assert str(folder) in prompt and "exact path:" in prompt

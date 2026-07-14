@@ -204,6 +204,20 @@ def _new_id() -> str:
     return uuid.uuid4().hex
 
 
+#: Bounded retry for the READ side — the symmetric counterpart of the write-side
+#: ``_atomic_replace`` retry. While a concurrent writer is mid ``os.replace`` over
+#: the store, this reader's ``read_text`` open can be transiently DENIED by
+#: Windows with ``PermissionError`` (a sharing violation, NOT a real fault). The
+#: writer's rename completes within microseconds, so a few short backed-off
+#: retries let the reader see the complete NEW file. Without this, a single
+#: transient would make ``load_sessions`` return ``{}`` — dropping the ENTIRE
+#: registry for that read (a spurious "no sessions"), which under load surfaces
+#: as a session momentarily vanishing from ``list_sessions``. POSIX never hits
+#: the window — the first read succeeds and the loop is a no-op.
+_READ_RETRIES = 40
+_READ_BACKOFF_S = 0.005
+
+
 def load_sessions() -> dict:
     """Load the session registry as a dict ``{session_id: record}``.
 
@@ -211,13 +225,40 @@ def load_sessions() -> dict:
     unreadable/corrupt (a corrupt registry must never crash the dashboard). The
     JSON on disk is a list of records; this returns them keyed by ``session_id``
     for O(1) lookup. A keyed-dict form on disk is also tolerated.
+
+    A transient ``OSError`` (the Windows sharing-violation race with a concurrent
+    atomic write) is RETRIED briefly (see ``_READ_RETRIES``) rather than swallowed
+    — swallowing it would drop the whole registry for that read. A genuine JSON
+    corruption is NOT retried: atomic writes never yield a half-written file, so a
+    decode error is a real fault, and ``{}`` is the honest best-effort fallback.
     """
     p = sessions_path()
     if not p.exists():
         return {}
-    try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, ValueError):
+    raw = None
+    for attempt in range(_READ_RETRIES):
+        try:
+            text = p.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # Raced with a rename where the target briefly did not resolve — the
+            # NEW file is landing; a retry sees it. Exhausted budget → {}.
+            if attempt == _READ_RETRIES - 1:
+                return {}
+            time.sleep(_READ_BACKOFF_S)
+            continue
+        except OSError:
+            # Transient Windows sharing violation while the writer replaces the
+            # store — back off and retry so we read the complete file, not {}.
+            if attempt == _READ_RETRIES - 1:
+                return {}
+            time.sleep(_READ_BACKOFF_S)
+            continue
+        try:
+            raw = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        break
+    if raw is None:
         return {}
     out = {}
     if isinstance(raw, list):
@@ -232,6 +273,16 @@ def load_sessions() -> dict:
                 if e.get("session_id"):
                     out[e["session_id"]] = _normalize(e)
     return out
+
+
+def _coerce_float_or_none(v):
+    """Coerce a possibly-string/None epoch value to ``float`` or ``None``."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize(record: dict) -> dict:
@@ -329,6 +380,55 @@ def _normalize(record: dict) -> dict:
     except (TypeError, ValueError):
         proc_create_time = None
     crypt_token = record.get("crypt_token", "") or ""
+    # ── Honest Telemetry W2: terminal cost-finalization latch ───────────────
+    # ``cost_final`` is the compare-and-set flag that makes finalize-on-every-
+    # end-path idempotent: exactly one of the racing end paths (kill / close /
+    # reconcile-dead) sets it (via :func:`finalize_cost_once`) and writes the
+    # session's single RUN cost record. Back-compat: every pre-feature record
+    # (no key) normalizes to ``False`` / ``None``.
+    cost_final = bool(record.get("cost_final", False))
+    cfa = record.get("cost_final_at")
+    try:
+        cost_final_at = float(cfa) if cfa is not None else None
+    except (TypeError, ValueError):
+        cost_final_at = None
+    # ── Honest Telemetry W4: engine-session UUID capture + usage state ───────
+    # ``engine_session_uuid`` is the Claude/engine session UUID captured AT LAUNCH
+    # (``claude --session-id <uuid>`` pins the sidecar filename — never mtime-
+    # guessed), the deterministic correlation the W4 usage-capture pipeline reads
+    # the per-message sidecar by. ``engine_session_uuids`` is the append-only
+    # history of EVERY engine UUID this managed session touched (launch + each
+    # engine switch produces a distinct sidecar segment); finalize sums over all
+    # of them, counted once. ``usage_state``/``usage_reason`` are the terminal
+    # capture verdict stamped at finalize (measured / capture-failed / unmeasured
+    # with a reason enum). Every pre-feature record (no keys) normalizes to
+    # ""/[]/"" — honestly uncorrelated, never a guessed cost.
+    engine_session_uuid = record.get("engine_session_uuid", "") or ""
+    raw_euuids = record.get("engine_session_uuids")
+    engine_session_uuids = []
+    if isinstance(raw_euuids, (list, tuple)):
+        _seen_eu = set()
+        for u in raw_euuids:
+            if u is None:
+                continue
+            us = str(u)
+            if not us or us in _seen_eu:
+                continue
+            _seen_eu.add(us)
+            engine_session_uuids.append(us)
+    # Keep the two consistent: a bare ``engine_session_uuid`` seeds the list.
+    if engine_session_uuid and engine_session_uuid not in engine_session_uuids:
+        engine_session_uuids.insert(0, engine_session_uuid)
+    usage_state = record.get("usage_state", "") or ""
+    usage_reason = record.get("usage_reason", "") or ""
+    # Honest Telemetry W5 (RULED Option C): a durable marker that this session
+    # touched a Gemini/agy segment whose usage Anchor cannot capture. Set by
+    # ``terminal_session.switch_engine`` whenever it switches TO an engine whose
+    # segment is not UUID-captured, so a claude→gemini→claude round-trip (which
+    # ends back on the claude backend) is STILL honestly flagged as mixed and the
+    # rollup renders 'partial (gemini segment unmeasured)' instead of a
+    # complete-looking Claude-only number. Back-compat: absent → False.
+    usage_gemini_segment = bool(record.get("usage_gemini_segment", False))
     # ── zombie-hunter safe-to-arm, Wave 6: owned-job claim set ──────────────
     # ``owned_job_ids`` is this session's explicit claim over ``job_runner`` job
     # ids — the reference-counted ownership the teardown path (``kill`` /
@@ -400,6 +500,38 @@ def _normalize(record: dict) -> dict:
         "crypt_token": crypt_token,
         # zombie-hunter safe-to-arm, Wave 6: reference-counted owned-job claims.
         "owned_job_ids": owned_job_ids,
+        # Honest Telemetry W2: terminal cost-finalization latch (see above).
+        "cost_final": cost_final,
+        "cost_final_at": cost_final_at,
+        # Honest Telemetry W4: engine-session UUID capture + usage state (above).
+        "engine_session_uuid": engine_session_uuid,
+        "engine_session_uuids": engine_session_uuids,
+        "usage_state": usage_state,
+        "usage_reason": usage_reason,
+        "usage_gemini_segment": usage_gemini_segment,
+        # ── telemetry-resume W6: eviction + paste-fallback + orientation ─────
+        # ``evicted``/``evicted_at``: the bounded oldest-first parked-worktree
+        # eviction reclaims ONLY the worktree; the record stays parked-warm with
+        # ``worktree_path=""`` and this durable marker, so the tile renders
+        # evicted-parked and its Layer-2 escalation opens a NEW seeded session
+        # (never a reattach claim). Everything else — record, chain, summary,
+        # finalized cost — survives (the session stays MEASURED). Back-compat:
+        # absent → False/None.
+        "evicted": bool(record.get("evicted", False)),
+        "evicted_at": _coerce_float_or_none(record.get("evicted_at")),
+        # ``pending_paste_since``: when a paste was recorded UNSENT, so the
+        # greet-gate has a bounded fallback flush (a paraphrased/omitted greet no
+        # longer leaves the paste pending forever). Still paste-NOT-submit.
+        "pending_paste_since": _coerce_float_or_none(
+            record.get("pending_paste_since")),
+        # ``orientation_owned_until``/``orientation_job_id``: a read-only
+        # plan-mode orientation one-shot job (the Phase-0 fork) marks its origin
+        # session owned-for-N-minutes so the zombie-hunter live-owner computation
+        # never flags/kills a session while its orientation read is in flight.
+        # Absent → None/"" (never owned by orientation).
+        "orientation_owned_until": _coerce_float_or_none(
+            record.get("orientation_owned_until")),
+        "orientation_job_id": record.get("orientation_job_id", "") or "",
     }
 
 
@@ -446,9 +578,16 @@ def _write_sessions_locked(reg: dict) -> None:
     items = [reg[k] for k in reg]
     target = sessions_path()
     tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(
-        json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
+    # Explicit open + flush + fsync (not Path.write_text) so the temp file's
+    # bytes are on stable storage BEFORE the atomic rename — a crash between the
+    # write and the replace can never leave a torn store (W2 durability
+    # substrate). The write site stays attributed to session_registry (the
+    # write-tripwire mutation-of-record inventory), and the tmp→target replace
+    # keeps the atomic idiom.
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(items, indent=2, ensure_ascii=False))
+        f.flush()
+        os.fsync(f.fileno())
     _atomic_replace(str(tmp), str(target))
 
 
@@ -479,7 +618,8 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
                      label="", session_id=None, parent_session_id="",
                      chain_id=None, grass_origin="",
                      effort_id=None, effort_managed=False,
-                     pid=None, proc_create_time=None, crypt_token="") -> dict:
+                     pid=None, proc_create_time=None, crypt_token="",
+                     engine_session_uuid="") -> dict:
     """Register a managed terminal session. Returns the stored record.
 
     ``session_id`` is allocated fresh when not supplied; an explicitly provided
@@ -519,6 +659,9 @@ def register_session(project_id, lane, backend=BACKEND_CLAUDE,
             "pid": pid,
             "proc_create_time": proc_create_time,
             "crypt_token": crypt_token or "",
+            # Honest Telemetry W4: engine-session UUID captured at launch (the
+            # deterministic sidecar correlation). Empty when not captured yet.
+            "engine_session_uuid": engine_session_uuid or "",
         })
         reg[sid] = record
         _save_sessions(reg, _locked=True)
@@ -718,7 +861,18 @@ def update_session(session_id: str, **fields) -> dict:
                # zombie-hunter v2: process-identity fields.
                "pid", "proc_create_time", "crypt_token",
                # zombie-hunter safe-to-arm, Wave 6: owned-job claim set.
-               "owned_job_ids"}
+               "owned_job_ids",
+               # Honest Telemetry W4: engine-session UUID capture + usage state.
+               "engine_session_uuid", "engine_session_uuids",
+               "usage_state", "usage_reason",
+               # Honest Telemetry W5: durable mixed-session (gemini-segment) marker.
+               "usage_gemini_segment",
+               # telemetry-resume W6: bounded oldest-first parked-worktree
+               # eviction (worktree reclaimed, everything else survives) +
+               # the greet-gate bounded-fallback stamp + the read-only
+               # orientation one-shot job's origin-ownership window.
+               "evicted", "evicted_at", "pending_paste_since",
+               "orientation_owned_until", "orientation_job_id"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
@@ -752,6 +906,75 @@ def remove_session(session_id: str) -> bool:
             _save_sessions(reg, _locked=True)
             return True
         return False
+
+
+# ── Terminal cost-finalization latch (Honest Telemetry, W2) ─────────────────
+
+def finalize_cost_once(session_id: str) -> bool:
+    """Compare-and-set the terminal cost-finalization flag for a session (W2).
+
+    Finalize-on-every-end-path (kill / close-park / drain / finish /
+    reconcile-dead) can fire CONCURRENTLY against the same session; without a
+    latch each racer would write the session's RUN cost record and the rollup
+    would double-count. This is the atomic gate: it returns ``True`` for EXACTLY
+    ONE caller — the one that wins the race to flip ``cost_final`` from unset to
+    set — and ``False`` for every subsequent caller (and for an unknown id). The
+    caller that gets ``True`` is the sole writer of the finalized cost record.
+
+    Atomicity: the whole read-check-write runs under ``paths.WRITE_LOCK`` and the
+    flag is persisted WITH the record (``cost_final`` + ``cost_final_at``) via the
+    registry's atomic tmp→rename write, so the latch survives a crash and a
+    restart never re-finalizes an already-finalized session. Idempotent by
+    construction: calling again after the win is a no-op that returns ``False``.
+    """
+    if not session_id:
+        return False
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        rec = reg.get(session_id)
+        if rec is None:
+            return False
+        if rec.get("cost_final"):
+            return False  # another end path already finalized this session
+        rec = dict(rec)
+        rec["cost_final"] = True
+        rec["cost_final_at"] = time.time()
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return True
+
+
+def add_engine_session_uuid(session_id: str, engine_session_uuid: str) -> dict:
+    """Record an engine-session UUID on a managed session (Honest Telemetry W4).
+
+    Sets ``engine_session_uuid`` (the CURRENT/last segment) and APPENDS it to the
+    append-only ``engine_session_uuids`` history — so a session that switches
+    engine mid-run accumulates BOTH sidecar segments and finalize sums over all of
+    them (counted once). Atomic (under ``paths.WRITE_LOCK``), idempotent (a
+    duplicate uuid is not re-appended). A no-op returning the current record for an
+    unknown id or a blank uuid.
+    """
+    if not session_id or not engine_session_uuid:
+        return get_session(session_id) or {}
+    u = str(engine_session_uuid)
+    with _paths.WRITE_LOCK:
+        reg = load_sessions()
+        rec = reg.get(session_id)
+        if rec is None:
+            return {}
+        rec = dict(rec)
+        hist = list(rec.get("engine_session_uuids") or [])
+        if u not in hist:
+            hist.append(u)
+        rec["engine_session_uuids"] = hist
+        rec["engine_session_uuid"] = u
+        rec = _normalize(rec)
+        rec["session_id"] = session_id
+        reg[session_id] = rec
+        _save_sessions(reg, _locked=True)
+        return rec
 
 
 # ── Reference-counted owned-job claims (zombie-hunter safe-to-arm, Wave 6) ───

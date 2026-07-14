@@ -113,7 +113,16 @@ def _index_path(folder_path, project_id: str, lane: str) -> Path:
 
 
 def _pointer_path(folder_path, project_id: str, lane: str, job_id: str) -> Path:
-    return efforts_dir(folder_path, project_id, lane) / f"{job_id}{POINTER_SUFFIX}"
+    # The on-disk FILENAME must be filesystem-safe: a run-cost job_id embeds the
+    # session_id (``run-cost-<sid>``) and a managed/lane-qualified session id can
+    # contain ``::`` (e.g. ``build::sess-XYZ``) — illegal in a Windows filename.
+    # Sanitize the filename with the SAME transform the summaries dir uses so the
+    # write and every later read resolve to the identical path; the stored
+    # ``job_id`` field and the append-only index keep the RAW value (lookups are
+    # index-driven, never derived from the filename), so this is a pure
+    # filename-safety mapping and a no-op for ordinary (special-char-free) ids.
+    return efforts_dir(folder_path, project_id, lane) / (
+        f"{_safe_session_segment(job_id)}{POINTER_SUFFIX}")
 
 
 # ── Index (append-only, preserves order; newest-first is computed on read) ──
@@ -136,7 +145,16 @@ def _save_index(folder_path, project_id: str, lane: str, order: list) -> None:
     p = _index_path(folder_path, project_id, lane)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(list(order), indent=2), encoding="utf-8")
+    # Explicit open + flush + fsync (not Path.write_text) so the temp file's
+    # bytes reach stable storage BEFORE the atomic rename — a crash between the
+    # write and the replace can never leave a torn effort index (W2 durability
+    # substrate). The write stays attributed to effort_history (the write-tripwire
+    # mutation-of-record inventory) and the tmp→target replace keeps the atomic
+    # idiom.
+    with open(tmp, "w", encoding="utf-8", newline="") as f:
+        f.write(json.dumps(list(order), indent=2))
+        f.flush()
+        os.fsync(f.fileno())
     tmp.replace(p)
 
 
@@ -2791,6 +2809,13 @@ def record_stage_baseline(worktree_path) -> str:
     """
     wt = Path(worktree_path) if worktree_path else None
     if not wt or not wt.is_dir():
+        return ""
+    # Guard against git's ancestor-repo discovery: `git rev-parse HEAD` run in a
+    # NON-repo dir walks UP the tree and can return an unrelated ANCESTOR repo's
+    # SHA (e.g. the pytest tmp dir living under some git checkout). The docstring
+    # promises a non-repo worktree degrades to "" — so require this dir to be a
+    # real git repo root (its own .git) BEFORE trusting rev-parse.
+    if not _is_git_repo(wt):
         return ""
     try:
         r = _git(wt, "rev-parse", "HEAD")

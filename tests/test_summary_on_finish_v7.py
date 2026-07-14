@@ -468,11 +468,18 @@ def test_finish_hooks_wired_in_handlers(env):
     hook (best-effort) so the wiring can't silently regress."""
     import inspect
     gui = env["gui"]
-    post_src = inspect.getsource(gui.AnchorHandler.do_POST)
-    get_src = inspect.getsource(gui.AnchorHandler.do_GET)
-    # The hook exists and is referenced from the kill + finish_to_build POST paths.
-    assert "_trigger_session_summary_on_finish(" in post_src
-    assert post_src.count("_trigger_session_summary_on_finish(") >= 2, \
-        "expected the finish hook in both term_kill and finish_to_build"
-    # And from the reconcile-dead GET (term_sessions) path.
-    assert "_trigger_session_summary_on_finish(" in get_src
+    # After the rearch W7/C2 route migration the finish transitions moved OUT of
+    # the inline do_POST/do_GET chains into their own module-level migrated
+    # handlers. The invariant is unchanged: every finish transition still calls the
+    # Wave-2 finish hook (best-effort) so the wiring can't silently regress.
+    kill_src = inspect.getsource(gui.handle_term_kill)
+    finish_src = inspect.getsource(gui.handle_finish_to_build)
+    sessions_src = inspect.getsource(gui.handle_term_sessions)
+    # The hook is referenced from the kill + finish_to_build POST handlers.
+    assert "_trigger_session_summary_on_finish(" in kill_src, \
+        "expected the finish hook in the term_kill handler"
+    assert "_trigger_session_summary_on_finish(" in finish_src, \
+        "expected the finish hook in the finish_to_build handler"
+    # And from the reconcile-dead term_sessions (GET) handler.
+    assert "_trigger_session_summary_on_finish(" in sessions_src, \
+        "expected the finish hook in the reconcile-dead term_sessions path"

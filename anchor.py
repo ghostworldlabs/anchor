@@ -68,6 +68,11 @@ have NO one-shot CLI form):
     python3 anchor.py rnd boneyard <project_id> [--search <q>]  # discarded material (killed/deleted/grass-deleted), newest-first
     python3 anchor.py rnd next-prompt <project_id> --session <id>  # the generated next-stage handoff prompt (pending paste / NEXT-PROMPT.md)
 
+telemetry-resume W3 "Narration floor" inspection mirror (read-only, cache-only;
+never spawns a PTY / runs the model / touches the network):
+    python3 anchor.py rnd narration <project_id> --lane <lane> --session <id>  # the Layer-1 warm narration spine (done / produced / next)
+    python3 anchor.py rnd narration-coverage [<project_id>]   # the two-number report (template coverage MUST be 100% + enrichment coverage %)
+
 R&D v12 "Efforts" inspection mirror (read-only DATA seams; the in-session
 advance/handoff/dock are interactive live ops with NO CLI form):
     python3 anchor.py rnd efforts <project_id>               # the project's efforts (id - current_stage - status - stage count)
@@ -1166,6 +1171,80 @@ def rnd_next_prompt(project_id, session_id):
     return ""
 
 
+# ── telemetry-resume W3 "Narration floor" inspection mirror (read-only) ──────
+
+def rnd_narration(project_id, lane, session_id):
+    """CLI mirror of ``narration.narrate_session`` — the Layer-1 warm narration.
+
+    READ-ONLY, cache-only: returns the deterministic narration SPINE (done /
+    produced / next) a session tile renders as the first-click 'warm terminal
+    that narrates'. NEVER spawns a PTY, runs the model, or touches the network —
+    a summary-less session renders the honest floor (no ``enrichment='generating'``
+    trigger from the CLI, which does not schedule background work). Raises
+    ``KeyError`` for an unknown project.
+    """
+    import narration as _narr
+    _proj, folder = _rnd_resolve(project_id)
+    return _narr.narrate_session(project_id, lane, session_id,
+                                 folder_path=folder)
+
+
+def rnd_narration_coverage(project_id=None):
+    """CLI mirror of ``narration.coverage_report`` — the honest two-number report.
+
+    Template coverage (MUST be 1.0 — the deterministic floor is TOTAL over every
+    record class) + enrichment coverage (the fraction served from a cached model
+    summary). Runs over the LIVE ``session_registry`` (optionally one project) +
+    each lane's finished one-shot-job efforts. Read-only; never runs the model.
+    """
+    import narration as _narr
+    import session_registry as _sreg
+    import effort_history as _eh
+    import summarizer as _s
+    sessions = []
+    try:
+        sessions = _sreg.list_sessions(project_id=project_id) or []
+    except Exception:
+        sessions = []
+    # Finished one-shot-job efforts: RUN-provenance efforts with a cost block and
+    # no owning managed session, across each project's trio lanes.
+    efforts = []
+    folders = {}
+    try:
+        import rnd_registry as _rnd2
+        pids = {r.get("project_id") for r in sessions if r.get("project_id")}
+        if project_id:
+            pids.add(project_id)
+        for pid in pids:
+            proj = _rnd2.get_project(pid)
+            folder = (proj or {}).get("folder_path", "")
+            folders[pid] = folder
+            for lane in ("research", "planning", "build"):
+                try:
+                    for e in _eh.list_efforts(folder, pid, lane):
+                        if (e.get("provenance") == "run"
+                                and not (e.get("session_id") or "")
+                                and isinstance(e.get("cost"), dict)):
+                            efforts.append(e)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    def _enrich(rec):
+        pid = rec.get("project_id") or ""
+        folder = folders.get(pid, "")
+        lane = rec.get("lane") or ""
+        try:
+            store_lane = _eh._resolve_subdir(lane) if lane else lane
+            return _s.load_cached(folder, pid, store_lane or lane,
+                                  rec.get("session_id") or "")
+        except Exception:
+            return None
+
+    return _narr.coverage_report(sessions, efforts, enrichment_lookup=_enrich)
+
+
 # ── R&D v12 "Efforts" inspection mirror (read-only) ──────────────────────
 
 def rnd_efforts(project_id):
@@ -1395,6 +1474,7 @@ def _rnd_cli(args):
               "deliverable-type|engine|session-summary|grass|"
               "build-deliverable|chain|blurb|remote|docs|"
               "folders|ghost-sessions|boneyard|next-prompt|"
+              "narration|narration-coverage|"
               "events|efforts|effort|effort-deliverable> ...")
         return
     sub = args[0].lower()
@@ -1878,6 +1958,49 @@ def _rnd_cli(args):
                 return
             print(f"Next-stage handoff prompt for session {session_id}:")
             print(prompt)
+
+        elif sub == "narration":
+            pos = _positionals()
+            lane = _opt("--lane")
+            session_id = _opt("--session")
+            if not pos or not lane or not session_id:
+                print("Usage: anchor.py rnd narration <project_id> "
+                      "--lane <lane> --session <session_id>")
+                return
+            view = rnd_narration(pos[0], lane, session_id)
+            print(f"Layer-1 narration for session {session_id} "
+                  f"[{view.get('tile_class','?')}]:")
+            print(f"  done:     {view.get('done','')}")
+            produced = view.get("produced", []) or []
+            if produced:
+                print("  produced:")
+                for p in produced:
+                    role = p.get("role", "") or ""
+                    tag = f"{role}: " if role else ""
+                    print(f"    - {tag}{p.get('label','')}  ({p.get('href','')})")
+            else:
+                print(f"  produced: {view.get('produced_note','') or 'none'}")
+            nxt = view.get("next") or {}
+            print(f"  next:     {nxt.get('text','')} "
+                  f"[{nxt.get('source','')}, submit={nxt.get('submit')}]")
+            badges = view.get("badges", []) or []
+            if badges:
+                print(f"  badges:   {', '.join(badges)}")
+            print(f"  enrichment: {view.get('enrichment','')}  "
+                  f"links_valid={view.get('links_valid')}")
+
+        elif sub == "narration-coverage":
+            pos = _positionals()
+            rep = rnd_narration_coverage(pos[0] if pos else None)
+            scope = pos[0] if pos else "all projects"
+            print(f"Narration coverage ({scope}):")
+            print(f"  template coverage:   "
+                  f"{rep.get('template_covered',0)}/{rep.get('template_total',0)} "
+                  f"= {rep.get('template_coverage',0.0)*100:.1f}%  "
+                  f"(MUST be 100%)")
+            print(f"  enrichment coverage: "
+                  f"{rep.get('enrichment_covered',0)}/{rep.get('template_total',0)} "
+                  f"= {rep.get('enrichment_coverage',0.0)*100:.1f}%")
 
         elif sub == "events":
             pos = _positionals()

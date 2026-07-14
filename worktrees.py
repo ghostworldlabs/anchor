@@ -52,6 +52,17 @@ REAPER_DRYRUN_ENV = "ANCHOR_REAPER_DRYRUN"
 #: Persistent "first post-move boot is dry-run" marker under the managed base.
 REAPER_DRYRUN_MARKER = ".reaper_dryrun"
 
+#: telemetry-resume W6 — the bounded parked-worktree budget. Each parked-warm
+#: session KEEPS a full git worktree checkout; without a cap they grow without
+#: bound (the eviction ruling, NORTH-STAR-AMENDMENT — kept-with-contract). When
+#: the count of RETAINED-parked worktrees exceeds this budget, the OLDEST are
+#: gracefully evicted oldest-first: only the worktree is reclaimed — the registry
+#: record, chain lineage, cached summary, and finalized cost record all SURVIVE
+#: (the session stays MEASURED and renders as an ``evicted-parked`` tile). Env
+#: ``ANCHOR_PARKED_WORKTREE_BUDGET`` overrides (tests set a tiny budget).
+PARKED_WORKTREE_BUDGET_ENV = "ANCHOR_PARKED_WORKTREE_BUDGET"
+PARKED_WORKTREE_BUDGET_DEFAULT = 24
+
 #: Branch-name prefix; the branch is deterministic from the session id.
 BRANCH_PREFIX = "anchor/session/"
 
@@ -422,6 +433,136 @@ def reap_orphans(active_session_ids, base=None, project_id=None, dryrun=None):
         _disarm_reaper_dryrun(base)
     return {"reaped": reaped, "kept": kept, "would_reap": would_reap,
             "dryrun": bool(dryrun), "errors": errors}
+
+
+# ── telemetry-resume W6: bounded oldest-first parked-worktree eviction ───────
+
+def parked_worktree_budget(env=None) -> int:
+    """The bounded parked-worktree budget (env override or the default)."""
+    e = os.environ if env is None else env
+    raw = (e.get(PARKED_WORKTREE_BUDGET_ENV) or "").strip()
+    if raw:
+        try:
+            n = int(raw)
+            if n >= 0:
+                return n
+        except (TypeError, ValueError):
+            pass
+    return PARKED_WORKTREE_BUDGET_DEFAULT
+
+
+def _parked_sort_key(session_id, base):
+    """Oldest-first ordering key for a parked worktree.
+
+    Prefers the registry record's ``created_at`` (deterministic, test-stable);
+    falls back to the worktree dir's mtime, then 0.0. Older → smaller → evicted
+    first.
+    """
+    try:
+        import session_registry as _sr
+        rec = _sr.get_session(session_id)
+        if rec and rec.get("created_at") is not None:
+            return float(rec.get("created_at"))
+    except Exception:
+        pass
+    try:
+        return worktree_path_for(session_id, base).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _retained_parked_ids(active, base):
+    """The session ids whose managed worktree is RETAINED-parked (not active).
+
+    A worktree is retained-parked iff it is NOT in ``active`` (no live PTY / owning
+    job) AND :func:`_is_parked_idle` keeps it. These are exactly the worktrees the
+    budget governs — a live or already-orphan worktree is never a budget candidate.
+    """
+    out = []
+    for sid in list_managed_worktrees(base):
+        if sid in active:
+            continue
+        if _is_parked_idle(sid):
+            out.append(sid)
+    return out
+
+
+def _mark_evicted(session_id):
+    """Stamp a session record EVICTED: worktree reclaimed, everything else kept.
+
+    The record STAYS parked-warm (so the tile persists + renders evicted-parked
+    via ``narration.classify_tile``), ``worktree_path`` is cleared (the reaped
+    checkout), and a durable ``evicted``/``evicted_at`` marker is written so the
+    dashboard count and the Layer-2 'NEW seeded session, not a reattach'
+    escalation can key on it. Best-effort; never raises.
+    """
+    try:
+        import session_registry as _sr
+        import time as _time
+        _sr.update_session(session_id, worktree_path="", evicted=True,
+                           evicted_at=_time.time())
+    except Exception:
+        pass
+
+
+def parked_worktree_count(active_session_ids, base=None) -> int:
+    """How many RETAINED-parked worktrees exist right now (dashboard count)."""
+    active = set(active_session_ids or ())
+    return len(_retained_parked_ids(active, base))
+
+
+def evict_oldest_parked(active_session_ids, budget=None, base=None,
+                        project_id=None, env=None):
+    """Bounded oldest-first graceful eviction of parked worktrees (W6).
+
+    When the number of RETAINED-parked worktrees exceeds ``budget`` (env default
+    :func:`parked_worktree_budget`), the OLDEST ``count - budget`` are gracefully
+    evicted: :func:`remove_worktree` reclaims ONLY the git worktree, then
+    :func:`_mark_evicted` stamps the record so EVERYTHING ELSE survives — the
+    registry record (the tile persists), its chain/lineage, its cached summary,
+    and its finalized cost record (an evicted session stays MEASURED; eviction
+    never zeroes or un-measures anything). The evicted tile therefore renders as
+    ``evicted-parked`` immediately, and its escalation opens a NEW seeded session
+    on the SAME chain — never a reattach claim (NORTH-STAR-AMENDMENT eviction
+    sub-contract).
+
+    ``project_id`` is resolved PER session from the registry so a multi-project
+    sweep still removes each worktree cleanly. Returns::
+
+        {"evicted": [sid, ...], "kept": [sid, ...], "budget": N,
+         "parked_count": M, "errors": [{...}]}
+
+    Never raises.
+    """
+    if budget is None:
+        budget = parked_worktree_budget(env)
+    active = set(active_session_ids or ())
+    parked = _retained_parked_ids(active, base)
+    # Oldest-first: the smallest sort key (earliest created_at / mtime) evicts
+    # first, so the freshest parked work is retained the longest.
+    parked.sort(key=lambda sid: _parked_sort_key(sid, base))
+    over = max(0, len(parked) - int(budget))
+    to_evict = parked[:over]
+    keep = parked[over:]
+    evicted, errors = [], []
+    for sid in to_evict:
+        pid = project_id
+        if pid is None:
+            try:
+                import session_registry as _sr
+                rec = _sr.get_session(sid)
+                pid = (rec or {}).get("project_id") or None
+            except Exception:
+                pid = None
+        res = remove_worktree(sid, project_id=pid, base=base)
+        if res.get("ok"):
+            _mark_evicted(sid)
+            evicted.append(sid)
+        else:
+            errors.append({"session_id": sid,
+                           "reason": res.get("reason", "remove-failed")})
+    return {"evicted": evicted, "kept": keep, "budget": int(budget),
+            "parked_count": len(parked), "errors": errors}
 
 
 # ── git-ignore safety (managed base under .anchor/) ─────────────────────────

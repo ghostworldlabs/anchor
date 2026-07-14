@@ -385,7 +385,10 @@ def test_term_sessions_handler_calls_reconcile_and_advance(env):
     LIVE PTY set, guarded — the wiring exists in the served source."""
     import inspect
     gui = env["gui"]
-    src = inspect.getsource(gui.AnchorHandler.do_GET)
+    # After the rearch W7/C2 route migration the GET /api/rnd/term_sessions logic
+    # moved OUT of the inline do_GET chain into the module-level handle_term_sessions
+    # handler; the wiring invariant is unchanged.
+    src = inspect.getsource(gui.handle_term_sessions)
     # The wiring is present and passes live_session_ids (NOT the default None,
     # which would mark live sessions stale).
     assert "reconcile_and_advance(" in src

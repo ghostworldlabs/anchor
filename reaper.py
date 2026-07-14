@@ -169,6 +169,11 @@ class LivenessSnapshot:
     job_owned_ids: frozenset = field(default_factory=frozenset)
     #: Sessions transitively owned via their ``parent_session_id`` lineage.
     parent_owned_ids: frozenset = field(default_factory=frozenset)
+    #: telemetry-resume W6 — sessions whose read-only plan-mode ORIENTATION
+    #: one-shot job is in flight: the origin session is treated as owned-for-N-
+    #: minutes (``now < orientation_owned_until``) so the hunter never flags/kills
+    #: a session while its orientation read is running, then it auto-expires.
+    orientation_owned_ids: frozenset = field(default_factory=frozenset)
     #: pid → (pid, create_time, image_path) — the launch-time identity tuples.
     pid_identity: Mapping[int, Tuple[int, Optional[float], Optional[str]]] = \
         field(default_factory=lambda: MappingProxyType({}))
@@ -285,6 +290,20 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
     # ── identity tuples + positive-liveness (probe each PID ONCE) ────────────
     if now is None:
         now = time.time()
+
+    # ── telemetry-resume W6: orientation-origin ownership (owned-for-N-minutes)
+    # A session whose read-only plan-mode orientation one-shot job is in flight
+    # carries ``orientation_owned_until`` (an epoch set at orient-launch). While
+    # ``now < orientation_owned_until`` the session is OWNED (never a zombie),
+    # then the window auto-expires — no cleanup needed. Best-effort per record.
+    orientation_owned = set()
+    for sid, rec in by_id.items():
+        try:
+            until = rec.get("orientation_owned_until")
+            if until is not None and float(until) > now:
+                orientation_owned.add(sid)
+        except (TypeError, ValueError):
+            continue
     # Take the Toolhelp process enumeration ONCE for this sweep (when an oracle
     # was supplied) so the denied-vs-gone disambiguation below is O(1)/PID. A
     # throwing enumerator is itself an enumeration GAP → every dead-looking PID
@@ -371,6 +390,7 @@ def build_snapshot(attached_pty_ids=None, records=None, job_active=None,
         attached_pty_ids=frozenset(attached),
         job_owned_ids=frozenset(job_owned),
         parent_owned_ids=frozenset(parent_owned),
+        orientation_owned_ids=frozenset(orientation_owned),
         pid_identity=MappingProxyType(dict(pid_identity)),
         positive_liveness=MappingProxyType(dict(positive)),
         degraded=degraded,
@@ -492,14 +512,15 @@ def enumerate_live_pids():
 def live_owner_ids(snapshot) -> set:
     """The canonical live-owner set — a PURE function of ``snapshot``.
 
-    Returns ``attached_pty_ids ∪ job_owned_ids ∪ transitive-parent-owned`` as a
-    NEW set each call. No self-sourcing, no I/O: it only reads the immutable
-    snapshot, so two sweeps over the same registry state yield equal sets with
-    no drift carried across sweeps.
+    Returns ``attached_pty_ids ∪ job_owned_ids ∪ transitive-parent-owned ∪
+    orientation-owned`` as a NEW set each call. No self-sourcing, no I/O: it only
+    reads the immutable snapshot, so two sweeps over the same registry state
+    yield equal sets with no drift carried across sweeps.
     """
     return (set(snapshot.attached_pty_ids)
             | set(snapshot.job_owned_ids)
-            | set(snapshot.parent_owned_ids))
+            | set(snapshot.parent_owned_ids)
+            | set(getattr(snapshot, "orientation_owned_ids", frozenset())))
 
 
 def live_pid_ids(snapshot) -> set:
