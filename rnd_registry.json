@@ -19,8 +19,8 @@
     "state": "active",
     "notes": "",
     "blurb": "The Anchor server runs **persistently in the background** — you do not normally launch it by hand. Its lifecycle is owned by the **NSSM service `anchor`** (Windows service, `Automatic` start), which runs `python anchor_gui.py --no-browser` and binds `http://localhost:8777`.",
-    "remote_url": "",
-    "auto_push": false,
+    "remote_url": "E:\\anchor.git",
+    "auto_push": true,
     "group": "AI Infastructure"
   },
   {
@@ -82,5 +82,77 @@
     "remote_url": "",
     "auto_push": false,
     "group": "AI Infastructure"
+  },
+  {
+    "id": "7b8659b729804c3baaf6aeaf47df4503",
+    "name": "Mez Tool",
+    "folder_path": "C:\\dev\\Mez Tool",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Personal"
+  },
+  {
+    "id": "9405abe06dc84b749d4ece0bda1cb45c",
+    "name": "Family Trusts",
+    "folder_path": "C:\\dev\\Family Trusts",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Personal"
+  },
+  {
+    "id": "343cfc30f00f434db0037f1374963264",
+    "name": "Data Room Ribo",
+    "folder_path": "C:\\dev\\Data Room Ribo",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Axmra"
+  },
+  {
+    "id": "c05e8d8b541f4f8089a106bf68f259b2",
+    "name": "Midway House",
+    "folder_path": "C:\\dev\\Midway House",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Personal"
+  },
+  {
+    "id": "959dc0718525456b929b0230a03ce3fd",
+    "name": "Collapse of Marketing",
+    "folder_path": "C:\\dev\\Collapse of Marketing",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Research"
+  },
+  {
+    "id": "505ec7bd62714d69bcf9aea855f876e6",
+    "name": "Cross Price Elasticity Market Competition",
+    "folder_path": "C:\\dev\\Cross Price Elasticity Market Competition",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Research"
   }
 ]

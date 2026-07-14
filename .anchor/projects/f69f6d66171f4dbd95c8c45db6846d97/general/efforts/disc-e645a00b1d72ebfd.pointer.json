@@ -1,0 +1,12 @@
+{
+  "job_id": "disc-e645a00b1d72ebfd",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "general",
+  "created_at": 1783702472.5754225,
+  "source": "discovered",
+  "kind": "doc",
+  "title": "205B8962D35B Transcript",
+  "artifact_path": "general/205b8962d35b-transcript.md",
+  "status": "imported",
+  "session_id": "205b8962d35b42299eb453a2baf39598"
+}

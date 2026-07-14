@@ -1,0 +1,11 @@
+{
+  "job_id": "disc-52563bb7c987a072",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "build",
+  "created_at": 1783725633.1445735,
+  "source": "discovered",
+  "kind": "execlog",
+  "title": "Sleep Engine Execution Log",
+  "artifact_path": "foundry-gui/planning/crucible/EXECUTION-LOG.md",
+  "status": "imported"
+}

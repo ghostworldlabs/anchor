@@ -62,61 +62,55 @@
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "write",
       "site": "effort_history.py:record_effort",
-      "count": 62
-    },
-    {
-      "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
-      "op": "replace",
-      "site": "paths.py:_replace_with_retry",
-      "count": 1
+      "count": 63
     },
     {
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "replace",
       "site": "paths.py:atomic_write_text",
-      "count": 2
+      "count": 6
     },
     {
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "write",
       "site": "paths.py:atomic_write_text",
-      "count": 3
+      "count": 6
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "replace",
       "site": "effort_history.py:_save_index",
-      "count": 65
+      "count": 69
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "write",
       "site": "effort_history.py:_save_index",
-      "count": 65
+      "count": 69
     },
     {
       "store": ".anchor/sessions.json",
       "op": "replace",
       "site": "session_registry.py:_atomic_replace",
-      "count": 6
+      "count": 12
     },
     {
       "store": ".anchor/sessions.json",
       "op": "replace",
       "site": "session_registry.py:_save_sessions",
-      "count": 124
+      "count": 126
     },
     {
       "store": ".anchor/sessions.json",
       "op": "write",
       "site": "session_registry.py:_save_sessions",
-      "count": 124
+      "count": 126
     },
     {
       "store": ".anchor/sessions.json",
       "op": "write",
       "site": "session_registry.py:_write_sessions_locked",
-      "count": 6
+      "count": 12
     }
   ]
 }

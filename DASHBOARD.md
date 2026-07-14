@@ -27,27 +27,42 @@
 - [x] Contact ICDS and Vasant RE AI Agent Workshop — Priority: 1 — energy: med — [academic]
 - [ ] Get the finances up to date and get the budget sorted — Priority: 1 — energy: med — [family]
 - [ ] Get Walt to issue NextGen Shares — Priority: 2 — energy: med — [commercial]
-- [ ] Get Milo Trust assigned to my trust — Priority: 1 — energy: med — [family]
-- [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 1 — energy: med — [family]
+- [ ] Get Milo Trust assigned to my trust — Priority: 2 — energy: med — [family]
+- [ ] Get Axmra, Nexia and NextGen into Holding Co. — Priority: 2 — energy: med — [family]
 - [x] Get my dossier updated — Priority: 1 — energy: med — [academic] — Due: 2026-05-07
 - [x] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
-- [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial]
+- [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial] — Notes: Look at Web Network solutions and Zoho subscription
 - [x] Respond to Cliffort — Priority: 1 — energy: med — [commercial]
 - [x] Review Archty PSU Patent and Respond to Matthew and Marco — Priority: 1 — energy: med — [commercial]
-- [ ] Sort out Archty Tax Bill Deleware — Priority: 2 — energy: med — [academic]
+- [ ] Sort out Archty Tax Bill Deleware — Priority: 1 — energy: med — [commercial]
 - [x] Get TAs lined up for Fall — Priority: 1 — energy: med — [academic]
-- [ ] Add a memorization and math training tool to GWL/Anchor — Priority: 1 — energy: med — [personal]
+- [ ] Create a memorization and math training tool — Priority: 1 — energy: med — [personal]
 - [x] Give Rick NYU Oral Exam tool/framework — Priority: 1 — energy: med — [academic]
-- [ ] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
+- [x] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
+- [x] Update ADNOC Analysis to help Bitar — Priority: 1 — energy: med — [commercial]
+- [ ] Draft Holding Co Slide/Slides (Napkin) — Priority: 1 — energy: med — [commercial]
+- [x] Send Brian Trust Docs — Priority: 1 — energy: med — [commercial]
+- [x] Work on 4 Pillar with Dave for Deck — Priority: 1 — energy: med — [commercial]
+- [x] Get Zombie Hunter Done & In V1 of Anchor — Priority: 1 — energy: med — [commercial]
+- [x] Get Skill Foundry Working w/ GUI V1.1 of Anchor — Priority: 1 — energy: med — [commercial]
+- [ ] Run get data sets for effort with Peter Ebbes — Priority: 1 — energy: med — [academic]
+- [ ] Update the Liechty Family Trusts and Share — Priority: 1 — energy: med — [family]
+- [x] Contact David Bears — Priority: 1 — energy: med — [commercial]
+- [x] Sort Box set up -- multiple collaborators, access via Claude code ... — Priority: 1 — energy: med — [commercial]
+- [ ] Expenses to sort — Priority: 1 — energy: med — [personal] — Notes: LinkedIn 2/15/26, $254.28. Marriott 1/26/26, SpringHill Suites $166.71 Ref #  898292533 3 to 5 business days ...
+- [ ] Figure out flights and where the expenses go — Priority: 1 — energy: med — [commercial]
+- [x] Cancel box subscirption — Priority: 1 — energy: med — [personal]
+- [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
+- [ ] Figure out Youth Super Activity Trip — Priority: 1 — energy: med — [personal]
 
 
 ### P1 (carried — Mon/Tue)
 - [ ] Find BYU Med School Person in charge of access — Priority: 2 — energy: med — [commercial] — Notes: Evan, Brandon's dad, said there was a young guy from Harvard system tasked with access ...
 - [x] Come up with a way of graphically representing the structure of the brain of an agent — Priority: 1 — energy: med — [commercial]
 - [ ] Work with Brian on Global Pharma Deck — Priority: 2 — energy: med — [commercial]
-- [ ] Compare PSU ID Watch Dog and Geico ID Protection — Priority: 1 — energy: low — [personal]
-- [ ] Get login details for Other Retirement Fund Account Nick Accordino — Priority: 1 — energy: low — [personal]
-- [ ] Get a Fire Proof Safe — Priority: 1 — energy: low — [personal]
+- [ ] Compare PSU ID Watch Dog and Geico ID Protection — Priority: 2 — energy: low — [personal]
+- [ ] Get login details for Other Retirement Fund Account Nick Accordino — Priority: 2 — energy: low — [personal]
+- [ ] Get a Fire Proof Safe — Priority: 2 — energy: low — [personal]
 - [x] Vet Mom's Trust and Review with Brothers — Priority: 1 — energy: med — [family]
 
 ### P2

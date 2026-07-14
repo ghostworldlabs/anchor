@@ -1,0 +1,12 @@
+{
+  "job_id": "disc-75d12dca333f5d10",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "general",
+  "created_at": 1783530519.3133502,
+  "source": "discovered",
+  "kind": "doc",
+  "title": "Census Report",
+  "artifact_path": "planning/rearch-2026-07/CENSUS-REPORT.md",
+  "status": "imported",
+  "session_id": "7588c088c4054e739a43f13bb902ca05"
+}

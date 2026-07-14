@@ -8,10 +8,20 @@
 - [x] Shepherd KU edit of answer deck (Jeffery + Ed) — Priority: 2 — energy: med — [commercial] — Notes: Carried from Axmra freeze 2026-04-07 — verify still relevant
 - [ ] Get Walt to issue NextGen Shares — Priority: 2 — energy: med — [commercial]
 - [x] Work with Brian on the HELM deck. — Priority: 1 — energy: med — [commercial]
-- [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial]
+- [ ] Stop NextGen Google Account Paid Status — Priority: 1 — energy: med — [commercial] — Notes: Look at Web Network solutions and Zoho subscription
 - [x] Respond to Cliffort — Priority: 1 — energy: med — [commercial]
 - [x] Review Archty PSU Patent and Respond to Matthew and Marco — Priority: 1 — energy: med — [commercial]
-- [ ] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
+- [x] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
+- [x] Update ADNOC Analysis to help Bitar — Priority: 1 — energy: med — [commercial]
+- [ ] Draft Holding Co Slide/Slides (Napkin) — Priority: 1 — energy: med — [commercial]
+- [x] Send Brian Trust Docs — Priority: 1 — energy: med — [commercial]
+- [x] Work on 4 Pillar with Dave for Deck — Priority: 1 — energy: med — [commercial]
+- [x] Get Zombie Hunter Done & In V1 of Anchor — Priority: 1 — energy: med — [commercial]
+- [x] Get Skill Foundry Working w/ GUI V1.1 of Anchor — Priority: 1 — energy: med — [commercial]
+- [x] Contact David Bears — Priority: 1 — energy: med — [commercial]
+- [x] Sort Box set up -- multiple collaborators, access via Claude code ... — Priority: 1 — energy: med — [commercial]
+- [ ] Figure out flights and where the expenses go — Priority: 1 — energy: med — [commercial]
+- [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
 
 
 ## Nexia Impact / Axmra Capital

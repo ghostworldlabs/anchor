@@ -1,0 +1,15 @@
+{
+  "engine_session_uuid": "401ba977-f4da-4220-b442-233ec06317c0",
+  "entries": {
+    "line:09855c277d250392f46fdbc72e99f70a90ef9ee3": {
+      "key": "line:09855c277d250392f46fdbc72e99f70a90ef9ee3",
+      "job_id": "37a9483a09fd4efcb09028cb327f93c8",
+      "input_tokens": 4,
+      "output_tokens": 546,
+      "total_tokens": 550,
+      "duration_ms": 19931,
+      "total_cost_usd": 0.24174500000000002,
+      "source": "job"
+    }
+  }
+}

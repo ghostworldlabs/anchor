@@ -4,16 +4,14 @@
 
 ## Plan set
 
-- title: Anchor R&D Surface v9 — "Tidy" — Master Plan (frozen design)
-- plan dir: `planning/rnd-v9`
+- title: Master Plan (draft — rev. Stage-1/R3)
+- plan dir: `planning/zombie-hunter-safe-to-arm-2026-07-05`
 - project: `f69f6d66171f4dbd95c8c45db6846d97`
-- plan session: `dir::planning/rnd-v9`
+- plan session: `dir::planning/zombie-hunter-safe-to-arm-2026-07-05`
 
 ## Execute on these documents
 
-- **Master plan:** `planning/rnd-v9/MASTER-PLAN.md`
-- **Implementation plan:** `planning/rnd-v9/IMPLEMENTATION-PLAN.md`
-- Supporting docs:
-  - `planning/rnd-v9/EXECUTION-LOG.md`
+- **Master plan:** `planning/zombie-hunter-safe-to-arm-2026-07-05/MASTER-PLAN.md`
+- **Implementation plan:** `planning/zombie-hunter-safe-to-arm-2026-07-05/IMPLEMENTATION-PLAN.md`
 
 These documents already exist in this checkout; open them to drive the build. (This is a reference only — no skill was auto-run.)

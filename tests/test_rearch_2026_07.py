@@ -564,7 +564,7 @@ class TestMutationInventoryArtifact:
         entries = payload["entries"]
         assert entries and all(
             set(e) == {"store", "op", "site", "count"} for e in entries)
-        assert any(e["site"] == "session_registry.py:_save_sessions"
+        assert any(e["site"] == "session_registry.py:_write_sessions_locked"
                    for e in entries)
         assert payload["journal_allowlist"]["filenames"] == ["journal.jsonl"]
         # deterministically sorted (stable, diffable, checked in)

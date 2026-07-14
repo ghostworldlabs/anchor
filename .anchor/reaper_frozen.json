@@ -1,0 +1,29 @@
+[
+  {
+    "session_id": "ec60eaa514c044a9b29ce2151fd6f0b1",
+    "pid": 47612,
+    "proc_create_time": 1784040565.9394517,
+    "state": "frozen",
+    "frozen_at": 1784042106.406126,
+    "reason": "reaper freeze-only tier",
+    "thaw_deadline": 1784045706.406126
+  },
+  {
+    "session_id": "5cacf842c4034064a217f1fc75a85559",
+    "pid": 104656,
+    "proc_create_time": 1784040556.821723,
+    "state": "frozen",
+    "frozen_at": 1784042106.406126,
+    "reason": "reaper freeze-only tier",
+    "thaw_deadline": 1784045706.406126
+  },
+  {
+    "session_id": "767ce81569c04aff9082182fc59cf4ff",
+    "pid": 93836,
+    "proc_create_time": 1784040556.8164835,
+    "state": "frozen",
+    "frozen_at": 1784042106.406126,
+    "reason": "reaper freeze-only tier",
+    "thaw_deadline": 1784045706.406126
+  }
+]
