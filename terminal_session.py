@@ -211,6 +211,29 @@ SEED_ENV_LANE_PREFIX = "ANCHOR_SEED_PROMPT_"
 #: case-insensitively on the stable, skill-independent tail of the greet line.
 GREET_MARKER = "what would you like to do?"
 
+#: telemetry-resume W6 (diag-B2 S3 attach-race fix) — the bounded FALLBACK for the
+#: greet-gated pending-paste flush. The greet-count gate above can leave a paste
+#: pending FOREVER when the model paraphrases/omits the greet marker (or an
+#: env-overridden seed lacks it). This is the escape hatch: once a paste has been
+#: pending longer than this many seconds AND the PTY has produced real model
+#: output beyond the echoed seed, the paste is delivered anyway — still
+#: paste-NOT-submit (trailing newline stripped; nothing is auto-submitted). Env
+#: ``ANCHOR_PASTE_FLUSH_FALLBACK_SECS`` overrides (tests set 0 to force it).
+PASTE_FLUSH_FALLBACK_SECS_ENV = "ANCHOR_PASTE_FLUSH_FALLBACK_SECS"
+PASTE_FLUSH_FALLBACK_SECS_DEFAULT = 45.0
+
+
+def _paste_flush_fallback_secs():
+    raw = (os.environ.get(PASTE_FLUSH_FALLBACK_SECS_ENV) or "").strip()
+    if raw:
+        try:
+            v = float(raw)
+            if v >= 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    return PASTE_FLUSH_FALLBACK_SECS_DEFAULT
+
 #: Neutral framing for an extra ``seed_context`` payload folded onto a lane seed.
 #: Replaces the old hard-coded "promoted from Grass Catchers" wording, which was
 #: WRONG for every non-grass use of ``seed_context`` — engine-switch handoffs
@@ -697,6 +720,12 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
         try:
             record = _reg.update_session(
                 sid, pending_paste=pending, paste_flushed=False)
+            # W6: stamp when the paste began waiting so the greet-gate has a
+            # bounded fallback flush (a separate call keeps the pending set above
+            # a stable, byte-identical write the B2 repro pins).
+            import time as _time
+            record = _reg.update_session(
+                sid, pending_paste_since=_time.time())
         except Exception:
             pass
 
@@ -805,8 +834,27 @@ def _flush_pending_paste(session_id):
     marker = GREET_MARKER.lower()
     seed_text = rec.get("seed_text") or ""
     base = seed_text.lower().count(marker)
-    if text.lower().count(marker) <= base:
-        return False  # still waiting on the model's actual greet — stay pending
+    greeted = text.lower().count(marker) > base
+    if not greeted:
+        # diag-B2 S3 attach-race fix (telemetry-resume W6): a paraphrased/omitted
+        # greet (or an env-overridden seed with no marker) would otherwise leave
+        # this paste pending FOREVER. Bounded fallback: once the paste has been
+        # pending longer than PASTE_FLUSH_FALLBACK_SECS *and* the PTY has produced
+        # real model output beyond the echoed seed, deliver it anyway — still
+        # paste-NOT-submit (the trailing newline is stripped below; nothing is
+        # ever auto-submitted). If neither the greet nor real output has appeared,
+        # stay pending (we never fabricate a greet we didn't observe).
+        import time as _time
+        since = rec.get("pending_paste_since")
+        if since is None:
+            since = rec.get("created_at")
+        try:
+            waited = _time.time() - float(since) if since is not None else 0.0
+        except (TypeError, ValueError):
+            waited = 0.0
+        has_model_output = len(text.strip()) > len(seed_text.strip())
+        if not (waited >= _paste_flush_fallback_secs() and has_model_output):
+            return False  # still waiting on the greet (or its bounded fallback)
 
     # Compare-and-set the claim under WRITE_LOCK (reentrant; same lock
     # update_session takes). Re-load + re-check inside the lock so exactly ONE
@@ -887,8 +935,10 @@ def queue_paste(session_id, text):
     if (rec.get("pending_paste") or "") or rec.get("paste_flushed"):
         return False
     try:
+        import time as _time
         _reg.update_session(
-            session_id, pending_paste=text, paste_flushed=False)
+            session_id, pending_paste=text, paste_flushed=False,
+            pending_paste_since=_time.time())  # W6: greet-gate fallback stamp
     except Exception:
         return False
     return True
@@ -1192,6 +1242,102 @@ def switch_engine(session_id, engine, seed_context=None):
     if project_id is not None:
         set_last_engine_for_project(project_id, engine)
     return record
+
+
+def resume_parked_session(session_id):
+    """Warm-REATTACH a PARKED-idle session by relaunching a PTY in its worktree (W6).
+
+    The telemetry-resume Layer-2 escalation for a **parked-idle** tile (worktree
+    RETAINED, PTY dead after a graceful ``close_session``): relaunch a fresh PTY on
+    the session's own engine in the SAME retained worktree, rebound under the SAME
+    ``session_id`` (the ``start_session``/``switch_engine`` rebind trick), flip the
+    record back to RUNNING, and re-seed the lane skill ONCE. Its worktree, chain,
+    summary, and finalized cost are all untouched — this is a genuine warm
+    reattach, not a new sibling session.
+
+    An **evicted-parked** tile (``worktree_path == ""`` — the worktree was
+    reclaimed by the bounded-budget eviction) CANNOT be reattached: this returns
+    ``{"ok": False, "reason": "evicted"}`` so the caller escalates via the W3/W4
+    continue-seed path instead (a NEW seeded session on the SAME chain, with the
+    honest 'resumed from persisted docs (worktree evicted)' line) — the UI NEVER
+    claims a reattach it cannot perform (NORTH-STAR-AMENDMENT eviction sub-contract).
+
+    Returns ``{"ok": True, "session": <record>, "mode": "reattach"}`` on success,
+    else an honest ``{"ok": False, "reason": ...}``. Never raises.
+    """
+    try:
+        record = _reg.get_session(session_id)
+    except Exception:
+        return {"ok": False, "reason": "lookup-failed"}
+    if record is None:
+        return {"ok": False, "reason": "unknown-session"}
+    # An evicted worktree cannot host a reattach — signal the caller to continue.
+    worktree_path = (record.get("worktree_path") or "").strip()
+    if record.get("evicted") or not worktree_path:
+        return {"ok": False, "reason": "evicted"}
+    try:
+        if not Path(worktree_path).is_dir():
+            # The worktree is gone though the record wasn't marked evicted — treat
+            # it as evicted (honest: no tree to reattach to).
+            return {"ok": False, "reason": "evicted"}
+    except (OSError, ValueError):
+        return {"ok": False, "reason": "evicted"}
+    # A still-live session needs no reattach — it is already running.
+    if record.get("status") == _reg.STATUS_RUNNING and session_id in _pty._LIVE:
+        return {"ok": True, "session": record, "mode": "already-live"}
+
+    lane = record.get("lane", "")
+    engine = record.get("backend", DEFAULT_ENGINE)
+    cmd = _resolve_engine_cmd(engine)
+    # Mint a fresh engine UUID for the resumed segment so its sidecar is a
+    # distinct, correlatable segment (finalize sums over all segments, once).
+    engine_uuid = _new_engine_session_id()
+    relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid)
+    stored_engine_uuid = engine_uuid if (len(relaunch_argv) > 1) else ""
+
+    # Reap any stale PTY child (tolerate already-dead), then relaunch in-tree.
+    try:
+        _pty.kill(session_id)
+    except _pty.UnknownSession:
+        pass
+    except Exception:
+        pass
+    try:
+        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
+    except Exception as exc:
+        return {"ok": False, "reason": "relaunch-failed", "detail": str(exc)}
+    # Rebind the new PTY under the EXISTING session_id (one id per session).
+    with _pty._TABLE_LOCK:
+        child = _pty._LIVE.pop(pty_sid, None)
+        if child is not None:
+            _pty._LIVE[session_id] = child
+
+    try:
+        record = _reg.update_session(
+            session_id, status=_reg.STATUS_RUNNING, seeded=False, seed_text="")
+    except Exception:
+        pass
+    if stored_engine_uuid:
+        try:
+            record = _reg.add_engine_session_uuid(session_id, stored_engine_uuid)
+        except Exception:
+            pass
+    # Re-seed the lane skill ONCE (loads the skill + one greet). No ACTION context
+    # is auto-submitted — orientation (a read-only plan-mode job) narrates, and any
+    # ACTION prompt stays v10 paste-NOT-submit.
+    seed_text = seed_for_lane(lane)
+    if seed_text:
+        try:
+            _pty.write(session_id, seed_text)
+        except Exception:
+            seed_text = None
+        if seed_text:
+            try:
+                record = _reg.update_session(
+                    session_id, seeded=True, seed_text=seed_text)
+            except Exception:
+                pass
+    return {"ok": True, "session": record, "mode": "reattach"}
 
 
 def suspend_session(session_id) -> str:
@@ -2813,6 +2959,16 @@ def autosave_session(session_id, record=None):
                 _usage.snapshot_session_usage(session_id, record=rec)
             except Exception:
                 pass
+        # 5. telemetry-resume W6 (diag-B2 S3 attach-race fix): the pending-paste
+        #    flush is normally only evaluated on read_since/attach — an UNMOUNTED
+        #    follow-on session (no open browser stream) would never check, leaving
+        #    its paste pending forever. Evaluate it here on the heartbeat too, so
+        #    the greet-gate (and its bounded fallback) still delivers the paste
+        #    UNSENT even with no viewer. Best-effort; never auto-submits.
+        try:
+            _flush_pending_paste(session_id)
+        except Exception:
+            pass
         return out
     except Exception:
         out["reason"] = "error"

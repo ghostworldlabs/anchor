@@ -275,6 +275,16 @@ def load_sessions() -> dict:
     return out
 
 
+def _coerce_float_or_none(v):
+    """Coerce a possibly-string/None epoch value to ``float`` or ``None``."""
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize(record: dict) -> dict:
     """Coerce a record to the canonical session shape.
 
@@ -499,6 +509,29 @@ def _normalize(record: dict) -> dict:
         "usage_state": usage_state,
         "usage_reason": usage_reason,
         "usage_gemini_segment": usage_gemini_segment,
+        # ── telemetry-resume W6: eviction + paste-fallback + orientation ─────
+        # ``evicted``/``evicted_at``: the bounded oldest-first parked-worktree
+        # eviction reclaims ONLY the worktree; the record stays parked-warm with
+        # ``worktree_path=""`` and this durable marker, so the tile renders
+        # evicted-parked and its Layer-2 escalation opens a NEW seeded session
+        # (never a reattach claim). Everything else — record, chain, summary,
+        # finalized cost — survives (the session stays MEASURED). Back-compat:
+        # absent → False/None.
+        "evicted": bool(record.get("evicted", False)),
+        "evicted_at": _coerce_float_or_none(record.get("evicted_at")),
+        # ``pending_paste_since``: when a paste was recorded UNSENT, so the
+        # greet-gate has a bounded fallback flush (a paraphrased/omitted greet no
+        # longer leaves the paste pending forever). Still paste-NOT-submit.
+        "pending_paste_since": _coerce_float_or_none(
+            record.get("pending_paste_since")),
+        # ``orientation_owned_until``/``orientation_job_id``: a read-only
+        # plan-mode orientation one-shot job (the Phase-0 fork) marks its origin
+        # session owned-for-N-minutes so the zombie-hunter live-owner computation
+        # never flags/kills a session while its orientation read is in flight.
+        # Absent → None/"" (never owned by orientation).
+        "orientation_owned_until": _coerce_float_or_none(
+            record.get("orientation_owned_until")),
+        "orientation_job_id": record.get("orientation_job_id", "") or "",
     }
 
 
@@ -833,7 +866,13 @@ def update_session(session_id: str, **fields) -> dict:
                "engine_session_uuid", "engine_session_uuids",
                "usage_state", "usage_reason",
                # Honest Telemetry W5: durable mixed-session (gemini-segment) marker.
-               "usage_gemini_segment"}
+               "usage_gemini_segment",
+               # telemetry-resume W6: bounded oldest-first parked-worktree
+               # eviction (worktree reclaimed, everything else survives) +
+               # the greet-gate bounded-fallback stamp + the read-only
+               # orientation one-shot job's origin-ownership window.
+               "evicted", "evicted_at", "pending_paste_since",
+               "orientation_owned_until", "orientation_job_id"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:

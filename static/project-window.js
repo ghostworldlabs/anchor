@@ -2162,6 +2162,23 @@ async function repopulate() {
 // Back-compat alias: the historical name used by callers.
 var loadSessions = repopulate;
 
+// telemetry-resume W6 (diag-B2 S1 fix): the client MANAGED liveness cache used to
+// self-heal ONLY on DOMContentLoaded + explicit user actions — a session that died
+// SERVER-side (restart/reap/crash) while a tab sat open stayed cached 'running'
+// forever, so a click routed to a live-terminal mount over a dead PTY. The PRIMARY
+// fix is the Layer-2 attach-ack handshake in _mountTerminal (a dead session yields
+// an explicit styled error state, never a blank pane). As defense-in-depth we ALSO
+// re-reconcile the cache to server truth on tab refocus + on a bounded timer, so a
+// stale-'running' record heals within seconds. Best-effort; _RESUME_REPOLL_MS is
+// overridable for tests.
+var _RESUME_REPOLL_MS = 15000;
+try {
+  window.addEventListener('focus', function () {
+    try { repopulate(); } catch (e) {}
+  });
+  setInterval(function () { try { loadSessions(); } catch (e) {} }, _RESUME_REPOLL_MS);
+} catch (e) {}
+
 // renderSessionBar(): v5 Wave 1 — render one clickable TILE per LIVE managed
 // session into #sessionBar. A live terminal session (started via "+ new <lane>")
 // is NOT a server-rendered board tile, so this bar IS its reopenable tile: after
@@ -3117,7 +3134,56 @@ function _resumeLive(sessionId, lane) {
     openPanel(prior);
     return;
   }
-  continueSession(sessionId, lane);
+  // telemetry-resume W6 — the per-tile-class escalation is decided SERVER-side by
+  // /api/rnd/resume_live: RUNNING→focus, parked-idle→warm reattach (same id,
+  // retained worktree), evicted-parked→NEW seeded session on the same chain with
+  // the 'resumed from persisted docs (worktree evicted)' line, done/failed/
+  // discovered/one-shot→continue-seed. On escalation the read-only orientation
+  // AUTO-EXECUTES as a plan-mode one-shot job (never a seeded PTY turn); any
+  // ACTION prompt stays v10 paste-NOT-submit. One click, one further action,
+  // same window — never a third action, never a second window.
+  var fromDock = (DOCK && DOCK.session_id === sessionId);
+  var payload = {project_id: PROJECT_ID, lane: lane || '',
+                 source_session: sessionId, backend: 'claude'};
+  _postJson('/api/rnd/resume_live', payload).then(function (d) {
+    if (!d || !d.ok || !d.session || !d.session.session_id) {
+      // Fall back to the plain continue path so the click is never a dead end.
+      continueSession(sessionId, lane);
+      return;
+    }
+    var sid = d.session.session_id;
+    var mode = d.mode || 'continue';
+    MANAGED[sid] = d.session;
+    if (sid !== sessionId) _RESUMED_FROM[sessionId] = sid;
+    try { renderSessionBar(); } catch (e) {}
+    // Read-only orientation AUTO-EXECUTES (plan-mode one-shot job) on the resumed
+    // session — best-effort, fire-and-forget; nothing is auto-submitted.
+    _triggerOrientation(sid, d.session.lane || lane || '');
+    // Open the escalated session IN THE SAME window (dock or panel).
+    if (fromDock) {
+      try { refreshBoard(); } catch (e) {}
+      var tile = document.querySelector('[data-effort-id="' + sid + '"]')
+        || document.querySelector('[data-effort-id="' + sessionId + '"]');
+      openEffortDock(sid, tile || undefined);
+    } else {
+      openPanel(sid);
+      if (sid !== sessionId) { try { _closePanel(sessionId); } catch (e) {} }
+    }
+    setTimeout(repopulate, 600);
+  }).catch(function () { continueSession(sessionId, lane); });
+}
+
+// _triggerOrientation: fire the read-only plan-mode orientation one-shot job for
+// a resumed session (telemetry-resume W6 orientation fork). Best-effort — the
+// escalation never blocks on it, and NOTHING is auto-submitted to the live PTY
+// (orientation is a separate read-only job; any ACTION prompt stays paste-NOT-
+// submit).
+function _triggerOrientation(sessionId, lane) {
+  try {
+    _postJson('/api/rnd/orient_session',
+              {project_id: PROJECT_ID, lane: lane || '', session: sessionId})
+      .catch(function () {});
+  } catch (e) {}
 }
 
 // _fillPastSessionDetail: fetch the cached session summary and render the
@@ -4049,6 +4115,50 @@ function _mountTerminal(sessionId, body, rec) {
               {session: sessionId, cols: sz.cols, rows: sz.rows});
   });
 
+  // telemetry-resume W6 — the ATTACH-ACK / replay-complete handshake (diag-B2 S1
+  // fix; NORTH-STAR-AMENDMENT Layer 2). The pane swaps in ONLY after the server's
+  // 'replay_complete' control frame; a dead/unknown session yields 'attach_ack
+  // ok:false' → an explicit styled ERROR STATE with a Retry control (the Layer-1
+  // narration stays visible underneath), never a silent blank pane. A missing ack
+  // within 5s falls to the SAME error state. Control frames ride the SAME authed
+  // socket as a TEXT frame prefixed with WS_CTL_PREFIX (opaque PTY bytes never
+  // start with a NUL), so terminal bytes and control messages are unambiguous.
+  var WS_CTL_PREFIX = '\x00ANCHOR-CTL:';
+  var attached = false;
+  var ackTimer = null;
+  // A styled attach overlay over the terminal until replay-complete lands.
+  var overlay = document.createElement('div');
+  overlay.className = 'term-attach';
+  overlay.innerHTML = '<div class="term-attach-msg">connecting to live '
+    + 'session…</div>';
+  try { body.appendChild(overlay); } catch (e) {}
+  function _clearAckTimer() { if (ackTimer) { clearTimeout(ackTimer); ackTimer = null; } }
+  function _attachOk() {
+    attached = true; _clearAckTimer();
+    try { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (e) {}
+    try { _fitPanelTerminal(sessionId, w); } catch (e) {}
+  }
+  function _attachError(reason) {
+    _clearAckTimer();
+    if (attached) return;  // already live — a later close is not an attach error
+    try { if (w.transport && w.transport.close) w.transport.close(); } catch (e) {}
+    overlay.className = 'term-attach term-attach-err';
+    overlay.innerHTML = '<div class="term-attach-msg">Could not attach a live '
+      + 'terminal (' + _esc(reason || 'no response') + '). The warm view below '
+      + 'is still available.</div>'
+      + '<button class="term-attach-retry" type="button">Retry</button>';
+    var rb = overlay.querySelector('.term-attach-retry');
+    if (rb) rb.onclick = function (e) {
+      e.stopPropagation();
+      try { if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay); } catch (er) {}
+      try { if (w.term && w.term.dispose) w.term.dispose(); } catch (er) {}
+      _mountTerminal(sessionId, body, rec);  // one-click retry, same window
+    };
+  }
+  ackTimer = setTimeout(function () {
+    if (!attached) _attachError('timeout');
+  }, 5000);
+
   // Transport: try WebSocket first; on error fall back to the SSE stream.
   var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
   var wsUrl = wsProto + '//' + location.host +
@@ -4060,6 +4170,12 @@ function _mountTerminal(sessionId, body, rec) {
     var sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
     var es = new EventSource(sseUrl);
     w.transport = es;
+    // Mirror the WS handshake over SSE control events.
+    es.addEventListener('attach_ack', function (ev) {
+      try { var p = JSON.parse(ev.data); if (p && p.ok === false) {
+        _attachError(p.reason || 'unknown-session'); } } catch (e) {}
+    });
+    es.addEventListener('replay_complete', function () { _attachOk(); });
     es.addEventListener('output', function (ev) {
       try { var p = JSON.parse(ev.data); if (p.text) term.write(p.text); } catch (e) {}
     });
@@ -4069,7 +4185,22 @@ function _mountTerminal(sessionId, body, rec) {
   try {
     var ws = new WebSocket(wsUrl);
     w.transport = ws;
-    ws.onmessage = function (ev) { term.write(ev.data); };
+    ws.onmessage = function (ev) {
+      var data = ev.data;
+      // A W6 control frame? (prefixed TEXT frame; PTY bytes never start with NUL.)
+      if (typeof data === 'string' && data.indexOf(WS_CTL_PREFIX) === 0) {
+        var msg = null;
+        try { msg = JSON.parse(data.slice(WS_CTL_PREFIX.length)); } catch (e) { return; }
+        if (!msg) return;
+        if (msg.type === 'attach_ack' && msg.ok === false) {
+          _attachError(msg.reason || 'unknown-session');
+        } else if (msg.type === 'replay_complete') {
+          _attachOk();
+        }
+        return;  // control frames are never written to the terminal
+      }
+      term.write(data);
+    };
     ws.onclose = function () {
       // If the WS never carried data (e.g. upgrade unsupported), use SSE.
       if (!sseStarted) startSSE();

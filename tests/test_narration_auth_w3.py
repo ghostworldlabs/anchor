@@ -35,6 +35,16 @@ NEW_ROUTES = [
     ("GET", "/api/rnd/usage_ledger", "session=sess-x", "usage"),
 ]
 
+# telemetry-resume W6 — the plan's NEW *mutating* endpoints (POST). Adding a POST
+# endpoint outside this enumeration is a BLOCKER exactly like the GET rule above.
+# The orientation trigger LAUNCHES a read-only plan-mode job → default-deny token;
+# resume_live escalates (spawns/reattaches a session) → token. Each must 401 a
+# tokenless POST BEFORE doing anything (no job launched, no session spawned).
+NEW_POST_ROUTES = [
+    ("POST", "/api/rnd/orient_session"),
+    ("POST", "/api/rnd/resume_live"),
+]
+
 
 def _get(url, token=None):
     # A token-gated GET authenticates via the standard Authorization header
@@ -61,6 +71,65 @@ def test_new_routes_declared_token_authed_in_route_table():
         row = declared[(method, path)]
         assert row.auth == rt.AUTH_TOKEN, f"{path} must be token-authed"
         assert row.migrated and row.handler, f"{path} must be migrated"
+
+
+def test_new_post_routes_declared_token_authed_in_route_table():
+    """Every W6 new POST route (orientation trigger, resume_live escalation) is a
+    declared, token-authed, migrated row — default-deny by construction."""
+    declared = {(r.method, r.pattern): r for r in rt.ROUTES}
+    for method, path in NEW_POST_ROUTES:
+        assert (method, path) in declared, (
+            f"{method} {path} must have a declared route_table row "
+            "(absence for a new endpoint is a BLOCKER)")
+        row = declared[(method, path)]
+        assert row.auth == rt.AUTH_TOKEN, f"{path} must be token-authed"
+        assert row.migrated and row.handler, f"{path} must be migrated"
+
+
+def _post(url, token=None, body=b"{}"):
+    req = urllib.request.Request(url, method="POST", data=body)
+    req.add_header("Content-Type", "application/json")
+    if token is not None:
+        req.add_header("X-Anchor-Token", token)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, resp.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def test_new_post_routes_401_before_substance(monkeypatch, tmp_path):
+    """With a token configured, each new POST route rejects a tokenless POST with
+    401 BEFORE doing anything (no job launched, no session spawned)."""
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
+    importlib.reload(paths)
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    server = gui.make_server("127.0.0.1", 0)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        base = f"http://127.0.0.1:{port}"
+        for method, path in NEW_POST_ROUTES:
+            url = f"{base}{path}"
+            code, raw = _post(url)
+            assert code == 401, f"{path} must 401 a tokenless POST"
+            body = json.loads(raw or b"{}")
+            assert body.get("ok") is False
+            code, _ = _post(url, token="nope")
+            assert code == 401, f"{path} must 401 a bad token"
+            # Correct token → NOT 401 (auth passed; the handler runs and returns
+            # its own 400/404 for the empty body — never a 401).
+            code, _ = _post(url, token="tok-123",
+                            body=b'{"project_id":"nope","session":"nope"}')
+            assert code != 401, f"{path} must accept an authed POST past the gate"
+    finally:
+        server.shutdown()
+        server.server_close()
+        t.join(timeout=5)
 
 
 def test_new_routes_401_before_substance(monkeypatch, tmp_path):

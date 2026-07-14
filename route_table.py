@@ -383,6 +383,14 @@ ROUTES = [
        handler="handle_push_now", migrated=True),
     _r("POST", "/api/rnd/continue_session", AUTH_TOKEN,
        handler="handle_continue_session", migrated=True),
+    # telemetry-resume W6 — Layer-2 '▶ Resume live' escalation (routed by tile
+    # class server-side) + the read-only plan-mode orientation one-shot trigger.
+    # Both mutate (spawn a session / launch a job) → default-deny token; the
+    # orientation trigger is enumerated in the auth-enumeration test.
+    _r("POST", "/api/rnd/resume_live", AUTH_TOKEN,
+       handler="handle_resume_live", migrated=True),
+    _r("POST", "/api/rnd/orient_session", AUTH_TOKEN,
+       handler="handle_orient_session", migrated=True),
     _r("POST", "/api/rnd/advance_session", AUTH_TOKEN,
        handler="handle_advance_session", migrated=True),
     _r("POST", "/api/rnd/gandalf_run", AUTH_TOKEN,
