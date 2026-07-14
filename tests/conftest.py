@@ -33,6 +33,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Billing safety net: default BOTH model-spawn seams to the stubs, suite-wide
+# ──────────────────────────────────────────────────────────────────────────────
+# Model spawns fire as BACKGROUND side effects of innocent tests — the
+# project-blurb / session-summary threads and PTY session starts resolve their
+# command from the environment at spawn time. A test that didn't set the seams
+# fell through to ``DEFAULT_RUNNER_CMD`` (real ``claude -p``) / real ConPTY
+# ``claude`` and incurred REAL BILLING (8,816 live sessions leaked from this
+# suite's tmp dirs between 2026-06-20 and 2026-07-14).
+#
+# ``setdefault`` so an explicit outer environment still wins, and tests that
+# need a seam UNSET (the runner-cmd contract / engine-selector / healthcheck
+# restore tests) keep working — they already ``monkeypatch.delenv`` on top.
+# A deliberate live run must opt in with ``ANCHOR_TESTS_ALLOW_LIVE=1``.
+import os
+
+if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
+    _FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
+    os.environ.setdefault("ANCHOR_RUNNER_CMD", f"python {_FAKE_CLAUDE}")
+    os.environ.setdefault("ANCHOR_PTY_BACKEND", "stub")
+
 import subprocess
 if sys.platform == "win32":
     _orig_run = getattr(subprocess, "run", None)
