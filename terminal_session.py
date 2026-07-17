@@ -988,6 +988,13 @@ def _generate_switch_summary(session_id, record):
     swap. Kept as a module-level seam so tests can stub it (healthy / hanging).
     """
     try:
+        worktree_path = (record or {}).get("worktree_path") or ""
+        lane = (record or {}).get("lane") or ""
+        if worktree_path and lane:
+            import os
+            restart_doc = os.path.join(worktree_path, lane, "RESTART.md")
+            if os.path.exists(restart_doc):
+                return f"Switching engines. Please read the {restart_doc} file to get oriented with the current state. Do NOT read the full raw transcripts unless specifically needed."
         try:
             out = _pty.read_since(session_id, 0)
         except _pty.UnknownSession:

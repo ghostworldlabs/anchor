@@ -514,7 +514,7 @@ def _aggregate_effort(session) -> dict:
 def _seed_prompt(seed: dict) -> str:
     """Render the extraction seed as the bounded model prompt (step b input)."""
     lines = [
-        f"Summarize this {seed['lane']} trio session as grounded bullet claims.",
+        f"Summarize this {seed['lane']} trio session in a clear, human-readable paragraph. Provide a simple, informative description of exactly what was accomplished in this session. Avoid overly dense lists; focus on readability for a human.",
         f"Title: {seed.get('title', '')}",
         "Anchors from the member documents:",
     ]
@@ -1516,10 +1516,11 @@ def _project_seed_prompt(seed: dict) -> str:
     unchanged.
     """
     lines = [
-        "State this project's OBJECTIVE in 1-2 sentences: what it is FOR — its "
-        "task/purpose and the problem it solves. Be specific and grounded only "
-        "in the material below; do NOT pad with generic feature lists. Output "
-        "the statement as 1-2 lines (one sentence per line), nothing else.",
+        "Write a clear, informative paragraph (3-5 sentences) summarizing what this project is, "
+        "its main purpose, and its current state. Write it in simple, human-readable language. "
+        "Make it highly informative and easy to understand at a glance. Be specific and grounded only "
+        "in the material below; do NOT pad with generic feature lists. Output the statement as "
+        "a few lines of plain text, nothing else.",
         f"Title: {seed.get('title', '')}",
         "Anchors from the project documents:",
     ]

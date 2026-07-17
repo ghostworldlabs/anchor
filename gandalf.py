@@ -184,9 +184,11 @@ def _build_agentic_prompt(folder_path, tier, report_abs) -> str:
         f"{report_abs}\n\n"
         "If the skill produces a graded advisor-output JSON, also write it next to "
         "the report as 'advisor-output.json' in the same directory.\n\n"
-        "Then, as your FINAL message, print a one-paragraph executive summary of "
-        "the read, followed by a single final line in exactly this form:\n"
-        "VERDICT: <one sentence overall assessment>")
+        "Then, as your FINAL message, print your executive summary and verdict wrapped in exactly this format:\n"
+        "<EXEC_SUMMARY>\n"
+        "[Provide a short, easy-to-read bulleted list covering the core findings]\n\n"
+        "VERDICT: <one sentence overall assessment>\n"
+        "</EXEC_SUMMARY>")
 
 
 def _parse_agentic_summary(text):
@@ -194,6 +196,12 @@ def _parse_agentic_summary(text):
     the ``VERDICT:`` line (if present); the summary is the remaining prose."""
     if not text:
         return "", ""
+    
+    import re
+    match = re.search(r"<EXEC_SUMMARY>(.*?)</EXEC_SUMMARY>", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        text = match.group(1).strip()
+        
     verdict = ""
     keep = []
     for ln in text.splitlines():

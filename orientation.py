@@ -114,8 +114,7 @@ def build_orientation_prompt(view, *, lane="", session_id="") -> str:
     if next_text:
         lines.append(f"- Suggested next step: {next_text}")
     lines.append("")
-    lines.append("Read the referenced documents where present, then print the "
-                 "three-part orientation. Take no other action.")
+    lines.append("Read the RESTART.md document if present to get oriented quickly. Do NOT read the full raw transcripts unless specifically needed to clarify an ambiguous point in the RESTART.md summary. Then print the three-part orientation. Take no other action.")
     return "\n".join(lines)
 
 

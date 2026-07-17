@@ -181,7 +181,7 @@ def parse_sidecar_text(text, engine_session_uuid=None) -> ParseResult:
     order = []                  # stable first-seen order of message ids
     timestamps = []
     assistant_lines = 0
-    has_message_lines = False
+    has_successful_assistant_lines = False
 
     for raw in (text or "").split("\n"):
         s = raw.strip()
@@ -201,7 +201,6 @@ def parse_sidecar_text(text, engine_session_uuid=None) -> ParseResult:
         if typ == "summary":
             continue
         if typ in ("user", "assistant"):
-            has_message_lines = True
             if not session_uuid:
                 session_uuid = obj.get("sessionId") or ""
             ts = obj.get("timestamp")
@@ -209,6 +208,8 @@ def parse_sidecar_text(text, engine_session_uuid=None) -> ParseResult:
                 timestamps.append(ts)
         if typ == "assistant":
             assistant_lines += 1
+            if not obj.get("isApiErrorMessage"):
+                has_successful_assistant_lines = True
             msg = obj.get("message") or {}
             mid = msg.get("id")
             usage = msg.get("usage")
@@ -230,13 +231,13 @@ def parse_sidecar_text(text, engine_session_uuid=None) -> ParseResult:
     entries = [by_msg[m] for m in order]
     totals = _sum_usage(entries)
 
-    if not has_message_lines:
-        # A present-but-turnless file (only a summary line, or empty). Honest
-        # unmeasured — NOT capture-failed (there were no turns to measure).
+    if not has_successful_assistant_lines:
+        # A present-but-turnless file (only local commands, API errors, or empty). Honest
+        # unmeasured — NOT capture-failed (there were no successful turns to measure).
         return _result(STATE_UNMEASURED, REASON_EMPTY_SIDECAR, session_uuid,
                        totals, [], 0, assistant_lines, 0, False)
     if totals["total_all_classes"] <= 0:
-        # Message lines present but zero usage → CORRECTNESS failure.
+        # Successful assistant lines present but zero usage → CORRECTNESS failure.
         return _result(STATE_CAPTURE_FAILED, REASON_ZERO_USAGE, session_uuid,
                        _zero_totals(), [], 0, assistant_lines, len(by_msg), True)
 

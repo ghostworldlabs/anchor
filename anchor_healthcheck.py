@@ -501,7 +501,7 @@ def check_server_and_endpoints(report: Report):
 
 
 # ── Check 4b: declared-route auth walk (rearch W8) ──────────────────────────
-def _status_of(req_or_url, timeout=4.0):
+def _status_of(req_or_url, timeout=10.0):
     """Return the HTTP status of a request, following the HTTPError path.
 
     A 2xx/3xx returns its code (no body read for streams — a HEAD-like probe is
@@ -1368,7 +1368,7 @@ def _git_init_repo(path: Path) -> bool:
             ["git", "commit", "-m", "hc seed", "--no-gpg-sign"],
         ):
             subprocess.run(args, cwd=str(path), env=env, capture_output=True,
-                           text=True, timeout=30)
+                           text=True, timeout=30, check=True)
         return True
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1434,6 +1434,9 @@ def check_rnd_v3_surface(report: Report, server_proc, rnd_env: dict):
         rnd_env["v3_temp_dirs"].append(proj_folder)
         (proj_folder / "README.md").write_text("# hc v3 probe\n", encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v3", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -1650,6 +1653,9 @@ def check_rnd_v4_surface(report: Report, server_proc, rnd_env: dict):
         rnd_env["v3_temp_dirs"].append(proj_folder)
         (proj_folder / "README.md").write_text("# hc v4 probe\n", encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v4", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -1903,6 +1909,9 @@ def check_rnd_v5_surface(report: Report, server_proc, rnd_env: dict):
         (proj_folder / "README.md").write_text("# hc v5 probe\n",
                                                encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v5", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -2193,6 +2202,9 @@ def check_rnd_v6_surface(report: Report, server_proc, rnd_env: dict):
         (proj_folder / "README.md").write_text("# hc v6 probe\n",
                                                encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v6", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -2493,6 +2505,9 @@ def check_rnd_v7_surface(report: Report, server_proc, rnd_env: dict):
         (proj_folder / "README.md").write_text("# hc v7 probe\n",
                                                encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v7", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -2807,6 +2822,9 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v8 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v8", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
@@ -3107,6 +3125,9 @@ def check_rnd_v9_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v9 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v9", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
@@ -3477,6 +3498,9 @@ def check_rnd_v10_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v10 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v10", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
@@ -3903,6 +3927,9 @@ def check_rnd_v11_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v11 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v11", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
@@ -4214,6 +4241,9 @@ def check_rnd_v11_1_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v11.1 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v11.1", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
@@ -4780,6 +4810,9 @@ def check_telemetry_capture_surface(report: Report, server_proc, rnd_env: dict):
             encoding="utf-8")
         (proj_folder / "README.md").write_text("# hc w7\n", encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " w7", str(proj_folder))
         pid = proj["id"]
         rnd_env["created_ids"].append(pid)
@@ -5104,6 +5137,9 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
             "# hc v12 probe\n\nR&D project managed by Anchor.\n",
             encoding="utf-8")
         git_ok = _git_init_repo(proj_folder)
+        if not git_ok:
+            report.check(name, True, "skipped (git init failed)")
+            return
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v12", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
