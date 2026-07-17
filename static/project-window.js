@@ -2266,7 +2266,20 @@ function _buildBarTile(s, finished) {
   lbl.textContent = (s.label ? s.label : (s.lane + ' ' + (s.idx || '')));
   chip.appendChild(dot);
   chip.appendChild(lbl);
-  if (finished) {
+    if (!finished) {
+      var kill = document.createElement('span');
+      kill.innerHTML = '&times;';
+      kill.style.marginLeft = '6px';
+      kill.style.cursor = 'pointer';
+      kill.style.fontWeight = 'bold';
+      kill.title = 'Retire session';
+      kill.onclick = function (ev) {
+        ev.stopPropagation();
+        killPanel(sid, true);
+      };
+      chip.appendChild(kill);
+    }
+    if (finished) {
     var ck = document.createElement('span');
     ck.className = 'ck';
     ck.textContent = '✓';
@@ -3768,18 +3781,38 @@ async function refreshBoard() {
     if (!r || !r.ok) return;
     var data = await r.json();
     if (!data || !data.ok || typeof data.html !== 'string') return;
-    var filesOpen = false;
-    var detailEl = document.getElementById('projectFilesDetails');
-    if (detailEl) {
-      filesOpen = detailEl.open;
-    }
-    var board = document.getElementById('kanbanBoard');
-    if (!board) return;                    // guard: container absent
-    board.innerHTML = data.html;
-    var newDetailEl = document.getElementById('projectFilesDetails');
-    if (newDetailEl && filesOpen) {
-      newDetailEl.open = true;
-    }
+      var filesOpen = false;
+      var detailEl = document.getElementById('projectFilesDetails');
+      if (detailEl) {
+        filesOpen = detailEl.open;
+      }
+      var openGandalfRuns = {};
+      var gruns = document.querySelectorAll('#gandalfPanel .grun.open');
+      for (var i = 0; i < gruns.length; i++) {
+        var runId = gruns[i].getAttribute('data-run');
+        var gexec = gruns[i].querySelector('.gexec');
+        if (runId && gexec && gexec.getAttribute('data-loaded') === '1') {
+          openGandalfRuns[runId] = gexec.innerHTML;
+        }
+      }
+      var board = document.getElementById('kanbanBoard');
+      if (!board) return;                    // guard: container absent
+      board.innerHTML = data.html;
+      var newDetailEl = document.getElementById('projectFilesDetails');
+      if (newDetailEl && filesOpen) {
+        newDetailEl.open = true;
+      }
+      for (var runId in openGandalfRuns) {
+        var el = document.querySelector('#gandalfPanel .grun[data-run="' + runId + '"]');
+        if (el) {
+          el.classList.add('open');
+          var gexec = el.querySelector('.gexec');
+          if (gexec) {
+            gexec.setAttribute('data-loaded', '1');
+            gexec.innerHTML = openGandalfRuns[runId];
+          }
+        }
+      }
     // v10 Wave 4 FIX 2/3: the swapped-in board re-emits "from grass" chip stubs;
     // resolve them (label/dead-state) against the loaded grass data. If grass
     // data isn't loaded yet, fetch it (which itself re-resolves on completion).
@@ -3859,10 +3892,10 @@ function _removeSessionTile(sessionId) {
 // remove the session's lane tile so it's gone. For a historical/non-live session
 // the server returns 404 (unknown-session) — that's fine; we STILL remove the
 // tile + record cleanly (no orphan). (Minimize/close, by contrast, never kill.)
-async function killPanel(sessionId) {
+async function killPanel(sessionId, skipConfirm) {
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
-  if (!confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
+  if (!skipConfirm && !confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
   var autoBuild = null;
   try {
     var r = await _postJson('/api/rnd/term_kill', {session: sessionId});
