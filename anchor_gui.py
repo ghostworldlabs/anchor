@@ -3824,9 +3824,10 @@ def _render_layoutd_gandalf_panel(folder_path, project_id) -> str:
         f"<img class='gicon' src='/vendor/brand/gandalf-icon-v5.jpg?v={BUILD_ID}' "
         "alt='Gandalf the White'>")
 
+    dis = " disabled" if in_flight else ""
+
     if not runs:
         # Honest empty state — no fabricated rows; a single Run control.
-        dis = " disabled" if in_flight else ""
         body = (
             "<div class='gandalf-empty' data-gandalf-empty='1'>"
             "No Gandalf read yet."
@@ -4252,7 +4253,11 @@ def _render_layoutd_html(folder_path, project_id):
         "<button class='btn primary neweffort' id='newPlanBuildBtn' "
         "onclick=\"newEffort('plan')\" "
         "title='Start a new effort at the Plan stage (then advance to Build)'>"
-        "+ New plan/build</button></div>"
+        "+ New plan/build</button>"
+        "<button class='btn primary neweffort' id='newGeneralBtn' "
+        "onclick=\"newEffort('general')\" "
+        "title='Start a new general session'>"
+        "+ New general</button></div>"
     )
     board = (
         "<div class='pgrid layoutd'>"
@@ -4836,7 +4841,7 @@ def render_project_window_html(project_id: str) -> str:
         except Exception:
             pass
     blurb_attr = html_lib.escape(blurb_raw, quote=True)
-    blurb_esc = html_lib.escape(blurb_raw)
+    blurb_esc = html_lib.escape(_summarizer.short_summary_text(blurb_raw))
     # v5 Wave 3: the project's cached OBJECTIVE summary (read-only — NEVER runs
     # the model on the render path). Shown in the header as the "objective" line;
     # falls back to the blurb when no summary is cached yet.
@@ -6977,12 +6982,12 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
                home stylesheet lacks the project window's .mflex rules, so a
                scoped copy rides along right here. -->
           <style>.mflex{{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);white-space:nowrap;cursor:default}}.mflex.mflex-both{{border-color:rgba(34,197,94,.45);color:var(--success);background:rgba(34,197,94,.12)}}.mflex.mflex-claude{{border-color:rgba(56,139,253,.45);color:var(--accent)}}.mflex.mflex-gemini{{border-color:rgba(234,179,8,.5);color:#eab308;background:rgba(234,179,8,.1)}}.mflex.mflex-none{{border-color:rgba(248,81,73,.5);color:var(--danger)}}</style>
-          {render_model_flex_badge()}
-        </div>
+          </div>
         <div class="date">{today_str}</div>
       </div>
 
-      <div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div>{render_model_flex_badge()}</div>
         <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
       </div>
       <div class="add-task-bar" id="addTaskBar" style="display:none;flex-wrap:wrap">
@@ -8459,7 +8464,7 @@ async function _anchorDoUpload(items, projectId) {{
 
   var filesPayload = [];
   for (var i = 0; i < items.length; i++) {{
-    var rel = String(items[i].path || items[i].file.name).replace(/^\/+/, '');
+    var rel = String(items[i].path || items[i].file.name).replace(/^\\/+/, '');
     try {{
       var base64 = await _anchorReadB64(items[i].file);
       filesPayload.push({{ path: rel, content_b64: base64 }});
@@ -10060,10 +10065,9 @@ def handle_switch_terminal_engine(handler, path, body):
                          "reason": "unknown-session"}, 404)
     else:
         try:
-            # 1) Suspend & Summarize
-            summary_text = _termsess.suspend_session(session)
-            # 2) Switch engine and inject summary
-            rec = _termsess.switch_engine(session, engine, seed_context=summary_text)
+            # Switch engine (which natively does a bounded context summary and injects it) 
+            rec = _termsess.switch_engine(session, engine)
+            summary_text = ''
             handler._send_json({
                 "ok": True,
                 "session": rec,
@@ -10597,7 +10601,13 @@ def handle_resume_live(handler, path, body):
     if not lane:
         lane = (src_rec.get("lane") or "").strip()
     # RUNNING → focus the existing live session (no new spawn).
+    import pty_manager as _pty
+    is_truly_live = False
     if src_rec.get("status") == _sessreg.STATUS_RUNNING:
+        with _pty._TABLE_LOCK:
+            is_truly_live = source in _pty._LIVE
+
+    if src_rec.get("status") == _sessreg.STATUS_RUNNING and is_truly_live:
         handler._send_json({"ok": True, "mode": "already-live",
                          "session": _safe_session_projection(src_rec)})
         return
@@ -11713,6 +11723,18 @@ def handle_zombie_hunter_report(handler, path, body):
     # branch referencing it before this line raises UnboundLocalError
     # -> a 500 on every page load. (rearch W8: the shadowing class is
     # structurally eliminated — route_import_scan proves it stays 0.)
+
+    import urllib.request
+    try:
+        req = urllib.request.urlopen('http://127.0.0.1:48484/', timeout=5)
+        html = req.read().decode('utf-8')
+    except Exception as e:
+        html = f"<html><body><h1>Error connecting to Zombie Hunter Node Server</h1><pre>{str(e)}</pre></body></html>"
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.end_headers()
+    handler.wfile.write(html.encode("utf-8"))
+    return
 
                     # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
     report_path = zombie_hunter._last_report_path()
@@ -14737,6 +14759,17 @@ def main():
                     _daemon_owners["set"] = attached
                 reaper_arming.armed_sweep(running, snap)
             zombie_hunter.start_hunter(_live_provider, sweep_fn=_armed_sweep_cycle)
+            
+            import subprocess
+            try:
+                node_server_path = r"C:\dev\Skill Foundry\skills\zombie-hunter\src\server.js"
+                if os.path.exists(node_server_path):
+                    creationflags = 0x08000000 if sys.platform.startswith("win") else 0
+                    subprocess.Popen(["node", node_server_path], creationflags=creationflags)
+                    _logger.info("Launched Prism Matrix Node Server on port 48484")
+            except Exception as e:
+                _logger.error(f"Failed to launch Prism Matrix Node Server: {e}")
+                
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")
 

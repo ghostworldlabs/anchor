@@ -346,6 +346,7 @@ The dashboard has these views (toggled by `showView()` in JS):
 - **F-string escaping:** The HTML is generated inside Python f-strings, so all literal `{` and `}` in CSS/JS must be doubled: `{{` and `}}`
 
 ## Important Rules
+- **Summary formatting:** Project and session summaries should be simple, human-readable paragraphs (3-5 sentences, no dense bulleted lists). Conversely, Gandalf executive summaries MUST be short, easy-to-read bulleted lists.
 - **anchor_gui.py is the primary interface.** It reads/writes markdown directly via a local API.
 - **Single folder.** Everything lives in `C:\dev\Anchor`. No siblings, no syncing.
 - **commercial.md is now full detail** — proprietary commercial info (Nexia/Axmra fundraising, drug detail, key relationships) lives directly in `domains/commercial.md`. The old "summary-only" rule no longer applies.
