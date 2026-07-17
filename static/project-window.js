@@ -3786,6 +3786,18 @@ async function refreshBoard() {
       if (detailEl) {
         filesOpen = detailEl.open;
       }
+      var openStates = { details: {}, classes: {} };
+      var detailsEls = document.querySelectorAll('#kanbanBoard details');
+      for (var i = 0; i < detailsEls.length; i++) {
+        var key = detailsEls[i].id || detailsEls[i].className;
+        if (key) openStates.details[key] = detailsEls[i].open;
+      }
+      var openEls = document.querySelectorAll('#kanbanBoard .open');
+      for (var i = 0; i < openEls.length; i++) {
+        var idAttr = openEls[i].id || openEls[i].getAttribute('data-run') || openEls[i].getAttribute('data-window') || openEls[i].className;
+        if (idAttr) openStates.classes[idAttr] = true;
+      }
+      
       var openGandalfRuns = {};
       var gruns = document.querySelectorAll('#gandalfPanel .grun.open');
       for (var i = 0; i < gruns.length; i++) {
@@ -3802,6 +3814,21 @@ async function refreshBoard() {
       if (newDetailEl && filesOpen) {
         newDetailEl.open = true;
       }
+      var newDetailsEls = document.querySelectorAll('#kanbanBoard details');
+      for (var i = 0; i < newDetailsEls.length; i++) {
+        var key = newDetailsEls[i].id || newDetailsEls[i].className;
+        if (key && openStates.details[key] !== undefined) {
+          newDetailsEls[i].open = openStates.details[key];
+        }
+      }
+      var newOpenEls = document.querySelectorAll('#kanbanBoard *');
+      for (var i = 0; i < newOpenEls.length; i++) {
+        var idAttr = newOpenEls[i].id || newOpenEls[i].getAttribute('data-run') || newOpenEls[i].getAttribute('data-window') || newOpenEls[i].className;
+        if (idAttr && openStates.classes[idAttr]) {
+          newOpenEls[i].classList.add('open');
+        }
+      }
+
       for (var runId in openGandalfRuns) {
         var el = document.querySelector('#gandalfPanel .grun[data-run="' + runId + '"]');
         if (el) {
