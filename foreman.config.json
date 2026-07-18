@@ -4,11 +4,11 @@
     "plan": "planning/anchor-doctor-ui/handoff/IMPLEMENTATION-PLAN.md",
     "execution_log": "planning/anchor-doctor-ui/handoff/EXECUTION-LOG.md"
   },
-  "git": { "enabled": false, "branch": "master" },
-  "budget": { "max_waves_per_run": 3, "max_fix_iters_per_wave": 4 },
+  "git": { "enabled": true, "branch": "foreman/doctor-v3" },
+  "budget": { "max_waves_per_run": 4, "max_fix_iters_per_wave": 4 },
   "models": {
-    "execute": "gemini-cli:Gemini 3.1 Pro (High)",
-    "fix": "gemini-cli:Gemini 3.1 Pro (High)",
-    "review": "gemini-cli:Gemini 3.1 Pro (High)"
+    "execute": "claude:claude-fable-5",
+    "fix": "claude:claude-fable-5",
+    "review": "gemini-cli:gemini-3.1-pro"
   }
 }
