@@ -10605,6 +10605,588 @@ def handle_doctor_session_start(handler, path, body):
     })
 
 
+# ── Doctor V3 Wave 3 — the /doctor page + background diagnostics ────────────
+# Every number the page shows is REAL or ABSENT (plan North Star): status /
+# last-run / count come from health_reports/*.md on disk; the reports list rows
+# are the actual files; the terminal attaches to the Wave-2 agentic session.
+# Nothing fabricated — no disk-usage card, no fake chart, no placeholder nav.
+
+_DOCTOR_STATUS_TEXT = {
+    "red": "Issues found",
+    "yellow": "Warnings",
+    "green": "Healthy",
+    "unknown": "Unreadable report",
+    "none": "No reports yet",
+}
+
+_DOCTOR_STATUS_DETAIL = {
+    "red": "The latest report flags correctness issues (red banner).",
+    "yellow": ("All correctness checks passed; non-blocking performance "
+               "warnings present."),
+    "green": "All checks passed in the latest report.",
+    "unknown": "The latest report file could not be parsed.",
+    "none": "Run diagnostics now, or wait for the daily 5 AM health check.",
+}
+
+
+def _doctor_report_status(body):
+    """Classify ONE health-report body per the locked severity rule.
+
+    red    = a CORRECTNESS failure ("Status: ISSUES FOUND");
+    yellow = correctness clean but the non-blocking Warnings section has
+             content (PERFORMANCE/timing notes never redden the banner);
+    green  = "Status: OK" with an empty Warnings section;
+    unknown= no recognizable status line (corrupt/foreign file) — honest,
+             never guessed.
+    """
+    if "Status: ISSUES FOUND" in body:
+        return "red"
+    warn_match = re.search(r"^## Warnings[^\n]*\n+(.*?)(?=^## |\Z)",
+                           body, re.S | re.M)
+    if warn_match:
+        content = warn_match.group(1).strip()
+        if content and content != "(none)":
+            return "yellow"
+    if re.search(r"^Status: OK\s*$", body, re.M):
+        return "green"
+    return "unknown"
+
+
+def _doctor_stats():
+    """REAL /doctor stats — every value from ``health_reports/`` or absent.
+
+    Total over an empty/corrupt reports dir: an unreadable file classifies
+    ``unknown``, an empty dir yields the honest ``none`` state; never raises.
+    """
+    try:
+        rd = _paths.health_reports_dir()
+        files = sorted((p for p in rd.glob("*.md") if p.is_file()),
+                       key=lambda p: p.name, reverse=True)
+    except OSError:
+        files = []
+    reports = []
+    for p in files[:10]:
+        try:
+            body = p.read_text(encoding="utf-8", errors="replace")
+            st = _doctor_report_status(body)
+        except OSError:
+            st = "unknown"
+        reports.append({"name": p.name, "date": p.stem, "status": st})
+    status = reports[0]["status"] if reports else "none"
+    last_run = reports[0]["date"] if reports else None
+    days_ago = None
+    if last_run:
+        try:
+            days_ago = (date.today()
+                        - datetime.strptime(last_run, "%Y-%m-%d").date()).days
+        except ValueError:
+            days_ago = None  # non-date filename — honest absence, no guess
+    return {
+        "status": status,
+        "status_text": _DOCTOR_STATUS_TEXT.get(status, status),
+        "status_detail": _DOCTOR_STATUS_DETAIL.get(status, ""),
+        "last_run": last_run,
+        "days_ago": days_ago,
+        "report_count": len(files),
+        "reports": reports,
+    }
+
+
+def handle_doctor_status(handler, path, body):
+    # Read-only JSON stats for the /doctor card + reports-list refresh after a
+    # diagnostics run. Token-authed by the route row (?token= / header /
+    # cookie). Never spawns / never blocks.
+    handler._send_json({"ok": True, **_doctor_stats()})
+
+
+_DOCTOR_REPORT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.md$")
+
+
+def handle_doctor_report(handler, path, body):
+    # Read-only render of ONE health report. Traversal-safe: the name must be
+    # a bare *.md filename (no separators — ".." can't survive the regex) AND
+    # the resolved path must stay inside health_reports/.
+    q = parse_qs(urlparse(handler.path).query)
+    name = (q.get("name", [""])[0] or "").strip()
+    if not name or not _DOCTOR_REPORT_NAME_RE.match(name) or ".." in name:
+        handler._send_json({"ok": False, "error": "bad report name"}, 400)
+        return
+    rd = _paths.health_reports_dir()
+    try:
+        target = (rd / name).resolve()
+        if target.parent != rd.resolve():
+            handler._send_json({"ok": False, "error": "bad report name"}, 400)
+            return
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        handler._send_json({"ok": False, "error": "unknown report"}, 404)
+        return
+    except OSError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 500)
+        return
+    handler._send_html(_rv.reader_html(text, title=name))
+
+
+# One background anchor_healthcheck.py run at a time (idempotent: a second
+# POST while one is live attaches to it). The output tails from a log file by
+# BYTE offset — the cursor-stable /api/rnd/tail pattern — so the page streams
+# it live and a re-fetch from an old offset is stable, never interleaved.
+_DOCTOR_HC_LOCK = threading.Lock()
+_DOCTOR_HC = {"proc": None, "log": None, "started_at": None}
+
+
+def _doctor_hc_log_path():
+    return _paths.logs_dir() / "doctor-healthcheck-run.log"
+
+
+def _doctor_hc_cmd():
+    """The background diagnostics argv. ``ANCHOR_HEALTHCHECK_CMD`` is the
+    test/deploy seam (same idiom as ANCHOR_RUNNER_CMD — the gate never runs
+    the real 75s healthcheck); default = this install's anchor_healthcheck.py
+    under the current interpreter."""
+    raw = (os.environ.get("ANCHOR_HEALTHCHECK_CMD", "") or "").strip()
+    if raw:
+        import shlex
+        return shlex.split(raw, posix=(os.name != "nt"))
+    return [sys.executable, str(ANCHOR_DIR / "anchor_healthcheck.py")]
+
+
+def handle_doctor_healthcheck_run(handler, path, body):
+    # Doctor V3 W3 — launch anchor_healthcheck.py as a BACKGROUND process
+    # (never the V2 75s synchronous request-thread block). Token-authed by the
+    # do_POST default-deny middleware BEFORE this runs. Idempotent while live.
+    import subprocess
+    with _DOCTOR_HC_LOCK:
+        proc = _DOCTOR_HC.get("proc")
+        if proc is not None and proc.poll() is None:
+            handler._send_json({"ok": True, "already_running": True})
+            return
+        log_path = _doctor_hc_log_path()
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            fh = open(log_path, "wb")
+        except OSError as exc:
+            handler._send_json(
+                {"ok": False, "error": f"cannot open run log: {exc}"}, 500)
+            return
+        try:
+            proc = subprocess.Popen(
+                _doctor_hc_cmd(),
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                cwd=str(_paths.data_dir()),
+                creationflags=_paths.NO_WINDOW,
+            )
+        except OSError as exc:
+            fh.close()
+            handler._send_json(
+                {"ok": False, "error": f"failed to launch: {exc}"}, 500)
+            return
+        # The child holds its own inherited handle; the parent's is done.
+        fh.close()
+        _DOCTOR_HC["proc"] = proc
+        _DOCTOR_HC["log"] = str(log_path)
+        _DOCTOR_HC["started_at"] = time.time()
+    handler._send_json({"ok": True, "already_running": False})
+
+
+def handle_doctor_healthcheck_tail(handler, path, body):
+    # Cursor-stable incremental read of the background run's log (?since=
+    # BYTE offset → {text, next, running, exit_code}). Plain non-blocking
+    # fetch the page polls ~1s; never holds the request thread. A missing log
+    # (no run yet) is an honest empty, never a 500.
+    q = parse_qs(urlparse(handler.path).query)
+    try:
+        since = int(q.get("since", ["0"])[0] or 0)
+    except (TypeError, ValueError):
+        since = 0
+    with _DOCTOR_HC_LOCK:
+        proc = _DOCTOR_HC.get("proc")
+        log = _DOCTOR_HC.get("log") or str(_doctor_hc_log_path())
+        started = _DOCTOR_HC.get("started_at")
+    running = proc is not None and proc.poll() is None
+    exit_code = None if (proc is None or running) else proc.returncode
+    text = ""
+    next_off = since
+    try:
+        with open(log, "rb") as f:
+            f.seek(0, 2)
+            total = f.tell()
+            if since < 0 or since > total:
+                since = 0  # truncated/new log — clamp, stay stable
+            f.seek(since)
+            data = f.read()
+        text = data.decode("utf-8", errors="replace")
+        next_off = since + len(data)
+    except OSError:
+        pass  # no run yet — honest empty tail
+    handler._send_json({
+        "ok": True,
+        "text": text,
+        "next": next_off,
+        "running": running,
+        "exit_code": exit_code,
+        "started": started is not None,
+    })
+
+
+# The /doctor page template. A RAW string filled via .replace() — NEVER an
+# f-string — so the V2 literal-{placeholder}-in-page bug class is structurally
+# impossible (regression-tested in tests/test_doctor_v3.py). Styled in the
+# Anchor dashboard's own idiom: same palette variables, same system font
+# stack, same card/button patterns — not a standalone-product mock.
+_DOCTOR_PAGE_TEMPLATE = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anchor Doctor</title>
+<link rel="icon" href="/vendor/brand/gwl-m-icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+<script src="/vendor/xterm/xterm.js"></script>
+<style>
+:root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #232733; --border: #2e3340;
+    --text: #e2e4e9; --text-dim: #8b8f9a; --accent: #6c9cfc;
+    --danger: #f87171; --warning: #fbbf24; --success: #4ade80;
+    color-scheme: dark;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; min-height: 100vh; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 20px 24px 40px; }
+.masthead { display: flex; align-items: center; gap: 14px; padding: 6px 0 16px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.mh-title { font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+.mh-title .mh-anchor { color: var(--accent); }
+.mh-title .mh-doctor { color: var(--success); }
+.mh-sub { font-size: 12px; color: var(--text-dim); }
+.mh-spacer { flex: 1; }
+.backlink { color: var(--accent); text-decoration: none; font-size: 13px; }
+.backlink:hover { text-decoration: underline; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+.stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 8px; }
+.stat-value { font-size: 22px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.stat-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; background: var(--text-dim); }
+.dot.green { background: var(--success); }
+.dot.yellow { background: var(--warning); }
+.dot.red { background: var(--danger); }
+.dot.none, .dot.unknown { background: var(--text-dim); }
+.cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 16px; align-items: start; }
+.panel h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); margin-bottom: 12px; }
+.panel + .panel { margin-top: 16px; }
+.btn { background: var(--accent); color: #fff; border: none; padding: 10px 18px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.btn:hover { filter: brightness(1.1); }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.hint { font-size: 11.5px; color: var(--text-dim); margin-top: 8px; }
+.hcout { display: none; margin-top: 12px; background: #0c0e14; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.report-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); font-size: 13.5px; }
+.report-row:last-child { border-bottom: none; }
+.report-row:hover { background: var(--surface2); }
+.rr-date { font-weight: 600; }
+.rr-chip { margin-left: auto; font-size: 11px; padding: 2px 9px; border-radius: 999px; background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+.rr-chip.green { color: var(--success); border-color: rgba(74,222,128,0.4); }
+.rr-chip.yellow { color: var(--warning); border-color: rgba(251,191,36,0.4); }
+.rr-chip.red { color: var(--danger); border-color: rgba(248,113,113,0.4); }
+.empty { color: var(--text-dim); font-size: 13px; padding: 6px 0; }
+.term-panel #terminal { height: 480px; background: #0c0e14; border-radius: 8px; padding: 6px; }
+.term-eng { color: var(--success); text-transform: none; letter-spacing: 0; margin-left: 8px; font-weight: 600; }
+@media (max-width: 980px) { .cols { grid-template-columns: 1fr; } .cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="masthead">
+    <div class="mh-title"><span class="mh-anchor">&#9875;</span> Anchor <span class="mh-doctor">Doctor</span></div>
+    <div class="mh-sub">honest diagnostics &mdash; every number real or absent</div>
+    <div class="mh-spacer"></div>
+    <a class="backlink" href="/">&larr; Dashboard</a>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="stat-label">Overall status</div>
+      <div class="stat-value"><span class="dot __STATUS_CLASS__" id="cardStatusDot"></span><span id="cardStatusText">__STATUS_TEXT__</span></div>
+      <div class="stat-sub" id="cardStatusDetail">__STATUS_DETAIL__</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Last health run</div>
+      <div class="stat-value" id="cardLastRun">__LAST_RUN__</div>
+      <div class="stat-sub" id="cardLastAgo">__LAST_AGO__</div>
+    </div>
+    <div class="card">
+      <div class="stat-label">Reports on disk</div>
+      <div class="stat-value" id="cardCount">__REPORT_COUNT__</div>
+      <div class="stat-sub">in health_reports/</div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="col-left">
+      <div class="card panel">
+        <h3>Diagnostics</h3>
+        <button class="btn" id="runBtn" onclick="runDiagnostics()">Run diagnostics</button>
+        <div class="hint">Runs anchor_healthcheck.py in the background; output tails below live.</div>
+        <pre id="hcout" class="hcout"></pre>
+      </div>
+      <div class="card panel">
+        <h3>Recent health reports</h3>
+        <div id="reportsList">__REPORTS_LIST__</div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="card panel term-panel">
+        <h3>Doctor session <span class="term-eng" id="termEngine"></span></h3>
+        <div id="terminal"></div>
+        <div class="hint">A read-only agentic session (plan permission mode) over this live Anchor install.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var token = new URLSearchParams(location.search).get('token') || '';
+  function tq(url) {
+    if (!token) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  }
+  function hdrs() {
+    var h = { 'Content-Type': 'application/json' };
+    if (token) h['X-Anchor-Token'] = token;
+    return h;
+  }
+  function getHdrs() {
+    var h = {};
+    if (token) h['X-Anchor-Token'] = token;
+    return h;
+  }
+  // Carry the token onto the server-rendered report links when configured.
+  document.querySelectorAll('a.report-row').forEach(function (a) {
+    if (token) a.href = tq(a.getAttribute('href'));
+  });
+
+  // ── The doctor agentic terminal (attaches to the Wave-2 session) ──
+  var term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: '#0c0e14' }, scrollback: 5000 });
+  term.open(document.getElementById('terminal'));
+  var activeWs = null;
+  var sendChain = Promise.resolve();
+  var sessionId = null;
+  function sendInput(d) {
+    if (!sessionId || d === '' || d == null) return;
+    if (activeWs && activeWs.readyState === 1) {
+      try { activeWs.send(d); return; } catch (e) { /* fall through */ }
+    }
+    var body = { session: sessionId, data: d };
+    if (token) body.token = token;
+    sendChain = sendChain.then(function () {
+      return fetch('/api/rnd/term_input2', { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+    }).catch(function () {});
+  }
+  term.onData(sendInput);
+  var sseStarted = false;
+  function startSSE() {
+    if (sseStarted || !sessionId) return;
+    sseStarted = true;
+    var es = new EventSource(tq('/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId)));
+    es.addEventListener('output', function (ev) {
+      try {
+        var p = JSON.parse(ev.data);
+        if (p.text) term.write(p.text);
+      } catch (e) {}
+    });
+    es.addEventListener('done', function () { try { es.close(); } catch (e) {} });
+  }
+  function fitTerm() {
+    if (!sessionId) return;
+    var el = document.getElementById('terminal');
+    var cols = Math.max(40, Math.floor(el.clientWidth / 8)) || 80;
+    var rows = Math.max(10, Math.floor(el.clientHeight / 18)) || 24;
+    try { term.resize(cols, rows); } catch (e) {}
+    var body = { session: sessionId, cols: cols, rows: rows };
+    if (token) body.token = token;
+    fetch('/api/rnd/term_resize', { method: 'POST', headers: hdrs(), body: JSON.stringify(body) }).catch(function () {});
+  }
+  window.addEventListener('resize', fitTerm);
+  function attach() {
+    var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
+    var wsUrl = tq(wsProto + '//' + location.host + '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId));
+    try {
+      var ws = new WebSocket(wsUrl);
+      activeWs = ws;
+      ws.onmessage = function (ev) { term.write(ev.data); };
+      ws.onclose = function () { activeWs = null; if (!sseStarted) startSSE(); };
+      ws.onerror = function () { activeWs = null; try { ws.close(); } catch (e) {} startSSE(); };
+    } catch (e) {
+      activeWs = null;
+      startSSE();
+    }
+    setTimeout(fitTerm, 100);
+  }
+  var startBody = {};
+  if (token) startBody.token = token;
+  fetch('/api/doctor/session_start', { method: 'POST', headers: hdrs(), body: JSON.stringify(startBody) })
+    .then(function (r) { return r.json(); })
+    .then(function (p) {
+      if (p && p.ok && p.session && p.session.session_id) {
+        sessionId = p.session.session_id;
+        var eng = document.getElementById('termEngine');
+        if (eng && p.session.backend) eng.textContent = p.session.backend + (p.attached ? ' (reattached)' : '');
+        attach();
+      } else {
+        var status = (p && p.status) || 'error';
+        var reason = (p && (p.reason || p.error)) || 'unknown';
+        term.write('[doctor] No agentic session available (' + status + '): ' + reason + '\r\n');
+        term.write('[doctor] Log in to the claude or gemini CLI on this host to enable the live doctor.\r\n');
+      }
+    })
+    .catch(function (e) { term.write('[doctor] session start failed: ' + e + '\r\n'); });
+
+  // ── Background diagnostics run + live tail ──
+  var chipNames = { red: 'issues', yellow: 'warnings', green: 'healthy' };
+  function setCards(s) {
+    var el = document.getElementById('cardStatusDot');
+    if (el) el.className = 'dot ' + (s.status || 'none');
+    el = document.getElementById('cardStatusText');
+    if (el) el.textContent = s.status_text || '';
+    el = document.getElementById('cardStatusDetail');
+    if (el) el.textContent = s.status_detail || '';
+    el = document.getElementById('cardLastRun');
+    if (el) el.textContent = s.last_run || '—';
+    el = document.getElementById('cardLastAgo');
+    if (el) {
+      if (s.days_ago === 0) el.textContent = 'today';
+      else if (s.days_ago === 1) el.textContent = '1 day ago';
+      else if (s.days_ago == null) el.textContent = (s.last_run ? '' : 'never run');
+      else el.textContent = s.days_ago + ' days ago';
+    }
+    el = document.getElementById('cardCount');
+    if (el) el.textContent = String(s.report_count == null ? 0 : s.report_count);
+    var list = document.getElementById('reportsList');
+    if (list && s.reports) {
+      if (!s.reports.length) {
+        list.innerHTML = '<div class="empty">No health reports on disk yet.</div>';
+      } else {
+        list.innerHTML = s.reports.map(function (r) {
+          var chip = chipNames[r.status] || 'unreadable';
+          var href = tq('/doctor/report?name=' + encodeURIComponent(r.name));
+          return '<a class="report-row" target="_blank" href="' + href + '">'
+            + '<span class="dot ' + r.status + '"></span>'
+            + '<span class="rr-date">' + r.date + '</span>'
+            + '<span class="rr-chip ' + r.status + '">' + chip + '</span></a>';
+        }).join('');
+      }
+    }
+  }
+  function refreshStats() {
+    fetch(tq('/api/doctor/status'), { headers: getHdrs() })
+      .then(function (r) { return r.json(); })
+      .then(function (s) { if (s && s.ok) setCards(s); })
+      .catch(function () {});
+  }
+  var polling = false;
+  function pollDone() {
+    polling = false;
+    var btn = document.getElementById('runBtn');
+    btn.disabled = false;
+    btn.textContent = 'Run diagnostics';
+    refreshStats();
+  }
+  function pollTail(since) {
+    if (polling) return;
+    polling = true;
+    (function step(cursor) {
+      fetch(tq('/api/doctor/healthcheck_tail?since=' + cursor), { headers: getHdrs() })
+        .then(function (r) { return r.json(); })
+        .then(function (p) {
+          var out = document.getElementById('hcout');
+          if (p && p.ok) {
+            if (p.text) { out.textContent += p.text; out.scrollTop = out.scrollHeight; }
+            if (p.running) { setTimeout(function () { step(p.next); }, 1000); return; }
+            out.textContent += '\n[diagnostics finished' + (p.exit_code == null ? '' : ', exit ' + p.exit_code) + ']\n';
+          }
+          pollDone();
+        })
+        .catch(function () { pollDone(); });
+    })(since);
+  }
+  window.runDiagnostics = function () {
+    var out = document.getElementById('hcout');
+    out.style.display = 'block';
+    var body = {};
+    if (token) body.token = token;
+    fetch('/api/doctor/healthcheck_run', { method: 'POST', headers: hdrs(), body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (p) {
+        if (!p || !p.ok) {
+          out.textContent += '\n[doctor] run failed: ' + ((p && p.error) || 'unknown') + '\n';
+          return;
+        }
+        if (!p.already_running) out.textContent = '';
+        var btn = document.getElementById('runBtn');
+        btn.disabled = true;
+        btn.textContent = 'Running…';
+        pollTail(0);
+      })
+      .catch(function (e) { out.textContent += '\n[doctor] run failed: ' + e + '\n'; });
+  };
+})();
+</script>
+</body>
+</html>"""
+
+
+def render_doctor_page_html():
+    """The /doctor page — Anchor's own visual idiom, REAL values only.
+
+    Server-renders the stat cards + reports list from :func:`_doctor_stats`;
+    the terminal panel and diagnostics tail are wired by the page JS against
+    the Wave-2 session endpoint and the background-run endpoints. Built by
+    ``str.replace`` over a raw template — never an f-string (the V2 bug class).
+    """
+    s = _doctor_stats()
+    esc = html_lib.escape
+    if s["reports"]:
+        chip_names = {"red": "issues", "yellow": "warnings", "green": "healthy"}
+        rows = []
+        for r in s["reports"]:
+            chip = chip_names.get(r["status"], "unreadable")
+            rows.append(
+                '<a class="report-row" target="_blank"'
+                ' href="/doctor/report?name=%s">'
+                '<span class="dot %s"></span>'
+                '<span class="rr-date">%s</span>'
+                '<span class="rr-chip %s">%s</span></a>'
+                % (url_quote(r["name"]), esc(r["status"]), esc(r["date"]),
+                   esc(r["status"]), esc(chip)))
+        reports_html = "".join(rows)
+    else:
+        reports_html = (
+            '<div class="empty">No health reports on disk yet &mdash; run '
+            'diagnostics now, or wait for the daily 5 AM check.</div>')
+    if s["days_ago"] is None:
+        ago = "" if s["last_run"] else "never run"
+    elif s["days_ago"] == 0:
+        ago = "today"
+    elif s["days_ago"] == 1:
+        ago = "1 day ago"
+    else:
+        ago = "%d days ago" % s["days_ago"]
+    page = _DOCTOR_PAGE_TEMPLATE
+    for key, value in (
+        ("__STATUS_CLASS__", esc(s["status"])),
+        ("__STATUS_TEXT__", esc(s["status_text"])),
+        ("__STATUS_DETAIL__", esc(s["status_detail"])),
+        ("__LAST_RUN__", esc(s["last_run"] or "—")),
+        ("__LAST_AGO__", esc(ago)),
+        ("__REPORT_COUNT__", str(s["report_count"])),
+        ("__REPORTS_LIST__", reports_html),
+    ):
+        page = page.replace(key, value)
+    return page
+
+
 def handle_term_input2(handler, path, body):
     # POST-in half of the SSE-out + POST-in fallback transport. Authed by
     # the middleware above.
@@ -13339,6 +13921,10 @@ _MIGRATED_HANDLERS = {
     "handle_term_start": handle_term_start,
     "handle_zombie_terminal_start": handle_zombie_terminal_start,
     "handle_doctor_session_start": handle_doctor_session_start,
+    "handle_doctor_status": handle_doctor_status,
+    "handle_doctor_report": handle_doctor_report,
+    "handle_doctor_healthcheck_run": handle_doctor_healthcheck_run,
+    "handle_doctor_healthcheck_tail": handle_doctor_healthcheck_tail,
     "handle_term_input2": handle_term_input2,
     "handle_answer_gate": handle_answer_gate,
     "handle_cancel_job": handle_cancel_job,
@@ -14081,211 +14667,13 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
             elif _path_only == "/doctor":
-                import glob
-                import os
-                import re
-                report_files = sorted(glob.glob(os.path.join(ANCHOR_DIR, "health_reports", "*.md")), reverse=True)
-                raw_report = ""
-                if report_files:
-                    try:
-                        with open(report_files[0], "r", encoding="utf-8") as f:
-                            raw_report = f.read()
-                    except Exception:
-                        pass
-                
-                is_error = "Status: ISSUES FOUND" in raw_report
-                status_text = "Issues Found" if is_error else "Healthy"
-                
-                run_time = "Unknown"
-                time_match = re.search(r"Run time:\s*(.*)", raw_report)
-                if time_match:
-                    run_time = time_match.group(1).split(" ")[0]
-                
-                errors_count = "0" if not is_error else "1+"
-                
-                reports_html = ""
-                for file_path in report_files[:3]:
-                    fname = os.path.basename(file_path).replace(".md", "")
-                    reports_html += f'''
-                    <div class="report-item">
-                      <div>
-                        <div class="ri-title">Recent Health Report</div>
-                        <div class="ri-time">{{fname}}</div>
-                      </div>
-                      <div style="color:var(--text-dim)">&gt;</div>
-                    </div>
-                    '''
-                
-                html = f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Anchor Doctor</title>
-<link rel="stylesheet" href="/vendor/xterm/xterm.css" />
-<script src="/vendor/xterm/xterm.js"></script>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-  :root {{
-      --bg: #11131a; --sidebar: #171923; --surface: #1e212b; 
-      --text: #f3f4f6; --text-dim: #9ca3af; --border: #2d3748;
-      --primary: #3b82f6; --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
-  }}
-  body {{
-      margin: 0; padding: 0; font-family: 'Inter', sans-serif;
-      background: var(--bg); color: var(--text); display: flex; height: 100vh;
-  }}
-  .sidebar {{
-      width: 240px; background: var(--sidebar); border-right: 1px solid var(--border);
-      padding: 24px 0; display: flex; flex-direction: column;
-  }}
-  .brand {{
-      font-size: 18px; font-weight: 700; color: #fff; padding: 0 24px; margin-bottom: 40px;
-      display: flex; align-items: center; gap: 8px;
-  }}
-  .nav-item {{
-      padding: 12px 24px; color: var(--text-dim); font-size: 14px; font-weight: 500;
-      cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s;
-  }}
-  .nav-item:hover {{ color: #fff; background: rgba(255,255,255,0.05); }}
-  .nav-item.active {{ color: #fff; background: rgba(59, 130, 246, 0.15); border-left: 4px solid var(--primary); }}
-  
-  .main {{
-      flex: 1; padding: 32px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px;
-  }}
-  .top-cards {{
-      display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
-  }}
-  .card {{
-      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px;
-  }}
-  .card-header {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; }}
-  .card-value {{ font-size: 24px; font-weight: 700; }}
-  .icon-box {{ width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; }}
-  .icon-box.green {{ background: rgba(16, 185, 129, 0.15); color: var(--success); }}
-  .icon-box.blue {{ background: rgba(59, 130, 246, 0.15); color: var(--primary); }}
-  .icon-box.orange {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); }}
-  
-  .middle-section {{
-      display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px;
-  }}
-  .diag-controls {{
-      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
-  }}
-  .diag-controls h3 {{ margin: 0 0 24px 0; font-size: 14px; text-transform: uppercase; color: var(--text-dim); letter-spacing: 0.5px; }}
-  .btn-run {{
-      width: 100%; padding: 16px; border-radius: 8px; border: none;
-      background: linear-gradient(90deg, #2563eb, #3b82f6); color: #fff; font-size: 18px; font-weight: 600;
-      cursor: pointer; box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); margin-bottom: 24px; transition: transform 0.1s;
-  }}
-  .btn-run:active {{ transform: scale(0.98); }}
-  .secondary-btns {{ display: flex; gap: 12px; }}
-  .btn-sec {{
-      flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-      color: var(--text); border-radius: 6px; font-size: 13px; cursor: pointer;
-  }}
-  
-  .terminal-box {{
-      background: #0d1117; border: 1px solid var(--success); border-radius: 12px; padding: 16px;
-      display: flex; flex-direction: column; height: 300px;
-  }}
-  .terminal-box h3 {{ margin: 0 0 12px 0; font-size: 12px; color: var(--text-dim); text-transform: uppercase; }}
-  #terminal {{ flex: 1; }}
-  
-  .bottom-section {{
-      display: grid; grid-template-columns: 2fr 1fr; gap: 24px;
-  }}
-  .chart-box {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }}
-  .list-box {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }}
-  h3 {{ margin: 0 0 20px 0; font-size: 14px; text-transform: uppercase; color: var(--text-dim); }}
-  
-  .report-item {{
-      display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border);
-  }}
-  .report-item:last-child {{ border-bottom: none; }}
-  .ri-title {{ font-size: 14px; font-weight: 500; }}
-  .ri-time {{ font-size: 12px; color: var(--text-dim); margin-top: 4px; }}
-</style>
-</head>
-<body>
-  <div class="sidebar">
-    <div class="brand">&#9875; Anchor Doctor</div>
-    <div class="nav-item active">Dashboard</div>
-    <div class="nav-item">Scans</div>
-    <div class="nav-item">Reports</div>
-    <div class="nav-item">Settings</div>
-    <div class="nav-item">Support</div>
-  </div>
-  
-  <div class="main">
-    <div class="top-cards">
-      <div class="card">
-        <div class="card-header"><div class="icon-box green">✓</div> System Status</div>
-        <div class="card-value">{status_text}</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="icon-box blue">🕒</div> Last Scan</div>
-        <div class="card-value">{run_time}</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="icon-box green">!</div> Total Errors</div>
-        <div class="card-value">{errors_count}</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><div class="icon-box orange">💾</div> Disk Usage</div>
-        <div class="card-value">68%</div>
-      </div>
-    </div>
-    
-    <div class="middle-section">
-      <div class="diag-controls">
-        <h3>Diagnostic Controls</h3>
-        <button class="btn-run" onclick="runHealthcheck()">Run Diagnostics</button>
-        <div class="secondary-btns">
-          <button class="btn-sec">Scan History</button>
-          <button class="btn-sec">Schedule Scan</button>
-        </div>
-      </div>
-      
-      <div class="terminal-box">
-        <h3>Terminal / System Health Checks</h3>
-        <div id="terminal"></div>
-      </div>
-    </div>
-    
-    <div class="bottom-section">
-      <div class="chart-box">
-        <h3>Diagnostics Overview</h3>
-        <svg viewBox="0 0 400 150" style="width:100%; height:150px;">
-          <!-- Fake Line Chart -->
-          <polyline fill="none" stroke="var(--primary)" stroke-width="3" points="0,130 50,90 100,100 150,50 200,70 250,20 300,60 350,50 400,10" />
-          <path fill="rgba(59,130,246,0.1)" d="M0,130 L50,90 L100,100 L150,50 L200,70 L250,20 L300,60 L350,50 L400,10 L400,150 L0,150 Z" />
-        </svg>
-      </div>
-      <div class="list-box">
-        <h3>Recent Health Reports</h3>
-        {reports_html}
-      </div>
-    </div>
-  </div>
-
-<script>
-    const term = new Terminal({{ theme: {{ background: '#0d1117', foreground: '#10b981', cursor: '#10b981', selectionBackground: '#1b2030' }}, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, convertEol: true }});
-    term.open(document.getElementById('terminal'));
-
-    // Doctor V3 wave 1: the V2 backend (/api/doctor/run — a Gemini-API agent
-    // spawn + a 75s synchronous healthcheck) has been removed. The V3 agentic
-    // session backend (wave 2) and background diagnostics run (wave 3) replace
-    // it; until then the terminal states that honestly instead of calling a
-    // dead endpoint.
-    function runHealthcheck() {{
-        term.clear();
-        term.write('[ANCHOR_DOCTOR] The V2 diagnostics backend has been removed.\\r\\n');
-        term.write('The V3 diagnostics backend is not wired up yet.\\r\\n');
-    }}
-</script>
-</body>
-</html>"""
-                self._send_html(html)
+                # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
+                # own style (render_doctor_page_html: real stats from
+                # health_reports/, the Wave-2 agentic terminal, the background
+                # diagnostics tail). The V2 standalone-product mock (fake disk
+                # usage, fake chart, dead nav, f-string {placeholder} bug) is
+                # gone; the doctor gate regression-tests its absence.
+                self._send_html(render_doctor_page_html())
             elif _path_only == "/foundry" or _path_only == "/foundry/":
                 # Foundry GUI (folded-in React app): serve the built SPA
                 # (foundry-gui/dist/index.html). Its absolute /assets, /brand

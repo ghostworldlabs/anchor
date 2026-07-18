@@ -453,3 +453,368 @@ def test_doctor_session_start_route_declared_token_migrated(denv):
     assert route.migrated is True
     assert route.handler == "handle_doctor_session_start"
     assert route.handler in denv["gui"]._MIGRATED_HANDLERS
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 3 — the /doctor page in Anchor's own style + background diagnostics
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# The page shows REAL stat cards only (status per the severity rule / last-run
+# date + days ago / report count), a reports list of the ACTUAL files, and the
+# Wave-2 agentic terminal. "Run diagnostics" launches anchor_healthcheck.py as
+# a BACKGROUND process tailed cursor-stably (never the V2 75s synchronous
+# block). Empty/corrupt health_reports/ renders honestly. The V2 fabrications
+# (fake disk-usage card, fake SVG chart, dead nav, literal {placeholder}
+# f-string bug, hardcoded "68%") are regression-pinned OUT.
+
+import sys
+import textwrap
+import time as _time
+
+
+def _get(gui, path, headers=None):
+    """Drive anchor_gui's real do_GET without a socket; return (code, body)."""
+
+    class FakeGetHandler(gui.AnchorHandler):
+        def __init__(self):
+            self.path = path
+            self.headers = dict(headers or {})
+            self.wfile = io.BytesIO()
+            self.response_code = None
+
+        def send_response(self, code):
+            self.response_code = code
+
+        def send_header(self, keyword, value):
+            pass
+
+        def end_headers(self):
+            pass
+
+        def log_message(self, format, *args):
+            pass
+
+    handler = FakeGetHandler()
+    handler.do_GET()
+    return handler.response_code, handler.wfile.getvalue().decode(
+        "utf-8", errors="replace")
+
+
+def _get_json(gui, path, headers=None):
+    code, raw = _get(gui, path, headers=headers)
+    try:
+        return code, json.loads(raw)
+    except Exception:
+        return code, None
+
+
+def _report_body(status_ok=True, warnings=(), marker="HEALTHREPORT-MARKER"):
+    """A body in anchor_healthcheck.Report.write's real format."""
+    lines = [
+        "# Anchor Health Report — 2026-07-17",
+        "",
+        "Status: %s" % ("OK" if status_ok else "ISSUES FOUND"),
+        "Run time: 12.3s (05:00:01)",
+        "",
+        "## Checks",
+        "- + file system integrity  (%s)" % marker,
+        "",
+        "## Issues",
+    ]
+    lines.append("(none)" if status_ok else "- [endpoint] GET / returned 500")
+    lines.extend(["", "## Warnings (non-blocking)"])
+    if warnings:
+        lines.extend("- %s" % w for w in warnings)
+    else:
+        lines.append("(none)")
+    lines.extend(["", "## Auto-fixes applied", "(none)", ""])
+    return "\n".join(lines)
+
+
+# ── the page renders REAL stats in Anchor's idiom ────────────────────────────
+
+def test_doctor_page_green_renders_real_stats(denv):
+    today = __import__("datetime").date.today().isoformat()
+    _write_report(denv["data"], name=today + ".md", body=_report_body())
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "Anchor" in html and "Doctor" in html
+    assert "Healthy" in html                    # green per the severity rule
+    assert today in html                        # the REAL last-run date
+    assert "today" in html                      # days-ago from the filename
+    assert 'id="cardCount">1<' in html          # the REAL on-disk count
+    # The row links to the ACTUAL file.
+    assert "/doctor/report?name=" + today + ".md" in html
+
+
+def test_doctor_page_red_when_issues_found(denv):
+    _write_report(denv["data"], name="2026-07-16.md",
+                  body=_report_body(status_ok=False))
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "Issues found" in html
+    assert "Healthy" not in html
+
+
+def test_doctor_page_yellow_when_only_warnings(denv):
+    # Severity rule: a non-blocking PERFORMANCE warning must NOT read as red.
+    _write_report(denv["data"], name="2026-07-16.md",
+                  body=_report_body(status_ok=True,
+                                    warnings=["[home page render] 6.1s"]))
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "Warnings" in html
+    assert "Issues found" not in html
+
+
+def test_doctor_page_no_fabricated_values_regression(denv):
+    """The V2 bug classes stay dead: no literal {placeholder} text, no
+    hardcoded fake values, no fake chart, no dead nav, no Gemini SDK."""
+    _write_report(denv["data"], name="2026-07-16.md", body=_report_body())
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    # The V2 f-string bug rendered "{fname}" literally into the page.
+    assert re.findall(r"\{[a-z_]+\}", html) == [], \
+        "literal {placeholder} text leaked into the rendered /doctor page"
+    assert "68%" not in html                    # the fake disk-usage value
+    assert "Disk Usage" not in html             # the fabricated card
+    assert "polyline" not in html.lower()       # the fake SVG chart
+    assert "fonts.googleapis.com" not in html   # standalone-product mock look
+    for dead_nav in ("Scan History", "Schedule Scan"):
+        assert dead_nav not in html, f"dead V2 control still rendered: {dead_nav}"
+    assert _GEMINI_SDK not in html
+
+
+def test_doctor_page_empty_reports_is_graceful(denv):
+    # health_reports/ exists but is empty — honest empty states, no 500.
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "No reports yet" in html
+    assert "No health reports on disk yet" in html
+    assert 'id="cardCount">0<' in html
+    assert "Traceback" not in html
+
+
+def test_doctor_page_corrupt_report_is_graceful(denv):
+    rd = denv["data"] / "health_reports"
+    rd.mkdir(parents=True, exist_ok=True)
+    (rd / "2026-07-01.md").write_bytes(b"\x00\xff\xfe not a report \x9d")
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "Unreadable report" in html          # honest 'unknown', never a guess
+    assert "Traceback" not in html
+
+
+def test_doctor_page_terminal_wired_to_wave2_session(denv):
+    """The xterm panel attaches to the Wave-2 doctor session over the
+    EXISTING transports (live attach is the Playwright sign-off's job)."""
+    code, html = _get(denv["gui"], "/doctor")
+    assert code == 200
+    assert "/vendor/xterm/xterm.js" in html
+    assert "/api/doctor/session_start" in html
+    assert "/api/rnd/term_ws" in html
+    assert "/api/rnd/term_stream2" in html
+    assert "/api/rnd/term_input2" in html
+
+
+# ── /api/doctor/status — the card-refresh data is real ───────────────────────
+
+def test_doctor_status_endpoint_real_counts(denv):
+    _write_report(denv["data"], name="2026-07-10.md",
+                  body=_report_body(status_ok=False))
+    _write_report(denv["data"], name="2026-07-14.md",
+                  body=_report_body(warnings=["[journal overhead] 16%"]))
+    _write_report(denv["data"], name="2026-07-16.md", body=_report_body())
+    code, data = _get_json(denv["gui"], "/api/doctor/status")
+    assert code == 200 and data["ok"] is True
+    assert data["report_count"] == 3
+    assert data["status"] == "green"            # from the NEWEST report
+    assert data["last_run"] == "2026-07-16"
+    by_date = {r["date"]: r["status"] for r in data["reports"]}
+    assert by_date == {"2026-07-16": "green", "2026-07-14": "yellow",
+                       "2026-07-10": "red"}
+    # Newest-first ordering (the page list mirrors this).
+    assert [r["date"] for r in data["reports"]] == \
+        ["2026-07-16", "2026-07-14", "2026-07-10"]
+
+
+def test_doctor_status_401_before_substance(denv, monkeypatch):
+    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    code, data = _get_json(denv["gui"], "/api/doctor/status")
+    assert code == 401 and data["ok"] is False
+    code2, data2 = _get_json(
+        denv["gui"], "/api/doctor/status?token=sekrit-doctor-token")
+    assert code2 == 200 and data2["ok"] is True
+
+
+# ── /doctor/report — real file, rendered, traversal-safe ─────────────────────
+
+def test_doctor_report_serves_the_actual_file(denv):
+    _write_report(denv["data"], name="2026-07-16.md",
+                  body=_report_body(marker="REPORT-BODY-MARKER-77"))
+    code, html = _get(denv["gui"], "/doctor/report?name=2026-07-16.md")
+    assert code == 200
+    assert "REPORT-BODY-MARKER-77" in html
+
+
+def test_doctor_report_traversal_and_unknown_are_safe(denv):
+    secret = denv["data"] / "secret.md"
+    secret.write_text("TOP-SECRET", encoding="utf-8")
+    for bad in ("../secret.md", "..%2Fsecret.md", "a/../../secret.md",
+                "secret.txt", ""):
+        code, raw = _get(denv["gui"],
+                         "/doctor/report?name=" + bad)
+        assert code == 400, f"traversal name {bad!r} was not rejected"
+        assert "TOP-SECRET" not in raw
+    code, _raw = _get(denv["gui"], "/doctor/report?name=nope.md")
+    assert code == 404
+
+
+def test_doctor_report_401_before_substance(denv, monkeypatch):
+    _write_report(denv["data"], name="2026-07-16.md", body=_report_body())
+    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    code, raw = _get(denv["gui"], "/doctor/report?name=2026-07-16.md")
+    assert code == 401
+    assert "HEALTHREPORT-MARKER" not in raw
+    code2, html2 = _get(denv["gui"],
+                        "/doctor/report?name=2026-07-16.md"
+                        "&token=sekrit-doctor-token")
+    assert code2 == 200 and "HEALTHREPORT-MARKER" in html2
+
+
+# ── the background diagnostics run + cursor-stable live tail ─────────────────
+
+def _fake_hc_script(tmp_path, report_name, sleep_s=1.2):
+    """A stand-in anchor_healthcheck.py: prints, sleeps, writes a REAL report
+    into ANCHOR_DATA_DIR/health_reports, prints again. Never the live 75s
+    check."""
+    script = tmp_path / "fake_healthcheck.py"
+    script.write_text(textwrap.dedent("""\
+        import os, sys, time
+        print("HC-BEGIN", flush=True)
+        time.sleep(%s)
+        rd = os.path.join(os.environ["ANCHOR_DATA_DIR"], "health_reports")
+        os.makedirs(rd, exist_ok=True)
+        with open(os.path.join(rd, %r), "w", encoding="utf-8") as f:
+            f.write("# Anchor Health Report\\n\\nStatus: OK\\n"
+                    "Run time: 1.0s (05:00:01)\\n\\n## Checks\\n- + ok\\n\\n"
+                    "## Issues\\n(none)\\n\\n"
+                    "## Warnings (non-blocking)\\n(none)\\n")
+        print("HC-END", flush=True)
+    """ % (sleep_s, report_name)), encoding="utf-8")
+    return script
+
+
+def test_healthcheck_runs_in_background_and_tails_live(denv, tmp_path,
+                                                       monkeypatch):
+    report_name = "2026-07-18.md"
+    script = _fake_hc_script(tmp_path, report_name)
+    monkeypatch.setenv("ANCHOR_HEALTHCHECK_CMD",
+                       f"{sys.executable} {script}")
+
+    code, p = _post(denv["gui"], "/api/doctor/healthcheck_run", {})
+    assert code == 200 and p["ok"] is True and p["already_running"] is False
+
+    # BACKGROUND, not a synchronous block: the POST returned while the run is
+    # still going (the stand-in sleeps), and the tail reports running=True.
+    code_t, t0 = _get_json(denv["gui"], "/api/doctor/healthcheck_tail?since=0")
+    assert code_t == 200 and t0["ok"] is True
+    assert t0["running"] is True
+
+    # Idempotent while live: a second POST attaches, never stacks a second run.
+    code2, p2 = _post(denv["gui"], "/api/doctor/healthcheck_run", {})
+    assert code2 == 200 and p2["ok"] is True and p2["already_running"] is True
+
+    # Cursor-stable incremental tail until completion.
+    collected, cursor = "", 0
+    deadline = _time.time() + 30
+    while _time.time() < deadline:
+        _c, t = _get_json(denv["gui"],
+                          "/api/doctor/healthcheck_tail?since=%d" % cursor)
+        assert t["ok"] is True
+        assert t["next"] >= cursor              # the cursor never runs backward
+        collected += t["text"]
+        cursor = t["next"]
+        if not t["running"]:
+            break
+        _time.sleep(0.2)
+    else:
+        pytest.fail("background healthcheck never finished")
+    assert "HC-BEGIN" in collected and "HC-END" in collected
+    assert t["exit_code"] == 0
+
+    # Cursor stability after completion: a re-read from 0 replays the same
+    # output; a read from the end is an honest empty.
+    _c, replay = _get_json(denv["gui"], "/api/doctor/healthcheck_tail?since=0")
+    assert "HC-BEGIN" in replay["text"] and "HC-END" in replay["text"]
+    _c, atend = _get_json(denv["gui"],
+                          "/api/doctor/healthcheck_tail?since=%d" % cursor)
+    assert atend["text"] == "" and atend["next"] == cursor
+
+    # On completion the stat cards refresh from the NEW report.
+    _c, stats = _get_json(denv["gui"], "/api/doctor/status")
+    assert stats["report_count"] == 1
+    assert stats["last_run"] == report_name[:-3]
+    assert stats["status"] == "green"
+
+
+def test_healthcheck_tail_before_any_run_is_honest_empty(denv):
+    code, t = _get_json(denv["gui"], "/api/doctor/healthcheck_tail?since=0")
+    assert code == 200 and t["ok"] is True
+    assert t["text"] == "" and t["running"] is False and t["started"] is False
+
+
+def test_healthcheck_run_401_before_substance(denv, tmp_path, monkeypatch):
+    import subprocess
+
+    script = _fake_hc_script(tmp_path, "2026-07-18.md", sleep_s=0)
+    monkeypatch.setenv("ANCHOR_HEALTHCHECK_CMD",
+                       f"{sys.executable} {script}")
+    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+
+    spawned = []
+    real_popen = subprocess.Popen
+
+    class _TrappingPopen(real_popen):
+        def __init__(self, *args, **kwargs):
+            spawned.append(args[0] if args else kwargs.get("args"))
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", _TrappingPopen)
+
+    code, p = _post(denv["gui"], "/api/doctor/healthcheck_run", {})
+    assert code == 401 and p["ok"] is False
+    assert spawned == [], "a tokenless POST must never spawn the healthcheck"
+
+    code2, p2 = _post(denv["gui"], "/api/doctor/healthcheck_run",
+                      {"token": "sekrit-doctor-token"})
+    assert code2 == 200 and p2["ok"] is True
+    assert len(spawned) == 1
+
+
+# ── structural pins: the wave-3 routes are declared ──────────────────────────
+
+def test_doctor_wave3_routes_declared(denv):
+    rt = denv["routes"]
+    gui = denv["gui"]
+    # The page itself: declared OPEN (browser bootstrap, like "/"), legacy-
+    # served — and mirrored in the reviewed OPEN_ROUTES.json allowlist.
+    page = rt.match("GET", "/doctor")
+    assert page is not None and page.auth == rt.AUTH_OPEN
+    open_file = json.loads(
+        (REPO_ROOT / "OPEN_ROUTES.json").read_text(encoding="utf-8"))
+    assert any(e["method"] == "GET" and e["pattern"] == "/doctor"
+               for e in open_file["routes"])
+    # The data/mutating surface: default-deny token, migrated, registered.
+    for method, path, handler_name in (
+            ("GET", "/api/doctor/status", "handle_doctor_status"),
+            ("GET", "/doctor/report", "handle_doctor_report"),
+            ("GET", "/api/doctor/healthcheck_tail",
+             "handle_doctor_healthcheck_tail"),
+            ("POST", "/api/doctor/healthcheck_run",
+             "handle_doctor_healthcheck_run")):
+        route = rt.match(method, path)
+        assert route is not None, (method, path)
+        assert route.auth == rt.AUTH_TOKEN, (method, path)
+        assert route.migrated is True and route.handler == handler_name
+        assert route.handler in gui._MIGRATED_HANDLERS

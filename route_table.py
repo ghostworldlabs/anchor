@@ -232,6 +232,29 @@ ROUTES = [
     _r("GET", "/api/rnd/board_html", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_board_html", migrated=True),
 
+    # ── doctor V3 W3 — the /doctor page + background diagnostics ──────────
+    # The page itself is an open bootstrap (same posture as "/" — browser
+    # navigation must load before any token is presented; every mutating /
+    # data call it makes is token-gated below). Served by the legacy do_GET
+    # arm (a whole-page render, like "/dashboard").
+    _r("GET", "/doctor", AUTH_OPEN),
+    # Real stat cards / reports-list refresh data (read, per-install health
+    # data → default-deny token; ?token= / Authorization / cookie accepted).
+    _r("GET", "/api/doctor/status", AUTH_TOKEN,
+       handler="handle_doctor_status", migrated=True),
+    # One health report rendered read-only (name-validated, traversal-safe
+    # inside health_reports/).
+    _r("GET", "/doctor/report", AUTH_TOKEN,
+       handler="handle_doctor_report", migrated=True),
+    # Cursor-stable incremental tail of the BACKGROUND anchor_healthcheck.py
+    # run (the /api/rnd/tail pattern; never a synchronous request-thread run).
+    _r("GET", "/api/doctor/healthcheck_tail", AUTH_TOKEN,
+       handler="handle_doctor_healthcheck_tail", migrated=True),
+    # Launch the background diagnostics run (mutating → default-deny token;
+    # idempotent: a second POST while one is live attaches, never stacks).
+    _r("POST", "/api/doctor/healthcheck_run", AUTH_TOKEN,
+       handler="handle_doctor_healthcheck_run", migrated=True),
+
     # ── POST: browser auth-cookie login/logout (rearch W9, migrated) ──────
     # Mint / clear the HttpOnly auth cookie that carries browser page
     # navigation under ``ANCHOR_AUTH_MODE=enforce`` (SPIKE-COOKIE-WS-VERDICT).
