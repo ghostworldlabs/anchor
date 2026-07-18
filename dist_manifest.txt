@@ -32,6 +32,17 @@ brownfield_scan.py
 anchor_marker.py
 distro.py
 
+# ── Doctor V3 "honest agentic diagnostics" module ──────────────────────────
+# Stdlib-only: doctor.py (the run_doctor() system check the /doctor session
+# seed embeds) uses only sys / shutil / platform / os / subprocess / pathlib.
+# anchor_gui.py imports it at runtime for the doctor seed, so it must ship or
+# the shipped /doctor surface degrades. Its interrupted-update probe imports
+# update_transaction ONLY inside a try/except (update_transaction.py is
+# deliberately NOT shipped — its closure drags the foundry update subsystem,
+# and anchor.py already treats it the same lazy/optional way) — absent, the
+# probe silently skips; nothing ImportErrors at import time.
+doctor.py
+
 # ── R&D control surface v2 modules ─────────────────────────────────────────
 sessions.py
 summarizer.py

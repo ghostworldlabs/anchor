@@ -818,3 +818,95 @@ def test_doctor_wave3_routes_declared(denv):
         assert route.auth == rt.AUTH_TOKEN, (method, path)
         assert route.migrated is True and route.handler == handler_name
         assert route.handler in gui._MIGRATED_HANDLERS
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 4 — hardening, suite health, deploy
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Deliverable 1: the distro import scan passes — the doctor surface added NO
+# third-party import anywhere in product code, no new import exception was
+# declared, and the ONE runtime module the /doctor seed imports (doctor.py) is
+# deliberately declared in the deny-by-default manifest so the SHIPPED
+# product's doctor surface actually works (the manifest header's rule: a new
+# unlisted source file will not silently ship — add it deliberately).
+# Deliverable 2: anchor_healthcheck.py non-regression — the daily check's
+# module imports cleanly with the doctor changes in place and carries no
+# reference to the removed V2 endpoint, so its endpoint walk cannot regress
+# against this build (the live end-to-end run is the orchestrator's/deploy's
+# job — never run inside the stub gate).
+
+import ast
+
+
+def test_w4_doctor_module_ships_in_manifest():
+    """doctor.py is declared in dist_manifest.txt and selected by the deny-by-
+    default stager (anchor_gui.py imports it at runtime for the doctor seed)."""
+    import distro
+    manifest = (REPO_ROOT / "dist_manifest.txt").read_text(encoding="utf-8")
+    assert "doctor.py" in manifest, (
+        "doctor.py must be deliberately declared in dist_manifest.txt")
+    selected = set(distro.select_shippable())
+    assert "doctor.py" in selected, "doctor.py should ship"
+    assert "anchor_gui.py" in selected
+
+
+def test_w4_import_scan_clean_over_full_shipped_set():
+    """The WHOLE shipped product set passes the stdlib-only import scan after
+    the doctor waves (modulo the single declared pywinpty exception)."""
+    import distro
+    selected = distro.select_shippable()
+    pairs = [(rel, distro.REPO_ROOT / rel) for rel in selected]
+    hits = distro.scan_third_party_imports(pairs, root=distro.REPO_ROOT)
+    assert hits == [], (
+        f"undeclared third-party import(s) in product code: {hits}")
+
+
+def test_w4_no_new_import_exception_declared():
+    """The doctor waves declared NO new third-party-import exception: the
+    allowlist is still exactly winpty, scoped to pty_manager.py."""
+    import distro
+    allow = distro._THIRD_PARTY_IMPORT_ALLOWLIST
+    assert set(allow.keys()) == {"winpty"}, (
+        "the doctor build must not add a third-party-import exception")
+    assert allow["winpty"]["files"] == frozenset({"pty_manager.py"})
+
+
+def test_w4_doctor_py_scans_clean_and_guards_its_optional_probe():
+    """doctor.py itself is stdlib/first-party only per the real scanner, and
+    its interrupted-update probe import stays OUT of module level: it lives
+    inside run_doctor's try/except, because update_transaction.py is
+    deliberately NOT in the manifest — the shipped doctor must degrade
+    gracefully (probe skipped), never ImportError at import time."""
+    import distro
+    doctor_path = REPO_ROOT / "doctor.py"
+    src = doctor_path.read_text(encoding="utf-8")
+    hits = distro.scan_third_party_imports(
+        [("doctor.py", doctor_path)], root=distro.REPO_ROOT)
+    assert hits == [], f"doctor.py leaks a third-party import: {hits}"
+    top_level = set()
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Import):
+            top_level |= {a.name.split(".", 1)[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top_level.add(node.module.split(".", 1)[0])
+    assert "update_transaction" not in top_level, (
+        "doctor.py must keep the update_transaction probe import guarded "
+        "(function-scoped, inside try/except) — it is not shipped")
+
+
+def test_w4_healthcheck_module_clean_against_doctor_changes(denv):
+    """anchor_healthcheck imports cleanly with the doctor build in place (its
+    module-level ensure_data_dirs runs against this test's temp data dir), its
+    entrypoint survives, and its source references neither the removed V2
+    endpoint (so the daily endpoint walk cannot hit a 404-dead route) nor the
+    deleted V2 agent/SDK."""
+    hc = importlib.reload(importlib.import_module("anchor_healthcheck"))
+    assert callable(hc.main)
+    assert callable(hc.check_server_and_endpoints)
+    assert callable(hc.check_route_table_walk)
+    src = (REPO_ROOT / "anchor_healthcheck.py").read_text(encoding="utf-8")
+    assert "/api/doctor/run" not in src, (
+        "the daily check must not probe the removed V2 doctor endpoint")
+    assert _AGENT_MODULE not in src
+    assert _GEMINI_SDK not in src

@@ -36,8 +36,8 @@ test-command: python -m pytest -v tests/test_doctor_v3.py
 - Regression test: the rendered `/doctor` HTML contains no literal `{`-placeholder text (the V2 f-string bug class), no `google.generativeai` reference, and no hardcoded fake values ("68%", the fake polyline).
 **done-when:** `/doctor` renders real data in Anchor's style with a live agentic terminal; STUB GATE green; Playwright + screenshot captured for John's sign-off (the v4 lesson: no UI wave is done without it).
 
-## Wave 4
-**Title:** Hardening, suite health, deploy
+## Wave 4 [test-only]
+**Title:** Hardening, suite health, deploy (verification wave — new tests + docs only; product code lands in waves 1–3)
 **Deliverables:**
 - `distro.py` import scan passes (no third-party imports anywhere in product code).
 - `anchor_healthcheck.py` non-regression: the daily check still passes end-to-end with the doctor changes in place.
