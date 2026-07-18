@@ -255,6 +255,9 @@ def _default_seed_text(skill):
         "Load the {skill} skill now. Once it is loaded and ready, greet me "
         "EXACTLY once with this single line and nothing else: "
         "\"✓ {skill} loaded — what would you like to do?\" "
+        "Engine-enforced governance: the engine automatically emits a status block "
+        "(timestamp, wave, budget, state) on a 10-minute cadence from existing telemetry; "
+        "do NOT fabricate or emit your own status blocks. "
         "Then stop and wait for my next message. Do not repeat this greeting."
         "\n"
     ).format(skill=skill)
@@ -728,6 +731,9 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # v10 Wave 1: record the task prompt as a PENDING PASTE — held UNSENT in the
     # PTY input until the user presses Enter. It is NOT written here; it is
     # delivered exactly once, after the greet, by :func:`_flush_pending_paste`
+
+    # W12 Status Emitter
+    _start_status_emitter(project_id, sid, worktree_path)
     # (wired into the first read_since/attach). Recorded with paste_flushed=False
     # so the flush guard knows it is still pending. With no paste_prompt this is
     # skipped entirely (the v9 back-compat path is untouched).
@@ -1769,6 +1775,60 @@ def _trigger_background_stage_summary(folder, project_id, store_lane,
                                   stage=stage)
         except Exception:
             pass
+
+    try:
+        import threading
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def _start_status_emitter(project_id, sid, worktree_path):
+    """Best-effort, NON-BLOCKING: schedule a 10-minute status block emitter (W12)."""
+    if os.environ.get("ANCHOR_STATUS_EMITTER", "").strip().lower() in ("0", "false", "no", "off"):
+        return
+
+    def _run():
+        import time, json
+        while True:
+            time.sleep(600)  # 10 minute cadence
+            try:
+                rec = _reg.get_session(sid)
+                if not rec or rec.get("status") != _reg.STATUS_RUNNING:
+                    break
+                
+                wave = "?"
+                budget = "?"
+                state = rec.get("status", "running")
+                
+                cp_path = os.path.join(worktree_path, "foreman-checkpoint.json")
+                if os.path.exists(cp_path):
+                    try:
+                        with open(cp_path, "r", encoding="utf-8") as f:
+                            cp = json.load(f)
+                        
+                        w = str(cp.get("current_wave", "?"))
+                        total = str(cp.get("total_waves", "?"))
+                        wave = f"{w}/{total}" if total != "?" else w
+                        
+                        b = cp.get("budget_remaining", {})
+                        bw = b.get("waves")
+                        if bw is not None:
+                            budget = f"{bw} waves"
+                            
+                        state = cp.get("status", state)
+                    except Exception:
+                        pass
+
+                ts = time.strftime("%H:%M")
+                msg = f"\n[STATUS {ts}] Wave: {wave} | Budget: {budget} | State: {state}\n"
+                
+                child = _pty._LIVE.get(sid)
+                if child and hasattr(child, "_append"):
+                    with getattr(child, "_lock", threading.RLock()):
+                        child._append(msg)
+            except Exception:
+                pass
 
     try:
         import threading

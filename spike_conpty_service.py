@@ -19,7 +19,7 @@ on pass, non-zero on fail. A bounded timeout guarantees it never hangs.
 
 Service-context simulation (per anchor-runtime-facts memory, the documented
 pitfall): the ``anchor`` service runs as ``.\\john`` with ``USERPROFILE`` and
-``HOME`` pinned to ``C:\\Users\\john`` and NO loaded user profile (so no
+``HOME`` pinned to ``C:\\Users\\example`` and NO loaded user profile (so no
 ``APPDATA``/``LOCALAPPDATA``). The CORRECT way to simulate it is the FULL current
 process environment (which includes ``SystemRoot``/``windir`` — omitting those
 fast-fail-crashes ``claude`` with ``0xC0000409``) with the profile vars stripped
@@ -36,7 +36,7 @@ import uuid
 import pty_manager
 
 
-JOHN_HOME = r"C:\Users\john"
+JOHN_HOME = r"C:\Users\example"
 
 # Read window + overall timeout bounds so the spike can NEVER hang.
 READ_TIMEOUT_S = 20.0
@@ -49,7 +49,7 @@ def simulated_service_env():
     Start from the FULL current process environment (keeps SystemRoot/windir,
     PATH, PATHEXT — required so a native child like ``claude`` does not
     fast-fail-crash with 0xC0000409), then:
-      - force ``USERPROFILE`` and ``HOME`` to ``C:\\Users\\john`` (the service
+      - force ``USERPROFILE`` and ``HOME`` to ``C:\\Users\\example`` (the service
         runs as ``.\\john`` and Anchor pins these so ``claude`` finds
         ``~\\.claude\\.credentials.json``), and
       - drop the loaded-profile-only vars ``APPDATA`` / ``LOCALAPPDATA`` (the

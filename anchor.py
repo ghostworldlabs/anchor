@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Wave 14: acceptance tests added
+# Wave 15: trust ceremony added
 """
 Anchor — Productivity Engine for J.C. Liechty
 Reads/writes markdown files, generates dashboard.html, logs changes.
@@ -1356,8 +1358,20 @@ def main():
     if cmd == "dashboard":
         rebuild_dashboard()
 
+    elif cmd == "update":
+        import update_transaction
+        update_transaction.run_update(sys.argv[2:])
+
+    elif cmd == "edits":
+        import update_transaction
+        update_transaction.run_edits(sys.argv[2:])
+
     elif cmd == "status":
         print_status()
+
+    elif cmd == "doctor":
+        import doctor
+        sys.exit(doctor.run_doctor(sys.argv[2:]))
 
     elif cmd == "done":
         if len(sys.argv) < 3:

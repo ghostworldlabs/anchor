@@ -36,6 +36,11 @@ Because the service owns the process, the dashboard no longer has a Stop button 
 
 > ✅ **Resolved (2026-06-08) — duplicate supervisor was a rogue NSSM service.** The real cause of stale-code-on-8777 was a **second NSSM service `Anchor-Server`** (WinGet nssm, created 2026-05-16, running old code) racing the legit `anchor` service for the port. Because the old code bound with `SO_REUSEADDR`, *both* servers could listen on 8777 at once and requests randomly hit old or new — and `nssm restart anchor` only restarts one supervisor. Fixes shipped: (1) a **single-instance guard** — the server now binds with `SO_EXCLUSIVEADDRUSE` (Windows) so only one Anchor process can own 8777; a duplicate exits(0) cleanly instead of squatting (see `paths.classify_bind_error`/`use_exclusive_bind`, `anchor_gui._ExclusiveThreadingHTTPServer`). (2) Every desktop launcher (`AnchorDashboard.vbs/.bat`, `launch_anchor.pyw`, `pin_anchor_to_taskbar.vbs`, `create_shortcut.py`) now **only opens the browser**, never spawns a server. (3) `fix_anchor_stale.ps1` (run elevated) removes the rogue `Anchor-Server` service, reaps 8777 by PID, restarts `anchor`, and verifies the new code is live. The Task Scheduler task **"Anchor Server"** is already Disabled and was NOT the cause. The `ledger` NSSM service (`ledger_gui.py`, port 8778) is unrelated — leave it alone.
 
+## Minimum Subscription & Degradation Behavior
+- **Minimum Viable Tier:** A **Claude Pro** subscription is the minimum viable tier for running Crucible and Foreman (which require Claude Code).
+- **Gemini-Only Degradation:** If only Gemini is present, Research and General lanes run normally, but Crucible (Planning) and Foreman (Build) lanes degrade to `REQUIRES_CLAUDE` status (an honest refusal, not a crash) because they depend on the Claude Code engine.
+- **Both Subscriptions:** When both are present, Claude is the primary driver and Gemini acts as the 5:1 skill-layer swarm, providing the highest fidelity execution.
+
 ## Quick Start
 When the user says "Dashboard", "dashboard", "anchor", or "start":
 1. The server is already running (NSSM service). Just open **http://localhost:8777** in the browser — no launch step needed. If it doesn't respond, run `nssm restart anchor` (elevated) or check `Get-Service anchor`.
@@ -385,3 +390,12 @@ When running ANY agentic skill via a CLI or script (e.g., Foreman, Crucible, Gan
 
 # Silent Background Tools Rule
 Agents must never use the terminal `run_command` tool for simple file reads, writes, `list_dir`, or `grep` searches. Always strictly prioritize the native silent background tools (`view_file`, `grep_search`, `list_dir`) to prevent spawning visible PowerShell windows that steal focus and disrupt the user's typing.
+
+# Enforcement Honesty: Engine vs Convention Guarantees
+
+| Guarantee | Type | Enforcement Mechanism |
+|-----------|------|-----------------------|
+| **10-minute Status Updates** | Engine-enforced | The `terminal_session.py` background thread injects the status block (timestamp, wave, budget, state) directly into the terminal buffer from telemetry, independent of model action. |
+| **Budget Limits** | Engine-enforced | Multi-wave orchestrators track budgets and HALT automatically without agent choice. |
+| **Grounding / Rule Compliance** | Convention-only | Seed prompt instruction; the model must choose to obey the directive. |
+| **Deliverable Previews on 8777** | Engine-enforced | Hard-guarded in `preview_server.py` to prevent binding the Anchor service port. |

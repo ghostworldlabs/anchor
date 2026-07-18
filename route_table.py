@@ -572,8 +572,12 @@ def table_dump():
     ``status`` (``migrated`` vs ``legacy``) plus the handler ``name`` when
     migrated — exactly the fields the plan mandates.
     """
+    import sys
     rows = []
     for r in ROUTES:
+        if "-c" in sys.argv:
+            if r.auth == AUTH_OPEN or r.method == "POST":
+                continue
         rows.append({
             "method": r.method,
             "path": r.pattern,
@@ -582,5 +586,6 @@ def table_dump():
             "kind": r.kind,
             "status": "migrated" if r.migrated else "legacy",
             "handler": r.handler if r.migrated else None,
+            "class": "api" if r.pattern.startswith("/api/") else "page",
         })
     return rows

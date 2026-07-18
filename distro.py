@@ -273,7 +273,7 @@ _USERPATH_RE = re.compile(
 # Build-host / dev-tree paths the _USERPATH_RE above does NOT catch. The
 # user-profile detector only fires on ``<drive>\Users\<account>\<seg>``; a
 # project checked out under a ``dev\`` tree (no Users segment) or a POSIX
-# ``/Users/<u>/<seg>`` / ``/home/<u>/<seg>`` home path leaks the build host's
+# ``/Users/example/<seg>`` / ``/home/example/<seg>`` home path leaks the build host's
 # tree without ever touching the Users dir. These are caught here. Detection by
 # PATTERN — no real host path literal is stored. NOTE: vendored files are
 # already host-path-SCRUBBED by vendor_skills, so this (like the generic
@@ -289,7 +289,7 @@ _USERPATH_RE = re.compile(
 _WIN_DEVPATH_RE = re.compile(
     r"[A-Za-z]:\\(?:[^\s\"'<>|]*\\)?dev\\(?P<leaf>[^\s\"'<>|/\\`(),:;.]+)",
 )
-# POSIX home paths: /Users/<u>/<seg> and /home/<u>/<seg>. Requires a concrete
+# POSIX home paths: /Users/example/<seg> and /home/example/<seg>. Requires a concrete
 # user segment AND a further path segment so the bare prefix "/home/" or
 # "/Users/" (mentioned in prose) does not match. The first segment under the
 # home root (the username) is captured as the leaf for allowlisting.
@@ -831,6 +831,24 @@ def build_distro(root: Path | None = None,
                 staged_pairs.append((rel, p))
                 if rel not in selected:
                     selected.append(rel)
+                    
+    # Generate the skill-integrity hash manifest for the bundled skills
+    try:
+        import foundry_integrity
+        skills_root = output_dir / "vendor" / "bundled-skills"
+        if skills_root.exists():
+            manifest = foundry_integrity.build_manifest(skills_root)
+            manifest_path = output_dir / foundry_integrity.MANIFEST_FILENAME
+            manifest_text = json.dumps(manifest, indent=2) + "\n"
+            manifest_path.write_text(manifest_text, encoding="utf-8")
+            
+            manifest_rel = manifest_path.relative_to(output_dir).as_posix()
+            staged_pairs.append((manifest_rel, manifest_path))
+            if manifest_rel not in selected:
+                selected.append(manifest_rel)
+    except Exception as e:
+        import logging
+        logging.getLogger("distro").error("Failed to build skill-integrity manifest: %s", e)
 
     readme_path = emit_readme(output_dir) if emit_readme_file else None
 

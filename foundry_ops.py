@@ -218,8 +218,14 @@ def _derive_manifest_data(name, skill_dir: Path, *, host_cmd=None,
 
 def _write_manifest(skill_dir: Path, manifest: dict) -> Path:
     target = skill_dir / _sr.MANIFEST_FILENAME
-    _atomic_write(target,
-                  json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False) + "\n"
+    _atomic_write(target, manifest_text)
+    try:
+        import foundry_integrity
+        foundry_integrity.update_manifest_entry(skill_dir.name, _sr.MANIFEST_FILENAME, manifest_text)
+    except Exception as e:
+        import logging
+        logging.getLogger("foundry_ops").warning("failed to update integrity manifest entry: %s", e)
     return target
 
 
@@ -274,7 +280,7 @@ print(json.dumps({{
 # ── Git (best-effort, honestly reported — never a silent skip) ───────────────
 
 _GIT_IDENT = ("-c", "user.name=Anchor Foundry",
-              "-c", "user.email=foundry@anchor.invalid")
+              "-c", "user.email=foundry@example.com")
 
 
 def _git_commit_on_branch(skills_root: Path, paths_to_add, *, branch,
@@ -441,6 +447,13 @@ def scaffold_skill(name, *, skills_root=None, map_path=None, lock_path=None,
         jdir.mkdir(parents=True, exist_ok=True)
         (jdir / ".gitkeep").write_text("", encoding="utf-8")
         created.append(_SKILL_JOURNAL_SUBDIR + "/.gitkeep")
+        
+        # Wave 10: register the new skill in the integrity manifest
+        try:
+            import foundry_integrity
+            foundry_integrity.register_skill(name)
+        except Exception as e:
+            pass
     except OSError as exc:
         shutil.rmtree(skill_dir, ignore_errors=True)
         return _refusal(op, "scaffold-io-failed:%s" % exc)

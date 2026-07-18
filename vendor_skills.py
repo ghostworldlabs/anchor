@@ -119,7 +119,7 @@ _WIN_USER_RE = re.compile(
     r"[A-Za-z]:\\Users\\[^\s\"'<>|]*",
     re.IGNORECASE,
 )
-# POSIX home paths: /Users/<u>/... and /home/<u>/...
+# POSIX home paths: /Users/example/... and /home/example/...
 _POSIX_HOME_RE = re.compile(
     r"/(?:Users|home)/[^/\s\"'<>|]+(?:/[^\s\"'<>|]*)?",
 )

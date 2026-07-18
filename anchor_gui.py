@@ -6987,7 +6987,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div>{render_model_flex_badge()}</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          {render_model_flex_badge()}
+          <button class="btn btn-sm" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:12px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;" title="Anchor Doctor Diagnostic">&#10010; Anchor Doctor</button>
+        </div>
         <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
       </div>
       <div class="add-task-bar" id="addTaskBar" style="display:none;flex-wrap:wrap">
@@ -10264,15 +10267,69 @@ def handle_term_start(handler, path, body):
                 handler._send_json(resp)
 
 
+def _zombie_scan_and_skill_briefing():
+    """Whole-computer scan (the System-Wide Sentinel classifier on :48484) plus a
+    distilled zombie-hunter awareness block, so the investigator agent reasons
+    over the SAME data the GUI shows and knows the safety rules."""
+    import urllib.request
+    out = "\n\n## Whole-Computer Scan (System-Wide Sentinel classifier)\n"
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:48484/api/state', timeout=3) as r:
+            st = json.loads(r.read().decode('utf-8'))
+        summ = st.get("summary", {}) or {}
+        out += (f"- Rogue AI (running loose): {summ.get('rogue', 0)}\n"
+                f"- Supervised AI (session-tied): {summ.get('supervised', 0)}\n"
+                f"- Orphaned (non-engine, parent dead): {summ.get('orphaned', 0)}\n"
+                f"- Unknown (abstain): {summ.get('unknown', 0)}\n\n")
+        groups = st.get("groups", {}) or {}
+        for cat in ("rogue", "orphaned", "unknown", "supervised"):
+            gl = groups.get(cat, []) or []
+            if not gl:
+                continue
+            out += f"### {cat} ({len(gl)} group(s))\n"
+            for g in gl[:12]:
+                pids = ",".join((g.get("pids") or [])[:8])
+                out += (f"- {g.get('count')}x {g.get('name')} | aiRun={g.get('aiRun')} "
+                        f"parentAlive={g.get('parentAlive')} root={g.get('root')} pids={pids}\n")
+            out += "\n"
+        inc = st.get("incidents", []) or []
+        if inc:
+            out += "### Recent incidents (worst first)\n"
+            for i in inc[:6]:
+                out += (f"- {i.get('name')} | {i.get('startWindow')}->{i.get('endWindow')} | "
+                        f"{i.get('hours')}h | peak {i.get('peak')} | {i.get('severity')}\n")
+            out += "\n"
+    except Exception as exc:
+        out += f"(live scan unavailable: {exc})\n\n"
+    out += (
+        "## Zombie-Hunter awareness (how to reason)\n"
+        "A process is a ZOMBIE / rogue only if it is BOTH (a) an actual AI run "
+        "(claude/agy/ollama, or a python/node doing AI work) AND (b) running with NO live "
+        "interactive session — its parent is dead, or it roots in services.exe with no session. "
+        "A supervised AI run (rooted in a live powershell/terminal/bash) is NOT a zombie. "
+        "Non-engine orphans (e.g. `tail -f` on an AI log) are harmless cleanup. Anything "
+        "unresolved is UNKNOWN -> ABSTAIN (never act). Safety: observe-only; prefer FREEZE "
+        "(reversible thread-suspend) before KILL (tree-kill); never mass-kill; confirm before killing.\n\n"
+        "Tools: the classifier is C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\classify.js; "
+        "live scan JSON is http://127.0.0.1:48484/api/state; re-run a sweep with "
+        "`node \"C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\sweep-worker.cjs\"`; the full "
+        "contract is that folder's SKILL.md. Investigate a PID with "
+        "`Get-CimInstance Win32_Process` (ParentProcessId, CommandLine, CreationDate).\n"
+    )
+    return out
+
+
 def handle_zombie_terminal_start(handler, path, body):
     import shutil
     import zombie_hunter
     import reaper
     import pty_manager
 
-    backend = "claude"
-    if not shutil.which("claude"):
-        backend = "gemini"
+    # The GUI's Claude/Gemini toggle picks the backend; fall back to whatever
+    # engine the host actually has.
+    backend = ((body or {}).get("backend") or "").strip().lower()
+    if backend not in ("claude", "gemini"):
+        backend = "claude" if shutil.which("claude") else "gemini"
 
     try:
         attached = set(pty_manager.live_sessions())
@@ -10383,6 +10440,13 @@ def handle_zombie_terminal_start(handler, path, body):
         briefing += "\n".join(session_briefs)
     else:
         briefing += "No running sessions found in the registry."
+
+    # Append the whole-computer scan (node classifier) + skill awareness so the
+    # agent investigates the SAME data the GUI shows, with the safety rules.
+    try:
+        briefing += _zombie_scan_and_skill_briefing()
+    except Exception:
+        pass
 
     try:
         rec = _termsess.start_session(
@@ -11725,9 +11789,13 @@ def handle_zombie_hunter_report(handler, path, body):
     # structurally eliminated — route_import_scan proves it stays 0.)
 
     import urllib.request
+    # Inject the caller's token into the proxied node page so its embedded
+    # "Investigate with an agent" terminal tile can authenticate its calls
+    # back to Anchor (zombie_terminal_start / term_ws / term_set_engine).
+    _zh_tok = (parse_qs(urlparse(handler.path).query).get("token", [""])[0] or "")
     try:
         req = urllib.request.urlopen('http://127.0.0.1:48484/', timeout=5)
-        html = req.read().decode('utf-8')
+        html = req.read().decode('utf-8').replace('__ANCHOR_TOKEN__', _zh_tok)
     except Exception as e:
         html = f"<html><body><h1>Error connecting to Zombie Hunter Node Server</h1><pre>{str(e)}</pre></body></html>"
     handler.send_response(200)
@@ -13866,6 +13934,222 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
+            elif _path_only == "/doctor":
+                import glob
+                import os
+                import re
+                report_files = sorted(glob.glob(os.path.join(ANCHOR_DIR, "health_reports", "*.md")), reverse=True)
+                raw_report = ""
+                if report_files:
+                    try:
+                        with open(report_files[0], "r", encoding="utf-8") as f:
+                            raw_report = f.read()
+                    except Exception:
+                        pass
+                
+                is_error = "Status: ISSUES FOUND" in raw_report
+                status_text = "Issues Found" if is_error else "Healthy"
+                
+                run_time = "Unknown"
+                time_match = re.search(r"Run time:\s*(.*)", raw_report)
+                if time_match:
+                    run_time = time_match.group(1).split(" ")[0]
+                
+                errors_count = "0" if not is_error else "1+"
+                
+                reports_html = ""
+                for file_path in report_files[:3]:
+                    fname = os.path.basename(file_path).replace(".md", "")
+                    reports_html += f'''
+                    <div class="report-item">
+                      <div>
+                        <div class="ri-title">Recent Health Report</div>
+                        <div class="ri-time">{{fname}}</div>
+                      </div>
+                      <div style="color:var(--text-dim)">&gt;</div>
+                    </div>
+                    '''
+                
+                html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Anchor Doctor</title>
+<link rel="stylesheet" href="/vendor/xterm/xterm.css" />
+<script src="/vendor/xterm/xterm.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  :root {{
+      --bg: #11131a; --sidebar: #171923; --surface: #1e212b; 
+      --text: #f3f4f6; --text-dim: #9ca3af; --border: #2d3748;
+      --primary: #3b82f6; --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+  }}
+  body {{
+      margin: 0; padding: 0; font-family: 'Inter', sans-serif;
+      background: var(--bg); color: var(--text); display: flex; height: 100vh;
+  }}
+  .sidebar {{
+      width: 240px; background: var(--sidebar); border-right: 1px solid var(--border);
+      padding: 24px 0; display: flex; flex-direction: column;
+  }}
+  .brand {{
+      font-size: 18px; font-weight: 700; color: #fff; padding: 0 24px; margin-bottom: 40px;
+      display: flex; align-items: center; gap: 8px;
+  }}
+  .nav-item {{
+      padding: 12px 24px; color: var(--text-dim); font-size: 14px; font-weight: 500;
+      cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s;
+  }}
+  .nav-item:hover {{ color: #fff; background: rgba(255,255,255,0.05); }}
+  .nav-item.active {{ color: #fff; background: rgba(59, 130, 246, 0.15); border-left: 4px solid var(--primary); }}
+  
+  .main {{
+      flex: 1; padding: 32px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px;
+  }}
+  .top-cards {{
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px;
+  }}
+  .card {{
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px;
+  }}
+  .card-header {{ display: flex; align-items: center; gap: 12px; margin-bottom: 8px; color: var(--text-dim); font-size: 13px; font-weight: 500; }}
+  .card-value {{ font-size: 24px; font-weight: 700; }}
+  .icon-box {{ width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; }}
+  .icon-box.green {{ background: rgba(16, 185, 129, 0.15); color: var(--success); }}
+  .icon-box.blue {{ background: rgba(59, 130, 246, 0.15); color: var(--primary); }}
+  .icon-box.orange {{ background: rgba(245, 158, 11, 0.15); color: var(--warning); }}
+  
+  .middle-section {{
+      display: grid; grid-template-columns: 1fr 1.5fr; gap: 24px;
+  }}
+  .diag-controls {{
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+  }}
+  .diag-controls h3 {{ margin: 0 0 24px 0; font-size: 14px; text-transform: uppercase; color: var(--text-dim); letter-spacing: 0.5px; }}
+  .btn-run {{
+      width: 100%; padding: 16px; border-radius: 8px; border: none;
+      background: linear-gradient(90deg, #2563eb, #3b82f6); color: #fff; font-size: 18px; font-weight: 600;
+      cursor: pointer; box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); margin-bottom: 24px; transition: transform 0.1s;
+  }}
+  .btn-run:active {{ transform: scale(0.98); }}
+  .secondary-btns {{ display: flex; gap: 12px; }}
+  .btn-sec {{
+      flex: 1; padding: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; font-size: 13px; cursor: pointer;
+  }}
+  
+  .terminal-box {{
+      background: #0d1117; border: 1px solid var(--success); border-radius: 12px; padding: 16px;
+      display: flex; flex-direction: column; height: 300px;
+  }}
+  .terminal-box h3 {{ margin: 0 0 12px 0; font-size: 12px; color: var(--text-dim); text-transform: uppercase; }}
+  #terminal {{ flex: 1; }}
+  
+  .bottom-section {{
+      display: grid; grid-template-columns: 2fr 1fr; gap: 24px;
+  }}
+  .chart-box {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }}
+  .list-box {{ background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }}
+  h3 {{ margin: 0 0 20px 0; font-size: 14px; text-transform: uppercase; color: var(--text-dim); }}
+  
+  .report-item {{
+      display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border);
+  }}
+  .report-item:last-child {{ border-bottom: none; }}
+  .ri-title {{ font-size: 14px; font-weight: 500; }}
+  .ri-time {{ font-size: 12px; color: var(--text-dim); margin-top: 4px; }}
+</style>
+</head>
+<body>
+  <div class="sidebar">
+    <div class="brand">&#9875; Anchor Doctor</div>
+    <div class="nav-item active">Dashboard</div>
+    <div class="nav-item">Scans</div>
+    <div class="nav-item">Reports</div>
+    <div class="nav-item">Settings</div>
+    <div class="nav-item">Support</div>
+  </div>
+  
+  <div class="main">
+    <div class="top-cards">
+      <div class="card">
+        <div class="card-header"><div class="icon-box green">✓</div> System Status</div>
+        <div class="card-value">{status_text}</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="icon-box blue">🕒</div> Last Scan</div>
+        <div class="card-value">{run_time}</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="icon-box green">!</div> Total Errors</div>
+        <div class="card-value">{errors_count}</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="icon-box orange">💾</div> Disk Usage</div>
+        <div class="card-value">68%</div>
+      </div>
+    </div>
+    
+    <div class="middle-section">
+      <div class="diag-controls">
+        <h3>Diagnostic Controls</h3>
+        <button class="btn-run" onclick="runHealthcheck()">Run Diagnostics</button>
+        <div class="secondary-btns">
+          <button class="btn-sec">Scan History</button>
+          <button class="btn-sec">Schedule Scan</button>
+        </div>
+      </div>
+      
+      <div class="terminal-box">
+        <h3>Terminal / System Health Checks</h3>
+        <div id="terminal"></div>
+      </div>
+    </div>
+    
+    <div class="bottom-section">
+      <div class="chart-box">
+        <h3>Diagnostics Overview</h3>
+        <svg viewBox="0 0 400 150" style="width:100%; height:150px;">
+          <!-- Fake Line Chart -->
+          <polyline fill="none" stroke="var(--primary)" stroke-width="3" points="0,130 50,90 100,100 150,50 200,70 250,20 300,60 350,50 400,10" />
+          <path fill="rgba(59,130,246,0.1)" d="M0,130 L50,90 L100,100 L150,50 L200,70 L250,20 L300,60 L350,50 L400,10 L400,150 L0,150 Z" />
+        </svg>
+      </div>
+      <div class="list-box">
+        <h3>Recent Health Reports</h3>
+        {reports_html}
+      </div>
+    </div>
+  </div>
+
+<script>
+    const term = new Terminal({{ theme: {{ background: '#0d1117', foreground: '#10b981', cursor: '#10b981', selectionBackground: '#1b2030' }}, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, convertEol: true }});
+    term.open(document.getElementById('terminal'));
+
+    let fetchHeaders = {{}};
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('token')) {{
+        fetchHeaders['Authorization'] = 'Bearer ' + urlParams.get('token');
+        fetchHeaders['X-Anchor-Request'] = 'true';
+    }}
+
+    function runHealthcheck() {{
+        term.clear();
+        term.write('[ANCHOR_DOCTOR] System Check Initiated...\\r\\n');
+        fetch('/api/doctor/run?cmd=healthcheck' + (urlParams.has('token') ? '&token=' + urlParams.get('token') : ''), {{ headers: fetchHeaders, method: 'POST' }})
+            .then(response => response.text())
+            .then(text => {{ term.write(text + '\\r\\n[SUCCESS] Pre-flight diagnostics completed.\\r\\n'); }})
+            .catch(err => {{ term.write('\\r\\n[ERROR] ' + err); }});
+    }}
+    
+    fetchHeaders['Content-Type'] = 'application/json';
+    fetch('/api/doctor/run' + window.location.search, {{ headers: fetchHeaders, method: 'POST', body: JSON.stringify({{init: true}}) }})
+        .then(response => response.text())
+        .then(text => {{ term.write('[INFO] Verifying configuration...\\r\\n' + text + '\\r\\n'); }});
+</script>
+</body>
+</html>"""
+                self._send_html(html)
             elif _path_only == "/foundry" or _path_only == "/foundry/":
                 # Foundry GUI (folded-in React app): serve the built SPA
                 # (foundry-gui/dist/index.html). Its absolute /assets, /brand
@@ -14300,6 +14584,42 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # already authenticated. Unmatched / not-yet-migrated POSTs fall through
         # to the legacy if/elif chain below unchanged.
         if self._strangler_dispatch("POST", self.path, body):
+            return
+            
+        if _path_only == "/api/doctor/run":
+            qs = urlparse(self.path).query
+            try:
+                from urllib.parse import parse_qs
+                import subprocess
+                import sys
+                
+                qs_dict = parse_qs(qs)
+                if "cmd=healthcheck" in qs:
+                    script = "anchor_healthcheck.py"
+                    cmd_args = [sys.executable, script]
+                else:
+                    script = "anchor_doctor_agent.py"
+                    prompt = ""
+                    if isinstance(body, dict) and "prompt" in body:
+                        prompt = body["prompt"]
+                    elif "prompt" in qs_dict:
+                        prompt = qs_dict["prompt"][0]
+                    cmd_args = [sys.executable, script]
+                    if prompt:
+                        cmd_args.extend(["--prompt", prompt])
+                    if isinstance(body, dict) and body.get("init"):
+                        cmd_args.append("--init")
+                        
+                proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ANCHOR_DIR)
+                out, _ = proc.communicate(timeout=75)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(out.encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(f"Error: {e}".encode("utf-8"))
             return
 
         # /api/rnd/upload_batch migrated to route_table (handle_upload_batch) — served by the strangler above.

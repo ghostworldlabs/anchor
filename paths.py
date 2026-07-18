@@ -406,6 +406,13 @@ def auth_ok(provided) -> bool:
     """
     want = expected_token()
     if want is None:
+        import pillar_flags
+        try:
+            mode = pillar_flags.current_flags()[pillar_flags.FLAG_AUTH]
+        except Exception:
+            mode = pillar_flags.FLAG_DEFAULTS[pillar_flags.FLAG_AUTH]
+        if mode == "enforce":
+            return False
         return True
     import hmac
     return hmac.compare_digest(str(provided or ""), str(want))

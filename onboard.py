@@ -470,6 +470,32 @@ def main(argv=None) -> int:
     print("  token %s at: %s"
           % ("created" if tok["created"] else "already present (kept)", tok["path"]))
 
+    print("\nCapability probe & Driver-init hardening...")
+    try:
+        import lanes
+        prof = lanes.detect_host_profile()
+        plan_research = lanes.select_engine_plan("research", prof)
+        plan_plan = lanes.select_engine_plan("plan", prof)
+        plan_build = lanes.select_engine_plan("build", prof)
+
+        print("  Host engines detected: Claude=%s, Gemini=%s" % (
+            "FOUND" if prof["claude"] else "missing",
+            "FOUND" if prof["gemini"] else "missing"
+        ))
+        print("  Seat resolution (same code path as author):")
+        print("    - research: driver=%s, swarm=%s" % (plan_research["driver"] or "None", plan_research["swarm"] or "None"))
+        print("    - plan:     driver=%s, swarm=%s" % (plan_plan["driver"] or "None", plan_plan["swarm"] or "None"))
+        print("    - build:    driver=%s, swarm=%s" % (plan_build["driver"] or "None", plan_build["swarm"] or "None"))
+
+        print("  Roles filled:")
+        print("    - Driver seats: %s" % (plan_build["driver"] or "None"))
+        role_model = "Claude" if prof["claude"] else "None (requires Claude)"
+        print("    - Shark: %s" % role_model)
+        print("    - Judge: %s" % role_model)
+        print("    - Synthesizer: %s" % role_model)
+    except Exception as exc:
+        print("  WARNING: Could not probe capabilities: %s" % exc)
+
     print("\nservice setup: next step (run the service-registration step "
           "to bring up the background dashboard).")
     

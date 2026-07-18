@@ -235,8 +235,17 @@ def apply_edit(skill_dir, proposal) -> dict:
         hdir.mkdir(parents=True, exist_ok=True)
         _atomic_write(hdir / prior_name, current)
         prior_rel = HISTORY_DIRNAME + "/" + prior_name
-    _atomic_write(north_star_path(skill_dir),
-                  str(proposal.get("new_text") or ""))
+    new_text = str(proposal.get("new_text") or "")
+    _atomic_write(north_star_path(skill_dir), new_text)
+    
+    # Wave 10: update the skill integrity manifest atomically
+    try:
+        import foundry_integrity
+        foundry_integrity.update_manifest_entry(skill_dir.name, "NORTH-STAR.md", new_text)
+    except Exception as e:
+        import logging
+        logging.getLogger("foundry_north_star").warning("failed to update manifest entry: %s", e)
+        
     entry = record_version(skill_dir, action=ACTION_APPLY,
                            proposal_id=proposal.get("proposal_id"),
                            prior_rel=prior_rel)
