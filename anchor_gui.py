@@ -14126,26 +14126,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
     const term = new Terminal({{ theme: {{ background: '#0d1117', foreground: '#10b981', cursor: '#10b981', selectionBackground: '#1b2030' }}, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, convertEol: true }});
     term.open(document.getElementById('terminal'));
 
-    let fetchHeaders = {{}};
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.has('token')) {{
-        fetchHeaders['Authorization'] = 'Bearer ' + urlParams.get('token');
-        fetchHeaders['X-Anchor-Request'] = 'true';
-    }}
-
+    // Doctor V3 wave 1: the V2 backend (/api/doctor/run — a Gemini-API agent
+    // spawn + a 75s synchronous healthcheck) has been removed. The V3 agentic
+    // session backend (wave 2) and background diagnostics run (wave 3) replace
+    // it; until then the terminal states that honestly instead of calling a
+    // dead endpoint.
     function runHealthcheck() {{
         term.clear();
-        term.write('[ANCHOR_DOCTOR] System Check Initiated...\\r\\n');
-        fetch('/api/doctor/run?cmd=healthcheck' + (urlParams.has('token') ? '&token=' + urlParams.get('token') : ''), {{ headers: fetchHeaders, method: 'POST' }})
-            .then(response => response.text())
-            .then(text => {{ term.write(text + '\\r\\n[SUCCESS] Pre-flight diagnostics completed.\\r\\n'); }})
-            .catch(err => {{ term.write('\\r\\n[ERROR] ' + err); }});
+        term.write('[ANCHOR_DOCTOR] The V2 diagnostics backend has been removed.\\r\\n');
+        term.write('The V3 diagnostics backend is not wired up yet.\\r\\n');
     }}
-    
-    fetchHeaders['Content-Type'] = 'application/json';
-    fetch('/api/doctor/run' + window.location.search, {{ headers: fetchHeaders, method: 'POST', body: JSON.stringify({{init: true}}) }})
-        .then(response => response.text())
-        .then(text => {{ term.write('[INFO] Verifying configuration...\\r\\n' + text + '\\r\\n'); }});
 </script>
 </body>
 </html>"""
@@ -14586,41 +14576,13 @@ class AnchorHandler(BaseHTTPRequestHandler):
         if self._strangler_dispatch("POST", self.path, body):
             return
             
-        if _path_only == "/api/doctor/run":
-            qs = urlparse(self.path).query
-            try:
-                from urllib.parse import parse_qs
-                import subprocess
-                import sys
-                
-                qs_dict = parse_qs(qs)
-                if "cmd=healthcheck" in qs:
-                    script = "anchor_healthcheck.py"
-                    cmd_args = [sys.executable, script]
-                else:
-                    script = "anchor_doctor_agent.py"
-                    prompt = ""
-                    if isinstance(body, dict) and "prompt" in body:
-                        prompt = body["prompt"]
-                    elif "prompt" in qs_dict:
-                        prompt = qs_dict["prompt"][0]
-                    cmd_args = [sys.executable, script]
-                    if prompt:
-                        cmd_args.extend(["--prompt", prompt])
-                    if isinstance(body, dict) and body.get("init"):
-                        cmd_args.append("--init")
-                        
-                proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ANCHOR_DIR)
-                out, _ = proc.communicate(timeout=75)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(out.encode("utf-8"))
-            except Exception as e:
-                self.send_response(500)
-                self.end_headers()
-                self.wfile.write(f"Error: {e}".encode("utf-8"))
-            return
+        # /api/doctor/run removed (doctor V3 wave 1). The V2 handler spawned a
+        # third-party Gemini API-key wrapper script (deleted; stdlib-only
+        # violation, unusable on a subscription-CLI host) and ran
+        # anchor_healthcheck.py synchronously in the request thread for up to
+        # 75s. V3 replaces them with a real agentic session on the existing PTY
+        # substrate (wave 2) and a background healthcheck run with a live tail
+        # (wave 3). An unmatched POST here falls through to the 404 below.
 
         # /api/rnd/upload_batch migrated to route_table (handle_upload_batch) — served by the strangler above.
         # /api/upload migrated to route_table (handle_upload) — served by the strangler above.
