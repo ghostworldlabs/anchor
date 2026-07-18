@@ -10466,6 +10466,145 @@ def handle_zombie_terminal_start(handler, path, body):
         })
 
 
+#: Cap on how much of the latest health report rides in the doctor seed —
+#: enough for the whole summary + failures section of a normal report without
+#: flooding the opening turn.
+_DOCTOR_SEED_REPORT_CAP = 6000
+
+
+def _build_doctor_seed():
+    """Compose the ONE-TIME doctor-session briefing (doctor V3 Wave 2).
+
+    Content (plan §W2): the latest ``health_reports/*.md`` (graceful "no
+    reports yet" when absent), fresh ``doctor.run_doctor()`` output, the
+    CORRECTNESS-vs-PERFORMANCE severity rule, and a capability list. ASCII-safe
+    (encoded with replacement so no non-ASCII byte ever reaches the PTY seed).
+    Every section is individually guarded — a failure degrades to an honest
+    note, never a fabricated value and never a crash.
+    """
+    import contextlib
+    import io as _io
+    lines = [
+        "ANCHOR DOCTOR - LIVE DIAGNOSTIC BRIEFING",
+        "You are the Anchor Doctor: an HONEST, READ-ONLY diagnostic assistant "
+        "for this Anchor installation. This terminal runs in plan permission "
+        "mode - you may inspect anything, you can mutate nothing. Never invent "
+        "a number: every figure you state must come from a file you actually "
+        "read or a command you actually ran; say 'unknown' otherwise.",
+    ]
+
+    # 1) The latest health report (graceful when absent/corrupt).
+    try:
+        reports = sorted(_paths.health_reports_dir().glob("*.md"),
+                         reverse=True)
+    except Exception:
+        reports = []
+    if reports:
+        latest = reports[0]
+        try:
+            body = latest.read_text(encoding="utf-8", errors="replace")
+        except Exception as exc:
+            body = "(report unreadable: %s)" % exc
+        lines.append("## Latest health report (%s of %d on disk)"
+                     % (latest.name, len(reports)))
+        lines.append(body[:_DOCTOR_SEED_REPORT_CAP])
+    else:
+        lines.append("## Latest health report")
+        lines.append("No health reports yet - the daily 5 AM health check has "
+                     "not produced one on this install.")
+
+    # 2) Fresh doctor.py system-check output (stdout captured; honest on fail).
+    try:
+        import doctor as _doctor
+        buf = _io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = _doctor.run_doctor()
+        lines.append("## Fresh doctor.py system check (exit %s)" % rc)
+        lines.append(buf.getvalue().strip() or "(no output)")
+    except Exception as exc:
+        lines.append("## Fresh doctor.py system check")
+        lines.append("doctor.run_doctor() failed: %s" % exc)
+
+    # 3) The severity rule (locked 2026-07-07) — so the agent explains a red
+    #    banner vs a yellow warning correctly.
+    lines.append("## Severity rule (locked 2026-07-07)")
+    lines.append(
+        "Every health check is either CORRECTNESS or PERFORMANCE - never "
+        "conflate them. A CORRECTNESS failure (broken endpoint, journal "
+        "corruption/loss, auth violation, bad page content) sets ISSUES FOUND "
+        "and turns the dashboard banner RED. A PERFORMANCE/timing measurement "
+        "(render latency, journal overhead %) is load-sensitive and flaps, so "
+        "it is a NON-BLOCKING YELLOW warning that never reddens the banner. "
+        "Never present a timing warning as a correctness failure.")
+
+    # 4) Capability list.
+    lines.append("## What you can do in this session")
+    lines.append(
+        "- Read health_reports/*.md and explain any failure or warning "
+        "honestly (red = correctness, yellow = performance).\n"
+        "- Inspect the Anchor folder (code, logs/, .anchor/ state) to "
+        "diagnose issues; cross-reference the doctor.py output above.\n"
+        "- Suggest fixes as commands FOR THE USER to run - this session is "
+        "read-only and must not (and cannot) apply them itself.\n"
+        "- Say plainly when something is healthy; never invent a problem.")
+
+    text = "\n\n".join(lines)
+    return text.encode("ascii", "replace").decode("ascii")
+
+
+def handle_doctor_session_start(handler, path, body):
+    # Doctor V3 Wave 2 — start (or attach to) THE doctor agentic session.
+    # Token-authed by the do_POST default-deny middleware (route row declares
+    # AUTH_TOKEN) BEFORE this handler runs. Engine resolved HONESTLY via the W8
+    # model-flex policy: subscription CLIs only (claude / agy|gemini), never an
+    # API key; a host with neither gets an honest `unavailable` status — never
+    # a crash. Output/input ride the EXISTING term transports by session id.
+    profile = _lanes.detect_host_profile()
+    plan = _lanes.select_engine_plan("general", profile=profile)
+    if plan.get("status") != _lanes.ENGINE_STATUS_OK or not plan.get("driver"):
+        handler._send_json({
+            "ok": False,
+            "status": plan.get("status") or _lanes.ENGINE_STATUS_UNAVAILABLE,
+            "reason": plan.get("reason", ""),
+            "session": None,
+        })
+        return
+    try:
+        seed = _build_doctor_seed()
+    except Exception as exc:
+        # The briefing must never block the session — degrade honestly.
+        seed = ("ANCHOR DOCTOR - LIVE DIAGNOSTIC BRIEFING\n\n"
+                "(briefing assembly failed: %s)" % exc)
+    try:
+        rec, attached = _termsess.start_doctor_session(
+            seed_context=seed, backend=plan["driver"])
+    except _termsess.TerminalSessionError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        return
+    # SAFE projection (consistent with term_sessions): NEVER worktree_path /
+    # branch / seed text — the UI needs only the id + engine + status.
+    handler._send_json({
+        "ok": True,
+        "status": _lanes.ENGINE_STATUS_OK,
+        "attached": bool(attached),
+        "session": {
+            "session_id": rec.get("session_id"),
+            "project_id": rec.get("project_id", ""),
+            "lane": rec.get("lane", ""),
+            "backend": rec.get("backend", ""),
+            "status": rec.get("status", ""),
+            "label": rec.get("label", ""),
+            "created_at": rec.get("created_at"),
+        },
+        "engine": {
+            "driver": plan.get("driver"),
+            "swarm": plan.get("swarm"),
+            "swarm_ratio": plan.get("swarm_ratio"),
+            "reason": plan.get("reason", ""),
+        },
+    })
+
+
 def handle_term_input2(handler, path, body):
     # POST-in half of the SSE-out + POST-in fallback transport. Authed by
     # the middleware above.
@@ -12767,6 +12906,12 @@ def handle_term_sessions(handler, path, body):
         if (r.get("lane") in ("gandalf", "zombie")
                 or r.get("label") == "zombie-hunter"):
             continue
+        # Doctor V3 W2: the reserved __doctor__ pseudo-project is FILTERED
+        # from every dashboard/board surface (same pattern as __healthcheck__
+        # task filtering) — its session must never paint a cockpit tile, even
+        # when this projection is queried with project_id=__doctor__ directly.
+        if r.get("project_id") == _termsess.DOCTOR_PROJECT_ID:
+            continue
         safe.append({
             "session_id": r.get("session_id"),
             "project_id": r.get("project_id", ""),
@@ -13193,6 +13338,7 @@ _MIGRATED_HANDLERS = {
     "handle_term_adopt": handle_term_adopt,
     "handle_term_start": handle_term_start,
     "handle_zombie_terminal_start": handle_zombie_terminal_start,
+    "handle_doctor_session_start": handle_doctor_session_start,
     "handle_term_input2": handle_term_input2,
     "handle_answer_gate": handle_answer_gate,
     "handle_cancel_job": handle_cancel_job,

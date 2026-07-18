@@ -270,6 +270,24 @@ def get_project(project_id: str):
             "group": "",
             "notes": "Global general terminal and grasscatcher."
         }
+    if project_id == "__doctor__":
+        # Doctor V3 Wave 2: reserved pseudo-project for THE /doctor agentic
+        # diagnostic session (same idiom as __dashboard__ above). Synthetic —
+        # never a registry row, so it can never surface on the dashboard
+        # project list; the session-listing surfaces filter it explicitly too.
+        # folder_path = the Anchor root (data_dir() == CODE_DIR in the live
+        # layout; the temp data dir in tests, keeping the gate hermetic) — the
+        # doctor session's cwd, held read-only by the engine's plan mode.
+        return {
+            "id": "__doctor__",
+            "name": "Anchor Doctor",
+            "folder_path": str(_paths.data_dir()),
+            "state": "active",
+            "priority": 1,
+            "group": "",
+            "notes": "Reserved pseudo-project for the /doctor diagnostic "
+                     "session; filtered from every dashboard surface.",
+        }
     return load_registry().get(project_id)
 
 

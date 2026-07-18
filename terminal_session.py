@@ -467,7 +467,8 @@ def _engine_launch_argv(cmd, backend, engine_uuid):
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   parent_session_id=None, paste_prompt=None, grass_origin=None,
-                  effort_id=None, effort_managed=False, actor=None):
+                  effort_id=None, effort_managed=False, actor=None,
+                  extra_cli_args=None):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -523,6 +524,12 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     (default False) is the v12 discriminator — passed True ONLY by the v12
     entrypoints; every existing caller leaves it False, so there is NO behavior
     change for them (both default to today's behavior).
+
+    Doctor V3 Wave 2: ``extra_cli_args`` (optional) is a list of extra engine
+    CLI flags appended to the launch argv — e.g. the doctor session's read-only
+    ``--permission-mode plan`` posture. Appended AFTER the session-uuid pin and
+    BEFORE the gemini ``-i`` seed injection; every existing caller omits it
+    (default ``None`` → argv unchanged).
 
     Returns the registry record (incl. ``session_id``). Raises
     :class:`TerminalSessionError` for an unknown project or a disallowed engine.
@@ -593,6 +600,12 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     engine_uuid = _new_engine_session_id()
     launch_argv = _engine_launch_argv(cmd, backend, engine_uuid)
     stored_engine_uuid = engine_uuid if (len(launch_argv) > 1) else ""
+
+    # Doctor V3 W2: caller-supplied extra engine flags (e.g. the doctor
+    # session's read-only ``--permission-mode plan``). Appended AFTER the
+    # uuid-pin check above so ``stored_engine_uuid`` stays honest.
+    if extra_cli_args:
+        launch_argv = launch_argv + [str(a) for a in extra_cli_args]
 
     # 1b) Resolve the lane seed ONCE before launch.
     seed_text = seed_for_lane(lane, seed_context=seed_context)
@@ -774,6 +787,94 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # this project defaults to it. Best-effort (never fails a live session).
     set_last_engine_for_project(project_id, backend)
     return record
+
+
+# ── The doctor agentic session (doctor V3 Wave 2) ────────────────────────────
+
+#: Reserved pseudo-project id for THE ``/doctor`` diagnostic session. Like
+#: ``__dashboard__`` it is synthesized by ``rnd_registry.get_project`` (never a
+#: registry row — so it can never surface on the dashboard project list) and
+#: special-cased by ``worktrees.create_worktree`` (NO worktree — diagnostics run
+#: against the live Anchor folder, held read-only by the engine's plan
+#: permission mode). It is FILTERED from every session-listing surface (same
+#: pattern as the ``__healthcheck__`` task filtering).
+DOCTOR_PROJECT_ID = "__doctor__"
+
+#: The doctor session runs the bare ``general`` lane: no trio skill seed (the
+#: doctor briefing arrives via ``seed_context``, written exactly once by the
+#: existing seed-once mechanism), Gemini-runnable on a Gemini-only host
+#: (``lanes.GEMINI_RUNNABLE_LANES``), and never a planning lane (no advance).
+DOCTOR_LANE = "general"
+DOCTOR_LABEL = "doctor"
+
+#: Read-only engine posture per backend (plan §W2: the engine CLI is launched
+#: in READ-ONLY plan permission mode — diagnostics inspect the live folder but
+#: can never mutate it). claude: ``--permission-mode plan`` (verified-real
+#: interactive flag; same mode the read-only Gandalf/orientation jobs use).
+#: gemini: ``--approval-mode plan`` (the gemini CLI's read-only approval
+#: posture). Module-level so a test/deploy can inspect or tune it.
+DOCTOR_READONLY_CLI_ARGS = {
+    _reg.BACKEND_CLAUDE: ("--permission-mode", "plan"),
+    _reg.BACKEND_GEMINI: ("--approval-mode", "plan"),
+}
+
+
+def live_doctor_session():
+    """Return the LIVE doctor session's registry record, or ``None``.
+
+    LIVE means the record is RUNNING **and** its PTY is actually attached in
+    this process. A row that claims RUNNING with no live PTY is a stale
+    leftover (e.g. from a prior server instance); it is honestly re-statused
+    DONE here (best-effort) so a later start can never "attach" to a corpse.
+    Never raises.
+    """
+    try:
+        running = _reg.list_sessions(project_id=DOCTOR_PROJECT_ID,
+                                     status=_reg.STATUS_RUNNING)
+    except Exception:
+        return None
+    try:
+        live = set(_pty.live_sessions())
+    except Exception:
+        live = set()
+    for rec in running:
+        sid = rec.get("session_id", "")
+        if not sid:
+            continue
+        if sid in live:
+            return rec
+        try:  # stale RUNNING row, PTY gone → honest terminal status
+            _reg.update_session(sid, status=_reg.STATUS_DONE)
+        except Exception:
+            pass
+    return None
+
+
+def start_doctor_session(seed_context=None, backend=None):
+    """Start (or attach to) THE doctor agentic session (doctor V3 Wave 2).
+
+    Returns ``(record, attached)``. Idempotent: while one doctor session is
+    LIVE a second start ATTACHES to it — the existing record is returned with
+    ``attached=True`` and a duplicate is never stacked. Otherwise a fresh
+    session starts through the existing substrate (:func:`start_session`) under
+    the reserved ``__doctor__`` pseudo-project: bare ``general`` lane (the
+    briefing is the ``seed_context``, delivered once by the seed-once
+    mechanism), cwd = the live Anchor folder (no worktree), and the engine CLI
+    in READ-ONLY plan permission mode (:data:`DOCTOR_READONLY_CLI_ARGS`).
+    Output/input ride the EXISTING term_ws / term_stream2 / term_input2 /
+    term_kill transports keyed by the returned ``session_id`` — no new
+    transport. The caller resolves ``backend`` honestly via
+    ``lanes.select_engine_plan`` (default claude).
+    """
+    existing = live_doctor_session()
+    if existing is not None:
+        return existing, True
+    backend = backend or _reg.BACKEND_CLAUDE
+    rec = start_session(
+        DOCTOR_PROJECT_ID, DOCTOR_LANE, backend=backend, label=DOCTOR_LABEL,
+        seed_context=seed_context,
+        extra_cli_args=list(DOCTOR_READONLY_CLI_ARGS.get(backend, ())))
+    return rec, False
 
 
 def _flush_pending_paste(session_id):

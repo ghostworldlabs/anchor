@@ -333,6 +333,11 @@ ROUTES = [
        handler="handle_term_start", migrated=True),
     _r("POST", "/api/rnd/zombie_terminal_start", AUTH_TOKEN,
        handler="handle_zombie_terminal_start", migrated=True),
+    # doctor V3 W2 — start/attach THE /doctor agentic session (spawns a PTY on
+    # an engine subscription CLI → mutating, default-deny token; enumerated in
+    # the doctor gate's 401-before-substance test).
+    _r("POST", "/api/doctor/session_start", AUTH_TOKEN,
+       handler="handle_doctor_session_start", migrated=True),
     _r("POST", "/api/rnd/term_kill", AUTH_TOKEN,
        handler="handle_term_kill", migrated=True),
     _r("POST", "/api/rnd/term_close", AUTH_TOKEN,

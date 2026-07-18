@@ -175,6 +175,13 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
     """
     if project_id == "__dashboard__":
         return {"ok": True, "path": str(base) if base else _paths.data_dir().parent.as_posix(), "branch": "dashboard-root"}
+    if project_id == "__doctor__":
+        # Doctor V3 Wave 2: the doctor diagnostic session runs against the
+        # LIVE Anchor folder in a READ-ONLY engine posture — no worktree and no
+        # branch are ever created for it (same idiom as __dashboard__ above).
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path") or str(_paths.data_dir())
+        return {"ok": True, "path": str(folder), "branch": "doctor-root"}
     folder = _repo_for_project(project_id)
     if folder is None:
         return {"ok": False, "reason": "unknown-project",

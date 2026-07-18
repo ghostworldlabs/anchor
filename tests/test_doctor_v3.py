@@ -1,5 +1,25 @@
 """Anchor Doctor UI V3 — STUB GATE (planning/anchor-doctor-ui/handoff).
 
+Wave 2 — "The doctor agentic session backend":
+ - POST /api/doctor/session_start starts ONE interactive doctor session on the
+   EXISTING PTY substrate (stubbed: ANCHOR_PTY_BACKEND=stub — never a real
+   ConPTY / live model), registered under the reserved ``__doctor__``
+   pseudo-project, cwd = the live Anchor folder (NO worktree), engine CLI in
+   READ-ONLY plan permission mode;
+ - the one-time seed contains the latest health report (graceful "no reports
+   yet" when absent), fresh doctor.py output, the severity rule, and a
+   capability list — ASCII-safe;
+ - engine honesty per the W8 model-flex seams (ANCHOR_CLAUDE_AVAILABLE /
+   ANCHOR_GEMINI_AVAILABLE): claude-only → claude drives; gemini-only → gemini
+   drives; neither → an honest ``unavailable`` status, never a crash and never
+   a session;
+ - idempotent: a second session_start while one doctor session is LIVE
+   attaches to it (never stacks a duplicate);
+ - ``__doctor__`` is FILTERED from the term_sessions projection (the
+   dashboard/board repopulate hook) — even when queried directly;
+ - 401-before-substance: with ANCHOR_TOKEN configured, a tokenless POST gets
+   401 from the default-deny middleware and NO session/PTY is ever created.
+
 Wave 1 — "Rip out the API-key backend + swept-in scratch":
  - the V2 Gemini API-key agent, its tests/mocks, the standalone-product mock
    page, and the scratch files swept into master by 65e93e1 are DELETED and
@@ -22,6 +42,7 @@ like tests/test_distro_scan.py does for the personal email, the forbidden
 module name and the deleted agent-script name are ASSEMBLED AT RUNTIME, never
 stored as contiguous literals in this file's source.
 """
+import importlib
 import io
 import json
 import re
@@ -30,6 +51,8 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+FAKE = (Path(__file__).resolve().parent / "fake_claude.py").as_posix()
 
 # The forbidden third-party Gemini SDK module, assembled at runtime so this
 # file itself adds no repo reference to it.
@@ -192,3 +215,241 @@ def test_anchor_gui_source_has_no_doctor_agent_spawn_path():
     assert '_path_only == "/api/doctor/run"' not in src
     # The /doctor page no longer fires client-side calls at the dead endpoint.
     assert "fetch('/api/doctor/run" not in src
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 2 — the doctor agentic session backend
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Hermetic: temp data dir + stub PTY + the fake runner + a temp worktree base —
+# NEVER :8777 / real data / a live model / a real ConPTY. The reserved
+# ``__doctor__`` pseudo-project needs no git repo (no worktree is ever created
+# for it — the whole point).
+
+DOCTOR_PID = "__doctor__"
+
+
+@pytest.fixture
+def denv(tmp_path, monkeypatch):
+    """Temp data dir + stub PTY + fake runner, with the session stack reloaded
+    so every module resolves against this test's environment."""
+    data = tmp_path / "data"
+    data.mkdir()
+    wbase = tmp_path / "wt-base"
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_WORKTREE_BASE", str(wbase))
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {FAKE}")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    monkeypatch.delenv("ANCHOR_CLAUDE_AVAILABLE", raising=False)
+    monkeypatch.delenv("ANCHOR_GEMINI_AVAILABLE", raising=False)
+    for mod in ("paths", "job_runner", "pty_manager", "rnd_registry",
+                "session_registry", "worktrees", "lanes", "effort_history",
+                "sessions", "summarizer", "brownfield_scan", "effort_view",
+                "deliverables", "terminal_session"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import anchor_gui
+    gui = importlib.reload(anchor_gui)
+    import pty_manager
+    import route_table
+    import session_registry
+    import terminal_session
+    yield {
+        "gui": gui, "ts": terminal_session, "reg": session_registry,
+        "pty": pty_manager, "routes": route_table, "data": data,
+        "wbase": wbase,
+    }
+    try:
+        pty_manager._reset_live_table_for_tests()
+    except Exception:
+        pass
+
+
+def _claude_only(monkeypatch):
+    monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "1")
+    monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "0")
+
+
+def _write_report(data_dir, name="2026-07-17.md",
+                  body="# Anchor Health Check\nHEALTHREPORT-MARKER all clear\n"):
+    rd = data_dir / "health_reports"
+    rd.mkdir(parents=True, exist_ok=True)
+    (rd / name).write_text(body, encoding="utf-8")
+
+
+class _CaptureGet:
+    """Minimal stand-in for a GET request against a module-level handler."""
+
+    def __init__(self, path):
+        self.path = path
+        self.sent = []
+
+    def _send_json(self, data, code=200):
+        self.sent.append((code, data))
+
+
+def _doctor_records(reg):
+    return reg.list_sessions(project_id=DOCTOR_PID)
+
+
+# ── session starts stubbed, seeded, read-only, no worktree ───────────────────
+
+def test_doctor_session_start_stubbed_seeded_readonly(denv, monkeypatch):
+    _claude_only(monkeypatch)
+    _write_report(denv["data"])
+    code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code == 200, payload
+    assert payload["ok"] is True
+    assert payload["attached"] is False
+    sess = payload["session"]
+    sid = sess["session_id"]
+    assert sid
+    assert sess["project_id"] == DOCTOR_PID
+    assert sess["backend"] == "claude"
+    assert sess["status"] == denv["reg"].STATUS_RUNNING
+    # SAFE projection: never worktree_path / branch / seed text.
+    assert "worktree_path" not in sess and "branch" not in sess
+
+    rec = denv["reg"].get_session(sid)
+    assert rec is not None and rec.get("seeded") is True
+    seed = rec.get("seed_text", "")
+    # Seed content: latest report + fresh doctor output + severity rule +
+    # capability list — and ASCII-safe end to end.
+    assert "HEALTHREPORT-MARKER" in seed
+    assert "doctor.py system check" in seed
+    assert "CORRECTNESS" in seed and "PERFORMANCE" in seed
+    assert "What you can do in this session" in seed
+    seed.encode("ascii")  # raises if any non-ASCII byte survived
+
+    # The PTY is the stub backend, launched in READ-ONLY plan permission mode
+    # with cwd = the live Anchor folder — and NO worktree was created.
+    child = denv["pty"]._LIVE[sid]
+    argv = child.cmd
+    assert "--permission-mode" in argv
+    assert argv[argv.index("--permission-mode") + 1] == "plan"
+    assert Path(child.cwd).resolve() == denv["data"].resolve()
+    assert not denv["wbase"].exists() or not any(denv["wbase"].iterdir()), \
+        "a doctor session must never create a worktree"
+
+
+def test_doctor_session_start_no_reports_yet_is_graceful(denv, monkeypatch):
+    _claude_only(monkeypatch)
+    # health_reports/ exists but is empty (ensure_data_dirs made it).
+    code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code == 200 and payload["ok"] is True
+    rec = denv["reg"].get_session(payload["session"]["session_id"])
+    assert "No health reports yet" in rec.get("seed_text", "")
+
+
+# ── idempotent: a live doctor session is attached to, never duplicated ───────
+
+def test_doctor_session_start_attaches_never_stacks(denv, monkeypatch):
+    _claude_only(monkeypatch)
+    code1, p1 = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code1 == 200 and p1["ok"] is True and p1["attached"] is False
+    sid1 = p1["session"]["session_id"]
+
+    code2, p2 = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code2 == 200 and p2["ok"] is True
+    assert p2["attached"] is True
+    assert p2["session"]["session_id"] == sid1
+
+    running = denv["reg"].list_sessions(project_id=DOCTOR_PID,
+                                        status=denv["reg"].STATUS_RUNNING)
+    assert len(running) == 1, "a second start must never stack a duplicate"
+
+
+def test_doctor_stale_running_row_is_reconciled_not_attached(denv, monkeypatch):
+    """A registry row claiming RUNNING with a dead PTY is honestly re-statused
+    (never 'attached' to); the next start opens a FRESH live session."""
+    _claude_only(monkeypatch)
+    _, p1 = _post(denv["gui"], "/api/doctor/session_start", {})
+    sid1 = p1["session"]["session_id"]
+    denv["pty"].kill(sid1)  # PTY dies; registry row still says running
+
+    code2, p2 = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code2 == 200 and p2["ok"] is True
+    assert p2["attached"] is False
+    assert p2["session"]["session_id"] != sid1
+    stale = denv["reg"].get_session(sid1)
+    assert stale["status"] in denv["reg"].TERMINAL_STATUSES
+
+
+# ── engine honesty (W8 model-flex seams) ─────────────────────────────────────
+
+def test_doctor_engine_gemini_only_drives_on_gemini(denv, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "0")
+    monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "1")
+    code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code == 200 and payload["ok"] is True, payload
+    sess = payload["session"]
+    assert sess["backend"] == "gemini"
+    # Read-only posture on the gemini CLI too.
+    child = denv["pty"]._LIVE[sess["session_id"]]
+    assert "--approval-mode" in child.cmd
+    assert child.cmd[child.cmd.index("--approval-mode") + 1] == "plan"
+
+
+def test_doctor_engine_neither_is_honest_unavailable(denv, monkeypatch):
+    monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "0")
+    monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "0")
+    code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code == 200, payload  # an honest status, never a crash
+    assert payload["ok"] is False
+    assert payload["status"] == "unavailable"
+    assert payload.get("reason")
+    assert payload.get("session") is None
+    assert _doctor_records(denv["reg"]) == [], \
+        "an unavailable host must not mint a session"
+    assert denv["pty"].live_sessions() == []
+
+
+# ── __doctor__ is filtered from the term_sessions projection ─────────────────
+
+def test_doctor_filtered_from_term_sessions_listing(denv, monkeypatch):
+    _claude_only(monkeypatch)
+    _, p1 = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert p1["ok"] is True
+    # Queried directly by the reserved pseudo-project id…
+    cap = _CaptureGet("/api/rnd/term_sessions?project_id=" + DOCTOR_PID)
+    denv["gui"].handle_term_sessions(cap, cap.path, None)
+    code, data = cap.sent[-1]
+    assert code == 200 and data["ok"] is True
+    assert data["sessions"] == []
+    # …and in the unscoped (all-projects) listing.
+    cap2 = _CaptureGet("/api/rnd/term_sessions")
+    denv["gui"].handle_term_sessions(cap2, cap2.path, None)
+    _, data2 = cap2.sent[-1]
+    assert all(s.get("project_id") != DOCTOR_PID
+               for s in data2["sessions"])
+
+
+# ── 401-before-substance on the new endpoint ─────────────────────────────────
+
+def test_doctor_session_start_401_before_substance(denv, monkeypatch):
+    _claude_only(monkeypatch)
+    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
+    assert code == 401, payload
+    assert payload["ok"] is False
+    assert "unauthorized" in str(payload.get("error", "")).lower()
+    # No substance: nothing was registered, no PTY was started.
+    assert _doctor_records(denv["reg"]) == []
+    assert denv["pty"].live_sessions() == []
+    # The SAME request WITH the token is served.
+    code2, p2 = _post(denv["gui"], "/api/doctor/session_start",
+                      {"token": "sekrit-doctor-token"})
+    assert code2 == 200 and p2["ok"] is True, p2
+
+
+# ── structural pin: the route row is declared token + migrated ───────────────
+
+def test_doctor_session_start_route_declared_token_migrated(denv):
+    route = denv["routes"].match("POST", "/api/doctor/session_start")
+    assert route is not None
+    assert route.auth == denv["routes"].AUTH_TOKEN
+    assert route.migrated is True
+    assert route.handler == "handle_doctor_session_start"
+    assert route.handler in denv["gui"]._MIGRATED_HANDLERS
