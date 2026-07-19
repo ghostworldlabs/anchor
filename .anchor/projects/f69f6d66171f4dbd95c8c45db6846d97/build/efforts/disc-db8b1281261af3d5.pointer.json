@@ -1,0 +1,11 @@
+{
+  "job_id": "disc-db8b1281261af3d5",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "build",
+  "created_at": 1784393203.529102,
+  "source": "discovered",
+  "kind": "execlog",
+  "title": "Execution Log",
+  "artifact_path": "planning/anchor-doctor-ui/handoff/EXECUTION-LOG.md",
+  "status": "imported"
+}

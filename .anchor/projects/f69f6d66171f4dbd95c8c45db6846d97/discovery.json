@@ -6,42 +6,56 @@
         "rel": "DECISION-LOG.md",
         "kind": "plan-doc",
         "title": "Decision Log: Scaled Gandalf Architecture",
-        "mtime": 1782562082.8830073,
+        "mtime": 1784350116.080129,
         "lane": "planning"
       },
       {
         "rel": "FOUNDRY-V2-IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Skill Foundry v2 — Implementation Plan (Foreman-ready) — ANCHOR-SIDE BUILD (split)",
-        "mtime": 1783725633.1092887,
+        "mtime": 1784350116.0839376,
         "lane": "planning"
       },
       {
         "rel": "IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)",
-        "mtime": 1783694590.8685522,
+        "mtime": 1784350116.0860324,
         "lane": "planning"
       },
       {
         "rel": "foundry-gui/planning/crucible/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Skill Foundry - Implementation Plan (Crucible Stage 2)",
-        "mtime": 1783725633.1445735,
+        "mtime": 1784350116.1878386,
         "lane": "planning"
       },
       {
         "rel": "foundry-gui/planning/crucible/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Skill Foundry - Master Plan (Crucible Stage 1)",
-        "mtime": 1783725633.1445735,
+        "mtime": 1784350116.1888423,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/anchor-doctor-ui/handoff/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Implementation Plan: Anchor Doctor UI V2",
+        "mtime": 1784404617.734892,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/anchor-shareable-2026-07/handoff/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Crucible-planned project — Implementation Plan (Foreman-ready)",
+        "mtime": 1784368967.2587686,
         "lane": "planning"
       },
       {
         "rel": "planning/anchor-v1/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor v1 — Implementation Plan (Foreman-ready)",
-        "mtime": 1782754012.7887583,
+        "mtime": 1784350116.2998607,
         "lane": "planning"
       },
       {
@@ -76,56 +90,56 @@
         "rel": "planning/crucible-improve-2026-06-30/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Implementation Plan — Anchor Improvement Effort (Crucible Stage 2)",
-        "mtime": 1782891578.919541,
+        "mtime": 1784350116.3026214,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible-improve-2026-06-30/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Master Plan — Anchor Improvement Effort (Crucible Stage 1)",
-        "mtime": 1782891578.919541,
+        "mtime": 1784350116.3036225,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible-improve-followup-2026-07-01/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Implementation Plan — Crucible-Improve Follow-up (2026-07-01)",
-        "mtime": 1782919598.1608183,
+        "mtime": 1784350116.3078775,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible-improve-followup-2026-07-01/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Master Plan — Crucible-Improve Follow-up (live-use fixes, 2026-07-01)",
-        "mtime": 1782919598.1618185,
+        "mtime": 1784350116.3089461,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible-rearchitecture-2026-07/IMPLEMENTATION-PLAN-DRAFT.md",
         "kind": "plan-doc",
         "title": "Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)",
-        "mtime": 1783087947.274374,
+        "mtime": 1784350116.3109672,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible-rearchitecture-2026-07/MASTER-PLAN-DRAFT.md",
         "kind": "plan-doc",
         "title": "Master Plan (draft)",
-        "mtime": 1783034448.8071396,
+        "mtime": 1784350116.3129725,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "STAGE 2: IMPLEMENTATION PLAN",
-        "mtime": 1782627273.891373,
+        "mtime": 1784350116.3569586,
         "lane": "planning"
       },
       {
         "rel": "planning/crucible/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "NORTH STAR (LOCKED)",
-        "mtime": 1782627273.8926861,
+        "mtime": 1784350116.3569586,
         "lane": "planning"
       },
       {
@@ -223,7 +237,7 @@
         "rel": "planning/rnd-v13/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor R&D v13 — Implementation Plan (Foreman-ready)",
-        "mtime": 1782536278.7463646,
+        "mtime": 1784350116.3821533,
         "lane": "planning"
       },
       {
@@ -363,42 +377,49 @@
         "rel": "planning/ship-anchor-v1/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Ship Anchor v1 — Implementation Plan (Foreman-ready)",
-        "mtime": 1782916912.7348542,
+        "mtime": 1784350116.384156,
         "lane": "planning"
       },
       {
         "rel": "planning/ship-anchor-v1/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Ship Anchor v1 (full foundry suite + cross-platform onboard + Tailscale) — MASTER PLAN (FROZEN)",
-        "mtime": 1782916742.1509292,
+        "mtime": 1784350116.385156,
         "lane": "planning"
       },
       {
         "rel": "planning/telemetry-resume-2026-07/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "MASTER PLAN — Honest Telemetry + Warm Resume (APPROVED 2026-07-11)",
-        "mtime": 1783813264.7334096,
+        "mtime": 1784350116.3867047,
         "lane": "planning"
       },
       {
         "rel": "planning/telemetry-resume-2026-07/handoff/approved/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Anchor — Honest Telemetry + Warm Resume — Implementation Plan (Foreman-ready)",
-        "mtime": 1783815441.7424934,
+        "mtime": 1784350116.3923059,
         "lane": "planning"
       },
       {
         "rel": "planning/zombie-hunter-safe-to-arm-2026-07-05/IMPLEMENTATION-PLAN.md",
         "kind": "plan-doc",
         "title": "Zombie-Hunter → safe-to-arm reaper (pause-first) — Implementation Plan (Foreman-ready)",
-        "mtime": 1783275228.190874,
+        "mtime": 1784350116.4344437,
         "lane": "planning"
       },
       {
         "rel": "planning/zombie-hunter-safe-to-arm-2026-07-05/MASTER-PLAN.md",
         "kind": "plan-doc",
         "title": "Master Plan (draft — rev. Stage-1/R3)",
-        "mtime": 1783270382.1531818,
+        "mtime": 1784350116.435443,
+        "lane": "planning"
+      },
+      {
+        "rel": "plans/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Implementation Plan — Implementation Plan (Foreman-ready)",
+        "mtime": 1784045277.120722,
         "lane": "planning"
       }
     ],
@@ -407,63 +428,84 @@
         "rel": "EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Zombie-Hunter → safe-to-arm reaper (pause-first) — Execution Log",
-        "mtime": 1783332476.7491908,
+        "mtime": 1784350116.0808833,
         "lane": "build"
       },
       {
         "rel": "FOREMAN-EXECUTION-LOG-2026-07.md",
         "kind": "execlog",
         "title": "Execution log — Anchor durability waves (2026-07)",
-        "mtime": 1783199227.8843763,
+        "mtime": 1784350116.0823865,
         "lane": "build"
       },
       {
         "rel": "FOREMAN-EXECUTION-LOG-REARCH.md",
         "kind": "execlog",
         "title": "Execution log — Anchor re-architecture (2026-07)",
-        "mtime": 1783199227.884909,
+        "mtime": 1784350116.0823865,
         "lane": "build"
       },
       {
         "rel": "FOUNDRY-V2-EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Skill Foundry v2 — Execution Log",
-        "mtime": 1783725633.1092887,
+        "mtime": 1784350116.0839376,
         "lane": "build"
       },
       {
         "rel": "foreman-checkpoint.json",
         "kind": "foreman-checkpoint",
         "title": "foreman-checkpoint",
-        "mtime": 1783344237.9911284,
+        "mtime": 1784406147.8106053,
         "lane": "build"
       },
       {
         "rel": "foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1783725633.1133413,
+        "mtime": 1784393467.7056165,
         "lane": "build"
       },
       {
         "rel": "foundry-gui/planning/crucible/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Sleep Engine Execution Log",
-        "mtime": 1783725633.1445735,
+        "mtime": 1784350116.1878386,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/anchor-doctor-ui/handoff/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Execution Log",
+        "mtime": 1784393203.529102,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/anchor-shareable-2026-07/handoff/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Crucible-planned project — Execution Log",
+        "mtime": 1784369752.2853956,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/anchor-shareable-2026-07/handoff/foreman.config.json",
+        "kind": "foreman-config",
+        "title": "foreman.config",
+        "mtime": 1784325856.7767801,
         "lane": "build"
       },
       {
         "rel": "planning/anchor-v1/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Anchor v1 — Execution Log",
-        "mtime": 1782754012.7887583,
+        "mtime": 1784350116.298857,
         "lane": "build"
       },
       {
         "rel": "planning/anchor-v1/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1782754012.789759,
+        "mtime": 1784350116.300618,
         "lane": "build"
       },
       {
@@ -498,35 +540,35 @@
         "rel": "planning/crucible-improve-2026-06-30/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Execution Log — Anchor Improvement Effort (Foreman)",
-        "mtime": 1782891578.9185395,
+        "mtime": 1784350116.3016222,
         "lane": "build"
       },
       {
         "rel": "planning/crucible-improve-2026-06-30/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1782891578.9215405,
+        "mtime": 1784350116.306872,
         "lane": "build"
       },
       {
         "rel": "planning/crucible-improve-followup-2026-07-01/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Execution Log — Crucible-Improve Follow-up (Foreman)",
-        "mtime": 1782919598.1608183,
+        "mtime": 1784350116.3078775,
         "lane": "build"
       },
       {
         "rel": "planning/crucible-improve-followup-2026-07-01/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1782919598.1618185,
+        "mtime": 1784350116.309946,
         "lane": "build"
       },
       {
         "rel": "planning/crucible/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "EXECUTION LOG",
-        "mtime": 1782627273.891373,
+        "mtime": 1784350116.3554513,
         "lane": "build"
       },
       {
@@ -645,35 +687,49 @@
         "rel": "planning/ship-anchor-v1/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Ship Anchor v1 — Execution Log",
-        "mtime": 1782916814.192464,
+        "mtime": 1784350116.3831563,
         "lane": "build"
       },
       {
         "rel": "planning/telemetry-resume-2026-07/handoff/approved/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Anchor — Honest Telemetry + Warm Resume — Execution Log",
-        "mtime": 1783816222.4810398,
+        "mtime": 1784350116.3913023,
         "lane": "build"
       },
       {
         "rel": "planning/telemetry-resume-2026-07/handoff/approved/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1783815401.7312436,
+        "mtime": 1784350116.3923059,
         "lane": "build"
       },
       {
         "rel": "planning/zombie-hunter-safe-to-arm-2026-07-05/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "Zombie-Hunter → safe-to-arm reaper (pause-first) — Execution Log",
-        "mtime": 1783270382.1852715,
+        "mtime": 1784350116.4344437,
         "lane": "build"
       },
       {
         "rel": "planning/zombie-hunter-safe-to-arm-2026-07-05/foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1783273253.1756742,
+        "mtime": 1784350116.4374523,
+        "lane": "build"
+      },
+      {
+        "rel": "plans/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Implementation Plan — Execution Log",
+        "mtime": 1784045277.1212394,
+        "lane": "build"
+      },
+      {
+        "rel": "plans/foreman.config.json",
+        "kind": "foreman-config",
+        "title": "foreman.config",
+        "mtime": 1784045277.1217556,
         "lane": "build"
       }
     ],
@@ -683,7 +739,7 @@
         "rel": "SAVED_FOR_LATER.md",
         "kind": "idea-doc",
         "title": "Saved for Later",
-        "mtime": 1783940416.048652,
+        "mtime": 1784403901.6710262,
         "lane": "grass"
       },
       {
@@ -691,13 +747,6 @@
         "kind": "idea-doc",
         "title": "Crucible/Foreman → Gemini adapter — scoping notes (for a future trio run)",
         "mtime": 1781026219.579206,
-        "lane": "grass"
-      },
-      {
-        "rel": "starter/SAVED_FOR_LATER.md",
-        "kind": "idea-doc",
-        "title": "Saved for Later",
-        "mtime": 1782533628.8203945,
         "lane": "grass"
       }
     ],
@@ -735,10 +784,10 @@
       "mtime": 1782618835.6905277
     },
     {
-      "rel": "gandalf/run-1783435435916/report.md",
+      "rel": "gandalf/run-1784232817192/report.md",
       "kind": "report-doc",
-      "title": "Gandalf Deep-Think Read — C:\\dev\\Anchor",
-      "mtime": 1783436182.1427417
+      "title": "Gandalf Deep-Think Read — Anchor (`C:\\dev\\Anchor`)",
+      "mtime": 1784233167.051725
     },
     {
       "rel": "planning/anchor-as-app/00-PLAN.md",
@@ -768,22 +817,22 @@
       "rel": "planning/crucible-rearchitecture-2026-07/stage2-artifacts/impl-plan-prevet.md",
       "kind": "plan-md",
       "title": "Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)",
-      "mtime": 1783085942.3913295
+      "mtime": 1784350116.3416476
     }
   ],
   "counts": {
     "research": 0,
-    "planning": 57,
-    "build": 39,
+    "planning": 60,
+    "build": 44,
     "deliverables": 0,
-    "grass": 3,
+    "grass": 2,
     "gandalf": 0,
     "docs": 11,
-    "total": 110
+    "total": 117
   },
-  "generated_at": 1783961997.9420078,
+  "generated_at": 1784410660.4756553,
   "root": "C:\\dev\\Anchor",
-  "truncated": false,
+  "truncated": true,
   "stage_links": [
     {
       "from_session_id": "e898220abd104131bfa97a38149de0df",

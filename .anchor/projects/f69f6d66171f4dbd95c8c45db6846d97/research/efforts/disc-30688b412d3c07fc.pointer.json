@@ -1,0 +1,13 @@
+{
+  "job_id": "disc-30688b412d3c07fc",
+  "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
+  "lane": "research",
+  "created_at": 1784411058.811151,
+  "source": "discovered",
+  "kind": "doc",
+  "title": "84Ba87A4D29A Transcript",
+  "artifact_path": "research/84ba87a4d29a-transcript.md",
+  "status": "imported",
+  "session_id": "84ba87a4d29a4a0eb36e1fcf0445eb23",
+  "stage": "research"
+}
