@@ -2531,6 +2531,83 @@ function openPanel(sessionId) {
   summ.className = 'summary split';
   summ.setAttribute('data-session', sessionId);
   summ.innerHTML = '<div class="summ-loading">loading session summary…</div>';
+
+  // ── Trio/Foundry Skills quick-loader ──────────────────────────────────
+  // A long skinny button at the very top of the session panel. Click it to
+  // reveal a list — Trio (pipeline order) first, then Foundry skills A→Z, each
+  // with its icon. Clicking a skill submits "Load the <Skill> skill now." into
+  // THIS session. The list dismisses on a terminal click or a skill pick.
+  var _hideSkillsMenu = function () {};
+  if (isLive) {
+    var skillsWrap = document.createElement('div');
+    skillsWrap.className = 'skillswrap';
+    skillsWrap.style.cssText = 'position:relative;margin-bottom:6px';
+    var skillsBtn = document.createElement('button');
+    skillsBtn.type = 'button';
+    skillsBtn.className = 'skillsbtn';
+    skillsBtn.innerHTML = '⚡ Trio / Foundry Skills ▾';
+    skillsBtn.style.cssText = 'width:100%;text-align:left;font-size:12px;font-weight:600;padding:6px 12px;background:var(--surface2,#232733);color:var(--text,#e2e4e9);border:1px solid var(--accent,#6c9cfc);border-radius:6px;cursor:pointer';
+    var skillsMenu = document.createElement('div');
+    skillsMenu.className = 'skillsmenu';
+    skillsMenu.style.cssText = 'display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:60;background:var(--surface,#1a1d27);border:1px solid var(--border,#2e3340);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-height:340px;overflow:auto;padding:4px';
+    _hideSkillsMenu = function () { skillsMenu.style.display = 'none'; };
+    var _SKILLS = [
+      {g:'trio', name:'researchPrime', label:'researchPrime', icon:'research-prime-icon.jpg'},
+      {g:'trio', name:'Crucible', label:'Crucible', icon:'crucible-icon.svg'},
+      {g:'trio', name:'Foreman', label:'Foreman', icon:'foreman-icon.svg'},
+      {g:'foundry', name:'financial-analyst', label:'Financial Analyst', icon:'financial-analyst-icon.jpg'},
+      {g:'foundry', name:'gandalf', label:'Gandalf', icon:'gandalf-icon.jpg'},
+      {g:'foundry', name:'jumper', label:'Jumper', icon:'jumper-icon.jpg'},
+      {g:'foundry', name:'legal-beagle', label:'Legal Beagle', icon:'legal-beagle-icon.jpg'},
+      {g:'foundry', name:'literature-review', label:'Literature Review', icon:'literature-review-icon.jpg'},
+      {g:'foundry', name:'ramanujan', label:'Ramanujan', icon:'ramanujan-icon.jpg'},
+      {g:'foundry', name:'tidy-idy', label:'Tidy-Idy', icon:'tidy-idy-icon.jpg'},
+      {g:'foundry', name:'zombie-hunter', label:'Zombie Hunter', icon:'zombie-hunter-radar.jpg'}
+    ];
+    function _skillHeader(text) {
+      var h = document.createElement('div');
+      h.textContent = text;
+      h.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim,#8b8f9a);padding:6px 10px 3px';
+      return h;
+    }
+    skillsMenu.appendChild(_skillHeader('Trio (pipeline)'));
+    var _grp = 'trio';
+    _SKILLS.forEach(function (sk) {
+      if (sk.g === 'foundry' && _grp === 'trio') {
+        var hh = _skillHeader('Foundry skills');
+        hh.style.borderTop = '1px solid var(--border,#2e3340)';
+        hh.style.marginTop = '3px';
+        skillsMenu.appendChild(hh);
+        _grp = 'foundry';
+      }
+      var item = document.createElement('div');
+      item.className = 'skillitem';
+      item.style.cssText = 'display:flex;align-items:center;gap:9px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:12.5px;color:var(--text,#e2e4e9)';
+      item.onmouseenter = function () { item.style.background = 'var(--surface2,#232733)'; };
+      item.onmouseleave = function () { item.style.background = 'transparent'; };
+      var im = document.createElement('img');
+      im.src = '/vendor/brand/' + sk.icon;
+      im.alt = sk.label;
+      im.style.cssText = 'width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none';
+      im.onerror = function () { im.style.visibility = 'hidden'; };
+      var nm = document.createElement('span');
+      nm.textContent = sk.label;
+      item.appendChild(im); item.appendChild(nm);
+      item.onclick = function (e) {
+        e.stopPropagation();
+        _hideSkillsMenu();
+        _postJson('/api/rnd/term_input2', {session: sessionId, data: 'Load the ' + sk.name + ' skill now.\n'});
+      };
+      skillsMenu.appendChild(item);
+    });
+    skillsBtn.onclick = function (e) {
+      e.stopPropagation();
+      skillsMenu.style.display = (skillsMenu.style.display === 'none') ? 'block' : 'none';
+    };
+    skillsWrap.appendChild(skillsBtn);
+    skillsWrap.appendChild(skillsMenu);
+    pin.appendChild(skillsWrap);
+  }
   pin.appendChild(summ);
 
   // (2) The terminal pane (resizable wrapper) with a bar + the xterm host.
@@ -2553,6 +2630,9 @@ function openPanel(sessionId) {
   host.setAttribute('data-session', sessionId);
   tpane.appendChild(tbar);
   tpane.appendChild(host);
+  // Clicking into the terminal dismisses the Skills list (spec: it closes on a
+  // terminal click or a skill pick).
+  host.addEventListener('click', function () { _hideSkillsMenu(); });
   pin.appendChild(tpane);
 
   // v6 Wave 5: a research session's panel gets an "Advance to Planning →" bar
@@ -3807,6 +3887,15 @@ async function refreshBoard() {
           openGandalfRuns[runId] = gexec.innerHTML;
         }
       }
+      // Preserve the collapsed/open state of the Gandalf + Grass tiles across the
+      // 15s board refresh. Previously their `.collapsed` class was NOT captured
+      // (only details[open]/.open/.grun.open were), so a tile the user opened
+      // snapped shut on the next poll. Capture now; re-apply after the swap.
+      var _collapsedState = {};
+      ['grassMiniList', 'gandalfRuns', 'gandalfPanelBody'].forEach(function (cid) {
+        var cel = document.getElementById(cid);
+        if (cel) _collapsedState[cid] = cel.classList.contains('collapsed');
+      });
       var board = document.getElementById('kanbanBoard');
       if (!board) return;                    // guard: container absent
       board.innerHTML = data.html;
@@ -3828,6 +3917,13 @@ async function refreshBoard() {
           newOpenEls[i].classList.add('open');
         }
       }
+      // Re-apply the captured Gandalf/Grass collapsed state so an opened tile
+      // stays open across the refresh (and a closed one stays closed) — it now
+      // only closes on an explicit user click, never on the poll timer.
+      Object.keys(_collapsedState).forEach(function (cid) {
+        var cel = document.getElementById(cid);
+        if (cel) cel.classList.toggle('collapsed', _collapsedState[cid]);
+      });
 
       for (var runId in openGandalfRuns) {
         var el = document.querySelector('#gandalfPanel .grun[data-run="' + runId + '"]');

@@ -3676,6 +3676,19 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     # W4 #6 UI — a discovered/brownfield headline carries a "Resume as session"
     # control (warm resume via the W3 synthesized seed); "" for a managed tile.
     resume_ctl = _layoutd_resume_control(sv, rep, trio_lane)
+    # Trio skill icon on the big headline tile: Research→researchPrime,
+    # Planning→Crucible, Build→Foreman (icons served from /vendor/brand).
+    _lane_icon_file = {"research": "research-prime-icon.jpg",
+                       "plan": "crucible-icon.svg",
+                       "build": "foreman-icon.svg"}.get(badge_lane, "")
+    _lane_icon_skill = {"research": "researchPrime", "plan": "Crucible",
+                        "build": "Foreman"}.get(badge_lane, "")
+    lane_icon = (
+        f"<img class='lane-skill-icon' src='/vendor/brand/{_lane_icon_file}?v={BUILD_ID}' "
+        f"alt='{_lane_icon_skill}' title='{_lane_icon_skill}' "
+        f"style='width:22px;height:22px;border-radius:5px;object-fit:cover;"
+        f"vertical-align:middle;margin-right:5px'>"
+        if _lane_icon_file else "")
     return (
         f"<div class='headline tile lane-tile{running_cls}' "
         f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "
@@ -3683,6 +3696,7 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
         f"onclick=\"laneTileClick(event,'{sid_attr}')\">"
         f"<div class='htop'>"
         f"<span class='dot {light}'></span>"
+        f"{lane_icon}"
         f"<span class='badge {badge_lane}'>{badge_lbl}</span>"
         f"{running_chip}{grass_chip}</div>"
         f"<div class='htitle'>{title}</div>"
