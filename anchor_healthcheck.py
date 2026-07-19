@@ -121,6 +121,39 @@ class Report:
     def has_issues(self) -> bool:
         return bool(self.issues)
 
+    def _exec_summary_lines(self):
+        """Plain-English, human-facing digest rendered at the top of the
+        report. Deterministic (stdlib-only, no model call — this runs
+        headless at 5 AM). Wording deliberately avoids the machine-parsed
+        markers (the ``Status:`` line and the ``## Warnings`` heading) so
+        the /doctor severity classifier keeps reading only the canonical
+        lines it already targets."""
+        passed = sum(1 for _, ok, _ in self.checks if ok is True)
+        failed = [name for name, ok, _ in self.checks if ok is False]
+        lines = []
+        if failed:
+            head = " · ".join(failed[:3])
+            more = f" (+{len(failed) - 3} more)" if len(failed) > 3 else ""
+            lines.append(
+                f"Needs attention: {len(failed)} of {len(self.checks)} checks "
+                f"failed — {head}{more}. The dashboard banner stays red until "
+                "the next clean run; start with the Issues section below.")
+        else:
+            lines.append(
+                f"Anchor is healthy: all {passed} correctness checks passed.")
+        if self.warnings:
+            lines.append(
+                f"{len(self.warnings)} non-blocking warning(s) — "
+                "performance/timing notes only; they never redden the banner.")
+        if self.fixes:
+            lines.append(
+                f"{len(self.fixes)} auto-fix(es) applied during the run.")
+        if self.recommendations:
+            lines.append(
+                f"{len(self.recommendations)} recommended action(s) at the "
+                "bottom of this report.")
+        return lines
+
     def write(self, path: Path):
         elapsed = (datetime.now() - self.started).total_seconds()
         status_line = "ISSUES FOUND" if self.has_issues else "OK"
@@ -129,6 +162,9 @@ class Report:
             "",
             f"Status: {status_line}",
             f"Run time: {elapsed:.1f}s ({self.started.strftime('%H:%M:%S')})",
+            "",
+            "## Executive summary",
+            *self._exec_summary_lines(),
             "",
             "## Checks",
         ]
