@@ -3652,7 +3652,9 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     else:
         badge_lane = "build" if trio_lane == "build" else (
             "plan" if trio_lane in ("plan", "planning") else "research")
-        badge_lbl = badge_lane.capitalize()
+        # Plan and Build share ONE combined zone → label it as both.
+        badge_lbl = ("Plan / Build" if badge_lane in ("plan", "build")
+                     else badge_lane.capitalize())
     running_cls = " running" if light == "green" else ""
     running_chip = ("<span style='font-size:11px;color:var(--success)'>"
                     "&#9679; running</span>" if light == "green" else "")
@@ -3676,19 +3678,21 @@ def _render_layoutd_headline(sv, trio_lane, project_id, folder_path, store_lane,
     # W4 #6 UI — a discovered/brownfield headline carries a "Resume as session"
     # control (warm resume via the W3 synthesized seed); "" for a managed tile.
     resume_ctl = _layoutd_resume_control(sv, rep, trio_lane)
-    # Trio skill icon on the big headline tile: Research→researchPrime,
-    # Planning→Crucible, Build→Foreman (icons served from /vendor/brand).
-    _lane_icon_file = {"research": "research-prime-icon.jpg",
-                       "plan": "crucible-icon.svg",
-                       "build": "foreman-icon.svg"}.get(badge_lane, "")
-    _lane_icon_skill = {"research": "researchPrime", "plan": "Crucible",
-                        "build": "Foreman"}.get(badge_lane, "")
-    lane_icon = (
-        f"<img class='lane-skill-icon' src='/vendor/brand/{_lane_icon_file}?v={BUILD_ID}' "
-        f"alt='{_lane_icon_skill}' title='{_lane_icon_skill}' "
-        f"style='width:22px;height:22px;border-radius:5px;object-fit:cover;"
-        f"vertical-align:middle;margin-right:5px'>"
-        if _lane_icon_file else "")
+    # Trio skill icon(s) on the big headline tile: Research→researchPrime; the
+    # combined Plan/Build zone shows BOTH Crucible + Foreman. Served from /vendor/brand.
+    def _skill_icon_img(fn, skill):
+        return (
+            f"<img class='lane-skill-icon' src='/vendor/brand/{fn}?v={BUILD_ID}' "
+            f"alt='{skill}' title='{skill}' "
+            f"style='width:22px;height:22px;border-radius:5px;object-fit:cover;"
+            f"vertical-align:middle;margin-right:5px'>")
+    if badge_lane == "research":
+        lane_icon = _skill_icon_img("research-prime-icon.jpg", "researchPrime")
+    elif badge_lane in ("plan", "build"):
+        lane_icon = (_skill_icon_img("crucible-icon.svg", "Crucible")
+                     + _skill_icon_img("foreman-icon.svg", "Foreman"))
+    else:
+        lane_icon = ""
     return (
         f"<div class='headline tile lane-tile{running_cls}' "
         f"data-session=\"{sid_attr}\" data-lane=\"{lane_attr}\" "

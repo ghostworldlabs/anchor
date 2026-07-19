@@ -2549,7 +2549,7 @@ function openPanel(sessionId) {
     skillsBtn.style.cssText = 'width:100%;text-align:left;font-size:12px;font-weight:600;padding:6px 12px;background:var(--surface2,#232733);color:var(--text,#e2e4e9);border:1px solid var(--accent,#6c9cfc);border-radius:6px;cursor:pointer';
     var skillsMenu = document.createElement('div');
     skillsMenu.className = 'skillsmenu';
-    skillsMenu.style.cssText = 'display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;z-index:60;background:var(--surface,#1a1d27);border:1px solid var(--border,#2e3340);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-height:340px;overflow:auto;padding:4px';
+    skillsMenu.style.cssText = 'display:none;position:absolute;left:0;width:240px;max-width:92%;top:100%;margin-top:4px;z-index:60;background:var(--surface,#1a1d27);border:1px solid var(--border,#2e3340);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-height:340px;overflow:auto;padding:4px';
     _hideSkillsMenu = function () { skillsMenu.style.display = 'none'; };
     var _SKILLS = [
       {g:'trio', name:'researchPrime', label:'researchPrime', icon:'research-prime-icon.jpg'},
@@ -2586,7 +2586,7 @@ function openPanel(sessionId) {
       item.onmouseenter = function () { item.style.background = 'var(--surface2,#232733)'; };
       item.onmouseleave = function () { item.style.background = 'transparent'; };
       var im = document.createElement('img');
-      im.src = '/vendor/brand/' + sk.icon;
+      im.src = '/vendor/brand/' + sk.icon + '?v=' + (window.__ANCHOR_BUILD__ || '1');
       im.alt = sk.label;
       im.style.cssText = 'width:20px;height:20px;border-radius:4px;object-fit:cover;flex:none';
       im.onerror = function () { im.style.visibility = 'hidden'; };
