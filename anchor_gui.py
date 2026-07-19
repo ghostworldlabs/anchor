@@ -4906,8 +4906,8 @@ def render_project_window_html(project_id: str) -> str:
         f"<button class='rnd-mini' onclick=\"tidyIdyRun('claude')\" "
         f"title='Run Tidy-Idy repo hygiene on this project'>"
         f"<img src='/vendor/brand/tidy-idy-icon.jpg?v={BUILD_ID}' alt='' "
-        f"style='width:20px;height:20px;border-radius:4px;object-fit:cover;"
-        f"vertical-align:middle;margin-right:5px'>Tidy-Idy</button>")
+        f"style='width:60px;height:60px;border-radius:8px;object-fit:cover;"
+        f"vertical-align:middle;margin-right:7px'>Tidy-Idy</button>")
     if is_active:
         lifecycle = (
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
