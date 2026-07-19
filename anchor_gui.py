@@ -8609,6 +8609,7 @@ function addTaskDomain(domain) {{
 </script>
 <script>{cache_bust_script()}</script>
 <script>{_ORPHAN_ALERT_JS}</script>
+<script>{_ZOMBIE_SPEND_ALERT_JS}</script>
 </body>
 </html>'''
 
@@ -8672,6 +8673,53 @@ _ORPHAN_ALERT_JS = r'''
   if (document.readyState !== 'loading') { _zhPoll(); }
   else { window.addEventListener('DOMContentLoaded', _zhPoll); }
   setInterval(_zhPoll, 45000);
+})();
+'''
+
+
+# ── Token-spend zombie banner (dashboard) ───────────────────────────────
+# STATE-DRIVEN: polls /api/rnd/zombie_spenders (which reads the node Sentinel's
+# whole-computer token-spend scan). While >=1 VALID zombie exists (a process
+# spending paid tokens with no live session) it shows a red top banner; clicking
+# opens the Zombie Hunter GUI. When the zombie is dealt with (reaped OR
+# re-designated supervised), the next poll returns 0 and the banner is removed
+# automatically. Plain (non-f) string — its braces are literal JS.
+_ZOMBIE_SPEND_ALERT_JS = r'''
+(function () {
+  function _zsTok() { try { return (typeof _anchorToken === 'function') ? (_anchorToken() || '') : ''; } catch (e) { return ''; } }
+  function _zsUrl() { var t = _zsTok(); return '/api/rnd/zombie_hunter_report' + (t ? ('?token=' + encodeURIComponent(t)) : ''); }
+  function _zsShow(count, usd) {
+    var b = document.getElementById('zhSpendBanner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'zhSpendBanner';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#7f1d1d;color:#fee2e2;padding:10px 16px;display:flex;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.4);cursor:pointer';
+      b.onclick = function () { window.open(_zsUrl(), '_blank'); };
+      var msg = document.createElement('span'); msg.id = 'zhSpendMsg'; msg.style.cssText = 'flex:1';
+      var go = document.createElement('button');
+      go.textContent = 'Deal with it →';
+      go.style.cssText = 'background:#fee2e2;color:#7f1d1d;border:none;border-radius:4px;padding:5px 12px;font-weight:600;cursor:pointer';
+      go.onclick = function (e) { e.stopPropagation(); window.open(_zsUrl(), '_blank'); };
+      b.appendChild(msg); b.appendChild(go);
+      document.body.appendChild(b);
+    }
+    var m = document.getElementById('zhSpendMsg');
+    if (m) m.innerHTML = '<span style="font-size:16px;margin-right:6px">&#9888;</span><b>' + count + ' token-spending zombie' + (count > 1 ? 's' : '') + '</b> running unsupervised' + (usd > 0 ? ' — ~$' + usd + '/min burning' : '') + '. Click to investigate &amp; reap.';
+  }
+  function _zsHide() { var b = document.getElementById('zhSpendBanner'); if (b && b.parentNode) b.parentNode.removeChild(b); }
+  function _zsPoll() {
+    var t = _zsTok();
+    fetch('/api/rnd/zombie_spenders' + (t ? ('?token=' + encodeURIComponent(t)) : ''), { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        if (d.count > 0) _zsShow(d.count, d.usdPerMin); else _zsHide();
+      })
+      .catch(function () {});
+  }
+  if (document.readyState !== 'loading') { _zsPoll(); }
+  else { window.addEventListener('DOMContentLoaded', _zsPoll); }
+  setInterval(_zsPoll, 30000);
 })();
 '''
 
@@ -9432,6 +9480,31 @@ def handle_orphan_check(handler, path, body):
     except Exception:
         pass
     handler._send_json({"ok": True, "orphans": orphans})
+
+
+def handle_zombie_spenders(handler, path, body):
+    """GET /api/rnd/zombie_spenders — lightweight read-only poll for the home
+    dashboard's token-spend zombie banner. Server-side reads the node Sentinel's
+    /api/state and reports how many VALID zombies exist right now (processes
+    spending paid AI tokens with no live session) plus the current burn rate.
+    Best-effort: if the node server is down/absent, returns count 0 (no banner)
+    rather than erroring. Token-gated like the other read-API GET routes.
+    """
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    import urllib.request
+    count = 0
+    usd_per_min = 0.0
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:48484/api/state', timeout=3) as r:
+            st = json.loads(r.read().decode('utf-8'))
+        zg = st.get("zombies", []) or []
+        count = sum(int(g.get("count", 0) or 0) for g in zg)
+        usd_per_min = float((st.get("ledger", {}) or {}).get("totals", {}).get("usdPerMin", 0) or 0)
+    except Exception:
+        pass
+    handler._send_json({"ok": True, "count": count, "usdPerMin": round(usd_per_min, 2)})
 
 
 def handle_reaper_status(handler, path, body):
@@ -13893,6 +13966,7 @@ _MIGRATED_HANDLERS = {
     "handle_boneyard": handle_boneyard,
     "handle_build_deliverable": handle_build_deliverable,
     "handle_orphan_check": handle_orphan_check,
+    "handle_zombie_spenders": handle_zombie_spenders,
     "handle_reaper_status": handle_reaper_status,
     "handle_promote_grass": handle_promote_grass,
     "handle_grass_develop": handle_grass_develop,

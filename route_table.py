@@ -209,6 +209,8 @@ ROUTES = [
        handler="handle_gandalf_status_all", migrated=True),
     _r("GET", "/api/rnd/orphan_check", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_orphan_check", migrated=True),
+    _r("GET", "/api/rnd/zombie_spenders", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_zombie_spenders", migrated=True),
     _r("GET", "/api/rnd/zombie_hunter_report", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_zombie_hunter_report", migrated=True),
     # Reaper control plane (token-authed; safe-to-arm build) — status read + the
