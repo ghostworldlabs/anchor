@@ -10272,49 +10272,51 @@ def _zombie_scan_and_skill_briefing():
     distilled zombie-hunter awareness block, so the investigator agent reasons
     over the SAME data the GUI shows and knows the safety rules."""
     import urllib.request
-    out = "\n\n## Whole-Computer Scan (System-Wide Sentinel classifier)\n"
+    out = "\n\n## Whole-Computer Token-Spend Scan (System-Wide Sentinel)\n"
     try:
         with urllib.request.urlopen('http://127.0.0.1:48484/api/state', timeout=3) as r:
             st = json.loads(r.read().decode('utf-8'))
-        summ = st.get("summary", {}) or {}
-        out += (f"- Rogue AI (running loose): {summ.get('rogue', 0)}\n"
-                f"- Supervised AI (session-tied): {summ.get('supervised', 0)}\n"
-                f"- Orphaned (non-engine, parent dead): {summ.get('orphaned', 0)}\n"
-                f"- Unknown (abstain): {summ.get('unknown', 0)}\n\n")
-        groups = st.get("groups", {}) or {}
-        for cat in ("rogue", "orphaned", "unknown", "supervised"):
-            gl = groups.get(cat, []) or []
-            if not gl:
-                continue
-            out += f"### {cat} ({len(gl)} group(s))\n"
-            for g in gl[:12]:
-                pids = ",".join((g.get("pids") or [])[:8])
-                out += (f"- {g.get('count')}x {g.get('name')} | aiRun={g.get('aiRun')} "
-                        f"parentAlive={g.get('parentAlive')} root={g.get('root')} pids={pids}\n")
+        tot = (st.get("ledger", {}) or {}).get("totals", {}) or {}
+        zombies = st.get("zombies", []) or []
+        active = st.get("active", []) or []
+        out += (f"- Burn rate NOW: ${tot.get('usdPerMin', 0):.2f}/min "
+                f"(${tot.get('usdRecent', 0):.2f} in last {(st.get('ledger', {}) or {}).get('windowMin', 10)}m, "
+                f"{tot.get('activeSessions', 0)} active Claude sessions)\n"
+                f"- Token-spending ZOMBIES (spending + no live session): {sum(g.get('count', 0) for g in zombies)}\n"
+                f"- Active + supervised (your live sessions): {sum(g.get('count', 0) for g in active)}\n"
+                f"- Idle engines + non-engine matches (hidden): {st.get('idleCount', 0)} + {st.get('hiddenNonEngine', 0)}\n\n")
+        if zombies:
+            out += "### ZOMBIES — reap candidates (spending paid tokens, unsupervised)\n"
+            for g in zombies[:12]:
+                out += (f"- {g.get('count')}x {g.get('name')} | providers={','.join(g.get('providers') or [])} "
+                        f"| supervised={g.get('supervised')} root={g.get('root')} "
+                        f"| pids={','.join((g.get('pids') or [])[:8])}\n")
             out += "\n"
-        inc = st.get("incidents", []) or []
-        if inc:
-            out += "### Recent incidents (worst first)\n"
-            for i in inc[:6]:
-                out += (f"- {i.get('name')} | {i.get('startWindow')}->{i.get('endWindow')} | "
-                        f"{i.get('hours')}h | peak {i.get('peak')} | {i.get('severity')}\n")
+        sessions = (st.get("ledger", {}) or {}).get("sessions", []) or []
+        if sessions:
+            out += "### Burn ledger (Claude sessions accruing tokens)\n"
+            for s in sessions[:8]:
+                out += (f"- ${s.get('usdPerMin', 0):.2f}/min | {s.get('model')} | {s.get('cwd')} "
+                        f"| last {s.get('lastActivityAgoMin')}m ago\n")
             out += "\n"
     except Exception as exc:
         out += f"(live scan unavailable: {exc})\n\n"
     out += (
         "## Zombie-Hunter awareness (how to reason)\n"
-        "A process is a ZOMBIE / rogue only if it is BOTH (a) an actual AI run "
-        "(claude/agy/ollama, or a python/node doing AI work) AND (b) running with NO live "
-        "interactive session — its parent is dead, or it roots in services.exe with no session. "
-        "A supervised AI run (rooted in a live powershell/terminal/bash) is NOT a zombie. "
-        "Non-engine orphans (e.g. `tail -f` on an AI log) are harmless cleanup. Anything "
-        "unresolved is UNKNOWN -> ABSTAIN (never act). Safety: observe-only; prefer FREEZE "
-        "(reversible thread-suspend) before KILL (tree-kill); never mass-kill; confirm before killing.\n\n"
-        "Tools: the classifier is C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\classify.js; "
-        "live scan JSON is http://127.0.0.1:48484/api/state; re-run a sweep with "
-        "`node \"C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\sweep-worker.cjs\"`; the full "
-        "contract is that folder's SKILL.md. Investigate a PID with "
-        "`Get-CimInstance Win32_Process` (ParentProcessId, CommandLine, CreationDate).\n"
+        "The threat that MATTERS is a process SPENDING PAID AI TOKENS with nobody steering it. "
+        "A ZOMBIE = an AI engine (claude->Anthropic, agy/gemini->Google) that is (a) actively "
+        "calling a paid provider (live :443 connection to the provider's IP, and/or a Claude "
+        "session log accruing tokens) AND (b) NOT rooted in a live interactive session "
+        "(parent dead, or service-rooted with no session). An AI run that IS supervised (rooted "
+        "in a live powershell/terminal you're using) is NOT a zombie — it's your work. Processes "
+        "that merely matched a keyword but spend nothing (tail -f on an AI log, shells) are NOT a "
+        "threat and are hidden. Safety: observe-only; prefer FREEZE (reversible) before KILL "
+        "(tree-kill); never mass-kill; confirm before killing your own live session.\n\n"
+        "Tools: spend detector C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\spend.js "
+        "(network by provider IP-prefix + Claude token-log $/min ledger from ~/.claude/projects/*/*.jsonl); "
+        "classifier classify.js; live scan JSON http://127.0.0.1:48484/api/state; a PID's live API "
+        "connections via `Get-NetTCPConnection -OwningProcess <pid> -State Established` (RemotePort 443); "
+        "a PID's tree via `Get-CimInstance Win32_Process` (ParentProcessId).\n"
     )
     return out
 
