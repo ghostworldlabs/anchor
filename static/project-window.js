@@ -2546,7 +2546,7 @@ function openPanel(sessionId) {
     skillsBtn.type = 'button';
     skillsBtn.className = 'skillsbtn';
     skillsBtn.innerHTML = '⚡ Trio / Foundry Skills ▾';
-    skillsBtn.style.cssText = 'width:100%;text-align:left;font-size:12px;font-weight:600;padding:6px 12px;background:var(--surface2,#232733);color:var(--text,#e2e4e9);border:1px solid var(--accent,#6c9cfc);border-radius:6px;cursor:pointer';
+    skillsBtn.style.cssText = 'width:240px;max-width:92%;text-align:left;font-size:12px;font-weight:600;padding:6px 12px;background:var(--surface2,#232733);color:var(--text,#e2e4e9);border:1px solid var(--accent,#6c9cfc);border-radius:6px;cursor:pointer';
     var skillsMenu = document.createElement('div');
     skillsMenu.className = 'skillsmenu';
     skillsMenu.style.cssText = 'display:none;position:absolute;left:0;width:240px;max-width:92%;top:100%;margin-top:4px;z-index:60;background:var(--surface,#1a1d27);border:1px solid var(--border,#2e3340);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.5);max-height:min(480px,78vh);overflow:auto;padding:4px';
@@ -4875,6 +4875,41 @@ async function newGeneral(backend) {
       '.tile[data-session="' + _cssEsc(sid) + '"]');
     openEffortDock(sid, tile);
   }, 400);
+}
+// Header "Tidy-Idy" button: open a general session for THIS project and load the
+// tidy-idy repo-hygiene skill into it. Reuses the general-session start; the load
+// prompt is sent once the fresh session's REPL has had time to boot.
+async function tidyIdyRun(backend) {
+  backend = backend || 'claude';
+  var payload = {project_id: PROJECT_ID, lane: 'general', backend: backend, label: 'tidy-idy'};
+  var r, data;
+  try {
+    r = await _postJson('/api/rnd/term_start', payload);
+    data = await r.json();
+    if (_isUnauthorized(r, data) && setAnchorToken()) {
+      r = await _postJson('/api/rnd/term_start', payload);
+      data = await r.json();
+    }
+  } catch (e) { alert('[tidy-idy error] ' + e.message); return; }
+  if (!data || !data.ok || !data.session) {
+    alert('[tidy-idy refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+    return;
+  }
+  var rec = data.session;
+  var sid = rec.session_id;
+  MANAGED[sid] = {session_id: sid, lane: 'general', backend: rec.backend || backend,
+    status: rec.status || 'running', label: rec.label || 'tidy-idy',
+    idx: (_laneCounters['general'] = (_laneCounters['general'] || 0) + 1)};
+  renderSessionBar();
+  refreshBoard();
+  setTimeout(function () {
+    var tile = document.querySelector('.tile[data-session="' + _cssEsc(sid) + '"]');
+    openEffortDock(sid, tile);
+  }, 400);
+  // Give the new session's REPL time to boot, then load tidy-idy.
+  setTimeout(function () {
+    _postJson('/api/rnd/term_input2', {session: sid, data: 'Load the Tidy-Idy skill now.\n'});
+  }, 4000);
 }
 // --- Wave 2: File Upload (multi-file + folder + drag-drop) ---
 function _anchorReadB64(file) {

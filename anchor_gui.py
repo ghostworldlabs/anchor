@@ -4901,14 +4901,20 @@ def render_project_window_html(project_id: str) -> str:
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
                   f"title='Re-scan the folder for trio artifacts'>Rescan</button>")
+    # Tidy-Idy repo-hygiene launcher (replaces the old Blurb/Notes buttons).
+    tidy_btn = (
+        f"<button class='rnd-mini' onclick=\"tidyIdyRun('claude')\" "
+        f"title='Run Tidy-Idy repo hygiene on this project'>"
+        f"<img src='/vendor/brand/tidy-idy-icon.jpg?v={BUILD_ID}' alt='' "
+        f"style='width:15px;height:15px;border-radius:3px;object-fit:cover;"
+        f"vertical-align:middle;margin-right:4px'>Tidy-Idy</button>")
     if is_active:
         lifecycle = (
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
             f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
             f"{rescan_btn}"
             f"{upload_btn}"
-            f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
-            f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
+            f"{tidy_btn}"
             f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
             f"<button class='rnd-mini rnd-danger' onclick=\"rndRetire('{pid_attr}')\">Retire</button>"
         )
@@ -4917,8 +4923,7 @@ def render_project_window_html(project_id: str) -> str:
             f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
             f"{rescan_btn}"
             f"{upload_btn}"
-            f"<button class='rnd-mini' onclick=\"rndBlurb('{pid_attr}')\">Blurb</button>"
-            f"<button class='rnd-mini' onclick=\"rndNotes('{pid_attr}')\">Notes</button>"
+            f"{tidy_btn}"
         )
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
     # pin it as the runnable deliverable so the Deliverables LANE shows it as a
