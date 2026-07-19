@@ -4901,20 +4901,20 @@ def render_project_window_html(project_id: str) -> str:
     # Lifecycle header actions (all send the auth token via _postJson in the JS).
     rescan_btn = (f"<button class='rnd-mini' onclick=\"rndRescan('{pid_attr}')\" "
                   f"title='Re-scan the folder for trio artifacts'>Rescan</button>")
-    # Tidy-Idy repo-hygiene launcher (replaces the old Blurb/Notes buttons).
+    # Tidy-Idy repo-hygiene launcher — icon-only, pinned to the tile's top-right
+    # corner (its own @@tidy_btn@@ slot; no longer inline in the lifecycle row).
     tidy_btn = (
-        f"<button class='rnd-mini' onclick=\"tidyIdyRun('claude')\" "
+        f"<button class='tidy-corner' onclick=\"tidyIdyRun('claude')\" "
         f"title='Run Tidy-Idy repo hygiene on this project'>"
-        f"<img src='/vendor/brand/tidy-idy-icon.jpg?v={BUILD_ID}' alt='' "
-        f"style='width:60px;height:60px;border-radius:8px;object-fit:cover;"
-        f"vertical-align:middle;margin-right:7px'>Tidy-Idy</button>")
+        f"<img src='/vendor/brand/tidy-idy-icon.jpg?v={BUILD_ID}' alt='Tidy-Idy'></button>")
+    # The file-drop window (upload_btn) and the tidy icon are now their own header
+    # slots (right side / top-right corner), so the lifecycle row holds only the
+    # remaining actions.
     if is_active:
         lifecycle = (
             f"<button class='rnd-mini{p1on}' onclick=\"rndSetPriority('{pid_attr}',1)\" title='Priority 1'>P1</button>"
             f"<button class='rnd-mini{p2on}' onclick=\"rndSetPriority('{pid_attr}',2)\" title='Priority 2'>P2</button>"
             f"{rescan_btn}"
-            f"{upload_btn}"
-            f"{tidy_btn}"
             f"<button class='rnd-mini' onclick=\"rndArchive('{pid_attr}')\">Archive</button>"
             f"<button class='rnd-mini rnd-danger' onclick=\"rndRetire('{pid_attr}')\">Retire</button>"
         )
@@ -4922,8 +4922,6 @@ def render_project_window_html(project_id: str) -> str:
         lifecycle = (
             f"<button class='rnd-mini rnd-accent' onclick=\"rndReactivate('{pid_attr}')\">Reactivate</button>"
             f"{rescan_btn}"
-            f"{upload_btn}"
-            f"{tidy_btn}"
         )
     # Wave 8: if this project's folder IS an Anchor checkout (has anchor_gui.py),
     # pin it as the runnable deliverable so the Deliverables LANE shows it as a
@@ -5059,6 +5057,8 @@ def render_project_window_html(project_id: str) -> str:
         "model_flex_badge": render_model_flex_badge(),
         "token_display": "inline-block" if _paths.expected_token() else "none",
         "lifecycle": lifecycle,
+        "upload_btn": upload_btn,
+        "tidy_btn": tidy_btn,
         "objective_block": objective_block,
         "blurb_block": blurb_block,
         "notes_block": notes_block,
