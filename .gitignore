@@ -89,3 +89,5 @@ bridge_test*.txt
 # volatile, mutation-of-record (never a committed pointer record).
 .anchor/projects/*/journal.jsonl
 .anchor/projects/*/**/journal.jsonl_c1_before.json
+# Phase-0 sidecar snapshot (spend-telemetry-2026-07) — 1GB of engine JSONL, data not code
+.anchor/sidecar-archive/
