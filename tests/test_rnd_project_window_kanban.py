@@ -165,7 +165,7 @@ def test_window_renders_kanban_console_and_header(gui_env, tmp_path):
     # (newTermSession → term_start → terminal_session.start_session).
     assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
     assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
-    assert "newGeneral('claude')" in html
+    assert "newEffort('general')" in html or "newGeneral(" in html
     # Real xterm.js terminal: the vendored library + stylesheet are included and
     # the inline panel mounts xterm directly (new window.Terminal). v4.1: the v2
     # anchor-term REPL adapter is no longer used by the cockpit.

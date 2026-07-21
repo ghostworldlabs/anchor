@@ -68,6 +68,9 @@ DEFAULT_RUNNER_CMD = "claude -p --output-format stream-json"
 #: ALWAYS wins, regardless of backend, so the mock runner drives every test.
 BACKEND_CLAUDE = "claude"
 BACKEND_GEMINI = "gemini"
+BACKEND_GROK = "grok"
+#: Jobs keep Claude as the default backend; interactive terminals read
+#: ``anchor_settings.get_default_cli()`` (default ``grok``) instead.
 DEFAULT_BACKEND = BACKEND_CLAUDE
 
 #: Env var overriding the Gemini runner command. When unset,
@@ -398,6 +401,15 @@ def build_backend_argv(backend, prompt, output_dir, gated, permission_mode=None)
     per-backend builder. ``gated`` is falsy for research, ``"plan"``/``"build"``
     (truthy) for the gated lanes (claude only — gemini is research-only).
     """
+    if backend == BACKEND_GROK:
+        # Interactive Grok terminals are supported via terminal_session; headless
+        # job_runner has no tool-capable Grok argv builder yet. Refuse honestly
+        # rather than silently launching Claude under a grok backend label.
+        raise ValueError(
+            "job_runner does not support backend='grok' for headless jobs yet; "
+            "use an interactive Grok terminal (terminal_session) or set "
+            "coding_family/review_family for trio seat routing instead"
+        )
     if backend == BACKEND_GEMINI:
         return _build_gemini_argv(prompt, output_dir, gated, permission_mode=permission_mode)
     return _build_claude_argv(prompt, output_dir, gated, permission_mode=permission_mode)
@@ -588,6 +600,15 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     full_env = dict(os.environ)
     if backend == BACKEND_GEMINI:
         full_env["TRIO_DRIVER"] = "gemini-cli-native"
+    # Propagate Anchor model-family prefs so foundry/trio seats (and any agent
+    # reading CODING_FAMILY / REVIEW_FAMILY) honor the dashboard knobs.
+    # Pre-set env always wins over settings (caller / setx override).
+    try:
+        import anchor_settings as _aset
+        for _k, _v in _aset.export_env_overrides().items():
+            full_env.setdefault(_k, _v)
+    except Exception:
+        pass
     if env:
         full_env.update(env)
     

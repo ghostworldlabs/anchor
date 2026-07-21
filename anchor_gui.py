@@ -400,6 +400,7 @@ import anchor_marker as _marker
 import rnd_terminal as _term
 import terminal_session as _termsess
 import session_registry as _sessreg
+import anchor_settings as _aset  # durable model/engine prefs (default_cli, families)
 import handoff as _handoff
 import preview_server as _preview
 import project_bootstrap as _bootstrap
@@ -912,6 +913,9 @@ _PW_BOOT_GLOBALS_JS = (
     "var PROJECT_ID = window.ANCHOR_BOOT.project_id;\n"
     "var GRASS_DEV_LABEL_PREFIX = window.ANCHOR_BOOT.grass_dev_label_prefix;\n"
     "window.ANCHOR_AUTH_REQUIRED = !!window.ANCHOR_BOOT.auth_required;\n"
+    "window.ANCHOR_DEFAULT_CLI = window.ANCHOR_BOOT.default_cli || 'grok';\n"
+    "window.ANCHOR_CODING_FAMILY = window.ANCHOR_BOOT.coding_family || 'claude';\n"
+    "window.ANCHOR_REVIEW_FAMILY = window.ANCHOR_BOOT.review_family || 'gemini';\n"
 )
 
 
@@ -930,12 +934,19 @@ def project_window_boot_extra(project_id: str) -> dict:
                    if r.get("status") == _sessreg.STATUS_RUNNING)
     except Exception:
         pass
+    try:
+        prefs = _aset.load_settings()
+    except Exception:
+        prefs = dict(_aset.DEFAULTS)
     return {
         "page": "project-window",
         "project_id": project_id,
         "grass_dev_label_prefix": _eh.GRASS_DEV_LABEL_PREFIX,
         "flags": {"frontend": "static"},
         "counts": {"sessions": sessions, "live_sessions": live},
+        "default_cli": prefs.get("default_cli") or "grok",
+        "coding_family": prefs.get("coding_family") or "claude",
+        "review_family": prefs.get("review_family") or "gemini",
     }
 
 
@@ -4808,6 +4819,150 @@ def render_model_flex_badge(env=None) -> str:
             f"title='{html_lib.escape(title, quote=True)}'>{label}{_x}</span>{_hide}")
 
 
+def render_model_prefs_controls() -> str:
+    """Compact Default-terminal / Coding / Review family selects for the home header.
+
+    Loads current prefs via GET ``/api/settings`` (token from localStorage, same
+    pattern as other dashboard token-gated reads) and POSTs on change. Dark-theme
+    compact styling; pure HTML + a small self-contained script (no consecutive
+    ``{{``/``}}`` so f-string-leakage tests stay clean).
+    """
+    # Server-side initial values so the selects are correct before the fetch
+    # returns (and when auth is off / settings unreachable).
+    try:
+        s = _aset.load_settings()
+    except Exception:
+        s = dict(_aset.DEFAULTS)
+    dcli = html_lib.escape(str(s.get("default_cli") or "grok"), quote=True)
+    ccode = html_lib.escape(str(s.get("coding_family") or "claude"), quote=True)
+    rcode = html_lib.escape(str(s.get("review_family") or "gemini"), quote=True)
+
+    def _opts(selected: str) -> str:
+        parts = []
+        for val, lab in (("claude", "Claude"), ("gemini", "Gemini"),
+                         ("grok", "Grok")):
+            sel = " selected" if val == selected else ""
+            parts.append("<option value='%s'%s>%s</option>" % (val, sel, lab))
+        return "".join(parts)
+
+    style = (
+        "display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;"
+        "font-size:11px;color:var(--text-dim)"
+    )
+    sel_style = (
+        "background:var(--surface);color:var(--text);border:1px solid var(--border);"
+        "border-radius:6px;padding:2px 6px;font-size:11px;cursor:pointer"
+    )
+    lab_style = "display:inline-flex;align-items:center;gap:4px;white-space:nowrap"
+    html = (
+        "<div id='modelPrefs' class='model-prefs' style=\"%s\" "
+        "title='Interactive default terminal + coding/review model families'>"
+        "<label style=\"%s\">Default terminal "
+        "<select id='mpDefaultCli' data-key='default_cli' style=\"%s\">%s</select>"
+        "</label>"
+        "<label style=\"%s\">Coding "
+        "<select id='mpCoding' data-key='coding_family' style=\"%s\">%s</select>"
+        "</label>"
+        "<label style=\"%s\">Review "
+        "<select id='mpReview' data-key='review_family' style=\"%s\">%s</select>"
+        "</label>"
+        "<span id='mpStatus' style=\"font-size:10px;opacity:.7\"></span>"
+        "</div>"
+    ) % (style, lab_style, sel_style, _opts(dcli),
+         lab_style, sel_style, _opts(ccode),
+         lab_style, sel_style, _opts(rcode))
+
+    # Self-contained script: load prefs on DOMContentLoaded; POST on change.
+    # Uses X-Anchor-Token for POST and ?token= for GET (dashboard convention).
+    # NEVER emit consecutive `{{` or `}}` — dashboard f-string-leakage tests
+    # treat those as accidental Python f-string escapes. Always space braces.
+    script = r"""
+<script>
+(function () {
+  function tok() {
+    try { return localStorage.getItem('anchor_token') || ''; }
+    catch (e) { return ''; }
+  }
+  function tq() {
+    var t = tok();
+    return t ? ('?token=' + encodeURIComponent(t)) : '';
+  }
+  function setStatus(m) {
+    var el = document.getElementById('mpStatus');
+    if (el) el.textContent = m || '';
+  }
+  function apply(d) {
+    if (!d) return;
+    var map = {
+      default_cli: 'mpDefaultCli',
+      coding_family: 'mpCoding',
+      review_family: 'mpReview'
+    };
+    Object.keys(map).forEach(function (k) {
+      var el = document.getElementById(map[k]);
+      if (el && d[k]) el.value = d[k];
+    });
+    if (d.default_cli) window.ANCHOR_DEFAULT_CLI = d.default_cli;
+    if (d.coding_family) window.ANCHOR_CODING_FAMILY = d.coding_family;
+    if (d.review_family) window.ANCHOR_REVIEW_FAMILY = d.review_family;
+  }
+  function load() {
+    var opts = { cache: 'no-store', headers: { Accept: 'application/json' } };
+    fetch('/api/settings' + tq(), opts)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.ok) apply(d); })
+      .catch(function () { });
+  }
+  function save(el) {
+    var key = el.getAttribute('data-key');
+    if (!key) return;
+    var body = Object.create(null);
+    body[key] = el.value;
+    setStatus('saving…');
+    var h = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    };
+    var t = tok();
+    if (t) h['X-Anchor-Token'] = t;
+    var opts = { method: 'POST', headers: h, body: JSON.stringify(body) };
+    fetch('/api/settings', opts)
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.ok) {
+          apply(d);
+          setStatus('saved');
+          setTimeout(function () { setStatus(''); }, 1200);
+        } else {
+          setStatus((d && d.error) || 'error');
+        }
+      })
+      .catch(function () { setStatus('error'); });
+  }
+  function wire() {
+    ['mpDefaultCli', 'mpCoding', 'mpReview'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('change', function () { save(el); });
+    });
+    load();
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+})();
+</script>
+""".strip()
+    # Defense-in-depth: if any consecutive brace pair snuck in, space it.
+    while "{{" in script:
+        script = script.replace("{{", "{ {")
+    while "}}" in script:
+        script = script.replace("}}", "} }")
+    return html + script
+
+
 # ANCHOR[rearch]: RENDER_PROJECT_WINDOW — structural anchor (W1); keep UNIQUE,
 # keep directly above the def. The anchor-freshness gate (tools/anchors.py)
 # re-locates this before every extraction wave — no line numbers anywhere.
@@ -4904,7 +5059,7 @@ def render_project_window_html(project_id: str) -> str:
     # Tidy-Idy repo-hygiene launcher — icon-only, pinned to the tile's top-right
     # corner (its own @@tidy_btn@@ slot; no longer inline in the lifecycle row).
     tidy_btn = (
-        f"<button class='tidy-corner' onclick=\"tidyIdyRun('claude')\" "
+        f"<button class='tidy-corner' onclick=\"tidyIdyRun()\" "
         f"title='Run Tidy-Idy repo hygiene on this project'>"
         f"<img src='/vendor/brand/tidy-idy-icon.jpg?v={BUILD_ID}' alt='Tidy-Idy'></button>")
     # The file-drop window (upload_btn) and the tidy icon are now their own header
@@ -4985,6 +5140,13 @@ def render_project_window_html(project_id: str) -> str:
             + "'></script>"
         )
     else:
+        try:
+            _pw_prefs = _aset.load_settings()
+        except Exception:
+            _pw_prefs = dict(_aset.DEFAULTS)
+        _pw_dcli = json.dumps(_pw_prefs.get("default_cli") or "grok")
+        _pw_cfam = json.dumps(_pw_prefs.get("coding_family") or "claude")
+        _pw_rfam = json.dumps(_pw_prefs.get("review_family") or "gemini")
         pw_app_js_block = (
             "<script>\n"
             f"var PROJECT_ID = {pid_js};\n"
@@ -4993,10 +5155,13 @@ def render_project_window_html(project_id: str) -> str:
             # drift from ``effort_history.is_grass_dev_label``.
             f"var GRASS_DEV_LABEL_PREFIX = {json.dumps(_eh.GRASS_DEV_LABEL_PREFIX)};\n"
             f"window.ANCHOR_AUTH_REQUIRED = {'true' if _paths.expected_token() else 'false'};\n"
+            f"window.ANCHOR_DEFAULT_CLI = {_pw_dcli};\n"
+            f"window.ANCHOR_CODING_FAMILY = {_pw_cfam};\n"
+            f"window.ANCHOR_REVIEW_FAMILY = {_pw_rfam};\n"
             # W2 contract shim: the versioned bootstrap (build id). Embedded by
             # PLAIN CONCATENATION — not an f-string interpolation — so the W1
             # census counts for this render surface are undisturbed.
-            + anchor_boot_script() + "\n"
+            + anchor_boot_script(project_window_boot_extra(project_id)) + "\n"
             + _PROJECT_WINDOW_JS +
             "</script>"
         )
@@ -7010,8 +7175,9 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       </div>
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           {render_model_flex_badge()}
+          {render_model_prefs_controls()}
           <button class="btn btn-sm" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:12px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;" title="Anchor Doctor Diagnostic">&#10010; Anchor Doctor</button>
         </div>
         <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
@@ -9285,6 +9451,61 @@ def handle_set_notes(handler, path, body):
         handler._send_json({"ok": False, "error": "Not found"}, 404)
 
 
+def handle_settings_get(handler, path, body):
+    """GET /api/settings — durable model/engine prefs + env override map.
+
+    Token-authed by the route row. Returns load_settings() fields plus
+    ``env`` (export_env_overrides), ``cross_model`` (coding ≠ review family),
+    and a cheap host-capability profile when available.
+    """
+    settings = _aset.load_settings()
+    payload = {
+        "ok": True,
+        **settings,
+        "env": _aset.export_env_overrides(),
+        "cross_model": _aset.families_are_cross_model(),
+    }
+    try:
+        payload["host_profile"] = _lanes.detect_host_profile()
+    except Exception:
+        pass
+    handler._send_json(payload)
+
+
+def handle_settings_post(handler, path, body):
+    """POST /api/settings — merge partial model prefs; return full settings.
+
+    Accepts any of ``default_cli``, ``coding_family``, ``review_family``.
+    Invalid values → 400. Token-authed by the route row (mutating).
+    """
+    body = body or {}
+    kwargs = {}
+    for key in ("default_cli", "coding_family", "review_family"):
+        if key in body and body[key] is not None:
+            kwargs[key] = body[key]
+    if not kwargs:
+        # No-op write: still return the current full settings snapshot.
+        settings = _aset.load_settings()
+        handler._send_json({
+            "ok": True,
+            **settings,
+            "env": _aset.export_env_overrides(),
+            "cross_model": _aset.families_are_cross_model(),
+        })
+        return
+    try:
+        settings = _aset.save_settings(**kwargs)
+    except ValueError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        return
+    handler._send_json({
+        "ok": True,
+        **settings,
+        "env": _aset.export_env_overrides(),
+        "cross_model": _aset.families_are_cross_model(),
+    })
+
+
 def handle_set_blurb(handler, path, body):
     """POST /api/rnd/set_blurb — set a project's blurb. Token-gated by the middleware."""
     pid = body.get("id", "")
@@ -9559,12 +9780,12 @@ def handle_promote_grass(handler, path, body):
     pid = (body.get("project_id", "") or body.get("id", "")).strip()
     idea_id = (body.get("idea_id", "") or "").strip()
     lane = (body.get("lane", "") or "").strip()
-    # Claude-first policy: a promote opens a NEW session with no prior
-    # engine choice, so it defaults to Claude — never the project's sticky
-    # last_engine (which could be Gemini from an unrelated per-session
-    # toggle). Gemini stays reachable via the session engine toggle.
+    # Settings-backed default: a promote opens a NEW session with no prior
+    # engine choice, so it uses default_cli — never the project's sticky
+    # last_engine (which could be another engine from an unrelated per-session
+    # toggle). Other engines stay reachable via the session engine toggle.
     backend = ((body.get("backend", "") or "").strip()
-               or _termsess.DEFAULT_ENGINE)
+               or _aset.get_default_cli())
     if not pid or not idea_id or not lane:
         handler._send_json(
             {"ok": False,
@@ -10121,7 +10342,7 @@ def handle_cleanup_ghost_sessions(handler, path, body):
 
 
 def handle_term_set_engine(handler, path, body):
-    # v4 Wave 2: toggle a live session to the other engine (claude|gemini).
+    # v4 Wave 2: switch a live session to another engine (claude|gemini|grok).
     # Token-gated by the do_POST middleware above. Reaps + relaunches in
     # the SAME worktree, re-seeds once, updates the registry backend.
     session = (body.get("session", "") or "").strip()
@@ -10131,7 +10352,7 @@ def handle_term_set_engine(handler, path, body):
                          "error": "session and engine required"}, 400)
     elif engine not in _termsess.VALID_BACKENDS:
         handler._send_json({"ok": False,
-                         "error": "invalid engine (expected claude|gemini)",
+                         "error": "invalid engine (expected claude|gemini|grok)",
                          "reason": "invalid-engine"}, 400)
     elif _termsess.get_session(session) is None:
         handler._send_json({"ok": False,
@@ -10147,7 +10368,7 @@ def handle_term_set_engine(handler, path, body):
 
 
 def handle_switch_terminal_engine(handler, path, body):
-    # Wave 4: toggle engine (Gemini ↔ Claude) with graceful suspension and summary context handoff.
+    # Wave 4: switch engine (claude|gemini|grok) with graceful suspension and summary context handoff.
     # Token-gated by the do_POST middleware above.
     session = (body.get("session", "") or body.get("session_id", "") or "").strip()
     engine = (body.get("engine", "") or "").strip()
@@ -10156,7 +10377,7 @@ def handle_switch_terminal_engine(handler, path, body):
                          "error": "session and engine required"}, 400)
     elif engine not in _termsess.VALID_BACKENDS:
         handler._send_json({"ok": False,
-                         "error": "invalid engine (expected claude|gemini)",
+                         "error": "invalid engine (expected claude|gemini|grok)",
                          "reason": "invalid-engine"}, 400)
     elif _termsess.get_session(session) is None:
         handler._send_json({"ok": False,
@@ -10212,11 +10433,11 @@ def handle_start_terminal(handler, path, body):
     # project / invalid lane / engine or concurrency refusals.
     pid = body.get("project_id", "")
     lane = body.get("lane", "")
-    backend = body.get("backend") or _lanes.DEFAULT_BACKEND
+    backend = body.get("backend") or _aset.get_default_cli()
     if lane not in _lanes.LANES:
         handler._send_json({"ok": False, "error": f"invalid lane: {lane}",
                          "reason": "invalid-lane"}, 400)
-    elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+    elif backend not in _termsess.VALID_BACKENDS:
         handler._send_json({"ok": False,
                          "error": f"invalid engine: {backend}",
                          "reason": "invalid-engine"}, 400)
@@ -10306,7 +10527,9 @@ def handle_term_adopt(handler, path, body):
 def handle_term_start(handler, path, body):
     pid = (body.get("project_id", "") or body.get("id", "")).strip()
     lane = (body.get("lane", "") or "").strip()
-    backend = (body.get("backend", "") or "claude").strip() or "claude"
+    # Interactive default from durable settings (default_cli), not a hard-coded engine.
+    backend = ((body.get("backend", "") or "").strip()
+               or _aset.get_default_cli())
     label = body.get("label", "") or ""
     # Wave 6 seam → Wave 7: a launch-from-panel carries the source
     # session id as a seed hint. On a BUILD launch we now consume it:
@@ -10423,11 +10646,18 @@ def handle_zombie_terminal_start(handler, path, body):
     import reaper
     import pty_manager
 
-    # The GUI's Claude/Gemini toggle picks the backend; fall back to whatever
-    # engine the host actually has.
+    # The GUI's engine toggle picks the backend; fall back to settings default,
+    # then whatever engine the host actually has.
     backend = ((body or {}).get("backend") or "").strip().lower()
-    if backend not in ("claude", "gemini"):
-        backend = "claude" if shutil.which("claude") else "gemini"
+    if backend not in _termsess.VALID_BACKENDS:
+        try:
+            backend = _aset.get_default_cli()
+        except Exception:
+            backend = ""
+        if backend not in _termsess.VALID_BACKENDS:
+            backend = ("claude" if shutil.which("claude")
+                       else "gemini" if shutil.which("gemini")
+                       else "grok")
 
     try:
         attached = set(pty_manager.live_sessions())
@@ -11392,12 +11622,12 @@ def handle_continue_session(handler, path, body):
     lane = (body.get("lane", "") or "").strip()
     source = (body.get("source_session", "")
               or body.get("session", "") or "").strip()
-    # Claude-first policy: continuing a past session opens a NEW session;
-    # default it to Claude rather than the project's sticky last_engine
-    # (which could be Gemini from an unrelated toggle). Explicit backend
-    # in the body still wins; Gemini stays reachable via the toggle.
+    # Settings-backed default: continuing a past session opens a NEW session;
+    # default it to default_cli rather than the project's sticky last_engine
+    # (which could be another engine from an unrelated toggle). Explicit
+    # backend in the body still wins; other engines stay reachable via the toggle.
     backend = ((body.get("backend", "") or "").strip()
-               or _termsess.DEFAULT_ENGINE)
+               or _aset.get_default_cli())
     if not pid or not lane or not source:
         handler._send_json(
             {"ok": False,
@@ -11467,7 +11697,7 @@ def handle_resume_live(handler, path, body):
     source = (body.get("source_session", "")
               or body.get("session", "") or "").strip()
     backend = ((body.get("backend", "") or "").strip()
-               or _termsess.DEFAULT_ENGINE)
+               or _aset.get_default_cli())
     if not pid or not source:
         handler._send_json({"ok": False,
                          "error": "project_id and source_session required"}, 400)
@@ -12044,13 +12274,15 @@ def handle_launch_lane(handler, path, body):
     # Launch a trio lane (research|plan|build) for a project. Returns a
     # clean JSON error (not a 500) for an unknown project / invalid lane
     # / a concurrency refusal (same-lane-busy or folder-build-lock).
+    # Headless jobs keep lanes.DEFAULT_BACKEND (claude) when omitted —
+    # only interactive terminals use settings default_cli.
     pid = body.get("project_id", "")
     lane = body.get("lane", "")
     backend = body.get("backend") or _lanes.DEFAULT_BACKEND
     if lane not in _lanes.LANES:
         handler._send_json({"ok": False, "error": f"invalid lane: {lane}",
                          "reason": "invalid-lane"}, 400)
-    elif backend not in (_lanes.BACKEND_CLAUDE, _lanes.BACKEND_GEMINI):
+    elif backend not in _termsess.VALID_BACKENDS:
         handler._send_json({"ok": False,
                          "error": f"invalid engine: {backend}",
                          "reason": "invalid-engine"}, 400)
@@ -13982,6 +14214,8 @@ _MIGRATED_HANDLERS = {
     "handle_retire_project": handle_retire_project,
     "handle_reactivate_project": handle_reactivate_project,
     "handle_set_notes": handle_set_notes,
+    "handle_settings_get": handle_settings_get,
+    "handle_settings_post": handle_settings_post,
     "handle_set_blurb": handle_set_blurb,
     "handle_link_task": handle_link_task,
     "handle_project_rollup": handle_project_rollup,

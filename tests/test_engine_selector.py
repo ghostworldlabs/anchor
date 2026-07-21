@@ -304,8 +304,8 @@ def test_project_window_offers_gemini_for_research_only(gui_env, tmp_path):
     # — Gemini is research-only, plan/build are Claude-only — is still enforced
     # via the per-panel engine toggle (engtog → term_set_engine / switch_engine,
     # gated by lanes.check_engine_allowed). The surviving live launch (masthead
-    # general session) defaults to Claude.
-    assert "newGeneral('claude')" in html
+    # general session) uses settings-backed default_cli via newGeneral()/_defaultCli().
+    assert "newEffort('general')" in html or "newGeneral(" in html
     # No plan/build Gemini launch affordance is offered.
     assert "newTermSession('plan','gemini')" not in html
     assert "newTermSession('build','gemini')" not in html

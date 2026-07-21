@@ -9,7 +9,7 @@ reflect true live state.
 
 A session record models::
 
-    {session_id, project_id, lane, backend ("claude"|"gemini"),
+    {session_id, project_id, lane, backend ("claude"|"gemini"|"grok"),
      worktree_path, branch, status, created_at, label,
      seeded, seed_text}
 
@@ -181,10 +181,11 @@ def is_parked_warm(record_or_status) -> bool:
     # Unknown / ambiguous → fail SAFE (keep, never reap).
     return True
 
-#: Recognized backends.
+#: Recognized backends (interactive terminal peers).
 BACKEND_CLAUDE = "claude"
 BACKEND_GEMINI = "gemini"
-VALID_BACKENDS = {BACKEND_CLAUDE, BACKEND_GEMINI}
+BACKEND_GROK = "grok"
+VALID_BACKENDS = {BACKEND_CLAUDE, BACKEND_GEMINI, BACKEND_GROK}
 
 
 # ── Persistence ─────────────────────────────────────────────────────────────

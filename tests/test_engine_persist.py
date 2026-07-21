@@ -3,7 +3,7 @@
 Locks the Wave-2 contract:
 
   (a) a new session with no explicit backend inherits the project's last-used
-      engine (and ``claude`` when unset);
+      engine (and settings ``default_cli`` — currently ``grok`` — when unset);
   (b) starting a session updates the project's persisted ``last_engine``;
   (c) ``switch_engine`` swaps the backend, keeps the SAME session_id + worktree,
       re-registers, and leaves NO orphan PTY / worktree;
@@ -102,15 +102,17 @@ def env(tmp_path, monkeypatch):
         pass
 
 
-# ── (a) default-from-last (and 'claude' when unset) ──────────────────────────
+# ── (a) default-from-last (and settings default_cli when unset) ──────────────
 
-def test_unset_last_engine_defaults_to_claude(env):
+def test_unset_last_engine_defaults_to_settings_default_cli(env):
     ts = env["ts"]
-    # No engine.json yet → helper returns the default.
-    assert ts.last_engine_for_project(env["pid"]) == "claude"
+    import anchor_settings as _aset
+    expected = _aset.get_default_cli()  # machine default: grok
+    # No engine.json yet → helper returns the settings-backed default.
+    assert ts.last_engine_for_project(env["pid"]) == expected
     # A new session with NO explicit backend inherits that default.
     rec = ts.start_session(env["pid"], "research")
-    assert rec["backend"] == "claude"
+    assert rec["backend"] == expected
 
 
 def test_new_session_inherits_last_engine(env):
@@ -127,7 +129,8 @@ def test_new_session_inherits_last_engine(env):
 
 def test_start_session_updates_last_engine(env):
     ts = env["ts"]
-    assert ts.last_engine_for_project(env["pid"]) == "claude"
+    import anchor_settings as _aset
+    assert ts.last_engine_for_project(env["pid"]) == _aset.get_default_cli()
     # Explicitly start on gemini (research lane) → project remembers gemini.
     ts.start_session(env["pid"], "research", backend="gemini")
     assert ts.last_engine_for_project(env["pid"]) == "gemini"

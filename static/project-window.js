@@ -112,6 +112,40 @@ function toggleGandalfRuns(el) {
   if (el) el.innerHTML = collapsed ? '&#9656;' : '&#9662;';  // ▸ / ▾
 }
 
+// ── Interactive default CLI (settings-backed) ───────────────────────────────
+// Prefer server-injected window.ANCHOR_DEFAULT_CLI / ANCHOR_BOOT.default_cli;
+// otherwise fetch /api/settings once and cache. Schema default is grok.
+// Launch sites call _defaultCli() instead of hard-coding 'claude'.
+function _defaultCli() {
+  if (window.ANCHOR_DEFAULT_CLI) return window.ANCHOR_DEFAULT_CLI;
+  if (window.ANCHOR_BOOT && window.ANCHOR_BOOT.default_cli)
+    return window.ANCHOR_BOOT.default_cli;
+  return 'grok';
+}
+function _engineLabel(eng) {
+  if (eng === 'gemini') return '✦ Gemini';
+  if (eng === 'grok') return '✦ Grok';
+  return '◆ Claude';
+}
+function _bootSettingsCache() {
+  // One-shot fetch so a page without boot prefs still lands on the live default.
+  if (window.ANCHOR_DEFAULT_CLI) return;
+  try {
+    var tok = '';
+    try { tok = localStorage.getItem('anchor_token') || ''; } catch (e) {}
+    var url = '/api/settings' + (tok ? ('?token=' + encodeURIComponent(tok)) : '');
+    fetch(url, { cache: 'no-store', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r && r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.ok) return;
+        if (d.default_cli) window.ANCHOR_DEFAULT_CLI = d.default_cli;
+        if (d.coding_family) window.ANCHOR_CODING_FAMILY = d.coding_family;
+        if (d.review_family) window.ANCHOR_REVIEW_FAMILY = d.review_family;
+        try { if (typeof _grassEngine !== 'undefined') _grassEngine = _defaultCli(); } catch (e) {}
+      }).catch(function () {});
+  } catch (e) {}
+}
+
 // ── Access token (D4) ──────────────────────────────────────────────────────
 // The shared-secret token is kept ONLY in this browser's localStorage and sent
 // as X-Anchor-Token on mutating POSTs. It is NEVER embedded in the served HTML
@@ -145,6 +179,8 @@ function primeAuthCookie() {
 window.addEventListener('DOMContentLoaded', function () {
   if (window.ANCHOR_AUTH_REQUIRED && !_anchorToken()) { setAnchorToken(); }
   primeAuthCookie();   // W9: set the cookie so page navigation works under enforce
+  try { _bootSettingsCache(); } catch (e) {}
+  try { _grassEngine = _defaultCli(); } catch (e) {}
   repopulate();
   try { initGandalfPanelCollapse(); } catch(e){}
   // v8 Wave 3: render the GitHub link / auto-push header controls from the
@@ -419,7 +455,7 @@ async function promoteInbox() {
 // The idea REMAINS in grass (copy, never destroy).
 async function promoteGrass(ideaId, lane) {
   var payload = {project_id: PROJECT_ID, idea_id: ideaId, lane: lane,
-                 backend: 'claude'};
+                 backend: _defaultCli()};
   var r, data;
   try {
     r = await _postJson('/api/rnd/promote_grass', payload);
@@ -436,7 +472,7 @@ async function promoteGrass(ideaId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || _defaultCli(),
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -921,7 +957,7 @@ function _gandalfRefreshCount() {
 // Tabs + search scope the left list; selecting a .gli loads the right workbench;
 // Develop starts a SEEDED live session in the workbench terminal; a saved
 // refinement appears in the history (grass-<id>/dev-N) and is pullable.
-var _grassEngine = 'claude';   // workbench engine toggle (default Claude; flip to gemini)
+var _grassEngine = (typeof _defaultCli === 'function' ? _defaultCli() : (window.ANCHOR_DEFAULT_CLI || 'grok'));   // workbench engine toggle (3-way: claude|gemini|grok)
 var _grassData = {};            // idea_id -> idea record (from /api/rnd/grass)
 var _grassDevSession = null;    // the active Develop session id (for Save refinement)
 // v10 Wave 3 — per-(idea,lane) develop session id, so each of the TWO terminal
@@ -1061,7 +1097,7 @@ function selectGrassIdea(ideaId) {
   if (!work) return;
   work.removeAttribute('data-empty');
   work.setAttribute('data-idea', ideaId);
-  var engLabel = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
+  var engLabel = _engineLabel(_grassEngine);
   var html = ''
     // ── workbench header: title + status chip + auto-saved + Archive + Migrate ──
     + '<div class="ghead">'
@@ -1107,11 +1143,13 @@ function selectGrassIdea(ideaId) {
     + '<div class="term-host" data-grass-term="research"></div></div>'
     + '</div>';
   work.innerHTML = html;
-  // Engine toggle (Claude/Gemini) — affects the next session opened for this idea.
+  // Engine toggle (Claude / Gemini / Grok) — 3-way cycle for the next session.
   var eng = work.querySelector('.gengtog');
   if (eng) eng.onclick = function () {
-    _grassEngine = (_grassEngine === 'claude') ? 'gemini' : 'claude';
-    eng.textContent = (_grassEngine === 'claude') ? '◆ Claude' : '✦ Gemini';
+    var order = ['claude', 'gemini', 'grok'];
+    var ix = order.indexOf(_grassEngine);
+    _grassEngine = order[(ix < 0 ? 0 : ix + 1) % order.length];
+    eng.textContent = _engineLabel(_grassEngine);
   };
   // Migrate to project ↑ → export_grass_to_project (idea stays, grass_origin).
   var mig = work.querySelector('.gmigrate');
@@ -2325,9 +2363,9 @@ function openLinkedPlanning(ev, planningSid) {
 }
 
 // Start a brand-new managed terminal session for a lane (Wave-3 term_start),
-// then refresh the bar and open its inline panel. backend defaults to claude.
+// then refresh the bar and open its inline panel. backend defaults via settings.
 async function newTermSession(lane, backend, opts) {
-  backend = backend || 'claude';
+  backend = backend || _defaultCli();
   var payload = {project_id: PROJECT_ID, lane: lane, backend: backend};
   // Wave 6 seam: a seed hint (the source session id) rides into term_start so
   // Wave 7 can build the stage-handoff on top of it. term_start tolerates the
@@ -2966,16 +3004,17 @@ function _cssEsc(s) {
   return String(s).replace(/["\\\]]/g, '\\$&');
 }
 
-// _buildEngineToggle(sessionId, s): the ◆ Claude / ✦ Gemini toggle for the panel
-// bar. The currently-selected engine (s.backend, default claude) is highlighted;
-// clicking the OTHER engine POSTs term_set_engine (relaunch in the same worktree)
-// and updates the record + toggle on success. Returns the .engtog element.
+// _buildEngineToggle(sessionId, s): the ◆ Claude / ✦ Gemini / ✦ Grok 3-way
+// toggle for the panel bar. The currently-selected engine (s.backend, default
+// from settings via _defaultCli()) is highlighted; clicking another engine
+// POSTs switch_terminal_engine (relaunch in the same worktree) and updates the
+// record + toggle on success. Returns the .engtog element.
 function _buildEngineToggle(sessionId, s) {
-  var cur = (s && s.backend) || 'claude';
+  var cur = (s && s.backend) || _defaultCli();
   var tog = document.createElement('span');
   tog.className = 'engtog';
-  tog.title = 'Chosen once; flip to switch this session to the other engine.';
-  [['claude', '◆ Claude'], ['gemini', '✦ Gemini']].forEach(function (pair) {
+  tog.title = 'Chosen once; flip to switch this session to another engine.';
+  [['claude', '◆ Claude'], ['gemini', '✦ Gemini'], ['grok', '✦ Grok']].forEach(function (pair) {
     var eng = pair[0];
     var b = document.createElement('b');
     b.textContent = pair[1];
@@ -3237,7 +3276,7 @@ function _resumeLive(sessionId, lane) {
   // same window — never a third action, never a second window.
   var fromDock = (DOCK && DOCK.session_id === sessionId);
   var payload = {project_id: PROJECT_ID, lane: lane || '',
-                 source_session: sessionId, backend: 'claude'};
+                 source_session: sessionId, backend: _defaultCli()};
   _postJson('/api/rnd/resume_live', payload).then(function (d) {
     if (!d || !d.ok || !d.session || !d.session.session_id) {
       // Fall back to the plain continue path so the click is never a dead end.
@@ -3371,7 +3410,7 @@ function resumeDiscovered(ev, sessionId, lane) {
 // (reusing the live-session panel path).
 async function continueSession(sessionId, lane) {
   var payload = {project_id: PROJECT_ID, lane: lane, source_session: sessionId,
-                 backend: 'claude'};
+                 backend: _defaultCli()};
   var r, data;
   try {
     r = await _postJson('/api/rnd/continue_session', payload);
@@ -3388,7 +3427,7 @@ async function continueSession(sessionId, lane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || lane, backend: rec.backend || _defaultCli(),
     status: rec.status || 'running', label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] = (_laneCounters[rec.lane || lane] || 0) + 1)
   };
@@ -3451,7 +3490,7 @@ async function advanceSession(sourceId, toLane) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {
-    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || 'claude',
+    session_id: sid, lane: rec.lane || toLane, backend: rec.backend || _defaultCli(),
     status: rec.status || 'running', label: rec.label || '',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || sourceId,
     idx: (_laneCounters[rec.lane || toLane] = (_laneCounters[rec.lane || toLane] || 0) + 1)
@@ -4124,7 +4163,7 @@ function _addAutoBuildTile(rec) {
   var sid = rec.session_id;
   var lane = rec.lane || 'build';
   MANAGED[sid] = {
-    session_id: sid, lane: lane, backend: rec.backend || 'claude',
+    session_id: sid, lane: lane, backend: rec.backend || _defaultCli(),
     status: rec.status || 'running', label: rec.label || 'auto · from plan',
     chain_id: rec.chain_id || '', parent_session_id: rec.parent_session_id || '',
     auto_from_plan: true,
@@ -4803,9 +4842,11 @@ async function newEffort(stage) {
   stage = stage || 'research';
   // v12 W10 (John change #2): start at research OR plan (W6 supports both). The
   // lane name mirrors the stage (term_start accepts both 'plan' and 'planning').
+  // When stage is 'general', start a bare general session (newGeneral path).
+  if (stage === 'general') { return newGeneral(); }
   var lane = (stage === 'plan') ? 'plan'
            : (stage === 'build') ? 'build' : 'research';
-  var payload = {project_id: PROJECT_ID, lane: lane, backend: 'claude',
+  var payload = {project_id: PROJECT_ID, lane: lane, backend: _defaultCli(),
                  effort_managed: true};
   var r, data;
   try {
@@ -4824,7 +4865,7 @@ async function newEffort(stage) {
   var rec = data.session;
   var sid = rec.session_id;
   MANAGED[sid] = {session_id: sid, lane: rec.lane || lane,
-    backend: rec.backend || 'claude', status: rec.status || 'running',
+    backend: rec.backend || _defaultCli(), status: rec.status || 'running',
     label: rec.label || '',
     idx: (_laneCounters[rec.lane || lane] =
           (_laneCounters[rec.lane || lane] || 0) + 1)};
@@ -4843,7 +4884,7 @@ async function newEffort(stage) {
 // effort: the dock shows no stage track and no Advance, and it never auto-advances.
 // It is registered (a top-strip chip) but is NOT a board lane column. Token-aware.
 async function newGeneral(backend) {
-  backend = backend || 'claude';
+  backend = backend || _defaultCli();
   var payload = {project_id: PROJECT_ID, lane: 'general', backend: backend};
   var r, data;
   try {
@@ -4880,7 +4921,7 @@ async function newGeneral(backend) {
 // tidy-idy repo-hygiene skill into it. Reuses the general-session start; the load
 // prompt is sent once the fresh session's REPL has had time to boot.
 async function tidyIdyRun(backend) {
-  backend = backend || 'claude';
+  backend = backend || _defaultCli();
   var payload = {project_id: PROJECT_ID, lane: 'general', backend: backend, label: 'tidy-idy'};
   var r, data;
   try {

@@ -109,13 +109,15 @@ def test_neither_is_unavailable_not_a_crash(lanes):
 def test_detect_host_profile_honors_env_overrides(lanes, monkeypatch):
     monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "1")
     monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "0")
+    monkeypatch.setenv("ANCHOR_GROK_AVAILABLE", "0")
     prof = lanes.detect_host_profile()
-    assert prof == {"claude": True, "gemini": False}
+    assert prof["claude"] is True and prof["gemini"] is False
+    assert prof.get("grok") is False
 
     monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "0")
     monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "1")
     prof = lanes.detect_host_profile()
-    assert prof == {"claude": False, "gemini": True}
+    assert prof["claude"] is False and prof["gemini"] is True
 
 
 def test_select_engine_plan_falls_back_to_detected_profile(lanes, monkeypatch):

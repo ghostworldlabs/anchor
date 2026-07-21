@@ -61,6 +61,7 @@ SKILL_BUILD = "foreman"
 #: Code engines Gemini can't run.
 BACKEND_CLAUDE = _jr.BACKEND_CLAUDE
 BACKEND_GEMINI = _jr.BACKEND_GEMINI
+BACKEND_GROK = _jr.BACKEND_GROK
 DEFAULT_BACKEND = _jr.DEFAULT_BACKEND
 
 #: Lanes on which a ``gemini`` backend REQUEST is accepted at the launch
@@ -285,11 +286,13 @@ def _write_launch_record(output_dir: Path, project_id: str, lane: str,
 
 
 def check_engine_allowed(lane: str, backend: str) -> None:
-    """Enforce the engine policy: Gemini runs on research + general; Claude anywhere.
+    """Enforce the engine policy: Gemini restricted; Claude/Grok anywhere.
 
     Raises :class:`EngineNotAllowedError` if ``backend == "gemini"`` and ``lane``
-    is not in ``GEMINI_LANES`` (research or the bare ``general`` exploration
-    lane). Claude (the default) is always allowed; plan/build stay Claude-only.
+    is not in ``GEMINI_LANES`` (research, general, plan, build). Claude and Grok
+    are always allowed on every lane (Grok is a terminal peer, not under the
+    Gemini lane restrictions). Job-layer plan/build drivers still prefer Claude
+    via :func:`select_engine_plan`.
     """
     if backend == BACKEND_GEMINI and lane not in GEMINI_LANES:
         raise EngineNotAllowedError(lane, backend)
@@ -328,11 +331,12 @@ SWARM_RATIO = "5:1"
 GEMINI_RUNNABLE_LANES = frozenset((LANE_RESEARCH, "general"))
 
 #: Env seams to force host-capability detection deterministically (used by the
-#: gate to construct Claude-only / Gemini-only / both profiles without touching
-#: the real PATH). ``1``/``true``/``yes``/``on`` ⇒ available; ``0``/``false``/
-#: ``no``/``off`` ⇒ absent; unset/blank ⇒ probe the real host.
+#: gate to construct Claude-only / Gemini-only / both / Grok profiles without
+#: touching the real PATH). ``1``/``true``/``yes``/``on`` ⇒ available;
+#: ``0``/``false``/``no``/``off`` ⇒ absent; unset/blank ⇒ probe the real host.
 CLAUDE_AVAILABLE_ENV = "ANCHOR_CLAUDE_AVAILABLE"
 GEMINI_AVAILABLE_ENV = "ANCHOR_GEMINI_AVAILABLE"
+GROK_AVAILABLE_ENV = "ANCHOR_GROK_AVAILABLE"
 
 
 def _env_override(env, name):
@@ -379,31 +383,50 @@ def _gemini_available(env) -> bool:
     return os.path.exists(agy_path)
 
 
+def _grok_available(env) -> bool:
+    """Whether the Grok CLI is usable on this host.
+
+    Honors the :data:`GROK_AVAILABLE_ENV` override first (test/deploy seam).
+    Otherwise probes for ``grok`` on PATH, or the known install location
+    ``~/.grok/bin/grok.exe`` (mirrors ``terminal_session._resolve_engine_cmd``).
+    """
+    ov = _env_override(env, GROK_AVAILABLE_ENV)
+    if ov is not None:
+        return ov
+    if shutil.which("grok"):
+        return True
+    home = env.get("HOME") or env.get("USERPROFILE") or str(Path.home())
+    grok_exe = Path(home) / ".grok" / "bin" / "grok.exe"
+    return grok_exe.is_file()
+
+
 def detect_host_profile(env=None) -> dict:
     """Probe the host for which engine subscriptions are available.
 
-    Returns ``{"claude": bool, "gemini": bool}`` where ``claude`` is the Claude
-    Code driver and ``gemini`` is the ``agy-dispatch`` / Gemini swarm substrate.
-    ``env`` defaults to ``os.environ`` and is the seam through which the gate
-    forces a Claude-only / Gemini-only / both profile deterministically.
+    Returns ``{"claude": bool, "gemini": bool, "grok": bool}`` where ``claude``
+    is the Claude Code driver, ``gemini`` is the ``agy-dispatch`` / Gemini swarm
+    substrate, and ``grok`` is the Grok CLI. ``env`` defaults to ``os.environ``
+    and is the seam through which the gate forces a profile deterministically.
     """
     if env is None:
         env = os.environ
     return {
         "claude": _claude_available(env),
         "gemini": _gemini_available(env),
+        "grok": _grok_available(env),
     }
 
 
 def select_engine_plan(lane: str, profile=None, env=None) -> dict:
     """The honest per-lane execution plan for a host-capability profile (#10).
 
-    Given a ``lane`` and a host ``profile`` (``{"claude": bool, "gemini": bool}``;
-    detected via :func:`detect_host_profile` when omitted), return a plan dict::
+    Given a ``lane`` and a host ``profile`` (``{"claude": bool, "gemini": bool,
+    "grok": bool}``; detected via :func:`detect_host_profile` when omitted),
+    return a plan dict::
 
         {
           "lane": <lane>,
-          "profile": {"claude": bool, "gemini": bool},
+          "profile": {"claude": bool, "gemini": bool, "grok": bool},
           "driver": "claude" | "gemini" | None,   # engine that drives the lane
           "swarm": "gemini" | None,               # 5:1 skill-layer swarm engine
           "swarm_ratio": "5:1" | None,
@@ -412,24 +435,30 @@ def select_engine_plan(lane: str, profile=None, env=None) -> dict:
           "reason": <str>,
         }
 
-    Policy (locked #10, never cross-calling):
+    Policy (locked #10, never cross-calling). Job-layer drivers stay Claude/
+    Gemini; Grok is an interactive terminal peer (surfaced in ``profile``) and
+    does not change this plan:
 
-    - **Both** subscriptions → the default driver is **Claude**, with **Gemini
+    - **Both** Claude+Gemini → the default driver is **Claude**, with **Gemini
       available as the 5:1 skill-layer swarm**.
     - **Claude only** → Claude drives every lane and **no agy/Gemini process is
       ever spawned** (``spawns_gemini`` is False for every lane).
     - **Gemini only** → research + Gemini-runnable lanes drive on Gemini;
       **plan/build resolve to a ``requires_claude`` status** (honest, not a crash).
-    - **Neither** → ``unavailable``.
+    - **Neither Claude nor Gemini** → ``unavailable`` (Grok alone does not drive
+      job-layer plan/build).
     """
     if profile is None:
         profile = detect_host_profile(env)
     has_claude = bool(profile.get("claude"))
     has_gemini = bool(profile.get("gemini"))
+    has_grok = bool(profile.get("grok"))
 
     plan = {
         "lane": lane,
-        "profile": {"claude": has_claude, "gemini": has_gemini},
+        "profile": {
+            "claude": has_claude, "gemini": has_gemini, "grok": has_grok,
+        },
         "driver": None,
         "swarm": None,
         "swarm_ratio": None,

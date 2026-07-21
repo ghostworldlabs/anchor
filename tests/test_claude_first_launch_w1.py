@@ -1,13 +1,10 @@
-"""Wave 1 gate — Claude-first session launch.
+"""Wave 1 gate — settings-backed session launch defaults.
 
-crucible-improve-followup (2026-07-01), Wave 1.
-
-Locked model policy: every dashboard session-launch control opens on CLAUDE by
-default. Gemini is reachable only via the per-session engine toggle / the 5:1
-skill-layer swarm — NEVER as a launch default. This gate asserts the JS launch
-defaults (newTermSession / newEffort / grass workbench / engine-toggle highlight)
-and the research-lane launcher all default to Claude, and that no launch site in
-the project-window JS still hardcodes gemini.
+Originally "Claude-first" (crucible-improve-followup 2026-07-01). Retargeted
+2026-07-21: interactive launch defaults come from durable settings
+(``default_cli``, schema default ``grok``) — never hard-coded Gemini, and no
+longer hard-coded Claude either. Gemini/Claude/Grok are all selectable via the
+3-way engine toggle; launch payloads call ``_defaultCli()``.
 """
 import importlib
 import re
@@ -41,7 +38,7 @@ def gui_env(tmp_path, monkeypatch):
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
     monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
     for mod in ("paths", "rnd_registry", "session_registry", "effort_history",
-                "summarizer", "lanes", "terminal_session"):
+                "summarizer", "lanes", "terminal_session", "anchor_settings"):
         importlib.reload(importlib.import_module(mod))
     import paths
     paths.ensure_data_dirs()
@@ -51,88 +48,114 @@ def gui_env(tmp_path, monkeypatch):
 
 # ── JS launch-default assertions (module-level _PROJECT_WINDOW_JS) ───────────
 
-def test_newtermsession_defaults_to_claude(gui_env):
+def test_newtermsession_defaults_via_settings(gui_env):
     js = gui_env._PROJECT_WINDOW_JS
-    assert "backend = backend || 'claude'" in js
+    assert "backend = backend || _defaultCli()" in js
     assert "backend = backend || 'gemini'" not in js
+    assert "backend = backend || 'claude'" not in js
 
 
-def test_neweffort_payload_launches_claude(gui_env):
+def test_neweffort_payload_uses_default_cli(gui_env):
     js = gui_env._PROJECT_WINDOW_JS
-    # The effort_managed launch payload must request claude, never gemini.
-    assert "backend: 'claude'" in js
+    # The effort_managed launch payload must request the settings default, never
+    # a hard-coded gemini (or a hard-coded claude).
+    assert "backend: _defaultCli()" in js
     assert "backend: 'gemini'" not in js
+    assert "backend: 'claude'" not in js
 
 
-def test_grass_workbench_default_engine_is_claude(gui_env):
+def test_grass_workbench_default_engine_from_settings(gui_env):
     js = gui_env._PROJECT_WINDOW_JS
-    assert "_grassEngine = 'claude'" in js
+    # Grass engine init reads _defaultCli() / ANCHOR_DEFAULT_CLI, not a pinned
+    # gemini (and no longer a pinned claude).
+    assert "_defaultCli" in js
     assert "_grassEngine = 'gemini'" not in js
+    # The 3-way cycle includes all three engines as SELECTABLE values.
+    assert "'claude', 'gemini', 'grok'" in js or \
+           "['claude', 'gemini', 'grok']" in js
 
 
-def test_engine_toggle_highlight_defaults_claude(gui_env):
+def test_engine_toggle_highlight_defaults_via_settings(gui_env):
     js = gui_env._PROJECT_WINDOW_JS
-    assert "(s && s.backend) || 'claude'" in js
+    assert "(s && s.backend) || _defaultCli()" in js
     assert "(s && s.backend) || 'gemini'" not in js
+    assert "(s && s.backend) || 'claude'" not in js
 
 
 def test_no_gemini_launch_default_or_fallback_remains(gui_env):
     """Policy guard: no launch payload / MANAGED fallback / default in the
-    project-window JS still pins gemini. (The ◆Claude/✦Gemini toggle button list
-    keeps the literal 'gemini' as a SELECTABLE value — that is not a default and
-    is matched narrowly here.)"""
+    project-window JS still pins gemini. (The 3-way toggle button list keeps
+    the literal 'gemini' as a SELECTABLE value — that is not a default and is
+    matched narrowly here.)"""
     js = gui_env._PROJECT_WINDOW_JS
     assert "|| 'gemini'" not in js, "a gemini launch/fallback default remains"
     assert "backend: 'gemini'" not in js, "a launch payload still pins gemini"
 
 
+def test_default_cli_helper_present(gui_env):
+    js = gui_env._PROJECT_WINDOW_JS
+    assert "function _defaultCli()" in js
+    assert "ANCHOR_DEFAULT_CLI" in js
+    # Schema fallback when boot prefs are absent.
+    assert "return 'grok'" in js or "|| 'grok'" in js
+
+
 # ── Rendered project window (Layout-D — the REAL launch controls) ────────────
 
-def test_layoutd_launch_controls_default_to_claude(gui_env, tmp_path):
-    """The served project window (v12 Layout-D — what the user actually sees)
-    launches on Claude: the '+ New effort' buttons call newEffort (which posts
-    backend:'claude') and 'Open terminal' calls newGeneral('claude'). No launch
-    control in the rendered window hands a session to gemini."""
+def test_layoutd_launch_controls_use_settings_default(gui_env, tmp_path):
+    """The served project window launches via settings default_cli — no control
+    hands a session to gemini by default. newEffort posts backend:_defaultCli();
+    newGeneral() without an arg also resolves via _defaultCli()."""
     import rnd_registry
     folder = tmp_path / "Proj"
     folder.mkdir()
     pid = rnd_registry.add_project("Proj", str(folder), scaffold=False)["id"]
     html = gui_env.render_project_window_html(pid)
-    # The real research/plan launchers + the bare terminal are present ...
+    # The real research/plan launchers are present ...
     assert "newEffort('research')" in html
-    assert "newGeneral('claude')" in html
     # ... and no launch control in the served window pins gemini.
     assert "newTermSession('research','gemini')" not in html
     assert "backend: 'gemini'" not in html
     assert "|| 'gemini'" not in html
+    # Boot prefs (or globals) expose the settings default for the client.
+    assert "ANCHOR_DEFAULT_CLI" in html or "default_cli" in html
 
 
-# ── Client payloads for promote / continue explicitly request claude ─────────
+# ── Client payloads for promote / continue request settings default ──────────
 
-def test_promote_and_continue_payloads_request_claude(gui_env):
+def test_promote_and_continue_payloads_request_default_cli(gui_env):
     js = gui_env._PROJECT_WINDOW_JS
-    # promoteGrass + continueSession are NEW sessions; both must pin claude in the
-    # payload (not fall through to the server's sticky last_engine).
-    assert re.search(r"idea_id: ideaId, lane: lane,\s*backend: 'claude'", js), \
-        "promoteGrass payload must request claude"
-    assert re.search(r"source_session: sessionId,\s*backend: 'claude'", js), \
-        "continueSession payload must request claude"
+    # promoteGrass + continueSession are NEW sessions; both must request the
+    # settings default (not fall through to sticky last_engine, not pin gemini).
+    assert re.search(r"idea_id: ideaId, lane: lane,\s*backend: _defaultCli\(\)", js), \
+        "promoteGrass payload must request _defaultCli()"
+    assert re.search(r"source_session: sessionId,\s*backend: _defaultCli\(\)", js), \
+        "continueSession payload must request _defaultCli()"
 
 
-# ── Regression: the backend default engine really is claude ──────────────────
+# ── Regression: interactive default engine tracks settings ───────────────────
 
-def test_backend_default_engine_is_claude(gui_env):
-    import lanes
+def test_backend_default_engine_tracks_settings(gui_env):
     import terminal_session
-    assert terminal_session.DEFAULT_ENGINE == lanes.BACKEND_CLAUDE == "claude"
+    import anchor_settings
+    # Schema default is grok; DEFAULT_ENGINE mirrors it for import-time readers.
+    assert terminal_session.DEFAULT_ENGINE == "grok"
+    assert anchor_settings.get_default_cli() == "grok"
+    assert "grok" in terminal_session.VALID_BACKENDS
 
 
-# ── Behavioral (un-gameable): the sticky-last_engine LEAK is closed ──────────
+def test_engine_toggle_is_three_way(gui_env):
+    js = gui_env._PROJECT_WINDOW_JS
+    assert "◆ Claude" in js
+    assert "✦ Gemini" in js
+    assert "✦ Grok" in js
+
+
+# ── Behavioral: sticky-last_engine LEAK is closed with explicit backend ──────
 #
-# Reviewer A's DEFECT 1: promote / continue used to resolve to the project's
-# sticky last_engine, so after ANY per-session Gemini toggle an unrelated
-# promote/continue would silently open on Gemini. These tests set the project's
-# last_engine to gemini and prove the NEW sessions still open on CLAUDE.
+# promote / continue pass an explicit backend so sticky last_engine cannot
+# silently re-route a NEW session. These tests set last_engine to gemini and
+# prove an explicit backend still wins (using the settings default_cli value).
 
 @pytest.fixture
 def live_env(tmp_path, monkeypatch):
@@ -145,7 +168,8 @@ def live_env(tmp_path, monkeypatch):
     monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
     for mod in ("paths", "job_runner", "pty_manager", "rnd_registry",
                 "session_registry", "worktrees", "lanes", "effort_history",
-                "summarizer", "gate_adapter", "terminal_session"):
+                "summarizer", "gate_adapter", "terminal_session",
+                "anchor_settings"):
         importlib.reload(importlib.import_module(mod))
     import paths
     paths.ensure_data_dirs()
@@ -168,32 +192,35 @@ def live_env(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
-def test_promote_opens_claude_after_gemini_toggle(live_env):
+def test_promote_honors_explicit_backend_after_gemini_toggle(live_env):
     import effort_history
     import terminal_session
+    import anchor_settings
     pid = live_env["pid"]
     # Simulate a prior per-session Gemini toggle in this project.
     terminal_session.set_last_engine_for_project(pid, "gemini")
     assert terminal_session.last_engine_for_project(pid) == "gemini"
     idea = effort_history.add_idea(live_env["repo"], pid, "an idea to promote")
     idea_id = idea.get("job_id") or idea.get("idea_id") or idea.get("id")
-    # The endpoint now passes backend='claude'; the promote must honor it.
+    # Explicit backend (settings default_cli) must win over sticky last_engine.
+    want = anchor_settings.get_default_cli()
     rec = effort_history.promote_grass_to_lane(pid, idea_id, "research",
-                                               backend="claude")
-    assert rec.get("backend") == "claude", \
-        "promote must open claude, not the sticky gemini last_engine"
+                                               backend=want)
+    assert rec.get("backend") == want, \
+        "promote must honor explicit backend, not sticky gemini last_engine"
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")
-def test_continue_opens_claude_after_gemini_toggle(live_env):
+def test_continue_honors_explicit_backend_after_gemini_toggle(live_env):
     import terminal_session
+    import anchor_settings
     pid = live_env["pid"]
     terminal_session.set_last_engine_for_project(pid, "gemini")
-    # The continue endpoint now defaults + passes backend='claude'.
-    rec = terminal_session.start_session(pid, "research", backend="claude",
+    want = anchor_settings.get_default_cli()
+    rec = terminal_session.start_session(pid, "research", backend=want,
                                          seed_context="carry on")
-    assert rec.get("backend") == "claude", \
-        "continue must open claude, not the sticky gemini last_engine"
+    assert rec.get("backend") == want, \
+        "continue must honor explicit backend, not sticky gemini last_engine"
 
 
 @pytest.mark.skipif(not _have_git(), reason="git not on PATH")

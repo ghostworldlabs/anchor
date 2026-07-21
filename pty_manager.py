@@ -662,6 +662,15 @@ def start(cmd, cwd=None, env=None):
         env = dict(os.environ)
     else:
         env = dict(env)
+    # Inject Anchor model-family prefs so interactive CLI sessions (Claude Code /
+    # AGY / Grok Build) inherit coding/review family for skill seat resolution.
+    # Pre-set env wins (setdefault). Best-effort — never block a PTY start.
+    try:
+        import anchor_settings as _aset
+        for _k, _v in _aset.export_env_overrides().items():
+            env.setdefault(_k, _v)
+    except Exception:
+        pass
     env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
 
     backend = select_backend()

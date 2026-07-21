@@ -188,8 +188,9 @@ def test_cli_engine_default_and_persisted(env, capsys):
     anchor = env["anchor"]
     proj, _folder = _mkproject(env)
     pid = proj["id"]
-    # Unset → defaults to claude.
-    assert anchor.rnd_engine(pid) == "claude"
+    # Unset → settings-backed default_cli (currently grok).
+    import anchor_settings as _aset
+    assert anchor.rnd_engine(pid) == _aset.get_default_cli()
 
     # Persist gemini and read it back through the mirror.
     env["ts"].set_last_engine_for_project(pid, "gemini")

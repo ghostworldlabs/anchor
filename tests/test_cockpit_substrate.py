@@ -55,7 +55,8 @@ def test_lane_launch_uses_seeded_term_start_not_start_terminal(gui, tmp_path):
     # (a) The seeded ConPTY start path is defined + wired; the surviving live
     #     launch affordance (masthead general session) routes through it.
     assert "function newTermSession" in html
-    assert "newGeneral('claude')" in html
+    # General launch uses settings-backed default_cli (newEffort('general') → newGeneral()).
+    assert "newEffort('general')" in html or "newGeneral(" in html
     assert "id='newResearchBtn'" in html  # v12 W10 refine: + New research
     assert "id='newPlanBuildBtn'" in html  # v12 W10 refine: + New plan/build
     # The seeded endpoint is the launch target.

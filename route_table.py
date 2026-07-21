@@ -234,6 +234,10 @@ ROUTES = [
     _r("GET", "/api/rnd/board_html", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_board_html", migrated=True),
 
+    # ── Model/engine prefs (durable settings.json) ────────────────────────
+    _r("GET",  "/api/settings", AUTH_TOKEN, handler="handle_settings_get",  migrated=True),
+    _r("POST", "/api/settings", AUTH_TOKEN, handler="handle_settings_post", migrated=True),
+
     # ── doctor V3 W3 — the /doctor page + background diagnostics ──────────
     # The page itself is an open bootstrap (same posture as "/" — browser
     # navigation must load before any token is presented; every mutating /

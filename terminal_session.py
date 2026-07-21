@@ -97,10 +97,28 @@ def finalize_usage(session_id, project_id=None, record=None):
 
 
 #: Backends this service accepts (mirrors session_registry.VALID_BACKENDS).
-VALID_BACKENDS = {_reg.BACKEND_CLAUDE, _reg.BACKEND_GEMINI}
+VALID_BACKENDS = set(_reg.VALID_BACKENDS)
+
+
+def _default_engine() -> str:
+    """Interactive default engine from durable settings (lazy; never raises).
+
+    Falls back to the settings-schema default (``grok``) if ``anchor_settings``
+    is unavailable. Job-layer launches keep ``job_runner.DEFAULT_BACKEND``
+    (claude) separately.
+    """
+    try:
+        from anchor_settings import get_default_cli
+        return get_default_cli()
+    except Exception:
+        return _reg.BACKEND_GROK
+
 
 #: Default engine when a project has never picked one (v4 Wave 2).
-DEFAULT_ENGINE = _reg.BACKEND_CLAUDE
+#: Resolved lazily via :func:`_default_engine` so settings changes apply without
+#: re-import. Module attribute kept for callers/tests that read the name —
+#: prefer :func:`_default_engine` / :func:`last_engine_for_project` at runtime.
+DEFAULT_ENGINE = _reg.BACKEND_GROK  # settings default; see _default_engine()
 
 #: Per-project last-used-engine pointer file, stored alongside the per-project
 #: cache under ``<folder>/.anchor/projects/<id>/`` (the convention summarizer
@@ -110,12 +128,13 @@ ENGINE_POINTER_NAME = "engine.json"
 
 # ── Per-project last-used engine persistence (v4 Wave 2) ─────────────────────
 #
-# The chosen engine (claude|gemini) is selected ONCE per session, but a project
-# "remembers" its last-used engine so a fresh session defaults to it. Persisted
-# as ``{"last_engine": "<engine>"}`` in ``engine.json`` under the per-project
-# store dir — the SAME ``<folder>/.anchor/projects/<id>/`` directory summarizer
-# caches into. Atomic write (tmp + os.replace) under ``paths.WRITE_LOCK`` so a
-# concurrent ThreadingHTTPServer writer / crash mid-write can't corrupt it.
+# The chosen engine (claude|gemini|grok) is selected ONCE per session, but a
+# project "remembers" its last-used engine so a fresh session defaults to it.
+# Persisted as ``{"last_engine": "<engine>"}`` in ``engine.json`` under the
+# per-project store dir — the SAME ``<folder>/.anchor/projects/<id>/`` directory
+# summarizer caches into. Atomic write (tmp + os.replace) under
+# ``paths.WRITE_LOCK`` so a concurrent ThreadingHTTPServer writer / crash
+# mid-write can't corrupt it.
 
 
 def _engine_pointer_path(project_id) -> Path:
@@ -133,23 +152,25 @@ def _engine_pointer_path(project_id) -> Path:
 
 
 def last_engine_for_project(project_id) -> str:
-    """Return the project's last-used engine, defaulting to ``claude`` when unset.
+    """Return the project's last-used engine, defaulting via settings when unset.
 
     Best-effort: a missing/corrupt/unreadable pointer (or an unknown project)
-    returns :data:`DEFAULT_ENGINE`. An out-of-range persisted value (not a known
-    backend) also falls back to the default rather than propagating garbage.
+    returns the interactive default from :func:`_default_engine` (settings
+    ``default_cli``, currently ``grok``). An out-of-range persisted value (not a
+    known backend) also falls back to the default rather than propagating garbage.
     """
+    fallback = _default_engine()
     p = _engine_pointer_path(project_id)
     if p is None or not p.exists():
-        return DEFAULT_ENGINE
+        return fallback
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError, ValueError):
-        return DEFAULT_ENGINE
+        return fallback
     eng = data.get("last_engine") if isinstance(data, dict) else None
     if eng in VALID_BACKENDS:
         return eng
-    return DEFAULT_ENGINE
+    return fallback
 
 
 def set_last_engine_for_project(project_id, engine) -> bool:
@@ -371,7 +392,7 @@ def _check_engine_allowed(lane, backend):
     """
     if backend not in VALID_BACKENDS:
         raise TerminalSessionError(
-            "unknown backend %r (expected claude|gemini)" % (backend,))
+            "unknown backend %r (expected claude|gemini|grok)" % (backend,))
     if _lanes is not None:
         try:
             _lanes.check_engine_allowed(lane, backend)
@@ -413,15 +434,26 @@ _UNSET = object()
 
 
 def _resolve_engine_cmd(engine: str) -> str:
-    """Resolve the executable name for a given engine backend."""
+    """Resolve the executable name/path for a given engine backend."""
+    import shutil
     if engine == _reg.BACKEND_GEMINI:
-        import shutil, os
-        if shutil.which("gemini"): return "gemini"
-        if shutil.which("agy"): return "agy"
-        agy_path = os.path.join(os.environ.get("LOCALAPPDATA", ""), "agy", "bin", "agy.exe")
+        if shutil.which("gemini"):
+            return "gemini"
+        if shutil.which("agy"):
+            return "agy"
+        agy_path = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "agy", "bin", "agy.exe")
         if os.path.exists(agy_path):
             return agy_path
         return "agy"
+    if engine == _reg.BACKEND_GROK:
+        which = shutil.which("grok")
+        if which:
+            return which
+        grok_exe = Path.home() / ".grok" / "bin" / "grok.exe"
+        if grok_exe.is_file():
+            return str(grok_exe)
+        return "grok"
     return engine
 
 
@@ -439,30 +471,44 @@ def _new_engine_session_id() -> str:
 _SESSION_ID_FLAG_ENV = "ANCHOR_TERMINAL_SESSION_ID_FLAG"
 _DEFAULT_SESSION_ID_FLAG = "--session-id"
 
+#: Env seam: the flag Grok accepts for a session id at launch (``-s <uuid>``).
+#: Set EMPTY to disable Grok session-id injection.
+_GROK_SESSION_ID_FLAG_ENV = "ANCHOR_GROK_SESSION_ID_FLAG"
+_DEFAULT_GROK_SESSION_ID_FLAG = "-s"
+
 
 def _engine_launch_argv(cmd, backend, engine_uuid):
-    """Build the PTY launch argv, injecting ``--session-id <uuid>`` for claude.
+    """Build the PTY launch argv, injecting a session-id pin when the backend supports it.
 
     UUID-at-launch (W4): ``claude --session-id <uuid>`` pins the engine's sidecar
     filename deterministically at launch — the correlation the usage-capture
-    pipeline reads by, never a fragile mtime/cwd-window guess. Gemini/agy has no
-    equivalent pin (its segment stays honestly unmeasured per the RULED Option C),
-    so only the claude backend gets the flag. The flag name is a test/deploy seam
-    (``ANCHOR_TERMINAL_SESSION_ID_FLAG``); setting it empty disables injection.
-    Pure — returns the argv list.
+    pipeline reads by, never a fragile mtime/cwd-window guess. Grok gets
+    ``-s <uuid>`` for the same interactive session pin. Gemini/agy has no
+    equivalent pin (its segment stays honestly unmeasured per the RULED Option C).
+    Flag names are test/deploy seams (``ANCHOR_TERMINAL_SESSION_ID_FLAG`` /
+    ``ANCHOR_GROK_SESSION_ID_FLAG``); empty disables injection. Pure — returns
+    the argv list.
     """
     argv = [cmd]
     if not engine_uuid:
         return argv
-    if backend != _reg.BACKEND_CLAUDE:
-        return argv
-    flag = os.environ.get(_SESSION_ID_FLAG_ENV)
-    if flag is None:
-        flag = _DEFAULT_SESSION_ID_FLAG
-    flag = flag.strip()
-    if not flag:
-        return argv  # injection disabled by the seam
-    return [cmd, flag, engine_uuid]
+    if backend == _reg.BACKEND_CLAUDE:
+        flag = os.environ.get(_SESSION_ID_FLAG_ENV)
+        if flag is None:
+            flag = _DEFAULT_SESSION_ID_FLAG
+        flag = flag.strip()
+        if not flag:
+            return argv  # injection disabled by the seam
+        return [cmd, flag, engine_uuid]
+    if backend == _reg.BACKEND_GROK:
+        flag = os.environ.get(_GROK_SESSION_ID_FLAG_ENV)
+        if flag is None:
+            flag = _DEFAULT_GROK_SESSION_ID_FLAG
+        flag = flag.strip()
+        if not flag:
+            return argv
+        return [cmd, flag, engine_uuid]
+    return argv
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
@@ -1240,7 +1286,7 @@ def switch_engine(session_id, engine, seed_context=None):
     """
     if engine not in VALID_BACKENDS:
         raise TerminalSessionError(
-            "unknown backend %r (expected claude|gemini)" % (engine,))
+            "unknown backend %r (expected claude|gemini|grok)" % (engine,))
 
     record = _reg.get_session(session_id)
     if record is None:
