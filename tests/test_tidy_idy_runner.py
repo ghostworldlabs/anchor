@@ -126,6 +126,12 @@ def test_status_for_folder_reads_status_json(tmp_path):
             "message": "Analyzing…",
             "statusUrl": "http://127.0.0.1:9/",
             "projectName": "demo",
+            "progress": 55,
+            "step": "analyze",
+            "stepLabel": "Running analyze…",
+            "stepIndex": 8,
+            "stepTotal": 13,
+            "startedAt": "2026-07-22T00:00:00.000Z",
         }),
         encoding="utf-8",
     )
@@ -134,6 +140,9 @@ def test_status_for_folder_reads_status_json(tmp_path):
     assert out["phase"] == "analyzing"
     assert out["statusUrl"] == "http://127.0.0.1:9/"
     assert "Analyzing" in out["message"]
+    assert out["progress"] == 55
+    assert out["step"] == "analyze"
+    assert out["stepIndex"] == 8
 
 
 def test_launch_short_circuits_live_status(tmp_path, monkeypatch):

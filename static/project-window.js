@@ -4982,24 +4982,51 @@ async function tidyIdyRun(_backend) {
     try {
       win.document.open();
       win.document.write(
-        '<!doctype html><title>Tidy-Idy…</title>' +
-        '<body style="font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;' +
-        'padding:2rem;line-height:1.5;margin:0">' +
-        '<div style="max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;' +
-        'padding:1.25rem 1.4rem;background:#161a22">' +
-        '<div id="phase" style="display:inline-block;font-size:.75rem;letter-spacing:.04em;' +
-        'text-transform:uppercase;color:#8ab4f8;border:1px solid rgba(138,180,248,.33);' +
-        'border-radius:999px;padding:.15rem .6rem;margin-bottom:.75rem">starting</div>' +
-        '<h2 style="margin:0 0 .5rem;font-size:1.35rem;font-weight:600">Tidy-Idy</h2>' +
-        '<p id="msg" style="margin:0;font-size:1.05rem">' + (message || 'Starting hygiene pass…') + '</p>' +
-        '<p id="detail" style="color:#9aa0a6;font-size:.9rem;margin:.75rem 0 0"></p>' +
-        '</div></body>'
+        '<!doctype html><html><head><title>Tidy-Idy…</title>' +
+        '<link rel="icon" href="/vendor/brand/tidy-idy-icon.jpg" type="image/jpeg"/>' +
+        '<style>' +
+        'body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;padding:2rem;line-height:1.5;margin:0}' +
+        '.card{max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}' +
+        '.phase{display:inline-block;font-size:.75rem;letter-spacing:.04em;text-transform:uppercase;' +
+        'color:#8ab4f8;border:1px solid rgba(138,180,248,.33);border-radius:999px;padding:.15rem .6rem;margin-bottom:.75rem}' +
+        'h2{margin:0 0 .5rem;font-size:1.35rem;font-weight:600}' +
+        '#msg{margin:0 0 .75rem;font-size:1.05rem}' +
+        '.bar-meta{display:flex;justify-content:space-between;font-size:.85rem;color:#9aa0a6;margin-bottom:.35rem}' +
+        '#pct{color:#8ab4f8;font-weight:600;font-variant-numeric:tabular-nums}' +
+        '.bar{height:.55rem;background:#2a2f3a;border-radius:999px;overflow:hidden;margin-bottom:.5rem}' +
+        '.bar>i{display:block;height:100%;width:2%;background:linear-gradient(90deg,#8ab4f8,#8ab4f8cc);' +
+        'border-radius:999px;transition:width .4s ease}' +
+        '#detail{color:#9aa0a6;font-size:.9rem;margin:.5rem 0 0;white-space:pre-wrap}' +
+        '#alive{color:#9aa0a6;font-size:.8rem;margin:.65rem 0 0}' +
+        '</style></head><body><div class="card">' +
+        '<div class="phase" id="phase">starting</div>' +
+        '<h2>Tidy-Idy</h2>' +
+        '<p id="msg">' + (message || 'Starting hygiene pass…') + '</p>' +
+        '<div class="bar-meta"><span id="stepLabel">Starting</span><span id="pct">0%</span></div>' +
+        '<div class="bar"><i id="barFill"></i></div>' +
+        '<p id="detail"></p>' +
+        '<p id="alive">Waiting for first status…</p>' +
+        '</div></body></html>'
       );
       win.document.close();
     } catch (_w) { /* cross-origin after navigate — ignore */ }
   }
 
-  function _setWinMsg(msg, phase, detail) {
+  function _setProgress(pct, stepLabel) {
+    if (!win || win.closed) return;
+    try {
+      var p = Math.max(0, Math.min(100, Number(pct) || 0));
+      var fill = win.document.getElementById('barFill');
+      if (fill) fill.style.width = p + '%';
+      var pctEl = win.document.getElementById('pct');
+      if (pctEl) pctEl.textContent = Math.round(p) + '%';
+      var sl = win.document.getElementById('stepLabel');
+      if (sl && stepLabel) sl.textContent = stepLabel;
+      try { win.document.title = Math.round(p) + '% · Tidy-Idy'; } catch (_t) {}
+    } catch (_e) { /* ignore */ }
+  }
+
+  function _setWinMsg(msg, phase, detail, progress, stepLabel, alive) {
     if (!win || win.closed) return;
     try {
       var el = win.document.getElementById('msg');
@@ -5009,7 +5036,36 @@ async function tidyIdyRun(_backend) {
       if (ph && phase) ph.textContent = phase;
       var det = win.document.getElementById('detail');
       if (det && detail != null) det.textContent = detail;
+      if (progress != null || stepLabel) _setProgress(progress != null ? progress : 0, stepLabel);
+      var al = win.document.getElementById('alive');
+      if (al && alive != null) al.textContent = alive;
     } catch (_e) { /* ignore */ }
+  }
+
+  function _fmtElapsed(ms) {
+    if (!isFinite(ms) || ms < 0) return '0s';
+    var s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60); s = s % 60;
+    if (m < 60) return m + 'm ' + s + 's';
+    var h = Math.floor(m / 60); m = m % 60;
+    return h + 'h ' + m + 'm';
+  }
+
+  function _aliveLine(st) {
+    var parts = [];
+    if (st && st.startedAt) {
+      var t0 = Date.parse(st.startedAt);
+      if (isFinite(t0)) parts.push('elapsed ' + _fmtElapsed(Date.now() - t0));
+    }
+    if (st && st.updatedAt) {
+      var t1 = Date.parse(st.updatedAt);
+      if (isFinite(t1)) {
+        var age = Date.now() - t1;
+        parts.push(age < 2500 ? 'status fresh' : ('last update ' + _fmtElapsed(age) + ' ago'));
+      }
+    }
+    return parts.length ? parts.join(' · ') : 'Working…';
   }
 
   function _navWin(url) {
@@ -5063,7 +5119,7 @@ async function tidyIdyRun(_backend) {
       data = await r.json();
     }
   } catch (e) {
-    _setWinMsg('Error: ' + String(e.message || e), 'failed');
+    _setWinMsg('Error: ' + String(e.message || e), 'failed', null, 100, 'Failed');
     alert('[tidy-idy error] ' + e.message);
     return;
   }
@@ -5084,7 +5140,7 @@ async function tidyIdyRun(_backend) {
       }
     } else {
       var err = (data && (data.error || data.code)) || 'unknown';
-      _setWinMsg('Refused: ' + err, 'refused');
+      _setWinMsg('Refused: ' + err, 'refused', null, 100, 'Refused');
       alert('[tidy-idy refused] ' + err);
       return;
     }
@@ -5094,8 +5150,8 @@ async function tidyIdyRun(_backend) {
   var message = data.message || (data.already_running
     ? 'A tidy-idy run is already in progress for this project.'
     : 'Hygiene pass started…');
-  _setWinMsg(message, phase, data.job_id ? ('job ' + data.job_id) : '');
-
+  _setWinMsg(message, phase, data.job_id ? ('job ' + data.job_id) : '', 2, 'Starting');
+  _setProgress(2, 'Starting');
   // Prefer live panel (bootstrap / base), else the tool status page.
   var readyUrl = data.open_url || data.panel_base ||
     (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
@@ -5120,13 +5176,13 @@ async function tidyIdyRun(_backend) {
   // Poll Anchor status until panel is ready (or fail/done). Remote always uses this.
   var jobId = data.job_id || null;
   if (!jobId && !statusUrl && !readyUrl && !data.already_running) {
-    _setWinMsg('Run reported ok but returned no status or panel URL.', 'failed');
+    _setWinMsg('Run reported ok but returned no status or panel URL.', 'failed', null, 100, 'Failed');
     alert('[tidy-idy] run reported ok but returned no status or panel URL.');
     return;
   }
 
   var polls = 0;
-  var maxPolls = 240; // ~4 min at 1s
+  var maxPolls = 600; // ~10 min at 1s (large trees + LLM stages)
   async function _pollOnce() {
     polls++;
     var url = '/api/rnd/tidy_idy_status?project_id=' + encodeURIComponent(PROJECT_ID) +
@@ -5148,12 +5204,27 @@ async function tidyIdyRun(_backend) {
       if (polls < maxPolls) setTimeout(_pollOnce, 1000);
       return;
     }
-    _setWinMsg(st.message || 'Working…', st.phase || 'running',
-      (st.findings != null ? (st.findings + ' finding(s)') : '') +
-      (st.runId ? (' · run ' + st.runId) : ''));
+    var detailBits = [];
+    if (st.stepIndex != null && st.stepTotal != null) {
+      detailBits.push('step ' + st.stepIndex + ' / ' + st.stepTotal +
+        (st.step ? ' (' + st.step + ')' : ''));
+    } else if (st.step) {
+      detailBits.push('step: ' + st.step);
+    }
+    if (st.findings != null) detailBits.push(st.findings + ' finding(s)');
+    if (st.runId) detailBits.push('run ' + st.runId);
+    _setWinMsg(
+      st.message || 'Working…',
+      st.phase || 'running',
+      detailBits.join(' · '),
+      st.progress != null ? st.progress : 0,
+      st.stepLabel || st.step || st.phase || 'Working',
+      _aliveLine(st)
+    );
 
     if (st.phase === 'panel-ready') {
       var go = st.proxyOpenPath || st.openUrl || st.panelBaseUrl;
+      _setProgress(100, 'Panel ready');
       if (_navBest(st.openUrl || st.panelBaseUrl, st.proxyOpenPath, 'panel-ready')) {
         try { refreshBoard(); } catch (_e) { /* board optional */ }
         return;
@@ -5161,7 +5232,10 @@ async function tidyIdyRun(_backend) {
       _setWinMsg(
         'Panel is ready on the host, but this browser could not open it. Re-click Tidy-Idy.',
         'panel-ready',
-        go || ''
+        go || '',
+        100,
+        'Panel ready',
+        _aliveLine(st)
       );
       return;
     }
@@ -5174,6 +5248,7 @@ async function tidyIdyRun(_backend) {
       }
     }
     if (st.phase === 'failed' || st.phase === 'refused' || st.phase === 'done') {
+      _setProgress(100, st.phase);
       try { refreshBoard(); } catch (_e) { /* board optional */ }
       return;
     }
@@ -5181,7 +5256,11 @@ async function tidyIdyRun(_backend) {
     else {
       _setWinMsg(
         'Still running, but status polling timed out in this tab. Re-click Tidy-Idy to re-open.',
-        st.phase || 'running'
+        st.phase || 'running',
+        null,
+        st.progress != null ? st.progress : 0,
+        st.stepLabel || st.phase,
+        _aliveLine(st)
       );
     }
   }

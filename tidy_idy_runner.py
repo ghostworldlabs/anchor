@@ -428,6 +428,25 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
     open_url = st.get("openUrl") or st.get("panelBaseUrl") or st.get("statusUrl")
     proxy_open = browser_open_url(project_id, open_url) if project_id else None
     proxy_status = browser_open_url(project_id, st.get("statusUrl")) if project_id else None
+    # Progress % — prefer status.json; fall back to coarse phase map.
+    progress = st.get("progress")
+    if progress is None:
+        progress = {
+            "starting": 2,
+            "scanning": 8,
+            "analyzing": 20,
+            "archiving": 96,
+            "panel-ready": 100,
+            "failed": 100,
+            "refused": 100,
+            "done": 100,
+            "running": 15,
+        }.get(phase, 0)
+    try:
+        progress = max(0, min(100, int(round(float(progress)))))
+    except (TypeError, ValueError):
+        progress = 0
+
     return {
         "ok": True,
         "phase": phase,
@@ -448,6 +467,12 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
         "job_status": (rec or {}).get("status"),
         "alreadyRunning": bool(st.get("alreadyRunning")),
         "updatedAt": st.get("updatedAt"),
+        "startedAt": st.get("startedAt"),
+        "progress": progress,
+        "step": st.get("step"),
+        "stepLabel": st.get("stepLabel") or st.get("step") or phase,
+        "stepIndex": st.get("stepIndex"),
+        "stepTotal": st.get("stepTotal"),
     }
 
 
