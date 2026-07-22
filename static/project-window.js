@@ -4977,13 +4977,22 @@ async function tidyIdyRun(_backend) {
     return String(u).indexOf('/bootstrap/') >= 0 || String(u).indexOf('tidy_idy_proxy') >= 0;
   }
 
+  // Data-URI favicon: about:blank tabs cannot load /vendor/... (no Anchor origin).
+  var _TIDY_FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+    '<rect width="32" height="32" rx="7" fill="#1a2332"/>' +
+    '<path d="M8 22c2-6 5-10 9-12 1.2 2.5 2 5.2 2.2 8.2 2.8-.4 5 .6 6.8 2.4-3.2 1.2-6.5 1.6-9.5.6C13.2 23 10.5 23 8 22z" fill="#8ab4f8"/>' +
+    '<path d="M11 9l2.2 1.1L14.5 8l.8 2.3L17.5 11l-2.3.7L14.5 14l-1.1-2.2L11 11.2l2.2-.6z" fill="#fdd663"/>' +
+    '</svg>'
+  );
+
   function _writeStatusShell(message) {
     if (!win || win.closed) return;
     try {
       win.document.open();
       win.document.write(
         '<!doctype html><html><head><title>Tidy-Idy…</title>' +
-        '<link rel="icon" href="/vendor/brand/tidy-idy-icon.jpg" type="image/jpeg"/>' +
+        '<link rel="icon" href="' + _TIDY_FAVICON + '" type="image/svg+xml"/>' +
         '<style>' +
         'body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;padding:2rem;line-height:1.5;margin:0}' +
         '.card{max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}' +
