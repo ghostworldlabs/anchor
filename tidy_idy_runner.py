@@ -634,6 +634,7 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
         live = live_tool_endpoints(root)
         if live.get("any_live"):
             open_url = live.get("open_url") or live.get("panel_base") or live.get("status_url")
+            phase = existing.get("phase") or "scanning"
             return {
                 "ok": True,
                 "already_running": True,
@@ -646,7 +647,12 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
                 "proxy_open_path": browser_open_url(project_id, open_url),
                 "proxy_status_path": browser_open_url(project_id, live.get("status_url")),
                 "loopback_only": bool(open_url and is_loopback_url(open_url)),
-                "phase": existing.get("phase"),
+                "phase": phase,
+                "progress": existing.get("progress") if existing.get("progress") is not None else (
+                    100 if phase == "panel-ready" else 20
+                ),
+                "step": existing.get("step"),
+                "stepLabel": existing.get("stepLabel") or existing.get("step") or phase,
                 "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
                 "contributed_launch_logic": False,
                 "contributed_archive_logic": False,
@@ -687,7 +693,7 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
         )
     except job_runner.LaneBusyError as e:
         # Folder build lock often means a tidy run is already live — surface status.
-        st = status_for_folder(root)
+        st = status_for_folder(root, project_id=project_id)
         return {
             "ok": False,
             "error": getattr(e, "message", None) or str(e),
@@ -695,8 +701,14 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             "holder": getattr(e, "holder", None),
             "status_url": st.get("statusUrl"),
             "open_url": st.get("openUrl"),
+            "panel_base": st.get("panelBaseUrl"),
+            "proxy_open_path": st.get("proxyOpenPath"),
+            "proxy_status_path": st.get("proxyStatusPath"),
             "phase": st.get("phase"),
-            "message": st.get("message"),
+            "progress": st.get("progress"),
+            "step": st.get("step"),
+            "stepLabel": st.get("stepLabel"),
+            "message": st.get("message") or "A tidy-idy run is already holding this folder.",
         }
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "code": "launch-failed"}
@@ -707,11 +719,24 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
     except Exception:
         pass
 
-    # Prefer returning once the status page is up so the tab can show progress.
-    status_ev = wait_for_event(job_id, STATUS_READY_EVENT, timeout_s=wait_for_status_s) if job_id else None
-    already = wait_for_event(job_id, ALREADY_RUNNING_EVENT, timeout_s=0.5) if job_id else None
-    # Also re-read status file (written even if stdout is late).
-    file_st = read_project_status(root) or {}
+    # Prefer status.json (written as soon as the status server binds). Do NOT wait
+    # for the late status-ready stdout line that only appears after the full scan —
+    # that made the browser sit at 2% for the entire analysis.
+    already = wait_for_event(job_id, ALREADY_RUNNING_EVENT, timeout_s=0.4) if job_id else None
+    file_st = {}
+    status_ev = None
+    if job_id and wait_for_status_s > 0:
+        deadline = time.time() + float(wait_for_status_s)
+        while time.time() < deadline:
+            status_ev = latest_event(_read_log_text(job_id), STATUS_READY_EVENT)
+            file_st = read_project_status(root) or {}
+            if status_ev or file_st.get("statusUrl") or file_st.get("phase"):
+                break
+            rec_now = job_runner.load_record(job_id)
+            if rec_now and rec_now.get("status") not in (None, "running"):
+                break
+            time.sleep(0.1)
+    file_st = file_st or read_project_status(root) or {}
     status_url = (
         (status_ev or {}).get("statusUrl")
         or (already or {}).get("statusUrl")
@@ -720,6 +745,13 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
 
     open_url = file_st.get("openUrl") or (already or {}).get("openUrl")
     panel_base = file_st.get("panelBaseUrl")
+    phase = file_st.get("phase") or "starting"
+    progress = file_st.get("progress")
+    if progress is None:
+        progress = {
+            "starting": 2, "scanning": 8, "analyzing": 20, "archiving": 96,
+            "panel-ready": 100, "failed": 100, "refused": 100, "done": 100,
+        }.get(phase, 2)
     if async_mode:
         return {
             "ok": True,
@@ -740,7 +772,10 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
                 (open_url and is_loopback_url(open_url))
                 or (status_url and is_loopback_url(status_url))
             ),
-            "phase": file_st.get("phase") or "starting",
+            "phase": phase,
+            "progress": progress,
+            "step": file_st.get("step"),
+            "stepLabel": file_st.get("stepLabel") or file_st.get("step") or phase,
             "message": file_st.get("message") or "Hygiene pass started — status page will update live.",
             "already_running": bool(already),
             "contributed_launch_logic": False,

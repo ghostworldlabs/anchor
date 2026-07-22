@@ -5159,8 +5159,16 @@ async function tidyIdyRun(_backend) {
   var message = data.message || (data.already_running
     ? 'A tidy-idy run is already in progress for this project.'
     : 'Hygiene pass started…');
-  _setWinMsg(message, phase, data.job_id ? ('job ' + data.job_id) : '', 2, 'Starting');
-  _setProgress(2, 'Starting');
+  // Use server progress — never hardcode 2% (that made long scans look frozen).
+  var prog = (data.progress != null) ? data.progress : (
+    phase === 'panel-ready' ? 100 :
+    phase === 'archiving' ? 96 :
+    phase === 'analyzing' ? 20 :
+    phase === 'scanning' ? 8 : 2
+  );
+  var stepLab = data.stepLabel || data.step || phase || 'Starting';
+  _setWinMsg(message, phase, data.job_id ? ('job ' + data.job_id) : '', prog, stepLab);
+  _setProgress(prog, stepLab);
   // Prefer live panel (bootstrap / base), else the tool status page.
   var readyUrl = data.open_url || data.panel_base ||
     (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
@@ -5168,11 +5176,16 @@ async function tidyIdyRun(_backend) {
   var proxyOpen = data.proxy_open_path || null;
   var proxyStatus = data.proxy_status_path || null;
 
-  if (readyUrl && (phase === 'panel-ready' || data.already_running)) {
-    if (_navBest(readyUrl, proxyOpen, phase === 'panel-ready' ? 'panel-ready' : phase)) {
+  if (readyUrl && (phase === 'panel-ready' || (data.already_running && phase === 'panel-ready'))) {
+    _setProgress(100, 'Panel ready');
+    if (_navBest(readyUrl, proxyOpen, 'panel-ready')) {
       try { refreshBoard(); } catch (_e) { /* board optional */ }
       return;
     }
+  }
+  // Live mid-run (or already_running during scan): always poll — do not sit on 2%.
+  if (data.already_running && phase !== 'panel-ready') {
+    // fall through to poll
   }
   // Local only: hand off to tool status page (self-polls → panel). Remote stays here.
   if (statusUrl && localPage) {
@@ -5273,7 +5286,8 @@ async function tidyIdyRun(_backend) {
       );
     }
   }
-  setTimeout(_pollOnce, 400);
+  // Poll quickly so the bar moves as soon as status.json advances past 2%.
+  setTimeout(_pollOnce, 250);
   try { refreshBoard(); } catch (_e) { /* board optional */ }
 }
 // --- Wave 2: File Upload (multi-file + folder + drag-drop) ---
