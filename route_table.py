@@ -429,6 +429,8 @@ ROUTES = [
        handler="handle_advance_session", migrated=True),
     _r("POST", "/api/rnd/gandalf_run", AUTH_TOKEN,
        handler="handle_gandalf_run", migrated=True),
+    _r("POST", "/api/rnd/tidy_idy_run", AUTH_TOKEN,
+       handler="handle_tidy_idy_run", migrated=True),
     _r("POST", "/api/rnd/gandalf_delete", AUTH_TOKEN,
        handler="handle_gandalf_delete", migrated=True),
     _r("POST", "/api/rnd/gandalf_archive", AUTH_TOKEN,

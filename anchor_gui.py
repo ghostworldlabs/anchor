@@ -10100,6 +10100,46 @@ def handle_gandalf_run(handler, path, body):
                                 "tier": tier})
 
 
+def handle_tidy_idy_run(handler, path, body):
+    """POST /api/rnd/tidy_idy_run — thin caller for the tidy-idy CLI.
+
+    Dispatches ``bin/tidy-idy.mjs`` via job_runner (build lane for the folder
+    claim) and returns the panel bootstrap URL when the tool prints
+    ``panel-ready``. Auth is enforced by the do_POST token middleware.
+    """
+    import tidy_idy_runner as _tidy
+    pid = (body.get("project_id", "") or body.get("id", "")).strip()
+    if not pid:
+        handler._send_json({"ok": False, "error": "project_id required"}, 400)
+        return
+    if _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad pid"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+    folder = proj.get("folder_path", "")
+    if not folder:
+        handler._send_json({"ok": False, "error": "project has no folder_path"}, 400)
+        return
+    wait_s = body.get("wait_s")
+    try:
+        wait_s = float(wait_s) if wait_s is not None else 180.0
+    except (TypeError, ValueError):
+        wait_s = 180.0
+    out = _tidy.launch_tidy_idy(pid, folder, wait_for_panel_s=wait_s)
+    # Map job_runner refuse reasons to 409 Conflict; other failures stay 400.
+    status = 200 if out.get("ok") else 400
+    if not out.get("ok") and out.get("code") in (
+            "spawn-cap-reached",
+            getattr(_jr, "REFUSED_SAME_LANE", "same-lane"),
+            getattr(_jr, "REFUSED_FOLDER_BUILD", "folder-build-lock"),
+            "same-lane", "folder-build-lock", "busy"):
+        status = 409
+    handler._send_json(out, status)
+
+
 def handle_gandalf_delete(handler, path, body):
     pid = (body.get("project_id", "") or body.get("id", "")).strip()
     run_id = (body.get("run_id", "") or body.get("session_id", "")).strip()
@@ -14236,6 +14276,7 @@ _MIGRATED_HANDLERS = {
     "handle_grass_advance": handle_grass_advance,
     "handle_grass_delete": handle_grass_delete,
     "handle_gandalf_run": handle_gandalf_run,
+    "handle_tidy_idy_run": handle_tidy_idy_run,
     "handle_gandalf_delete": handle_gandalf_delete,
     "handle_gandalf_archive": handle_gandalf_archive,
     "handle_gandalf_clear_failed": handle_gandalf_clear_failed,

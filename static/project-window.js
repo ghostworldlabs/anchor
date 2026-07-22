@@ -4917,40 +4917,36 @@ async function newGeneral(backend) {
     openEffortDock(sid, tile);
   }, 400);
 }
-// Header "Tidy-Idy" button: open a general session for THIS project and load the
-// tidy-idy repo-hygiene skill into it. Reuses the general-session start; the load
-// prompt is sent once the fresh session's REPL has had time to boot.
-async function tidyIdyRun(backend) {
-  backend = backend || _defaultCli();
-  var payload = {project_id: PROJECT_ID, lane: 'general', backend: backend, label: 'tidy-idy'};
+// Header "Tidy-Idy" button: THIN CALLER of the standalone tidy-idy tool.
+// Dispatches bin/tidy-idy.mjs via job_runner and opens the tool's Triage Panel
+// URL. No second launch/panel/archive path (North Star Amendment D).
+async function tidyIdyRun(_backend) {
+  var payload = {project_id: PROJECT_ID};
   var r, data;
   try {
-    r = await _postJson('/api/rnd/term_start', payload);
+    r = await _postJson('/api/rnd/tidy_idy_run', payload);
     data = await r.json();
     if (_isUnauthorized(r, data) && setAnchorToken()) {
-      r = await _postJson('/api/rnd/term_start', payload);
+      r = await _postJson('/api/rnd/tidy_idy_run', payload);
       data = await r.json();
     }
   } catch (e) { alert('[tidy-idy error] ' + e.message); return; }
-  if (!data || !data.ok || !data.session) {
-    alert('[tidy-idy refused] ' + ((data && (data.error || data.reason)) || 'unknown'));
+  if (!data || !data.ok) {
+    alert('[tidy-idy refused] ' + ((data && (data.error || data.code)) || 'unknown'));
     return;
   }
-  var rec = data.session;
-  var sid = rec.session_id;
-  MANAGED[sid] = {session_id: sid, lane: 'general', backend: rec.backend || backend,
-    status: rec.status || 'running', label: rec.label || 'tidy-idy',
-    idx: (_laneCounters['general'] = (_laneCounters['general'] || 0) + 1)};
-  renderSessionBar();
-  refreshBoard();
-  setTimeout(function () {
-    var tile = document.querySelector('.tile[data-session="' + _cssEsc(sid) + '"]');
-    openEffortDock(sid, tile);
-  }, 400);
-  // Give the new session's REPL time to boot, then load tidy-idy.
-  setTimeout(function () {
-    _postJson('/api/rnd/term_input2', {session: sid, data: 'Load the Tidy-Idy skill now.\n'});
-  }, 4000);
+  // Prefer the single-use bootstrap URL (capability token never in the durable
+  // log). Fall back to the panel base if the nonce was already redeemed.
+  var url = data.open_url || data.panel_base || (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
+  if (url) {
+    try { window.open(url, '_blank', 'noopener'); }
+    catch (e2) { alert('[tidy-idy] panel ready but open failed: ' + e2.message + '\n' + url); }
+  } else if (data.job_id) {
+    alert('[tidy-idy] run started (job ' + data.job_id + ') but no panel URL yet — check jobs log.');
+  } else {
+    alert('[tidy-idy] run reported ok but returned no panel URL.');
+  }
+  try { refreshBoard(); } catch (_e) { /* board optional */ }
 }
 // --- Wave 2: File Upload (multi-file + folder + drag-drop) ---
 function _anchorReadB64(file) {
