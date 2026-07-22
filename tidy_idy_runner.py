@@ -144,6 +144,23 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
     except FileNotFoundError as e:
         return {"ok": False, "error": str(e), "code": "no-entry"}
 
+    # Point the skill at the trio/agy driver when available so debate stages are
+    # not loud-noops under the headless job env (which has no interactive agent).
+    child_env = {}
+    for key in ("TIDY_IDY_DRIVER", "TRIO_DRIVER", "TRIO_DRIVER_PATH",
+                "TRIO_DRIVER_REVIEW", "TRIO_MODEL_REVIEW"):
+        if os.environ.get(key):
+            child_env[key] = os.environ[key]
+    # Well-known host default if nothing is set.
+    if not child_env.get("TIDY_IDY_DRIVER") and not child_env.get("TRIO_DRIVER_PATH"):
+        for cand in (
+            Path(r"C:\dev\trio\drivers\gemini-cli.mjs"),
+            Path(r"C:\dev\Skill Foundry\tools\agy-dispatch.mjs"),
+        ):
+            if cand.is_file():
+                child_env.setdefault("TRIO_DRIVER_PATH", str(cand))
+                break
+
     try:
         rec = job_runner.launch_guarded(
             BUILD_LANE,
@@ -152,6 +169,7 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             cwd=str(root),
             gated=False,
             command=command,
+            env=child_env or None,
         )
     except job_runner.LaneBusyError as e:
         return {

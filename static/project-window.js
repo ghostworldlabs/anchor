@@ -4920,7 +4920,39 @@ async function newGeneral(backend) {
 // Header "Tidy-Idy" button: THIN CALLER of the standalone tidy-idy tool.
 // Dispatches bin/tidy-idy.mjs via job_runner and opens the tool's Triage Panel
 // URL. No second launch/panel/archive path (North Star Amendment D).
+//
+// Popup-blocker note: after a long async wait, window.open() is blocked. Open
+// a blank tab SYNCHRONOUSLY on click (user gesture), then navigate it when the
+// panel URL arrives.
 async function tidyIdyRun(_backend) {
+  var win = null;
+  try {
+    win = window.open('about:blank', 'tidy-idy-' + String(PROJECT_ID || 'run'));
+    if (win && win.document) {
+      try {
+        win.document.write(
+          '<!doctype html><title>Tidy-Idy…</title>' +
+          '<body style="font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;' +
+          'padding:2rem;line-height:1.5">' +
+          '<h2 style="margin:0 0 .5rem">Tidy-Idy</h2>' +
+          '<p id="msg">Starting hygiene pass… this can take a minute on large folders. ' +
+          'The Triage Panel will open here when the scan finishes.</p>' +
+          '</body>'
+        );
+        win.document.close();
+      } catch (_w) { /* cross-origin race — ignore */ }
+    }
+  } catch (_o) { win = null; }
+
+  function _setWinMsg(html) {
+    if (!win || win.closed) return;
+    try {
+      var el = win.document.getElementById('msg');
+      if (el) el.innerHTML = html;
+      else win.document.body.innerHTML = html;
+    } catch (_e) { /* ignore */ }
+  }
+
   var payload = {project_id: PROJECT_ID};
   var r, data;
   try {
@@ -4930,20 +4962,40 @@ async function tidyIdyRun(_backend) {
       r = await _postJson('/api/rnd/tidy_idy_run', payload);
       data = await r.json();
     }
-  } catch (e) { alert('[tidy-idy error] ' + e.message); return; }
+  } catch (e) {
+    _setWinMsg('<p style="color:#f88">Error: ' + String(e.message || e) + '</p>');
+    alert('[tidy-idy error] ' + e.message);
+    return;
+  }
   if (!data || !data.ok) {
-    alert('[tidy-idy refused] ' + ((data && (data.error || data.code)) || 'unknown'));
+    var err = (data && (data.error || data.code)) || 'unknown';
+    _setWinMsg('<p style="color:#f88">Refused: ' + err + '</p>');
+    alert('[tidy-idy refused] ' + err);
     return;
   }
   // Prefer the single-use bootstrap URL (capability token never in the durable
   // log). Fall back to the panel base if the nonce was already redeemed.
-  var url = data.open_url || data.panel_base || (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
+  var url = data.open_url || data.panel_base ||
+    (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
   if (url) {
-    try { window.open(url, '_blank', 'noopener'); }
-    catch (e2) { alert('[tidy-idy] panel ready but open failed: ' + e2.message + '\n' + url); }
+    if (win && !win.closed) {
+      try { win.location = url; }
+      catch (_nav) {
+        try { win.location.href = url; } catch (_n2) { /* fall through */ }
+      }
+    } else {
+      var w2 = window.open(url, '_blank');
+      if (!w2) {
+        alert('[tidy-idy] Panel is ready but the browser blocked the popup.\n\nOpen this URL manually:\n' + url);
+      }
+    }
   } else if (data.job_id) {
-    alert('[tidy-idy] run started (job ' + data.job_id + ') but no panel URL yet — check jobs log.');
+    var msg = 'Run started (job ' + data.job_id + ') but no panel URL returned. ' +
+      'The scan may still be running — check Anchor jobs, or re-click after it finishes.';
+    _setWinMsg('<p>' + msg + '</p>');
+    alert('[tidy-idy] ' + msg);
   } else {
+    _setWinMsg('<p style="color:#f88">Run reported ok but returned no panel URL.</p>');
     alert('[tidy-idy] run reported ok but returned no panel URL.');
   }
   try { refreshBoard(); } catch (_e) { /* board optional */ }
