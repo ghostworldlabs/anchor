@@ -4918,42 +4918,82 @@ async function newGeneral(backend) {
   }, 400);
 }
 // Header "Tidy-Idy" button: THIN CALLER of the standalone tidy-idy tool.
-// Dispatches bin/tidy-idy.mjs via job_runner and opens the tool's Triage Panel
-// URL. No second launch/panel/archive path (North Star Amendment D).
+// Dispatches bin/tidy-idy.mjs via job_runner. No second launch/panel/archive
+// path (North Star Amendment D).
 //
-// Popup-blocker note: after a long async wait, window.open() is blocked. Open
-// a blank tab SYNCHRONOUSLY on click (user gesture), then navigate it when the
-// panel URL arrives.
+// UX contract:
+//   1. Click opens a NAMED browser tab immediately with a status message.
+//   2. When the tool's status page (or panel) is ready, that tab navigates there.
+//   3. Re-click reuses the same named window (focus + navigate) — no second pass
+//      when a run is already live (server short-circuits via status.json / lock).
+//
+// Popup-blocker: open the tab SYNCHRONOUSLY on the user gesture, then navigate.
 async function tidyIdyRun(_backend) {
+  var winName = 'tidy-idy-' + String(PROJECT_ID || 'run');
   var win = null;
-  try {
-    win = window.open('about:blank', 'tidy-idy-' + String(PROJECT_ID || 'run'));
-    if (win && win.document) {
-      try {
-        win.document.write(
-          '<!doctype html><title>Tidy-Idy…</title>' +
-          '<body style="font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;' +
-          'padding:2rem;line-height:1.5">' +
-          '<h2 style="margin:0 0 .5rem">Tidy-Idy</h2>' +
-          '<p id="msg">Starting hygiene pass… this can take a minute on large folders. ' +
-          'The Triage Panel will open here when the scan finishes.</p>' +
-          '</body>'
-        );
-        win.document.close();
-      } catch (_w) { /* cross-origin race — ignore */ }
-    }
-  } catch (_o) { win = null; }
 
-  function _setWinMsg(html) {
+  function _writeStatusShell(message) {
+    if (!win || win.closed) return;
+    try {
+      win.document.open();
+      win.document.write(
+        '<!doctype html><title>Tidy-Idy…</title>' +
+        '<body style="font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;' +
+        'padding:2rem;line-height:1.5;margin:0">' +
+        '<div style="max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;' +
+        'padding:1.25rem 1.4rem;background:#161a22">' +
+        '<div id="phase" style="display:inline-block;font-size:.75rem;letter-spacing:.04em;' +
+        'text-transform:uppercase;color:#8ab4f8;border:1px solid rgba(138,180,248,.33);' +
+        'border-radius:999px;padding:.15rem .6rem;margin-bottom:.75rem">starting</div>' +
+        '<h2 style="margin:0 0 .5rem;font-size:1.35rem;font-weight:600">Tidy-Idy</h2>' +
+        '<p id="msg" style="margin:0;font-size:1.05rem">' + (message || 'Starting hygiene pass…') + '</p>' +
+        '<p id="detail" style="color:#9aa0a6;font-size:.9rem;margin:.75rem 0 0"></p>' +
+        '</div></body>'
+      );
+      win.document.close();
+    } catch (_w) { /* cross-origin after navigate — ignore */ }
+  }
+
+  function _setWinMsg(msg, phase, detail) {
     if (!win || win.closed) return;
     try {
       var el = win.document.getElementById('msg');
-      if (el) el.innerHTML = html;
-      else win.document.body.innerHTML = html;
+      if (el) el.textContent = msg || '';
+      else _writeStatusShell(msg);
+      var ph = win.document.getElementById('phase');
+      if (ph && phase) ph.textContent = phase;
+      var det = win.document.getElementById('detail');
+      if (det && detail != null) det.textContent = detail;
     } catch (_e) { /* ignore */ }
   }
 
-  var payload = {project_id: PROJECT_ID};
+  function _navWin(url) {
+    if (!url) return false;
+    if (win && !win.closed) {
+      try { win.location = url; return true; }
+      catch (_nav) {
+        try { win.location.href = url; return true; } catch (_n2) { /* fall through */ }
+      }
+    }
+    try {
+      win = window.open(url, winName);
+      return Boolean(win);
+    } catch (_o) {
+      return false;
+    }
+  }
+
+  // Named window: first click creates it; re-click focuses the existing tab.
+  try {
+    win = window.open('about:blank', winName);
+    _writeStatusShell(
+      'Starting hygiene pass… this can take a minute on large folders. ' +
+      'Live status updates here; the Triage Panel opens in this tab when ready.'
+    );
+    try { if (win) win.focus(); } catch (_f) { /* ignore */ }
+  } catch (_o) { win = null; }
+
+  var payload = {project_id: PROJECT_ID, async: true};
   var r, data;
   try {
     r = await _postJson('/api/rnd/tidy_idy_run', payload);
@@ -4963,41 +5003,117 @@ async function tidyIdyRun(_backend) {
       data = await r.json();
     }
   } catch (e) {
-    _setWinMsg('<p style="color:#f88">Error: ' + String(e.message || e) + '</p>');
+    _setWinMsg('Error: ' + String(e.message || e), 'failed');
     alert('[tidy-idy error] ' + e.message);
     return;
   }
+
+  // Busy / already-running with a known URL still counts as a successful re-open.
   if (!data || !data.ok) {
+    var reopen = (data && (data.open_url || data.status_url)) || null;
+    if (reopen) {
+      if (!_navWin(reopen)) {
+        alert('[tidy-idy] A run is live but the browser blocked the popup.\n\nOpen:\n' + reopen);
+      }
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      return;
+    }
     var err = (data && (data.error || data.code)) || 'unknown';
-    _setWinMsg('<p style="color:#f88">Refused: ' + err + '</p>');
+    _setWinMsg('Refused: ' + err, 'refused');
     alert('[tidy-idy refused] ' + err);
     return;
   }
-  // Prefer the single-use bootstrap URL (capability token never in the durable
-  // log). Fall back to the panel base if the nonce was already redeemed.
-  var url = data.open_url || data.panel_base ||
+
+  var phase = data.phase || (data.already_running ? 'scanning' : 'starting');
+  var message = data.message || (data.already_running
+    ? 'A tidy-idy run is already in progress for this project.'
+    : 'Hygiene pass started…');
+  _setWinMsg(message, phase, data.job_id ? ('job ' + data.job_id) : '');
+
+  // Prefer live panel (bootstrap / base), else the tool status page.
+  var readyUrl = data.open_url || data.panel_base ||
     (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
-  if (url) {
-    if (win && !win.closed) {
-      try { win.location = url; }
-      catch (_nav) {
-        try { win.location.href = url; } catch (_n2) { /* fall through */ }
-      }
-    } else {
-      var w2 = window.open(url, '_blank');
-      if (!w2) {
-        alert('[tidy-idy] Panel is ready but the browser blocked the popup.\n\nOpen this URL manually:\n' + url);
-      }
+  var statusUrl = data.status_url || null;
+  if (readyUrl && (phase === 'panel-ready' || data.already_running)) {
+    if (!_navWin(readyUrl)) {
+      alert('[tidy-idy] Panel is ready but the browser blocked the popup.\n\nOpen:\n' + readyUrl);
     }
-  } else if (data.job_id) {
-    var msg = 'Run started (job ' + data.job_id + ') but no panel URL returned. ' +
-      'The scan may still be running — check Anchor jobs, or re-click after it finishes.';
-    _setWinMsg('<p>' + msg + '</p>');
-    alert('[tidy-idy] ' + msg);
-  } else {
-    _setWinMsg('<p style="color:#f88">Run reported ok but returned no panel URL.</p>');
-    alert('[tidy-idy] run reported ok but returned no panel URL.');
+    try { refreshBoard(); } catch (_e) { /* board optional */ }
+    return;
   }
+  if (statusUrl) {
+    if (!_navWin(statusUrl)) {
+      // Keep the shell message; poll below may still get a panel URL via Anchor.
+      _setWinMsg(message + ' (open status page manually if needed)', phase, statusUrl);
+    } else {
+      // Tool-owned status page self-polls and redirects to the panel — done.
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      return;
+    }
+  }
+
+  // Fallback: poll Anchor status until panel/status URL appears (or fail/done).
+  var jobId = data.job_id || null;
+  if (!jobId && !statusUrl && !readyUrl) {
+    _setWinMsg('Run reported ok but returned no status or panel URL.', 'failed');
+    alert('[tidy-idy] run reported ok but returned no status or panel URL.');
+    return;
+  }
+
+  var polls = 0;
+  var maxPolls = 240; // ~4 min at 1s
+  async function _pollOnce() {
+    polls++;
+    var url = '/api/rnd/tidy_idy_status?project_id=' + encodeURIComponent(PROJECT_ID) +
+      (jobId ? ('&job_id=' + encodeURIComponent(jobId)) : '') + _tokenQ();
+    var st = null;
+    try {
+      var sr = await fetch(url, _jsonHdrs());
+      st = await sr.json();
+      if (_isUnauthorized(sr, st) && setAnchorToken()) {
+        sr = await fetch(
+          '/api/rnd/tidy_idy_status?project_id=' + encodeURIComponent(PROJECT_ID) +
+          (jobId ? ('&job_id=' + encodeURIComponent(jobId)) : '') + _tokenQ(),
+          _jsonHdrs()
+        );
+        st = await sr.json();
+      }
+    } catch (_pe) { st = null; }
+    if (!st || !st.ok) {
+      if (polls < maxPolls) setTimeout(_pollOnce, 1000);
+      return;
+    }
+    _setWinMsg(st.message || 'Working…', st.phase || 'running',
+      (st.findings != null ? (st.findings + ' finding(s)') : '') +
+      (st.runId ? (' · run ' + st.runId) : ''));
+    var go = null;
+    if (st.phase === 'panel-ready') {
+      go = st.openUrl || st.panelBaseUrl || st.statusUrl;
+    } else if (st.statusUrl && !statusUrl) {
+      // Status server came up after the POST returned — hand off to it.
+      go = st.statusUrl;
+      statusUrl = st.statusUrl;
+    }
+    if (go) {
+      if (!_navWin(go)) {
+        alert('[tidy-idy] Ready, but the browser blocked navigation.\n\nOpen:\n' + go);
+      }
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      return;
+    }
+    if (st.phase === 'failed' || st.phase === 'refused' || st.phase === 'done') {
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      return;
+    }
+    if (polls < maxPolls) setTimeout(_pollOnce, 1000);
+    else {
+      _setWinMsg(
+        'Still running, but status polling timed out in this tab. Re-click Tidy-Idy to re-open.',
+        st.phase || 'running'
+      );
+    }
+  }
+  setTimeout(_pollOnce, 400);
   try { refreshBoard(); } catch (_e) { /* board optional */ }
 }
 // --- Wave 2: File Upload (multi-file + folder + drag-drop) ---

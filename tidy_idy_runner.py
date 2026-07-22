@@ -1,11 +1,11 @@
 """Tidy-Idy thin caller for Anchor.
 
 Dispatches the tool's own entry point (``bin/tidy-idy.mjs``) via
-:func:`job_runner.launch_guarded` and returns the panel handoff URL.
+:func:`job_runner.launch_guarded` and surfaces a **status page URL** immediately,
+then the Triage Panel URL when the scan finishes.
 
-No launch/archive/panel logic lives here — that is all owned by the tidy-idy
-tool. This module is only a dispatcher + URL opener surface for the project
-window's Tidy-Idy button.
+Second click: if a run is already live for the project folder, return its
+status/panel URLs instead of starting a second pass (tool lock is the authority).
 """
 
 from __future__ import annotations
@@ -21,16 +21,19 @@ import job_runner
 #: Env override for the tidy-idy CLI entry (absolute path to tidy-idy.mjs).
 ENTRY_ENV = "ANCHOR_TIDY_IDY_ENTRY"
 
-#: Well-known locations, newest first.
+#: Well-known locations: installed Skill Foundry first (has status page), then
+#: any local worktree / user-skill copy.
 _DEFAULT_CANDIDATES = (
-    Path(r"C:\dev\skill-foundry-tidyidy-wt\skills\tidy-idy\bin\tidy-idy.mjs"),
     Path(r"C:\dev\Skill Foundry\skills\tidy-idy\bin\tidy-idy.mjs"),
+    Path(r"C:\dev\skill-foundry-tidyidy-wt\skills\tidy-idy\bin\tidy-idy.mjs"),
     Path.home() / ".claude" / "skills" / "tidy-idy" / "bin" / "tidy-idy.mjs",
 )
 
 BUILD_LANE = "build"
 TIDY_JOB_TYPE = "tidy"
 PANEL_READY_EVENT = "panel-ready"
+STATUS_READY_EVENT = "status-ready"
+ALREADY_RUNNING_EVENT = "already-running"
 
 
 def resolve_entry() -> Path | None:
@@ -72,6 +75,15 @@ def build_command(root_path: str | Path, *, entry: Path | None = None,
     return cmd
 
 
+def read_project_status(folder_path: str | Path) -> dict | None:
+    """Read ``.tidy-idy/status.json`` written by the tool itself."""
+    p = Path(folder_path).resolve() / ".tidy-idy" / "status.json"
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def _read_log_text(job_id: str) -> str:
     path = job_runner.log_path_for(job_id)
     try:
@@ -80,7 +92,8 @@ def _read_log_text(job_id: str) -> str:
         return ""
 
 
-def parse_panel_ready(text: str) -> dict | None:
+def parse_json_events(text: str) -> list[dict]:
+    out = []
     for line in str(text or "").splitlines():
         t = line.strip()
         if not t.startswith("{"):
@@ -89,9 +102,22 @@ def parse_panel_ready(text: str) -> dict | None:
             obj = json.loads(t)
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and obj.get("event") == PANEL_READY_EVENT:
-            return obj
-    return None
+        if isinstance(obj, dict) and obj.get("event"):
+            out.append(obj)
+    return out
+
+
+def latest_event(text: str, name: str) -> dict | None:
+    found = None
+    for ev in parse_json_events(text):
+        if ev.get("event") == name:
+            found = ev
+    return found
+
+
+def parse_panel_ready(text: str) -> dict | None:
+    """Latest ``panel-ready`` JSON event in a job log (tests + thin callers)."""
+    return latest_event(text, PANEL_READY_EVENT)
 
 
 def read_bootstrap_file(path: str | Path) -> dict | None:
@@ -102,12 +128,11 @@ def read_bootstrap_file(path: str | Path) -> dict | None:
     return obj if isinstance(obj, dict) and obj.get("url") else None
 
 
-def wait_for_panel(job_id: str, *, timeout_s: float = 120.0,
-                   poll_s: float = 0.25) -> dict | None:
-    """Poll the durable job log for the tool's ``panel-ready`` line."""
-    deadline = time.time() + max(1.0, float(timeout_s))
+def wait_for_event(job_id: str, event_name: str, *, timeout_s: float = 30.0,
+                   poll_s: float = 0.2) -> dict | None:
+    deadline = time.time() + max(0.5, float(timeout_s))
     while time.time() < deadline:
-        found = parse_panel_ready(_read_log_text(job_id))
+        found = latest_event(_read_log_text(job_id), event_name)
         if found:
             return found
         rec = job_runner.load_record(job_id)
@@ -117,12 +142,134 @@ def wait_for_panel(job_id: str, *, timeout_s: float = 120.0,
     return None
 
 
+def wait_for_panel(job_id: str, *, timeout_s: float = 180.0,
+                   poll_s: float = 0.25) -> dict | None:
+    """Poll the durable job log for the tool's ``panel-ready`` line."""
+    return wait_for_event(job_id, PANEL_READY_EVENT, timeout_s=timeout_s, poll_s=poll_s)
+
+
+def _child_env() -> dict:
+    child_env = {}
+    for key in ("TIDY_IDY_DRIVER", "TRIO_DRIVER", "TRIO_DRIVER_PATH",
+                "TRIO_DRIVER_REVIEW", "TRIO_MODEL_REVIEW"):
+        if os.environ.get(key):
+            child_env[key] = os.environ[key]
+    if not child_env.get("TIDY_IDY_DRIVER") and not child_env.get("TRIO_DRIVER_PATH"):
+        for cand in (
+            Path(r"C:\dev\trio\drivers\gemini-cli.mjs"),
+            Path(r"C:\dev\Skill Foundry\tools\agy-dispatch.mjs"),
+        ):
+            if cand.is_file():
+                child_env.setdefault("TRIO_DRIVER_PATH", str(cand))
+                break
+    return child_env
+
+
+def status_for_folder(folder_path: str | Path, *, job_id: str | None = None) -> dict:
+    """Unified status for the browser status tab (poll endpoint)."""
+    st = read_project_status(folder_path) or {}
+    log_ev = None
+    rec = None
+    if job_id:
+        rec = job_runner.load_record(job_id)
+        log_text = _read_log_text(job_id)
+        log_ev = {
+            "status_ready": latest_event(log_text, STATUS_READY_EVENT),
+            "panel_ready": latest_event(log_text, PANEL_READY_EVENT),
+            "already_running": latest_event(log_text, ALREADY_RUNNING_EVENT),
+            "refused": latest_event(log_text, "refused"),
+            "run_complete": latest_event(log_text, "run-complete"),
+        }
+        pr = log_ev["panel_ready"]
+        if pr and pr.get("bootstrapFile") and not st.get("openUrl"):
+            boot = read_bootstrap_file(pr["bootstrapFile"])
+            if boot and boot.get("url"):
+                st = {**st, "openUrl": boot["url"], "phase": st.get("phase") or "panel-ready",
+                      "panelBaseUrl": pr.get("url") or st.get("panelBaseUrl")}
+        sr = log_ev["status_ready"]
+        if sr and sr.get("statusUrl") and not st.get("statusUrl"):
+            st = {**st, "statusUrl": sr["statusUrl"]}
+        ar = log_ev["already_running"]
+        if ar:
+            st = {
+                **st,
+                "phase": ar.get("phase") or st.get("phase") or "scanning",
+                "statusUrl": ar.get("statusUrl") or st.get("statusUrl"),
+                "openUrl": ar.get("openUrl") or st.get("openUrl"),
+                "panelBaseUrl": ar.get("panelBaseUrl") or st.get("panelBaseUrl"),
+                "message": ar.get("message") or st.get("message") or "A tidy-idy run is already in progress.",
+                "alreadyRunning": True,
+            }
+
+    phase = st.get("phase") or ("running" if rec and rec.get("status") == "running" else "unknown")
+    message = st.get("message") or {
+        "starting": "Starting hygiene pass…",
+        "scanning": "Scanning the folder…",
+        "analyzing": "Analyzing (this can take a minute on large trees)…",
+        "archiving": "Writing the report…",
+        "panel-ready": "Triage Panel is ready.",
+        "failed": "Run failed.",
+        "refused": "Run refused.",
+        "done": "Done.",
+        "running": "Hygiene pass in progress…",
+    }.get(phase, "Working…")
+
+    open_url = st.get("openUrl") or st.get("panelBaseUrl") or st.get("statusUrl")
+    return {
+        "ok": True,
+        "phase": phase,
+        "message": message,
+        "projectName": st.get("projectName"),
+        "rootPath": st.get("rootPath") or str(Path(folder_path).resolve()),
+        "statusUrl": st.get("statusUrl"),
+        "openUrl": open_url,
+        "panelBaseUrl": st.get("panelBaseUrl"),
+        "findings": st.get("findings"),
+        "runId": st.get("runId"),
+        "error": st.get("error"),
+        "job_id": job_id,
+        "job_status": (rec or {}).get("status"),
+        "alreadyRunning": bool(st.get("alreadyRunning")),
+        "updatedAt": st.get("updatedAt"),
+    }
+
+
 def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
-                    wait_for_panel_s: float = 180.0) -> dict:
-    """Thin-caller launch. Returns a JSON-serializable handoff dict."""
+                    wait_for_panel_s: float = 180.0,
+                    wait_for_status_s: float = 4.0,
+                    async_mode: bool = True) -> dict:
+    """Thin-caller launch.
+
+    ``async_mode=True`` (default): return as soon as the status page URL is known
+    (or after a short wait), so the browser tab can show progress. The status
+    endpoint is then polled for panel handoff.
+    """
     root = Path(folder_path).resolve()
     if not root.is_dir():
         return {"ok": False, "error": f"folder not found: {root}", "code": "no-folder"}
+
+    # Second click: if the tool already has a live status/panel, do not re-dispatch.
+    existing = read_project_status(root)
+    if existing and existing.get("phase") in (
+            "starting", "scanning", "analyzing", "archiving", "panel-ready"):
+        # Prefer live panel / status URLs when the prior process still holds them.
+        open_url = existing.get("openUrl") or existing.get("panelBaseUrl") or existing.get("statusUrl")
+        if open_url or existing.get("statusUrl"):
+            return {
+                "ok": True,
+                "already_running": True,
+                "job_id": None,
+                "job_type": TIDY_JOB_TYPE,
+                "folder_path": str(root),
+                "status_url": existing.get("statusUrl"),
+                "open_url": open_url,
+                "panel_base": existing.get("panelBaseUrl"),
+                "phase": existing.get("phase"),
+                "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
+                "contributed_launch_logic": False,
+                "contributed_archive_logic": False,
+                "contributed_panel_logic": False,
+            }
 
     entry = resolve_entry()
     if entry is None:
@@ -144,23 +291,6 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
     except FileNotFoundError as e:
         return {"ok": False, "error": str(e), "code": "no-entry"}
 
-    # Point the skill at the trio/agy driver when available so debate stages are
-    # not loud-noops under the headless job env (which has no interactive agent).
-    child_env = {}
-    for key in ("TIDY_IDY_DRIVER", "TRIO_DRIVER", "TRIO_DRIVER_PATH",
-                "TRIO_DRIVER_REVIEW", "TRIO_MODEL_REVIEW"):
-        if os.environ.get(key):
-            child_env[key] = os.environ[key]
-    # Well-known host default if nothing is set.
-    if not child_env.get("TIDY_IDY_DRIVER") and not child_env.get("TRIO_DRIVER_PATH"):
-        for cand in (
-            Path(r"C:\dev\trio\drivers\gemini-cli.mjs"),
-            Path(r"C:\dev\Skill Foundry\tools\agy-dispatch.mjs"),
-        ):
-            if cand.is_file():
-                child_env.setdefault("TRIO_DRIVER_PATH", str(cand))
-                break
-
     try:
         rec = job_runner.launch_guarded(
             BUILD_LANE,
@@ -169,35 +299,72 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             cwd=str(root),
             gated=False,
             command=command,
-            env=child_env or None,
+            env=_child_env() or None,
         )
     except job_runner.LaneBusyError as e:
+        # Folder build lock often means a tidy run is already live — surface status.
+        st = status_for_folder(root)
         return {
             "ok": False,
             "error": getattr(e, "message", None) or str(e),
             "code": getattr(e, "reason", "busy"),
             "holder": getattr(e, "holder", None),
+            "status_url": st.get("statusUrl"),
+            "open_url": st.get("openUrl"),
+            "phase": st.get("phase"),
+            "message": st.get("message"),
         }
-    except Exception as e:  # noqa: BLE001 — surface to UI, never crash the server
+    except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "code": "launch-failed"}
 
     job_id = rec.get("job_id")
-    # Stamp job_type for UI/history without changing job_runner schema.
     try:
         job_runner._update_record(job_id, job_type=TIDY_JOB_TYPE)  # noqa: SLF001
     except Exception:
         pass
 
+    # Prefer returning once the status page is up so the tab can show progress.
+    status_ev = wait_for_event(job_id, STATUS_READY_EVENT, timeout_s=wait_for_status_s) if job_id else None
+    already = wait_for_event(job_id, ALREADY_RUNNING_EVENT, timeout_s=0.5) if job_id else None
+    # Also re-read status file (written even if stdout is late).
+    file_st = read_project_status(root) or {}
+    status_url = (
+        (status_ev or {}).get("statusUrl")
+        or (already or {}).get("statusUrl")
+        or file_st.get("statusUrl")
+    )
+
+    if async_mode:
+        return {
+            "ok": True,
+            "async": True,
+            "job_id": job_id,
+            "job_type": TIDY_JOB_TYPE,
+            "lane": BUILD_LANE,
+            "entry": str(entry),
+            "folder_path": str(root),
+            "status": rec.get("status"),
+            "log_path": rec.get("log_path"),
+            "status_url": status_url,
+            "open_url": file_st.get("openUrl") or (already or {}).get("openUrl"),
+            "panel_base": file_st.get("panelBaseUrl"),
+            "phase": file_st.get("phase") or "starting",
+            "message": file_st.get("message") or "Hygiene pass started — status page will update live.",
+            "already_running": bool(already),
+            "contributed_launch_logic": False,
+            "contributed_archive_logic": False,
+            "contributed_panel_logic": False,
+        }
+
+    # Legacy sync path: wait for panel-ready (kept for tests / callers that want it).
     ready = wait_for_panel(job_id, timeout_s=wait_for_panel_s) if job_id else None
     bootstrap_url = None
     if ready and ready.get("bootstrapFile"):
         boot = read_bootstrap_file(ready["bootstrapFile"])
         bootstrap_url = boot.get("url") if boot else None
-    if not bootstrap_url and ready and ready.get("bootstrapUrl"):
-        bootstrap_url = ready.get("bootstrapUrl")
-
     return {
         "ok": True,
+        "async": False,
         "job_id": job_id,
         "job_type": TIDY_JOB_TYPE,
         "lane": BUILD_LANE,
@@ -205,9 +372,10 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
         "folder_path": str(root),
         "status": rec.get("status"),
         "log_path": rec.get("log_path"),
+        "status_url": status_url,
         "panel": ready,
         "open_url": bootstrap_url,
-        "panel_base": (ready or {}).get("baseUrl") or (ready or {}).get("url"),
+        "panel_base": (ready or {}).get("url"),
         "contributed_launch_logic": False,
         "contributed_archive_logic": False,
         "contributed_panel_logic": False,

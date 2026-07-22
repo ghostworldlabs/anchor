@@ -67,7 +67,58 @@ def test_launch_refuses_missing_entry(tmp_path, monkeypatch):
     assert out["code"] == "no-entry"
 
 
-def test_route_table_registers_tidy_idy_run():
+def test_route_table_registers_tidy_idy_run_and_status():
     import route_table
     keys = {(r.method, r.pattern) for r in route_table.ROUTES}
     assert ("POST", "/api/rnd/tidy_idy_run") in keys
+    assert ("GET", "/api/rnd/tidy_idy_status") in keys
+
+
+def test_migrated_handlers_include_tidy_idy_status():
+    import anchor_gui
+    assert "handle_tidy_idy_run" in anchor_gui._MIGRATED_HANDLERS
+    assert "handle_tidy_idy_status" in anchor_gui._MIGRATED_HANDLERS
+
+
+def test_status_for_folder_reads_status_json(tmp_path):
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({
+            "phase": "analyzing",
+            "message": "Analyzing…",
+            "statusUrl": "http://127.0.0.1:9/",
+            "projectName": "demo",
+        }),
+        encoding="utf-8",
+    )
+    out = tidy.status_for_folder(tmp_path)
+    assert out["ok"] is True
+    assert out["phase"] == "analyzing"
+    assert out["statusUrl"] == "http://127.0.0.1:9/"
+    assert "Analyzing" in out["message"]
+
+
+def test_launch_short_circuits_live_status(tmp_path, monkeypatch):
+    """Second click: live status.json short-circuits without job_runner."""
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({
+            "phase": "scanning",
+            "message": "Scanning…",
+            "statusUrl": "http://127.0.0.1:60890/",
+            "openUrl": "http://127.0.0.1:60890/?n=abc",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tidy, "resolve_entry", lambda: tmp_path / "never.mjs")
+
+    def _boom(*_a, **_k):
+        raise AssertionError("job_runner must not be called when a run is live")
+
+    monkeypatch.setattr(tidy.job_runner, "launch_guarded", _boom)
+    out = tidy.launch_tidy_idy("proj", tmp_path)
+    assert out["ok"] is True
+    assert out["already_running"] is True
+    assert out["status_url"] == "http://127.0.0.1:60890/"
