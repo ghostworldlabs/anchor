@@ -10160,7 +10160,108 @@ def handle_tidy_idy_status(handler, path, body):
     if not folder:
         handler._send_json({"ok": False, "error": "project has no folder_path"}, 400)
         return
-    handler._send_json(_tidy.status_for_folder(folder, job_id=job_id or None))
+    handler._send_json(
+        _tidy.status_for_folder(folder, job_id=job_id or None, project_id=pid)
+    )
+
+
+def handle_tidy_idy_proxy(handler, path, body):
+    """GET|POST /api/rnd/tidy_idy_proxy/<project_id>/<...> — reverse-proxy to tool loopback.
+
+    The tidy-idy status page and Triage Panel bind 127.0.0.1 only (by design).
+    That works when the browser is on the same machine as Anchor; it fails for
+    Tailscale / remote dashboard clients. This route is same-origin with Anchor,
+    so remote browsers can reach the panel while the upstream stays loopback.
+    """
+    import json as _json
+    import tidy_idy_runner as _tidy
+    from urllib.parse import urlparse
+
+    parsed = urlparse(path)
+    prefix = "/api/rnd/tidy_idy_proxy/"
+    if not parsed.path.startswith(prefix):
+        handler._send_json({"ok": False, "error": "bad proxy path"}, 400)
+        return
+    rest = parsed.path[len(prefix):]
+    if not rest:
+        handler._send_json({"ok": False, "error": "project_id required in path"}, 400)
+        return
+    parts = rest.split("/", 1)
+    pid = parts[0].strip()
+    sub = "/" + parts[1] if len(parts) > 1 else "/"
+    if not pid or _unsafe_path_seg(pid):
+        handler._send_json({"ok": False, "error": "bad project_id"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+    folder = proj.get("folder_path", "")
+    if not folder:
+        handler._send_json({"ok": False, "error": "project has no folder_path"}, 400)
+        return
+
+    method = (getattr(handler, "command", None) or "GET").upper()
+    # Panel POSTs JSON; the strangler already parsed the body into a dict.
+    raw_body = None
+    if method in ("POST", "PUT", "PATCH") and body is not None:
+        if isinstance(body, (bytes, bytearray)):
+            raw_body = bytes(body)
+        else:
+            raw_body = _json.dumps(body).encode("utf-8")
+
+    fwd_headers = {}
+    # Capability token for the panel control plane (never logged).
+    tok = handler.headers.get("x-tidy-idy-token") or handler.headers.get("X-Tidy-Idy-Token")
+    if tok:
+        fwd_headers["x-tidy-idy-token"] = tok
+    ctype = handler.headers.get("Content-Type")
+    if ctype:
+        fwd_headers["Content-Type"] = ctype
+    elif raw_body is not None:
+        fwd_headers["Content-Type"] = "application/json"
+
+    result = _tidy.proxy_to_loopback(
+        folder,
+        method=method,
+        rel_path=sub,
+        query=parsed.query or "",
+        headers=fwd_headers,
+        body=raw_body,
+    )
+    if not result.get("ok") and result.get("code"):
+        code = 502 if result.get("code") == "proxy-failed" else 404
+        if result.get("code") == "ssrf-guard":
+            code = 403
+        handler._send_json(
+            {"ok": False, "error": result.get("error"), "code": result.get("code")},
+            code,
+        )
+        return
+
+    upstream = result.get("upstream") or ""
+    public_base = _tidy.proxy_mount_for(pid)
+    payload = result.get("body") or b""
+    ctype_out = result.get("content_type") or "application/octet-stream"
+    if upstream and isinstance(payload, (bytes, bytearray)):
+        payload = _tidy.rewrite_proxied_body(
+            bytes(payload),
+            content_type=ctype_out,
+            upstream_base=upstream,
+            public_base=public_base,
+        )
+
+    status = int(result.get("status") or 200)
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", ctype_out)
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.send_header("Cache-Control", "no-store")
+        # Do not forward upstream Set-Cookie / hop-by-hop headers.
+        handler.end_headers()
+        handler.wfile.write(payload)
+    except Exception:
+        pass
 
 
 def handle_gandalf_delete(handler, path, body):
@@ -14301,6 +14402,7 @@ _MIGRATED_HANDLERS = {
     "handle_gandalf_run": handle_gandalf_run,
     "handle_tidy_idy_run": handle_tidy_idy_run,
     "handle_tidy_idy_status": handle_tidy_idy_status,
+    "handle_tidy_idy_proxy": handle_tidy_idy_proxy,
     "handle_gandalf_delete": handle_gandalf_delete,
     "handle_gandalf_archive": handle_gandalf_archive,
     "handle_gandalf_clear_failed": handle_gandalf_clear_failed,

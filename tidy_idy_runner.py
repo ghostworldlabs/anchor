@@ -165,7 +165,218 @@ def _child_env() -> dict:
     return child_env
 
 
-def status_for_folder(folder_path: str | Path, *, job_id: str | None = None) -> dict:
+def is_loopback_url(url: str | None) -> bool:
+    """True when *url* points at this host's loopback (tool-owned servers)."""
+    if not url:
+        return False
+    try:
+        from urllib.parse import urlparse
+        host = (urlparse(str(url)).hostname or "").lower()
+    except Exception:
+        return False
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
+def proxy_mount_for(project_id: str) -> str:
+    """Same-origin mount path for the reverse proxy (Tailscale / remote browsers)."""
+    return f"/api/rnd/tidy_idy_proxy/{project_id}"
+
+
+def browser_open_url(project_id: str, loopback_url: str | None) -> str | None:
+    """Map a tool loopback URL onto the Anchor reverse-proxy path (path only).
+
+    Remote browsers (Tailscale) cannot reach 127.0.0.1 on the Anchor host; the
+    proxy path is same-origin with the Anchor GUI so it works from any client.
+    """
+    if not loopback_url or not project_id:
+        return None
+    if not is_loopback_url(loopback_url):
+        return str(loopback_url)
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(str(loopback_url))
+        sub = u.path or "/"
+        if u.query:
+            sub = f"{sub}?{u.query}"
+        return f"{proxy_mount_for(project_id)}{sub}"
+    except Exception:
+        return None
+
+
+def panel_upstream_base(folder_path: str | Path) -> str | None:
+    """Loopback panel base URL from status.json, or None if not live / not loopback."""
+    st = read_project_status(folder_path) or {}
+    base = st.get("panelBaseUrl") or None
+    if base and is_loopback_url(base):
+        return str(base).rstrip("/")
+    # Fall back: openUrl is .../bootstrap/<nonce> on the same origin as the panel.
+    open_url = st.get("openUrl") or ""
+    if is_loopback_url(open_url) and "/bootstrap/" in open_url:
+        try:
+            from urllib.parse import urlparse
+            u = urlparse(open_url)
+            return f"{u.scheme}://{u.netloc}"
+        except Exception:
+            return None
+    return None
+
+
+def status_upstream_base(folder_path: str | Path) -> str | None:
+    st = read_project_status(folder_path) or {}
+    base = st.get("statusUrl") or None
+    if base and is_loopback_url(base):
+        return str(base).rstrip("/")
+    return None
+
+
+def resolve_proxy_upstream(folder_path: str | Path, rel_path: str) -> str | None:
+    """Choose panel vs status loopback upstream for a relative path under the proxy.
+
+    Panel owns /bootstrap/* and its /api/* control plane. Status owns / and
+    /api/status during the pre-panel phase.
+    """
+    route = rel_path.split("?", 1)[0] or "/"
+    panel = panel_upstream_base(folder_path)
+    status = status_upstream_base(folder_path)
+    if route.startswith("/bootstrap/") or route in (
+            "/api/heartbeat", "/api/close", "/api/apply", "/api/restore",
+            "/api/rescan", "/api/confirm-full-run", "/api/investigate",
+            "/api/envelope", "/api/panel", "/api/trash", "/api/staleness",
+            "/api/apply-state", "/api/identity", "/api/lock", "/api/cost-gate",
+            "/api/archive", "/api/runs",
+    ):
+        return panel
+    if route == "/api/health":
+        # Prefer panel when live (panel health); else status.
+        return panel or status
+    if route in ("/", "/status", "/api/status") or route.startswith("/api/status"):
+        return status or panel
+    # Default: panel if ready, else status.
+    return panel or status
+
+
+def proxy_to_loopback(
+    folder_path: str | Path,
+    *,
+    method: str,
+    rel_path: str,
+    query: str = "",
+    headers: dict | None = None,
+    body: bytes | None = None,
+    timeout_s: float = 30.0,
+) -> dict:
+    """HTTP reverse-proxy to the tool's loopback status/panel server.
+
+    Returns ``{ok, status, headers, body, content_type, upstream}`` or
+    ``{ok: False, error, code}``. Hard-refuses non-loopback upstreams (SSRF).
+    """
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    base = resolve_proxy_upstream(folder_path, rel_path)
+    if not base:
+        return {
+            "ok": False,
+            "error": "no live tidy-idy status/panel for this project",
+            "code": "no-upstream",
+        }
+    if not is_loopback_url(base):
+        return {"ok": False, "error": "upstream is not loopback", "code": "ssrf-guard"}
+
+    path = rel_path if rel_path.startswith("/") else f"/{rel_path}"
+    target = f"{base.rstrip('/')}{path}"
+    if query:
+        target = f"{target}?{query}"
+
+    # Final SSRF check on the fully resolved URL.
+    parsed = urlparse(target)
+    host = (parsed.hostname or "").lower()
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        return {"ok": False, "error": "upstream host refused", "code": "ssrf-guard"}
+    if parsed.scheme not in ("http", "https"):
+        return {"ok": False, "error": "upstream scheme refused", "code": "ssrf-guard"}
+
+    # Forward only safe / required headers (never Host).
+    out_headers = {}
+    for key, val in (headers or {}).items():
+        lk = str(key).lower()
+        if lk in (
+            "x-tidy-idy-token",
+            "content-type",
+            "accept",
+            "x-anchor-token",
+        ):
+            out_headers[key] = val
+
+    data = body if method.upper() in ("POST", "PUT", "PATCH") else None
+    req = urllib.request.Request(
+        target, data=data, headers=out_headers, method=method.upper(),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read()
+            resp_headers = {k: v for k, v in resp.headers.items()}
+            return {
+                "ok": True,
+                "status": getattr(resp, "status", 200) or 200,
+                "headers": resp_headers,
+                "body": raw,
+                "content_type": resp.headers.get("Content-Type") or "application/octet-stream",
+                "upstream": base,
+            }
+    except urllib.error.HTTPError as e:
+        raw = e.read() if hasattr(e, "read") else b""
+        try:
+            raw = raw if isinstance(raw, (bytes, bytearray)) else bytes(raw or b"")
+        except Exception:
+            raw = b""
+        return {
+            "ok": True,  # HTTP error from upstream is still a completed proxy hop
+            "status": int(e.code or 502),
+            "headers": dict(e.headers.items()) if e.headers else {},
+            "body": raw,
+            "content_type": (e.headers.get("Content-Type") if e.headers else None)
+            or "application/octet-stream",
+            "upstream": base,
+        }
+    except Exception as e:  # noqa: BLE001
+        return {
+            "ok": False,
+            "error": f"{type(e).__name__}: {e}",
+            "code": "proxy-failed",
+            "upstream": base,
+        }
+
+
+def rewrite_proxied_body(
+    body: bytes,
+    *,
+    content_type: str,
+    upstream_base: str,
+    public_base: str,
+) -> bytes:
+    """Rewrite absolute loopback URLs in HTML/JS so the panel stays on the proxy."""
+    ct = (content_type or "").lower()
+    if "text/html" not in ct and "javascript" not in ct and "json" not in ct:
+        return body
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body
+    # Longest first so we don't partial-replace.
+    replacements = [
+        (upstream_base.rstrip("/") + "/", public_base.rstrip("/") + "/"),
+        (upstream_base.rstrip("/"), public_base.rstrip("/")),
+    ]
+    for old, new in replacements:
+        if old and old in text:
+            text = text.replace(old, new)
+    return text.encode("utf-8")
+
+
+def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
+                      project_id: str | None = None) -> dict:
     """Unified status for the browser status tab (poll endpoint)."""
     st = read_project_status(folder_path) or {}
     log_ev = None
@@ -215,6 +426,8 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None) -> 
     }.get(phase, "Working…")
 
     open_url = st.get("openUrl") or st.get("panelBaseUrl") or st.get("statusUrl")
+    proxy_open = browser_open_url(project_id, open_url) if project_id else None
+    proxy_status = browser_open_url(project_id, st.get("statusUrl")) if project_id else None
     return {
         "ok": True,
         "phase": phase,
@@ -224,6 +437,10 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None) -> 
         "statusUrl": st.get("statusUrl"),
         "openUrl": open_url,
         "panelBaseUrl": st.get("panelBaseUrl"),
+        # Same-origin paths for Tailscale / remote browsers (never 127.0.0.1).
+        "proxyOpenPath": proxy_open,
+        "proxyStatusPath": proxy_status,
+        "loopbackOnly": bool(open_url and is_loopback_url(open_url)),
         "findings": st.get("findings"),
         "runId": st.get("runId"),
         "error": st.get("error"),
@@ -264,6 +481,9 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
                 "status_url": existing.get("statusUrl"),
                 "open_url": open_url,
                 "panel_base": existing.get("panelBaseUrl"),
+                "proxy_open_path": browser_open_url(project_id, open_url),
+                "proxy_status_path": browser_open_url(project_id, existing.get("statusUrl")),
+                "loopback_only": bool(open_url and is_loopback_url(open_url)),
                 "phase": existing.get("phase"),
                 "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
                 "contributed_launch_logic": False,
@@ -334,6 +554,8 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
         or file_st.get("statusUrl")
     )
 
+    open_url = file_st.get("openUrl") or (already or {}).get("openUrl")
+    panel_base = file_st.get("panelBaseUrl")
     if async_mode:
         return {
             "ok": True,
@@ -346,8 +568,14 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             "status": rec.get("status"),
             "log_path": rec.get("log_path"),
             "status_url": status_url,
-            "open_url": file_st.get("openUrl") or (already or {}).get("openUrl"),
-            "panel_base": file_st.get("panelBaseUrl"),
+            "open_url": open_url,
+            "panel_base": panel_base,
+            "proxy_open_path": browser_open_url(project_id, open_url or panel_base),
+            "proxy_status_path": browser_open_url(project_id, status_url),
+            "loopback_only": bool(
+                (open_url and is_loopback_url(open_url))
+                or (status_url and is_loopback_url(status_url))
+            ),
             "phase": file_st.get("phase") or "starting",
             "message": file_st.get("message") or "Hygiene pass started — status page will update live.",
             "already_running": bool(already),

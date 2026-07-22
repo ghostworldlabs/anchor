@@ -72,12 +72,49 @@ def test_route_table_registers_tidy_idy_run_and_status():
     keys = {(r.method, r.pattern) for r in route_table.ROUTES}
     assert ("POST", "/api/rnd/tidy_idy_run") in keys
     assert ("GET", "/api/rnd/tidy_idy_status") in keys
+    assert ("GET", "/api/rnd/tidy_idy_proxy/") in keys
+    assert ("POST", "/api/rnd/tidy_idy_proxy/") in keys
 
 
 def test_migrated_handlers_include_tidy_idy_status():
     import anchor_gui
     assert "handle_tidy_idy_run" in anchor_gui._MIGRATED_HANDLERS
     assert "handle_tidy_idy_status" in anchor_gui._MIGRATED_HANDLERS
+    assert "handle_tidy_idy_proxy" in anchor_gui._MIGRATED_HANDLERS
+
+
+def test_is_loopback_and_browser_open_url():
+    assert tidy.is_loopback_url("http://127.0.0.1:55410/") is True
+    assert tidy.is_loopback_url("http://example.com/") is False
+    path = tidy.browser_open_url(
+        "abc123",
+        "http://127.0.0.1:55614/bootstrap/deadbeef",
+    )
+    assert path == "/api/rnd/tidy_idy_proxy/abc123/bootstrap/deadbeef"
+
+
+def test_rewrite_proxied_body_rewrites_base():
+    html = b'const BASE = "http://127.0.0.1:55614"; fetch(BASE + "/api/x")'
+    out = tidy.rewrite_proxied_body(
+        html,
+        content_type="text/html",
+        upstream_base="http://127.0.0.1:55614",
+        public_base="/api/rnd/tidy_idy_proxy/pid",
+    )
+    assert b"127.0.0.1" not in out
+    assert b"/api/rnd/tidy_idy_proxy/pid" in out
+
+
+def test_proxy_ssrf_guard_refuses_non_loopback(tmp_path, monkeypatch):
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({"panelBaseUrl": "http://evil.example:9", "phase": "panel-ready"}),
+        encoding="utf-8",
+    )
+    # resolve uses status; is_loopback fails → no upstream
+    out = tidy.proxy_to_loopback(tmp_path, method="GET", rel_path="/api/health")
+    assert out["ok"] is False
 
 
 def test_status_for_folder_reads_status_json(tmp_path):

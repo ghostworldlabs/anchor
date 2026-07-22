@@ -4923,14 +4923,59 @@ async function newGeneral(backend) {
 //
 // UX contract:
 //   1. Click opens a NAMED browser tab immediately with a status message.
-//   2. When the tool's status page (or panel) is ready, that tab navigates there.
-//   3. Re-click reuses the same named window (focus + navigate) — no second pass
-//      when a run is already live (server short-circuits via status.json / lock).
+//   2. Same-machine: navigate to the tool's loopback status/panel when ready.
+//   3. Remote (Tailscale): NEVER open 127.0.0.1 in the browser — stay on the
+//      Anchor-served status shell (poll) and open the panel via the same-origin
+//      reverse proxy /api/rnd/tidy_idy_proxy/<project_id>/...
+//   4. Re-click reuses the named window — no second hygiene pass when live.
 //
 // Popup-blocker: open the tab SYNCHRONOUSLY on the user gesture, then navigate.
 async function tidyIdyRun(_backend) {
   var winName = 'tidy-idy-' + String(PROJECT_ID || 'run');
   var win = null;
+  // True when this Anchor page is on the same host as the tool (loopback OK).
+  var localPage = (function () {
+    var h = (location.hostname || '').toLowerCase();
+    return h === '127.0.0.1' || h === 'localhost' || h === '[::1]';
+  })();
+
+  function _isLoopbackUrl(u) {
+    if (!u) return false;
+    try {
+      var x = new URL(u, location.href);
+      var h = (x.hostname || '').toLowerCase();
+      return h === '127.0.0.1' || h === 'localhost' || h === '[::1]';
+    } catch (_e) { return false; }
+  }
+
+  function _withToken(url) {
+    if (!url) return url;
+    var tok = _anchorToken();
+    if (!tok) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tok);
+  }
+
+  /** Map a tool URL to something this browser can open (loopback or proxy). */
+  function _browserUrl(targetUrl, proxyPath) {
+    if (proxyPath) return _withToken(proxyPath);
+    if (!targetUrl) return null;
+    if (!_isLoopbackUrl(targetUrl)) return targetUrl;
+    if (localPage) return targetUrl;
+    // Remote: rewrite loopback → same-origin Anchor proxy.
+    try {
+      var x = new URL(targetUrl);
+      var sub = x.pathname + (x.search || '');
+      if (!sub) sub = '/';
+      return _withToken('/api/rnd/tidy_idy_proxy/' + encodeURIComponent(PROJECT_ID) + sub);
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  function _isPanelUrl(u) {
+    if (!u) return false;
+    return String(u).indexOf('/bootstrap/') >= 0 || String(u).indexOf('tidy_idy_proxy') >= 0;
+  }
 
   function _writeStatusShell(message) {
     if (!win || win.closed) return;
@@ -4983,12 +5028,27 @@ async function tidyIdyRun(_backend) {
     }
   }
 
+  /** Navigate only when the destination is reachable from this browser. */
+  function _navBest(targetUrl, proxyPath, phase) {
+    // Remote: do not leave the status shell for mid-run loopback status pages —
+    // keep polling via Anchor until panel-ready, then open via proxy.
+    if (!localPage && targetUrl && _isLoopbackUrl(targetUrl) && !_isPanelUrl(targetUrl)
+        && phase !== 'panel-ready') {
+      return false;
+    }
+    var dest = _browserUrl(targetUrl, proxyPath);
+    if (!dest) return false;
+    return _navWin(dest);
+  }
+
   // Named window: first click creates it; re-click focuses the existing tab.
   try {
     win = window.open('about:blank', winName);
     _writeStatusShell(
       'Starting hygiene pass… this can take a minute on large folders. ' +
-      'Live status updates here; the Triage Panel opens in this tab when ready.'
+      (localPage
+        ? 'Live status updates here; the Triage Panel opens in this tab when ready.'
+        : 'You are on a remote Anchor session — status stays in this tab (via Anchor); the panel opens through Anchor when ready.')
     );
     try { if (win) win.focus(); } catch (_f) { /* ignore */ }
   } catch (_o) { win = null; }
@@ -5010,18 +5070,24 @@ async function tidyIdyRun(_backend) {
 
   // Busy / already-running with a known URL still counts as a successful re-open.
   if (!data || !data.ok) {
-    var reopen = (data && (data.open_url || data.status_url)) || null;
-    if (reopen) {
-      if (!_navWin(reopen)) {
-        alert('[tidy-idy] A run is live but the browser blocked the popup.\n\nOpen:\n' + reopen);
+    var reopen = (data && (data.proxy_open_path || data.open_url || data.status_url)) || null;
+    if (reopen || (data && data.proxy_open_path)) {
+      if (!_navBest(data.open_url || data.status_url, data.proxy_open_path || data.proxy_status_path,
+          data.phase || 'panel-ready')) {
+        // Keep shell + poll if mid-run remote.
+        if (data.phase === 'panel-ready' || data.open_url) {
+          alert('[tidy-idy] A run is live but the browser blocked the popup.');
+        }
+      } else {
+        try { refreshBoard(); } catch (_e) { /* board optional */ }
+        return;
       }
-      try { refreshBoard(); } catch (_e) { /* board optional */ }
+    } else {
+      var err = (data && (data.error || data.code)) || 'unknown';
+      _setWinMsg('Refused: ' + err, 'refused');
+      alert('[tidy-idy refused] ' + err);
       return;
     }
-    var err = (data && (data.error || data.code)) || 'unknown';
-    _setWinMsg('Refused: ' + err, 'refused');
-    alert('[tidy-idy refused] ' + err);
-    return;
   }
 
   var phase = data.phase || (data.already_running ? 'scanning' : 'starting');
@@ -5034,27 +5100,26 @@ async function tidyIdyRun(_backend) {
   var readyUrl = data.open_url || data.panel_base ||
     (data.panel && (data.panel.bootstrapUrl || data.panel.baseUrl || data.panel.url));
   var statusUrl = data.status_url || null;
+  var proxyOpen = data.proxy_open_path || null;
+  var proxyStatus = data.proxy_status_path || null;
+
   if (readyUrl && (phase === 'panel-ready' || data.already_running)) {
-    if (!_navWin(readyUrl)) {
-      alert('[tidy-idy] Panel is ready but the browser blocked the popup.\n\nOpen:\n' + readyUrl);
+    if (_navBest(readyUrl, proxyOpen, phase === 'panel-ready' ? 'panel-ready' : phase)) {
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      return;
     }
-    try { refreshBoard(); } catch (_e) { /* board optional */ }
-    return;
   }
-  if (statusUrl) {
-    if (!_navWin(statusUrl)) {
-      // Keep the shell message; poll below may still get a panel URL via Anchor.
-      _setWinMsg(message + ' (open status page manually if needed)', phase, statusUrl);
-    } else {
-      // Tool-owned status page self-polls and redirects to the panel — done.
+  // Local only: hand off to tool status page (self-polls → panel). Remote stays here.
+  if (statusUrl && localPage) {
+    if (_navBest(statusUrl, proxyStatus, phase)) {
       try { refreshBoard(); } catch (_e) { /* board optional */ }
       return;
     }
   }
 
-  // Fallback: poll Anchor status until panel/status URL appears (or fail/done).
+  // Poll Anchor status until panel is ready (or fail/done). Remote always uses this.
   var jobId = data.job_id || null;
-  if (!jobId && !statusUrl && !readyUrl) {
+  if (!jobId && !statusUrl && !readyUrl && !data.already_running) {
     _setWinMsg('Run reported ok but returned no status or panel URL.', 'failed');
     alert('[tidy-idy] run reported ok but returned no status or panel URL.');
     return;
@@ -5086,20 +5151,27 @@ async function tidyIdyRun(_backend) {
     _setWinMsg(st.message || 'Working…', st.phase || 'running',
       (st.findings != null ? (st.findings + ' finding(s)') : '') +
       (st.runId ? (' · run ' + st.runId) : ''));
-    var go = null;
+
     if (st.phase === 'panel-ready') {
-      go = st.openUrl || st.panelBaseUrl || st.statusUrl;
-    } else if (st.statusUrl && !statusUrl) {
-      // Status server came up after the POST returned — hand off to it.
-      go = st.statusUrl;
-      statusUrl = st.statusUrl;
-    }
-    if (go) {
-      if (!_navWin(go)) {
-        alert('[tidy-idy] Ready, but the browser blocked navigation.\n\nOpen:\n' + go);
+      var go = st.proxyOpenPath || st.openUrl || st.panelBaseUrl;
+      if (_navBest(st.openUrl || st.panelBaseUrl, st.proxyOpenPath, 'panel-ready')) {
+        try { refreshBoard(); } catch (_e) { /* board optional */ }
+        return;
       }
-      try { refreshBoard(); } catch (_e) { /* board optional */ }
+      _setWinMsg(
+        'Panel is ready on the host, but this browser could not open it. Re-click Tidy-Idy.',
+        'panel-ready',
+        go || ''
+      );
       return;
+    }
+    // Local: optional handoff to status page once; remote never leaves this shell early.
+    if (localPage && st.statusUrl && !statusUrl) {
+      statusUrl = st.statusUrl;
+      if (_navBest(st.statusUrl, st.proxyStatusPath, st.phase)) {
+        try { refreshBoard(); } catch (_e) { /* board optional */ }
+        return;
+      }
     }
     if (st.phase === 'failed' || st.phase === 'refused' || st.phase === 'done') {
       try { refreshBoard(); } catch (_e) { /* board optional */ }
