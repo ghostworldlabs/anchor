@@ -4955,21 +4955,43 @@ async function tidyIdyRun(_backend) {
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(tok);
   }
 
+  /** about:blank has no origin — relative /api/... paths never hit Anchor. */
+  function _absoluteUrl(url) {
+    if (!url) return null;
+    try {
+      // Already absolute
+      if (/^https?:\/\//i.test(url) || /^data:/i.test(url)) return url;
+      if (url.charAt(0) === '/') return String(location.origin || '') + url;
+      return new URL(url, location.href).href;
+    } catch (_e) {
+      return url;
+    }
+  }
+
   /** Map a tool URL to something this browser can open (loopback or proxy). */
   function _browserUrl(targetUrl, proxyPath) {
-    if (proxyPath) return _withToken(proxyPath);
-    if (!targetUrl) return null;
-    if (!_isLoopbackUrl(targetUrl)) return targetUrl;
-    if (localPage) return targetUrl;
-    // Remote: rewrite loopback → same-origin Anchor proxy.
-    try {
-      var x = new URL(targetUrl);
-      var sub = x.pathname + (x.search || '');
-      if (!sub) sub = '/';
-      return _withToken('/api/rnd/tidy_idy_proxy/' + encodeURIComponent(PROJECT_ID) + sub);
-    } catch (_e) {
-      return null;
+    var out = null;
+    if (proxyPath) out = _withToken(proxyPath);
+    else if (!targetUrl) out = null;
+    else if (!_isLoopbackUrl(targetUrl)) out = targetUrl;
+    else if (localPage) out = targetUrl;
+    else {
+      // Remote: rewrite loopback → same-origin Anchor proxy.
+      try {
+        var x = new URL(targetUrl);
+        var sub = x.pathname + (x.search || '');
+        if (!sub) sub = '/';
+        // Never open bare panel base (JSON health) — only bootstrap HTML.
+        if (sub === '/' || sub === '') {
+          out = null;
+        } else {
+          out = _withToken('/api/rnd/tidy_idy_proxy/' + encodeURIComponent(PROJECT_ID) + sub);
+        }
+      } catch (_e) {
+        out = null;
+      }
     }
+    return _absoluteUrl(out);
   }
 
   function _isPanelUrl(u) {
@@ -4977,8 +4999,9 @@ async function tidyIdyRun(_backend) {
     return String(u).indexOf('/bootstrap/') >= 0 || String(u).indexOf('tidy_idy_proxy') >= 0;
   }
 
-  // Data-URI favicon: about:blank tabs cannot load /vendor/... (no Anchor origin).
-  var _TIDY_FAVICON = 'data:image/svg+xml,' + encodeURIComponent(
+  // Brand icon: absolute Anchor URL works even from about:blank; SVG data-URI is fallback.
+  var _TIDY_FAVICON_ABS = _absoluteUrl('/vendor/brand/tidy-idy-icon.jpg');
+  var _TIDY_FAVICON_SVG = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
     '<rect width="32" height="32" rx="7" fill="#1a2332"/>' +
     '<path d="M8 22c2-6 5-10 9-12 1.2 2.5 2 5.2 2.2 8.2 2.8-.4 5 .6 6.8 2.4-3.2 1.2-6.5 1.6-9.5.6C13.2 23 10.5 23 8 22z" fill="#8ab4f8"/>' +
@@ -4986,13 +5009,34 @@ async function tidyIdyRun(_backend) {
     '</svg>'
   );
 
+  function _applyFavicon(doc) {
+    if (!doc || !doc.head) return;
+    try {
+      var old = doc.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]');
+      for (var i = 0; i < old.length; i++) old[i].parentNode.removeChild(old[i]);
+      if (_TIDY_FAVICON_ABS) {
+        var a = doc.createElement('link');
+        a.rel = 'icon';
+        a.type = 'image/jpeg';
+        a.href = _TIDY_FAVICON_ABS;
+        doc.head.appendChild(a);
+      }
+      var b = doc.createElement('link');
+      b.rel = 'icon';
+      b.type = 'image/svg+xml';
+      b.href = _TIDY_FAVICON_SVG;
+      doc.head.appendChild(b);
+    } catch (_e) { /* ignore */ }
+  }
+
   function _writeStatusShell(message) {
     if (!win || win.closed) return;
     try {
       win.document.open();
       win.document.write(
-        '<!doctype html><html><head><title>Tidy-Idy…</title>' +
-        '<link rel="icon" href="' + _TIDY_FAVICON + '" type="image/svg+xml"/>' +
+        '<!doctype html><html><head><meta charset="utf-8"/><title>Tidy-Idy…</title>' +
+        '<link rel="icon" href="' + (_TIDY_FAVICON_ABS || _TIDY_FAVICON_SVG) + '" type="image/jpeg"/>' +
+        '<link rel="icon" href="' + _TIDY_FAVICON_SVG + '" type="image/svg+xml"/>' +
         '<style>' +
         'body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;padding:2rem;line-height:1.5;margin:0}' +
         '.card{max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}' +
@@ -5007,6 +5051,9 @@ async function tidyIdyRun(_backend) {
         'border-radius:999px;transition:width .4s ease}' +
         '#detail{color:#9aa0a6;font-size:.9rem;margin:.5rem 0 0;white-space:pre-wrap}' +
         '#alive{color:#9aa0a6;font-size:.8rem;margin:.65rem 0 0}' +
+        '#openBtn{display:none;margin-top:1rem;padding:.55rem 1rem;border:0;border-radius:8px;' +
+        'background:#8ab4f8;color:#0f1115;font:600 14px system-ui;cursor:pointer}' +
+        '#openBtn:hover{filter:brightness(1.08)}' +
         '</style></head><body><div class="card">' +
         '<div class="phase" id="phase">starting</div>' +
         '<h2>Tidy-Idy</h2>' +
@@ -5015,10 +5062,26 @@ async function tidyIdyRun(_backend) {
         '<div class="bar"><i id="barFill"></i></div>' +
         '<p id="detail"></p>' +
         '<p id="alive">Waiting for first status…</p>' +
+        '<button type="button" id="openBtn">Open Triage Panel</button>' +
         '</div></body></html>'
       );
       win.document.close();
+      _applyFavicon(win.document);
     } catch (_w) { /* cross-origin after navigate — ignore */ }
+  }
+
+  function _showOpenButton(absUrl) {
+    if (!win || win.closed || !absUrl) return;
+    try {
+      var btn = win.document.getElementById('openBtn');
+      if (!btn) return;
+      btn.style.display = 'inline-block';
+      btn.onclick = function () {
+        try { win.location.href = absUrl; } catch (_e) {
+          try { window.open(absUrl, winName); } catch (_e2) { /* ignore */ }
+        }
+      };
+    } catch (_e) { /* ignore */ }
   }
 
   function _setProgress(pct, stepLabel) {
@@ -5079,10 +5142,12 @@ async function tidyIdyRun(_backend) {
 
   function _navWin(url) {
     if (!url) return false;
+    url = _absoluteUrl(url);
+    if (!url) return false;
     if (win && !win.closed) {
-      try { win.location = url; return true; }
+      try { win.location.href = url; return true; }
       catch (_nav) {
-        try { win.location.href = url; return true; } catch (_n2) { /* fall through */ }
+        try { win.location = url; return true; } catch (_n2) { /* fall through */ }
       }
     }
     try {
@@ -5093,17 +5158,35 @@ async function tidyIdyRun(_backend) {
     }
   }
 
-  /** Navigate only when the destination is reachable from this browser. */
+  /**
+   * Navigate to the Triage Panel (or status) when reachable.
+   * Returns the absolute destination URL when navigation was attempted, or null.
+   */
   function _navBest(targetUrl, proxyPath, phase) {
     // Remote: do not leave the status shell for mid-run loopback status pages —
     // keep polling via Anchor until panel-ready, then open via proxy.
     if (!localPage && targetUrl && _isLoopbackUrl(targetUrl) && !_isPanelUrl(targetUrl)
         && phase !== 'panel-ready') {
-      return false;
+      return null;
     }
-    var dest = _browserUrl(targetUrl, proxyPath);
-    if (!dest) return false;
-    return _navWin(dest);
+    // Prefer bootstrap / proxy path that serves HTML, not panel base JSON.
+    var dest = null;
+    if (proxyPath && String(proxyPath).indexOf('/bootstrap/') >= 0) {
+      dest = _browserUrl(null, proxyPath);
+    } else if (targetUrl && _isPanelUrl(targetUrl)) {
+      dest = _browserUrl(targetUrl, proxyPath);
+    } else if (phase === 'panel-ready' && proxyPath) {
+      dest = _browserUrl(targetUrl, proxyPath);
+    } else {
+      dest = _browserUrl(targetUrl, proxyPath);
+    }
+    if (!dest) return null;
+    // Bare panel root is health JSON — useless as a GUI.
+    if (/\/api\/rnd\/tidy_idy_proxy\/[^/]+\/?(\?|$)/.test(dest) && dest.indexOf('/bootstrap/') < 0) {
+      return null;
+    }
+    var ok = _navWin(dest);
+    return ok ? dest : dest; // still return dest so caller can show a click-to-open button
   }
 
   // Named window: first click creates it; re-click focuses the existing tab.
@@ -5176,12 +5259,26 @@ async function tidyIdyRun(_backend) {
   var proxyOpen = data.proxy_open_path || null;
   var proxyStatus = data.proxy_status_path || null;
 
-  if (readyUrl && (phase === 'panel-ready' || (data.already_running && phase === 'panel-ready'))) {
+  if (phase === 'panel-ready' || (data.already_running && phase === 'panel-ready')) {
     _setProgress(100, 'Panel ready');
-    if (_navBest(readyUrl, proxyOpen, 'panel-ready')) {
+    var destReady = _navBest(readyUrl, proxyOpen, 'panel-ready');
+    if (destReady) {
+      _showOpenButton(destReady);
+      _setWinMsg(
+        'Triage Panel is ready — opening… If it does not appear, click the button below.',
+        'panel-ready',
+        destReady,
+        100,
+        'Panel ready'
+      );
       try { refreshBoard(); } catch (_e) { /* board optional */ }
+      // Give navigation a moment; keep the open button as backup.
       return;
     }
+    _setWinMsg(
+      'Triage Panel is ready but no open URL was returned. Re-click Tidy-Idy, or check Anchor jobs.',
+      'panel-ready', null, 100, 'Panel ready'
+    );
   }
   // Live mid-run (or already_running during scan): always poll — do not sit on 2%.
   if (data.already_running && phase !== 'panel-ready') {
@@ -5245,9 +5342,24 @@ async function tidyIdyRun(_backend) {
     );
 
     if (st.phase === 'panel-ready') {
-      var go = st.proxyOpenPath || st.openUrl || st.panelBaseUrl;
+      var go = st.proxyOpenPath || st.openUrl || null;
+      // Prefer bootstrap URL only (panelBaseUrl alone is JSON health, not the GUI).
+      var openTarget = st.openUrl;
+      if (openTarget && String(openTarget).indexOf('/bootstrap/') < 0 && st.proxyOpenPath) {
+        openTarget = null;
+      }
       _setProgress(100, 'Panel ready');
-      if (_navBest(st.openUrl || st.panelBaseUrl, st.proxyOpenPath, 'panel-ready')) {
+      var dest = _navBest(openTarget || st.openUrl, st.proxyOpenPath, 'panel-ready');
+      if (dest) {
+        _showOpenButton(dest);
+        _setWinMsg(
+          'Triage Panel is ready — opening… If it does not appear, click Open Triage Panel.',
+          'panel-ready',
+          dest,
+          100,
+          'Panel ready',
+          _aliveLine(st)
+        );
         try { refreshBoard(); } catch (_e) { /* board optional */ }
         return;
       }
