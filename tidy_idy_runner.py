@@ -177,6 +177,96 @@ def is_loopback_url(url: str | None) -> bool:
     return host in ("127.0.0.1", "localhost", "::1")
 
 
+def probe_loopback_alive(url: str | None, *, timeout_s: float = 0.6) -> bool:
+    """True if a loopback tool URL accepts a TCP/HTTP connection right now.
+
+    Used to distinguish a live panel/status server from a STALE status.json that
+    still names ports after the process exited (common after idle close / crash).
+    """
+    if not url or not is_loopback_url(url):
+        return False
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urlparse
+
+    try:
+        u = urlparse(str(url))
+        # Health endpoints are cheap; base URL also works for the panel root.
+        probe = str(url)
+        if u.path in ("", "/") and not (u.query or ""):
+            # Prefer /api/health when we only have a base.
+            probe = f"{u.scheme}://{u.netloc}/api/health"
+        req = urllib.request.Request(probe, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            # Any HTTP response (incl. 401/404) means the port is live.
+            _ = getattr(resp, "status", 200)
+            return True
+    except urllib.error.HTTPError:
+        return True  # server answered — alive
+    except Exception:
+        return False
+
+
+def mark_status_stale(folder_path: str | Path, *, reason: str = "panel process is gone") -> None:
+    """Best-effort: rewrite status.json so a second click starts a fresh run."""
+    root = Path(folder_path).resolve()
+    p = root / ".tidy-idy" / "status.json"
+    try:
+        prev = {}
+        if p.is_file():
+            prev = json.loads(p.read_text(encoding="utf-8"))
+        next_st = {
+            **prev,
+            "phase": "done",
+            "message": f"Previous tidy-idy session ended ({reason}). Re-click to start a new pass.",
+            "progress": 100,
+            "step": "done",
+            "stepLabel": "Session ended",
+            "openUrl": None,
+            "panelBaseUrl": None,
+            "statusUrl": None,
+            "statusPort": None,
+            "stale": True,
+            "staleReason": reason,
+            "updatedAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
+        }
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(next_st, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def live_tool_endpoints(folder_path: str | Path) -> dict:
+    """Which tool loopback endpoints are actually accepting connections."""
+    st = read_project_status(folder_path) or {}
+    status_url = st.get("statusUrl")
+    panel_base = st.get("panelBaseUrl")
+    open_url = st.get("openUrl")
+    status_live = probe_loopback_alive(status_url)
+    panel_live = probe_loopback_alive(panel_base) or (
+        bool(open_url and "/bootstrap/" in str(open_url)) and probe_loopback_alive(open_url)
+    )
+    # Also try openUrl's origin as panel base.
+    if not panel_live and open_url and is_loopback_url(open_url):
+        try:
+            from urllib.parse import urlparse
+            u = urlparse(str(open_url))
+            panel_live = probe_loopback_alive(f"{u.scheme}://{u.netloc}/api/health")
+            if panel_live and not panel_base:
+                panel_base = f"{u.scheme}://{u.netloc}"
+        except Exception:
+            pass
+    return {
+        "status": st,
+        "status_live": status_live,
+        "panel_live": panel_live,
+        "any_live": status_live or panel_live,
+        "status_url": status_url if status_live else None,
+        "panel_base": panel_base if panel_live else None,
+        "open_url": open_url if panel_live else None,
+    }
+
+
 def proxy_mount_for(project_id: str) -> str:
     """Same-origin mount path for the reverse proxy (Tailscale / remote browsers)."""
     return f"/api/rnd/tidy_idy_proxy/{project_id}"
@@ -203,13 +293,15 @@ def browser_open_url(project_id: str, loopback_url: str | None) -> str | None:
         return None
 
 
-def panel_upstream_base(folder_path: str | Path) -> str | None:
-    """Loopback panel base URL from status.json, or None if not live / not loopback."""
+def panel_upstream_base(folder_path: str | Path, *, require_live: bool = True) -> str | None:
+    """Loopback panel base URL from status.json (optionally only if still listening)."""
+    live = live_tool_endpoints(folder_path) if require_live else None
+    if require_live:
+        return live.get("panel_base") if live else None
     st = read_project_status(folder_path) or {}
     base = st.get("panelBaseUrl") or None
     if base and is_loopback_url(base):
         return str(base).rstrip("/")
-    # Fall back: openUrl is .../bootstrap/<nonce> on the same origin as the panel.
     open_url = st.get("openUrl") or ""
     if is_loopback_url(open_url) and "/bootstrap/" in open_url:
         try:
@@ -221,7 +313,10 @@ def panel_upstream_base(folder_path: str | Path) -> str | None:
     return None
 
 
-def status_upstream_base(folder_path: str | Path) -> str | None:
+def status_upstream_base(folder_path: str | Path, *, require_live: bool = True) -> str | None:
+    if require_live:
+        live = live_tool_endpoints(folder_path)
+        return live.get("status_url")
     st = read_project_status(folder_path) or {}
     base = st.get("statusUrl") or None
     if base and is_loopback_url(base):
@@ -233,11 +328,19 @@ def resolve_proxy_upstream(folder_path: str | Path, rel_path: str) -> str | None
     """Choose panel vs status loopback upstream for a relative path under the proxy.
 
     Panel owns /bootstrap/* and its /api/* control plane. Status owns / and
-    /api/status during the pre-panel phase.
+    /api/status during the pre-panel phase. Only returns URLs that still answer.
     """
     route = rel_path.split("?", 1)[0] or "/"
-    panel = panel_upstream_base(folder_path)
-    status = status_upstream_base(folder_path)
+    live = live_tool_endpoints(folder_path)
+    panel = live.get("panel_base")
+    status = live.get("status_url")
+    if not live.get("any_live"):
+        # Stale status.json naming dead ports — clear so next click restarts.
+        st = live.get("status") or {}
+        if st.get("phase") in (
+                "starting", "scanning", "analyzing", "archiving", "panel-ready"):
+            mark_status_stale(folder_path, reason="no process listening on recorded ports")
+        return None
     if route.startswith("/bootstrap/") or route in (
             "/api/heartbeat", "/api/close", "/api/apply", "/api/restore",
             "/api/rescan", "/api/confirm-full-run", "/api/investigate",
@@ -247,11 +350,9 @@ def resolve_proxy_upstream(folder_path: str | Path, rel_path: str) -> str | None
     ):
         return panel
     if route == "/api/health":
-        # Prefer panel when live (panel health); else status.
         return panel or status
     if route in ("/", "/status", "/api/status") or route.startswith("/api/status"):
         return status or panel
-    # Default: panel if ready, else status.
     return panel or status
 
 
@@ -341,9 +442,23 @@ def proxy_to_loopback(
             "upstream": base,
         }
     except Exception as e:  # noqa: BLE001
+        err = f"{type(e).__name__}: {e}"
+        # Connection refused / timed out → panel process is gone; clear stale status.
+        low = err.lower()
+        if "10061" in err or "refused" in low or "timed out" in low or "10060" in err:
+            mark_status_stale(folder_path, reason="upstream connection failed")
+            return {
+                "ok": False,
+                "error": (
+                    "The tidy-idy panel is no longer running on the host "
+                    "(previous session ended). Close this tab and click Tidy-Idy again."
+                ),
+                "code": "upstream-gone",
+                "upstream": base,
+            }
         return {
             "ok": False,
-            "error": f"{type(e).__name__}: {e}",
+            "error": err,
             "code": "proxy-failed",
             "upstream": base,
         }
@@ -379,6 +494,14 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
                       project_id: str | None = None) -> dict:
     """Unified status for the browser status tab (poll endpoint)."""
     st = read_project_status(folder_path) or {}
+    # Drop dead loopback URLs so the browser is not sent to a corpse.
+    live = live_tool_endpoints(folder_path)
+    if st.get("phase") in (
+            "starting", "scanning", "analyzing", "archiving", "panel-ready"
+    ) and not live.get("any_live") and (st.get("statusUrl") or st.get("panelBaseUrl")):
+        mark_status_stale(folder_path, reason="recorded ports no longer accept connections")
+        st = read_project_status(folder_path) or st
+        live = live_tool_endpoints(folder_path)
     log_ev = None
     rec = None
     if job_id:
@@ -425,9 +548,20 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
         "running": "Hygiene pass in progress…",
     }.get(phase, "Working…")
 
-    open_url = st.get("openUrl") or st.get("panelBaseUrl") or st.get("statusUrl")
+    # Only advertise URLs that still answer (or non-loopback).
+    raw_open = st.get("openUrl") or st.get("panelBaseUrl") or st.get("statusUrl")
+    open_url = None
+    if live.get("panel_live"):
+        open_url = live.get("open_url") or live.get("panel_base")
+    elif live.get("status_live"):
+        open_url = live.get("status_url")
+    elif raw_open and not is_loopback_url(raw_open):
+        open_url = raw_open
+    status_url_live = live.get("status_url") or (
+        st.get("statusUrl") if st.get("statusUrl") and not is_loopback_url(st.get("statusUrl")) else None
+    )
     proxy_open = browser_open_url(project_id, open_url) if project_id else None
-    proxy_status = browser_open_url(project_id, st.get("statusUrl")) if project_id else None
+    proxy_status = browser_open_url(project_id, status_url_live) if project_id else None
     # Progress % — prefer status.json; fall back to coarse phase map.
     progress = st.get("progress")
     if progress is None:
@@ -453,19 +587,20 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
         "message": message,
         "projectName": st.get("projectName"),
         "rootPath": st.get("rootPath") or str(Path(folder_path).resolve()),
-        "statusUrl": st.get("statusUrl"),
+        "statusUrl": status_url_live,
         "openUrl": open_url,
-        "panelBaseUrl": st.get("panelBaseUrl"),
+        "panelBaseUrl": live.get("panel_base") if live.get("panel_live") else None,
         # Same-origin paths for Tailscale / remote browsers (never 127.0.0.1).
         "proxyOpenPath": proxy_open,
         "proxyStatusPath": proxy_status,
         "loopbackOnly": bool(open_url and is_loopback_url(open_url)),
+        "upstreamLive": bool(live.get("any_live")),
         "findings": st.get("findings"),
         "runId": st.get("runId"),
         "error": st.get("error"),
         "job_id": job_id,
         "job_status": (rec or {}).get("status"),
-        "alreadyRunning": bool(st.get("alreadyRunning")),
+        "alreadyRunning": bool(st.get("alreadyRunning")) and bool(live.get("any_live")),
         "updatedAt": st.get("updatedAt"),
         "startedAt": st.get("startedAt"),
         "progress": progress,
@@ -490,24 +625,26 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
     if not root.is_dir():
         return {"ok": False, "error": f"folder not found: {root}", "code": "no-folder"}
 
-    # Second click: if the tool already has a live status/panel, do not re-dispatch.
+    # Second click: only short-circuit when the tool process is STILL listening.
+    # A stale status.json (panel-ready + dead ports) used to send remote browsers
+    # to the reverse proxy → connection refused. Probe first; if dead, restart.
     existing = read_project_status(root)
     if existing and existing.get("phase") in (
             "starting", "scanning", "analyzing", "archiving", "panel-ready"):
-        # Prefer live panel / status URLs when the prior process still holds them.
-        open_url = existing.get("openUrl") or existing.get("panelBaseUrl") or existing.get("statusUrl")
-        if open_url or existing.get("statusUrl"):
+        live = live_tool_endpoints(root)
+        if live.get("any_live"):
+            open_url = live.get("open_url") or live.get("panel_base") or live.get("status_url")
             return {
                 "ok": True,
                 "already_running": True,
                 "job_id": None,
                 "job_type": TIDY_JOB_TYPE,
                 "folder_path": str(root),
-                "status_url": existing.get("statusUrl"),
+                "status_url": live.get("status_url"),
                 "open_url": open_url,
-                "panel_base": existing.get("panelBaseUrl"),
+                "panel_base": live.get("panel_base"),
                 "proxy_open_path": browser_open_url(project_id, open_url),
-                "proxy_status_path": browser_open_url(project_id, existing.get("statusUrl")),
+                "proxy_status_path": browser_open_url(project_id, live.get("status_url")),
                 "loopback_only": bool(open_url and is_loopback_url(open_url)),
                 "phase": existing.get("phase"),
                 "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
@@ -515,6 +652,8 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
                 "contributed_archive_logic": False,
                 "contributed_panel_logic": False,
             }
+        # Recorded as in-flight / panel-ready but nothing is listening → restart.
+        mark_status_stale(root, reason="stale status.json; process gone")
 
     entry = resolve_entry()
     if entry is None:

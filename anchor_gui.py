@@ -10230,9 +10230,41 @@ def handle_tidy_idy_proxy(handler, path, body):
         body=raw_body,
     )
     if not result.get("ok") and result.get("code"):
-        code = 502 if result.get("code") == "proxy-failed" else 404
+        code = 502 if result.get("code") in ("proxy-failed", "upstream-gone", "no-upstream") else 404
         if result.get("code") == "ssrf-guard":
             code = 403
+        # Browser navigations (GET bootstrap / status) should not show raw JSON.
+        wants_html = method == "GET" and not str(sub).startswith("/api/")
+        if wants_html:
+            from html import escape as _html_esc
+            err = result.get("error") or "Tidy-Idy panel is not available."
+            html = (
+                "<!doctype html><html><head><meta charset=utf-8>"
+                "<title>Tidy-Idy — session ended</title>"
+                '<link rel="icon" href="/vendor/brand/tidy-idy-icon.jpg" type="image/jpeg"/>'
+                "<style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;"
+                "padding:2rem;line-height:1.5} .card{max-width:36rem;border:1px solid #2a2f3a;"
+                "border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}"
+                "h1{font-size:1.25rem;margin:0 0 .5rem} p{color:#9aa0a6;margin:0 0 .75rem}"
+                "code{color:#8ab4f8}</style></head><body><div class=card>"
+                "<h1>Tidy-Idy session ended</h1>"
+                f"<p>{_html_esc(err)}</p>"
+                "<p>Close this tab and click <b>Tidy-Idy</b> on the project again "
+                "to start a fresh pass (the previous panel process is no longer running).</p>"
+                f"<p><code>{_html_esc(str(result.get('code') or ''))}</code></p>"
+                "</div></body></html>"
+            )
+            try:
+                payload = html.encode("utf-8")
+                handler.send_response(code)
+                handler.send_header("Content-Type", "text/html; charset=utf-8")
+                handler.send_header("Content-Length", str(len(payload)))
+                handler.send_header("Cache-Control", "no-store")
+                handler.end_headers()
+                handler.wfile.write(payload)
+            except Exception:
+                pass
+            return
         handler._send_json(
             {"ok": False, "error": result.get("error"), "code": result.get("code")},
             code,

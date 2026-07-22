@@ -117,7 +117,7 @@ def test_proxy_ssrf_guard_refuses_non_loopback(tmp_path, monkeypatch):
     assert out["ok"] is False
 
 
-def test_status_for_folder_reads_status_json(tmp_path):
+def test_status_for_folder_reads_status_json(tmp_path, monkeypatch):
     report = tmp_path / ".tidy-idy"
     report.mkdir()
     (report / "status.json").write_text(
@@ -134,6 +134,20 @@ def test_status_for_folder_reads_status_json(tmp_path):
             "startedAt": "2026-07-22T00:00:00.000Z",
         }),
         encoding="utf-8",
+    )
+    # Pretend the status server is still listening (unit test — no real port).
+    monkeypatch.setattr(
+        tidy,
+        "live_tool_endpoints",
+        lambda _folder: {
+            "status": json.loads((report / "status.json").read_text(encoding="utf-8")),
+            "status_live": True,
+            "panel_live": False,
+            "any_live": True,
+            "status_url": "http://127.0.0.1:9/",
+            "panel_base": None,
+            "open_url": None,
+        },
     )
     out = tidy.status_for_folder(tmp_path)
     assert out["ok"] is True
@@ -159,6 +173,19 @@ def test_launch_short_circuits_live_status(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(tidy, "resolve_entry", lambda: tmp_path / "never.mjs")
+    monkeypatch.setattr(
+        tidy,
+        "live_tool_endpoints",
+        lambda _folder: {
+            "status": {},
+            "status_live": True,
+            "panel_live": False,
+            "any_live": True,
+            "status_url": "http://127.0.0.1:60890/",
+            "panel_base": None,
+            "open_url": None,
+        },
+    )
 
     def _boom(*_a, **_k):
         raise AssertionError("job_runner must not be called when a run is live")
@@ -168,3 +195,56 @@ def test_launch_short_circuits_live_status(tmp_path, monkeypatch):
     assert out["ok"] is True
     assert out["already_running"] is True
     assert out["status_url"] == "http://127.0.0.1:60890/"
+
+
+def test_launch_restarts_when_status_ports_are_dead(tmp_path, monkeypatch):
+    """Stale panel-ready + dead ports must NOT short-circuit — start a new run."""
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({
+            "phase": "panel-ready",
+            "message": "Triage Panel is ready.",
+            "statusUrl": "http://127.0.0.1:1/",
+            "panelBaseUrl": "http://127.0.0.1:1",
+            "openUrl": "http://127.0.0.1:1/bootstrap/dead",
+        }),
+        encoding="utf-8",
+    )
+    entry = tmp_path / "tidy-idy.mjs"
+    entry.write_text("// entry\n", encoding="utf-8")
+    monkeypatch.setenv(tidy.ENTRY_ENV, str(entry))
+    monkeypatch.setattr(
+        tidy,
+        "live_tool_endpoints",
+        lambda _folder: {
+            "status": {},
+            "status_live": False,
+            "panel_live": False,
+            "any_live": False,
+            "status_url": None,
+            "panel_base": None,
+            "open_url": None,
+        },
+    )
+    launched = {}
+
+    def _fake_launch(*_a, **_k):
+        launched["yes"] = True
+        return {
+            "job_id": "job-test",
+            "status": "running",
+            "log_path": str(tmp_path / "x.log"),
+        }
+
+    monkeypatch.setattr(tidy.job_runner, "launch_guarded", _fake_launch)
+    monkeypatch.setattr(tidy, "wait_for_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(tidy.job_runner, "_update_record", lambda *_a, **_k: None)
+    out = tidy.launch_tidy_idy("proj", tmp_path, wait_for_status_s=0.1)
+    assert launched.get("yes") is True
+    assert out["ok"] is True
+    assert out.get("already_running") is not True
+
+
+def test_probe_loopback_alive_false_for_closed_port():
+    assert tidy.probe_loopback_alive("http://127.0.0.1:1/api/health", timeout_s=0.2) is False
