@@ -1228,10 +1228,30 @@ _PROACTIVE_SUMMARY_ENABLED = (
 
 _zombie_hunter_started = False
 _ZH_NODE_PORT = 48484
-# Optional env path to the System-Wide Sentinel Node server.js. Never hardcode
-# a host build tree (clean-scan / stranger-machine). Unset → warm-start skipped;
-# the pure-Python radar report route still works without it.
-_ZH_NODE_SERVER_PATH = (os.environ.get("ANCHOR_ZH_NODE_SERVER") or "").strip()
+# System-Wide Sentinel Node server.js (multi-engine Burn Ledger GUI).
+# Prefer ANCHOR_ZH_NODE_SERVER when set; otherwise resolve the canonical Skill
+# Foundry path (or ~/.claude/skills junction). Unset/missing → Python fallback
+# report only (tests + hosts without the Node skill).
+def _resolve_zh_node_server_path():
+    env = (os.environ.get("ANCHOR_ZH_NODE_SERVER") or "").strip()
+    if env and os.path.isfile(env):
+        return env
+    candidates = [
+        os.path.join("C:\\dev", "Skill Foundry", "skills", "zombie-hunter", "src", "server.js"),
+        os.path.join(os.path.expanduser("~"), ".claude", "skills", "zombie-hunter", "src", "server.js"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Skill Foundry",
+                     "skills", "zombie-hunter", "src", "server.js"),
+    ]
+    for c in candidates:
+        try:
+            if c and os.path.isfile(c):
+                return os.path.abspath(c)
+        except OSError:
+            continue
+    return env  # may be empty — warm-start then no-ops honestly
+
+
+_ZH_NODE_SERVER_PATH = _resolve_zh_node_server_path()
 _zh_node_start_lock = threading.Lock()
 
 
@@ -14240,11 +14260,31 @@ def handle_zombie_hunter_report(handler, path, body):
     # -> a 500 on every page load. (rearch W8: the shadowing class is
     # structurally eliminated — route_import_scan proves it stays 0.)
     #
-    # Contract (tests + dashboard): this route serves the pure-Python
-    # Cached Sweep Report / Live Process Query Fallback HTML. The Node
-    # System-Wide Sentinel on :48484 is warmed at boot separately and is
-    # NOT the primary body of this route (a prior short-circuit proxy
-    # made the report path dead and broke the frozen UX tests).
+    # Operator path (2026-07-23 restore): prefer the Node System-Wide
+    # Sentinel GUI on :48484 (multi-engine Burn Ledger, freeze/kill,
+    # auto-refresh). That is the product radar. Pure-Python Cached Sweep
+    # Report remains the FALLBACK when Node is unavailable (tests, cold
+    # hosts, missing skill path). Query ?legacy=1 forces the Python report.
+    try:
+        from urllib.parse import urlparse, parse_qs
+        _qs = parse_qs(urlparse(getattr(handler, "path", "") or "").query or "")
+        _force_legacy = str((_qs.get("legacy") or ["0"])[0]).strip() in ("1", "true", "yes")
+    except Exception:
+        _force_legacy = False
+    # Never auto-spawn Node under pytest (frozen UX tests assert the Python HTML).
+    _in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if not _force_legacy and not _in_pytest:
+        try:
+            if _ensure_zh_node_server(wait_s=10.0) and _zh_node_is_up(timeout=1.5):
+                # Redirect to the live Node radar (self-contained HTML+API on :48484).
+                handler.send_response(302)
+                handler.send_header("Location", f"{_zh_node_base()}/")
+                handler.send_header("Cache-Control", "no-store")
+                handler.end_headers()
+                return
+        except Exception as _zh_exc:
+            _logger.warning("zombie_hunter_report: Node radar unavailable (%s) — Python fallback",
+                            _zh_exc)
 
     # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
     report_path = zombie_hunter._last_report_path()

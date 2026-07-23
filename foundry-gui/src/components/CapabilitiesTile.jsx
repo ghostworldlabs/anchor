@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Markdown from './Markdown.jsx';
 
 export default function CapabilitiesTile({ selectedSkill }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -36,7 +37,11 @@ export default function CapabilitiesTile({ selectedSkill }) {
           </div>
           <div>
             <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400 group-hover:text-white font-display">2. Core Capabilities</h3>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Documented sections of SKILL.md — click a row for detail</p>
+            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+              {selectedSkill?.humanCard
+                ? 'HUMAN.md sections — click a row for detail'
+                : 'Documented sections — click a row for detail'}
+            </p>
           </div>
         </div>
         <button
@@ -82,7 +87,7 @@ export default function CapabilitiesTile({ selectedSkill }) {
                     {/* Detail (revealed on click) */}
                     {open && hasDetail && (
                       <div className="px-4 pb-4 pt-1 border-t border-[#16161A]">
-                        <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-400 font-mono">{cap.detail}</pre>
+                        <Markdown source={cap.detail} className="text-xs" />
                       </div>
                     )}
                   </li>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Markdown from './Markdown.jsx';
 
 export default function NorthStarTile({ selectedSkill, globalNorthStar, onEditNorthStar }) {
   const [isExpanded, setIsExpanded] = useState(true);
@@ -6,7 +7,11 @@ export default function NorthStarTile({ selectedSkill, globalNorthStar, onEditNo
   const description = selectedSkill
     ? (selectedSkill.northStar || selectedSkill.description || globalNorthStar || '')
     : (globalNorthStar || '');
-  const filePath = selectedSkill ? selectedSkill.file_path : 'NORTH-STAR.md';
+  // Prefer HUMAN.md path for people; fall back to SKILL.md
+  const filePath = selectedSkill
+    ? (selectedSkill.human_path || selectedSkill.file_path || 'HUMAN.md')
+    : 'NORTH-STAR.md';
+  const isHumanCard = Boolean(selectedSkill?.humanCard || selectedSkill?.human_path);
 
   return (
     <div className={`panel expandable-tile ${isExpanded ? 'expanded' : ''} shrink-0 transition-all duration-300`} id="tile-ns">
@@ -23,7 +28,9 @@ export default function NorthStarTile({ selectedSkill, globalNorthStar, onEditNo
           </div>
           <div>
             <h3 className="text-sm font-bold uppercase tracking-widest text-[#00F0FF] font-display">1. North Star & Identity</h3>
-            <p className="text-[10px] text-slate-500 font-mono mt-0.5">Objective directive & file path</p>
+            <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+              {isHumanCard ? 'Human skill card (HUMAN.md) — rendered for people' : 'Objective directive & file path'}
+            </p>
           </div>
         </div>
         <button 
@@ -40,10 +47,10 @@ export default function NorthStarTile({ selectedSkill, globalNorthStar, onEditNo
       {/* Expanded Content */}
       {isExpanded && (
         <div className="px-6 pb-6 pt-4 border-t border-[#16161A] bg-black/40">
-          <div className="rounded-xl bg-[#050507] p-5 border border-[#16161A]/60">
-            <p className="text-sm leading-relaxed text-slate-300 font-light whitespace-pre-wrap">
-              {description || 'No North Star documented for this skill yet.'}
-            </p>
+          <div className="rounded-xl bg-[#050507] p-5 border border-[#16161A]/60 max-h-[420px] overflow-y-auto">
+            {description
+              ? <Markdown source={description} />
+              : <p className="text-sm text-slate-500">No North Star documented for this skill yet.</p>}
           </div>
 
           <div className="mt-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
