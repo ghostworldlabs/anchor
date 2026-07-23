@@ -627,6 +627,84 @@ def _get(session_id):
 class SpawnCapReached(Exception):
     pass
 
+
+def prune_dead_live() -> int:
+    """Drop PTY table entries whose children are no longer alive. Returns count removed."""
+    dead = []
+    with _TABLE_LOCK:
+        for sid, child in list(_LIVE.items()):
+            try:
+                alive = bool(child.is_alive())
+            except Exception:
+                alive = False
+            if not alive:
+                dead.append(sid)
+        for sid in dead:
+            _LIVE.pop(sid, None)
+    return len(dead)
+
+
+def count_live_for_spawn_cap() -> tuple:
+    """Return ``(total, live_ptys, live_jobs, cap)`` after pruning dead entries.
+
+    Uses unique OS PIDs for PTY children so a multi-pane session does not burn
+    the whole budget. Jobs are counted only when :func:`job_runner._holder_is_active`.
+    """
+    import job_runner
+    prune_dead_live()
+    try:
+        job_runner.prune_dead_live()
+    except Exception:
+        pass
+    pids = set()
+    live_ptys = 0
+    with _TABLE_LOCK:
+        for child in _LIVE.values():
+            try:
+                if not child.is_alive():
+                    continue
+            except Exception:
+                continue
+            live_ptys += 1
+            pid = getattr(child, "pid", None)
+            if pid:
+                try:
+                    pids.add(int(pid))
+                except (TypeError, ValueError):
+                    pass
+    live_jobs = 0
+    job_pids = set()
+    for jid in list(job_runner._LIVE.keys()):
+        if not job_runner._holder_is_active(jid):
+            continue
+        live_jobs += 1
+        try:
+            rec = job_runner.load_record(jid) or {}
+            pid = rec.get("pid")
+            if pid:
+                job_pids.add(int(pid))
+        except Exception:
+            pass
+    # Unique process identities (PTYs ∪ jobs). Avoid double-count when a job
+    # and a PTY share a process identity.
+    unique = len(pids | job_pids)
+    # Fallback when PIDs unavailable: sessions + jobs (legacy).
+    if unique == 0:
+        total = live_ptys + live_jobs
+    else:
+        # Count unique PIDs, but never under-count sessions that lack PIDs.
+        no_pid_ptys = max(0, live_ptys - len(pids))
+        no_pid_jobs = max(0, live_jobs - len(job_pids))
+        total = unique + no_pid_ptys + no_pid_jobs
+    try:
+        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 32))
+    except ValueError:
+        cap = 32
+    if cap < 1:
+        cap = 32
+    return total, live_ptys, live_jobs, cap
+
+
 def start(cmd, cwd=None, env=None):
     """Start a PTY child for ``cmd`` and return its ``session_id``.
 
@@ -635,19 +713,14 @@ def start(cmd, cwd=None, env=None):
     """
     import job_runner
     import os
-    cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 16))
-    # Count only GENUINELY-LIVE entries. Dead PTY children and completed
-    # job_runner jobs linger in their _LIVE tables (pty entries are removed only
-    # on kill(); job entries only on a test reset), so a raw len() count
-    # permanently locks out EVERY new session after a handful of cumulative
-    # runs — until a process restart. Filtering to live means finished work
-    # frees budget immediately.
-    live_ptys = sum(1 for c in _LIVE.values() if c.is_alive())
-    live_jobs = sum(1 for jid in list(job_runner._LIVE.keys())
-                    if job_runner._holder_is_active(jid))
-    total_live = live_ptys + live_jobs
+    total_live, live_ptys, live_jobs, cap = count_live_for_spawn_cap()
     if total_live >= cap:
-        raise SpawnCapReached(f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
+        raise SpawnCapReached(
+            f"Global sub-agent spawn cap reached ({total_live}/{cap} "
+            f"— {live_ptys} terminals + {live_jobs} jobs). "
+            f"Close idle Anchor terminals, let jobs finish, or restart Anchor. "
+            f"Override with ANCHOR_SPAWN_CAP."
+        )
 
     # ── zombie-hunter Phase 1: capture process identity at spawn ───────────
     # Mint a per-session crypt token and inject it into the child's environment
@@ -662,6 +735,15 @@ def start(cmd, cwd=None, env=None):
         env = dict(os.environ)
     else:
         env = dict(env)
+    # Inject Anchor model-family prefs so interactive CLI sessions (Claude Code /
+    # AGY / Grok Build) inherit coding/review family for skill seat resolution.
+    # Pre-set env wins (setdefault). Best-effort — never block a PTY start.
+    try:
+        import anchor_settings as _aset
+        for _k, _v in _aset.export_env_overrides().items():
+            env.setdefault(_k, _v)
+    except Exception:
+        pass
     env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
 
     backend = select_backend()

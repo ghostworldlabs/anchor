@@ -1545,6 +1545,27 @@ def _holder_is_active(job_id: str) -> bool:
     return rec.get("status") not in TERMINAL_STATUSES
 
 
+def prune_dead_live() -> int:
+    """Drop ``_LIVE`` entries whose durable status is terminal / inactive.
+
+    Finished jobs used to linger in ``_LIVE`` forever (only cleared on test
+    reset), which inflated the global spawn-cap census and blocked Tidy-Idy
+    and new terminals after a long Anchor uptime. Returns count removed.
+    """
+    dead = []
+    with _LIVE_LOCK:
+        keys = list(_LIVE.keys())
+    for jid in keys:
+        if not _holder_is_active(jid):
+            dead.append(jid)
+    if not dead:
+        return 0
+    with _LIVE_LOCK:
+        for jid in dead:
+            _LIVE.pop(jid, None)
+    return len(dead)
+
+
 def is_gate_blocked(job_id: str) -> bool:
     """True when ``job_id`` is parked on an AskUserQuestion gate.
 
@@ -1648,19 +1669,19 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     """
     folder_path = str(folder_path)
     with _paths.WRITE_LOCK:
-        # 0) Global spawn cap.
+        # 0) Global spawn cap (shared with pty_manager.start).
         import pty_manager
-        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 16))
-        # Count only GENUINELY-LIVE entries. Finished jobs linger in _LIVE (only
-        # cleared on a test reset) and dead PTY children linger in pty_manager
-        # _LIVE, so a raw len() count permanently locks out new spawns after a
-        # few cumulative runs until a restart. _holder_is_active is already used
-        # under this same WRITE_LOCK by _gc_lane_slot, so it is safe here.
-        live_jobs = sum(1 for jid in list(_LIVE.keys()) if _holder_is_active(jid))
-        live_ptys = sum(1 for c in pty_manager._LIVE.values() if c.is_alive())
-        total_live = live_jobs + live_ptys
+        total_live, live_ptys, live_jobs, cap = pty_manager.count_live_for_spawn_cap()
         if total_live >= cap:
-            raise LaneBusyError("spawn-cap-reached", message=f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
+            raise LaneBusyError(
+                "spawn-cap-reached",
+                message=(
+                    f"Global sub-agent spawn cap reached ({total_live}/{cap} "
+                    f"— {live_ptys} terminals + {live_jobs} jobs). "
+                    f"Close idle Anchor terminals, let jobs finish, or restart Anchor. "
+                    f"Override with ANCHOR_SPAWN_CAP."
+                ),
+            )
 
         # 1) Same-lane within-project serialization.
         _gc_lane_slot(project_id, lane)

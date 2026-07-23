@@ -68,6 +68,9 @@ DEFAULT_RUNNER_CMD = "claude -p --output-format stream-json"
 #: ALWAYS wins, regardless of backend, so the mock runner drives every test.
 BACKEND_CLAUDE = "claude"
 BACKEND_GEMINI = "gemini"
+BACKEND_GROK = "grok"
+#: Jobs keep Claude as the default backend; interactive terminals read
+#: ``anchor_settings.get_default_cli()`` (default ``grok``) instead.
 DEFAULT_BACKEND = BACKEND_CLAUDE
 
 #: Env var overriding the Gemini runner command. When unset,
@@ -398,6 +401,15 @@ def build_backend_argv(backend, prompt, output_dir, gated, permission_mode=None)
     per-backend builder. ``gated`` is falsy for research, ``"plan"``/``"build"``
     (truthy) for the gated lanes (claude only — gemini is research-only).
     """
+    if backend == BACKEND_GROK:
+        # Interactive Grok terminals are supported via terminal_session; headless
+        # job_runner has no tool-capable Grok argv builder yet. Refuse honestly
+        # rather than silently launching Claude under a grok backend label.
+        raise ValueError(
+            "job_runner does not support backend='grok' for headless jobs yet; "
+            "use an interactive Grok terminal (terminal_session) or set "
+            "coding_family/review_family for trio seat routing instead"
+        )
     if backend == BACKEND_GEMINI:
         return _build_gemini_argv(prompt, output_dir, gated, permission_mode=permission_mode)
     return _build_claude_argv(prompt, output_dir, gated, permission_mode=permission_mode)
@@ -519,7 +531,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
            prompt=None, output_dir=None, gated=False,
            permission_mode=None, project_id=None, folder_path=None,
-           command=None) -> dict:
+           command=None, kill_on_job_close: bool = True) -> dict:
     """Launch a server-owned job. Returns the job record.
 
     ``command`` (foundry-v2 Wave 7 — the control-plane dispatch seam): when
@@ -588,6 +600,15 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     full_env = dict(os.environ)
     if backend == BACKEND_GEMINI:
         full_env["TRIO_DRIVER"] = "gemini-cli-native"
+    # Propagate Anchor model-family prefs so foundry/trio seats (and any agent
+    # reading CODING_FAMILY / REVIEW_FAMILY) honor the dashboard knobs.
+    # Pre-set env always wins over settings (caller / setx override).
+    try:
+        import anchor_settings as _aset
+        for _k, _v in _aset.export_env_overrides().items():
+            full_env.setdefault(_k, _v)
+    except Exception:
+        pass
     if env:
         full_env.update(env)
     
@@ -630,13 +651,19 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     with _LIVE_LOCK:
         _LIVE[job_id] = live
 
-    # Wrap the subprocess in a Job Object with KILL_ON_JOB_CLOSE (Windows only)
-    if os.name == "nt":
+    # Wrap the subprocess in a Job Object with KILL_ON_JOB_CLOSE (Windows only).
+    # OPT-OUT: long-lived tool panels (e.g. tidy-idy Triage Panel) must survive
+    # an Anchor/NSSM restart — KILL_ON_JOB_CLOSE would murder them the moment
+    # the service process exits (observed 2026-07-22: every restart interrupted
+    # mid-debate tidy jobs; remote Tailscale clients froze on corpse status).
+    if os.name == "nt" and kill_on_job_close:
         try:
             import proc_probe
             live._h_job = proc_probe.attach_to_job_object(proc.pid)
         except Exception:
             live._h_job = None
+    else:
+        live._h_job = None
 
     # For a gated lane, deliver the initial prompt as a stream-json user turn on
     # stdin and register the (kept-open) pipe with the gate adapter so a later
@@ -1518,6 +1545,27 @@ def _holder_is_active(job_id: str) -> bool:
     return rec.get("status") not in TERMINAL_STATUSES
 
 
+def prune_dead_live() -> int:
+    """Drop ``_LIVE`` entries whose durable status is terminal / inactive.
+
+    Finished jobs used to linger in ``_LIVE`` forever (only cleared on test
+    reset), which inflated the global spawn-cap census and blocked Tidy-Idy
+    and new terminals after a long Anchor uptime. Returns count removed.
+    """
+    dead = []
+    with _LIVE_LOCK:
+        keys = list(_LIVE.keys())
+    for jid in keys:
+        if not _holder_is_active(jid):
+            dead.append(jid)
+    if not dead:
+        return 0
+    with _LIVE_LOCK:
+        for jid in dead:
+            _LIVE.pop(jid, None)
+    return len(dead)
+
+
 def is_gate_blocked(job_id: str) -> bool:
     """True when ``job_id`` is parked on an AskUserQuestion gate.
 
@@ -1593,7 +1641,8 @@ def folder_build_holder(folder_path: str):
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                    extra_args=None, env=None, job_id: str = None,
                    backend=DEFAULT_BACKEND, prompt=None, output_dir=None,
-                   gated=False, permission_mode=None, command=None) -> dict:
+                   gated=False, permission_mode=None, command=None,
+                   kill_on_job_close: bool = True) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -1620,19 +1669,19 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
     """
     folder_path = str(folder_path)
     with _paths.WRITE_LOCK:
-        # 0) Global spawn cap.
+        # 0) Global spawn cap (shared with pty_manager.start).
         import pty_manager
-        cap = int(os.environ.get("ANCHOR_SPAWN_CAP", 16))
-        # Count only GENUINELY-LIVE entries. Finished jobs linger in _LIVE (only
-        # cleared on a test reset) and dead PTY children linger in pty_manager
-        # _LIVE, so a raw len() count permanently locks out new spawns after a
-        # few cumulative runs until a restart. _holder_is_active is already used
-        # under this same WRITE_LOCK by _gc_lane_slot, so it is safe here.
-        live_jobs = sum(1 for jid in list(_LIVE.keys()) if _holder_is_active(jid))
-        live_ptys = sum(1 for c in pty_manager._LIVE.values() if c.is_alive())
-        total_live = live_jobs + live_ptys
+        total_live, live_ptys, live_jobs, cap = pty_manager.count_live_for_spawn_cap()
         if total_live >= cap:
-            raise LaneBusyError("spawn-cap-reached", message=f"Global sub-agent spawn cap reached ({total_live}/{cap}).")
+            raise LaneBusyError(
+                "spawn-cap-reached",
+                message=(
+                    f"Global sub-agent spawn cap reached ({total_live}/{cap} "
+                    f"— {live_ptys} terminals + {live_jobs} jobs). "
+                    f"Close idle Anchor terminals, let jobs finish, or restart Anchor. "
+                    f"Override with ANCHOR_SPAWN_CAP."
+                ),
+            )
 
         # 1) Same-lane within-project serialization.
         _gc_lane_slot(project_id, lane)
@@ -1656,7 +1705,7 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                      output_dir=output_dir, gated=gated,
                      permission_mode=permission_mode,
                      project_id=project_id, folder_path=folder_path,
-                     command=command)
+                     command=command, kill_on_job_close=kill_on_job_close)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:
