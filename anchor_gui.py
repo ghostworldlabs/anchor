@@ -14240,6 +14240,191 @@ def handle_gandalf_status_all(handler, path, body):
     handler._send_json({"ok": True, "statuses": statuses})
 
 
+# Public same-origin mount for the ZH Node radar (Tailscale / remote safe).
+_ZH_PROXY_PREFIX = "/api/rnd/zombie_hunter_proxy"
+
+
+def _zh_extract_token(handler, qs=None):
+    """Token from query or X-Anchor-Token (dashboard convention)."""
+    try:
+        if qs is None:
+            from urllib.parse import urlparse, parse_qs
+            qs = parse_qs(urlparse(getattr(handler, "path", "") or "").query or "")
+        t = (qs.get("token") or [""])[0]
+        if t:
+            return str(t).strip()
+    except Exception:
+        pass
+    try:
+        return (handler.headers.get("X-Anchor-Token")
+                or handler.headers.get("x-anchor-token") or "").strip()
+    except Exception:
+        return ""
+
+
+def _zh_proxy_to_node(method, upstream_path, query="", headers=None, body=None, timeout=30):
+    """Server-side fetch to 127.0.0.1:48484. Returns dict ok/status/headers/body."""
+    import urllib.request
+    import urllib.error
+    q = f"?{query}" if query else ""
+    url = f"{_zh_node_base()}{upstream_path}{q}"
+    req_headers = dict(headers or {})
+    # Never forward Host of the remote client
+    req_headers.pop("Host", None)
+    req_headers.pop("host", None)
+    data = body if body is not None and method.upper() not in ("GET", "HEAD") else None
+    req = urllib.request.Request(url, data=data, headers=req_headers, method=method.upper())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            return {
+                "ok": True,
+                "status": getattr(resp, "status", 200) or 200,
+                "headers": {k: v for k, v in resp.headers.items()},
+                "body": raw,
+                "content_type": resp.headers.get("Content-Type") or "application/octet-stream",
+            }
+    except urllib.error.HTTPError as e:
+        try:
+            raw = e.read()
+        except Exception:
+            raw = b""
+        return {
+            "ok": False,
+            "status": int(getattr(e, "code", 502) or 502),
+            "headers": {},
+            "body": raw,
+            "content_type": e.headers.get("Content-Type") if e.headers else "text/plain",
+            "error": str(e),
+        }
+    except Exception as e:
+        return {
+            "ok": False,
+            "status": 502,
+            "headers": {},
+            "body": b"",
+            "content_type": "text/plain",
+            "error": str(e),
+        }
+
+
+def _zh_rewrite_html_for_proxy(html_text, token=""):
+    """Rewrite Node radar HTML so browser stays on Anchor origin (Tailscale-safe)."""
+    import re as _re
+    text = html_text
+    # Absolute loopback API → same-origin proxy mount
+    text = _re.sub(
+        r"https?://127\.0\.0\.1:\d+",
+        _ZH_PROXY_PREFIX,
+        text,
+    )
+    text = _re.sub(
+        r"const API = ['\"][^'\"]+['\"]",
+        f"const API = '{_ZH_PROXY_PREFIX}'",
+        text,
+        count=1,
+    )
+    if token:
+        # Escape for JS single-quoted string
+        safe = (
+            str(token)
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace("\n", "")
+            .replace("\r", "")
+        )
+        text = text.replace(
+            "var ANCHOR_TOKEN='__ANCHOR_TOKEN__'",
+            f"var ANCHOR_TOKEN='{safe}'",
+        )
+    return text
+
+
+def handle_zombie_hunter_proxy(handler, path, body):
+    """GET|POST /api/rnd/zombie_hunter_proxy/* — reverse-proxy to ZH Node on loopback.
+
+    Same pattern as tidy_idy_proxy: browser stays same-origin with Anchor (works
+    over Tailscale); Anchor fetches 127.0.0.1:48484 server-side.
+    """
+    if not handler._term_token_ok():
+        handler._send_json({"ok": False, "error": "unauthorized"}, 401)
+        return
+    from urllib.parse import urlparse
+
+    parsed = urlparse(path)
+    if not parsed.path.startswith(_ZH_PROXY_PREFIX):
+        handler._send_json({"ok": False, "error": "bad proxy path"}, 400)
+        return
+    rest = parsed.path[len(_ZH_PROXY_PREFIX):] or "/"
+    if not rest.startswith("/"):
+        rest = "/" + rest
+    # Only allow path chars that the Node radar actually serves
+    if ".." in rest or "\\" in rest:
+        handler._send_json({"ok": False, "error": "bad path"}, 400)
+        return
+
+    _in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+    if not _in_pytest:
+        try:
+            _ensure_zh_node_server(wait_s=8.0)
+        except Exception:
+            pass
+    if not _zh_node_is_up(timeout=1.5):
+        handler._send_json(
+            {"ok": False, "error": "Zombie Hunter Node radar is not running on the Anchor host",
+             "code": "zh-upstream-down"},
+            502,
+        )
+        return
+
+    method = (getattr(handler, "command", None) or "GET").upper()
+    raw_body = None
+    if method in ("POST", "PUT", "PATCH") and body is not None:
+        if isinstance(body, (bytes, bytearray)):
+            raw_body = bytes(body)
+        else:
+            raw_body = json.dumps(body).encode("utf-8")
+
+    fwd = {"Accept": handler.headers.get("Accept") or "*/*"}
+    ctype = handler.headers.get("Content-Type")
+    if ctype:
+        fwd["Content-Type"] = ctype
+    elif raw_body is not None:
+        fwd["Content-Type"] = "application/json"
+
+    result = _zh_proxy_to_node(
+        method, rest, query=parsed.query or "", headers=fwd, body=raw_body,
+        timeout=60 if rest.startswith("/api/sweep") else 30,
+    )
+    status = int(result.get("status") or 502)
+    payload = result.get("body") or b""
+    ctype_out = result.get("content_type") or "application/octet-stream"
+
+    # Rewrite HTML so assets/API stay on the proxy
+    if isinstance(payload, (bytes, bytearray)) and "text/html" in (ctype_out or ""):
+        try:
+            token = _zh_extract_token(handler)
+            text = payload.decode("utf-8", errors="replace")
+            text = _zh_rewrite_html_for_proxy(text, token=token)
+            payload = text.encode("utf-8")
+            ctype_out = "text/html; charset=utf-8"
+        except Exception as e:
+            _logger.warning("zh_proxy: HTML rewrite failed: %s", e)
+
+    try:
+        handler.send_response(status)
+        handler.send_header("Content-Type", ctype_out)
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.send_header("Cache-Control", "no-store")
+        # CORS not needed same-origin; allow for belt-and-suspenders
+        handler.send_header("Access-Control-Allow-Origin", "*")
+        handler.end_headers()
+        if payload:
+            handler.wfile.write(payload)
+    except Exception as e:
+        _logger.warning("zh_proxy: write failed: %s", e)
+
+
 def handle_zombie_hunter_report(handler, path, body):
     # Auth gate (defense-in-depth): the radar report exposes process
     # metadata (PIDs / session ids). Token-gated like the other
@@ -14260,25 +14445,28 @@ def handle_zombie_hunter_report(handler, path, body):
     # -> a 500 on every page load. (rearch W8: the shadowing class is
     # structurally eliminated — route_import_scan proves it stays 0.)
     #
-    # Operator path (2026-07-23 restore): prefer the Node System-Wide
-    # Sentinel GUI on :48484 (multi-engine Burn Ledger, freeze/kill,
-    # auto-refresh). That is the product radar. Pure-Python Cached Sweep
-    # Report remains the FALLBACK when Node is unavailable (tests, cold
-    # hosts, missing skill path). Query ?legacy=1 forces the Python report.
+    # Operator path: prefer Node multi-engine radar, served via SAME-ORIGIN
+    # reverse proxy (works over Tailscale). Never redirect the browser to
+    # 127.0.0.1 — that is the host machine, not the remote client.
+    # Pure-Python Cached Sweep Report is FALLBACK when Node is down.
+    # Query ?legacy=1 forces the Python report.
     try:
         from urllib.parse import urlparse, parse_qs
         _qs = parse_qs(urlparse(getattr(handler, "path", "") or "").query or "")
         _force_legacy = str((_qs.get("legacy") or ["0"])[0]).strip() in ("1", "true", "yes")
+        _tok = _zh_extract_token(handler, _qs)
     except Exception:
         _force_legacy = False
+        _tok = ""
     # Never auto-spawn Node under pytest (frozen UX tests assert the Python HTML).
     _in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
     if not _force_legacy and not _in_pytest:
         try:
             if _ensure_zh_node_server(wait_s=10.0) and _zh_node_is_up(timeout=1.5):
-                # Redirect to the live Node radar (self-contained HTML+API on :48484).
+                # Same-origin proxy to Node HTML (Tailscale-safe).
+                q = f"?token={url_quote(_tok)}" if _tok else ""
                 handler.send_response(302)
-                handler.send_header("Location", f"{_zh_node_base()}/")
+                handler.send_header("Location", f"{_ZH_PROXY_PREFIX}/{q}")
                 handler.send_header("Cache-Control", "no-store")
                 handler.end_headers()
                 return
@@ -15772,6 +15960,7 @@ _MIGRATED_HANDLERS = {
     "handle_gandalf_status": handle_gandalf_status,
     "handle_gandalf_status_all": handle_gandalf_status_all,
     "handle_zombie_hunter_report": handle_zombie_hunter_report,
+    "handle_zombie_hunter_proxy": handle_zombie_hunter_proxy,
     "handle_zombie_terminal": handle_zombie_terminal,
     "handle_board_html": handle_board_html,
     "handle_handoff_proposal": handle_handoff_proposal,

@@ -213,6 +213,11 @@ ROUTES = [
        handler="handle_zombie_spenders", migrated=True),
     _r("GET", "/api/rnd/zombie_hunter_report", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_zombie_hunter_report", migrated=True),
+    # Same-origin reverse proxy to ZH Node radar (Tailscale / remote safe)
+    _r("GET", "/api/rnd/zombie_hunter_proxy", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_zombie_hunter_proxy", migrated=True),
+    _r("POST", "/api/rnd/zombie_hunter_proxy", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_zombie_hunter_proxy", migrated=True),
     # Reaper control plane (token-authed; safe-to-arm build) — status read + the
     # arm/advance/disarm mutations. Sensitive control surface: token, never open.
     _r("GET", "/api/rnd/reaper_status", AUTH_TOKEN, match=MATCH_PREFIX,
