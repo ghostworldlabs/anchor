@@ -147,6 +147,31 @@ def _parse_skill_md(text):
     return {"description": description, "body": body}
 
 
+def _parse_human_md(text):
+    """Parse HUMAN.md (people-first skill card) into one-sentence + body.
+
+    Prefer ``**One sentence:** …`` then first non-heading line. Used for
+    human-facing Foundry UI surfaces; agent SKILL.md stays the protocol source.
+    """
+    if not text:
+        return {"oneSentence": "", "body": ""}
+    body = str(text).strip()
+    one = ""
+    m = re.search(r"\*\*One sentence:\*\*\s*(.+?)(?:\r?\n|$)", body, re.IGNORECASE)
+    if not m:
+        m = re.search(r"^One sentence:\s*(.+?)(?:\r?\n|$)", body, re.IGNORECASE | re.MULTILINE)
+    if m:
+        one = re.sub(r"\s+", " ", m.group(1).strip())
+    if not one:
+        for line in re.split(r"\r?\n", body):
+            t = line.strip()
+            if not t or t.startswith("#"):
+                continue
+            one = re.sub(r"^\*\*|\*\*$", "", t).strip()
+            break
+    return {"oneSentence": one, "body": body}
+
+
 def _extract_sections(body):
     """Top-level ``## `` section titles from the SKILL.md body."""
     if not body:
@@ -261,27 +286,42 @@ def _load_manifest():
 
 def build_skills():
     """The full real ``/api/skills`` payload from the manifest + each skill's
-    files (SKILL.md sections/description + journal timeline + map edges)."""
+    files. Human-facing ``description`` / ``northStar`` prefer HUMAN.md when
+    present; SKILL.md remains agent protocol (agentDescription + sections)."""
     out = []
     for entry in _load_manifest():
         skill_dir = _resolve_source(entry.get("source"))
         skill_md = _read_text_safe(os.path.join(skill_dir, "SKILL.md")) if skill_dir else None
+        human_md = _read_text_safe(os.path.join(skill_dir, "HUMAN.md")) if skill_dir else None
         parsed = _parse_skill_md(skill_md)
-        description, body = parsed["description"], parsed["body"]
+        agent_description, body = parsed["description"], parsed["body"]
+        human = _parse_human_md(human_md)
+        description = human["oneSentence"] or agent_description or _first_paragraph(body)
+        north_star = (human["body"][:4000] if human["body"]
+                      else (agent_description or _first_paragraph(body)))
+        human_sections = _extract_sections(human["body"]) if human["body"] else []
+        agent_sections = _extract_sections(body)
+        human_details = _extract_section_details(human["body"]) if human["body"] else []
+        agent_details = _extract_section_details(body)
         timeline = _journal_events(skill_dir) if skill_dir else []
         edges = entry.get("edges") if isinstance(entry.get("edges"), list) else []
+        src = entry.get("source") or ""
         out.append({
             "ref": entry.get("ref", ""),
             "name": entry.get("name", ""),
-            "source": entry.get("source", ""),
+            "source": src,
             "status": entry.get("status", ""),
             "tier": entry.get("tier", ""),
             "version": entry.get("version", ""),
             "description": description,
-            "northStar": description or _first_paragraph(body),
-            "file_path": (entry.get("source") + "/SKILL.md") if entry.get("source") else "",
-            "capabilities": _extract_sections(body),
-            "capabilitySections": _extract_section_details(body),
+            "agentDescription": agent_description or "",
+            "humanCard": bool(human_md),
+            "humanOneSentence": human["oneSentence"] or "",
+            "northStar": north_star,
+            "file_path": (src + "/SKILL.md") if src else "",
+            "human_path": (src + "/HUMAN.md") if (src and human_md) else "",
+            "capabilities": human_sections if human_sections else agent_sections,
+            "capabilitySections": human_details if human_details else agent_details,
             "dependencies": [d for d in (
                 re.sub(r"^skill:", "", str(e.get("to", ""))) for e in edges) if d],
             "edges": edges,

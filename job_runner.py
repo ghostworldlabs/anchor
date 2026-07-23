@@ -531,7 +531,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
            job_id: str = None, backend=DEFAULT_BACKEND,
            prompt=None, output_dir=None, gated=False,
            permission_mode=None, project_id=None, folder_path=None,
-           command=None) -> dict:
+           command=None, kill_on_job_close: bool = True) -> dict:
     """Launch a server-owned job. Returns the job record.
 
     ``command`` (foundry-v2 Wave 7 — the control-plane dispatch seam): when
@@ -651,13 +651,19 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     with _LIVE_LOCK:
         _LIVE[job_id] = live
 
-    # Wrap the subprocess in a Job Object with KILL_ON_JOB_CLOSE (Windows only)
-    if os.name == "nt":
+    # Wrap the subprocess in a Job Object with KILL_ON_JOB_CLOSE (Windows only).
+    # OPT-OUT: long-lived tool panels (e.g. tidy-idy Triage Panel) must survive
+    # an Anchor/NSSM restart — KILL_ON_JOB_CLOSE would murder them the moment
+    # the service process exits (observed 2026-07-22: every restart interrupted
+    # mid-debate tidy jobs; remote Tailscale clients froze on corpse status).
+    if os.name == "nt" and kill_on_job_close:
         try:
             import proc_probe
             live._h_job = proc_probe.attach_to_job_object(proc.pid)
         except Exception:
             live._h_job = None
+    else:
+        live._h_job = None
 
     # For a gated lane, deliver the initial prompt as a stream-json user turn on
     # stdin and register the (kept-open) pipe with the gate adapter so a later
@@ -1614,7 +1620,8 @@ def folder_build_holder(folder_path: str):
 def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                    extra_args=None, env=None, job_id: str = None,
                    backend=DEFAULT_BACKEND, prompt=None, output_dir=None,
-                   gated=False, permission_mode=None, command=None) -> dict:
+                   gated=False, permission_mode=None, command=None,
+                   kill_on_job_close: bool = True) -> dict:
     """Launch a job under the Wave-6 concurrency policy.
 
     Policy (frozen design — MASTER-PLAN "Lanes & concurrency"):
@@ -1677,7 +1684,7 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
                      output_dir=output_dir, gated=gated,
                      permission_mode=permission_mode,
                      project_id=project_id, folder_path=folder_path,
-                     command=command)
+                     command=command, kill_on_job_close=kill_on_job_close)
         jid = rec["job_id"]
         _ACTIVE_LANE[(project_id, lane)] = jid
         if lane == BUILD_LANE:

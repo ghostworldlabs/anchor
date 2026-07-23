@@ -2312,8 +2312,13 @@ def project_effort_rollup(project_id: str, window: str = WINDOW_LIFETIME,
                 if not m_tokens:
                     m_tokens = (int(cost.get("input_tokens", 0) or 0)
                                 + int(cost.get("output_tokens", 0) or 0))
+                m_wall = int(cost.get("duration_ms", 0) or 0)
+                # Count wall-clock-only unmeasured rows (Grok / no sidecar) as
+                # contributing sessions even when tokens stay 0.
+                if not m_tokens and not m_wall:
+                    continue
                 tokens += m_tokens
-                wall_clock_ms += int(cost.get("duration_ms", 0) or 0)
+                wall_clock_ms += m_wall
                 try:
                     cost_usd += float(cost.get("total_cost_usd", 0.0) or 0.0)
                 except (TypeError, ValueError):

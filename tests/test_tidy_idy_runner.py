@@ -83,6 +83,75 @@ def test_migrated_handlers_include_tidy_idy_status():
     assert "handle_tidy_idy_proxy" in anchor_gui._MIGRATED_HANDLERS
 
 
+def test_tidy_idy_status_reads_query_from_handler_path(tmp_path, monkeypatch):
+    """Strangler passes query-stripped path; handler must read handler.path."""
+    import anchor_gui
+
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({"phase": "analyzing", "progress": 42, "step": "save",
+                    "message": "Running save…", "statusUrl": "http://127.0.0.1:9/"}),
+        encoding="utf-8",
+    )
+    pid = "proj-status-query"
+    monkeypatch.setattr(
+        anchor_gui._rnd, "get_project",
+        lambda p: {"folder_path": str(tmp_path)} if p == pid else None,
+    )
+    monkeypatch.setattr(
+        tidy, "live_tool_endpoints",
+        lambda _f: {
+            "status": {}, "status_live": False, "panel_live": False,
+            "any_live": False, "status_url": None, "panel_base": None, "open_url": None,
+        },
+    )
+    # Avoid mark_status_stale rewriting our fixture mid-call when pid is dead.
+    monkeypatch.setattr(tidy, "_pid_alive", lambda _p: True)
+    monkeypatch.setattr(tidy, "mark_status_stale", lambda *_a, **_k: None)
+
+    sent = {}
+
+    class Handler:
+        path = f"/api/rnd/tidy_idy_status?project_id={pid}&token=sekrit"
+
+        def _send_json(self, obj, code=200):
+            sent["code"] = code
+            sent["obj"] = obj
+
+    # Strangler path is query-stripped — this is what used to drop project_id.
+    anchor_gui.handle_tidy_idy_status(Handler(), "/api/rnd/tidy_idy_status", None)
+    assert sent.get("code") == 200, sent
+    assert sent["obj"].get("ok") is True
+    assert sent["obj"].get("progress") == 42
+
+    # Without handler.path query, must still 400 (not silently invent a project).
+    class Bare:
+        path = "/api/rnd/tidy_idy_status"
+        headers = {}
+
+        def _send_json(self, obj, code=200):
+            sent["code"] = code
+            sent["obj"] = obj
+
+    anchor_gui.handle_tidy_idy_status(Bare(), "/api/rnd/tidy_idy_status", None)
+    assert sent.get("code") == 400
+    assert "project_id" in (sent["obj"].get("error") or "")
+
+    # Header-only project id (query stripped) must still succeed.
+    class HdrOnly:
+        path = "/api/rnd/tidy_idy_status"
+        headers = {"X-Project-Id": pid}
+
+        def _send_json(self, obj, code=200):
+            sent["code"] = code
+            sent["obj"] = obj
+
+    anchor_gui.handle_tidy_idy_status(HdrOnly(), "/api/rnd/tidy_idy_status", None)
+    assert sent.get("code") == 200, sent
+    assert sent["obj"].get("ok") is True
+
+
 def test_is_loopback_and_browser_open_url():
     assert tidy.is_loopback_url("http://127.0.0.1:55410/") is True
     assert tidy.is_loopback_url("http://example.com/") is False
@@ -248,3 +317,81 @@ def test_launch_restarts_when_status_ports_are_dead(tmp_path, monkeypatch):
 
 def test_probe_loopback_alive_false_for_closed_port():
     assert tidy.probe_loopback_alive("http://127.0.0.1:1/api/health", timeout_s=0.2) is False
+
+
+def test_probe_loopback_never_gets_bootstrap_path(monkeypatch):
+    """Liveness must hit /api/health only — GET /bootstrap/<nonce> burns SC4 Option 1."""
+    import urllib.request as ur
+
+    seen = []
+
+    class _Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _urlopen(req, timeout=None):  # noqa: ARG001
+        full = req.full_url if hasattr(req, "full_url") else req.get_full_url()
+        seen.append(full)
+        return _Resp()
+
+    monkeypatch.setattr(ur, "urlopen", _urlopen)
+
+    assert tidy.probe_loopback_alive(
+        "http://127.0.0.1:58132/bootstrap/deadbeefcafebabe",
+        timeout_s=0.5,
+    ) is True
+    assert seen == ["http://127.0.0.1:58132/api/health"]
+
+
+def test_proxy_timeout_for_bootstrap_is_long():
+    assert tidy._proxy_timeout_for("/bootstrap/abc") >= 180
+    assert tidy._proxy_timeout_for("/api/heartbeat") == 30
+
+
+def test_strip_anchor_auth_query():
+    assert "token=" not in tidy._strip_anchor_auth_query("token=secret&x=1")
+    assert "x=1" in tidy._strip_anchor_auth_query("token=secret&x=1")
+
+
+def test_proxy_timeout_does_not_mark_status_stale(tmp_path, monkeypatch):
+    """Soft timeouts must not kill a live Tailscale handoff (remote stuck-at-42% root cause)."""
+    report = tmp_path / ".tidy-idy"
+    report.mkdir()
+    (report / "status.json").write_text(
+        json.dumps({
+            "phase": "panel-ready",
+            "panelBaseUrl": "http://127.0.0.1:9",
+            "openUrl": "http://127.0.0.1:9/bootstrap/abc",
+            "progress": 100,
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        tidy,
+        "resolve_proxy_upstream",
+        lambda *_a, **_k: "http://127.0.0.1:9",
+    )
+    import urllib.request as ur
+
+    def _boom(*_a, **_k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(ur, "urlopen", _boom)
+    marked = {"n": 0}
+    monkeypatch.setattr(
+        tidy,
+        "mark_status_stale",
+        lambda *_a, **_k: marked.__setitem__("n", marked["n"] + 1),
+    )
+    out = tidy.proxy_to_loopback(tmp_path, method="GET", rel_path="/bootstrap/abc")
+    assert out.get("ok") is False
+    assert out.get("code") == "proxy-timeout"
+    assert marked["n"] == 0
+    # status.json must still say panel-ready
+    st = json.loads((report / "status.json").read_text(encoding="utf-8"))
+    assert st.get("phase") == "panel-ready"

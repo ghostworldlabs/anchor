@@ -40,7 +40,7 @@
 - [x] Give Rick NYU Oral Exam tool/framework — Priority: 1 — energy: med — [academic]
 - [x] Get Alexander to remove 4J Threaputics from Website — Priority: 1 — energy: med — [commercial]
 - [x] Update ADNOC Analysis to help Bitar — Priority: 1 — energy: med — [commercial]
-- [ ] Draft Holding Co Slide/Slides (Napkin) — Priority: 1 — energy: med — [commercial]
+- [x] Draft Holding Co Slide/Slides (Napkin) — Priority: 1 — energy: med — [commercial]
 - [x] Send Brian Trust Docs — Priority: 1 — energy: med — [commercial]
 - [x] Work on 4 Pillar with Dave for Deck — Priority: 1 — energy: med — [commercial]
 - [x] Get Zombie Hunter Done & In V1 of Anchor — Priority: 1 — energy: med — [commercial]
@@ -54,6 +54,9 @@
 - [x] Cancel box subscirption — Priority: 1 — energy: med — [personal]
 - [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
 - [ ] Figure out Youth Super Activity Trip — Priority: 1 — energy: med — [personal]
+- [ ] Get Trust Structure Verified — Priority: 1 — energy: med — [personal]
+- [ ] Create a verified Trust Structure Doc and PPT to Share with Family — Priority: 1 — energy: med — [family]
+- [ ] Draft my updated version of the MBA class — Priority: 1 — energy: med — [academic]
 
 
 ### P1 (carried — Mon/Tue)

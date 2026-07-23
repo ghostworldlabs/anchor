@@ -35,18 +35,32 @@ def _get_skill_files(skill_dir: Path):
             yield p
 
 def build_manifest(skills_root: Path):
-    """Build the full manifest dict for all skills."""
+    """Build the full manifest dict for all skills.
+
+    Only skills that contribute at least one hashed file are included, so an
+    empty ``{}`` means "nothing to ship" (truthy empty skill shells are not
+    written into skill_manifest.json).
+    """
     manifest = {}
     if not skills_root.exists():
         return manifest
     for skill_dir in skills_root.iterdir():
         if not skill_dir.is_dir():
             continue
-        skill = skill_dir.name
-        manifest[skill] = {}
+        # Skip provenance-only / non-skill dirs under the bundle root.
+        if skill_dir.name.startswith(".") or skill_dir.name in ("__pycache__",):
+            continue
+        skill_files = {}
         for f in _get_skill_files(skill_dir):
+            # Do not hash the integrity manifest itself (would self-mutate).
+            if f.name == MANIFEST_FILENAME:
+                continue
             rel = f.relative_to(skill_dir).as_posix()
-            manifest[skill][rel] = sha256_file(f)
+            digest = sha256_file(f)
+            if digest:
+                skill_files[rel] = digest
+        if skill_files:
+            manifest[skill_dir.name] = skill_files
     return manifest
 
 def verify_at_boot(anchor_dir=None):

@@ -362,11 +362,19 @@ ROUTES = [
        handler="handle_term_start", migrated=True),
     _r("POST", "/api/rnd/zombie_terminal_start", AUTH_TOKEN,
        handler="handle_zombie_terminal_start", migrated=True),
+    # W8/SC5+SC6 — engine toggle health for Investigate/Doctor shell-first start
+    _r("GET", "/api/zh/engines", AUTH_TOKEN,
+       handler="handle_zh_engines", migrated=True),
     # doctor V3 W2 — start/attach THE /doctor agentic session (spawns a PTY on
     # an engine subscription CLI → mutating, default-deny token; enumerated in
     # the doctor gate's 401-before-substance test).
     _r("POST", "/api/doctor/session_start", AUTH_TOKEN,
        handler="handle_doctor_session_start", migrated=True),
+    # W9 / SC7 — health + reaper-health banner → Doctor 1:1 seed (+ async diagnose contract)
+    _r("GET", "/api/doctor/banner_seed", AUTH_TOKEN,
+       handler="handle_doctor_banner_seed", migrated=True),
+    _r("POST", "/api/doctor/banner_seed", AUTH_TOKEN,
+       handler="handle_doctor_banner_seed", migrated=True),
     _r("POST", "/api/rnd/term_kill", AUTH_TOKEN,
        handler="handle_term_kill", migrated=True),
     _r("POST", "/api/rnd/term_close", AUTH_TOKEN,
@@ -432,6 +440,10 @@ ROUTES = [
     _r("POST", "/api/rnd/tidy_idy_run", AUTH_TOKEN,
        handler="handle_tidy_idy_run", migrated=True),
     _r("GET", "/api/rnd/tidy_idy_status", AUTH_TOKEN,
+       handler="handle_tidy_idy_status", migrated=True),
+    # POST status: body carries project_id — immune to query-strip / GET cache
+    # issues that froze Tailscale status shells at "project_id required".
+    _r("POST", "/api/rnd/tidy_idy_status", AUTH_TOKEN,
        handler="handle_tidy_idy_status", migrated=True),
     # Reverse-proxy the tool's loopback status/panel for Tailscale remote browsers.
     _r("GET", "/api/rnd/tidy_idy_proxy/", AUTH_TOKEN, match=MATCH_PREFIX,

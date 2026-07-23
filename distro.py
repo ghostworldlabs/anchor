@@ -832,23 +832,39 @@ def build_distro(root: Path | None = None,
                 if rel not in selected:
                     selected.append(rel)
                     
-    # Generate the skill-integrity hash manifest for the bundled skills
-    try:
-        import foundry_integrity
-        skills_root = output_dir / "vendor" / "bundled-skills"
-        if skills_root.exists():
-            manifest = foundry_integrity.build_manifest(skills_root)
-            manifest_path = output_dir / foundry_integrity.MANIFEST_FILENAME
-            manifest_text = json.dumps(manifest, indent=2) + "\n"
-            manifest_path.write_text(manifest_text, encoding="utf-8")
-            
-            manifest_rel = manifest_path.relative_to(output_dir).as_posix()
-            staged_pairs.append((manifest_rel, manifest_path))
-            if manifest_rel not in selected:
-                selected.append(manifest_rel)
-    except Exception as e:
-        import logging
-        logging.getLogger("distro").error("Failed to build skill-integrity manifest: %s", e)
+    # Generate the skill-integrity hash manifest for the bundled skills.
+    # Only when vendoring ran (vendor_skills_): otherwise a custom test tree
+    # must not grow a vendor/ tree or a root-level hash map. The file MUST live
+    # under vendor/bundled-skills/ (not the export root): it is a map of sha256
+    # digests and would trip the first-party high-entropy clean-scan if staged
+    # as a root-level product file. Vendored paths skip that heuristic
+    # (concrete PII detectors still run).
+    if vendor_skills_:
+        try:
+            import foundry_integrity
+            skills_root = output_dir / "vendor" / "bundled-skills"
+            if skills_root.exists():
+                skill_manifest = foundry_integrity.build_manifest(skills_root)
+                # Skip empty manifests (no skills vendored / no hashed files).
+                if skill_manifest:
+                    skill_manifest_path = (
+                        skills_root / foundry_integrity.MANIFEST_FILENAME
+                    )
+                    skill_manifest_path.write_text(
+                        json.dumps(skill_manifest, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    skill_manifest_rel = skill_manifest_path.relative_to(
+                        output_dir
+                    ).as_posix()
+                    staged_pairs.append((skill_manifest_rel, skill_manifest_path))
+                    if skill_manifest_rel not in selected:
+                        selected.append(skill_manifest_rel)
+        except Exception as e:
+            import logging
+            logging.getLogger("distro").error(
+                "Failed to build skill-integrity manifest: %s", e
+            )
 
     readme_path = emit_readme(output_dir) if emit_readme_file else None
 

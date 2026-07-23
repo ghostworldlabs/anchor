@@ -1227,6 +1227,129 @@ _PROACTIVE_SUMMARY_ENABLED = (
     in ("1", "true", "yes", "on"))
 
 _zombie_hunter_started = False
+_ZH_NODE_PORT = 48484
+# Optional env path to the System-Wide Sentinel Node server.js. Never hardcode
+# a host build tree (clean-scan / stranger-machine). Unset → warm-start skipped;
+# the pure-Python radar report route still works without it.
+_ZH_NODE_SERVER_PATH = (os.environ.get("ANCHOR_ZH_NODE_SERVER") or "").strip()
+_zh_node_start_lock = threading.Lock()
+
+
+def _zh_node_base():
+    return f"http://127.0.0.1:{_ZH_NODE_PORT}"
+
+
+def _zh_node_is_up(timeout=1.0):
+    """True when the System-Wide Sentinel on :48484 answers /api/state."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{_zh_node_base()}/api/state", timeout=timeout) as r:
+            return 200 <= getattr(r, "status", 200) < 500
+    except Exception:
+        return False
+
+
+def _zh_node_port_listening():
+    """True if something accepts TCP on the ZH port (may still be wedged)."""
+    try:
+        with socket.create_connection(("127.0.0.1", _ZH_NODE_PORT), timeout=0.4):
+            return True
+    except OSError:
+        return False
+
+
+def _zh_node_kill_listener():
+    """Best-effort kill of whatever holds :48484 (wedged Node after blocking probe)."""
+    import subprocess
+    if not sys.platform.startswith("win"):
+        return False
+    try:
+        # netstat -ano: find LISTENING pid on our port
+        out = subprocess.check_output(
+            ["netstat", "-ano"],
+            text=True,
+            timeout=5,
+            creationflags=0x08000000 if sys.platform.startswith("win") else 0,
+        )
+    except Exception as e:
+        _logger.warning("ensure_zh_node: netstat failed: %s", e)
+        return False
+    killed = False
+    needle = f":{_ZH_NODE_PORT}"
+    for line in out.splitlines():
+        if "LISTENING" not in line.upper() and "LISTEN" not in line.upper():
+            continue
+        if needle not in line:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            pid = int(parts[-1])
+        except ValueError:
+            continue
+        if pid <= 0:
+            continue
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+                timeout=8,
+                creationflags=0x08000000 if sys.platform.startswith("win") else 0,
+            )
+            _logger.warning("ensure_zh_node: killed wedged listener pid=%s", pid)
+            killed = True
+        except Exception as e:
+            _logger.warning("ensure_zh_node: taskkill pid=%s failed: %s", pid, e)
+    return killed
+
+
+def _ensure_zh_node_server(wait_s=10.0):
+    """Start the ZH Node radar if it is down; wait until it accepts connections.
+
+    After a host restart the Anchor boot path fire-and-forgets ``node server.js``.
+    Opening the Zombie Hunter button before listen completes (or if the spawn
+    failed) used to surface ``Error connecting … timed out``. This helper is
+    the proxy's safety net: start once, poll briefly, return readiness.
+
+    Also recycles a **wedged** listener: port open but HTTP timed out (classic
+    blocking freeze-capability probe on the old Node build).
+    """
+    import subprocess
+    if _zh_node_is_up(timeout=0.8):
+        return True
+    with _zh_node_start_lock:
+        if _zh_node_is_up(timeout=0.8):
+            return True
+        # Port held but unresponsive → kill and re-spawn with current server.js
+        if _zh_node_port_listening():
+            _logger.warning(
+                "ensure_zh_node: port %s listening but /api/state dead — recycling",
+                _ZH_NODE_PORT,
+            )
+            _zh_node_kill_listener()
+            time.sleep(0.4)
+        try:
+            if os.path.exists(_ZH_NODE_SERVER_PATH):
+                creationflags = 0x08000000 if sys.platform.startswith("win") else 0
+                subprocess.Popen(
+                    ["node", _ZH_NODE_SERVER_PATH],
+                    creationflags=creationflags,
+                    cwd=os.path.dirname(_ZH_NODE_SERVER_PATH),
+                )
+                _logger.info("ensure_zh_node: launched server.js on port %s", _ZH_NODE_PORT)
+            else:
+                _logger.error("ensure_zh_node: missing %s", _ZH_NODE_SERVER_PATH)
+                return False
+        except Exception as e:
+            _logger.error("ensure_zh_node: spawn failed: %s", e)
+            return False
+        deadline = time.time() + max(0.5, float(wait_s))
+        while time.time() < deadline:
+            if _zh_node_is_up(timeout=0.8):
+                return True
+            time.sleep(0.35)
+        return _zh_node_is_up(timeout=1.0)
 
 
 def _trigger_project_summary(folder_path, project_id, force: bool = False):
@@ -2117,9 +2240,23 @@ def render_project_tile_html(entry: dict) -> str:
         roll_txt = html_lib.escape(_fmt_rollup_line(roll))
     except Exception:
         roll_txt = ""
+    # Honesty stamp: measured vs unmeasured (incl. Grok wall-clock-only).
+    cap_note = ""
+    try:
+        rate = _rollhon.project_capture_rate(pid_raw, window="lifetime")
+        if int(rate.get("total", 0) or 0) > 0:
+            cap_note = " · " + html_lib.escape(
+                _rollhon.capture_rate_text(rate)
+                if hasattr(_rollhon, "capture_rate_text")
+                else _fmt_capture_rate_short(rate))
+    except Exception:
+        cap_note = ""
+    if not roll_txt:
+        roll_txt = "Σ — no run-session costs yet"
     rollup_block = (
         f'<span class="rnd-row-roll" data-pid="{pid}" data-window="lifetime" '
-        f'title="Cost / tokens / time across run sessions">{roll_txt}</span>'
+        f'title="Cost / tokens / time across run sessions (RUN provenance only;'
+        f' Grok may show time without $)">{roll_txt}{cap_note}</span>'
     )
 
     is_active = state in ("active", "path-missing")
@@ -4688,8 +4825,31 @@ def _fmt_rollup_line(roll: dict) -> str:
     # renders ``… (subscription)`` — Anchor never computes a dollar figure of its
     # own. (See NORTH-STAR-AMENDMENT.md "No-own-pricing-table".)
     money = f"${cost:.2f}" if cost > 0 else "(subscription)"
+    # When only wall-clock exists (Grok unmeasured / wall-only rows), be explicit.
+    if toks == 0 and ms > 0:
+        return (f"Σ time {tstr} · {money} · 0 tok measured"
+                f" · {n} session{'' if n == 1 else 's'}")
     return (f"Σ {tokstr} · {money} · {tstr} "
             f"· {n} session{'' if n == 1 else 's'}")
+
+
+def _fmt_capture_rate_short(rate: dict) -> str:
+    """Compact capture-rate note for project-row rollup (never raises)."""
+    try:
+        total = int(rate.get("total", 0) or 0)
+        measured = int(rate.get("measured", 0) or 0)
+        unm = int(rate.get("unmeasured", 0) or 0)
+        failed = int(rate.get("capture-failed", 0) or rate.get("capture_failed", 0) or 0)
+        if total <= 0:
+            return ""
+        parts = [f"measured {measured}/{total}"]
+        if unm:
+            parts.append(f"{unm} unmeasured")
+        if failed:
+            parts.append(f"{failed} capture-failed")
+        return " · ".join(parts)
+    except Exception:
+        return ""
 
 
 def render_header_rollup_html(project_id: str) -> str:
@@ -5993,39 +6153,68 @@ def generate_html(projects, tasks, inbox):
     # auth flag) — a JSON literal, never the token value itself.
     anchor_boot_js = json.dumps(anchor_boot())
 
-    # ── Health banner ──
-    # If the most recent health report flagged issues, show a banner at the top.
+    # ── Health banner (W9 / SC7) ──
+    # Clickable → Doctor with 1:1 issue seed (issueId, message, component,
+    # lastError, suggestedChecks) + async diagnose attempt. NOT a static
+    # markdown path to health_reports/*.md.
     health_banner_html = ""
     hr = latest_health_report()
     if hr is not None:
         report_date, status, _ = hr
         if "ISSUE" in status.upper() or "FAIL" in status.upper() or "ERROR" in status.upper():
-            health_banner_html = (
-                f'<div style="background:#3b1f1f;border:1px solid #9b3a3a;color:#ffb3b3;'
-                f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;">'
-                f'<strong style="color:#ff7a7a">&#9888; Health check found issues</strong>'
-                f' on {html_lib.escape(report_date)}. '
-                f'See <code style="background:#2a1414;padding:1px 5px;border-radius:3px">'
-                f'health_reports/{html_lib.escape(report_date)}.md</code> for details.'
-                f'</div>'
-            )
+            try:
+                _hb_issue = _w9_build_dashboard_health_banner_issue(
+                    report_date=report_date, status=status)
+                health_banner_html = _w9_render_clickable_banner_html(
+                    _hb_issue,
+                    title="Health check found issues",
+                    body=(
+                        f'on {html_lib.escape(str(report_date))}. '
+                        f'Click to open Doctor and diagnose this issue '
+                        f'(seeded context — not a static markdown path).'
+                    ),
+                    style_kind="health",
+                )
+            except Exception:
+                # Fail-soft: still show a clickable Doctor open, never only a .md path.
+                health_banner_html = (
+                    f'<div role="button" tabindex="0" onclick="window.open('
+                    f"'/doctor?issueId=ZH_HEALTH_CHECK_ISSUES&diagnose=1'"
+                    f' + (_anchorToken() ? (\'&token=\' + encodeURIComponent(_anchorToken())) : \'\'), \'_blank\')" '
+                    f'style="background:#3b1f1f;border:1px solid #9b3a3a;color:#ffb3b3;'
+                    f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;'
+                    f'cursor:pointer;" title="Open Doctor with health-check issue seed">'
+                    f'<strong style="color:#ff7a7a">&#9888; Health check found issues</strong>'
+                    f' on {html_lib.escape(report_date)}. Click to diagnose in Doctor.'
+                    f'</div>'
+                )
 
-    # Wave 8 — the reaper consecutive-abstain health banner. Trips when the reaper
-    # has abstained (could-not-observe liveness) for > K consecutive sweeps, or
-    # the owner-evidence receipt chain fails verification — a signal the reaper is
-    # flying blind / the audit log may be tampered. Best-effort: never break the
-    # dashboard render over a reaper diagnostic.
+    # Reaper consecutive-abstain / chain-tampered health banner (W9/SC7 clickable).
+    # Best-effort: never break the dashboard render over a reaper diagnostic.
     try:
         import reaper_arming as _reaper_arm
         _rb = _reaper_arm.health_banner()
         if _rb and _rb.get("tripped"):
-            health_banner_html += (
-                f'<div style="background:#3b2a1f;border:1px solid #9b6a3a;color:#ffd9b3;'
-                f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;">'
-                f'<strong style="color:#ffb37a">&#9888; Reaper health</strong> '
-                f'{html_lib.escape(str(_rb.get("message", "")))}'
-                f'</div>'
-            )
+            try:
+                _rh_issue = _w9_build_reaper_health_banner_issue(_rb)
+                health_banner_html += _w9_render_clickable_banner_html(
+                    _rh_issue,
+                    title="Reaper health",
+                    body=html_lib.escape(str(_rb.get("message", ""))),
+                    style_kind="reaper",
+                )
+            except Exception:
+                health_banner_html += (
+                    f'<div role="button" tabindex="0" onclick="window.open('
+                    f"'/doctor?issueId=ZH_REAPER_ABSTAIN_STREAK&diagnose=1'"
+                    f' + (_anchorToken() ? (\'&token=\' + encodeURIComponent(_anchorToken())) : \'\'), \'_blank\')" '
+                    f'style="background:#3b2a1f;border:1px solid #9b6a3a;color:#ffd9b3;'
+                    f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;'
+                    f'cursor:pointer;" title="Open Doctor with reaper-health issue seed">'
+                    f'<strong style="color:#ffb37a">&#9888; Reaper health</strong> '
+                    f'{html_lib.escape(str(_rb.get("message", "")))}'
+                    f'</div>'
+                )
     except Exception:
         pass
 
@@ -9733,6 +9922,10 @@ def handle_zombie_spenders(handler, path, body):
     spending paid AI tokens with no live session) plus the current burn rate.
     Best-effort: if the node server is down/absent, returns count 0 (no banner)
     rather than erroring. Token-gated like the other read-API GET routes.
+
+    Dual-write dark (G0): under classifierMode=shadow (or missing armed receipt),
+    actionable scare count is forced to 0 even if observe dual-run would-be
+    candidates exist — no token-spending zombie banner chrome until armed.
     """
     if not handler._term_token_ok():
         handler._send_json({"ok": False, "error": "unauthorized"}, 401)
@@ -9740,15 +9933,42 @@ def handle_zombie_spenders(handler, path, body):
     import urllib.request
     count = 0
     usd_per_min = 0.0
+    classifier_mode = "shadow"
+    actionable_red_allowed = False
+    observe_would_be = 0
     try:
         with urllib.request.urlopen('http://127.0.0.1:48484/api/state', timeout=3) as r:
             st = json.loads(r.read().decode('utf-8'))
-        zg = st.get("zombies", []) or []
-        count = sum(int(g.get("count", 0) or 0) for g in zg)
+        classifier_mode = str(st.get("classifierMode") or "shadow").lower()
+        actionable_red_allowed = bool(st.get("actionableRedAllowed"))
+        # Prefer explicit dual-write dashboard surface when present
+        dash = st.get("dashboardZombieBanner") or {}
+        if isinstance(dash, dict) and "actionableRed" in dash:
+            if dash.get("actionableRed"):
+                count = int(dash.get("count", 0) or 0)
+            else:
+                count = 0
+        elif actionable_red_allowed and classifier_mode in (
+                "armed", "armed_partial", "armed_global"):
+            zg = st.get("zombies", []) or []
+            count = sum(int(g.get("count", 0) or 0) for g in zg)
+        else:
+            # Shadow / dual-write dark: never paint scare banner
+            count = 0
+        obs = st.get("observe") or {}
+        if isinstance(obs, dict):
+            observe_would_be = int(obs.get("wouldBeCount", 0) or 0)
         usd_per_min = float((st.get("ledger", {}) or {}).get("totals", {}).get("usdPerMin", 0) or 0)
     except Exception:
         pass
-    handler._send_json({"ok": True, "count": count, "usdPerMin": round(usd_per_min, 2)})
+    handler._send_json({
+        "ok": True,
+        "count": count,
+        "usdPerMin": round(usd_per_min, 2),
+        "classifierMode": classifier_mode,
+        "actionableRedAllowed": actionable_red_allowed,
+        "observeWouldBeCount": observe_would_be,
+    })
 
 
 def handle_reaper_status(handler, path, body):
@@ -10140,11 +10360,40 @@ def handle_tidy_idy_run(handler, path, body):
 
 
 def handle_tidy_idy_status(handler, path, body):
-    """GET /api/rnd/tidy_idy_status?project_id=&job_id= — live run status for the status tab."""
+    """GET /api/rnd/tidy_idy_status?project_id=&job_id= — live run status for the status tab.
+
+    Query must be read from ``handler.path`` (full request URI). The strangler
+    passes a query-stripped ``path`` for route matching — using that alone made
+    every remote Tailscale poll return ``project_id required`` and freeze the
+    status shell at the last launch snapshot (often 42% / save).
+    """
     import tidy_idy_runner as _tidy
     from urllib.parse import parse_qs, urlparse
-    qs = parse_qs(urlparse(path).query)
-    pid = (qs.get("project_id") or [""])[0].strip() or (body or {}).get("project_id", "")
+    # Prefer the live request URI (includes ?project_id=…&token=…); fall back to
+    # the strangler path only if somehow empty. Also accept X-Project-Id header
+    # (remote status shell sends it so a query-strip bug cannot black-hole polls).
+    raw = getattr(handler, "path", None) or path or ""
+    qs = parse_qs(urlparse(raw).query)
+    if not qs.get("project_id"):
+        # body is usually None on GET; keep for tests that pass a dict.
+        qs = parse_qs(urlparse(path or "").query) or qs
+    hdr_pid = ""
+    try:
+        hdr_pid = (
+            handler.headers.get("X-Project-Id")
+            or handler.headers.get("x-project-id")
+            or ""
+        ).strip()
+    except Exception:
+        hdr_pid = ""
+    pid = (
+        (qs.get("project_id") or [""])[0].strip()
+        or hdr_pid
+        or (body or {}).get("project_id", "")
+        or ""
+    )
+    if isinstance(pid, str):
+        pid = pid.strip()
     job_id = (qs.get("job_id") or [""])[0].strip() or (body or {}).get("job_id") or None
     if not pid:
         handler._send_json({"ok": False, "error": "project_id required"}, 400)
@@ -10231,6 +10480,8 @@ def handle_tidy_idy_proxy(handler, path, body):
     )
     if not result.get("ok") and result.get("code"):
         code = 502 if result.get("code") in ("proxy-failed", "upstream-gone", "no-upstream") else 404
+        if result.get("code") == "proxy-timeout":
+            code = 504
         if result.get("code") == "ssrf-guard":
             code = 403
         # Browser navigations (GET bootstrap / status) should not show raw JSON.
@@ -10254,6 +10505,10 @@ def handle_tidy_idy_proxy(handler, path, body):
                 f"<p><code>{_html_esc(str(result.get('code') or ''))}</code></p>"
                 "</div></body></html>"
             )
+            # Soft timeouts stay 504 so the browser can retry without implying
+            # the host session is permanently dead.
+            if result.get("code") == "proxy-timeout":
+                code = 504
             try:
                 payload = html.encode("utf-8")
                 handler.send_response(code)
@@ -10265,6 +10520,8 @@ def handle_tidy_idy_proxy(handler, path, body):
             except Exception:
                 pass
             return
+        if result.get("code") == "proxy-timeout":
+            code = 504
         handler._send_json(
             {"ok": False, "error": result.get("error"), "code": result.get("code")},
             code,
@@ -10827,8 +11084,8 @@ def _zombie_scan_and_skill_briefing():
         "that merely matched a keyword but spend nothing (tail -f on an AI log, shells) are NOT a "
         "threat and are hidden. Safety: observe-only; prefer FREEZE (reversible) before KILL "
         "(tree-kill); never mass-kill; confirm before killing your own live session.\n\n"
-        "Tools: spend detector C:\\dev\\Skill Foundry\\skills\\zombie-hunter\\src\\spend.js "
-        "(network by provider IP-prefix + Claude token-log $/min ledger from ~/.claude/projects/*/*.jsonl); "
+        "Tools: spend detector (zombie-hunter spend.js — network by provider IP-prefix + Claude "
+        "token-log $/min ledger from ~/.claude/projects/*/*.jsonl); "
         "classifier classify.js; live scan JSON http://127.0.0.1:48484/api/state; a PID's live API "
         "connections via `Get-NetTCPConnection -OwningProcess <pid> -State Established` (RemotePort 443); "
         "a PID's tree via `Get-CimInstance Win32_Process` (ParentProcessId).\n"
@@ -10836,141 +11093,868 @@ def _zombie_scan_and_skill_briefing():
     return out
 
 
+# ── W8 / SC5+SC6 — shared Investigate + Doctor session-start plumbing (P5) ──
+# Shell + engine picker + seed BEFORE session. Session is async/cancelable;
+# failure is non-blocking. Engine toggle: Claude, Gemini(agy), Grok (grok-cli /
+# grok.exe -p). Dead toggle forbidden; unhealthy engine disabled with health.
+# Doctor: shell first, no blocking auto-session. Slim Investigate seed by default.
+
+_W8_ENGINE_IDS = ("claude", "gemini", "grok")
+_W8_SHELL_PAINT_BUDGET_MS = 1000
+_W8_FIRST_PROMPT_BUDGET_MS = 15_000
+_W8_P5_PLUMBING = {
+    "id": "p5-shared-session-start",
+    "version": "w8-p5-v1",
+    "required": [
+        "shared_session_start_helper",
+        "shell_before_session",
+        "engine_picker_three",
+        "slim_seed",
+        "async_cancelable_session",
+        "failure_non_blocking",
+        "first_prompt_budget",
+        "doctor_shell_first",
+    ],
+    "surfaces": ["investigate", "doctor"],
+    "engines": list(_W8_ENGINE_IDS),
+    "shellPaintBudgetMs": _W8_SHELL_PAINT_BUDGET_MS,
+    "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
+}
+
+
+def _w8_normalize_engine(raw):
+    e = (raw or "").strip().lower()
+    if e == "agy":
+        return "gemini"
+    if e in ("grok-cli", "grok.exe"):
+        return "grok"
+    if e in _W8_ENGINE_IDS:
+        return e
+    return None
+
+
+def _w8_engine_toggle(profile=None, prefs=None, last_used=None):
+    """Three-engine toggle with health; never offers a silent dead toggle."""
+    if profile is None:
+        try:
+            profile = _lanes.detect_host_profile()
+        except Exception:
+            profile = {"claude": False, "gemini": False, "grok": False}
+    prefs = prefs or {}
+    engines = []
+    for eid in _W8_ENGINE_IDS:
+        available = bool(profile.get(eid))
+        transport = {
+            "claude": ("claude", "claude"),
+            "gemini": ("agy", "agy"),
+            "grok": ("grok-cli", "grok.exe -p"),
+        }[eid]
+        health = "healthy" if available else "unavailable (subscription CLI not detected)"
+        engines.append({
+            "id": eid,
+            "label": eid.capitalize() if eid != "gemini" else "Gemini",
+            "transport": transport[0],
+            "spawn": transport[1],
+            "subscriptionCli": True,
+            "available": available,
+            "enabled": available,
+            "disabled": not available,
+            "health": health,
+            "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
+        })
+    healthy = [e["id"] for e in engines if e["enabled"]]
+    default = None
+    last = _w8_normalize_engine(last_used)
+    if last and last in healthy:
+        default = last
+    else:
+        family = _w8_normalize_engine(
+            prefs.get("coding_family") or prefs.get("default_cli"))
+        if family and family in healthy:
+            default = family
+        elif healthy:
+            default = healthy[0]
+    return {
+        "engines": engines,
+        "available": healthy,
+        "defaultEngine": default,
+        "anyHealthy": bool(healthy),
+        "shellPaintBudgetMs": _W8_SHELL_PAINT_BUDGET_MS,
+        "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
+        "profile": {
+            "claude": bool(profile.get("claude")),
+            "gemini": bool(profile.get("gemini")),
+            "grok": bool(profile.get("grok")),
+        },
+    }
+
+
+def _w8_resolve_interactive_engine(requested, toggle=None):
+    """Pick a healthy engine; refuse dead toggles with health (never silent)."""
+    toggle = toggle or _w8_engine_toggle()
+    req = _w8_normalize_engine(requested)
+    if req:
+        row = next((e for e in toggle["engines"] if e["id"] == req), None)
+        if row and row["enabled"]:
+            return req, None
+        reason = (row or {}).get("health") or "unknown engine (dead toggle forbidden)"
+        return None, {"engine": req, "reason": reason, "disabled": True}
+    if toggle.get("defaultEngine"):
+        return toggle["defaultEngine"], None
+    return None, {"engine": None, "reason": "no healthy engine", "disabled": True}
+
+
+def _w8_clip(s, n=240):
+    t = "" if s is None else str(s)
+    if len(t) <= n:
+        return t
+    return t[: n - 1] + "…"
+
+
+def _w8_build_investigate_slim_seed(candidate=None, opts=None):
+    """Investigate slim seed: pid + class + top reason codes + freeze/kill status."""
+    candidate = candidate or {}
+    opts = opts or {}
+    reasons = candidate.get("reasonCodes") or candidate.get("topReasonCodes") or []
+    if not isinstance(reasons, list):
+        reasons = []
+    reasons = [str(r) for r in reasons[:8]]
+    pid = candidate.get("pid")
+    if pid is None and candidate.get("pids"):
+        try:
+            pid = int(candidate["pids"][0])
+        except Exception:
+            pid = None
+    else:
+        try:
+            pid = int(pid) if pid is not None else None
+        except Exception:
+            pid = None
+    freeze_status = opts.get("freezeStatus") or candidate.get("freezeStatus") or (
+        "disabled" if opts.get("freezeKillEnabled") is False else (
+            "available" if opts.get("freezeCapability") else "unavailable"))
+    kill_status = opts.get("killStatus") or candidate.get("killStatus") or (
+        "disabled" if opts.get("freezeKillEnabled") is False else "confirm_required")
+    return {
+        "kind": "investigate_slim",
+        "version": "w8-investigate-slim-v1",
+        "pid": pid,
+        "class": _w8_clip(
+            candidate.get("engineClass")
+            or candidate.get("class")
+            or candidate.get("name")
+            or "unknown",
+            80,
+        ),
+        "topReasonCodes": reasons,
+        "freezeStatus": str(freeze_status),
+        "killStatus": str(kill_status),
+        "classifierMode": opts.get("classifierMode") or "shadow",
+        "freezeCapability": bool(opts.get("freezeCapability")),
+        "image": _w8_clip(candidate.get("imagePath") or candidate.get("image") or "", 160),
+        "name": _w8_clip(candidate.get("name") or "", 80),
+        "slim": True,
+        "deepBrief": False,
+    }
+
+
+def _w8_format_investigate_slim_seed_text(slim):
+    s = slim or {}
+    lines = [
+        "ZOMBIE-HUNTER INVESTIGATE — SLIM SEED (W8/SC5)",
+        "You help the operator treat ONE candidate. Prefer FREEZE before KILL. Uncertain ≠ red.",
+        "pid: %s" % (s.get("pid") if s.get("pid") is not None else "unknown"),
+        "class: %s" % (s.get("class") or "unknown"),
+        "top reason codes: %s" % (", ".join(s.get("topReasonCodes") or []) or "(none)"),
+        "freeze status: %s" % (s.get("freezeStatus") or "unknown"),
+        "kill status: %s" % (s.get("killStatus") or "unknown"),
+        "classifierMode: %s" % (s.get("classifierMode") or "shadow"),
+        "freezeCapability: %s" % bool(s.get("freezeCapability")),
+    ]
+    if s.get("image"):
+        lines.append("image: %s" % s["image"])
+    lines.append(
+        "Safety: observe-only unless DESTRUCTIVE_ELIGIBLE; never mass-kill; confirm before kill.")
+    return "\n".join(lines)
+
+
+def _w8_build_doctor_short_seed(issue=None):
+    """Optional one-click diagnose short seed (shell paints first)."""
+    base = {
+        "kind": "doctor_short",
+        "version": "w8-doctor-short-v1",
+        "short": True,
+        "note": "Short diagnose seed — shell painted first; session start is on demand.",
+        "markdownPath": None,
+        "isMarkdownPath": False,
+    }
+    if not issue or not isinstance(issue, dict):
+        return base
+    message = _w8_clip(issue.get("message") or issue.get("exactMessage") or "", 400)
+    base.update({
+        "issueId": str(issue.get("issueId") or issue.get("id") or "") or None,
+        "message": message,
+        "exactMessage": message,
+        "component": _w8_clip(issue.get("component") or "", 120),
+        "lastError": _w8_clip(issue.get("lastError") or "", 400),
+        "suggestedChecks": [
+            _w8_clip(c, 160)
+            for c in (issue.get("suggestedChecks") or [])[:8]
+        ],
+        "bannerSurface": issue.get("bannerSurface"),
+    })
+    return base
+
+
+def _w8_format_doctor_short_seed_text(short):
+    s = short or {}
+    lines = [
+        "ANCHOR DOCTOR — SHORT DIAGNOSE SEED (W8/SC6)",
+        "Read-only diagnose. Never invent numbers. Shell-first: session started on demand.",
+    ]
+    if s.get("issueId"):
+        lines.append("issueId: %s" % s["issueId"])
+    if s.get("message"):
+        lines.append("message: %s" % s["message"])
+    if s.get("component"):
+        lines.append("component: %s" % s["component"])
+    if s.get("lastError"):
+        lines.append("lastError: %s" % s["lastError"])
+    if s.get("suggestedChecks"):
+        lines.append("suggestedChecks: %s" % "; ".join(s["suggestedChecks"]))
+    lines.append("Say plainly when healthy; prefer inspect-then-suggest over mutation.")
+    return "\n".join(lines)
+
+
+def _w8_shared_session_start_plan(surface="investigate", engine=None, candidate=None,
+                                  issue=None, deep_brief=False, slim=True,
+                                  prefs=None, last_used=None):
+    """Shared session-start helper: shell + picker + seed before session (P5)."""
+    try:
+        prefs = prefs or {
+            "default_cli": _aset.get_default_cli(),
+            "coding_family": getattr(_aset, "get_coding_family", lambda: None)()
+            if hasattr(_aset, "get_coding_family") else None,
+        }
+    except Exception:
+        prefs = prefs or {}
+    toggle = _w8_engine_toggle(prefs=prefs, last_used=last_used)
+    eng, denied = _w8_resolve_interactive_engine(engine, toggle)
+    if surface == "doctor":
+        seed = _w8_build_doctor_short_seed(issue)
+        seed_text = _w8_format_doctor_short_seed_text(seed)
+    else:
+        seed = _w8_build_investigate_slim_seed(candidate or {})
+        seed_text = _w8_format_investigate_slim_seed_text(seed)
+        if deep_brief:
+            seed = {
+                "kind": "investigate_deep_brief",
+                "version": "w8-investigate-deep-brief-v1",
+                "slim": seed,
+                "recommendedNext": "INVESTIGATE",
+                "deepBrief": True,
+            }
+            seed_text += "\nrecommendedNext: INVESTIGATE\n(deep-brief path; shell already painted)"
+    can_start = bool(eng) and toggle["anyHealthy"] and not denied
+    return {
+        "surface": surface,
+        "shell": {
+            "paintFirst": True,
+            "paintBudgetMs": _W8_SHELL_PAINT_BUDGET_MS,
+            "enginePicker": True,
+            "engines": toggle["engines"],
+            "autoStartSession": False,
+        },
+        "seed": seed,
+        "seedText": seed_text,
+        "seedBeforeSession": True,
+        "engine": eng,
+        "engineDenied": denied,
+        "engineToggle": toggle,
+        "session": {
+            "async": True,
+            "cancelable": True,
+            "failureNonBlocking": True,
+            "autoStart": False,
+            "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
+            "startWhen": ("operator_or_diagnose_click" if can_start
+                          else "blocked_no_healthy_engine"),
+        },
+        "canStart": can_start,
+        "ok": can_start,
+        "error": (None if can_start else (
+            (denied or {}).get("reason") if denied else "no healthy engine")),
+        "p5Plumbing": _W8_P5_PLUMBING,
+        "slim": bool(slim),
+        "deepBrief": bool(deep_brief),
+    }
+
+
+def handle_zh_engines(handler, path, body):
+    """W8: engine toggle health for Investigate/Doctor shells (shell-first)."""
+    try:
+        prefs = {"default_cli": _aset.get_default_cli()}
+    except Exception:
+        prefs = {}
+    toggle = _w8_engine_toggle(prefs=prefs)
+    handler._send_json({
+        "ok": True,
+        **toggle,
+        "p5Plumbing": _W8_P5_PLUMBING,
+        "doctorShell": {
+            "shellFirst": True,
+            "autoStartSession": False,
+            "oneClickDiagnose": True,
+            "sessionStartOnDemand": True,
+        },
+    })
+
+
+# ── W9 / SC7 — clickable health + reaper-health banners → Doctor seed ──────
+# Banner click opens Doctor with 1:1 fields (issueId, exact message, component,
+# lastError, suggestedChecks). Async diagnose start attempted when engine
+# enabled; failure surfaces health and leaves UI usable. Never a markdown path.
+
+_W9_BANNER_SEED_FIELDS = (
+    "issueId", "message", "component", "lastError", "suggestedChecks",
+)
+_W9_BANNER_DOCTOR_SEED_VERSION = "w9-banner-doctor-seed-v1"
+
+# Closed Doctor issue defaults aligned with zombie-hunter reason-catalog.js (W9).
+_W9_DOCTOR_ISSUE_DEFAULTS = {
+    "ZH_HEALTH_CHECK_ISSUES": {
+        "component": "health-check",
+        "message": (
+            "Dashboard health check found issues — diagnose in Doctor "
+            "(not a markdown path)"
+        ),
+        "suggestedChecks": [
+            "Open Doctor from the health banner (seeded issue context)",
+            "Inspect latest health_reports entry via Doctor, not a static file link alone",
+            "Re-run diagnostics if status is stale",
+        ],
+    },
+    "ZH_REAPER_ABSTAIN_STREAK": {
+        "component": "reaper-health",
+        "message": (
+            "Reaper consecutive-abstain streak — liveness inputs may be "
+            "broken; reaper flying blind"
+        ),
+        "suggestedChecks": [
+            "Run reaper explain (read-only) and inspect live_owner_ids",
+            "Check liveness snapshot degraded flag and owner enumeration inputs",
+            "Confirm reaper is unarmed/disarmed until inputs recover",
+        ],
+    },
+    "ZH_REAPER_CHAIN_TAMPERED": {
+        "component": "reaper-health",
+        "message": (
+            "Reaper owner-evidence receipt chain failed verification — "
+            "audit log may be tampered"
+        ),
+        "suggestedChecks": [
+            "Verify receipt chain hashes under .anchor/",
+            "Do not arm or advance reaper tier until chain verifies",
+            "Inspect last owner-evidence receipt entries",
+        ],
+    },
+    "ZH_SWEEP_ERROR": {
+        "component": "sweep",
+        "message": "Sweep parse or worker error — abstain, never invent RED",
+        "suggestedChecks": [
+            "Read sweepError field",
+            "Re-run scan; check control-char safety of process JSON",
+        ],
+    },
+}
+
+
+def _w9_normalize_banner_issue(raw, banner_surface=None):
+    """Normalize banner/issue payload to 1:1 Doctor seed fields (SC7)."""
+    if not raw or not isinstance(raw, dict):
+        return None
+    issue_id = raw.get("issueId") or raw.get("id")
+    issue_id = str(issue_id) if issue_id else None
+    catalog = _W9_DOCTOR_ISSUE_DEFAULTS.get(issue_id or "", {})
+    message = _w8_clip(
+        raw.get("message") or raw.get("exactMessage") or catalog.get("message") or "",
+        400,
+    )
+    component = _w8_clip(
+        raw.get("component") or catalog.get("component") or "",
+        120,
+    )
+    last_error = _w8_clip(raw.get("lastError") or raw.get("error") or "", 400)
+    checks = raw.get("suggestedChecks")
+    if not isinstance(checks, list):
+        checks = list(catalog.get("suggestedChecks") or [])
+    checks = [_w8_clip(c, 160) for c in checks[:8] if c]
+    surface = raw.get("bannerSurface") or banner_surface
+    return {
+        "issueId": issue_id,
+        "message": message,
+        "exactMessage": message,
+        "component": component,
+        "lastError": last_error,
+        "suggestedChecks": checks,
+        "bannerSurface": surface,
+        "markdownPath": None,
+        "isMarkdownPath": False,
+        "version": _W9_BANNER_DOCTOR_SEED_VERSION,
+        "catalogAligned": bool(issue_id and issue_id in _W9_DOCTOR_ISSUE_DEFAULTS),
+    }
+
+
+def _w9_build_dashboard_health_banner_issue(report_date="", status="ISSUES FOUND",
+                                           last_error=None, message=None):
+    """Dashboard health-check banner issue (replaces static health_reports path)."""
+    report_date = str(report_date or "")
+    status = str(status or "ISSUES FOUND")
+    msg = message or (
+        f"Health check found issues"
+        f"{(' on ' + report_date) if report_date else ''} ({status})"
+    )
+    return _w9_normalize_banner_issue({
+        "issueId": "ZH_HEALTH_CHECK_ISSUES",
+        "message": msg,
+        "component": "health-check",
+        "lastError": last_error if last_error is not None else status,
+        "bannerSurface": "dashboard_health",
+    }, banner_surface="dashboard_health")
+
+
+def _w9_build_reaper_health_banner_issue(banner=None):
+    """Reaper-health banner issue from reaper_arming.health_banner() dict."""
+    banner = banner or {}
+    kind = str(banner.get("kind") or "abstain-streak")
+    issue_id = (
+        "ZH_REAPER_CHAIN_TAMPERED" if kind == "chain-tampered"
+        else "ZH_REAPER_ABSTAIN_STREAK"
+    )
+    msg = banner.get("message") or (
+        "Reaper receipt chain failed verification."
+        if kind == "chain-tampered"
+        else (
+            f"Reaper has ABSTAINED for {banner.get('streak', '?')} consecutive "
+            f"sweeps — flying blind."
+        )
+    )
+    last_error = banner.get("lastError") or (
+        "chain_verification_failed" if kind == "chain-tampered"
+        else (
+            f"abstain_streak={banner.get('streak', '?')};"
+            f"threshold={banner.get('threshold', '?')}"
+        )
+    )
+    return _w9_normalize_banner_issue({
+        "issueId": issue_id,
+        "message": msg,
+        "component": "reaper-health",
+        "lastError": last_error,
+        "bannerSurface": "reaper_health",
+    }, banner_surface="reaper_health")
+
+
+def _w9_extract_banner_seed_fields(issue):
+    n = _w9_normalize_banner_issue(issue) or {}
+    return {
+        "issueId": n.get("issueId"),
+        "message": n.get("message") or "",
+        "component": n.get("component") or "",
+        "lastError": n.get("lastError") or "",
+        "suggestedChecks": list(n.get("suggestedChecks") or []),
+    }
+
+
+def _w9_assert_banner_seed_one_to_one(banner_issue, doctor_seed):
+    """True iff Doctor short seed matches banner 1:1 on SC7 fields."""
+    b = _w9_extract_banner_seed_fields(banner_issue)
+    seed = doctor_seed or {}
+    mismatches = []
+    if str(seed.get("issueId") or "") != str(b.get("issueId") or ""):
+        mismatches.append("issueId")
+    if str(seed.get("message") or "") != str(b.get("message") or ""):
+        mismatches.append("message")
+    if str(seed.get("component") or "") != str(b.get("component") or ""):
+        mismatches.append("component")
+    if str(seed.get("lastError") or "") != str(b.get("lastError") or ""):
+        mismatches.append("lastError")
+    seed_checks = [str(c) for c in (seed.get("suggestedChecks") or [])]
+    b_checks = [str(c) for c in (b.get("suggestedChecks") or [])]
+    if seed_checks != b_checks:
+        mismatches.append("suggestedChecks")
+    if seed.get("markdownPath") or seed.get("isMarkdownPath") is True:
+        mismatches.append("markdownPath_present")
+    return {"ok": len(mismatches) == 0, "mismatches": mismatches,
+            "fields": list(_W9_BANNER_SEED_FIELDS)}
+
+
+def _w9_build_doctor_navigation_from_banner(issue, token=None, auto_diagnose=True):
+    """Doctor href with 1:1 query seed — never health_reports/*.md."""
+    n = _w9_normalize_banner_issue(issue)
+    if not n:
+        return {
+            "ok": False, "href": "/doctor", "path": "/doctor",
+            "isMarkdownPath": False, "markdownPath": None,
+            "autoDiagnose": False, "issue": None, "error": "no_issue",
+        }
+    from urllib.parse import urlencode
+    q = {
+        "issueId": n.get("issueId") or "",
+        "message": n.get("message") or "",
+        "component": n.get("component") or "",
+        "lastError": n.get("lastError") or "",
+        "suggestedChecks": "|".join(n.get("suggestedChecks") or []),
+    }
+    if auto_diagnose:
+        q["diagnose"] = "1"
+    if token:
+        q["token"] = str(token)
+    # Drop empties for cleaner URLs
+    q = {k: v for k, v in q.items() if v not in (None, "")}
+    href = "/doctor?" + urlencode(q)
+    return {
+        "ok": True,
+        "href": href,
+        "path": "/doctor",
+        "isMarkdownPath": False,
+        "markdownPath": None,
+        "autoDiagnose": bool(auto_diagnose),
+        "query": q,
+        "issue": _w9_extract_banner_seed_fields(n),
+        "bannerSurface": n.get("bannerSurface"),
+        "version": _W9_BANNER_DOCTOR_SEED_VERSION,
+    }
+
+
+def _w9_build_banner_diagnose_plan(issue, engine=None, profile=None):
+    """Session-start plan for banner→Doctor with 1:1 seed + async diagnose markers."""
+    n = _w9_normalize_banner_issue(issue)
+    plan = _w8_shared_session_start_plan(
+        surface="doctor", engine=engine, issue=n)
+    seed = plan.get("seed") or _w8_build_doctor_short_seed(n)
+    if n:
+        seed = dict(seed)
+        seed["exactMessage"] = n.get("exactMessage") or seed.get("message")
+        seed["markdownPath"] = None
+        seed["isMarkdownPath"] = False
+        seed["bannerSurface"] = n.get("bannerSurface")
+        seed["bannerDoctorVersion"] = _W9_BANNER_DOCTOR_SEED_VERSION
+        plan["seed"] = seed
+        plan["seedText"] = _w8_format_doctor_short_seed_text(seed)
+    plan["bannerIssue"] = _w9_extract_banner_seed_fields(n)
+    plan["bannerOneToOne"] = _w9_assert_banner_seed_one_to_one(n, plan.get("seed"))
+    plan["navigation"] = _w9_build_doctor_navigation_from_banner(n, auto_diagnose=True)
+    plan["p6BannerDoctor"] = {
+        "id": "p6-health-banner-doctor-seed",
+        "version": _W9_BANNER_DOCTOR_SEED_VERSION,
+        "notMarkdownPath": True,
+        "fields": list(_W9_BANNER_SEED_FIELDS),
+    }
+    if plan.get("canStart"):
+        plan["session"] = dict(plan.get("session") or {})
+        plan["session"]["attemptAsyncDiagnose"] = True
+        plan["session"]["startWhen"] = "banner_click_diagnose"
+        plan["session"]["failureNonBlocking"] = True
+        plan["session"]["async"] = True
+    return plan
+
+
+def _w9_attempt_async_banner_diagnose_start(issue, engine=None, force_fail=False,
+                                           fail_reason=None, profile=None):
+    """Contract for async diagnose attempt; failure leaves UI usable."""
+    plan = _w9_build_banner_diagnose_plan(issue, engine=engine, profile=profile)
+    if force_fail or not plan.get("canStart"):
+        reason = (
+            fail_reason if force_fail
+            else (plan.get("error") or "no healthy engine")
+        )
+        return {
+            "ok": False,
+            "attempted": bool(force_fail),
+            "async": True,
+            "failureNonBlocking": True,
+            "uiUsable": True,
+            "health": {
+                "status": "start_failed" if force_fail else "engine_disabled",
+                "message": str(reason),
+                "engine": plan.get("engine") or engine,
+            },
+            "plan": plan,
+            "session": None,
+            "seed": plan.get("seed"),
+            "seedOneToOne": plan.get("bannerOneToOne"),
+            "error": reason,
+        }
+    return {
+        "ok": True,
+        "attempted": True,
+        "async": True,
+        "failureNonBlocking": True,
+        "uiUsable": True,
+        "health": {
+            "status": "healthy",
+            "message": "async diagnose start attempted with banner seed",
+            "engine": plan.get("engine"),
+        },
+        "plan": plan,
+        "session": {
+            "status": "starting",
+            "async": True,
+            "cancelable": True,
+            "engine": plan.get("engine"),
+            "issueId": (plan.get("bannerIssue") or {}).get("issueId"),
+        },
+        "seed": plan.get("seed"),
+        "seedOneToOne": plan.get("bannerOneToOne"),
+        "error": None,
+    }
+
+
+def _w9_render_clickable_banner_html(issue, title, body, style_kind="health"):
+    """Render a clickable health/reaper banner that opens Doctor with 1:1 seed."""
+    n = _w9_normalize_banner_issue(issue) or {}
+    nav = _w9_build_doctor_navigation_from_banner(n, auto_diagnose=True)
+    href = nav.get("href") or "/doctor?diagnose=1"
+    # JS open with token: base href + optional token from _anchorToken()
+    if style_kind == "reaper":
+        bg, border, color, strong = "#3b2a1f", "#9b6a3a", "#ffd9b3", "#ffb37a"
+    else:
+        bg, border, color, strong = "#3b1f1f", "#9b3a3a", "#ffb3b3", "#ff7a7a"
+    # Escape attribute values
+    def _attr(s):
+        return html_lib.escape(str(s or ""), quote=True)
+
+    issue_id = _attr(n.get("issueId") or "")
+    message = _attr(n.get("message") or "")
+    component = _attr(n.get("component") or "")
+    last_error = _attr(n.get("lastError") or "")
+    checks = _attr("|".join(n.get("suggestedChecks") or []))
+    surface = _attr(n.get("bannerSurface") or "")
+    href_js = href.replace("\\", "\\\\").replace("'", "\\'")
+    return (
+        f'<div role="button" tabindex="0" class="zh-health-banner-doctor" '
+        f'data-issue-id="{issue_id}" data-message="{message}" '
+        f'data-component="{component}" data-last-error="{last_error}" '
+        f'data-suggested-checks="{checks}" data-banner-surface="{surface}" '
+        f'data-diagnose="1" data-not-markdown-path="1" '
+        f'onclick="(function(){{var h=\'{href_js}\';'
+        f'try{{var t=(typeof _anchorToken===\'function\')?(_anchorToken()||\'\'):\'\';'
+        f'if(t)h+=(h.indexOf(\'?\')>=0?\'&amp;\':\'?\')+\'token=\'+encodeURIComponent(t);'
+        f'}}catch(e){{}}window.open(h,\'_blank\');}})()" '
+        f'style="background:{bg};border:1px solid {border};color:{color};'
+        f'padding:10px 14px;border-radius:6px;margin:0 0 10px 0;font-size:13px;'
+        f'cursor:pointer;" title="Open Doctor with seeded diagnose context (W9/SC7)">'
+        f'<strong style="color:{strong}">&#9888; {_attr(title)}</strong> {body}'
+        f'</div>'
+    )
+
+
+def handle_doctor_banner_seed(handler, path, body):
+    """GET/POST helper surface for W9 banner→Doctor seed (tests + clients)."""
+    # Parse query from handler path when GET
+    from urllib.parse import urlparse, parse_qs
+    qs = {}
+    try:
+        qs = {k: (v[0] if v else "") for k, v in parse_qs(
+            urlparse(path).query).items()}
+    except Exception:
+        qs = {}
+    body = body or {}
+    surface = (body.get("surface") or qs.get("surface") or "dashboard_health").lower()
+    if surface in ("reaper_health", "reaper"):
+        issue = _w9_build_reaper_health_banner_issue({
+            "kind": body.get("kind") or qs.get("kind") or "abstain-streak",
+            "message": body.get("message") or qs.get("message"),
+            "streak": body.get("streak") or qs.get("streak"),
+            "threshold": body.get("threshold") or qs.get("threshold"),
+            "lastError": body.get("lastError") or qs.get("lastError"),
+        })
+    else:
+        issue = _w9_build_dashboard_health_banner_issue(
+            report_date=body.get("reportDate") or qs.get("reportDate") or "",
+            status=body.get("status") or qs.get("status") or "ISSUES FOUND",
+            last_error=body.get("lastError") or qs.get("lastError"),
+            message=body.get("message") or qs.get("message"),
+        )
+    plan = _w9_build_banner_diagnose_plan(
+        issue, engine=body.get("engine") or qs.get("engine"))
+    attempt = _w9_attempt_async_banner_diagnose_start(
+        issue,
+        engine=body.get("engine") or qs.get("engine"),
+        force_fail=bool(body.get("forceFail") or qs.get("forceFail") == "1"),
+        fail_reason=body.get("failReason"),
+    )
+    handler._send_json({
+        "ok": True,
+        "surface": surface,
+        "issue": _w9_extract_banner_seed_fields(issue),
+        "seed": plan.get("seed"),
+        "seedText": plan.get("seedText"),
+        "oneToOne": plan.get("bannerOneToOne"),
+        "navigation": plan.get("navigation"),
+        "diagnosePlan": plan,
+        "asyncDiagnoseAttempt": attempt,
+        "bannerDoctorVersion": _W9_BANNER_DOCTOR_SEED_VERSION,
+        "notMarkdownPath": True,
+        "markdownPath": None,
+        "p5Plumbing": _W8_P5_PLUMBING,
+    })
+
+
+
 def handle_zombie_terminal_start(handler, path, body):
-    import shutil
     import zombie_hunter
     import reaper
     import pty_manager
 
-    # The GUI's engine toggle picks the backend; fall back to settings default,
-    # then whatever engine the host actually has.
-    backend = ((body or {}).get("backend") or "").strip().lower()
-    if backend not in _termsess.VALID_BACKENDS:
+    body = body or {}
+    # W8: prefer slim seed + three-engine health gate (shared start helper).
+    want_slim = body.get("slim") is not False  # default slim (SC5)
+    want_deep = bool(body.get("deepBrief") or body.get("deep_brief"))
+    candidate = body.get("candidate") if isinstance(body.get("candidate"), dict) else {}
+    if body.get("pid") is not None and "pid" not in candidate:
+        candidate = dict(candidate)
+        candidate["pid"] = body.get("pid")
+    if body.get("reasonCodes") and "reasonCodes" not in candidate:
+        candidate = dict(candidate)
+        candidate["reasonCodes"] = body.get("reasonCodes")
+
+    plan = _w8_shared_session_start_plan(
+        surface="investigate",
+        engine=body.get("backend") or body.get("engine"),
+        candidate=candidate,
+        deep_brief=want_deep,
+        slim=want_slim,
+    )
+    backend = plan.get("engine")
+    if not backend:
+        # Failure is non-blocking for the shell — honest JSON, no crash.
+        handler._send_json({
+            "ok": False,
+            "error": plan.get("error") or "no healthy engine",
+            "engineDenied": plan.get("engineDenied"),
+            "engineToggle": plan.get("engineToggle"),
+            "shell": plan.get("shell"),
+            "failureNonBlocking": True,
+            "p5Plumbing": _W8_P5_PLUMBING,
+        }, 200)
+        return
+
+    # Deep-brief or slim: use the shared seed. Optional legacy full briefing when
+    # caller explicitly sets slim=false (pre-W8 path).
+    if want_slim or want_deep:
+        briefing = plan["seedText"]
+        # Optional: append a short live scan tip without multi-minute assembly.
         try:
-            backend = _aset.get_default_cli()
+            import urllib.request
+            with urllib.request.urlopen('http://127.0.0.1:48484/api/state', timeout=1.5) as r:
+                st = json.loads(r.read().decode('utf-8'))
+            tot = (st.get("ledger", {}) or {}).get("totals", {}) or {}
+            briefing += (
+                "\n\n## Live scan tip (non-blocking)\n"
+                "- Burn $/min: %.2f · observe zombies: %s · mode: %s\n"
+                % (
+                    float(tot.get("usdPerMin") or 0),
+                    sum(g.get("count", 0) for g in (st.get("zombies") or [])),
+                    st.get("classifierMode") or "shadow",
+                )
+            )
         except Exception:
-            backend = ""
-        if backend not in _termsess.VALID_BACKENDS:
-            backend = ("claude" if shutil.which("claude")
-                       else "gemini" if shutil.which("gemini")
-                       else "grok")
-
-    try:
-        attached = set(pty_manager.live_sessions())
-    except Exception:
-        attached = set()
-
-    report_path = zombie_hunter._last_report_path()
-    report_data = None
-    if report_path.exists():
+            pass
+    else:
+        # Legacy full briefing path (explicit slim=false only).
         try:
-            report_data = json.loads(report_path.read_text("utf-8"))
+            attached = set(pty_manager.live_sessions())
+        except Exception:
+            attached = set()
+
+        report_path = zombie_hunter._last_report_path()
+        report_data = None
+        if report_path.exists():
+            try:
+                report_data = json.loads(report_path.read_text("utf-8"))
+            except Exception:
+                pass
+
+        if not report_data:
+            try:
+                report_data = zombie_hunter.sweep(
+                    live_session_ids=list(attached), apply=False)
+            except Exception:
+                report_data = {}
+
+        running_records = []
+        try:
+            running_records = _sessreg.list_sessions(status="running")
         except Exception:
             pass
 
-    if not report_data:
         try:
-            report_data = zombie_hunter.sweep(live_session_ids=list(attached), apply=False)
+            _snap = reaper.build_snapshot(
+                attached_pty_ids=attached, records=running_records,
+                enumerate_pids=reaper.enumerate_live_pids)
         except Exception:
-            report_data = {}
+            _snap = None
 
-    running_records = []
-    try:
-        running_records = _sessreg.list_sessions(status="running")
-    except Exception:
-        pass
-
-    # (#3, single source) Classify against the ONE immutable snapshot for
-    # this sweep (the shared provider) so a legit work-doing session with
-    # no open stream is not briefed as an orphan: attached ∪ job-owned ∪
-    # parent-owned.
-    try:
-        _snap = reaper.build_snapshot(attached_pty_ids=attached, records=running_records,
-                                      enumerate_pids=reaper.enumerate_live_pids)
-        live_ids = reaper.live_owner_ids(_snap)
-    except Exception:
-        _snap = None
-        live_ids = attached
-
-    session_briefs = []
-    orphaned_ids = []
-    for rec in running_records:
-        sid = rec.get("session_id", "")
-        lane_name = rec.get("lane", "")
-        pid = rec.get("pid")
-        rec_backend = rec.get("backend", "")
-        proj_id = rec.get("project_id", "")
-
-        owner = "(unowned)"
-        if proj_id:
-            proj = _rnd.get_project(proj_id)
-            if proj and proj.get("name"):
-                owner = proj["name"]
+        session_briefs = []
+        orphaned_ids = []
+        for rec in running_records:
+            sid = rec.get("session_id", "")
+            lane_name = rec.get("lane", "")
+            pid = rec.get("pid")
+            rec_backend = rec.get("backend", "")
+            proj_id = rec.get("project_id", "")
+            owner = "(unowned)"
+            if proj_id:
+                proj = _rnd.get_project(proj_id)
+                if proj and proj.get("name"):
+                    owner = proj["name"]
+                else:
+                    owner = proj_id
+            try:
+                classification = reaper.classify_record(rec, _snap)
+            except Exception:
+                classification = reaper.VERDICT_ABSTAIN
+            if classification == "kill":
+                orphaned_ids.append(sid)
+                cls_str = "ORPHANED (Pending Kill)"
+            elif classification == "alive":
+                cls_str = "ALIVE (Attached)"
             else:
-                owner = proj_id
+                cls_str = classification.upper()
+            session_briefs.append(
+                "- Session ID: %s\n  Lane: %s\n  PID: %s\n  Backend: %s\n  "
+                "Owner Project: %s\n  Classification: %s"
+                % (sid, lane_name, pid, rec_backend, owner, cls_str)
+            )
 
-        try:
-            classification = reaper.classify_record(rec, _snap)
-        except Exception:
-            # Defensive boundary (Wave 2, criterion 1): a fault NEVER
-            # briefs a session as an orphan-pending-kill — abstain-safe.
-            classification = reaper.VERDICT_ABSTAIN
-
-        if classification == "kill":
-            orphaned_ids.append(sid)
-            cls_str = "ORPHANED (Pending Kill)"
-        elif classification == "alive":
-            cls_str = "ALIVE (Attached)"
-        else:
-            cls_str = classification.upper()
-
-        session_briefs.append(
-            f"- Session ID: {sid}\n  Lane: {lane_name}\n  PID: {pid}\n  Backend: {rec_backend}\n  Owner Project: {owner}\n  Classification: {cls_str}"
+        briefing = "# ZOMBIE-HUNTER LIVE BRIEFING\n\n"
+        briefing += "You are the user's zombie-hunting assistant inside Anchor.\n"
+        briefing += (
+            "Your role is to help the user investigate the current "
+            "swarm/owner/orphan state of the terminal sessions, "
+            "and when the user confirms, cancel (kill) orphaned sessions.\n\n"
         )
-
-    briefing = "# ZOMBIE-HUNTER LIVE BRIEFING\n\n"
-    briefing += "You are the user's zombie-hunting assistant inside Anchor.\n"
-    briefing += "Your role is to help the user investigate the current swarm/owner/orphan state of the terminal sessions, "
-    briefing += "and when the user confirms, cancel (kill) orphaned sessions.\n\n"
-
-    if orphaned_ids:
-        briefing += "## Orphaned Sessions (Pending Kill)\n"
-        briefing += "These are orphaned sessions that can be killed:\n"
-        for oid in orphaned_ids:
-            briefing += f"- `{oid}`\n"
-        briefing += "\n"
-    else:
-        briefing += "No orphaned sessions detected.\n\n"
-
-    briefing += "## Sweep Report Summary\n"
-    if report_data:
-        swept_time_str = "unknown"
+        if orphaned_ids:
+            briefing += "## Orphaned Sessions (Pending Kill)\n"
+            for oid in orphaned_ids:
+                briefing += "- `%s`\n" % oid
+            briefing += "\n"
+        else:
+            briefing += "No orphaned sessions detected.\n\n"
+        briefing += "## Sweep Report Summary\n"
+        if report_data:
+            briefing += "- Killed count (orphaned): %s\n" % len(report_data.get("killed", []))
+            briefing += "- Alive count (attached): %s\n" % len(report_data.get("alive", []))
+        else:
+            briefing += "No sweep report data available.\n"
+        briefing += "\n## Running Sessions Details\n"
+        briefing += "\n".join(session_briefs) if session_briefs else "No running sessions."
         try:
-            swept_time_str = datetime.fromtimestamp(report_data.get("swept_at", 0)).strftime("%Y-%m-%d %H:%M:%S")
+            briefing += _zombie_scan_and_skill_briefing()
         except Exception:
             pass
-        briefing += f"- Swept At: {swept_time_str}\n"
-        briefing += f"- Killed count (orphaned): {len(report_data.get('killed', []))}\n"
-        briefing += f"- Alive count (attached): {len(report_data.get('alive', []))}\n"
-        briefing += f"- Abstained count (manual): {len(report_data.get('abstained', []))}\n"
-        briefing += f"- Reaped (dead): {len(report_data.get('reaped_dead', []))}\n"
-        briefing += f"- Reaped (recycled): {len(report_data.get('reaped_recycled', []))}\n"
-    else:
-        briefing += "No sweep report data available.\n"
-    briefing += "\n"
-
-    briefing += "## Running Sessions Details\n"
-    if session_briefs:
-        briefing += "\n".join(session_briefs)
-    else:
-        briefing += "No running sessions found in the registry."
-
-    # Append the whole-computer scan (node classifier) + skill awareness so the
-    # agent investigates the SAME data the GUI shows, with the safety rules.
-    try:
-        briefing += _zombie_scan_and_skill_briefing()
-    except Exception:
-        pass
 
     try:
         rec = _termsess.start_session(
@@ -10978,15 +11962,33 @@ def handle_zombie_terminal_start(handler, path, body):
             lane="zombie",
             backend=backend,
             label="zombie-hunter",
-            seed_context=briefing
+            seed_context=briefing,
         )
     except _termsess.TerminalSessionError as exc:
-        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        # Failure non-blocking for the shell UI.
+        handler._send_json({
+            "ok": False,
+            "error": str(exc),
+            "failureNonBlocking": True,
+            "engine": backend,
+            "shell": plan.get("shell"),
+        }, 400)
     else:
         handler._send_json({
             "ok": True,
             "session_id": rec.get("session_id"),
-            "backend": rec.get("backend")
+            "backend": rec.get("backend"),
+            "slim": want_slim,
+            "deepBrief": want_deep,
+            "seedKind": (plan.get("seed") or {}).get("kind"),
+            "engineToggle": plan.get("engineToggle"),
+            "session": {
+                "async": True,
+                "cancelable": True,
+                "failureNonBlocking": True,
+                "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
+            },
+            "p5Plumbing": _W8_P5_PLUMBING,
         })
 
 
@@ -11077,33 +12079,90 @@ def _build_doctor_seed():
 
 
 def handle_doctor_session_start(handler, path, body):
-    # Doctor V3 Wave 2 — start (or attach to) THE doctor agentic session.
-    # Token-authed by the do_POST default-deny middleware (route row declares
-    # AUTH_TOKEN) BEFORE this handler runs. Engine resolved HONESTLY via the W8
-    # model-flex policy: subscription CLIs only (claude / agy|gemini), never an
-    # API key; a host with neither gets an honest `unavailable` status — never
-    # a crash. Output/input ride the EXISTING term transports by session id.
-    profile = _lanes.detect_host_profile()
-    plan = _lanes.select_engine_plan("general", profile=profile)
-    if plan.get("status") != _lanes.ENGINE_STATUS_OK or not plan.get("driver"):
-        handler._send_json({
-            "ok": False,
-            "status": plan.get("status") or _lanes.ENGINE_STATUS_UNAVAILABLE,
+    # Doctor V3 Wave 2 + W8/SC6 multi-engine — start (or attach to) THE doctor
+    # agentic session. Token-authed by middleware BEFORE this handler runs.
+    # When the UI picker sends backend=claude|gemini|grok, resolve via the
+    # shared three-engine start helper (dead toggle forbidden). When no
+    # backend is provided (legacy API callers / V3 tests), keep honest
+    # select_engine_plan (claude/agy job-layer) so unavailable stays honest.
+    # Page itself must NOT auto-call this on load (shell-first / one-click
+    # diagnose).
+    body = body or {}
+    short_only = bool(body.get("short") or body.get("shortSeed"))
+    issue = body.get("issue") if isinstance(body.get("issue"), dict) else None
+    requested = _w8_normalize_engine(body.get("backend") or body.get("engine"))
+    start_plan = _w8_shared_session_start_plan(
+        surface="doctor",
+        engine=requested,
+        issue=issue,
+    )
+    engine_meta = {
+        "driver": None,
+        "swarm": None,
+        "swarm_ratio": None,
+        "reason": "",
+    }
+    if requested:
+        backend = start_plan.get("engine")
+        engine_meta["driver"] = backend
+        engine_meta["reason"] = "interactive doctor picker (W8/SC6)"
+        if not backend:
+            handler._send_json({
+                "ok": False,
+                "status": _lanes.ENGINE_STATUS_UNAVAILABLE,
+                "reason": start_plan.get("error") or "no healthy engine",
+                "session": None,
+                "engineDenied": start_plan.get("engineDenied"),
+                "engineToggle": start_plan.get("engineToggle"),
+                "shell": start_plan.get("shell"),
+                "failureNonBlocking": True,
+                "p5Plumbing": _W8_P5_PLUMBING,
+            })
+            return
+    else:
+        # Legacy / no-picker path: claude|gemini job-layer honesty (V3 tests).
+        profile = _lanes.detect_host_profile()
+        plan = _lanes.select_engine_plan("general", profile=profile)
+        if plan.get("status") != _lanes.ENGINE_STATUS_OK or not plan.get("driver"):
+            handler._send_json({
+                "ok": False,
+                "status": plan.get("status") or _lanes.ENGINE_STATUS_UNAVAILABLE,
+                "reason": plan.get("reason", ""),
+                "session": None,
+                "engineToggle": start_plan.get("engineToggle"),
+                "shell": start_plan.get("shell"),
+                "failureNonBlocking": True,
+                "p5Plumbing": _W8_P5_PLUMBING,
+            })
+            return
+        backend = plan["driver"]
+        engine_meta = {
+            "driver": plan.get("driver"),
+            "swarm": plan.get("swarm"),
+            "swarm_ratio": plan.get("swarm_ratio"),
             "reason": plan.get("reason", ""),
-            "session": None,
-        })
-        return
+        }
     try:
-        seed = _build_doctor_seed()
+        if short_only or issue:
+            seed = start_plan.get("seedText") or _w8_format_doctor_short_seed_text(
+                start_plan.get("seed"))
+        else:
+            seed = _build_doctor_seed()
     except Exception as exc:
         # The briefing must never block the session — degrade honestly.
         seed = ("ANCHOR DOCTOR - LIVE DIAGNOSTIC BRIEFING\n\n"
                 "(briefing assembly failed: %s)" % exc)
     try:
         rec, attached = _termsess.start_doctor_session(
-            seed_context=seed, backend=plan["driver"])
+            seed_context=seed, backend=backend)
     except _termsess.TerminalSessionError as exc:
-        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        handler._send_json({
+            "ok": False,
+            "error": str(exc),
+            "failureNonBlocking": True,
+            "engine": backend,
+            "shell": start_plan.get("shell"),
+        }, 400)
         return
     # SAFE projection (consistent with term_sessions): NEVER worktree_path /
     # branch / seed text — the UI needs only the id + engine + status.
@@ -11120,12 +12179,16 @@ def handle_doctor_session_start(handler, path, body):
             "label": rec.get("label", ""),
             "created_at": rec.get("created_at"),
         },
-        "engine": {
-            "driver": plan.get("driver"),
-            "swarm": plan.get("swarm"),
-            "swarm_ratio": plan.get("swarm_ratio"),
-            "reason": plan.get("reason", ""),
+        "engine": engine_meta,
+        "engineToggle": start_plan.get("engineToggle"),
+        "sessionStart": {
+            "async": True,
+            "cancelable": True,
+            "failureNonBlocking": True,
+            "autoStart": False,
+            "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
         },
+        "p5Plumbing": _W8_P5_PLUMBING,
     })
 
 
@@ -11219,8 +12282,23 @@ def _doctor_stats():
 def handle_doctor_status(handler, path, body):
     # Read-only JSON stats for the /doctor card + reports-list refresh after a
     # diagnostics run. Token-authed by the route row (?token= / header /
-    # cookie). Never spawns / never blocks.
-    handler._send_json({"ok": True, **_doctor_stats()})
+    # cookie). Never spawns / never blocks. W8: includes engine toggle so the
+    # shell can paint pickers without starting a session.
+    try:
+        prefs = {"default_cli": _aset.get_default_cli()}
+    except Exception:
+        prefs = {}
+    toggle = _w8_engine_toggle(prefs=prefs)
+    handler._send_json({
+        "ok": True,
+        **_doctor_stats(),
+        "engines": toggle["engines"],
+        "defaultEngine": toggle["defaultEngine"],
+        "shellFirst": True,
+        "autoStartSession": False,
+        "oneClickDiagnose": True,
+        "p5Plumbing": _W8_P5_PLUMBING,
+    })
 
 
 _DOCTOR_REPORT_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.md$")
@@ -11461,9 +12539,17 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     </div>
     <div class="col-right">
       <div class="card panel term-panel">
-        <h3>Doctor session <span class="term-eng" id="termEngine"></span></h3>
+        <h3>Doctor session <span class="term-eng" id="termEngine">shell ready</span></h3>
+        <div id="enginePicker" style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px;align-items:center">
+          <span style="color:#71717a;font-size:12px">Engine:</span>
+          <button type="button" class="btn eng-btn" data-eng="claude" id="engC" onclick="pickDoctorEng('claude')">Claude</button>
+          <button type="button" class="btn eng-btn" data-eng="gemini" id="engG" onclick="pickDoctorEng('gemini')">Gemini</button>
+          <button type="button" class="btn eng-btn" data-eng="grok" id="engK" onclick="pickDoctorEng('grok')">Grok</button>
+          <button type="button" class="btn" id="diagnoseBtn" onclick="runDiagnose()">Diagnose</button>
+          <span id="engHealth" style="color:#a1a1aa;font-size:11px"></span>
+        </div>
         <div id="terminal"></div>
-        <div class="hint">A read-only agentic session (plan permission mode) over this live Anchor install.</div>
+        <div class="hint">Shell-first (W8/SC6): page is usable immediately. Session starts only when you click Diagnose — no multi-minute blank wait. Engines: Claude · Gemini(agy) · Grok (grok.exe -p). Unhealthy engines disable with health.</div>
       </div>
     </div>
   </div>
@@ -11491,12 +12577,37 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     if (token) a.href = tq(a.getAttribute('href'));
   });
 
-  // ── The doctor agentic terminal (attaches to the Wave-2 session) ──
+  // ── W8/SC6 shell-first doctor terminal (NO auto session_start on load) ──
   var term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: '#0c0e14' }, scrollback: 5000 });
   term.open(document.getElementById('terminal'));
+  term.write('[doctor] Shell ready (≤1s). Pick Claude / Gemini / Grok, then Diagnose.\\r\\n');
+  term.write('[doctor] No auto-session — page stays usable without multi-minute blank wait.\\r\\n');
   var activeWs = null;
   var sendChain = Promise.resolve();
   var sessionId = null;
+  var ZH_ENG = 'claude';
+  var ZH_ENG_HEALTH = { claude: true, gemini: true, grok: true };
+  function paintEng() {
+    ['claude','gemini','grok'].forEach(function (e) {
+      var id = e === 'claude' ? 'engC' : (e === 'gemini' ? 'engG' : 'engK');
+      var el = document.getElementById(id);
+      if (!el) return;
+      var ok = ZH_ENG_HEALTH[e] !== false;
+      el.disabled = !ok;
+      el.style.opacity = ok ? '1' : '0.45';
+      el.style.outline = (ZH_ENG === e) ? '1px solid #6c9cfc' : 'none';
+    });
+    var h = document.getElementById('engHealth');
+    if (h) h.textContent = ZH_ENG_HEALTH[ZH_ENG] === false ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' ready');
+  }
+  window.pickDoctorEng = function (e) {
+    if (ZH_ENG_HEALTH[e] === false) {
+      term.write('[doctor] ' + e + ' disabled (unhealthy).\\r\\n');
+      return;
+    }
+    ZH_ENG = e;
+    paintEng();
+  };
   function sendInput(d) {
     if (!sessionId || d === '' || d == null) return;
     if (activeWs && activeWs.readyState === 1) {
@@ -11548,24 +12659,118 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
     }
     setTimeout(fitTerm, 100);
   }
-  var startBody = {};
-  if (token) startBody.token = token;
-  fetch('/api/doctor/session_start', { method: 'POST', headers: hdrs(), body: JSON.stringify(startBody) })
+  // W9 / SC7 — banner→Doctor seed from URL query (1:1 fields; not a markdown path).
+  var BANNER_ISSUE = null;
+  var AUTO_DIAGNOSE = false;
+  (function parseBannerIssueFromQuery() {
+    try {
+      var sp = new URLSearchParams(location.search);
+      var issueId = sp.get('issueId') || sp.get('id') || '';
+      var message = sp.get('message') || sp.get('exactMessage') || '';
+      var component = sp.get('component') || '';
+      var lastError = sp.get('lastError') || '';
+      var checksRaw = sp.get('suggestedChecks') || '';
+      var suggestedChecks = checksRaw ? checksRaw.split('|').filter(Boolean) : [];
+      AUTO_DIAGNOSE = sp.get('diagnose') === '1' || sp.get('autoDiagnose') === '1';
+      if (issueId || message || component || lastError || suggestedChecks.length) {
+        BANNER_ISSUE = {
+          issueId: issueId || null,
+          message: message,
+          exactMessage: message,
+          component: component,
+          lastError: lastError,
+          suggestedChecks: suggestedChecks,
+          markdownPath: null,
+          isMarkdownPath: false
+        };
+        term.write('[doctor] Banner seed loaded (W9/SC7) — not a markdown path.\\r\\n');
+        term.write('[doctor] issueId: ' + (BANNER_ISSUE.issueId || '(none)') + '\\r\\n');
+        if (BANNER_ISSUE.message) term.write('[doctor] message: ' + BANNER_ISSUE.message + '\\r\\n');
+        if (BANNER_ISSUE.component) term.write('[doctor] component: ' + BANNER_ISSUE.component + '\\r\\n');
+        if (BANNER_ISSUE.lastError) term.write('[doctor] lastError: ' + BANNER_ISSUE.lastError + '\\r\\n');
+        if (BANNER_ISSUE.suggestedChecks.length) {
+          term.write('[doctor] suggestedChecks: ' + BANNER_ISSUE.suggestedChecks.join('; ') + '\\r\\n');
+        }
+      }
+    } catch (e) {
+      BANNER_ISSUE = null;
+      AUTO_DIAGNOSE = false;
+    }
+  })();
+
+  // Shell-first: load engine health ONLY (never auto session_start on plain open).
+  // Banner navigation with diagnose=1 may attempt async diagnose after engines paint.
+  fetch(tq('/api/doctor/status'), { headers: getHdrs() })
     .then(function (r) { return r.json(); })
-    .then(function (p) {
-      if (p && p.ok && p.session && p.session.session_id) {
-        sessionId = p.session.session_id;
-        var eng = document.getElementById('termEngine');
-        if (eng && p.session.backend) eng.textContent = p.session.backend + (p.attached ? ' (reattached)' : '');
-        attach();
-      } else {
-        var status = (p && p.status) || 'error';
-        var reason = (p && (p.reason || p.error)) || 'unknown';
-        term.write('[doctor] No agentic session available (' + status + '): ' + reason + '\r\n');
-        term.write('[doctor] Log in to the claude or gemini CLI on this host to enable the live doctor.\r\n');
+    .then(function (s) {
+      if (s && s.engines) {
+        s.engines.forEach(function (row) { ZH_ENG_HEALTH[row.id] = !!row.enabled; });
+        if (s.defaultEngine) ZH_ENG = s.defaultEngine;
+      }
+      paintEng();
+      // W9: banner click with diagnose=1 → attempt async session start with seed.
+      if (AUTO_DIAGNOSE && BANNER_ISSUE && ZH_ENG_HEALTH[ZH_ENG] !== false) {
+        term.write('[doctor] Banner diagnose path: attempting async session start…\\r\\n');
+        window.runDiagnose({ fromBanner: true });
+      } else if (AUTO_DIAGNOSE && BANNER_ISSUE && ZH_ENG_HEALTH[ZH_ENG] === false) {
+        term.write('[doctor] Banner diagnose deferred — engine ' + ZH_ENG + ' disabled with health; shell usable.\\r\\n');
       }
     })
-    .catch(function (e) { term.write('[doctor] session start failed: ' + e + '\r\n'); });
+    .catch(function () {
+      paintEng();
+      if (AUTO_DIAGNOSE && BANNER_ISSUE) {
+        term.write('[doctor] Engine health probe failed (non-blocking); shell usable. Click Diagnose when ready.\\r\\n');
+      }
+    });
+
+  window.runDiagnose = function (opts) {
+    opts = opts || {};
+    if (sessionId) {
+      term.write('[doctor] Session already live.\\r\\n');
+      return;
+    }
+    if (ZH_ENG_HEALTH[ZH_ENG] === false) {
+      term.write('[doctor] Engine ' + ZH_ENG + ' disabled with health — pick another.\\r\\n');
+      return;
+    }
+    var btn = document.getElementById('diagnoseBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+    var startBody = { backend: ZH_ENG };
+    if (token) startBody.token = token;
+    // W9: seed Doctor 1:1 from banner issue payload (short diagnose seed).
+    if (BANNER_ISSUE) {
+      startBody.issue = BANNER_ISSUE;
+      startBody.short = true;
+      startBody.shortSeed = true;
+    }
+    fetch('/api/doctor/session_start', { method: 'POST', headers: hdrs(), body: JSON.stringify(startBody) })
+      .then(function (r) { return r.json(); })
+      .then(function (p) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Diagnose'; }
+        if (p && p.ok && p.session && p.session.session_id) {
+          sessionId = p.session.session_id;
+          var eng = document.getElementById('termEngine');
+          if (eng && p.session.backend) eng.textContent = p.session.backend + (p.attached ? ' (reattached)' : '');
+          term.write('[doctor] Session started async on ' + (p.session.backend || ZH_ENG)
+            + (opts.fromBanner ? ' (banner seed)' : '') + '.\\r\\n');
+          attach();
+        } else {
+          var status = (p && p.status) || 'error';
+          var reason = (p && (p.reason || p.error)) || 'unknown';
+          // Failure surfaces health; UI stays usable (SC7).
+          term.write('[doctor] Diagnose failed (non-blocking): ' + status + ' — ' + reason + '\\r\\n');
+          term.write('[doctor] Shell remains usable; try another engine or fix CLI health.\\r\\n');
+          var h = document.getElementById('engHealth');
+          if (h) h.textContent = 'start failed: ' + reason;
+        }
+      })
+      .catch(function (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Diagnose'; }
+        term.write('[doctor] session start failed (non-blocking): ' + e + '\\r\\n');
+        var h = document.getElementById('engHealth');
+        if (h) h.textContent = 'start failed (non-blocking)';
+      });
+  };
 
   // ── Background diagnostics run + live tail ──
   var chipNames = { red: 'issues', yellow: 'warnings', green: 'healthy' };
@@ -13034,24 +14239,14 @@ def handle_zombie_hunter_report(handler, path, body):
     # branch referencing it before this line raises UnboundLocalError
     # -> a 500 on every page load. (rearch W8: the shadowing class is
     # structurally eliminated — route_import_scan proves it stays 0.)
+    #
+    # Contract (tests + dashboard): this route serves the pure-Python
+    # Cached Sweep Report / Live Process Query Fallback HTML. The Node
+    # System-Wide Sentinel on :48484 is warmed at boot separately and is
+    # NOT the primary body of this route (a prior short-circuit proxy
+    # made the report path dead and broke the frozen UX tests).
 
-    import urllib.request
-    # Inject the caller's token into the proxied node page so its embedded
-    # "Investigate with an agent" terminal tile can authenticate its calls
-    # back to Anchor (zombie_terminal_start / term_ws / term_set_engine).
-    _zh_tok = (parse_qs(urlparse(handler.path).query).get("token", [""])[0] or "")
-    try:
-        req = urllib.request.urlopen('http://127.0.0.1:48484/', timeout=5)
-        html = req.read().decode('utf-8').replace('__ANCHOR_TOKEN__', _zh_tok)
-    except Exception as e:
-        html = f"<html><body><h1>Error connecting to Zombie Hunter Node Server</h1><pre>{str(e)}</pre></body></html>"
-    handler.send_response(200)
-    handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.end_headers()
-    handler.wfile.write(html.encode("utf-8"))
-    return
-
-                    # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
+    # Check if zombie_hunter_last.json exists and is not stale (within 60 seconds)
     report_path = zombie_hunter._last_report_path()
     is_stale = True
     report_data = None
@@ -13384,15 +14579,55 @@ function resumeSession(sessionId, btn) {
     btn.innerText = "Resume";
   });
 }
+var ZH_ENG = 'claude';
+var ZH_ENG_HEALTH = { claude: true, gemini: true, grok: true };
+function paintZhEng() {
+  ['claude','gemini','grok'].forEach(function(e) {
+    var el = document.getElementById('zh-eng-' + e);
+    if (!el) return;
+    var ok = ZH_ENG_HEALTH[e] !== false;
+    el.disabled = !ok;
+    el.style.opacity = ok ? '1' : '0.45';
+    el.style.outline = (ZH_ENG === e) ? '1px solid #6c9cfc' : 'none';
+  });
+  var h = document.getElementById('zh-eng-health');
+  if (h) h.textContent = ZH_ENG_HEALTH[ZH_ENG] === false
+    ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' · slim seed · async start');
+}
+function setZhEng(e) {
+  if (ZH_ENG_HEALTH[e] === false) return;
+  ZH_ENG = e;
+  paintZhEng();
+}
+function loadZhEngines() {
+  const token = getAnchorToken();
+  const headers = {};
+  if (token) headers['X-Anchor-Token'] = token;
+  const q = token ? ('?token=' + encodeURIComponent(token)) : '';
+  fetch('/api/zh/engines' + q, { headers: headers })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j && j.engines) {
+        j.engines.forEach(function(row) { ZH_ENG_HEALTH[row.id] = !!row.enabled; });
+        if (j.defaultEngine) ZH_ENG = j.defaultEngine;
+      }
+      paintZhEng();
+    })
+    .catch(function() { paintZhEng(); });
+}
 function startZombieTerminal(btn) {
+  if (ZH_ENG_HEALTH[ZH_ENG] === false) {
+    alert(ZH_ENG + ' is disabled (unhealthy). Pick another engine.');
+    return;
+  }
   btn.disabled = true;
-  btn.innerText = "Starting terminal...";
+  btn.innerText = "Starting…";
 
   const token = getAnchorToken();
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['X-Anchor-Token'] = token;
 
-  const payload = {};
+  const payload = { backend: ZH_ENG, slim: true };
   if (token) payload.token = token;
 
   fetch('/api/rnd/zombie_terminal_start', {
@@ -13413,25 +14648,32 @@ function startZombieTerminal(btn) {
       placeholder.style.display = 'none';
       iframe.style.display = 'block';
     } else {
-      alert("Failed to start terminal: " + (data.error || "unknown error"));
+      alert("Failed (non-blocking): " + (data.error || "unknown error"));
       btn.disabled = false;
       btn.innerText = "Start Terminal";
     }
   })
   .catch(err => {
-    alert("Error communicating with server: " + err.message);
+    alert("Error (non-blocking): " + err.message);
     btn.disabled = false;
     btn.innerText = "Start Terminal";
   });
 }
+document.addEventListener('DOMContentLoaded', loadZhEngines);
 """
     html += "</script>"
 
     html += "<h2>Zombie-Hunter Terminal</h2>"
     html += "<div id='terminal-container' style='background:#0c0e14; border:1px solid #27272a; border-radius:8px; padding:16px; margin-top:12px; margin-bottom:24px; min-height:100px; display:flex; flex-direction:column; align-items:center; justify-content:center;'>"
     html += "  <div id='terminal-placeholder' style='text-align:center;'>"
-    html += "    <p style='color:#a1a1aa; font-size:14px; margin-bottom:12px;'>Start an interactive, seeded terminal session with an agent to investigate and manage zombie processes.</p>"
-    html += "    <button class='btn-start' onclick='startZombieTerminal(this)'>Start Terminal</button>"
+    html += "    <p style='color:#a1a1aa; font-size:14px; margin-bottom:12px;'>Shell-first Investigate (W8/SC5): pick Claude / Gemini / Grok, then start with a slim seed (async — no multi-minute blank wait).</p>"
+    html += "    <div style='display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:12px;'>"
+    html += "      <button class='btn-start' id='zh-eng-claude' onclick='setZhEng(\"claude\")'>Claude</button>"
+    html += "      <button class='btn-start' id='zh-eng-gemini' onclick='setZhEng(\"gemini\")'>Gemini</button>"
+    html += "      <button class='btn-start' id='zh-eng-grok' onclick='setZhEng(\"grok\")'>Grok</button>"
+    html += "    </div>"
+    html += "    <div id='zh-eng-health' style='color:#71717a;font-size:12px;margin-bottom:10px;'>loading engines…</div>"
+    html += "    <button class='btn-start' onclick='startZombieTerminal(this)'>Start Terminal (slim seed)</button>"
     html += "  </div>"
     html += "  <iframe id='terminal-iframe' style='width:100%; height:450px; border:none; display:none; border-radius:6px;'></iframe>"
     html += "</div>"
@@ -14452,7 +15694,9 @@ _MIGRATED_HANDLERS = {
     "handle_term_adopt": handle_term_adopt,
     "handle_term_start": handle_term_start,
     "handle_zombie_terminal_start": handle_zombie_terminal_start,
+    "handle_zh_engines": handle_zh_engines,
     "handle_doctor_session_start": handle_doctor_session_start,
+    "handle_doctor_banner_seed": handle_doctor_banner_seed,
     "handle_doctor_status": handle_doctor_status,
     "handle_doctor_report": handle_doctor_report,
     "handle_doctor_healthcheck_run": handle_doctor_healthcheck_run,
@@ -14781,7 +16025,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
         if not self._route_auth_ok(route):
             self._send_json({"ok": False, "error": "unauthorized"}, 401)
             return True
-        fn(self, path, body)
+        # Always hand handlers the FULL request URI (query included). Route
+        # matching uses a path-only string, but handlers that parse ?project_id=
+        # must see the query. Passing path-only caused tidy_idy_status to return
+        # "project_id required" on every remote poll (Tailscale freeze at 42%).
+        full = getattr(self, "path", None) or path
+        fn(self, full, body)
         return True
 
     # ── Data-plane auth-mode gate (rearch W8 warn / W9 enforce) ──────────────
@@ -16108,15 +17357,21 @@ def main():
                 reaper_arming.armed_sweep(running, snap)
             zombie_hunter.start_hunter(_live_provider, sweep_fn=_armed_sweep_cycle)
             
-            import subprocess
             try:
-                node_server_path = r"C:\dev\Skill Foundry\skills\zombie-hunter\src\server.js"
-                if os.path.exists(node_server_path):
+                # Fire-and-forget warm start; handle_zombie_hunter_report will
+                # _ensure_zh_node_server if the user opens the radar before listen.
+                import subprocess as _sp_zh
+                if not _zh_node_is_up(timeout=0.5):
                     creationflags = 0x08000000 if sys.platform.startswith("win") else 0
-                    subprocess.Popen(["node", node_server_path], creationflags=creationflags)
-                    _logger.info("Launched Prism Matrix Node Server on port 48484")
+                    if os.path.exists(_ZH_NODE_SERVER_PATH):
+                        _sp_zh.Popen(
+                            ["node", _ZH_NODE_SERVER_PATH],
+                            creationflags=creationflags,
+                            cwd=os.path.dirname(_ZH_NODE_SERVER_PATH),
+                        )
+                        _logger.info("Launched ZH Node Server on port %s", _ZH_NODE_PORT)
             except Exception as e:
-                _logger.error(f"Failed to launch Prism Matrix Node Server: {e}")
+                _logger.error(f"Failed to launch ZH Node Server: {e}")
                 
     except Exception as e:
         _logger.error(f"zombie_hunter.start_hunter failed: {e}")

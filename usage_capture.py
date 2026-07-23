@@ -67,6 +67,8 @@ REASON_SIDECAR_UNAVAILABLE = "sidecar-root-unavailable"
 REASON_EMPTY_SIDECAR = "empty-sidecar"
 REASON_PRE_FEATURE = "pre-feature"
 REASON_GEMINI_SEGMENT = "gemini-segment"
+#: Grok interactive path: no Claude-shaped JSONL under ~/.claude; wall-clock only.
+REASON_GROK_NO_SIDECAR = "grok-no-claude-sidecar"
 
 #: The ``kind`` marker on the effort pointer-record a finalize writes (mirrors the
 #: W2 durability-substrate test's RUN cost record shape).
@@ -436,12 +438,22 @@ def finalize_session_usage(session_id, project_id=None, lane=None, record=None,
 
     uuids = _engine_uuids_of(rec)
 
+    # Wall-clock for unmeasured sessions (Grok / no-sidecar): never invents tokens.
+    duration_ms_observed = _session_wall_clock_ms(rec)
+
     # 1) No engine UUID was captured at launch → honest UNCORRELATED (defer-and-
-    #    badge). Never a guessed total, never an effort cost record.
+    #    badge). Never a guessed total. Grok wall-clock-only row is opt-in below
+    #    when UUID was pinned but Claude-shaped sidecar is absent.
     if not uuids:
-        _stamp(session_id, STATE_UNMEASURED, REASON_UNCORRELATED)
-        out.update(finalized=True, state=STATE_UNMEASURED,
-                   reason=REASON_UNCORRELATED)
+        backend = str(rec.get("backend") or "").lower()
+        reason = (REASON_GROK_NO_SIDECAR if backend == "grok"
+                  else REASON_UNCORRELATED)
+        _stamp(session_id, STATE_UNMEASURED, reason)
+        if backend == "grok":
+            _write_run_cost_wall_only(
+                folder_path, project_id, lane, session_id, duration_ms_observed,
+                reason)
+        out.update(finalized=True, state=STATE_UNMEASURED, reason=reason)
         return out
 
     # 2) Ingest every segment's sidecar into the ledger + classify. A fail-closed
@@ -493,14 +505,76 @@ def finalize_session_usage(session_id, project_id=None, lane=None, record=None,
         out.update(finalized=True, state=STATE_MEASURED, cost=cost)
         return out
 
-    # Unmeasured — no honest usage. Stamp the reason (pruned / unavailable);
-    # write NO effort cost record.
+    # Unmeasured — no honest token usage. Stamp the reason (pruned / unavailable).
+    # For Grok (or when backend=grok and Claude sidecar missing), write wall-clock
+    # only so project rollups show time; never invent tokens/$.
     reason = (REASON_SIDECAR_PRUNED if located_any is False
               and REASON_SIDECAR_PRUNED in reasons else
               (reasons[0] if reasons else REASON_SIDECAR_PRUNED))
+    backend = str(rec.get("backend") or "").lower()
+    if backend == "grok" and reason in (
+            REASON_SIDECAR_PRUNED, REASON_SIDECAR_UNAVAILABLE, REASON_EMPTY_SIDECAR):
+        reason = REASON_GROK_NO_SIDECAR
     _stamp(session_id, STATE_UNMEASURED, reason)
+    if backend == "grok":
+        wall = duration_ms if duration_ms > 0 else duration_ms_observed
+        _write_run_cost_wall_only(
+            folder_path, project_id, lane, session_id, wall, reason,
+            engine_session_uuid=(uuids[0] if uuids else ""))
     out.update(finalized=True, state=STATE_UNMEASURED, reason=reason)
     return out
+
+
+def _session_wall_clock_ms(record) -> int:
+    """Best-effort session wall clock from registry timestamps (never tokens)."""
+    if not isinstance(record, dict):
+        return 0
+    try:
+        created = float(record.get("created_at") or 0)
+    except (TypeError, ValueError):
+        created = 0.0
+    end = None
+    for key in ("finished_at", "updated_at", "ended_at"):
+        try:
+            v = float(record.get(key) or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        if v > 0:
+            end = v
+            break
+    if not created:
+        return 0
+    if end is None or end < created:
+        import time as _time
+        end = _time.time()
+    return max(0, int((end - created) * 1000))
+
+
+def _write_run_cost_wall_only(folder_path, project_id, lane, session_id,
+                              duration_ms, usage_reason,
+                              engine_session_uuid="") -> None:
+    """Write a RUN cost row with tokens/$ = 0 and wall-clock only (unmeasured).
+
+    Honesty: total_tokens and total_cost_usd stay 0 — never fabricates spend.
+    Enables project_effort_rollup to show session time for Grok / uncorrelated.
+    """
+    if not folder_path or not project_id or not duration_ms:
+        return
+    cost = {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0,
+        "total_all_classes": 0,
+        "total_tokens": 0,
+        "input_plus_output": 0,
+        "duration_ms": int(duration_ms or 0),
+        "total_cost_usd": 0.0,
+        "usage_state": STATE_UNMEASURED,
+        "usage_reason": usage_reason or "",
+    }
+    _write_run_cost(folder_path, project_id, lane, session_id,
+                    engine_session_uuid or "", cost, STATE_UNMEASURED)
 
 
 def _write_run_cost(folder_path, project_id, lane, session_id,

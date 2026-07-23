@@ -1,17 +1,22 @@
-"""vendor_skills.py — clean vendoring of the bundled trio + Gandalf skills.
+"""vendor_skills.py — clean vendoring of the bundled Trio + Foundry skills.
 
-Share-distro Wave 3. Vendors each source skill into
-``<dest>/vendor/bundled-skills/<name>/`` via ``git archive <commit>`` (which
-auto-drops ``.git/`` and untracked/gitignored files), THEN applies an explicit
-DENYLIST filter (because ``git archive`` KEEPS *tracked* files even if they
-match a ``.gitignore`` pattern — a committed personal log would otherwise
-ship), THEN a residual host-path / PII scrub over the remaining text files, and
-finally writes ``SOURCES.md`` recording each skill's source + archived commit
-sha.
+Share-distro Wave 3 + Shareable Anchor+Skills W2 roster expansion. Vendors each
+source skill into ``<dest>/vendor/bundled-skills/<name>/`` via
+``git archive <commit>`` (which auto-drops ``.git/`` and untracked/gitignored
+files), THEN applies an explicit DENYLIST filter (because ``git archive`` KEEPS
+*tracked* files even if they match a ``.gitignore`` pattern — a committed
+personal log would otherwise ship), THEN a residual host-path / PII / secret
+scrub over the remaining text files, and finally writes ``SOURCES.md``
+recording each skill's source + archived commit sha.
+
+Roster expansion is **config-only** (``SKILL_SOURCES`` / ``CANARY_SKILL_SOURCES``).
+The archive + denylist-apply + residual-scrub APIs stay frozen unless a
+gap-proof redesign ticket says otherwise.
 
 Stdlib only: ``subprocess`` (git), ``pathlib``, ``shutil``, ``re``, ``tarfile``.
 Best-effort + honest: a missing / unset source env is an honest SKIP with a
 clear message — never a fallback to a hardcoded real author path.
+Money-safe: only local ``git -C <repo>``; no network publish, no paid CLI.
 """
 
 from __future__ import annotations
@@ -25,22 +30,62 @@ import tarfile
 from pathlib import Path
 
 # --------------------------------------------------------------------------- #
-# Source configuration
+# Source configuration (config-only roster expansion — W2)
 # --------------------------------------------------------------------------- #
 # Each entry: skill name -> (env var holding the source REPO, subdir within
 # that repo holding the skill — "" means the repo root IS the skill).
-# The trio repo (ANCHOR_TRIO_DIR) holds researchPrime/crucible/foreman subdirs;
-# Gandalf lives at the root of its own repo (ANCHOR_GANDALF_DIR).
+#
+#   ANCHOR_TRIO_DIR     — trio monorepo (researchPrime/crucible/foreman subdirs)
+#   ANCHOR_GANDALF_DIR  — Gandalf skill at repo root (back-compat baseline)
+#   ANCHOR_FOUNDRY_DIR  — Skill Foundry monorepo (skills/<name> subdirs)
+#
+# Full declared suite toward capability matrix / NS D8 (vendorable skills).
+# Anchor Doctor is an Anchor feature, not a vendored skill — not listed here.
 SKILL_SOURCES = [
     ("researchPrime", "ANCHOR_TRIO_DIR", "researchPrime"),
     ("crucible", "ANCHOR_TRIO_DIR", "crucible"),
     ("foreman", "ANCHOR_TRIO_DIR", "foreman"),
     ("gandalf", "ANCHOR_GANDALF_DIR", ""),
+    ("jumper", "ANCHOR_FOUNDRY_DIR", "skills/jumper"),
+    ("ramanujan", "ANCHOR_FOUNDRY_DIR", "skills/ramanujan"),
+    ("legal-beagle", "ANCHOR_FOUNDRY_DIR", "skills/legal-beagle"),
+    ("literature-review", "ANCHOR_FOUNDRY_DIR", "skills/literature-review"),
+    ("financial-analyst", "ANCHOR_FOUNDRY_DIR", "skills/financial-analyst"),
+    ("tidy-idy", "ANCHOR_FOUNDRY_DIR", "skills/tidy-idy"),
+    ("zombie-hunter", "ANCHOR_FOUNDRY_DIR", "skills/zombie-hunter"),
+]
+
+# Early canary (W2): one Trio skill + one large Foundry skill through the
+# frozen git-archive → denylist → residual scrub → SOURCES path.
+CANARY_SKILL_SOURCES = [
+    ("foreman", "ANCHOR_TRIO_DIR", "foreman"),
+    ("literature-review", "ANCHOR_FOUNDRY_DIR", "skills/literature-review"),
 ]
 
 VENDOR_SUBPATH = ("vendor", "bundled-skills")
 
 _GIT_TIMEOUT = 120
+
+# Author data dirs / secret-shaped artifacts that must NEVER appear in a
+# stranger-facing shippable bundle (asserted by W2 money-safe packaging tests).
+# The distro deny-by-default manifest is the real allowlist; this tuple names
+# the high-risk prefixes/names the canary + stranger-tree checks refuse.
+BUNDLE_AUTHOR_EXCLUDES = (
+    "domains/",
+    "logs/",
+    "health_reports/",
+    "planning/",
+    ".anchor/",
+    "DASHBOARD.md",
+    "PROJECTS.md",
+    "INBOX.md",
+    "rnd_registry.json",
+    "foreman-checkpoint.json",
+    "planted_secret",
+    "planted_leak",
+    "CANCELLED.md",
+    "SAVED_FOR_LATER.md",
+)
 
 # --------------------------------------------------------------------------- #
 # Denylist — tracked-but-personal files git archive would otherwise keep.
@@ -50,12 +95,20 @@ _DENY_BASENAMES = {
     "execution-log.md",
     "decision-log.md",
     "claude_hist.md",
+    "_foreman-status.log",
+    "_foreman-output.log",
+    "_foreman-error.log",
+    "handoff.md",
 }
 # Path components (directory names) that, if present, drop the whole subtree.
 _DENY_DIR_COMPONENTS = {
     "journal",
     ".foreman",
     "runs",
+    "planning",
+    "_archive",
+    "scratch",
+    "litreview-out",
 }
 # Glob-ish suffix / pattern matches on the basename.
 _DENY_BASENAME_SUFFIXES = (
@@ -104,7 +157,7 @@ def _is_denied(rel: Path) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Residual host-path / PII scrub.
+# Residual host-path / PII / secret scrub (rules expanded in W2; API frozen).
 # --------------------------------------------------------------------------- #
 # Windows dev paths: C:\...\dev\... or C:\dev\... (any drive letter).
 _WIN_DEV_RE = re.compile(
@@ -127,6 +180,15 @@ _POSIX_HOME_RE = re.compile(
 _EMAIL_RE = re.compile(
     r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}",
 )
+# Concrete secret shapes (W2 residual secret scrub expansion).
+_AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
+_OPENAI_SK_RE = re.compile(r"\bsk-[A-Za-z0-9]{16,}\b")
+_GHP_RE = re.compile(r"\bghp_[A-Za-z0-9]{20,}\b")
+_GHO_RE = re.compile(r"\bgho_[A-Za-z0-9]{20,}\b")
+_JWT_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"
+)
+_BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._\-]{24,}")
 
 # Binary-ish suffixes we never try to scrub as text.
 _BINARY_SUFFIXES = {
@@ -141,6 +203,12 @@ def _scrub_text(text: str) -> str:
     text = _WIN_USER_RE.sub("<path>", text)
     text = _POSIX_HOME_RE.sub("<path>", text)
     text = _EMAIL_RE.sub("<email>", text)
+    text = _AWS_KEY_RE.sub("<secret>", text)
+    text = _OPENAI_SK_RE.sub("<secret>", text)
+    text = _GHP_RE.sub("<secret>", text)
+    text = _GHO_RE.sub("<secret>", text)
+    text = _JWT_RE.sub("<secret>", text)
+    text = _BEARER_RE.sub("Bearer <secret>", text)
     return text
 
 
@@ -284,6 +352,29 @@ def _scrub_tree(skill_dir: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+def declared_skill_names():
+    """Ordered skill names from the full declared-suite roster config."""
+    return [name for name, _env, _subdir in SKILL_SOURCES]
+
+
+def canary_skill_names():
+    """Ordered skill names for the W2 early canary (one Trio + one Foundry)."""
+    return [name for name, _env, _subdir in CANARY_SKILL_SOURCES]
+
+
+def vendor_canary(dest, sources=None):
+    """Early canary vendoring path (W2).
+
+    Runs the frozen archive → denylist → residual scrub → SOURCES pipeline for
+    ``CANARY_SKILL_SOURCES`` (or an explicit ``sources`` override). Does not
+    rewrite archive/scrub APIs — delegates entirely to :func:`vendor_all`.
+    """
+    return vendor_all(
+        dest,
+        sources=sources if sources is not None else CANARY_SKILL_SOURCES,
+    )
+
+
 def vendor_all(dest, sources=None):
     """Vendor each configured skill into ``<dest>/vendor/bundled-skills/``.
 

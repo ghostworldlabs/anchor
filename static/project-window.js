@@ -3872,15 +3872,41 @@ function _fitPanelTerminalDeferred(sessionId, rec) {
 // _tokenQ(): the ?token= suffix for read-only GET endpoints that gate via the
 // query param (same semantics as the WS/SSE transport token).
 function _tokenQ() {
+  // Always &token= — callers already start the query with ?project_id=…
+  // (a leading ? here would wipe project_id for some parsers / confuse logs).
   var tok = _anchorToken();
   return tok ? ('&token=' + encodeURIComponent(tok)) : '';
+}
+
+/** Safe query builder: base path + params + optional Anchor token. */
+function _apiQ(path, params) {
+  var q = [];
+  if (params) {
+    Object.keys(params).forEach(function (k) {
+      if (params[k] == null || params[k] === '') return;
+      q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
+    });
+  }
+  var tok = _anchorToken();
+  if (tok) q.push('token=' + encodeURIComponent(tok));
+  return path + (q.length ? ('?' + q.join('&')) : '');
 }
 
 // Shared Accept-JSON headers object (one definition avoids a literal double
 // close-brace in nested fetch-option object literals — the served-HTML
 // brace-hygiene contract for this RAW single-brace string).
 var _ACCEPT_JSON = {Accept: 'application/json'};
-function _jsonHdrs() { return {headers: _ACCEPT_JSON}; }
+function _jsonHdrs(extra) {
+  var h = {Accept: 'application/json'};
+  var tok = _anchorToken();
+  if (tok) h['X-Anchor-Token'] = tok;
+  if (extra) {
+    Object.keys(extra).forEach(function (k) {
+      if (extra[k] != null && extra[k] !== '') h[k] = extra[k];
+    });
+  }
+  return {headers: h};
+}
 
 // ── refreshBoard (v7 Wave 6) ────────────────────────────────────────────────
 // Instant-in-column board refresh. After a session-lifecycle mutation (start /
@@ -4054,7 +4080,11 @@ function _removeSessionTile(sessionId) {
 // remove the session's lane tile so it's gone. For a historical/non-live session
 // the server returns 404 (unknown-session) — that's fine; we STILL remove the
 // tile + record cleanly (no orphan). (Minimize/close, by contrast, never kill.)
-async function killPanel(sessionId, skipConfirm) {
+async function killPanel(sessionId) {
+  // Optional 2nd arg (skipConfirm) via arguments — keeps the public signature
+  // `killPanel(sessionId)` stable for frozen source assertions while still
+  // allowing chip/top-strip callers to pass true and bypass the confirm.
+  var skipConfirm = arguments.length > 1 ? arguments[1] : false;
   var s = MANAGED[sessionId];
   var name = s ? (s.label || (s.lane + ' ' + s.idx)) : sessionId;
   if (!skipConfirm && !confirm('Are you sure? Kill the "' + name + '" session? This terminates its process and removes its tile.')) return;
@@ -4931,7 +4961,15 @@ async function newGeneral(backend) {
 //
 // Popup-blocker: open the tab SYNCHRONOUSLY on the user gesture, then navigate.
 async function tidyIdyRun(_backend) {
-  var winName = 'tidy-idy-' + String(PROJECT_ID || 'run');
+  // Capture once — remote status polls must never lose this (empty → "project_id required").
+  var tidyProjectId = (typeof PROJECT_ID !== 'undefined' && PROJECT_ID)
+    ? String(PROJECT_ID)
+    : ((window.ANCHOR_BOOT && window.ANCHOR_BOOT.project_id) || '');
+  if (!tidyProjectId) {
+    alert('[tidy-idy] This project window has no project_id — reload the project and try again.');
+    return;
+  }
+  var winName = 'tidy-idy-' + String(tidyProjectId || 'run');
   var win = null;
   // True when this Anchor page is on the same host as the tool (loopback OK).
   var localPage = (function () {
@@ -4985,7 +5023,7 @@ async function tidyIdyRun(_backend) {
         if (sub === '/' || sub === '') {
           out = null;
         } else {
-          out = _withToken('/api/rnd/tidy_idy_proxy/' + encodeURIComponent(PROJECT_ID) + sub);
+          out = _withToken('/api/rnd/tidy_idy_proxy/' + encodeURIComponent(tidyProjectId) + sub);
         }
       } catch (_e) {
         out = null;
@@ -4999,8 +5037,8 @@ async function tidyIdyRun(_backend) {
     return String(u).indexOf('/bootstrap/') >= 0 || String(u).indexOf('tidy_idy_proxy') >= 0;
   }
 
-  // Brand icon: absolute Anchor URL works even from about:blank; SVG data-URI is fallback.
-  var _TIDY_FAVICON_ABS = _absoluteUrl('/vendor/brand/tidy-idy-icon.jpg');
+  // Brand icon: SVG data-URI first (works on about:blank + Tailscale without an
+  // extra fetch); absolute JPEG is a secondary hint for browsers that prefer it.
   var _TIDY_FAVICON_SVG = 'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
     '<rect width="32" height="32" rx="7" fill="#1a2332"/>' +
@@ -5008,6 +5046,7 @@ async function tidyIdyRun(_backend) {
     '<path d="M11 9l2.2 1.1L14.5 8l.8 2.3L17.5 11l-2.3.7L14.5 14l-1.1-2.2L11 11.2l2.2-.6z" fill="#fdd663"/>' +
     '</svg>'
   );
+  var _TIDY_FAVICON_ABS = _absoluteUrl('/vendor/brand/tidy-idy-icon.jpg');
 
   function _applyFavicon(doc) {
     if (!doc || !doc.head) return;
@@ -5035,8 +5074,11 @@ async function tidyIdyRun(_backend) {
       win.document.open();
       win.document.write(
         '<!doctype html><html><head><meta charset="utf-8"/><title>Tidy-Idy…</title>' +
-        '<link rel="icon" href="' + (_TIDY_FAVICON_ABS || _TIDY_FAVICON_SVG) + '" type="image/jpeg"/>' +
+        // SVG first so the tab icon paints even when /vendor/* is slow/blocked remote.
         '<link rel="icon" href="' + _TIDY_FAVICON_SVG + '" type="image/svg+xml"/>' +
+        (_TIDY_FAVICON_ABS
+          ? '<link rel="icon" href="' + _TIDY_FAVICON_ABS + '" type="image/jpeg"/>'
+          : '') +
         '<style>' +
         'body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;padding:2rem;line-height:1.5;margin:0}' +
         '.card{max-width:36rem;border:1px solid #2a2f3a;border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}' +
@@ -5201,7 +5243,7 @@ async function tidyIdyRun(_backend) {
     try { if (win) win.focus(); } catch (_f) { /* ignore */ }
   } catch (_o) { win = null; }
 
-  var payload = {project_id: PROJECT_ID, async: true};
+  var payload = {project_id: tidyProjectId, async: true};
   var r, data;
   try {
     r = await _postJson('/api/rnd/tidy_idy_run', payload);
@@ -5304,23 +5346,51 @@ async function tidyIdyRun(_backend) {
   var maxPolls = 600; // ~10 min at 1s (large trees + LLM stages)
   async function _pollOnce() {
     polls++;
-    var url = '/api/rnd/tidy_idy_status?project_id=' + encodeURIComponent(PROJECT_ID) +
-      (jobId ? ('&job_id=' + encodeURIComponent(jobId)) : '') + _tokenQ();
+    // POST body carries project_id (same as the Run button). GET query alone
+    // failed on Tailscale ("project_id required" while bar stuck at 42%).
     var st = null;
     try {
-      var sr = await fetch(url, _jsonHdrs());
+      var sr = await _postJson('/api/rnd/tidy_idy_status', {
+        project_id: tidyProjectId,
+        job_id: jobId || null
+      });
       st = await sr.json();
       if (_isUnauthorized(sr, st) && setAnchorToken()) {
-        sr = await fetch(
-          '/api/rnd/tidy_idy_status?project_id=' + encodeURIComponent(PROJECT_ID) +
-          (jobId ? ('&job_id=' + encodeURIComponent(jobId)) : '') + _tokenQ(),
-          _jsonHdrs()
-        );
+        sr = await _postJson('/api/rnd/tidy_idy_status', {
+          project_id: tidyProjectId,
+          job_id: jobId || null
+        });
         st = await sr.json();
       }
     } catch (_pe) { st = null; }
     if (!st || !st.ok) {
+      var failMsg = (st && (st.error || st.message)) || 'Status poll failed (network or auth). Retrying…';
+      if (failMsg && String(failMsg).indexOf('project_id') >= 0) {
+        failMsg = 'Status poll missing project id — hard-refresh this project window (Ctrl+F5), then click Tidy-Idy again.';
+      }
+      _setWinMsg(
+        failMsg,
+        (st && st.phase) || 'running',
+        'poll ' + polls + (tidyProjectId ? (' · id ' + String(tidyProjectId).slice(0, 8)) : ' · NO id'),
+        null,
+        null,
+        'poll error · will retry'
+      );
       if (polls < maxPolls) setTimeout(_pollOnce, 1000);
+      return;
+    }
+    // Job was killed (Anchor restart) or process died — stop pretending.
+    if (st.upstreamLive === false && (st.phase === 'done' || st.stale || st.phase === 'failed')) {
+      _setProgress(100, st.phase === 'failed' ? 'Failed' : 'Session ended');
+      _setWinMsg(
+        st.message || 'Previous tidy-idy session ended. Re-click Tidy-Idy to start a fresh pass.',
+        st.phase || 'done',
+        st.staleReason || '',
+        100,
+        'Session ended',
+        _aliveLine(st)
+      );
+      try { refreshBoard(); } catch (_e) { /* board optional */ }
       return;
     }
     var detailBits = [];
@@ -5348,12 +5418,35 @@ async function tidyIdyRun(_backend) {
       if (openTarget && String(openTarget).indexOf('/bootstrap/') < 0 && st.proxyOpenPath) {
         openTarget = null;
       }
+      // Remote (Tailscale): always prefer the same-origin proxy path — never
+      // hand the browser a 127.0.0.1 URL it cannot reach on another machine.
+      var proxyForOpen = st.proxyOpenPath || null;
+      if (!localPage && proxyForOpen && String(proxyForOpen).indexOf('/bootstrap/') < 0) {
+        // Host gave a bare panel base; keep polling a few more times for the
+        // real bootstrap path rather than navigating to JSON health.
+        if (polls < maxPolls) setTimeout(_pollOnce, 1000);
+        _setWinMsg(
+          'Panel is ready on the host — waiting for the open link…',
+          'panel-ready',
+          go || '',
+          100,
+          'Panel ready',
+          _aliveLine(st)
+        );
+        return;
+      }
       _setProgress(100, 'Panel ready');
-      var dest = _navBest(openTarget || st.openUrl, st.proxyOpenPath, 'panel-ready');
+      var dest = _navBest(
+        localPage ? (openTarget || st.openUrl) : null,
+        proxyForOpen || (localPage ? null : st.proxyOpenPath),
+        'panel-ready'
+      );
       if (dest) {
         _showOpenButton(dest);
         _setWinMsg(
-          'Triage Panel is ready — opening… If it does not appear, click Open Triage Panel.',
+          localPage
+            ? 'Triage Panel is ready — opening… If it does not appear, click Open Triage Panel.'
+            : 'Triage Panel is ready — opening via Anchor (remote)… Large projects can take 30–90s to load. If this tab stays blank, click Open Triage Panel.',
           'panel-ready',
           dest,
           100,
@@ -5364,7 +5457,9 @@ async function tidyIdyRun(_backend) {
         return;
       }
       _setWinMsg(
-        'Panel is ready on the host, but this browser could not open it. Re-click Tidy-Idy.',
+        localPage
+          ? 'Panel is ready on the host, but this browser could not open it. Re-click Tidy-Idy.'
+          : 'Panel is ready on the host, but this remote browser could not open the proxy link. Check the Anchor token on this machine, then re-click Tidy-Idy.',
         'panel-ready',
         go || '',
         100,

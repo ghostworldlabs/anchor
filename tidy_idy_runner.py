@@ -165,6 +165,38 @@ def _child_env() -> dict:
     return child_env
 
 
+def _pid_alive(pid) -> bool:
+    """True if *pid* looks like a live process (Windows-safe)."""
+    try:
+        n = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if n <= 0:
+        return False
+    import sys
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, n)
+            if handle:
+                ctypes.windll.kernel32.CloseHandle(handle)
+                return True
+            return False
+        except Exception:
+            return False
+    try:
+        import os
+        os.kill(n, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
 def is_loopback_url(url: str | None) -> bool:
     """True when *url* points at this host's loopback (tool-owned servers)."""
     if not url:
@@ -177,11 +209,16 @@ def is_loopback_url(url: str | None) -> bool:
     return host in ("127.0.0.1", "localhost", "::1")
 
 
-def probe_loopback_alive(url: str | None, *, timeout_s: float = 0.6) -> bool:
+def probe_loopback_alive(url: str | None, *, timeout_s: float = 1.5) -> bool:
     """True if a loopback tool URL accepts a TCP/HTTP connection right now.
 
     Used to distinguish a live panel/status server from a STALE status.json that
     still names ports after the process exited (common after idle close / crash).
+
+    NEVER GET a ``/bootstrap/<nonce>`` URL — that path is single-use and redeeming
+    it from a liveness probe burns the Triage Panel open ticket (observed live
+    2026-07-22: status stuck mid-run while panel was ready but bootstrap was 410).
+    Always probe ``/api/health`` on the same origin instead.
     """
     if not url or not is_loopback_url(url):
         return False
@@ -191,11 +228,9 @@ def probe_loopback_alive(url: str | None, *, timeout_s: float = 0.6) -> bool:
 
     try:
         u = urlparse(str(url))
-        # Health endpoints are cheap; base URL also works for the panel root.
-        probe = str(url)
-        if u.path in ("", "/") and not (u.query or ""):
-            # Prefer /api/health when we only have a base.
-            probe = f"{u.scheme}://{u.netloc}/api/health"
+        # Always health-check the origin. Paths like /bootstrap/<nonce> are
+        # single-use capability URLs — a GET redeems (and burns) them.
+        probe = f"{u.scheme}://{u.netloc}/api/health"
         req = urllib.request.Request(probe, method="GET")
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:
             # Any HTTP response (incl. 401/404) means the port is live.
@@ -243,19 +278,21 @@ def live_tool_endpoints(folder_path: str | Path) -> dict:
     panel_base = st.get("panelBaseUrl")
     open_url = st.get("openUrl")
     status_live = probe_loopback_alive(status_url)
-    panel_live = probe_loopback_alive(panel_base) or (
-        bool(open_url and "/bootstrap/" in str(open_url)) and probe_loopback_alive(open_url)
-    )
-    # Also try openUrl's origin as panel base.
-    if not panel_live and open_url and is_loopback_url(open_url):
+    # Derive panel origin from panelBaseUrl or from openUrl's host — never GET
+    # the bootstrap path itself (single-use nonce).
+    panel_origin = None
+    if panel_base and is_loopback_url(panel_base):
+        panel_origin = str(panel_base).rstrip("/")
+    elif open_url and is_loopback_url(open_url):
         try:
             from urllib.parse import urlparse
             u = urlparse(str(open_url))
-            panel_live = probe_loopback_alive(f"{u.scheme}://{u.netloc}/api/health")
-            if panel_live and not panel_base:
-                panel_base = f"{u.scheme}://{u.netloc}"
+            panel_origin = f"{u.scheme}://{u.netloc}"
         except Exception:
-            pass
+            panel_origin = None
+    panel_live = probe_loopback_alive(panel_origin) if panel_origin else False
+    if panel_live and not panel_base:
+        panel_base = panel_origin
     return {
         "status": st,
         "status_live": status_live,
@@ -356,6 +393,25 @@ def resolve_proxy_upstream(folder_path: str | Path, rel_path: str) -> str | None
     return panel or status
 
 
+def _proxy_timeout_for(rel_path: str, *, default_s: float = 30.0) -> float:
+    """Bootstrap/HTML can be multi‑MB (hundreds of findings); Tailscale needs longer."""
+    route = (rel_path or "/").split("?", 1)[0]
+    if route.startswith("/bootstrap/") or route in ("/", "/status"):
+        return max(float(default_s), 180.0)
+    return float(default_s)
+
+
+def _strip_anchor_auth_query(query: str) -> str:
+    """Drop Anchor shared-secret from the upstream query (tool must not see it)."""
+    if not query:
+        return ""
+    from urllib.parse import parse_qsl, urlencode
+
+    kept = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True)
+            if k.lower() not in ("token", "anchor_token")]
+    return urlencode(kept)
+
+
 def proxy_to_loopback(
     folder_path: str | Path,
     *,
@@ -364,12 +420,17 @@ def proxy_to_loopback(
     query: str = "",
     headers: dict | None = None,
     body: bytes | None = None,
-    timeout_s: float = 30.0,
+    timeout_s: float | None = None,
 ) -> dict:
     """HTTP reverse-proxy to the tool's loopback status/panel server.
 
     Returns ``{ok, status, headers, body, content_type, upstream}`` or
     ``{ok: False, error, code}``. Hard-refuses non-loopback upstreams (SSRF).
+
+    Tailscale / remote note (2026-07-22): the Triage Panel HTML can be very large.
+    A short timeout used to abort mid-transfer and then ``mark_status_stale`` —
+    remote status shells froze (often last seen ~42% / save) while the host was
+    still fine. Timeouts are soft failures; only hard connection-refused marks stale.
     """
     import urllib.error
     import urllib.request
@@ -387,8 +448,9 @@ def proxy_to_loopback(
 
     path = rel_path if rel_path.startswith("/") else f"/{rel_path}"
     target = f"{base.rstrip('/')}{path}"
-    if query:
-        target = f"{target}?{query}"
+    clean_q = _strip_anchor_auth_query(query or "")
+    if clean_q:
+        target = f"{target}?{clean_q}"
 
     # Final SSRF check on the fully resolved URL.
     parsed = urlparse(target)
@@ -398,7 +460,8 @@ def proxy_to_loopback(
     if parsed.scheme not in ("http", "https"):
         return {"ok": False, "error": "upstream scheme refused", "code": "ssrf-guard"}
 
-    # Forward only safe / required headers (never Host).
+    # Forward only the tool capability header + content-type — never Anchor's
+    # shared secret (that authenticates the proxy hop, not the tool).
     out_headers = {}
     for key, val in (headers or {}).items():
         lk = str(key).lower()
@@ -406,16 +469,19 @@ def proxy_to_loopback(
             "x-tidy-idy-token",
             "content-type",
             "accept",
-            "x-anchor-token",
         ):
             out_headers[key] = val
+
+    effective_timeout = (
+        float(timeout_s) if timeout_s is not None else _proxy_timeout_for(path)
+    )
 
     data = body if method.upper() in ("POST", "PUT", "PATCH") else None
     req = urllib.request.Request(
         target, data=data, headers=out_headers, method=method.upper(),
     )
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        with urllib.request.urlopen(req, timeout=effective_timeout) as resp:
             raw = resp.read()
             resp_headers = {k: v for k, v in resp.headers.items()}
             return {
@@ -443,10 +509,16 @@ def proxy_to_loopback(
         }
     except Exception as e:  # noqa: BLE001
         err = f"{type(e).__name__}: {e}"
-        # Connection refused / timed out → panel process is gone; clear stale status.
         low = err.lower()
-        if "10061" in err or "refused" in low or "timed out" in low or "10060" in err:
-            mark_status_stale(folder_path, reason="upstream connection failed")
+        # Hard dead only: connection refused. Timeouts are often "panel is busy
+        # rendering a large HTML page" or a slow Tailscale hop — do NOT kill the
+        # live session (that was the remote-stuck-at-42% failure mode).
+        refused = (
+            "10061" in err or "refused" in low
+            or "winerror 10061" in low or "errno 111" in low
+        )
+        if refused:
+            mark_status_stale(folder_path, reason="upstream connection refused")
             return {
                 "ok": False,
                 "error": (
@@ -454,6 +526,17 @@ def proxy_to_loopback(
                     "(previous session ended). Close this tab and click Tidy-Idy again."
                 ),
                 "code": "upstream-gone",
+                "upstream": base,
+            }
+        if "timed out" in low or "10060" in err or "timeout" in low:
+            return {
+                "ok": False,
+                "error": (
+                    "Timed out loading the Triage Panel through Anchor (large report "
+                    "or slow link). The host session may still be live — wait a few "
+                    "seconds and click Open Triage Panel again, or re-click Tidy-Idy."
+                ),
+                "code": "proxy-timeout",
                 "upstream": base,
             }
         return {
@@ -495,17 +578,41 @@ def status_for_folder(folder_path: str | Path, *, job_id: str | None = None,
     """Unified status for the browser status tab (poll endpoint)."""
     st = read_project_status(folder_path) or {}
     # Drop dead loopback URLs so the browser is not sent to a corpse.
+    # Use a slightly longer probe: the panel process can be busy building a
+    # multi‑MB HTML page (Tailscale open) and a 0.6s health miss was wrongly
+    # marking the whole session stale mid-handoff.
     live = live_tool_endpoints(folder_path)
     if st.get("phase") in (
             "starting", "scanning", "analyzing", "archiving", "panel-ready"
     ) and not live.get("any_live") and (st.get("statusUrl") or st.get("panelBaseUrl")):
-        mark_status_stale(folder_path, reason="recorded ports no longer accept connections")
-        st = read_project_status(folder_path) or st
+        # Double-check once more before killing the session (transient busy).
+        import time as _time
+        _time.sleep(0.35)
         live = live_tool_endpoints(folder_path)
+    if st.get("phase") in (
+            "starting", "scanning", "analyzing", "archiving", "panel-ready"
+    ) and not live.get("any_live") and (st.get("statusUrl") or st.get("panelBaseUrl")):
+        # Confirm the recorded PID is gone — do not stale on a single probe miss
+        # while the process is still alive (large HTML render blocks the loop).
+        if not _pid_alive(st.get("pid")):
+            mark_status_stale(folder_path, reason="recorded ports no longer accept connections")
+            st = read_project_status(folder_path) or st
+            live = live_tool_endpoints(folder_path)
     log_ev = None
     rec = None
     if job_id:
         rec = job_runner.load_record(job_id)
+        # Job interrupted (Anchor restart / kill) while status.json still says
+        # analyzing → heal so remote clients stop spinning at a corpse progress.
+        jstat = (rec or {}).get("status")
+        if jstat in ("interrupted", "cancelled", "failed") and st.get("phase") in (
+                "starting", "scanning", "analyzing", "archiving"):
+            mark_status_stale(
+                folder_path,
+                reason=f"Anchor job {jstat} (often: service restart killed the run)",
+            )
+            st = read_project_status(folder_path) or st
+            live = live_tool_endpoints(folder_path)
         log_text = _read_log_text(job_id)
         log_ev = {
             "status_ready": latest_event(log_text, STATUS_READY_EVENT),
@@ -690,6 +797,9 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             gated=False,
             command=command,
             env=_child_env() or None,
+            # Panel process must outlive Anchor restarts (Tailscale remote open
+            # depends on it). Default KILL_ON_JOB_CLOSE murders tidy mid-run.
+            kill_on_job_close=False,
         )
     except job_runner.LaneBusyError as e:
         # Folder build lock often means a tidy run is already live — surface status.

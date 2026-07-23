@@ -233,6 +233,30 @@ function parseSkillMd(text) {
   return { description, body };
 }
 
+/**
+ * Parse HUMAN.md (people-first skill card) into a short blurb + body.
+ * Prefer "**One sentence:** …" then first non-heading paragraph.
+ * Agent SKILL.md YAML description is NOT used for human-facing surfaces.
+ */
+function parseHumanMd(text) {
+  if (!text) return { oneSentence: '', body: '' };
+  const body = String(text).trim();
+  let oneSentence = '';
+  const m = body.match(/\*\*One sentence:\*\*\s*(.+?)(?:\r?\n|$)/i)
+    || body.match(/^One sentence:\s*(.+?)(?:\r?\n|$)/im);
+  if (m) oneSentence = m[1].trim().replace(/\s+/g, ' ');
+  if (!oneSentence) {
+    // First non-heading, non-empty line
+    for (const line of body.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      oneSentence = t.replace(/^\*\*|\*\*$/g, '').trim();
+      break;
+    }
+  }
+  return { oneSentence, body };
+}
+
 /** Top-level "## " section titles from the SKILL.md body — the real documented structure. */
 function extractSections(body) {
   if (!body) return [];
@@ -321,9 +345,19 @@ function buildSkills() {
   return loadManifest().map((entry) => {
     const skillDir = resolveSource(entry.source);
     const skillMdText = skillDir ? readTextSafe(path.join(skillDir, 'SKILL.md')) : null;
-    const { description, body } = parseSkillMd(skillMdText);
+    const humanMdText = skillDir ? readTextSafe(path.join(skillDir, 'HUMAN.md')) : null;
+    const { description: agentDescription, body } = parseSkillMd(skillMdText);
+    const human = parseHumanMd(humanMdText);
+    // Human-facing surfaces prefer HUMAN.md one-sentence + body; fall back to SKILL.md.
+    const description = human.oneSentence || agentDescription || firstParagraph(body);
+    const northStar = human.body
+      ? human.body.slice(0, 4000)
+      : (agentDescription || firstParagraph(body));
     const timeline = skillDir ? journalEvents(skillDir) : [];
     const edges = Array.isArray(entry.edges) ? entry.edges : [];
+    // Human card sections (## Use this when, etc.) for Capabilities tile when present
+    const humanSections = human.body ? extractSections(human.body) : [];
+    const agentSections = extractSections(body);
 
     return {
       ref: entry.ref || '',
@@ -333,9 +367,13 @@ function buildSkills() {
       tier: entry.tier || '',
       version: entry.version || '',
       description,
-      northStar: description || firstParagraph(body),
+      agentDescription: agentDescription || '',
+      humanCard: !!humanMdText,
+      humanOneSentence: human.oneSentence || '',
+      northStar,
       file_path: entry.source ? `${entry.source}/SKILL.md` : '',
-      capabilities: extractSections(body),
+      human_path: entry.source && humanMdText ? `${entry.source}/HUMAN.md` : '',
+      capabilities: humanSections.length ? humanSections : agentSections,
       dependencies: edges.map((e) => String(e.to || '').replace(/^skill:/, '')).filter(Boolean),
       edges,
       timeline,
