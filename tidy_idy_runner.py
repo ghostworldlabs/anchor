@@ -309,6 +309,53 @@ def proxy_mount_for(project_id: str) -> str:
     return f"/api/rnd/tidy_idy_proxy/{project_id}"
 
 
+def reissue_panel_bootstrap(folder_path: str | Path) -> str | None:
+    """Ask a LIVE panel process for a fresh single-use bootstrap URL (loopback only).
+
+    The first bootstrap nonce is single-use; a second click / F5 would otherwise
+    show raw JSON ``{ "error": "bootstrap nonce already redeemed" }``. Anchor
+    (on the host) POSTs ``/api/reissue-bootstrap`` to mint a new open link for
+    the same panel process without restarting the hygiene pass.
+    """
+    import urllib.error
+    import urllib.request
+
+    live = live_tool_endpoints(folder_path)
+    base = live.get("panel_base")
+    if not base or not is_loopback_url(base):
+        return None
+    url = str(base).rstrip("/") + "/api/reissue-bootstrap"
+    try:
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        data = json.loads(raw) if raw else {}
+        boot = data.get("bootstrapUrl") or data.get("openUrl")
+        if boot and is_loopback_url(boot):
+            # Persist so status polls / second clicks share the new URL.
+            try:
+                p = status_path(folder_path)
+                prev = {}
+                if p.is_file():
+                    prev = json.loads(p.read_text(encoding="utf-8"))
+                prev["openUrl"] = boot
+                if data.get("panelBaseUrl"):
+                    prev["panelBaseUrl"] = data["panelBaseUrl"]
+                prev["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+                p.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+            except Exception:
+                pass
+            return str(boot)
+    except Exception:
+        return None
+    return None
+
+
 def browser_open_url(project_id: str, loopback_url: str | None) -> str | None:
     """Map a tool loopback URL onto the Anchor reverse-proxy path (path only).
 
@@ -381,6 +428,7 @@ def resolve_proxy_upstream(folder_path: str | Path, rel_path: str) -> str | None
     if route.startswith("/bootstrap/") or route in (
             "/api/heartbeat", "/api/close", "/api/apply", "/api/restore",
             "/api/rescan", "/api/confirm-full-run", "/api/investigate",
+            "/api/reissue-bootstrap",
             "/api/envelope", "/api/panel", "/api/trash", "/api/staleness",
             "/api/apply-state", "/api/identity", "/api/lock", "/api/cost-gate",
             "/api/archive", "/api/runs",
@@ -740,8 +788,19 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             "starting", "scanning", "analyzing", "archiving", "panel-ready"):
         live = live_tool_endpoints(root)
         if live.get("any_live"):
-            open_url = live.get("open_url") or live.get("panel_base") or live.get("status_url")
             phase = existing.get("phase") or "scanning"
+            # Prefer a FRESH bootstrap URL — the stored openUrl is often already
+            # redeemed (single-use), which made re-clicks show raw JSON "{" .
+            open_url = None
+            if live.get("panel_live") and phase == "panel-ready":
+                open_url = reissue_panel_bootstrap(root)
+            if not open_url:
+                # Never fall back to panel_base alone — that endpoint is health JSON.
+                ou = live.get("open_url") or ""
+                if ou and "/bootstrap/" in str(ou):
+                    open_url = ou
+                else:
+                    open_url = live.get("status_url")
             return {
                 "ok": True,
                 "already_running": True,
