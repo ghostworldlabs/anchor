@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-23 — Tidy-Idy bootstrap reissue (share-ready)
+
+- **Spent bootstrap no longer dumps raw JSON.** Single-use SC4 nonces: Anchor re-click POSTs host-only /api/reissue-bootstrap when the panel is still live; otherwise marks status stale and starts a fresh pass.
+- **Proxy:** on /bootstrap/ 410, attempt reissue + redirect, else HTML 410 page (never forward spent JSON body over Tailscale).
+- **Never open panel_base alone** (that path is health JSON starting with {).
+
 ## 2026-07 — Rearchitecture
 
 ### W11 (C6) — Data-dir migration + git hygiene

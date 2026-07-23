@@ -10498,6 +10498,80 @@ def handle_tidy_idy_proxy(handler, path, body):
         headers=fwd_headers,
         body=raw_body,
     )
+
+    def _tidy_html_page(title, heading, body_html, code=410):
+        from html import escape as _html_esc
+        html = (
+            "<!doctype html><html><head><meta charset=utf-8>"
+            f"<title>{_html_esc(title)}</title>"
+            '<link rel="icon" href="/vendor/brand/tidy-idy-icon.jpg" type="image/jpeg"/>'
+            "<style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;"
+            "padding:2rem;line-height:1.5} .card{max-width:36rem;border:1px solid #2a2f3a;"
+            "border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}"
+            "h1{font-size:1.25rem;margin:0 0 .5rem} p{color:#9aa0a6;margin:0 0 .75rem}"
+            "code{color:#8ab4f8}</style></head><body><div class=card>"
+            f"<h1>{_html_esc(heading)}</h1>{body_html}</div></body></html>"
+        )
+        payload = html.encode("utf-8")
+        try:
+            handler.send_response(code)
+            handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("Content-Length", str(len(payload)))
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            handler.wfile.write(payload)
+        except Exception:
+            pass
+
+    # Spent single-use bootstrap: reissue when panel is still live, else clear HTML.
+    # Never forward raw JSON "{" to a browser tab (Tailscale operators hit this often).
+    status_hop = int(result.get("status") or 0)
+    if (
+        method == "GET"
+        and "/bootstrap/" in str(sub)
+        and status_hop == 410
+    ):
+        fresh = _tidy.reissue_panel_bootstrap(folder)
+        if fresh:
+            loc = _tidy.browser_open_url(pid, fresh)
+            if loc:
+                # Preserve Anchor auth token on the redirect.
+                tok = None
+                try:
+                    from urllib.parse import parse_qs
+                    tok = (parse_qs(parsed.query or "").get("token") or [""])[0]
+                except Exception:
+                    tok = ""
+                if not tok:
+                    tok = (handler.headers.get("X-Anchor-Token")
+                           or handler.headers.get("x-anchor-token") or "")
+                if tok:
+                    loc = loc + ("&" if "?" in loc else "?") + "token=" + url_quote(str(tok))
+                try:
+                    handler.send_response(302)
+                    handler.send_header("Location", loc)
+                    handler.send_header("Cache-Control", "no-store")
+                    handler.end_headers()
+                except Exception:
+                    pass
+                return
+        # Panel gone or too old to reissue — clear corpse status and explain.
+        try:
+            _tidy.mark_status_stale(
+                folder, reason="bootstrap nonce spent; panel cannot reissue")
+        except Exception:
+            pass
+        _tidy_html_page(
+            "Tidy-Idy — link already used",
+            "This panel link was already used",
+            "<p>The open link is single-use (so a refresh cannot re-enable Apply).</p>"
+            "<p>Close this tab and click <b>Tidy-Idy</b> on the project again to "
+            "start a <b>fresh</b> hygiene pass and mint a new open link.</p>"
+            "<p><code>bootstrap nonce already redeemed</code></p>",
+            code=410,
+        )
+        return
+
     if not result.get("ok") and result.get("code"):
         code = 502 if result.get("code") in ("proxy-failed", "upstream-gone", "no-upstream") else 404
         if result.get("code") == "proxy-timeout":
@@ -10509,36 +10583,15 @@ def handle_tidy_idy_proxy(handler, path, body):
         if wants_html:
             from html import escape as _html_esc
             err = result.get("error") or "Tidy-Idy panel is not available."
-            html = (
-                "<!doctype html><html><head><meta charset=utf-8>"
-                "<title>Tidy-Idy — session ended</title>"
-                '<link rel="icon" href="/vendor/brand/tidy-idy-icon.jpg" type="image/jpeg"/>'
-                "<style>body{font-family:system-ui,sans-serif;background:#0f1115;color:#e8eaed;"
-                "padding:2rem;line-height:1.5} .card{max-width:36rem;border:1px solid #2a2f3a;"
-                "border-radius:12px;padding:1.25rem 1.4rem;background:#161a22}"
-                "h1{font-size:1.25rem;margin:0 0 .5rem} p{color:#9aa0a6;margin:0 0 .75rem}"
-                "code{color:#8ab4f8}</style></head><body><div class=card>"
-                "<h1>Tidy-Idy session ended</h1>"
+            _tidy_html_page(
+                "Tidy-Idy — session ended",
+                "Tidy-Idy session ended",
                 f"<p>{_html_esc(err)}</p>"
                 "<p>Close this tab and click <b>Tidy-Idy</b> on the project again "
                 "to start a fresh pass (the previous panel process is no longer running).</p>"
-                f"<p><code>{_html_esc(str(result.get('code') or ''))}</code></p>"
-                "</div></body></html>"
+                f"<p><code>{_html_esc(str(result.get('code') or ''))}</code></p>",
+                code=code,
             )
-            # Soft timeouts stay 504 so the browser can retry without implying
-            # the host session is permanently dead.
-            if result.get("code") == "proxy-timeout":
-                code = 504
-            try:
-                payload = html.encode("utf-8")
-                handler.send_response(code)
-                handler.send_header("Content-Type", "text/html; charset=utf-8")
-                handler.send_header("Content-Length", str(len(payload)))
-                handler.send_header("Cache-Control", "no-store")
-                handler.end_headers()
-                handler.wfile.write(payload)
-            except Exception:
-                pass
             return
         if result.get("code") == "proxy-timeout":
             code = 504
@@ -10561,6 +10614,24 @@ def handle_tidy_idy_proxy(handler, path, body):
         )
 
     status = int(result.get("status") or 200)
+
+    # If upstream still returned JSON 410 for bootstrap (old panel), convert to HTML.
+    if (
+        method == "GET"
+        and "/bootstrap/" in str(sub)
+        and status == 410
+        and "json" in (ctype_out or "").lower()
+    ):
+        _tidy_html_page(
+            "Tidy-Idy — link already used",
+            "This panel link was already used",
+            "<p>Close this tab and click <b>Tidy-Idy</b> on the project again "
+            "for a fresh open link.</p>"
+            "<p><code>bootstrap nonce already redeemed</code></p>",
+            code=410,
+        )
+        return
+
     try:
         handler.send_response(status)
         handler.send_header("Content-Type", ctype_out)

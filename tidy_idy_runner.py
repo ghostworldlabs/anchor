@@ -794,36 +794,42 @@ def launch_tidy_idy(project_id: str, folder_path: str | Path, *,
             open_url = None
             if live.get("panel_live") and phase == "panel-ready":
                 open_url = reissue_panel_bootstrap(root)
-            if not open_url:
-                # Never fall back to panel_base alone — that endpoint is health JSON.
-                ou = live.get("open_url") or ""
-                if ou and "/bootstrap/" in str(ou):
-                    open_url = ou
-                else:
+            if not open_url and live.get("panel_live") and phase == "panel-ready":
+                # Old panel without reissue, or reissue failed — do NOT send a
+                # spent bootstrap URL (browser shows raw JSON). Restart the pass.
+                mark_status_stale(
+                    root,
+                    reason="panel live but cannot mint a fresh bootstrap; restarting tidy pass",
+                )
+                # Fall through to a new launch below.
+            else:
+                if not open_url:
+                    # Never fall back to panel_base alone — that endpoint is health JSON.
+                    # Never reuse a spent bootstrap path if reissue failed.
                     open_url = live.get("status_url")
-            return {
-                "ok": True,
-                "already_running": True,
-                "job_id": None,
-                "job_type": TIDY_JOB_TYPE,
-                "folder_path": str(root),
-                "status_url": live.get("status_url"),
-                "open_url": open_url,
-                "panel_base": live.get("panel_base"),
-                "proxy_open_path": browser_open_url(project_id, open_url),
-                "proxy_status_path": browser_open_url(project_id, live.get("status_url")),
-                "loopback_only": bool(open_url and is_loopback_url(open_url)),
-                "phase": phase,
-                "progress": existing.get("progress") if existing.get("progress") is not None else (
-                    100 if phase == "panel-ready" else 20
-                ),
-                "step": existing.get("step"),
-                "stepLabel": existing.get("stepLabel") or existing.get("step") or phase,
-                "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
-                "contributed_launch_logic": False,
-                "contributed_archive_logic": False,
-                "contributed_panel_logic": False,
-            }
+                return {
+                    "ok": True,
+                    "already_running": True,
+                    "job_id": None,
+                    "job_type": TIDY_JOB_TYPE,
+                    "folder_path": str(root),
+                    "status_url": live.get("status_url"),
+                    "open_url": open_url,
+                    "panel_base": live.get("panel_base"),
+                    "proxy_open_path": browser_open_url(project_id, open_url),
+                    "proxy_status_path": browser_open_url(project_id, live.get("status_url")),
+                    "loopback_only": bool(open_url and is_loopback_url(open_url)),
+                    "phase": phase,
+                    "progress": existing.get("progress") if existing.get("progress") is not None else (
+                        100 if phase == "panel-ready" else 20
+                    ),
+                    "step": existing.get("step"),
+                    "stepLabel": existing.get("stepLabel") or existing.get("step") or phase,
+                    "message": existing.get("message") or "A tidy-idy run is already in progress for this project.",
+                    "contributed_launch_logic": False,
+                    "contributed_archive_logic": False,
+                    "contributed_panel_logic": False,
+                }
         # Recorded as in-flight / panel-ready but nothing is listening → restart.
         mark_status_stale(root, reason="stale status.json; process gone")
 
