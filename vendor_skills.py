@@ -163,6 +163,16 @@ def _is_denied(rel: Path) -> bool:
 _WIN_DEV_RE = re.compile(
     r"[A-Za-z]:\\(?:[^\s\"'<>|]*\\)?dev\\[^\s\"'<>|]*",
 )
+# Forward-slash Windows dev paths (often in ESM imports / markdown): C:/dev/...
+_WIN_DEV_FWD_RE = re.compile(
+    r"[A-Za-z]:/(?:[^\s\"'<>|]*/)?dev/[^\s\"'<>|]*",
+    re.IGNORECASE,
+)
+# file:// URLs with host paths (e.g. file:///C:/dev/Skill%20Foundry/...)
+_FILE_URL_HOST_RE = re.compile(
+    r"file:///[A-Za-z]:/(?:Users|dev|home)[^\s\"'<>|]*",
+    re.IGNORECASE,
+)
 # Windows user-profile paths (a drive letter, the Users dir, an account, then a
 # further segment — any drive). Scrubbed so a vendored file (esp. SOURCES.md,
 # which records the host source repo path) never embeds the build host's
@@ -170,6 +180,10 @@ _WIN_DEV_RE = re.compile(
 # vendor/ too, so this must be scrubbed.
 _WIN_USER_RE = re.compile(
     r"[A-Za-z]:\\Users\\[^\s\"'<>|]*",
+    re.IGNORECASE,
+)
+_WIN_USER_FWD_RE = re.compile(
+    r"[A-Za-z]:/Users/[^\s\"'<>|]*",
     re.IGNORECASE,
 )
 # POSIX home paths: /Users/example/... and /home/example/...
@@ -200,8 +214,24 @@ _BINARY_SUFFIXES = {
 
 def _scrub_text(text: str) -> str:
     text = _WIN_DEV_RE.sub("<path>", text)
+    text = _WIN_DEV_FWD_RE.sub("<path>", text)
+    text = _FILE_URL_HOST_RE.sub("<path>", text)
+    # JSDoc / import() host paths that use mixed quoting
+    text = re.sub(
+        r"import\(['\"][A-Za-z]:[/\\][^\s'\"]+['\"]\)",
+        "import('<path>')",
+        text,
+    )
     text = _WIN_USER_RE.sub("<path>", text)
+    text = _WIN_USER_FWD_RE.sub("<path>", text)
     text = _POSIX_HOME_RE.sub("<path>", text)
+    # Broad C:/dev or C:\dev (comments, provenance, defaults)
+    text = re.sub(
+        r"[A-Za-z]:[/\\]+dev(?:[/\\][^\s\"'<>|]*)?",
+        "<path>",
+        text,
+        flags=re.IGNORECASE,
+    )
     text = _EMAIL_RE.sub("<email>", text)
     text = _AWS_KEY_RE.sub("<secret>", text)
     text = _OPENAI_SK_RE.sub("<secret>", text)
@@ -448,7 +478,80 @@ def vendor_all(dest, sources=None):
             "dest": str(skill_dir),
         })
 
+    # Runtime support for trio engines (ship-safe 2026-07-24):
+    # foreman/crucible/researchPrime import ../../drivers and @foundry/triage
+    # wires. Without these, collaborator packages cannot load.
+    support = vendor_trio_runtime_support(bundle_root)
+    if support.get("vendored"):
+        vendored.extend(support["vendored"])
+    if support.get("skipped"):
+        skipped.extend(support["skipped"])
+
     _write_sources_md(bundle_root, vendored)
+
+    return {"vendored": vendored, "skipped": skipped}
+
+
+def vendor_trio_runtime_support(bundle_root: Path) -> dict:
+    """Archive trio/drivers + foundry/triage next to bundled skills.
+
+    Layout (imports resolve for skills/<name>/bin → ../../drivers):
+
+      bundled-skills/drivers/          # from ANCHOR_TRIO_DIR
+      bundled-skills/foundry/triage/   # from ANCHOR_FOUNDRY_DIR (resolver also
+                                       # checks ANCHOR_FOUNDRY_DIR env at runtime)
+    """
+    bundle_root = Path(bundle_root)
+    vendored = []
+    skipped = []
+
+    trio = os.environ.get("ANCHOR_TRIO_DIR")
+    if trio and Path(trio).exists():
+        src = Path(trio)
+        commit = _resolve_head(src)
+        if commit:
+            dest = bundle_root / "drivers"
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            if _archive_subdir(src, commit, "drivers", dest):
+                _apply_denylist(dest)
+                _scrub_tree(dest)
+                vendored.append({
+                    "name": "drivers",
+                    "source": str(src),
+                    "commit": commit,
+                    "dest": str(dest),
+                })
+            else:
+                skipped.append({"name": "drivers", "reason": "git archive drivers failed"})
+        else:
+            skipped.append({"name": "drivers", "reason": "trio has no HEAD"})
+    else:
+        skipped.append({"name": "drivers", "reason": "ANCHOR_TRIO_DIR unset"})
+
+    foundry = os.environ.get("ANCHOR_FOUNDRY_DIR") or os.environ.get("SKILL_FOUNDRY_DIR")
+    if foundry and Path(foundry).exists():
+        src = Path(foundry)
+        commit = _resolve_head(src)
+        if commit:
+            dest = bundle_root / "foundry" / "triage"
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+            if _archive_subdir(src, commit, "foundry/triage", dest):
+                _apply_denylist(dest)
+                _scrub_tree(dest)
+                vendored.append({
+                    "name": "foundry-triage",
+                    "source": str(src),
+                    "commit": commit,
+                    "dest": str(dest),
+                })
+            else:
+                skipped.append({"name": "foundry-triage", "reason": "git archive foundry/triage failed"})
+        else:
+            skipped.append({"name": "foundry-triage", "reason": "foundry has no HEAD"})
+    else:
+        skipped.append({"name": "foundry-triage", "reason": "ANCHOR_FOUNDRY_DIR unset"})
 
     return {"vendored": vendored, "skipped": skipped}
 

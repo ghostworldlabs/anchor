@@ -73,7 +73,8 @@ _ACTIVE_RUNS_LOCK = threading.Lock()
 #: ``runtime/gandalf-run.mjs`` live here). Resolves BLOCKER B — ``/gandalf`` is
 #: not auto-discoverable, so the protocol is read from this dir.
 SKILL_DIR_ENV = "ANCHOR_GANDALF_SKILL_DIR"
-DEFAULT_SKILL_DIR = r"C:\dev\Skill Foundry\skills\gandalf"
+# No host default — resolve package-local or env (ship-safe for collaborators).
+DEFAULT_SKILL_DIR = ""
 
 #: Env var overriding the Stage-B host command. When unset, the default is
 #: ``node "<skilldir>/runtime/gandalf-run.mjs"``. ``node`` is an external CLI
@@ -536,8 +537,25 @@ def scan_project_context(folder_path) -> float:
 # ── Path helpers ─────────────────────────────────────────────────────────────
 
 def _skill_dir() -> Path:
-    raw = (os.environ.get(SKILL_DIR_ENV) or "").strip() or DEFAULT_SKILL_DIR
-    return Path(raw)
+    raw = (os.environ.get(SKILL_DIR_ENV) or "").strip()
+    if raw:
+        return Path(raw)
+    here = Path(__file__).resolve().parent
+    for c in (
+        here / "vendor" / "bundled-skills" / "gandalf",
+        here / "skills" / "gandalf",
+        Path(os.environ.get("ANCHOR_FOUNDRY_DIR", "") or "") / "skills" / "gandalf",
+        Path(os.environ.get("SKILL_FOUNDRY_DIR", "") or "") / "skills" / "gandalf",
+    ):
+        try:
+            if c.is_dir() and (c / "SKILL.md").is_file():
+                return c
+        except OSError:
+            continue
+    if DEFAULT_SKILL_DIR:
+        return Path(DEFAULT_SKILL_DIR)
+    # Last resort: relative name so callers get a Path (host grades fail honestly).
+    return Path("skills") / "gandalf"
 
 
 def _timeout(tier: str = DEFAULT_TIER) -> float:
