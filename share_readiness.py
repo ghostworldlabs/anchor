@@ -113,8 +113,14 @@ def compute_readiness(
             raise ReadinessError(
                 ["ready-without-governance-seat-or-accepted-degraded"]
             )
+    elif green_ok:
+        status = "ready"
+    elif not coding_seat_ok and not user_accepted_degraded:
+        # Zero coding seats → not-ready (exit non-zero on CLI); skills may
+        # still be on disk. Distinct from degraded (seat present, other issues).
+        status = "not-ready"
     else:
-        status = "ready" if green_ok else "degraded"
+        status = "degraded"
 
     # When forked, never claim pure green ready unless user explicitly accepted
     # degraded (fork is a degradation condition).

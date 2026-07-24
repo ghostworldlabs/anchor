@@ -1,40 +1,35 @@
 {
-    "schema": "share-sources-pin/v1",
-    "schema_version": 1,
-    "ship_allowed": true,
-    "ship_allowed_stamp_text": "v1.0 freeze 2026-07-24T00:10:56Z locked on origin; product only; no personal data",
-    "skills_pin": {
-        "tag": "v1.0",
-        "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
+  "schema": "share-sources-pin/v1",
+  "schema_version": 1,
+  "ship_allowed": false,
+  "ship_allowed_stamp_text": "only after concurrent skill-run merge + John go-ahead",
+  "skills_pin": {
+    "tag": "PLACEHOLDER",
+    "commit": "PLACEHOLDER"
+  },
+  "pins": [
+    {
+      "repo": "anchor",
+      "tag": "PLACEHOLDER",
+      "commit": "PLACEHOLDER"
     },
-    "pins": [
-        {
-            "repo": "anchor",
-            "tag": "v1.0.0+share",
-            "commit": "647a498ac93c0d80fea7a6fffa387a7b7b6936f8"
-        },
-        {
-            "repo": "trio",
-            "tag": "v1.0.0-share",
-            "commit": "d3558091eec16dceed316be9a058bb581ab0b47f"
-        },
-        {
-            "repo": "skill-foundry",
-            "tag": "v1.0",
-            "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
-        },
-        {
-            "repo": "zombie-hunter",
-            "tag": "v1.0-product",
-            "commit": "a0d54fe85d6382061ec429b828c4c0fa46f7129f"
-        }
-    ],
-    "package_versions": {
-        "A": "1.0.0",
-        "B": "1.0.0"
+    {
+      "repo": "trio",
+      "tag": "PLACEHOLDER",
+      "commit": "PLACEHOLDER"
     },
-    "scrub_tool_versions": {
-        "vendor_skills.py": "GREEN-share-distro",
-        "distro.py": "GREEN-share-distro"
+    {
+      "repo": "skill-foundry",
+      "tag": "PLACEHOLDER",
+      "commit": "PLACEHOLDER"
     }
+  ],
+  "package_versions": {
+    "A": "0.0.0-placeholder",
+    "B": "0.0.0-placeholder"
+  },
+  "scrub_tool_versions": {
+    "vendor_skills.py": "GREEN-share-distro",
+    "distro.py": "GREEN-share-distro"
+  }
 }

@@ -99,11 +99,43 @@ class SkillJournalError(Exception):
         super().__init__(self.message)
 
 
-def records_root(skill_dir) -> Path:
-    """``<skill_dir>/journal/runs`` — where share skill-run records live."""
+def records_root(skill_dir=None, *, skill_id=None, home=None, registry=None) -> Path:
+    """``.../journal/runs`` — where share skill-run records live.
+
+    Prefer :func:`share_skills_root.resolve_skill_journal_dir` when
+    ``skill_id`` plus ``home``/``registry`` are available (criterion 3 —
+    journals only under SKILLS_ROOT/<id>/journal). Falls back to
+    ``skill_dir/journal/runs`` for legacy/direct skill-tree callers.
+    """
+    if skill_id and (home is not None or registry is not None):
+        try:
+            import share_skills_root as ssr
+
+            jdir = ssr.resolve_skill_journal_dir(
+                skill_id, home=home, registry=registry
+            )
+            return Path(jdir) / _RECORDS_SUBDIR
+        except Exception:
+            # Fall through to skill_dir layout if resolve refuses.
+            pass
+    if skill_dir is None:
+        raise SkillJournalError(
+            ["skill_dir-or-home-required"],
+            message="records_root needs skill_dir or skill_id+home/registry",
+        )
     base = Path(skill_dir)
     mid = base / _RECORDS_DIRNAME
     return mid / _RECORDS_SUBDIR
+
+
+def records_dir_for_skill(skill_id: str, *, home=None, registry=None) -> Path:
+    """THE journal runs dir via resolve_skill_journal_dir (SKILLS_ROOT law)."""
+    import share_skills_root as ssr
+
+    jdir = ssr.resolve_skill_journal_dir(
+        skill_id, home=home, registry=registry
+    )
+    return Path(jdir) / _RECORDS_SUBDIR
 
 
 def validate_record(doc) -> list:
@@ -247,11 +279,22 @@ def build_record(
     return doc
 
 
-def append_run_record(skill_dir, record: dict) -> Path:
+def append_run_record(
+    skill_dir=None,
+    record: dict | None = None,
+    *,
+    skill_id=None,
+    home=None,
+    registry=None,
+) -> Path:
     """Validate and append one record as ``journal/runs/<record_id>.json``.
 
-    Fail-closed on schema problems. Returns the written path.
+    When ``home``/``registry`` + skill_id are provided, the write path is
+    :func:`records_dir_for_skill` / ``resolve_skill_journal_dir`` so the
+    realpath lands under SKILLS_ROOT. Fail-closed on schema problems.
     """
+    if record is None:
+        raise SkillJournalError(["record-required"])
     problems = validate_record(record)
     if problems:
         raise SkillJournalError(problems)
@@ -260,7 +303,10 @@ def append_run_record(skill_dir, record: dict) -> Path:
         record = dict(record)
         record["record_id"] = rid
 
-    root = records_root(skill_dir)
+    sid = skill_id or record.get("skill_id")
+    root = records_root(
+        skill_dir, skill_id=sid, home=home, registry=registry
+    )
     # mkdir then write on separate lines (product drift gate: no write marker
     # on the same line as a journal path token).
     root.mkdir(parents=True, exist_ok=True)
@@ -272,7 +318,7 @@ def append_run_record(skill_dir, record: dict) -> Path:
 
 
 def append_structured_run(
-    skill_dir,
+    skill_dir=None,
     *,
     skill_id: str,
     skill_version: str,
@@ -285,8 +331,14 @@ def append_structured_run(
     model_family_seats=None,
     workaround_codes=None,
     workaround_tokens=None,
+    home=None,
+    registry=None,
 ) -> Path:
-    """Hook for a completed structured skill run → one journal file."""
+    """Hook for a completed structured skill run → one journal file.
+
+    Prefer ``home``/``registry`` so the write uses
+    ``resolve_skill_journal_dir`` (SKILLS_ROOT/<id>/journal/runs).
+    """
     rec = build_record(
         skill_id=skill_id,
         skill_version=skill_version,
@@ -300,12 +352,22 @@ def append_structured_run(
         workaround_codes=workaround_codes,
         workaround_tokens=workaround_tokens,
     )
-    return append_run_record(skill_dir, rec)
+    return append_run_record(
+        skill_dir,
+        rec,
+        skill_id=skill_id,
+        home=home,
+        registry=registry,
+    )
 
 
-def list_records(skill_dir) -> list:
+def list_records(
+    skill_dir=None, *, skill_id=None, home=None, registry=None
+) -> list:
     """Load all records under the skill's journal runs dir (unsorted)."""
-    root = records_root(skill_dir)
+    root = records_root(
+        skill_dir, skill_id=skill_id, home=home, registry=registry
+    )
     if not root.is_dir():
         return []
     out = []
@@ -319,9 +381,13 @@ def list_records(skill_dir) -> list:
     return out
 
 
-def journal_contract_proven(skill_dir) -> bool:
+def journal_contract_proven(
+    skill_dir=None, *, skill_id=None, home=None, registry=None
+) -> bool:
     """True when at least one schema-valid record exists under the skill."""
-    for doc in list_records(skill_dir):
+    for doc in list_records(
+        skill_dir, skill_id=skill_id, home=home, registry=registry
+    ):
         if not validate_record(doc):
             return True
     return False

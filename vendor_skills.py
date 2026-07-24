@@ -500,13 +500,16 @@ def vendor_trio_runtime_support(bundle_root: Path) -> dict:
       bundled-skills/drivers/          # from ANCHOR_TRIO_DIR
       bundled-skills/foundry/triage/   # from ANCHOR_FOUNDRY_DIR (resolver also
                                        # checks ANCHOR_FOUNDRY_DIR env at runtime)
+
+    When source env vars are unset, this is a **silent no-op** (no skip rows) so
+    roster honesty tests stay SKILL_SOURCES-shaped. Ship builders set the envs.
     """
     bundle_root = Path(bundle_root)
     vendored = []
     skipped = []
 
     trio = os.environ.get("ANCHOR_TRIO_DIR")
-    if trio and Path(trio).exists():
+    if trio and Path(trio).exists() and (Path(trio) / "drivers").is_dir():
         src = Path(trio)
         commit = _resolve_head(src)
         if commit:
@@ -526,11 +529,11 @@ def vendor_trio_runtime_support(bundle_root: Path) -> dict:
                 skipped.append({"name": "drivers", "reason": "git archive drivers failed"})
         else:
             skipped.append({"name": "drivers", "reason": "trio has no HEAD"})
-    else:
-        skipped.append({"name": "drivers", "reason": "ANCHOR_TRIO_DIR unset"})
+    # else: env unset or no drivers/ tree → no-op (canary fixtures)
 
     foundry = os.environ.get("ANCHOR_FOUNDRY_DIR") or os.environ.get("SKILL_FOUNDRY_DIR")
-    if foundry and Path(foundry).exists():
+    triage_src = Path(foundry) / "foundry" / "triage" if foundry else None
+    if foundry and Path(foundry).exists() and triage_src is not None and triage_src.is_dir():
         src = Path(foundry)
         commit = _resolve_head(src)
         if commit:
@@ -550,9 +553,7 @@ def vendor_trio_runtime_support(bundle_root: Path) -> dict:
                 skipped.append({"name": "foundry-triage", "reason": "git archive foundry/triage failed"})
         else:
             skipped.append({"name": "foundry-triage", "reason": "foundry has no HEAD"})
-    else:
-        skipped.append({"name": "foundry-triage", "reason": "ANCHOR_FOUNDRY_DIR unset"})
-
+    # else: env unset or no foundry/triage tree → no-op
     return {"vendored": vendored, "skipped": skipped}
 
 

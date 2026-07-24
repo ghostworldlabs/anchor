@@ -147,7 +147,7 @@ def test_journal_refuses_missing_mandatory_fields():
 # ── GWT #3: readiness without seat → not green ready ────────────────────────
 
 def test_given_governance_no_seat_when_readiness_then_not_green_ready():
-    """GWT #3: governance installed, no coding seat, no accepted degraded → not ready."""
+    """GWT #3: governance installed, no coding seat, no accepted degraded → not-ready."""
     doc = ready.compute_readiness(
         package_id="A",
         governance_installed=True,
@@ -155,7 +155,8 @@ def test_given_governance_no_seat_when_readiness_then_not_green_ready():
         user_accepted_degraded=False,
         journal_proven=False,
     )
-    assert doc["status"] == "degraded"
+    # Canonical zero-seat matrix: not-ready (distinct from degraded-with-seat).
+    assert doc["status"] == "not-ready"
     assert "no_coding_seat" in doc["reason_codes"]
     assert "journal_contract_unproven" in doc["reason_codes"]
     assert ready.is_green_ready(doc) is False

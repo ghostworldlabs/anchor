@@ -148,7 +148,218 @@ EXECUTE_GATE_REASON_CODES = (
     "network_not_denied",
     "live_probes_without_opt_in",
     "recipient_api_key_in_fixture",
+    "user_onboard_doc_missing",
+    "user_onboard_marker_missing",
+    "user_onboard_rights_missing",
+    "user_onboard_oss_stamp",
+    "oss_license_file_present",
 )
+
+# ── Wave 6 — email-ready USER-ONBOARD.md + rights-reserved (no OSS stamp) ───
+
+USER_ONBOARD_FILENAME = "USER-ONBOARD.md"
+
+# Clone/unzip package root first; planning effort copy is also accepted.
+USER_ONBOARD_SEARCH_RELS = (
+    "USER-ONBOARD.md",
+    "planning/share-canonical-onboard-2026-07/USER-ONBOARD.md",
+    "docs/USER-ONBOARD.md",
+)
+
+# Markers the email-ready install doc must carry (plain-English acceptance).
+USER_ONBOARD_REQUIRED_MARKERS = (
+    "python -m share_onboard",
+    "Package A",
+    "Package B",
+    "feedback",
+    "anchor.ico",
+    "service",
+    "favicon",
+)
+
+# At least one rights-reserved / not-OSS family string required.
+USER_ONBOARD_RIGHTS_MARKERS = (
+    "rights reserved",
+    "not open source",
+    "not open-source",
+)
+
+# Phrases that would constitute an OSS license stamp *in the onboard doc*.
+USER_ONBOARD_FORBIDDEN_OSS_PHRASES = (
+    "licensed under the mit",
+    "mit license",
+    "apache license",
+    "licensed under apache",
+    "gnu general public license",
+    "spdx-license-identifier: mit",
+    "spdx-license-identifier: apache",
+    "bsd 2-clause",
+    "bsd 3-clause",
+    "isc license",
+)
+
+# Repo-root license filenames that would stamp OSS (Wave 6: do not add).
+OSS_LICENSE_FILENAMES = (
+    "LICENSE",
+    "LICENSE.txt",
+    "LICENSE.md",
+    "COPYING",
+    "COPYING.txt",
+)
+
+# Open-source grant patterns if a LICENSE-like file is present.
+_OSS_LICENSE_BODY_RES = (
+    re.compile(r"\bMIT\s+License\b", re.IGNORECASE),
+    re.compile(r"Apache\s+License", re.IGNORECASE),
+    re.compile(r"GNU\s+General\s+Public\s+License", re.IGNORECASE),
+    re.compile(r"SPDX-License-Identifier\s*:\s*(MIT|Apache|GPL|BSD)", re.IGNORECASE),
+    re.compile(r"Permission is hereby granted, free of charge", re.IGNORECASE),
+)
+
+
+def resolve_user_onboard_docs(repo_root=None) -> list:
+    """Return existing USER-ONBOARD.md paths under *repo_root* (ordered)."""
+    root = Path(repo_root) if repo_root is not None else _MODULE_DIR
+    found = []
+    for rel in USER_ONBOARD_SEARCH_RELS:
+        p = root / rel
+        if p.is_file():
+            found.append(p)
+    return found
+
+
+def check_user_onboard_doc(repo_root=None) -> dict:
+    """Doc presence + required string markers for email-ready onboard.
+
+    Acceptance (canonical Wave 6): clone/unzip → ``python -m share_onboard``;
+    Package A vs B; feedback step; B icons/service/favicon; rights-reserved /
+    not open-source. Returns ``{ok, paths, missing_markers, problems, …}``.
+    """
+    root = Path(repo_root) if repo_root is not None else _MODULE_DIR
+    paths = resolve_user_onboard_docs(root)
+    problems = []
+    missing = []
+    rights_hits = 0
+    readable = 0
+    oss_hits = []
+    bodies = []
+
+    if not paths:
+        problems.append("user_onboard_doc_missing")
+        return {
+            "ok": False,
+            "paths": [],
+            "missing_markers": list(USER_ONBOARD_REQUIRED_MARKERS),
+            "rights_reserved_ok": False,
+            "oss_phrase_hits": [],
+            "problems": problems,
+            "repo_root": str(root),
+        }
+
+    # All found copies must satisfy markers (package + planning stay in lockstep).
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            problems.append("user_onboard_doc_unreadable:%s" % path.name)
+            bodies.append({"path": str(path), "error": str(exc)})
+            continue
+        readable += 1
+        low = text.lower()
+        bodies.append({"path": str(path), "chars": len(text)})
+        for marker in USER_ONBOARD_REQUIRED_MARKERS:
+            if marker.lower() not in low and marker not in missing:
+                missing.append(marker)
+        if any(m in low for m in USER_ONBOARD_RIGHTS_MARKERS):
+            rights_hits += 1
+        for phrase in USER_ONBOARD_FORBIDDEN_OSS_PHRASES:
+            if phrase not in low:
+                continue
+            # Allow "not licensed under MIT..." style denials.
+            idx = low.find(phrase)
+            window = low[max(0, idx - 48): idx + len(phrase) + 12]
+            if re.search(r"\bnot\b|\bno\b|\bnever\b", window):
+                continue
+            if phrase not in oss_hits:
+                oss_hits.append(phrase)
+
+    rights_ok = readable > 0 and rights_hits == readable
+    if missing:
+        problems.append("user_onboard_marker_missing")
+    if not rights_ok:
+        problems.append("user_onboard_rights_missing")
+    if oss_hits:
+        problems.append("user_onboard_oss_stamp")
+
+    return {
+        "ok": not problems,
+        "paths": [str(p) for p in paths],
+        "missing_markers": missing,
+        "rights_reserved_ok": rights_ok,
+        "oss_phrase_hits": oss_hits,
+        "problems": problems,
+        "bodies": bodies,
+        "repo_root": str(root),
+        "required_markers": list(USER_ONBOARD_REQUIRED_MARKERS),
+    }
+
+
+def check_no_oss_license_stamp(repo_root=None) -> dict:
+    """Wave 6: no OSS LICENSE file / open-source grant at package root.
+
+    Presence of a root LICENSE* that grants MIT/Apache/GPL/etc. fails.
+    Absence of LICENSE is the expected GREEN state (rights reserved in docs).
+    """
+    root = Path(repo_root) if repo_root is not None else _MODULE_DIR
+    problems = []
+    found = []
+    for name in OSS_LICENSE_FILENAMES:
+        p = root / name
+        if not p.is_file():
+            continue
+        found.append(str(p))
+        try:
+            body = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            problems.append("oss_license_file_present")
+            continue
+        # Any root LICENSE-like file is an OSS stamp for this effort
+        # (plan: do not add LICENSE). Body patterns also fail closed.
+        problems.append("oss_license_file_present")
+        for rx in _OSS_LICENSE_BODY_RES:
+            if rx.search(body):
+                if "user_onboard_oss_stamp" not in problems:
+                    problems.append("user_onboard_oss_stamp")
+                break
+
+    return {
+        "ok": not problems,
+        "license_files": found,
+        "problems": problems,
+        "repo_root": str(root),
+        "expected": "no LICENSE file; rights reserved in USER-ONBOARD.md",
+    }
+
+
+def check_docs_and_rights_reserved(repo_root=None) -> dict:
+    """Combined Wave 6 ship-gate doc check (presence + no OSS license stamp)."""
+    doc = check_user_onboard_doc(repo_root)
+    lic = check_no_oss_license_stamp(repo_root)
+    problems = list(doc.get("problems") or []) + list(lic.get("problems") or [])
+    # De-dupe while preserving order.
+    seen = set()
+    uniq = []
+    for p in problems:
+        if p not in seen:
+            seen.add(p)
+            uniq.append(p)
+    return {
+        "ok": not uniq,
+        "user_onboard": doc,
+        "no_oss_license": lic,
+        "problems": uniq,
+        "repo_root": doc.get("repo_root") or lic.get("repo_root"),
+    }
 
 
 class ShipGateError(Exception):

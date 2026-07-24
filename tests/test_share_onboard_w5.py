@@ -344,3 +344,248 @@ def test_idempotent_second_run(tmp_path):
     skipped = {x["name"] for x in (r2.get("skills") or {}).get("skipped") or []}
     assert skipped == set(FAKE_SKILLS) or skipped.issubset(set(FAKE_SKILLS))
     assert r2["feedback_opt_in"] is False
+
+
+# ── Canonical Wave 3: interactive CLI, silent fail-closed, zero-seat ─────────
+
+def test_w3_cli_surface_importable():
+    assert callable(sob.main)
+    assert callable(sob.onboard_cli)
+    assert callable(sob.run_interactive_onboard)
+    assert callable(sob.run_silent_onboard)
+    assert callable(sob.prompt_feedback_consent)
+    assert callable(sob.detect_package_mode)
+    assert callable(sob.exit_code_for_report)
+    assert sob.FEEDBACK_CONSENT_COPY["default"] is False
+    assert sob.default_feedback_opt_in() is False
+
+
+def test_given_zero_coding_seats_when_onboard_then_not_ready_nonzero(tmp_path):
+    """Zero seats → readiness not-ready + non-zero exit (seat matrix)."""
+    home = tmp_path / "home-zero"
+    src = _make_bundle(tmp_path / "vendor-zero")
+    report = sob.run_share_onboard(
+        home,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={
+            "claude": False,
+            "gemini": False,
+            "grok": False,
+        },
+        platform_name="Windows",
+        dialogue_complete=True,
+    )
+    stamp = report["readiness"]
+    assert stamp["status"] == "not-ready"
+    assert stamp["coding_seat_ok"] is False
+    assert "no_coding_seat" in stamp["reason_codes"]
+    assert ready.is_green_ready(stamp) is False
+    assert sob.exit_code_for_report(report) != 0
+    assert report["exit_code"] != 0
+
+
+def test_given_silent_path_when_complete_then_not_ready(tmp_path):
+    """Silent/non-interactive without full dialogue never stamps ready."""
+    home = tmp_path / "home-silent"
+    src = _make_bundle(tmp_path / "vendor-silent")
+    # Even with a mock coding seat, silent path fails closed.
+    report = sob.run_silent_onboard(
+        home=home,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={"claude": True},
+        platform_name="Windows",
+    )
+    assert report["ok"] is False
+    assert report.get("silent") is True
+    stamp = report["readiness"]
+    assert stamp is not None
+    assert stamp["status"] != "ready"
+    assert stamp["status"] == "not-ready"
+    assert "interactive_onboard_required" in stamp["reason_codes"]
+    assert ready.is_green_ready(stamp) is False
+    assert sob.exit_code_for_report(report) != 0
+
+    # dialogue_complete=False on library path same contract
+    home2 = tmp_path / "home-silent2"
+    r2 = sob.run_share_onboard(
+        home2,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={"claude": True},
+        dialogue_complete=False,
+        platform_name="Windows",
+    )
+    assert r2["readiness"]["status"] == "not-ready"
+    assert r2["ok"] is False
+
+
+def test_given_feedback_no_when_export_then_blocked_no_install_key(tmp_path):
+    """Feedback default No → no install_key; export blocked."""
+    import share_feedback as fb
+
+    home = tmp_path / "home-fb-no"
+    src = _make_bundle(tmp_path / "vendor-fb-no")
+    report = sob.run_share_onboard(
+        home,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={"claude": True},
+        # omit feedback_opt_in → default No
+        platform_name="Windows",
+    )
+    assert report["feedback_opt_in"] is False
+    assert fb.load_install_key(home) is None
+    pref = sob.load_feedback_consent(home)
+    assert pref["opted_in"] is False
+    assert pref.get("install_key_present") is False
+
+    # Export attempt with local friction record is blocked by consent.
+    skills = home / home_cfg.SKILLS_SUBDIR
+    rec = {
+        "schema": "share-skill-journal/v1",
+        "schema_version": "1.0.0",
+        "record_id": "jr-testfbno",
+        "skill_id": "crucible",
+        "skill_version": "1.0.0",
+        "outcome": "friction",
+        "structural_failure_codes": ["timeout"],
+        "duration_band": "lt_1m",
+        "complexity_band": "small",
+        "os_class": "windows",
+        "model_family_seats": ["claude"],
+        "workaround_codes": ["none"],
+    }
+    result = fb.try_export_journal_record(home, rec, skills_root=skills)
+    assert result.get("enqueued") is False
+    assert result.get("exported") is False
+
+
+def test_given_feedback_yes_when_export_then_allowlist_and_key(tmp_path):
+    """Feedback Yes → install_key present; export allowlist-only (no full journal)."""
+    import share_feedback as fb
+    import share_skill_journal as sjournal
+    import share_skill_seal as seal
+
+    home = tmp_path / "home-fb-yes"
+    src = _make_bundle(tmp_path / "vendor-fb-yes")
+    report = sob.run_share_onboard(
+        home,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={"claude": True},
+        feedback_opt_in=True,
+        platform_name="Windows",
+    )
+    assert report["feedback_opt_in"] is True
+    key = fb.load_install_key(home)
+    assert key is not None
+    pref = sob.load_feedback_consent(home)
+    assert pref["opted_in"] is True
+    assert pref.get("install_key_present") is True
+
+    skills = home / home_cfg.SKILLS_SUBDIR
+    # Ensure seal so export allowed
+    if skills.is_dir() and not (skills / seal.SEAL_FILENAME).is_file():
+        seal.write_seal(skills)
+
+    rec = sjournal.build_record(
+        skill_id="crucible",
+        skill_version="1.0.0",
+        outcome="friction",
+        structural_failure_codes=["timeout"],
+        notes="LOCAL ONLY secret project C:\\Users\\secret me@x.com",
+        duration_band="1_5m",
+        complexity_band="small",
+        os_class="windows",
+        model_family_seats=["claude"],
+        workaround_codes=["retry"],
+    )
+    result = fb.try_export_journal_record(home, rec, skills_root=skills)
+    assert result["exported"] is True
+    assert result["enqueued"] is True
+    export = result["export_record"]
+    assert export["install_key"] == key
+    assert "notes" not in export
+    assert set(export.keys()).issubset(fb.EXPORT_ALLOWLIST)
+    assert fb.export_payload_contains_full_journal(export) is False
+
+
+def test_interactive_onboard_scripted_default_feedback_no(tmp_path):
+    """Interactive path with skip_prompts: feedback default No; seat ready."""
+    home = tmp_path / "home-ix"
+    src = _make_bundle(tmp_path / "vendor-ix")
+    lines = []
+
+    def capture_print(*a, **k):
+        lines.append(" ".join(str(x) for x in a))
+
+    report = sob.run_interactive_onboard(
+        home=home,
+        package_id="A",
+        skills_src=src,
+        mock_seat_results={"claude": True},
+        platform_name="Windows",
+        skip_prompts=True,
+        print_fn=capture_print,
+    )
+    assert report["interactive"] is True
+    assert report["feedback_opt_in"] is False
+    assert report["readiness"]["status"] == "ready"
+    assert report["exit_code"] == 0
+    transcript = "\n".join(lines)
+    # Transcript-friendly markers (plain ASCII dialogue)
+    assert "Home" in transcript or "home" in transcript.lower()
+    assert "Feedback" in transcript or "feedback" in transcript.lower()
+    assert "default No" in transcript or "Default is No" in transcript or (
+        "Feedback: No" in transcript
+    )
+
+
+def test_prompt_feedback_consent_default_no():
+    """Empty input on feedback prompt → No (locked default)."""
+    answers = [""]  # empty → default
+
+    def fake_input(prompt=""):
+        return answers.pop(0) if answers else ""
+
+    assert sob.prompt_feedback_consent(input_fn=fake_input, print_fn=lambda *a, **k: None) is False
+
+    answers2 = ["yes"]
+
+    def fake_input_yes(prompt=""):
+        return answers2.pop(0) if answers2 else ""
+
+    assert sob.prompt_feedback_consent(
+        input_fn=fake_input_yes, print_fn=lambda *a, **k: None
+    ) is True
+
+
+def test_main_non_interactive_exit_nonzero(tmp_path, monkeypatch):
+    """python -m share_onboard --non-interactive → not ready, non-zero."""
+    home = tmp_path / "home-main-silent"
+    home.mkdir()
+    src = _make_bundle(tmp_path / "vendor-main-silent")
+    code = sob.main([
+        "--non-interactive",
+        "--home", str(home),
+        "--package", "A",
+        "--skills-src", str(src),
+    ])
+    assert code != 0
+    stamp_path = home / home_cfg.GOVERNANCE_SUBDIR / "readiness.json"
+    if stamp_path.is_file():
+        stamp = ready.load_readiness_stamp(stamp_path)
+        assert stamp["status"] != "ready"
+
+
+def test_detect_package_mode_and_permissions_list():
+    det = sob.detect_package_mode(REPO)
+    assert det["package_id"] in ("A", "B")
+    assert "A" in det["candidates"] or det["package_id"] == "A"
+    perms_a = sob.permissions_write_list("A")
+    assert any("skills" in p.lower() for p in perms_a)
+    assert any("never starts" in p.lower() or "Package A" in p for p in perms_a)
+    perms_b = sob.permissions_write_list("B")
+    assert any("desktop" in p.lower() or "service" in p.lower() for p in perms_b)

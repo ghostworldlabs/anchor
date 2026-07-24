@@ -31,6 +31,7 @@ SCHEMA_FILES = {
     "freeze_manifest": SCHEMA_DIR / "freeze_manifest.schema.json",
     "skill_journal": SCHEMA_DIR / "skill_journal.schema.json",
     "skill_friction": SCHEMA_DIR / "skill_friction.schema.json",
+    "skills_root": SCHEMA_DIR / "skills_root.schema.json",
 }
 
 DATA_FILES = {
@@ -97,6 +98,11 @@ REUSE_MARKERS = {
 }
 
 # Closed enums mirrored from schemas (also re-read from schema at load).
+# skills-root/v1 (canonical SKILLS_ROOT registry — share_skills_root W0)
+SKILLS_ROOT_SCHEMA = "skills-root/v1"
+SKILLS_ROOT_INSTALL_MODES = ("junction", "copy")
+SKILLS_ROOT_HOSTS = ("claude", "grok", "gemini", "anchor")
+
 PACKAGE_IDS = ("A", "B")
 CAPABILITY_ENUM = (
     "works-without-Anchor",
@@ -104,7 +110,9 @@ CAPABILITY_ENUM = (
     "Anchor-required",
 )
 PACKAGE_A_POLICIES = ("exclude", "stub", "include")
-READINESS_STATUSES = ("ready", "degraded")
+# not-ready = zero coding seats / interactive dialogue incomplete (fail closed).
+# degraded = seat present but other degradation (fork, pin mismatch, etc.).
+READINESS_STATUSES = ("ready", "degraded", "not-ready")
 READINESS_REASON_CODES = (
     "governance_missing",
     "no_coding_seat",
@@ -117,6 +125,7 @@ READINESS_REASON_CODES = (
     "seat_probe_failed",
     "openai_sole_family_rejected",
     "prereq_missing",
+    "interactive_onboard_required",
 )
 PACKAGE_REASON_CODES = (
     "anchor_only_forbidden",
@@ -331,6 +340,18 @@ def validate_capability_matrix_doc(doc) -> list:
                 "%s:anchor-required-cannot-include-on-A:%s" % (where, sid)
             )
     return problems
+
+
+# ── skills-root/v1 registry validation (delegates to share_skills_root) ──────
+
+def validate_skills_root_doc(doc) -> list:
+    """Validate a skills-root/v1 registry document (problem list; empty = ok)."""
+    # Local import keeps share_contracts loadable without pulling vendor_skills
+    # for callers that only need matrices; W0 equality/registry tests import
+    # share_skills_root directly.
+    import share_skills_root as ssr
+
+    return ssr.validate_skills_root_doc(doc)
 
 
 # ── readiness stamp validation ───────────────────────────────────────────────

@@ -1,23 +1,21 @@
 {
-    "schema": "share-freeze-manifest/v1",
-    "schema_version": 1,
-    "ship_allowed": true,
-    "freeze_commits": {
-        "anchor": "647a498ac93c0d80fea7a6fffa387a7b7b6936f8",
-        "trio": "d3558091eec16dceed316be9a058bb581ab0b47f",
-        "skill-foundry": "b1022c9ed61fcf50dae70ec695ac7851947cf539",
-        "zombie-hunter": "a0d54fe85d6382061ec429b828c4c0fa46f7129f"
-    },
-    "freeze_tags": {
-        "anchor": "v1.0.0+share",
-        "trio": "v1.0.0-share",
-        "skill-foundry": "v1.0",
-        "zombie-hunter": "v1.0-product"
-    },
-    "skills_pin": {
-        "tag": "v1.0",
-        "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
-    },
-    "package_matrix_version": "1.0.0",
-    "notes": "Final v1.0 lock: Anchor share surface + Skill Foundry v1.0 + trio pin. git archive only; no author runtime state."
+  "schema": "share-freeze-manifest/v1",
+  "schema_version": 1,
+  "ship_allowed": false,
+  "freeze_commits": {
+    "anchor": "PLACEHOLDER",
+    "trio": "PLACEHOLDER",
+    "skill-foundry": "PLACEHOLDER"
+  },
+  "freeze_tags": {
+    "anchor": "PLACEHOLDER",
+    "trio": "PLACEHOLDER",
+    "skill-foundry": "PLACEHOLDER"
+  },
+  "skills_pin": {
+    "tag": "PLACEHOLDER",
+    "commit": "PLACEHOLDER"
+  },
+  "package_matrix_version": "0.0.0-placeholder",
+  "notes": "Freeze tags remain PLACEHOLDER until concurrent skill-run merge + John go-ahead. Plan-complete is not ship-allowed."
 }

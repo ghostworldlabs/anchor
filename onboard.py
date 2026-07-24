@@ -38,8 +38,11 @@ REPO_ROOT = Path(__file__).resolve().parent
 # pre-existing dir/symlink (refuse-don't-clobber).
 _OURS_MARKER = ".anchor-onboard-installed"
 
-# The default skills home (override via ANCHOR_SKILLS_HOME).
-_DEFAULT_SKILLS_HOME = Path.home() / ".claude" / "skills"
+# Product skills land under SKILLS_ROOT (canonical agent-independent tree).
+# Claude's ~/.claude/skills is a POINTER adapter only — never the default
+# product install target (share-canonical-onboard criterion 1).
+# Override via ANCHOR_SKILLS_ROOT / ANCHOR_SKILLS_HOME / ANCHOR_SHARE_HOME.
+_DEFAULT_SKILLS_HOME = Path.home() / "skills"
 # The default bundled-skills source (override via ANCHOR_BUNDLED_SKILLS_DIR).
 _DEFAULT_BUNDLED_SKILLS = REPO_ROOT / "vendor" / "bundled-skills"
 # The default data dir. Decision #7 requires the token to live OUTSIDE the repo
@@ -108,11 +111,21 @@ def _resolve_skills_src(skills_src) -> Path:
 
 
 def _resolve_skills_home(skills_home) -> Path:
+    """Resolve product install destination (SKILLS_ROOT — not Claude farm).
+
+    Order: explicit arg → ``ANCHOR_SKILLS_ROOT`` → ``ANCHOR_SKILLS_HOME`` →
+    ``ANCHOR_SHARE_HOME``/skills → ``~/skills``. Never defaults to
+    ``~/.claude/skills`` (that path is pointer-only via register_host).
+    """
     if skills_home is not None:
         return Path(skills_home)
-    env = os.environ.get("ANCHOR_SKILLS_HOME")
-    if env:
-        return Path(env)
+    for key in ("ANCHOR_SKILLS_ROOT", "ANCHOR_SKILLS_HOME"):
+        env = os.environ.get(key)
+        if env:
+            return Path(env)
+    share = (os.environ.get("ANCHOR_SHARE_HOME") or "").strip()
+    if share:
+        return Path(share) / "skills"
     return _DEFAULT_SKILLS_HOME
 
 
@@ -141,13 +154,15 @@ def _is_our_copy(target: Path) -> bool:
 
 def install_skills(skills_src=None, skills_home=None, symlink: bool = False,
                    _fail_on=None) -> dict:
-    """Install each bundled skill into the skills home. COPY by default.
+    """Install each bundled skill into SKILLS_ROOT (product tree). COPY default.
 
     Args:
       skills_src:  source dir (default ``vendor/bundled-skills`` or the
                    ``ANCHOR_BUNDLED_SKILLS_DIR`` env override).
-      skills_home: destination dir (default ``~/.claude/skills`` or the
-                   ``ANCHOR_SKILLS_HOME`` env override).
+      skills_home: destination SKILLS_ROOT (default via
+                   ``ANCHOR_SKILLS_ROOT`` / ``ANCHOR_SKILLS_HOME`` /
+                   ``ANCHOR_SHARE_HOME``/skills / ``~/skills``). Not
+                   ``~/.claude/skills`` — that is a host adapter only.
       symlink:     opt-in — symlink instead of copy (COPY is the default).
       _fail_on:    TEST seam — a skill name that should raise mid-copy to
                    exercise the partial-install rollback.
