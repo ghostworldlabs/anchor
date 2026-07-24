@@ -62,11 +62,19 @@ def main() -> None:
                     staged.append(rel)
     for name in (
         "onboard.py",
+        "onboard.cmd",
+        "onboard.ps1",
+        "onboard_cli.py",
+        "launch_anchor_dashboard.py",
+        "USER-ONBOARD.md",
         "vendor_skills.py",
         "distro.py",
         "paths.py",
         "pillar_flags.py",
         "dist_manifest.txt",
+        "gandalf.py",
+        "anchor.py",
+        "anchor_gui.py",
     ):
         if (ROOT / name).is_file() and name not in staged:
             staged.append(name)
