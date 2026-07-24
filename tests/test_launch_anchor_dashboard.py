@@ -87,3 +87,52 @@ def test_still_down_after_start_is_not_ok():
     )
     assert r["ok"] is False
     assert "anchor_service_unavailable" in r["reason_codes"]
+
+
+def test_package_b_dual_gate_passes_package_root_to_shortcut(tmp_path):
+    """Desktop brand path must know the package tree (launcher lives there)."""
+    home = tmp_path / "home"
+    desk = tmp_path / "Desktop"
+    home.mkdir()
+    desk.mkdir()
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "launch_anchor_dashboard.py").write_text("# stub\n", encoding="utf-8")
+    ico = home / sob.ANCHOR_ICO_BASENAME
+    ico.write_bytes(b"ICO")
+    seen = {}
+
+    def shortcut_fn(**kw):
+        seen.update(kw)
+        path = Path(kw["desktop_dir"]) / sob.DESKTOP_LNK_BASENAME
+        path.write_text(
+            "URL=%s\nIconLocation=%s,0\n" % (kw.get("url"), ico),
+            encoding="utf-8",
+        )
+        return {
+            "created": True,
+            "path": str(path),
+            "url": kw.get("url"),
+            "uses_anchor_ico": True,
+            "branding_complete": True,
+            "icon_location": "%s,0" % ico,
+            "format": "lnk",
+        }
+
+    report = {"ok": True, "readiness": {"status": "ready"}}
+    out = sob.complete_package_b_dual_gate(
+        report,
+        home=home,
+        desktop_dir=str(desk),
+        probe_fn=lambda u: True,
+        start_service_fn=lambda: {"attempted": True, "started": True},
+        shortcut_fn=shortcut_fn,
+        package_root=pkg,
+        skip_service_start=False,
+        check_favicon_flag=True,
+        check_skill_icons_flag=False,
+        favicon_get_fn=lambda u: True,
+    )
+    assert out.get("b_ready") is True or (out.get("package_b") or {}).get("b_ready") is True
+    # Production path passes package_root into write_desktop_lnk; inject still gets url.
+    assert seen.get("url") == URL

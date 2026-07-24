@@ -66,6 +66,7 @@ def _make_ico(path: Path) -> Path:
 
 def _branded_shortcut_fn(desktop_dir, url, icon_path=None, name=None, **_k):
     """Hermetic shortcut_fn: writes .lnk-contract with IconLocation=anchor.ico."""
+    # Accept package_root / python_exe from production kwargs without failing.
     desk = Path(desktop_dir)
     desk.mkdir(parents=True, exist_ok=True)
     name = name or sob.DESKTOP_LNK_BASENAME

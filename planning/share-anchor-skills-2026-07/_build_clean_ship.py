@@ -65,6 +65,7 @@ def main() -> None:
         "onboard.cmd",
         "onboard.ps1",
         "onboard_cli.py",
+        "onboard_bootstrap.py",
         "launch_anchor_dashboard.py",
         "USER-ONBOARD.md",
         "vendor_skills.py",
@@ -165,8 +166,39 @@ def main() -> None:
         (gp / k).write_text(v, encoding="utf-8")
     shutil.copy2(ROOT / "share_sources_pin.json", a / "share_sources_pin.json")
     shutil.copy2(ROOT / "share_freeze_manifest.json", a / "share_freeze_manifest.json")
+    # Package A cold-start (same onboard shell; no Anchor service/desktop gate).
+    for name in (
+        "onboard.cmd",
+        "onboard.ps1",
+        "onboard_cli.py",
+        "onboard.py",
+        "onboard_bootstrap.py",
+        "share_onboard.py",
+        "share_contracts.py",
+        "share_governance.py",
+        "share_home_config.py",
+        "share_publish.py",
+        "share_readiness.py",
+        "share_skill_journal.py",
+        "share_skills_root.py",
+        "USER-ONBOARD.md",
+        "vendor_skills.py",
+        "distro.py",
+        "paths.py",
+    ):
+        src = ROOT / name
+        if src.is_file():
+            shutil.copy2(src, a / name)
+    # Copy share_schemas if present
+    schemas = ROOT / "share_schemas"
+    if schemas.is_dir():
+        shutil.copytree(schemas, a / "share_schemas", dirs_exist_ok=True)
+    govpack = ROOT / "share_governance_pack"
+    if govpack.is_dir():
+        shutil.copytree(govpack, a / "share_governance_pack", dirs_exist_ok=True)
     (a / "README.md").write_text(
         "# Skills package v1.0\n\n"
+        "Cold-start: .\\onboard.cmd  (or powershell -File .\\onboard.ps1)\n"
         "Local edits stay local. Install skills + governance pack.\n",
         encoding="utf-8",
     )

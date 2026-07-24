@@ -1704,12 +1704,17 @@ def complete_package_b_dual_gate(
     skip_service_start: bool = False,
     check_favicon_flag: bool = True,
     check_skill_icons_flag: bool = True,
+    package_root=None,
+    python_exe: str | None = None,
 ) -> dict:
     """Run service start + probe + branded desktop + evaluate dual gate.
 
     Mutates and returns ``report`` with ``b_ready``, ``package_b``, readiness
     re-stamp when incomplete. Never claims success on ``foreground_fallback``
     alone.
+
+    ``package_root`` is the install tree that contains ``launch_anchor_dashboard.py``
+    (service-aware desktop target). Defaults to this module's directory.
     """
     root = Path(home)
     url = (dashboard_url or DEFAULT_LOCAL_DASHBOARD_URL).strip()
@@ -1719,6 +1724,7 @@ def complete_package_b_dual_gate(
     desk = desktop_dir
     if desk is None:
         desk = str(root / "Desktop")
+    pkg_root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
 
     # 1. Service start (optional inject; honesty on fallback).
     if skip_service_start:
@@ -1740,7 +1746,7 @@ def complete_package_b_dual_gate(
     # 2. HTTP probe (truth for dual gate — not service status alone).
     probe = probe_local_dashboard(url, probe_fn=probe_fn)
 
-    # 3. Branded desktop shortcut (prefer .lnk + anchor.ico).
+    # 3. Branded desktop shortcut (prefer .lnk + anchor.ico + service-aware launcher).
     ico = ensure_home_anchor_ico(root)
     desktop = write_desktop_lnk_shortcut(
         desktop_dir=desk,
@@ -1749,6 +1755,8 @@ def complete_package_b_dual_gate(
         platform_name=plat,
         shortcut_fn=shortcut_fn,
         home=root,
+        package_root=pkg_root,
+        python_exe=python_exe,
     )
     report["desktop"] = desktop
 
@@ -2927,6 +2935,8 @@ def run_package_b_onboard(
     skip_service_start: bool = False,
     check_favicon_flag: bool = True,
     check_skill_icons_flag: bool = True,
+    package_root=None,
+    python_exe: str | None = None,
 ) -> dict:
     """Package B end-to-end: Package A surface + service + dual gate.
 
@@ -2989,6 +2999,8 @@ def run_package_b_onboard(
         probe_fn=probe_fn,
         shortcut_fn=shortcut_fn,
         start_service_fn=start_service_fn,
+        package_root=package_root,
+        python_exe=python_exe,
         favicon_get_fn=favicon_get_fn,
         brand_dir=brand_dir,
         skills_root=skills_home,
@@ -3356,6 +3368,8 @@ def run_interactive_onboard(
     favicon_get_fn=None,
     brand_dir=None,
     dashboard_url: str = DEFAULT_LOCAL_DASHBOARD_URL,
+    package_root=None,
+    python_exe: str | None = None,
     **kwargs,
 ) -> dict:
     """Guided dialogue (steps 1-10). Sole cold-start UX for strangers.
@@ -3650,6 +3664,10 @@ def run_interactive_onboard(
             favicon_get_fn=favicon_get_fn,
             brand_dir=brand_dir,
             platform_name=plat,
+            package_root=package_root if package_root is not None else (
+                Path(tree_root) if tree_root is not None else Path(__file__).resolve().parent
+            ),
+            python_exe=python_exe,
         )
         pb = report.get("package_b") or {}
         if report.get("b_ready"):
