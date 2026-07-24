@@ -1238,6 +1238,39 @@ def ensure_skill_brand_icons(
     }
 
 
+def desktop_shortcut_launcher_args(
+    *,
+    package_root=None,
+    python_exe: str | None = None,
+    url: str = DEFAULT_LOCAL_DASHBOARD_URL,
+) -> dict:
+    """Return TargetPath/Arguments for a service-aware desktop launcher.
+
+    The shortcut must **not** only open a URL (service may be down). It runs
+    ``launch_anchor_dashboard.py``, which probes, starts if needed, then opens
+    the browser. Dual-gate still checks that the *URL* matches the probed
+    dashboard; the launcher is how the user reaches that URL reliably.
+    """
+    root = Path(package_root) if package_root is not None else Path(__file__).resolve().parent
+    launcher = root / "launch_anchor_dashboard.py"
+    py = (python_exe or sys.executable or "python").strip()
+    # Prefer pythonw on Windows to avoid a console flash when double-clicking.
+    if os.name == "nt" and py.lower().endswith("python.exe"):
+        candidate = py[:-10] + "pythonw.exe"
+        if Path(candidate).is_file():
+            py = candidate
+    args = '"%s"' % str(launcher.resolve())
+    if url and url.strip() and url.strip() != DEFAULT_LOCAL_DASHBOARD_URL:
+        args = '%s --url "%s"' % (args, url.strip())
+    return {
+        "target_path": py,
+        "arguments": args,
+        "working_directory": str(root.resolve()),
+        "launcher_path": str(launcher.resolve()),
+        "url": url or DEFAULT_LOCAL_DASHBOARD_URL,
+    }
+
+
 def write_desktop_lnk_shortcut(
     *,
     desktop_dir,
@@ -1248,11 +1281,16 @@ def write_desktop_lnk_shortcut(
     shortcut_fn=None,
     home=None,
     use_powershell: bool = True,
+    package_root=None,
+    python_exe: str | None = None,
 ) -> dict:
     """Create a desktop shortcut branded with universal ``anchor.ico``.
 
     Prefers ``.lnk`` via PowerShell COM (same contract as ``create_shortcut.py``)
-    with ``IconLocation = <icon>,0`` and target opening the local dashboard URL.
+    with ``IconLocation = <icon>,0``. Target is the **service-aware launcher**
+    (``launch_anchor_dashboard.py``) so a dead service is restarted on click;
+    the dual gate still requires the dashboard URL to match the probe.
+
     ``shortcut_fn`` is injectable for hermetic tests.
 
     Fallback: bare ``.url`` via :func:`write_desktop_url_shortcut` — marked
@@ -1352,16 +1390,26 @@ def write_desktop_lnk_shortcut(
         def _ps_esc(s: str) -> str:
             return s.replace("`", "``").replace('"', '`"')
 
+        # Service-aware launcher (not bare URL — restarts dead service on click).
+        launch = desktop_shortcut_launcher_args(
+            package_root=package_root or Path(__file__).resolve().parent,
+            python_exe=python_exe,
+            url=url,
+        )
+        tgt = _ps_esc(launch["target_path"])
+        arg = _ps_esc(launch["arguments"])
+        wdir = _ps_esc(launch["working_directory"])
         ps_script = (
             "$ws = New-Object -ComObject WScript.Shell; "
             "$s = $ws.CreateShortcut(\"%s\"); "
-            "$s.TargetPath = \"cmd.exe\"; "
-            "$s.Arguments = \"/c start \"\" \"\" \"%s\"\"; "
+            "$s.TargetPath = \"%s\"; "
+            "$s.Arguments = \"%s\"; "
+            "$s.WorkingDirectory = \"%s\"; "
             "$s.IconLocation = \"%s,0\"; "
-            "$s.Description = \"Anchor Dashboard\"; "
+            "$s.Description = \"Anchor Dashboard (starts service if needed)\"; "
             "$s.WindowStyle = 7; "
             "$s.Save()"
-        ) % (_ps_esc(lnk_abs), _ps_esc(url), _ps_esc(ico_abs))
+        ) % (_ps_esc(lnk_abs), tgt, arg, wdir, _ps_esc(ico_abs))
         try:
             import subprocess
 
@@ -1385,6 +1433,7 @@ def write_desktop_lnk_shortcut(
                     "path": str(lnk_path),
                     "path_reported": _safe_report_path(lnk_path, home=home),
                     "url": url,
+                    "launcher": launch,
                     "icon_location": icon_loc,
                     "icon_location_reported": "%s,0" % (
                         _safe_report_path(ico, home=home) or ANCHOR_ICO_BASENAME
