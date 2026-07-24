@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.0 — 2026-07-23
+
+First shareable product release of Anchor + integrated Skill Foundry skills.
+
+- Human skill cards (HUMAN.md) in Foundry GUI
+- Zombie Hunter multi-engine burn ledger + Tailscale-safe reverse proxy
+- Tidy-Idy triage panel with Grok investigator option
+- Single-use bootstrap reissue: spent nonces never dump raw JSON; HTML 410 + host reissue path
+- Spawn-cap census prune; default ANCHOR_SPAWN_CAP=32
+
 ## 2026-07-23 — Tidy-Idy bootstrap reissue (share-ready)
 
 - **Spent bootstrap no longer dumps raw JSON.** Single-use SC4 nonces: Anchor re-click POSTs host-only /api/reissue-bootstrap when the panel is still live; otherwise marks status stale and starts a fresh pass.
