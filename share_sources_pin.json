@@ -2,16 +2,16 @@
     "schema": "share-sources-pin/v1",
     "schema_version": 1,
     "ship_allowed": true,
-    "ship_allowed_stamp_text": "v1.0 freeze 2026-07-24T00:10:13Z John lock: Anchor share modules + skills v1.0 on origin; no personal data in product commits",
+    "ship_allowed_stamp_text": "v1.0 freeze 2026-07-24T00:10:56Z locked on origin; product only; no personal data",
     "skills_pin": {
-        "tag": "v1.0.0",
+        "tag": "v1.0",
         "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
     },
     "pins": [
         {
             "repo": "anchor",
-            "tag": "v1.0.0",
-            "commit": "20a500a8e03df80537c2a1af05748b10fc7af755"
+            "tag": "v1.0.0+share",
+            "commit": "647a498ac93c0d80fea7a6fffa387a7b7b6936f8"
         },
         {
             "repo": "trio",
@@ -26,8 +26,7 @@
         {
             "repo": "zombie-hunter",
             "tag": "v1.0-product",
-            "commit": "a0d54fe85d6382061ec429b828c4c0fa46f7129f",
-            "note": "product commit; later ZH fixes ride skill-foundry pin"
+            "commit": "a0d54fe85d6382061ec429b828c4c0fa46f7129f"
         }
     ],
     "package_versions": {
