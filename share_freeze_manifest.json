@@ -1,23 +1,23 @@
-﻿{
-    "schema_version":  1,
-    "freeze_commits":  {
-                           "skill-foundry":  "4466e5f35347c5d1f16c5a4ff53bdc205871f344",
-                           "zombie-hunter":  "a0d54fe85d6382061ec429b828c4c0fa46f7129f",
-                           "anchor":  "0d448a674bafb1d0bd7aa54c72dfca77d25b10c1",
-                           "trio":  "d3558091eec16dceed316be9a058bb581ab0b47f"
-                       },
-    "schema":  "share-freeze-manifest/v1",
-    "freeze_tags":  {
-                        "skill-foundry":  "v1.0.0-share",
-                        "zombie-hunter":  "v1.0.0-share",
-                        "anchor":  "v1.0.0-share",
-                        "trio":  "v1.0.0-share"
-                    },
-    "ship_allowed":  true,
-    "skills_pin":  {
-                       "tag":  "v1.0.0-share",
-                       "commit":  "4466e5f35347c5d1f16c5a4ff53bdc205871f344"
-                   },
-    "notes":  "Pinned 2026-07-23 after John quiet confirmation. Package via git archive at these SHAs + Anchor working-tree share modules. Personal scrub via distro clean-scan.",
-    "package_matrix_version":  "1.0.0"
+{
+    "schema": "share-freeze-manifest/v1",
+    "schema_version": 1,
+    "ship_allowed": true,
+    "freeze_commits": {
+        "anchor": "20a500a8e03df80537c2a1af05748b10fc7af755",
+        "trio": "d3558091eec16dceed316be9a058bb581ab0b47f",
+        "skill-foundry": "b1022c9ed61fcf50dae70ec695ac7851947cf539",
+        "zombie-hunter": "a0d54fe85d6382061ec429b828c4c0fa46f7129f"
+    },
+    "freeze_tags": {
+        "anchor": "v1.0.0",
+        "trio": "v1.0.0-share",
+        "skill-foundry": "v1.0",
+        "zombie-hunter": "v1.0-product"
+    },
+    "skills_pin": {
+        "tag": "v1.0",
+        "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
+    },
+    "package_matrix_version": "1.0.0",
+    "notes": "Re-pinned after share modules committed to Anchor and Skill Foundry v1.0 release. Package via git archive at these SHAs; personal scrub via distro clean-scan; no author .anchor projects."
 }

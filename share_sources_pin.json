@@ -1,40 +1,41 @@
-﻿{
-    "ship_allowed_stamp_text":  "v1.0 freeze 2026-07-23T23:11:43Z John go-ahead after quiet; no personal data",
-    "schema_version":  1,
-    "schema":  "share-sources-pin/v1",
-    "scrub_tool_versions":  {
-                                "vendor_skills.py":  "GREEN-share-distro",
-                                "distro.py":  "GREEN-share-distro"
-                            },
-    "ship_allowed":  true,
-    "skills_pin":  {
-                       "tag":  "v1.0.0-share",
-                       "commit":  "4466e5f35347c5d1f16c5a4ff53bdc205871f344"
-                   },
-    "pins":  [
-                 {
-                     "commit":  "0d448a674bafb1d0bd7aa54c72dfca77d25b10c1",
-                     "repo":  "anchor",
-                     "tag":  "v1.0.0-share"
-                 },
-                 {
-                     "commit":  "d3558091eec16dceed316be9a058bb581ab0b47f",
-                     "repo":  "trio",
-                     "tag":  "v1.0.0-share"
-                 },
-                 {
-                     "commit":  "4466e5f35347c5d1f16c5a4ff53bdc205871f344",
-                     "repo":  "skill-foundry",
-                     "tag":  "v1.0.0-share"
-                 },
-                 {
-                     "commit":  "a0d54fe85d6382061ec429b828c4c0fa46f7129f",
-                     "repo":  "zombie-hunter",
-                     "tag":  "v1.0.0-share"
-                 }
-             ],
-    "package_versions":  {
-                             "A":  "1.0.0",
-                             "B":  "1.0.0"
-                         }
+{
+    "schema": "share-sources-pin/v1",
+    "schema_version": 1,
+    "ship_allowed": true,
+    "ship_allowed_stamp_text": "v1.0 freeze 2026-07-24T00:10:13Z John lock: Anchor share modules + skills v1.0 on origin; no personal data in product commits",
+    "skills_pin": {
+        "tag": "v1.0.0",
+        "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
+    },
+    "pins": [
+        {
+            "repo": "anchor",
+            "tag": "v1.0.0",
+            "commit": "20a500a8e03df80537c2a1af05748b10fc7af755"
+        },
+        {
+            "repo": "trio",
+            "tag": "v1.0.0-share",
+            "commit": "d3558091eec16dceed316be9a058bb581ab0b47f"
+        },
+        {
+            "repo": "skill-foundry",
+            "tag": "v1.0",
+            "commit": "b1022c9ed61fcf50dae70ec695ac7851947cf539"
+        },
+        {
+            "repo": "zombie-hunter",
+            "tag": "v1.0-product",
+            "commit": "a0d54fe85d6382061ec429b828c4c0fa46f7129f",
+            "note": "product commit; later ZH fixes ride skill-foundry pin"
+        }
+    ],
+    "package_versions": {
+        "A": "1.0.0",
+        "B": "1.0.0"
+    },
+    "scrub_tool_versions": {
+        "vendor_skills.py": "GREEN-share-distro",
+        "distro.py": "GREEN-share-distro"
+    }
 }
