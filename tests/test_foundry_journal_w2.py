@@ -79,7 +79,9 @@ def project(tmp_path):
 
 
 def _journal_entries(skill_dir: Path) -> list:
-    return sorted((skill_dir / "journal").glob("*.md"))
+    # P2 2026-07-25: machine skeletons live under journal/machine/ (the curated
+    # journal root is the HUMAN NNNN-*.md namespace — the flood fix).
+    return sorted((skill_dir / "journal" / "machine").glob("*.md"))
 
 
 def _parse_only_entry(fj, skill_dir: Path) -> dict:
@@ -162,12 +164,12 @@ def test_skeleton_small_and_heavy_payload_in_side_channel(env, project):
 
     # ...it lives in the side channel, which the skeleton only REFERENCES.
     parsed = fj.parse_entry(skeleton)
-    side = skill / "journal" / "side" / run_id
+    side = skill / "journal" / "machine" / "side" / run_id
     assert side.is_dir()
     outputs = (side / "outputs.json").read_text(encoding="utf-8")
     assert heavy_marker in outputs
-    assert parsed["inputs_ref"] == f"journal/side/{run_id}/inputs.json"
-    assert parsed["outputs_ref"] == f"journal/side/{run_id}/outputs.json"
+    assert parsed["inputs_ref"] == f"journal/machine/side/{run_id}/inputs.json"
+    assert parsed["outputs_ref"] == f"journal/machine/side/{run_id}/outputs.json"
 
 
 def test_side_channel_is_droppable(env, project):
@@ -177,7 +179,7 @@ def test_side_channel_is_droppable(env, project):
     assert out["ok"] is True
 
     # Drop the WHOLE side channel (disk pressure / retention policy)...
-    shutil.rmtree(skill / "journal" / "side")
+    shutil.rmtree(skill / "journal" / "machine" / "side")
     # ...the skeleton still parses and validates — the corpus survives.
     parsed = _parse_only_entry(fj, skill)
     assert fj.validate_entry(parsed) == []
@@ -262,7 +264,7 @@ def test_append_entry_rejects_inline_bulk(env, tmp_path):
     entry["inputs_ref"] = "B" * 5000  # inline bulk, not a reference
     with pytest.raises(ValueError):
         fj.append_entry(tmp_path / "skill2", "e-1", entry)
-    assert not (tmp_path / "skill2" / "journal" / "e-1.md").exists()
+    assert not (tmp_path / "skill2" / "journal" / "machine" / "e-1.md").exists()
 
 
 def test_render_parse_roundtrip(env):

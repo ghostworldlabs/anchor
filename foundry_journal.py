@@ -48,7 +48,14 @@ import foundry_decisions as _fd
 ENTRY_SCHEMA_VERSION = 1
 
 #: The journal dir under a skill dir, and the side-channel dir under it.
+#: P2 2026-07-25 (journal-hardening review, gandalf §2): machine skeletons write
+#: under ``journal/machine/`` — a MACHINE namespace — never the curated journal
+#: root. The by-product capture had flooded gandalf's curated ``NNNN-*.md``
+#: namespace with ~2,280 run-*.md/side files (git-tracked, undocumented,
+#: non-disableable), burying the human narrative entries SKILL.md reserves that
+#: namespace for. Capture stays zero-author-action; only the placement changes.
 JOURNAL_DIRNAME = "journal"
+MACHINE_DIRNAME = "machine"
 SIDE_DIRNAME = "side"
 
 #: The 7 skeleton fields (DR-04). The seam validates against this tuple, so a
@@ -74,8 +81,12 @@ _MAX_FIELD_CHARS = 600
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 def journal_dir(skill_dir) -> Path:
-    """``<skill_dir>/journal/`` — where skeleton entries live."""
-    return Path(skill_dir) / JOURNAL_DIRNAME
+    """``<skill_dir>/journal/machine/`` — where MACHINE skeleton entries live.
+
+    The curated ``journal/`` root is the HUMAN namespace (``NNNN-*.md``); the
+    host-enforced capture is a machine by-product and lives one level down.
+    """
+    return Path(skill_dir) / JOURNAL_DIRNAME / MACHINE_DIRNAME
 
 
 def side_dir(skill_dir, run_id) -> Path:
@@ -103,8 +114,8 @@ def write_side_artifact(skill_dir, run_id, name, payload):
             text = json.dumps(payload, indent=2, ensure_ascii=False,
                               default=str)
         (d / str(name)).write_text(text, encoding="utf-8")
-        return "/".join((JOURNAL_DIRNAME, SIDE_DIRNAME, str(run_id),
-                         str(name)))
+        return "/".join((JOURNAL_DIRNAME, MACHINE_DIRNAME, SIDE_DIRNAME,
+                         str(run_id), str(name)))
     except Exception:
         return None
 
