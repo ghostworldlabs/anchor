@@ -31,6 +31,7 @@ error dict, never a crash). Stdlib only; the native PTY dep is isolated in
 
 import json
 import os
+import sys
 import re
 import threading
 import uuid
@@ -433,9 +434,52 @@ def _resolve_grass_origin_from_chain(parent_id, parent_rec):
 _UNSET = object()
 
 
+#: Test/deploy seam for the INTERACTIVE-terminal engine command — the PTY-path
+#: mirror of ``ANCHOR_RUNNER_CMD`` (which only covers one-shot ``job_runner``
+#: lanes). Before this existed, ``ANCHOR_PTY_BACKEND=stub`` was the SINGLE point
+#: of failure protecting every terminal test from a real billable spawn
+#: (2026-07-26 hardening; the suite once leaked 8,816 live sessions).
+ENGINE_CMD_ENV = "ANCHOR_ENGINE_CMD"
+
+#: Basenames that mean "a real, billable engine binary".
+_LIVE_ENGINE_BASENAMES = frozenset({"claude", "gemini", "agy", "grok"})
+
+
+def assert_not_live_engine_under_test(argv) -> None:
+    """FAIL CLOSED: refuse to spawn a real engine while the test guard is on.
+
+    The suite once leaked 8,816 billed sessions (tests/conftest.py). The guard
+    is now defence-in-depth: even if every env seam is defeated, a real engine
+    basename cannot be launched unless ``ANCHOR_TESTS_ALLOW_LIVE=1``. Inert in
+    production — it only fires when pytest is actually loaded.
+    """
+    if "pytest" not in sys.modules:
+        return
+    if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() == "1":
+        return
+    try:
+        first = str((argv or [""])[0])
+    except Exception:
+        return
+    base = os.path.basename(first).lower()
+    for ext in (".exe", ".cmd", ".bat"):
+        if base.endswith(ext):
+            base = base[: -len(ext)]
+    if base in _LIVE_ENGINE_BASENAMES:
+        raise TerminalSessionError(
+            "live-engine-spawn-refused: refusing to spawn %r under the test "
+            "guard (it resolves to a real billable engine). Set "
+            "ANCHOR_ENGINE_CMD to a stub (tests/conftest.py does this), or opt "
+            "in deliberately with ANCHOR_TESTS_ALLOW_LIVE=1." % (first,)
+        )
+
+
 def _resolve_engine_cmd(engine: str) -> str:
     """Resolve the executable name/path for a given engine backend."""
     import shutil
+    override = os.environ.get(ENGINE_CMD_ENV, "").strip()
+    if override:
+        return override
     if engine == _reg.BACKEND_GEMINI:
         if shutil.which("gemini"):
             return "gemini"
@@ -665,6 +709,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
 
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
     try:
+        assert_not_live_engine_under_test(launch_argv)
         pty_sid = _pty.start(launch_argv, cwd=worktree_path)
     except Exception as exc:
         # Roll back the worktree so a failed launch leaves nothing behind.
@@ -1356,6 +1401,7 @@ def switch_engine(session_id, engine, seed_context=None):
 
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
     try:
+        assert_not_live_engine_under_test(relaunch_argv)
         pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
     except Exception as exc:
         # Relaunch failed: leave the record CONSISTENT. The old PTY is already
@@ -1495,6 +1541,7 @@ def resume_parked_session(session_id):
     except Exception:
         pass
     try:
+        assert_not_live_engine_under_test(relaunch_argv)
         pty_sid = _pty.start(relaunch_argv, cwd=worktree_path)
     except Exception as exc:
         return {"ok": False, "reason": "relaunch-failed", "detail": str(exc)}
@@ -1916,8 +1963,14 @@ def _trigger_background_stage_summary(folder, project_id, store_lane,
                     folder, project_id, session_id, stage)
             except Exception:
                 efforts = []
+            # KEY CONTRACT (fixed 2026-07-26): the summarizer reads
+            # ``session["member_files"]`` (summarizer.py:291/:427/:456/:484/:1029).
+            # This dict said "efforts", so EVERY summary saw zero members ⇒ empty
+            # grounding corpus ⇒ "no grounded claims" + "0 tokens · 0.0s · 0 run(s)".
+            # Both keys are carried: member_files for the readers, efforts for
+            # any caller still expecting the old name.
             session = {"session_id": session_id, "lane": store_lane,
-                       "efforts": efforts}
+                       "member_files": efforts, "efforts": efforts}
             _sm.summarize_session(folder, project_id, store_lane, session,
                                   stage=stage)
         except Exception:
@@ -4078,8 +4131,9 @@ def _trigger_background_source_summary(folder, project_id, lane, session_id):
                     folder, project_id, store_lane, session_id)
             except Exception:
                 efforts = []
+            # Same key contract as above (2026-07-26).
             session = {"session_id": session_id, "lane": lane,
-                       "efforts": efforts}
+                       "member_files": efforts, "efforts": efforts}
             _sm.summarize_session(folder, project_id, store_lane, session)
         except Exception:
             pass

@@ -223,10 +223,34 @@ def list_efforts(folder_path, project_id: str, lane: str) -> list:
     """
     order = _load_index(folder_path, project_id, lane)
     out = []
+    seen = set()
     for job_id in reversed(order):  # newest-first
         rec = load_effort(folder_path, project_id, lane, job_id)
         if rec is not None:
+            seen.add(job_id)
             out.append(rec)
+    # INDEX-LOSS REPAIR (2026-07-26). The index is a load→append→save
+    # read-modify-write guarded only by an IN-PROCESS lock (paths.WRITE_LOCK),
+    # so a second process (CLI, healthcheck, rebuild_summaries, a preview
+    # server) clobbers it. Observed live: general/efforts/ held 17 pointer
+    # records while index.json listed 13 — and BOTH run-cost records were among
+    # the missing, so real measured usage was invisible. The index remains the
+    # ordering authority; the directory is the completeness authority. Recovered
+    # records are appended after the indexed ones (unknown relative age).
+    try:
+        eff_dir = efforts_dir(folder_path, project_id, lane)
+        if os.path.isdir(eff_dir):
+            for name in sorted(os.listdir(eff_dir)):
+                if not name.endswith(POINTER_SUFFIX):
+                    continue
+                job_id = name[: -len(POINTER_SUFFIX)]
+                if job_id in seen:
+                    continue
+                rec = load_effort(folder_path, project_id, lane, job_id)
+                if rec is not None:
+                    out.append(rec)
+    except Exception:
+        pass  # best-effort repair: never fail a read over recovery
     return out
 
 
@@ -2186,7 +2210,15 @@ def lane_rollup(folder_path, project_id: str, lane: str) -> dict:
 
 
 #: The lanes whose efforts roll up into the project total.
-ROLLUP_LANES = ("research", "planning", "build", "deliverables")
+#:
+#: 2026-07-26: ``general`` (the bare "Open terminal" lane — the DAILY driver),
+#: ``zombie`` and ``gandalf`` were missing, so every run-cost record written in
+#: those lanes was structurally unreachable by every rollup FOREVER. Real
+#: measured usage sat on disk (one general-lane record: 2,757,886 tokens /
+#: 444,813 ms) while the UI reported zero. ``grass`` stays out: grass ideas
+#: carry no cost of their own (their dev sessions live in research/planning).
+ROLLUP_LANES = ("research", "planning", "build", "deliverables",
+                "general", "zombie", "gandalf")
 
 
 def project_rollup(project_id: str, folder_path=None) -> dict:

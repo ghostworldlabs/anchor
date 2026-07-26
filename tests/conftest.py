@@ -43,16 +43,30 @@ if str(REPO_ROOT) not in sys.path:
 # ``claude`` and incurred REAL BILLING (8,816 live sessions leaked from this
 # suite's tmp dirs between 2026-06-20 and 2026-07-14).
 #
-# ``setdefault`` so an explicit outer environment still wins, and tests that
-# need a seam UNSET (the runner-cmd contract / engine-selector / healthcheck
-# restore tests) keep working — they already ``monkeypatch.delenv`` on top.
+# FAIL-CLOSED (2026-07-26 hardening). This used to ``setdefault``, so ANY ambient
+# value in the shell/profile/service environment silently WON — and
+# ``pty_manager.select_backend`` treats anything that is not exactly ``"stub"`` as
+# the REAL ConPTY backend, so a stray/typo'd ``ANCHOR_PTY_BACKEND`` re-armed live
+# spawns across 62 test files. The guard is now a hard assignment: under test the
+# seams are OURS. ``monkeypatch`` (used by the delenv/restore tests) still wins
+# per-test because it mutates os.environ after this import-time block.
 # A deliberate live run must opt in with ``ANCHOR_TESTS_ALLOW_LIVE=1``.
 import os
 
 if os.environ.get("ANCHOR_TESTS_ALLOW_LIVE", "").strip() != "1":
-    _FAKE_CLAUDE = Path(__file__).resolve().parent / "fake_claude.py"
-    os.environ.setdefault("ANCHOR_RUNNER_CMD", f"python {_FAKE_CLAUDE}")
-    os.environ.setdefault("ANCHOR_PTY_BACKEND", "stub")
+    _TESTS_DIR = Path(__file__).resolve().parent
+    _FAKE_CLAUDE = _TESTS_DIR / "fake_claude.py"
+    _STUB_GH = _TESTS_DIR / "stub_gh.py"
+    os.environ["ANCHOR_RUNNER_CMD"] = f"python {_FAKE_CLAUDE}"
+    os.environ["ANCHOR_PTY_BACKEND"] = "stub"
+    # The interactive-terminal path has no ANCHOR_RUNNER_CMD equivalent — it
+    # resolves the RAW engine binary. ANCHOR_ENGINE_CMD is the matching seam
+    # (terminal_session._resolve_engine_cmd), so ANCHOR_PTY_BACKEND is no longer
+    # a single point of failure for every terminal test.
+    os.environ["ANCHOR_ENGINE_CMD"] = f"{sys.executable} -c pass"
+    # gh reachable a real `gh repo create` from two healthcheck/cli tests.
+    if _STUB_GH.exists():
+        os.environ["ANCHOR_GH_CMD"] = f"python {_STUB_GH}"
 
 import subprocess
 if sys.platform == "win32":

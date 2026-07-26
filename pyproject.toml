@@ -16,6 +16,13 @@ terminal = ["pywinpty>=2.0; sys_platform == 'win32'"]
 [tool.pytest.ini_options]
 addopts = "-v"
 testpaths = ["tests"]
+# A live engine that wedges must never hang the suite while burning tokens
+# (2026-07-26 hardening). pytest-timeout is optional — when absent this marker
+# registration is inert and the suite behaves exactly as before; install with
+# `pip install pytest-timeout` and add `--timeout=120` to addopts to enforce.
+markers = [
+  "live: requires a REAL engine; only runs with ANCHOR_TESTS_ALLOW_LIVE=1",
+]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
