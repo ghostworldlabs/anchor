@@ -1464,6 +1464,74 @@ def main():
                 text_parts.append(sys.argv[i]); i += 1
         capture_inbox(" ".join(text_parts), domain)
 
+    elif cmd in ("journal", "friction"):
+        # FRICTION JOURNALING (2026-07-26). Tell Anchor something hurt; the
+        # record carries auto-context and feeds the sleep-cycle intake brief.
+        # ZERO model calls — this must work when the engines are down.
+        import friction_journal as _fj
+        parts, sev, body = [], _fj.DEFAULT_SEVERITY, ""
+        i = 2
+        while i < len(sys.argv):
+            a = sys.argv[i]
+            if a in ("--severity", "-s") and i + 1 < len(sys.argv):
+                sev = sys.argv[i + 1]; i += 2
+            elif a in ("--body", "-b") and i + 1 < len(sys.argv):
+                body = sys.argv[i + 1]; i += 2
+            else:
+                parts.append(a); i += 1
+        title = " ".join(parts).strip()
+        if not title:
+            print('Usage: anchor.py journal "what hurt" [--severity concern|friction|problem] [--body "detail"]')
+            return
+        rec = _fj.capture(title, body=body, severity=sev)
+        print(f"Journaled [{rec['severity']}] {rec['id']}")
+        print("  It stays OPEN until someone fixes it. See: anchor.py friction-report")
+
+    elif cmd == "friction-report":
+        import friction_journal as _fj
+        status, out_path = "open", ""
+        i = 2
+        while i < len(sys.argv):
+            a = sys.argv[i]
+            if a == "--status" and i + 1 < len(sys.argv):
+                status = sys.argv[i + 1]; i += 2
+            elif a == "--all":
+                status = ""; i += 1
+            elif a == "--out" and i + 1 < len(sys.argv):
+                out_path = sys.argv[i + 1]; i += 2
+            else:
+                i += 1
+        brief = _fj.friction_report(status=status or None)
+        if out_path:
+            Path(out_path).write_text(brief, encoding="utf-8")
+            print(f"Wrote sleep-cycle intake brief -> {out_path}")
+        else:
+            # Windows consoles are cp1252; never crash a report over a glyph.
+            try:
+                print(brief)
+            except UnicodeEncodeError:
+                print(brief.encode("ascii", "replace").decode("ascii"))
+
+    elif cmd == "friction-resolve":
+        import friction_journal as _fj
+        if len(sys.argv) < 3:
+            print('Usage: anchor.py friction-resolve <id> [--status resolved|triaged] [--commit <sha>] [--note "..."]')
+            return
+        rec_id, status, commit, note = sys.argv[2], "resolved", "", ""
+        i = 3
+        while i < len(sys.argv):
+            a = sys.argv[i]
+            if a == "--status" and i + 1 < len(sys.argv):
+                status = sys.argv[i + 1]; i += 2
+            elif a == "--commit" and i + 1 < len(sys.argv):
+                commit = sys.argv[i + 1]; i += 2
+            elif a == "--note" and i + 1 < len(sys.argv):
+                note = sys.argv[i + 1]; i += 2
+            else:
+                i += 1
+        rec = _fj.set_status(rec_id, status, note=note, commit=commit)
+        print(f"{rec['id']} -> {rec['status']}")
+
     elif cmd == "rnd":
         _rnd_cli(sys.argv[2:])
 

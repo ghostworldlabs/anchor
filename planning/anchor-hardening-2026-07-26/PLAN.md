@@ -158,5 +158,31 @@ regression tests, journal every fix. Bar: **world class**.
       DEFERRED to v1.1.2/v1.2 (tell John, don't silently drop): P1.5 zombie detection
       real, P1.1/P1.2 restart briefs, P1.6 keyed board diff, P2 hygiene, and the
       $-pricing-table DECISION (locked no-own-pricing policy — ask, don't build).
+- [x] **WAVE 1 LANDED + COMMITTED (Anchor 121b479, 2026-07-26)**: test guard
+      fail-closed (conftest hard-assign + ANCHOR_ENGINE_CMD seam + fail-closed
+      assert at all 3 spawn sites + ANCHOR_GH_CMD stub + live marker);
+      usage visibility (ROLLUP_LANES +general/zombie/gandalf; list_efforts
+      index∪glob; member_files key at both call sites).
+      **PROVEN: general lane now rolls up 3,178,583 tokens / 530,558 ms
+      (was invisible); 17 efforts visible (was 13).** +5 regression tests green.
+      Smoke subset 40 pass / 1 pre-existing fail (test_token_hygiene, at HEAD).
+      NOTE: the member_files fix should ALSO fix the blank-summary epidemic —
+      verify by regenerating a summary before claiming it.
+- [ ] **NEW REQUIREMENT (John 2026-07-26, IN SCOPE FOR v1.1.1): FRICTION
+      JOURNALING + sleep-cycle intake.** Full design:
+      `JOURNALING-FEATURE.md` in this folder. Verified gap: share_feedback.py
+      covers SKILL journals only; docs/friction/*.md were HAND-WRITTEN; Anchor
+      has NO user-facing capture for its own friction. Build: .anchor/friction
+      store + POST /api/rnd/journal_friction + GET /api/rnd/friction + CLI
+      `journal` / `friction-report` (the sleep-cycle intake brief) + UI control
+      + tests. Zero model calls on the capture path (it must work when engines
+      are down). Must appear in the collaborator memo as the "tell us what hurt"
+      mechanism.
+- [ ] NEXT (wave 2, in order): P0.1 terminal cursor resume · P0.2 one-mount
+      teardown + gotData · P0.3 dictation compose box + composition gate + cap ·
+      P0.4 token redaction in access log · P0.6 ensure_zh_node backoff ·
+      P1.3/P1.4 summarizer (no model call on title-only corpus; run2 = judge).
+      THEN propagate to Anchor-release-v1.0, re-vendor, in-bundle smoke, v1.1.1,
+      memo x3.
 - [ ] P3 fixes landed
 - [ ] P4 ship gate re-run
