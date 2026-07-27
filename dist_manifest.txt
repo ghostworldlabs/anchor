@@ -32,6 +32,16 @@ brownfield_scan.py
 anchor_marker.py
 distro.py
 
+# ── Foundry map data (REQUIRED at import) ──────────────────────
+# foundry_map.py resolves _SCHEMA = load_schema() at MODULE SCOPE, and
+# anchor_gui -> foundry_gui -> foundry_autoload -> foundry_map is an
+# unconditional import chain. Without these the shipped bundle raises
+# FileNotFoundError on `import anchor_gui` and the dashboard cannot start
+# at all. They were absent from v1.1.0 and earlier (added 2026-07-26).
+foundry_map_v2.schema.json
+foundry_map_v2.json
+foundry_map_v2.lock.json
+
 # ── Doctor V3 "honest agentic diagnostics" module ──────────────────────────
 # Stdlib-only: doctor.py (the run_doctor() system check the /doctor session
 # seed embeds) uses only sys / shutil / platform / os / subprocess / pathlib.
@@ -42,6 +52,12 @@ distro.py
 # and anchor.py already treats it the same lazy/optional way) — absent, the
 # probe silently skips; nothing ImportErrors at import time.
 doctor.py
+
+# ── Friction journal (v1.1.1) ───────────────────────────────
+# The user-initiated journaling store behind `anchor.py journal` and
+# POST /api/rnd/journal_friction. anchor_gui.py imports it at module
+# scope for those handlers, so it MUST ship or the server cannot import.
+friction_journal.py
 
 # ── R&D control surface v2 modules ─────────────────────────────────────────
 sessions.py

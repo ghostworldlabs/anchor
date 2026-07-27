@@ -703,6 +703,59 @@ def scan_staged_dir(staging: Path):
     return scan_paths(files)
 
 
+#: Modules the shipped bundle MUST import for the server to start. ``anchor_gui``
+#: is effectively the whole product: it pulls the route table, the foundry GUI
+#: chain, the terminal stack and the summarizer in at module scope.
+STARTUP_IMPORTS = ("anchor_gui", "anchor")
+
+
+class StartupImportError(Exception):
+    """The staged export cannot be imported — the bundle would not start."""
+
+
+def scan_startup_imports(staging: Path, timeout: int = 180) -> list:
+    """Import the staged bundle in a subprocess; return failures as scan hits.
+
+    WHY THIS EXISTS (2026-07-26). ``dist_manifest.txt`` is deny-by-default and
+    every other check here reads file CONTENT — none of them ever loaded the
+    result. So when ``foundry_map_v2.schema.json`` was never added to the
+    manifest, the build stayed green while shipping a bundle whose very first
+    import raised FileNotFoundError: ``anchor_gui`` → ``foundry_gui`` →
+    ``foundry_autoload`` → ``foundry_map``, which resolves its schema at MODULE
+    SCOPE. The public v1.1.0 tag went out that way and could not start at all.
+
+    A content scan structurally cannot catch a file that is simply ABSENT. Only
+    loading the thing can. This runs the staged tree in a CHILD process with a
+    throwaway data dir and the stub PTY backend, so it never touches real data
+    and never binds a port.
+    """
+    import os
+    import subprocess
+    import tempfile as _tf
+
+    staging = Path(staging)
+    hits = []
+    with _tf.TemporaryDirectory(prefix="anchor-import-gate-") as tmp:
+        env = dict(os.environ)
+        env["ANCHOR_DATA_DIR"] = tmp
+        env["ANCHOR_PTY_BACKEND"] = "stub"
+        env["PYTHONIOENCODING"] = "utf-8"
+        for mod in STARTUP_IMPORTS:
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-c", "import " + mod],
+                    cwd=str(staging), env=env, timeout=timeout,
+                    capture_output=True, text=True, errors="replace")
+            except (OSError, subprocess.SubprocessError) as exc:
+                hits.append((mod, "startup-import", "could not run: %s" % exc))
+                continue
+            if proc.returncode != 0:
+                tail = (proc.stderr or "").strip().splitlines()
+                hits.append((mod, "startup-import",
+                             tail[-1] if tail else "exit %s" % proc.returncode))
+    return hits
+
+
 # ── README emission (AC3) ────────────────────────────────────────────────────
 
 _README = """# Anchor — per-project R&D control surface
@@ -880,6 +933,17 @@ def build_distro(root: Path | None = None,
             shutil.rmtree(output_dir, ignore_errors=True)
         raise PersonalDataError(hits)
 
+    # STARTUP GATE: everything above reads file CONTENT, which structurally
+    # cannot detect a file that is simply ABSENT from the manifest. Load the
+    # staged bundle and confirm it imports before calling the build good.
+    import_hits = scan_startup_imports(output_dir)
+    if import_hits:
+        if cleanup_on_fail:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        raise StartupImportError(
+            "the staged bundle does not import (it would not start):\n"
+            + "\n".join("  %s: %s: %s" % h for h in import_hits))
+
     return {
         "staging": output_dir,
         "files": selected,
@@ -948,6 +1012,9 @@ def _main(argv=None):
     except PersonalDataError as exc:
         print("BUILD FAILED:\n" + str(exc))
         return 2
+    except StartupImportError as exc:
+        print("BUILD FAILED:\n" + str(exc))
+        return 3
 
     print(f"Built data-free export -> {report['staging']}")
     print(f"  {len(report['files'])} files staged; scan clean.")
