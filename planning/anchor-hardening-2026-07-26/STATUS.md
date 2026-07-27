@@ -106,3 +106,95 @@ Procs    | none
 Journal  | 1 open (status-cadence gap)
 ETA      | summarizer quality, then propagate/re-vendor/smoke/tag v1.1.1/memo
 To do    | summarizer quality · release sequence · collaborator memo
+
+[05:43] SUMMARIZER QUALITY LANDED (9d13b2e) — last fix of the wave
+Effort   | Anchor v1.1.1 hardening (steward/v1.2 isolated at b9252a9, untouched)
+Doing    | P1.3 empty-corpus short-circuit + P1.4 near-duplicate collapse
+Status   | ALL 9 fix items done; release sequence is what remains
+Evidence | measured across the 167 cached summaries on disk:
+           - 76 (45%) render blank "no grounded claims" -> those model calls
+             are now skipped entirely (one such blank cost 194,422 tok / 66.6s)
+           - 56 carry restated claims -> 278 redundant claims collapsed;
+             one 33-claim planning summary comes back as 20
+Tests    | +12 summarizer quality; 73 new tests this effort, all green.
+           test_summary_on_finish_v7 was FIXED not accommodated: its sessions
+           owned no docs, so at HEAD it asserted a BLANK summary got cached —
+           it encoded the bug. Each now gets a real member doc. 9/9 pass.
+Known    | test_project_summary_v5::test_seed_includes_all_sources fails at
+           HEAD too (verified by git stash) — pre-existing, not from this work.
+Blocker  | none
+Procs    | none
+Journal  | 1 open (status-cadence gap)
+ETA      | propagate to Anchor-release-v1.0 -> re-vendor skills -> in-bundle
+           smoke -> tag v1.1.1 -> collaborator memo x3
+To do    | release sequence · collaborator memo
+NOTE     | still outstanding for John (operator action, not code): existing log
+           files under logs/ contain historic capability tokens. Redaction is
+           live for NEW requests; the old files need rotating before sharing.
+
+[05:54] RELEASE SEQUENCE — found and fixed a v1.1.0 SHIP-BLOCKER
+Effort   | Anchor v1.1.1 hardening (v1.2 steward kept out of the release)
+Doing    | propagating the 9 hardening fixes into Anchor-release-v1.0
+FINDING  | *** the public v1.1.0 tag could not start at all. ***
+           anchor_gui -> foundry_gui -> foundry_autoload -> foundry_map, and
+           foundry_map resolves its schema at MODULE SCOPE. But
+           foundry_map_v2.schema.json was never listed in dist_manifest.txt,
+           which is deny-by-default — so it silently never shipped. Anyone who
+           cloned v1.1.0 got FileNotFoundError on `import anchor_gui`.
+           Verified against the TAG itself (git ls-tree v1.1.0 -> 0 matches).
+           Every build check was green because every check reads file CONTENT,
+           and a content scan cannot see a file that is ABSENT.
+Fix      | shipped the 3 foundry_map data files + friction_journal.py (my new
+           module, which had the identical hole waiting), and wired a STARTUP
+           GATE into distro.py: the build now imports the staged bundle in a
+           child process and fails if it cannot start (8637dd5, +7 tests).
+v1.2     | isolated cleanly. Built the release tree by reverting b9252a9 in a
+           throwaway worktree; one CSS conflict resolved by keeping my
+           dictation block and dropping the Ecgberht chamber styles. Verified
+           0 ecgberht/high-seat references in the release bundle.
+Verified | 70/70 hardening tests green in the v1.2-free tree · release bundle
+           imports OK · ramanujan HOLDS/REFUTED as documented · legal-beagle
+           11/11 · financial-analyst 8/8 · journaling CLI works in-bundle and
+           reports 1.1.1 · distro PII/secret scan unchanged (67 pre-existing
+           findings before AND after, so I introduced none)
+Journal  | 2 open (status-cadence gap; the v1.1.0 ship-blocker, journaled)
+Blocker  | none
+ETA      | collaborator memo x3, then push
+To do    | memo · commit+tag v1.1.1 · sync Anchor-dev · push
+NOTE     | pre-existing and NOT fixed here: `python distro.py` itself still
+           fails its scan on 67 fake secrets inside vendored skill TEST files
+           (e.g. apiKey: 'short-key'). Identical before my changes. The release
+           repo is maintained by file copy, not by distro.py, so this does not
+           block v1.1.1 — but the builder is unusable until those fixtures are
+           allowlisted. Flagging, not silently fixing.
+
+[05:58] SHIPPED — v1.1.1 tagged and pushed
+Effort   | Anchor v1.1.1 hardening — COMPLETE
+Shipped  | github.com/johncliechty/Anchor @ 784ed0f, tag v1.1.1 (verified on
+           the remote: refs/tags/v1.1.1^{} -> 784ed0f)
+           source repo C:\dev\Anchor -> E:\anchor.git master @ 8637dd5
+Memo     | COLLABORATOR-EMAIL.md rewritten for 1.1.1 in the release repo and
+           copied to C:\dev\Anchor-COLLABORATOR-EMAIL.md. It LEADS with the
+           1.1.0-could-not-start notice and carries an explicit token-rotation
+           warning for anyone who ran an older build.
+Totals   | 10 fixes · 77 new tests · 9 commits (v1.2 isolated in its own
+           commit b9252a9 and kept OUT of the release bundle)
+Journal  | v1.1.0 ship-blocker record RESOLVED against 784ed0f.
+           1 still open: the status-cadence gap (a real process defect —
+           leaving it open deliberately).
+NOT DONE — deliberate, needs John:
+  1. Anchor-dev was NOT synced. It carries ~18k lines of UNCOMMITTED v1.2
+     steward work in exactly the files a sync would overwrite (anchor_gui.py,
+     route_table.py, project-window.js/css). Overwriting work I did not author
+     and John has not committed is not mine to do. Sync it after the steward
+     work is committed.
+  2. Existing logs/ still contain historic capability tokens. Redaction covers
+     NEW requests only; it cannot clean what is already written. Rotate the
+     token and scrub/delete those files.
+  3. `python distro.py` still fails its own secret scan on 67 placeholder keys
+     in vendored skill TEST files (identical count before this work). The
+     release repo is maintained by file copy so this did not block v1.1.1, but
+     the builder is unusable until those fixtures are allowlisted.
+Deferred to v1.2 (recorded, not dropped): zombie detection made real (P1.5),
+RESTART.md brief rewrite (P1.1/P1.2), keyed board diff (P1.6), P2 hygiene,
+journaling UI control.
