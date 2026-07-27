@@ -2215,6 +2215,29 @@ try {
     try { repopulate(); } catch (e) {}
   });
   setInterval(function () { try { loadSessions(); } catch (e) {} }, _RESUME_REPOLL_MS);
+
+  // LAPTOP SLEEP / NETWORK FLAP RESUME (2026-07-26 hardening, P0.2). There was
+  // no visibilitychange / online / pageshow handling anywhere — only the focus
+  // hook above, which refreshes TILES, never the terminal transport. So a
+  // resumed laptop left dead sockets that the unmanaged EventSource retry then
+  // re-opened from cursor 0. Reconnect deliberately instead: each live mount
+  // exposes _ensureTransport(), which no-ops when the socket is healthy and
+  // otherwise remounts FROM THE STORED CURSOR behind an in-flight guard.
+  function _resumeAllTransports() {
+    try {
+      Object.keys(PANELS || {}).forEach(function (sid) {
+        var w = PANELS[sid];
+        if (w && typeof w._ensureTransport === 'function') w._ensureTransport();
+      });
+      if (typeof DOCK !== 'undefined' && DOCK &&
+          typeof DOCK._ensureTransport === 'function') DOCK._ensureTransport();
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') _resumeAllTransports();
+  });
+  window.addEventListener('online', _resumeAllTransports);
+  window.addEventListener('pageshow', _resumeAllTransports);
 } catch (e) {}
 
 // renderSessionBar(): v5 Wave 1 — render one clickable TILE per LIVE managed
@@ -2739,6 +2762,15 @@ function openPanel(sessionId) {
   panel.appendChild(pin);
   stack.appendChild(panel);
 
+  // Close the OUTGOING record's transport before replacing it wholesale
+  // (2026-07-26 hardening, P0.2). Overwriting PANELS[sessionId] used to orphan a
+  // live WebSocket/EventSource that kept streaming into a detached terminal —
+  // a second consumer on one PTY, i.e. the double-print.
+  var _prevPanel = PANELS[sessionId];
+  if (_prevPanel) {
+    try { if (_prevPanel.transport && _prevPanel.transport.close) _prevPanel.transport.close(); } catch (e) {}
+    try { if (_prevPanel.term && _prevPanel.term.dispose) _prevPanel.term.dispose(); } catch (e) {}
+  }
   PANELS[sessionId] = {el: panel, body: host, term: null, transport: null,
                        tpane: tpane, pin: pin, fit: null, ro: null, pinRo: null,
                        maxd: false};
@@ -4255,6 +4287,25 @@ function _mountTerminal(sessionId, body, rec) {
     body.textContent = 'terminal component failed to load';
     return;
   }
+  // IDEMPOTENT MOUNT (2026-07-26 hardening, P0.2). This function is re-entrant
+  // from five call sites and used to tear NOTHING down: a second call appended a
+  // second xterm into the same host AND left the old WebSocket/EventSource alive
+  // writing into the orphan. That is one shared root cause of two reported bugs —
+  // the terminal rendering everything twice, and the iPad dictation blow-up
+  // (two live helper textareas = two input targets for one session). Dispose the
+  // previous mount for THIS session in both homes (panel record and dock) first.
+  function _disposeMount(rec2) {
+    if (!rec2) return;
+    try { if (rec2.transport && rec2.transport.close) rec2.transport.close(); } catch (e) {}
+    try { if (rec2.term && rec2.term.dispose) rec2.term.dispose(); } catch (e) {}
+    rec2.transport = null;
+    rec2.term = null;
+  }
+  _disposeMount(w);
+  if (PANELS[sessionId] && PANELS[sessionId] !== w) _disposeMount(PANELS[sessionId]);
+  if (typeof DOCK !== 'undefined' && DOCK && DOCK !== w &&
+      DOCK.sessionId === sessionId) _disposeMount(DOCK);
+  try { body.innerHTML = ''; } catch (e) {}
   var _termTheme = {background: '#0c0e14'};
   var term = new window.Terminal({convertEol: true, fontSize: 12,
                                   theme: _termTheme, scrollback: 5000});
@@ -4385,14 +4436,39 @@ function _mountTerminal(sessionId, body, rec) {
   }, 5000);
 
   // Transport: try WebSocket first; on error fall back to the SSE stream.
+  //
+  // CURSOR RESUME (2026-07-26 hardening, P0.1). The client used to send NO
+  // cursor, so the server defaulted since=0 and EVERY (re)connect replayed the
+  // whole retained 200KB PTY buffer ON TOP of what was already on screen — the
+  // double-printing. Live evidence: two term_stream2 subscriptions for one
+  // session in the same second after a 92-minute laptop-sleep gap. We now track
+  // the byte cursor client-side and resume from it; the server already returns
+  // next in every output/replay_complete payload, it was simply discarded.
+  var cursor = 0;
+  function _bumpCursor(p) {
+    if (p && typeof p.next === 'number' && p.next > cursor) cursor = p.next;
+  }
+  function _noteDropped(p) {
+    // read_since clamps a stale cursor to the dropped floor; the server reports
+    // it honestly but nobody forwarded it, so scrollback vanished silently.
+    if (p && typeof p.dropped === 'number' && p.dropped > 0) {
+      try {
+        term.write('\r\n\x1b[2m-- ' + p.dropped +
+                   ' chars of scrollback dropped (buffer cap) --\x1b[0m\r\n');
+      } catch (e) {}
+    }
+  }
   var wsProto = (location.protocol === 'https:') ? 'wss:' : 'ws:';
-  var wsUrl = wsProto + '//' + location.host +
-              '/api/rnd/term_ws?session=' + encodeURIComponent(sessionId) + tq;
+  function _wsUrl() {
+    return wsProto + '//' + location.host + '/api/rnd/term_ws?session=' +
+           encodeURIComponent(sessionId) + tq + '&since=' + cursor;
+  }
   var sseStarted = false;
   function startSSE() {
     if (sseStarted) return;
     sseStarted = true;
-    var sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) + tq;
+    var sseUrl = '/api/rnd/term_stream2?session=' + encodeURIComponent(sessionId) +
+                 tq + '&since=' + cursor;
     var es = new EventSource(sseUrl);
     w.transport = es;
     // Mirror the WS handshake over SSE control events.
@@ -4400,16 +4476,33 @@ function _mountTerminal(sessionId, body, rec) {
       try { var p = JSON.parse(ev.data); if (p && p.ok === false) {
         _attachError(p.reason || 'unknown-session'); } } catch (e) {}
     });
-    es.addEventListener('replay_complete', function () { _attachOk(); });
+    es.addEventListener('replay_complete', function (ev) {
+      try { var p = JSON.parse(ev.data); _bumpCursor(p); _noteDropped(p); } catch (e) {}
+      _attachOk();
+    });
     es.addEventListener('output', function (ev) {
-      try { var p = JSON.parse(ev.data); if (p.text) term.write(p.text); } catch (e) {}
+      try {
+        var p = JSON.parse(ev.data);
+        if (p.text) term.write(p.text);
+        _bumpCursor(p);
+      } catch (e) {}
     });
     es.addEventListener('done', function () { try { es.close(); } catch (e) {} });
-    es.onerror = function () { /* bounded server stream; let it close */ };
+    // EventSource auto-reconnects on error unless closed. The server sends no
+    // id: field, so an automatic retry would restart at cursor 0 — a
+    // self-reinforcing replay loop. Close it; _ensureTransport reconnects
+    // deliberately, from the cursor.
+    es.onerror = function () { try { es.close(); } catch (e) {} };
   }
   try {
-    var ws = new WebSocket(wsUrl);
+    var ws = new WebSocket(_wsUrl());
     w.transport = ws;
+    // Did this WS ever actually carry data? The old fallback checked only
+    // sseStarted, so a WS that streamed happily for an hour and then closed
+    // (sleep / Wi-Fi roam / service restart) opened a SECOND transport that
+    // replayed everything — instant duplicate. Only fall back when the WS never
+    // worked in the first place.
+    var gotData = false;
     ws.onmessage = function (ev) {
       var data = ev.data;
       // A W6 control frame? (prefixed TEXT frame; PTY bytes never start with NUL.)
@@ -4420,18 +4513,38 @@ function _mountTerminal(sessionId, body, rec) {
         if (msg.type === 'attach_ack' && msg.ok === false) {
           _attachError(msg.reason || 'unknown-session');
         } else if (msg.type === 'replay_complete') {
+          _bumpCursor(msg); _noteDropped(msg);
           _attachOk();
         }
         return;  // control frames are never written to the terminal
       }
+      gotData = true;
       term.write(data);
+      if (typeof data === 'string') cursor += data.length;
     };
     ws.onclose = function () {
-      // If the WS never carried data (e.g. upgrade unsupported), use SSE.
-      if (!sseStarted) startSSE();
+      // Only a WS that NEVER delivered anything justifies switching transports.
+      if (!sseStarted && !gotData) startSSE();
     };
-    ws.onerror = function () { try { ws.close(); } catch (e) {} startSSE(); };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} if (!gotData) startSSE(); };
   } catch (e) { startSSE(); }
+
+  // Reconnect deliberately after a laptop sleep / network flap, FROM THE CURSOR,
+  // with an in-flight guard so a wake-up burst cannot open two streams (the
+  // observed 14:22:28 double-subscribe).
+  w._ensureTransport = function () {
+    if (w._reconnecting) return;
+    var t = w.transport;
+    var dead = !t ||
+      (typeof WebSocket !== 'undefined' && t instanceof WebSocket && t.readyState > 1) ||
+      (typeof EventSource !== 'undefined' && t instanceof EventSource && t.readyState === 2);
+    if (!dead) return;
+    w._reconnecting = true;
+    setTimeout(function () {
+      w._reconnecting = false;
+      try { _mountTerminal(sessionId, body, rec); } catch (e) {}
+    }, 400);
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════════════

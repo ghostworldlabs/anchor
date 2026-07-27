@@ -40,3 +40,32 @@ ETA      | unchanged
 To do    | arm a real cadence (see PLAN) · journaling endpoints+UI · terminal
            cursor resume · one-mount teardown · dictation · token redaction ·
            zh-node backoff · summarizer quality · release · memo
+
+[04:52] RUN START — v1.1 hardening resumed (steward/v1.2 EXCLUDED per John)
+Effort   | Anchor v1.1.1 hardening: finish P0 fixes + journaling endpoints, ship
+Doing    | isolating 735 lines of UNCOMMITTED Ecgberht/steward (v1.2) work found in
+           anchor_gui.py, route_table.py, static/project-window.{js,css,html} —
+           the exact files my terminal/dictation fixes touch. Committing it
+           SEPARATELY, untouched, so my v1.1 commits stay clean and honest.
+Status   | wave 1 + journaling already landed (121b479, 638b0cb); 6 items to go
+Tests    | +15 green so far this effort
+Blocker  | none (steward isolation is the mitigation, not a blocker)
+Procs    | none
+Journal  | 2 open: terminal double-print (problem), status-cadence gap (concern)
+ETA      | P0 fixes this run; release sequence + memo after
+To do    | steward isolate · journaling endpoints+UI · terminal cursor resume ·
+           one-mount teardown · dictation · token redaction · zh-node backoff ·
+           summarizer quality · release · memo
+
+[05:12] P0.1 + P0.2 LANDED — terminal double-print fixed
+Effort   | Anchor v1.1.1 hardening (steward/v1.2 isolated at b9252a9, untouched)
+Doing    | committed terminal cursor-resume + one-mount teardown + sleep-resume
+Status   | 5 of ~9 items done (usage, test guard, journaling CLI, P0.1, P0.2)
+Tests    | +12 new terminal regression tests; 23 green incl. the two UI suites
+Blocker  | none
+Procs    | none
+Journal  | terminal double-print record CLOSES with this commit; cadence-gap
+           record still open
+ETA      | dictation + token redaction + zh-node next; then release sequence
+To do    | dictation compose box · token redaction · zh-node backoff · journaling
+           endpoints+UI · summarizer quality · release · memo

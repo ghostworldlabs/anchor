@@ -16905,7 +16905,18 @@ class AnchorHandler(BaseHTTPRequestHandler):
         sock = self.connection
         sock.settimeout(max(0.01, poll_interval))
         inbuf = b""
-        cursor = 0
+        # CURSOR RESUME (2026-07-26 hardening, P0.1). This used to hard-code
+        # ``cursor = 0``, so every WS (re)attach replayed the ENTIRE retained
+        # 200KB PTY buffer on top of whatever the client already had on screen —
+        # the terminal double-printing. The SSE path already honored ``since``;
+        # the WS path had no knob at all. Same parse, same clamp, same default.
+        try:
+            _q = parse_qs(urlparse(self.path).query)
+            cursor = int(_q.get("since", ["0"])[0] or 0)
+            if cursor < 0:
+                cursor = 0
+        except Exception:
+            cursor = 0
         ws_state = {}  # persistent fragmentation-reassembly state for decode_frames
         try:
             # ── attach-ack / replay-complete handshake (telemetry-resume W6) ──
