@@ -10012,6 +10012,8 @@ def handle_ecgberht_speak(handler, path, body):
     if not text:
         handler._send_json({"ok": False, "error": "text required"}, 400)
         return
+    if _ecgberht_reject_oversized(handler, text):
+        return
     flag = "--recall" if kind == "recall" else "--speak"
     out = _ecgberht_bridge(["--project", folder, flag, text])
     handler._send_json(out, 200 if out.get("ok") else 502)
@@ -10075,6 +10077,28 @@ def _ecgberht_hs_bridge(args, timeout=30):
     except Exception:
         return {"ok": False, "error": "bridge_bad_json",
                 "message": out[:500]}
+
+
+#: Cap on user text handed to a bridge AS A COMMAND-LINE ARGUMENT. This is not
+#: the PTY path: ``rnd_terminal.MAX_TURN_CHARS`` (100_000) writes to a child's
+#: STDIN, which has no such limit. Here the text becomes argv, and Windows caps
+#: the entire command line near 32_767 characters — so an oversized paste does
+#: not fail as "too long", it fails as an opaque spawn error that surfaces as
+#: `bridge_spawn_failed`. Refuse it honestly, before spawning anything.
+_ECGBERHT_MAX_SPOKEN_CHARS = 8_000
+
+
+def _ecgberht_reject_oversized(handler, text):
+    """True (and a 413 already sent) iff ``text`` is too long to pass as argv."""
+    if len(text) <= _ECGBERHT_MAX_SPOKEN_CHARS:
+        return False
+    handler._send_json({"ok": False, "error": "text_too_long",
+                        "message": "%d characters exceeds the %d-character "
+                                   "limit for a spoken act"
+                                   % (len(text), _ECGBERHT_MAX_SPOKEN_CHARS),
+                        "length": len(text),
+                        "limit": _ECGBERHT_MAX_SPOKEN_CHARS}, 413)
+    return True
 
 
 #: The high-seat bridge takes its roots as ONE ``--roots a;b;c`` argument, so a
@@ -10181,6 +10205,8 @@ def handle_ecgberht_high_seat_act(handler, path, body):
         text = str(body.get("text", "") or "").strip()
         if not text:
             handler._send_json({"ok": False, "error": "text required"}, 400)
+            return
+        if _ecgberht_reject_oversized(handler, text):
             return
         out = _ecgberht_hs_bridge(["--speak", text])
     elif kind == "override":

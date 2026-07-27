@@ -170,3 +170,39 @@ def test_the_badge_poll_is_gated_and_backs_off():
     assert "clearTimeout" in HS_JS, "the timer is never cleared"
     assert "setInterval(ecgHighSeatBadge" not in HS_JS, \
         "the un-gated fixed-rate interval is back"
+
+
+# ── mutating handlers: argv bounds + closed acts ────────────────────────────
+
+def test_spoken_text_is_bounded_before_it_becomes_argv():
+    """This is NOT the PTY path. rnd_terminal.MAX_TURN_CHARS (100_000) writes to
+    a child's stdin, which has no size limit. Here the text becomes argv, and
+    Windows caps the whole command line near 32_767 - so an oversized paste
+    fails as an opaque spawn error, surfacing as the misleading
+    `bridge_spawn_failed`, not as "your text was too long"."""
+    assert "_ECGBERHT_MAX_SPOKEN_CHARS" in GUI
+    assert GUI.count("_ecgberht_reject_oversized(handler, text)") >= 2, (
+        "a speak path can still hand unbounded text to argv")
+    body = GUI.split("def _ecgberht_reject_oversized", 1)[1].split(chr(10)+"def ", 1)[0]
+    assert "text_too_long" in body and "413" in body
+
+
+def test_the_cap_is_well_inside_the_windows_command_line_limit():
+    import re as _re
+    m = _re.search(r"_ECGBERHT_MAX_SPOKEN_CHARS = ([0-9_]+)", GUI)
+    assert m, "the cap constant vanished"
+    assert int(m.group(1).replace("_", "")) < 32767
+
+
+def test_high_seat_act_refuses_unknown_kinds_with_the_allowed_list():
+    """Closed acts only - an unknown kind must not fall through to a bridge."""
+    body = GUI.split("def handle_ecgberht_high_seat_act", 1)[1].split(chr(10)+"def ", 1)[0]
+    assert "unknown_act" in body and "400" in body
+    for act in ("speak", "override", "decide", "capacity_choice"):
+        assert act in body
+
+
+def test_stand_up_refuses_to_invent_a_goal():
+    """The steward never invents a north star; an empty goal is a refusal."""
+    body = GUI.split("def handle_ecgberht_stand_up", 1)[1].split(chr(10)+"def ", 1)[0]
+    assert "empty_goal_refused" in body and "400" in body
