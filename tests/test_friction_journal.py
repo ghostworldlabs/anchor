@@ -125,3 +125,39 @@ def test_since_filter_selects_recent_records(fj):
     recent = fj.list_records(since_ts=time.time() - 3600)
     ids = {r["id"] for r in recent}
     assert fresh["id"] in ids and old["id"] not in ids
+
+
+# ── HTTP surface (2026-07-26): the feature must be reachable from the dashboard,
+# not only the CLI. Contract-level so no server boot is needed.
+
+def test_endpoints_are_registered_in_the_route_table():
+    from pathlib import Path
+    rt = Path(__file__).resolve().parent.parent / "route_table.py"
+    src = rt.read_text(encoding="utf-8", errors="replace")
+    assert '"/api/rnd/journal_friction"' in src, "capture endpoint not routed"
+    assert '"/api/rnd/friction"' in src, "read endpoint not routed"
+    assert "handle_journal_friction" in src and "handle_friction_list" in src
+    # Both must be token-authed like every other rnd surface. Check the route
+    # DECLARATION lines (_r(...)), not the handler= continuation lines.
+    for line in src.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("_r("):
+            continue
+        if "/api/rnd/journal_friction" in stripped or '"/api/rnd/friction"' in stripped:
+            assert "AUTH_TOKEN" in stripped, f"unauthed friction route: {stripped}"
+
+
+def test_handlers_exist_and_never_call_a_model():
+    from pathlib import Path
+    gui = Path(__file__).resolve().parent.parent / "anchor_gui.py"
+    src = gui.read_text(encoding="utf-8", errors="replace")
+    assert "def handle_journal_friction(" in src
+    assert "def handle_friction_list(" in src
+    cap = src.split("def handle_journal_friction", 1)[1].split("\ndef ", 1)[0]
+    for forbidden in ("job_runner", "summarize", "launch(", "_sm."):
+        assert forbidden not in cap, (
+            f"the capture path must not touch {forbidden} — it has to work "
+            "when the engines are down")
+    # The read path must hand out the SAFE projection (no raw log lines).
+    read = src.split("def handle_friction_list", 1)[1].split("\ndef ", 1)[0]
+    assert "safe_projection" in read

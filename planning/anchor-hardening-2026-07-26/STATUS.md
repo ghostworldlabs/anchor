@@ -95,3 +95,14 @@ To do    | zh-node backoff · journaling endpoints+UI · summarizer quality ·
            release sequence · collaborator memo
 NOTE     | pre-existing logs still contain historic tokens; rotating/scrubbing
            them is an operator action - flag to John before the memo ships.
+
+[06:12] P0.6 + journaling endpoints LANDED
+Effort   | Anchor v1.1.1 hardening (steward/v1.2 isolated at b9252a9, untouched)
+Doing    | zh-node circuit breaker + friction HTTP endpoints, both tested
+Status   | 8 of ~9 items done; summarizer quality is the last fix
+Tests    | +5 breaker, +2 endpoint contract; 61 new tests this effort, all green
+Blocker  | none
+Procs    | none
+Journal  | 1 open (status-cadence gap)
+ETA      | summarizer quality, then propagate/re-vendor/smoke/tag v1.1.1/memo
+To do    | summarizer quality · release sequence · collaborator memo

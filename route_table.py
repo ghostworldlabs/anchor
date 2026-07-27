@@ -201,6 +201,12 @@ ROUTES = [
        handler="handle_build_deliverable", migrated=True),
     _r("GET", "/api/rnd/grass", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_grass", migrated=True),
+    # Friction journaling (2026-07-26): tell Anchor something hurt, and read the
+    # accumulated records that feed the sleep-cycle intake brief.
+    _r("GET", "/api/rnd/friction", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_friction_list", migrated=True),
+    _r("POST", "/api/rnd/journal_friction", AUTH_TOKEN,
+       handler="handle_journal_friction", migrated=True),
     _r("GET", "/api/rnd/gandalf", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_gandalf", migrated=True),
     _r("GET", "/api/rnd/gandalf_status", AUTH_TOKEN, match=MATCH_PREFIX,

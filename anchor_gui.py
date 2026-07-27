@@ -1324,6 +1324,60 @@ def _zh_node_kill_listener():
     return killed
 
 
+#: Consecutive failed (re)starts before the ZH-node breaker OPENS.
+_ZH_NODE_MAX_RETRIES = 3
+#: Backoff between attempts: 5s, 20s, 80s (capped), then the breaker opens.
+_ZH_NODE_BACKOFF_BASE_S = 5.0
+_ZH_NODE_BACKOFF_CAP_S = 120.0
+#: How long the breaker stays open before allowing one probe again.
+_ZH_NODE_COOLDOWN_S = 600.0
+
+#: Breaker state. Guarded by ``_zh_node_start_lock`` at every mutation site.
+_zh_node_breaker = {"fails": 0, "next_attempt_at": 0.0, "open_until": 0.0}
+
+
+def _zh_node_breaker_reset():
+    """The radar answered — forget the failure history."""
+    if _zh_node_breaker["fails"]:
+        _logger.info("ensure_zh_node: healthy again — breaker reset after %s failure(s)",
+                     _zh_node_breaker["fails"])
+    _zh_node_breaker["fails"] = 0
+    _zh_node_breaker["next_attempt_at"] = 0.0
+    _zh_node_breaker["open_until"] = 0.0
+
+
+def _zh_node_breaker_fail():
+    """One more failed (re)start: back off, and open the breaker at the cap."""
+    _zh_node_breaker["fails"] += 1
+    n = _zh_node_breaker["fails"]
+    delay = min(_ZH_NODE_BACKOFF_CAP_S, _ZH_NODE_BACKOFF_BASE_S * (4 ** (n - 1)))
+    _zh_node_breaker["next_attempt_at"] = time.time() + delay
+    if n >= _ZH_NODE_MAX_RETRIES:
+        _zh_node_breaker["open_until"] = time.time() + _ZH_NODE_COOLDOWN_S
+        _logger.error(
+            "ensure_zh_node: %s consecutive failed starts — breaker OPEN for %.0fs. "
+            "The Zombie Hunter radar is DOWN and will not be respawned until then; "
+            "check `node %s` by hand.",
+            n, _ZH_NODE_COOLDOWN_S, _ZH_NODE_SERVER_PATH,
+        )
+    else:
+        _logger.warning(
+            "ensure_zh_node: start failed (%s/%s) — next attempt in %.0fs",
+            n, _ZH_NODE_MAX_RETRIES, delay,
+        )
+
+
+def zh_node_breaker_state():
+    """Honest read of the breaker for status surfaces/tests."""
+    now = time.time()
+    return {
+        "fails": _zh_node_breaker["fails"],
+        "open": _zh_node_breaker["open_until"] > now,
+        "open_for_s": max(0.0, _zh_node_breaker["open_until"] - now),
+        "next_attempt_in_s": max(0.0, _zh_node_breaker["next_attempt_at"] - now),
+    }
+
+
 def _ensure_zh_node_server(wait_s=10.0):
     """Start the ZH Node radar if it is down; wait until it accepts connections.
 
@@ -1340,12 +1394,32 @@ def _ensure_zh_node_server(wait_s=10.0):
         return True
     with _zh_node_start_lock:
         if _zh_node_is_up(timeout=0.8):
+            _zh_node_breaker_reset()
             return True
+        # CIRCUIT BREAKER (2026-07-26 hardening, P0.6). This recycle loop had no
+        # backoff and no give-up: logs/errors.log shows 74 cycles of
+        # "listening but /api/state dead -> killed wedged listener -> launched
+        # server.js" at 6-8 second intervals, forking a Node process each time.
+        # It was the loudest error in the log — in the very subsystem meant to
+        # look trustworthy. Now: exponential backoff between attempts, and after
+        # _ZH_NODE_MAX_RETRIES consecutive failures the breaker OPENS and stays
+        # open for a cooldown, reporting honestly instead of thrashing.
+        now = time.time()
+        if _zh_node_breaker["open_until"] > now:
+            _logger.debug(
+                "ensure_zh_node: breaker OPEN for another %.0fs after %s "
+                "consecutive failures — not respawning",
+                _zh_node_breaker["open_until"] - now, _zh_node_breaker["fails"],
+            )
+            return False
+        if now < _zh_node_breaker["next_attempt_at"]:
+            return False  # inside the backoff window; stay quiet
         # Port held but unresponsive → kill and re-spawn with current server.js
         if _zh_node_port_listening():
             _logger.warning(
-                "ensure_zh_node: port %s listening but /api/state dead — recycling",
-                _ZH_NODE_PORT,
+                "ensure_zh_node: port %s listening but /api/state dead — recycling "
+                "(attempt %s/%s)",
+                _ZH_NODE_PORT, _zh_node_breaker["fails"] + 1, _ZH_NODE_MAX_RETRIES,
             )
             _zh_node_kill_listener()
             time.sleep(0.4)
@@ -1367,9 +1441,14 @@ def _ensure_zh_node_server(wait_s=10.0):
         deadline = time.time() + max(0.5, float(wait_s))
         while time.time() < deadline:
             if _zh_node_is_up(timeout=0.8):
+                _zh_node_breaker_reset()
                 return True
             time.sleep(0.35)
-        return _zh_node_is_up(timeout=1.0)
+        if _zh_node_is_up(timeout=1.0):
+            _zh_node_breaker_reset()
+            return True
+        _zh_node_breaker_fail()
+        return False
 
 
 def _trigger_project_summary(folder_path, project_id, force: bool = False):
@@ -13327,6 +13406,55 @@ def handle_term_input2(handler, path, body):
             handler._send_json({"ok": False,
                              "error": f"unknown session: {session}",
                              "reason": "unknown-session"}, 404)
+
+
+def handle_journal_friction(handler, path, body):
+    """Capture ONE friction/problem/concern the user just hit (2026-07-26).
+
+    The user's words are stored verbatim; context (project/session/lane/route/
+    engine/version + recent error lines) is attached automatically so nobody has
+    to type it. ZERO model calls — the moment of friction is exactly when the
+    engines are down, wedged, or burning money.
+    """
+    import friction_journal as _fj
+    title = (body.get("title", "") or "").strip()
+    if not title:
+        handler._send_json(
+            {"ok": False, "error": "title required (one line: what hurt?)"}, 400)
+        return
+    try:
+        rec = _fj.capture(
+            title,
+            body=body.get("body", "") or "",
+            severity=body.get("severity", _fj.DEFAULT_SEVERITY),
+            project_id=body.get("project_id"),
+            session_id=body.get("session_id"),
+            lane=body.get("lane"),
+            route=body.get("route"),
+            engine=body.get("engine"),
+        )
+    except _fj.FrictionJournalError as e:
+        handler._send_json({"ok": False, "error": str(e)}, 400)
+        return
+    except Exception as e:  # capture must never 500 on the user
+        _logger.error("journal_friction failed: %s", e)
+        handler._send_json({"ok": False, "error": "could not write the record"}, 500)
+        return
+    handler._send_json({"ok": True, "record": _fj.safe_projection(rec)})
+
+
+def handle_friction_list(handler, path, body=None):
+    """Read the friction records (SAFE projection — never raw log lines)."""
+    import friction_journal as _fj
+    q = parse_qs(urlparse(handler.path).query)
+    status = (q.get("status", ["open"])[0] or "").strip() or None
+    try:
+        recs = _fj.list_records(status=status)
+    except Exception as e:
+        _logger.error("friction_list failed: %s", e)
+        recs = []
+    handler._send_json({"ok": True, "status": status,
+                        "records": [_fj.safe_projection(r) for r in recs]})
 
 
 def handle_answer_gate(handler, path, body):
