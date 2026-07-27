@@ -16371,8 +16371,32 @@ _MIGRATED_HANDLERS = {
 
 
 class AnchorHandler(BaseHTTPRequestHandler):
+    #: Query params whose VALUES must never reach a log file.
+    _LOG_REDACT_PARAMS = ("token", "capability", "nonce", "key", "secret")
+
+    @classmethod
+    def _redact_request_line(cls, line):
+        """Strip secret query-param values from an access-log request line.
+
+        2026-07-26 hardening. Every authed GET carried the LIVE capability token
+        verbatim into ``logs/nssm-stdout.log`` (the GET-transport ``?token=``
+        design), forever — in the very directory a collaborator is told to
+        inspect when something breaks. The token is redacted here, at the one
+        place request lines are written, so no call site can forget.
+        """
+        import re as _re  # module-local: anchor_gui imports re per-function
+        try:
+            s = str(line)
+        except Exception:
+            return line
+        for p in cls._LOG_REDACT_PARAMS:
+            s = _re.sub(r"(?i)([?&]" + _re.escape(p) + r"=)[^&\s\"']+",
+                        r"\1<redacted>", s)
+        return s
+
     def log_message(self, format, *args):
-        print(f"  [{datetime.now().strftime('%H:%M:%S')}] {args[0]}")
+        first = self._redact_request_line(args[0]) if args else ""
+        print(f"  [{datetime.now().strftime('%H:%M:%S')}] {first}")
 
     def log_error(self, format, *args):
         # Quiet the benign client-disconnect noise the base class would log to

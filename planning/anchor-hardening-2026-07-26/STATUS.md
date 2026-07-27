@@ -81,3 +81,17 @@ Journal  | 1 open (status-cadence gap); terminal + usage records closed
 ETA      | token redaction + zh-node backoff next, then journaling endpoints
 To do    | token redaction · zh-node backoff · journaling endpoints+UI ·
            summarizer quality · release sequence · collaborator memo
+
+[05:48] P0.4 LANDED — capability token no longer written to the access log
+Effort   | Anchor v1.1.1 hardening (steward/v1.2 isolated at b9252a9, untouched)
+Doing    | redaction at the single request-line writer + 8 tests
+Status   | 7 of ~9 items done
+Tests    | +8 redaction tests (48 new tests total this effort, all green)
+Blocker  | none
+Procs    | none
+Journal  | 1 open (status-cadence gap)
+ETA      | zh-node backoff, then journaling endpoints, then release sequence
+To do    | zh-node backoff · journaling endpoints+UI · summarizer quality ·
+           release sequence · collaborator memo
+NOTE     | pre-existing logs still contain historic tokens; rotating/scrubbing
+           them is an operator action - flag to John before the memo ships.
