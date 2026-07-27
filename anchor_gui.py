@@ -7368,6 +7368,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
           <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/vendor/brand/zombie-hunter-radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Hunter</button>
           <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Skill Foundry — library, knowledge graph, sleep runs"><img src="/vendor/brand/skill-foundry-icon.jpg?v={BUILD_ID}" style="width:14px;height:14px;border-radius:2px;" alt="" /> Skill Foundry</button>
+          <!-- Ecgberht High Seat (TW6, wireframes v2.1 Screen 0): docked overlay
+               over THIS dashboard; the ⚑ badge (raise-queue length) is the only
+               ambient Ecgberht signal anywhere in Anchor. -->
+          <button class="btn btn-sm ecg-hs-btn" id="ecgHighSeatBtn" onclick="openEcgberhtHighSeat()" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);" title="Ecgberht — the High Seat (every campaign, one steward above them)"><img src="/vendor/brand/ecgberht-portfolio-high-seat.jpg?v={BUILD_ID}" alt="" onerror="this.style.display='none'" /> High Seat<span class="ecg-hs-badge" id="ecgHighSeatBadge"></span></button>
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -9008,6 +9012,11 @@ function addTaskDomain(domain) {{
 <script>{cache_bust_script()}</script>
 <script>{_ORPHAN_ALERT_JS}</script>
 <script>{_ZOMBIE_SPEND_ALERT_JS}</script>
+<!-- Ecgberht High Seat overlay (TW6): host + static assets. The overlay
+     renders the engine view model only; closing it writes nothing. -->
+<link rel="stylesheet" href="/static/high-seat.css?v={BUILD_ID}">
+<div id="ecgHighSeatHost"></div>
+<script src="/static/high-seat.js?v={BUILD_ID}"></script>
 </body>
 </html>'''
 
@@ -9840,6 +9849,290 @@ def handle_boneyard(handler, path, body):
                 entries = []
             out = [_boneyard_entry_view(pid, e) for e in entries]
             handler._send_json({"ok": True, "entries": out, "q": query})
+
+
+
+def _ecgberht_root():
+    """Resolve the Ecgberht engine root: ECGBERHT_ROOT env override, else the
+    sibling checkout next to this Anchor tree (Ecgberht beside Anchor).
+    Never a host-absolute literal in call sites."""
+    env = os.environ.get("ECGBERHT_ROOT", "").strip()
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent / "Ecgberht"
+
+
+def _ecgberht_bridge(args, timeout=20):
+    """Spawn the Ecgberht seal-chamber bridge (Node, read-only) and parse its
+    one-line JSON. Same closed verb bodies as the ecgberht CLI (parity)."""
+    import subprocess
+    root = _ecgberht_root()
+    bridge = root / "scripts" / "seal-chamber-bridge.mjs"
+    if not bridge.exists():
+        return {"ok": False, "error": "ecgberht_engine_missing",
+                "message": "seal-chamber bridge not found (set ECGBERHT_ROOT "
+                           "or keep Ecgberht checkout beside Anchor)"}
+    try:
+        res = subprocess.run(
+            ["node", str(bridge)] + list(args),
+            capture_output=True, text=True, timeout=timeout,
+            cwd=str(root), creationflags=_paths.NO_WINDOW)
+    except Exception as exc:
+        return {"ok": False, "error": "bridge_spawn_failed",
+                "message": str(exc)}
+    out = (res.stdout or "").strip()
+    if not out:
+        return {"ok": False, "error": "bridge_no_output",
+                "message": (res.stderr or "").strip()[:500]}
+    try:
+        return json.loads(out.splitlines()[-1])
+    except Exception:
+        return {"ok": False, "error": "bridge_bad_json",
+                "message": out[:500]}
+
+
+def _ecgberht_project_folder(pid):
+    """project_id -> (folder, error_json, status). Same validation as boneyard."""
+    if not pid:
+        return None, {"ok": False, "error": "project_id required"}, 400
+    if _unsafe_path_seg(pid):
+        return None, {"ok": False, "error": "bad pid"}, 400
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        return None, {"ok": False, "error": "Unknown project"}, 404
+    return proj.get("folder_path", ""), None, 200
+
+
+def handle_ecgberht_chamber(handler, path, body):
+    """GET /api/ecgberht/chamber — Seal chamber view model (wireframes v2.1 Screen 1)."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    out = _ecgberht_bridge(["--project", folder])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_speak(handler, path, body):
+    """POST /api/ecgberht/speak — compile saybox talk (closed acts only)."""
+    pid = str(body.get("project_id", "") or "").strip()
+    text = str(body.get("text", "") or "").strip()
+    kind = str(body.get("kind", "speak") or "speak").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not text:
+        handler._send_json({"ok": False, "error": "text required"}, 400)
+        return
+    flag = "--recall" if kind == "recall" else "--speak"
+    out = _ecgberht_bridge(["--project", folder, flag, text])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_stand_up(handler, path, body):
+    """POST /api/ecgberht/stand_up — TW7 Screen 4 stand-up confirm ONLY:
+    create Face+Strip from the pack templates once John has spoken the goal
+    in his own words. The steward never invents a goal; an empty goal is a
+    structured refusal, and the engine refuses freeze-tree targets
+    (realpath-before-prefix, junction-aware)."""
+    pid = str(body.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    goal = str(body.get("north_star", "") or "").strip()
+    if not goal:
+        handler._send_json({"ok": False, "error": "empty_goal_refused",
+                            "message": "no goal text — the steward never "
+                                       "invents one"}, 400)
+        return
+    fields = {"project_path": folder, "north_star": goal,
+              "project_id": pid,
+              "who": str(body.get("who") or "john"),
+              "active_effort": body.get("active_effort")}
+    out = _ecgberht_bridge(["--stand-up-confirm", json.dumps(fields)])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+# ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────────
+# Portfolio altitude on the live-Anchor MAIN dashboard. Same engine-bridge
+# pattern as the TW5 Seal chamber, spawning scripts/high-seat-bridge.mjs.
+# Read-compose only; the only writes the bridge can produce are structured
+# receipts (override / seen) and single-writer Roadmap appends (decide).
+
+def _ecgberht_hs_bridge(args, timeout=30):
+    """Spawn the Ecgberht high-seat bridge (Node) and parse its one-line JSON.
+    Same closed surfaces as `ecgberht status --roots …` (CLI parity)."""
+    import subprocess
+    root = _ecgberht_root()
+    bridge = root / "scripts" / "high-seat-bridge.mjs"
+    if not bridge.exists():
+        return {"ok": False, "error": "ecgberht_engine_missing",
+                "message": "high-seat bridge not found (set ECGBERHT_ROOT "
+                           "or keep Ecgberht checkout beside Anchor)"}
+    try:
+        res = subprocess.run(
+            ["node", str(bridge)] + list(args),
+            capture_output=True, text=True, timeout=timeout,
+            cwd=str(root), creationflags=_paths.NO_WINDOW)
+    except Exception as exc:
+        return {"ok": False, "error": "bridge_spawn_failed",
+                "message": str(exc)}
+    out = (res.stdout or "").strip()
+    if not out:
+        return {"ok": False, "error": "bridge_no_output",
+                "message": (res.stderr or "").strip()[:500]}
+    try:
+        return json.loads(out.splitlines()[-1])
+    except Exception:
+        return {"ok": False, "error": "bridge_bad_json",
+                "message": out[:500]}
+
+
+def _ecgberht_portfolio_roots():
+    """Active R&D project folders = the High Seat's discovery roots.
+    Registry-derived, never a hardcoded host path."""
+    roots = []
+    try:
+        for entry in _rnd.list_projects(include_archived=False,
+                                        include_future=False,
+                                        include_retired=False):
+            folder = (entry.get("folder_path") or "").strip()
+            if folder and folder not in roots:
+                roots.append(folder)
+    except Exception:
+        pass
+    return roots
+
+
+def handle_ecgberht_high_seat(handler, path, body):
+    """GET /api/ecgberht/high_seat — Screen 2 view model (raise queue +
+    tiles + spoken capacity balancing) over all active project roots."""
+    roots = _ecgberht_portfolio_roots()
+    if not roots:
+        handler._send_json({"ok": False, "error": "no_projects",
+                            "message": "no active R&D project folders to steward"}, 200)
+        return
+    out = _ecgberht_hs_bridge(["--roots", ";".join(roots)])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_high_seat_badge(handler, path, body):
+    """GET /api/ecgberht/high_seat_badge — ⚑ raise-queue length ONLY.
+    The single ambient Ecgberht signal anywhere in Anchor (S0-E2)."""
+    roots = _ecgberht_portfolio_roots()
+    if not roots:
+        handler._send_json({"ok": True, "mode": "badge",
+                            "badge": {"glyph": "⚑", "count": 0},
+                            "queue_length": 0}, 200)
+        return
+    out = _ecgberht_hs_bridge(["--roots", ";".join(roots), "--badge"])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_bring_up(handler, path, body):
+    """GET /api/ecgberht/bring_up?project_id= — in-overlay altitude hop to the
+    project's Decision Packet (Option P path passport; zero further gathering)."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    out = _ecgberht_hs_bridge(["--bring-up", folder])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_high_seat_act(handler, path, body):
+    """POST /api/ecgberht/high_seat_act — closed High Seat acts only:
+    speak (compile), override (balancing → receipt), decide (packet answer →
+    receipt moving the Roadmap through the single writer)."""
+    kind = str(body.get("kind", "") or "").strip()
+    if kind == "speak":
+        text = str(body.get("text", "") or "").strip()
+        if not text:
+            handler._send_json({"ok": False, "error": "text required"}, 400)
+            return
+        out = _ecgberht_hs_bridge(["--speak", text])
+    elif kind == "override":
+        fields = {k: body.get(k) for k in ("who", "why", "from", "to")}
+        out = _ecgberht_hs_bridge(["--override", json.dumps(fields)])
+    elif kind == "decide":
+        pid = str(body.get("project_id", "") or "").strip()
+        folder, err, status = _ecgberht_project_folder(pid)
+        if err is not None:
+            handler._send_json(err, status)
+            return
+        fields = {
+            "project_path": folder,
+            "step_id": body.get("step_id"),
+            "decision": body.get("decision"),
+            "who": body.get("who") or "john",
+            "why": body.get("why"),
+        }
+        out = _ecgberht_hs_bridge(["--decide", json.dumps(fields)])
+    elif kind == "capacity_choice":
+        # TW7 S4-E2 — one of the three honest options under unknown capacity:
+        # lite_now / queue_full / override (which lands as a receipt). There
+        # is no silent-FULL path; anything else refuses with the options.
+        fields = {"capacity": "unknown",
+                  "choice": body.get("choice"),
+                  "who": body.get("who") or "john",
+                  "why": body.get("why"),
+                  "from": body.get("from") or "blocked — capacity unknown",
+                  "to": body.get("to") or "FULL admit (human override)"}
+        out = _ecgberht_hs_bridge(["--request-full", json.dumps(fields)])
+    else:
+        handler._send_json({"ok": False, "error": "unknown_act",
+                            "allowed": ["speak", "override", "decide",
+                                        "capacity_choice"]}, 400)
+        return
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+# Artifact display MVP (S3-E4): serve a packet artifact from inside the
+# project folder — traversal-safe — so HTML mockups render best-effort inline
+# (iframe) and everything else opens in the browser viewer. Never a bare
+# path with no open action.
+_ECGBERHT_ARTIFACT_TYPES = {
+    ".html": "text/html", ".htm": "text/html",
+    ".md": "text/plain", ".markdown": "text/plain", ".txt": "text/plain",
+    ".json": "application/json",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
+
+
+def handle_ecgberht_artifact(handler, path, body):
+    """GET /api/ecgberht/artifact?project_id=&rel= — open path for packet
+    artifacts (resolve()+relative_to containment, same idiom as static_asset)."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    rel = (q.get("rel", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not rel:
+        handler._send_json({"ok": False, "error": "rel required"}, 400)
+        return
+    root = Path(folder).resolve()
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        handler._send_json({"ok": False, "error": "artifact_outside_project"}, 400)
+        return
+    if not target.is_file():
+        handler._send_json({"ok": False, "error": "artifact_missing"}, 404)
+        return
+    ctype = _ECGBERHT_ARTIFACT_TYPES.get(target.suffix.lower(),
+                                         "application/octet-stream")
+    handler._send_bytes(target.read_bytes(), ctype, cache="no-cache")
 
 
 def handle_build_deliverable(handler, path, body):
@@ -15958,6 +16251,13 @@ _MIGRATED_HANDLERS = {
     "handle_project_rollup": handle_project_rollup,
     "handle_effort_rollup": handle_effort_rollup,
     "handle_boneyard": handle_boneyard,
+    "handle_ecgberht_chamber": handle_ecgberht_chamber,
+    "handle_ecgberht_speak": handle_ecgberht_speak,
+    "handle_ecgberht_high_seat": handle_ecgberht_high_seat,
+    "handle_ecgberht_high_seat_badge": handle_ecgberht_high_seat_badge,
+    "handle_ecgberht_bring_up": handle_ecgberht_bring_up,
+    "handle_ecgberht_high_seat_act": handle_ecgberht_high_seat_act,
+    "handle_ecgberht_artifact": handle_ecgberht_artifact,
     "handle_build_deliverable": handle_build_deliverable,
     "handle_orphan_check": handle_orphan_check,
     "handle_zombie_spenders": handle_zombie_spenders,

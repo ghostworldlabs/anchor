@@ -230,6 +230,29 @@ ROUTES = [
        handler="handle_reaper_disarm", migrated=True),
     _r("GET", "/api/rnd/boneyard", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_boneyard", migrated=True),
+    # ── Ecgberht Seal chamber (TW5 — wireframes v2.1 Screen 1) ────────────
+    # UI host: live C:\dev\Anchor (hardened line). Engine: C:\dev\Ecgberht.
+    _r("GET", "/api/ecgberht/chamber", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_chamber", migrated=True),
+    _r("POST", "/api/ecgberht/speak", AUTH_TOKEN,
+       handler="handle_ecgberht_speak", migrated=True),
+    # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)
+    _r("POST", "/api/ecgberht/stand_up", AUTH_TOKEN,
+       handler="handle_ecgberht_stand_up", migrated=True),
+    # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
+    # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
+    # Specific prefixes are registered BEFORE the bare /high_seat prefix so
+    # prefix dispatch never swallows _badge into the view-model handler.
+    _r("GET", "/api/ecgberht/high_seat_badge", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_high_seat_badge", migrated=True),
+    _r("POST", "/api/ecgberht/high_seat_act", AUTH_TOKEN,
+       handler="handle_ecgberht_high_seat_act", migrated=True),
+    _r("GET", "/api/ecgberht/high_seat", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_high_seat", migrated=True),
+    _r("GET", "/api/ecgberht/bring_up", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_bring_up", migrated=True),
+    _r("GET", "/api/ecgberht/artifact", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_artifact", migrated=True),
     _r("GET", "/api/rnd/remote_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_remote_status", migrated=True),
     _r("GET", "/api/rnd/project_rollup", AUTH_TOKEN, match=MATCH_PREFIX,

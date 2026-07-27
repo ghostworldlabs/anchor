@@ -5871,3 +5871,375 @@ document.addEventListener('click', function() {
   var all = document.querySelectorAll('.browse-menu');
   for (var i = 0; i < all.length; i++) all[i].style.display = 'none';
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Ecgberht Seal chamber — wireframes v2.1 Screen 1 (TW5).
+   Docked overlay over the project view. Renders ONLY the engine's chamber
+   view model (/api/ecgberht/chamber → seal-chamber bridge): goal bar first,
+   Campaign Roadmap rail + run block from the typed ledger projection (never
+   panel-invented steps), steward-first conversation, saybox that compiles
+   talk to closed verbs + receipts (dialogue ephemeral). Closing the overlay
+   writes nothing. No verb menus / depth dials / rank tables / instrument
+   card sheets as the opening face (v1 negative).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function _ecgEl(tag, cls, text) {
+  var el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text != null) el.textContent = text;
+  return el;
+}
+
+function _ecgStatusCls(status) {
+  return status === 'done' ? 'done'
+    : status === 'active' ? 'run'
+    : status === 'waiting' ? 'you'
+    : status === 'parked' ? 'park' : 'next';
+}
+
+function closeEcgberhtSeal() {
+  var dock = document.getElementById('ecgSealDock');
+  if (dock) dock.remove();  // close changes nothing in the ledger
+}
+
+function _ecgStewardMsg(convo, text, actions) {
+  var msg = _ecgEl('div', 'ecg-msg steward');
+  msg.appendChild(_ecgEl('div', 'who', 'Ecgberht'));
+  msg.appendChild(document.createTextNode(text || ''));
+  if (actions && actions.length) {
+    var act = _ecgEl('div', 'act');
+    for (var i = 0; i < actions.length; i++) {
+      var b = _ecgEl('button', 'ecg-btn', actions[i].label);
+      if (actions[i].onclick) b.onclick = actions[i].onclick;
+      act.appendChild(b);
+    }
+    msg.appendChild(act);
+  }
+  convo.appendChild(msg);
+  return msg;
+}
+
+function _ecgJohnMsg(convo, text) {
+  var msg = _ecgEl('div', 'ecg-msg john');
+  msg.appendChild(_ecgEl('div', 'who', 'John'));
+  msg.appendChild(document.createTextNode(text));
+  convo.appendChild(msg);
+}
+
+function _ecgRenderRail(rail, runBlock) {
+  var aside = _ecgEl('aside', 'ecg-rail');
+  var h = _ecgEl('h3', null, rail.heading + ' ');
+  h.appendChild(_ecgEl('span', 'house', '· ' + rail.house_subtitle));
+  aside.appendChild(h);
+  if (rail.honest_gap) {
+    // Honest gap — the rail NEVER invents steps from prose or panel memory.
+    aside.appendChild(_ecgEl('div', 'ecg-prov',
+      rail.gap === 'face_prose_only'
+        ? 'no typed roadmap on the ledger yet — prose is not a step list'
+        : 'no roadmap steps on the ledger yet'));
+  } else {
+    for (var i = 0; i < rail.steps.length; i++) {
+      var s = rail.steps[i];
+      var row = _ecgEl('div', 'ecg-step ' + _ecgStatusCls(s.status));
+      row.appendChild(_ecgEl('span', 'm', s.marker));
+      var body = _ecgEl('span', null, (s.id ? s.id + ' ' : '') + (s.name || ''));
+      body.appendChild(_ecgEl('small', null, s.substatus || ''));
+      row.appendChild(body);
+      aside.appendChild(row);
+    }
+  }
+  var rb = _ecgEl('div', 'ecg-runblock');
+  rb.id = 'ecgRunBlock';
+  rb.appendChild(_ecgEl('div', 'about', runBlock.about));
+  var tbl = document.createElement('table');
+  var rows = [['run', runBlock.rows.run], ['now', runBlock.rows.now],
+              ['last ✓', runBlock.rows.last_green], ['seats', runBlock.rows.seats]];
+  for (var r = 0; r < rows.length; r++) {
+    var tr = document.createElement('tr');
+    tr.appendChild(_ecgEl('td', null, rows[r][0]));
+    tr.appendChild(_ecgEl('td', null, rows[r][1]));
+    tbl.appendChild(tr);
+  }
+  rb.appendChild(tbl);
+  aside.appendChild(rb);
+  aside.appendChild(_ecgEl('div', 'ecg-prov', rail.provenance));
+  return aside;
+}
+
+function _ecgSpeak(convo, text) {
+  _ecgJohnMsg(convo, text);
+  var recall = /\bremind me\b|\bwhy did we\b/i.test(text);
+  var body = JSON.stringify(recall
+    ? {project_id: PROJECT_ID, kind: 'recall', text: text}
+    : {project_id: PROJECT_ID, kind: 'speak', text: text});
+  fetch('/api/ecgberht/speak' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: body
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j || !j.ok) {
+      _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was written.');
+      return;
+    }
+    if (j.mode === 'recall') {
+      var rec = j.recall || {};
+      var m = _ecgStewardMsg(convo, rec.unknown
+        ? rec.voice
+        : String(rec.answer && rec.answer.value != null ? rec.answer.value : rec.answer) + ' — ' + rec.voice);
+      if (rec.chip) {
+        var chip = _ecgEl('div', 'ecg-chip', rec.chip.label);
+        chip.title = 'provenance: ' + rec.chip.opens;
+        m.appendChild(chip);
+      }
+      // TW7 S4-E3 — thin evidence: honest unknown + a CONSTRUCTIVE offer
+      // (commission a fresh look), never padded into a fake answer.
+      if (rec.unknown && j.thin_evidence && j.thin_evidence.offer) {
+        var offer = j.thin_evidence.offer;
+        var act = _ecgEl('div', 'act');
+        var ob = _ecgEl('button', 'ecg-btn', offer.label);
+        ob.title = offer.compiles_to;
+        ob.onclick = function () {
+          var say = document.getElementById('ecgSayInput');
+          if (say) {
+            say.value = 'commission a fresh look: ' + (j.thin_evidence.question || '');
+            say.focus();
+          }
+        };
+        act.appendChild(ob);
+        m.appendChild(act);
+      }
+      return;
+    }
+    var c = j.compiled || {};
+    if (c.compiled) {
+      if (j.offer) {
+        // S1-E6 — Grasscatcher offer beat (receipt only on yes, via closed verb)
+        _ecgStewardMsg(convo, j.offer.question, [
+          {label: j.offer.actions[0].label, onclick: function () {
+            _ecgStewardMsg(convo, 'Parked. ' + j.offer.on_yes);
+          }},
+          {label: j.offer.actions[1].label}
+        ]);
+      } else if (j.divider_preview) {
+        // S1-E7 — receipted seat switch is a non-event
+        convo.appendChild(_ecgEl('div', 'ecg-divider', j.divider_preview.text));
+      } else {
+        _ecgStewardMsg(convo, 'Compiled to the closed act “' + (c.label || c.act) +
+          '”' + (c.verb ? ' (verb: ' + c.verb + ')' : '') +
+          (c.receipt_kind ? ' — lands as a ' + c.receipt_kind + ' receipt.' : '.'));
+      }
+    } else {
+      var prop = (c.proposal && c.proposal.message) ||
+        'I could not compile that to a closed act; nothing was written.';
+      _ecgStewardMsg(convo, prop);
+    }
+  }).catch(function () {
+    _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was written.');
+  });
+}
+
+function _ecgRenderChamber(host, vm) {
+  var chamber = vm.chamber;
+  var dock = _ecgEl('div', 'ecg-dock');
+  dock.id = 'ecgSealDock';
+
+  // S1-E1 — titlebar: seal icon · steward-of title · seat pill · quiet stamp
+  var bar = _ecgEl('div', 'ecg-dbar');
+  var ico = _ecgEl('img', 'ecg-seal-ico');
+  ico.src = '/vendor/brand/ecgberht-project-seal.jpg';
+  ico.alt = '';
+  ico.onerror = function () { this.style.display = 'none'; };
+  bar.appendChild(ico);
+  var ti = _ecgEl('span', 'ti', 'Ecgberht ');
+  ti.appendChild(_ecgEl('small', null, '· ' + chamber.titlebar.title.replace(/^Ecgberht · /, '')));
+  bar.appendChild(ti);
+  var pill = _ecgEl('button', 'ecg-seat-pill', chamber.titlebar.seat_switcher.pill);
+  pill.title = 'which subscription seat drives the steward — Anchor model prefs';
+  bar.appendChild(pill);
+  bar.appendChild(_ecgEl('span', 'sp'));
+  bar.appendChild(_ecgEl('span', 'ecg-stamp', chamber.titlebar.stamp));
+  var closeBtn = _ecgEl('button', 'ecg-btn', '×');
+  closeBtn.title = 'Close (writes nothing)';
+  closeBtn.onclick = closeEcgberhtSeal;
+  bar.appendChild(closeBtn);
+  dock.appendChild(bar);
+
+  // S1-E2 — goal bar FIRST: North Star + [Still the goal] [Refine it]
+  var goal = _ecgEl('div', 'ecg-goalbar');
+  goal.id = 'ecgGoalBar';
+  var g = _ecgEl('div', 'g');
+  g.appendChild(_ecgEl('div', 'lab', chamber.goal_bar.label));
+  g.appendChild(_ecgEl('div', 'txt', chamber.goal_bar.goal));
+  goal.appendChild(g);
+  goal.appendChild(_ecgEl('button', 'ecg-btn gold', chamber.goal_bar.actions[0].label));
+  goal.appendChild(_ecgEl('button', 'ecg-btn', chamber.goal_bar.actions[1].label));
+  dock.appendChild(goal);
+
+  // S1-E3/E4 — Roadmap rail + run block · S1-E5 — conversation main region
+  var body = _ecgEl('div', 'ecg-chamber');
+  body.appendChild(_ecgRenderRail(chamber.roadmap_rail, chamber.run_block));
+  var convo = _ecgEl('div', 'ecg-convo');
+  convo.id = 'ecgConvo';
+  var opening = chamber.conversation.opening;
+  _ecgStewardMsg(convo, opening.text, [
+    {label: opening.actions[0].label}, {label: opening.actions[1].label}
+  ]);
+  body.appendChild(convo);
+  dock.appendChild(body);
+
+  // S1-E9 — saybox + footer stamp
+  var say = _ecgEl('div', 'ecg-saybox');
+  var input = document.createElement('input');
+  input.id = 'ecgSayInput';
+  input.placeholder = chamber.conversation.saybox.placeholder;
+  input.onkeydown = function (e) {
+    if (e.key === 'Enter' && input.value.trim()) {
+      _ecgSpeak(convo, input.value.trim());
+      input.value = '';
+    }
+  };
+  say.appendChild(input);
+  var speak = _ecgEl('button', 'ecg-btn gold', chamber.conversation.saybox.action);
+  speak.onclick = function () {
+    if (input.value.trim()) { _ecgSpeak(convo, input.value.trim()); input.value = ''; }
+  };
+  say.appendChild(speak);
+  dock.appendChild(say);
+  var footer = chamber.footer_stamp +
+    (vm.parity && vm.parity.agrees ? ' · CLI parity: status agrees' : '');
+  dock.appendChild(_ecgEl('div', 'ecg-footer', footer));
+
+  host.appendChild(dock);
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
+  });
+}
+
+/* TW7 S4-E1 — new-ground chamber (wireframes v2.1 Screen 4). An empty
+   project (no Face, no Strip) opens the stand-up conversation: the steward
+   asks for the goal IN JOHN'S WORDS and invents nothing. Face+Strip are
+   created on [Set the goal with me] confirm ONLY; [Not now] exits clean —
+   zero writes either way until that confirm. */
+function _ecgRenderStandUp(host, su) {
+  var dock = _ecgEl('div', 'ecg-dock');
+  dock.id = 'ecgSealDock';
+
+  var bar = _ecgEl('div', 'ecg-dbar');
+  var ico = _ecgEl('img', 'ecg-seal-ico');
+  ico.src = '/vendor/brand/ecgberht-project-seal.jpg';
+  ico.alt = '';
+  ico.onerror = function () { this.style.display = 'none'; };
+  bar.appendChild(ico);
+  var ti = _ecgEl('span', 'ti', 'Ecgberht ');
+  ti.appendChild(_ecgEl('small', null, '· new ground — no steward stands here yet'));
+  bar.appendChild(ti);
+  bar.appendChild(_ecgEl('span', 'sp'));
+  var closeBtn = _ecgEl('button', 'ecg-btn', '×');
+  closeBtn.title = 'Close (writes nothing)';
+  closeBtn.onclick = closeEcgberhtSeal;
+  bar.appendChild(closeBtn);
+  dock.appendChild(bar);
+
+  var convo = _ecgEl('div', 'ecg-convo');
+  convo.id = 'ecgConvo';
+
+  var goalRow = _ecgEl('div', 'ecg-saybox');
+  var goalInput = document.createElement('input');
+  goalInput.id = 'ecgStandUpGoal';
+  goalInput.placeholder = su.goal_prompt;
+
+  var confirm = function () {
+    var goal = goalInput.value.trim();
+    if (!goal) {
+      // The steward never fills this in — an empty goal is a refusal.
+      _ecgStewardMsg(convo, "I won't invent a goal for you — say what this " +
+        'project is for, in your own words, and I will stand the steward up.');
+      goalInput.focus();
+      return;
+    }
+    fetch('/api/ecgberht/stand_up' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({project_id: PROJECT_ID, north_star: goal, who: 'john'})
+    }).then(function (r) { return r.json(); }).then(function (out) {
+      if (out && out.ok) {
+        _ecgStewardMsg(convo, (out.voice || 'The steward stands.') +
+          ' Created: ' + (out.created || []).join(' + ') + ' — receipt landed.', [
+          {label: 'Open the chamber', onclick: function () {
+            closeEcgberhtSeal();
+            openEcgberhtSeal();
+          }}
+        ]);
+        goalRow.style.display = 'none';
+      } else {
+        _ecgStewardMsg(convo, 'Refused: ' +
+          ((out && (out.message || out.error)) || 'no response') +
+          ' — nothing was created.');
+      }
+    }).catch(function () {
+      _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was created.');
+    });
+  };
+
+  // Steward speaks first — Screen 4 stand-up voice, two actions only.
+  _ecgStewardMsg(convo, su.voice, [
+    {label: su.actions[0].label, onclick: function () { goalInput.focus(); }},
+    {label: su.actions[1].label, onclick: function () {
+      // Not now → exit clean: no Face, no Strip, no invented goal.
+      closeEcgberhtSeal();
+    }}
+  ]);
+  dock.appendChild(convo);
+
+  goalRow.appendChild(goalInput);
+  var setBtn = _ecgEl('button', 'ecg-btn gold', 'Set the goal');
+  setBtn.onclick = confirm;
+  goalInput.onkeydown = function (e) { if (e.key === 'Enter') confirm(); };
+  goalRow.appendChild(setBtn);
+  dock.appendChild(goalRow);
+
+  dock.appendChild(_ecgEl('div', 'ecg-footer',
+    'Face + Strip are created from templates on your confirm only · your words become the North Star · nothing is written until then'));
+
+  host.appendChild(dock);
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
+  });
+}
+
+function openEcgberhtSeal() {
+  var host = document.getElementById('ecgSealHost');
+  if (!host) return;
+  var existing = document.getElementById('ecgSealDock');
+  if (existing) { existing.scrollIntoView({behavior: 'smooth', block: 'nearest'}); return; }
+  fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok && j.mode === 'stand_up' && j.stand_up) {
+        // TW7 Screen 4 — empty project: stand-up conversation, never an
+        // invented chamber over a steward that does not exist.
+        _ecgRenderStandUp(host, j.stand_up);
+        return;
+      }
+      if (!j || !j.ok || !j.chamber) {
+        var dock = _ecgEl('div', 'ecg-dock');
+        dock.id = 'ecgSealDock';
+        var bar = _ecgEl('div', 'ecg-dbar');
+        bar.appendChild(_ecgEl('span', 'ti', 'Ecgberht'));
+        bar.appendChild(_ecgEl('span', 'sp'));
+        var x = _ecgEl('button', 'ecg-btn', '×');
+        x.onclick = closeEcgberhtSeal;
+        bar.appendChild(x);
+        dock.appendChild(bar);
+        var msg = _ecgEl('div', 'ecg-convo');
+        _ecgStewardMsg(msg, (j && j.error) ? ('The steward engine is not reachable: ' + j.error +
+          '. Nothing was invented and nothing was written.') :
+          'The steward engine is not reachable. Nothing was invented and nothing was written.');
+        dock.appendChild(msg);
+        host.appendChild(dock);
+        return;
+      }
+      _ecgRenderChamber(host, j);
+    })
+    .catch(function () { /* leave the dashboard untouched */ });
+}

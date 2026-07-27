@@ -40,3 +40,42 @@
 .panel .tpane .term-host,.dock .dock-term-host,.dock .term{position:relative}
 /* the bounded parked-worktree budget stamp in the project header */
 .dhead .pwbudget{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace}
+
+/* ── Ecgberht Seal chamber (wireframes v2.1 Screen 1) — docked overlay over the project view ── */
+.ecg-seal-btn{display:inline-flex;align-items:center;gap:5px}
+.ecg-seal-ico{width:14px;height:14px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:middle}
+.ecg-dock{position:relative;width:auto;margin:12px 18px 4px;background:var(--surface);border:1px solid var(--border);border-top:2px solid #c9a227;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+.ecg-dock .ecg-dbar{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--border);background:var(--surface2);flex:0 0 auto}
+.ecg-dock .ecg-dbar .ti{font-weight:600}.ecg-dock .ecg-dbar .ti small{color:var(--text-dim);font-weight:400}
+.ecg-dock .ecg-dbar .sp{flex:1}
+.ecg-dock .ecg-seat-pill{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid #c9a227;color:#c9a227;background:transparent;cursor:pointer}
+.ecg-dock .ecg-stamp{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace}
+.ecg-goalbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:rgba(201,162,39,.06)}
+.ecg-goalbar .g{flex:1}.ecg-goalbar .lab{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
+.ecg-goalbar .txt{font-size:13px}
+.ecg-btn{font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer}
+.ecg-btn.gold{border-color:#c9a227;color:#c9a227}
+.ecg-chamber{display:flex;gap:0;min-height:260px}
+.ecg-rail{flex:0 0 270px;border-right:1px solid var(--border);padding:12px 14px;overflow:auto}
+.ecg-rail h3{font-size:11px;margin:0 0 8px;letter-spacing:.06em;text-transform:uppercase}
+.ecg-rail h3 .house{color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0}
+.ecg-step{display:flex;gap:8px;font-size:12px;padding:4px 0;align-items:baseline}
+.ecg-step .m{width:14px;flex:0 0 14px;text-align:center}
+.ecg-step small{display:block;color:var(--text-dim);font-size:10px}
+.ecg-step.run .m{color:#22c55e}.ecg-step.you .m{color:#eab308}.ecg-step.park{opacity:.65}
+.ecg-runblock{margin-top:10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:11px}
+.ecg-runblock .about{color:var(--text-dim);margin-bottom:6px}
+.ecg-runblock table{width:100%;border-collapse:collapse}
+.ecg-runblock td{padding:1px 4px 1px 0;vertical-align:top}.ecg-runblock td:first-child{color:var(--text-dim);width:52px}
+.ecg-prov{font-size:10px;color:var(--text-dim);margin-top:8px;font-family:ui-monospace,Consolas,monospace}
+.ecg-convo{flex:1;display:flex;flex-direction:column;padding:12px 16px;gap:10px;overflow:auto}
+.ecg-msg{max-width:92%;border:1px solid var(--border);border-radius:10px;padding:9px 12px;font-size:13px;background:var(--surface2)}
+.ecg-msg .who{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px}
+.ecg-msg.steward{align-self:flex-start;border-left:2px solid #c9a227}
+.ecg-msg.john{align-self:flex-end;border-right:2px solid var(--border)}
+.ecg-msg .act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
+.ecg-divider{align-self:center;color:var(--text-dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;border-top:1px dashed var(--border);width:100%;text-align:center;padding-top:8px}
+.ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
+.ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:center}
+.ecg-saybox input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}
+.ecg-footer{padding:6px 16px 10px;font-size:10px;color:var(--text-dim);text-align:center;font-family:ui-monospace,Consolas,monospace}
