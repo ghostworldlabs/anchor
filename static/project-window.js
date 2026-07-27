@@ -4359,7 +4359,58 @@ function _mountTerminal(sessionId, body, rec) {
       return _postJson('/api/rnd/term_input2', {session: sessionId, data: d});
     }).catch(function () {});
   }
-  term.onData(function (d) { _sendInput(d); });
+  // ── iPad / IME DICTATION GUARD (2026-07-26 hardening, P0.3) ───────────────
+  // Symptom: each dictated sentence re-sent EVERYTHING said so far
+  // ("a", "a b", "a b c") — an exponential blow-up that polluted real
+  // transcripts. Root cause is in vendored xterm 6.0.0: its hidden helper
+  // textarea is NEVER cleared after a composition commit, and the only
+  // anti-duplication guard (_dataAlreadySent) is populated exclusively from a
+  // keyCode===229 keydown — which iOS dictation never sends. So every
+  // compositionend re-emitted value.substring(start) of an ever-growing buffer,
+  // and Anchor forwarded it verbatim, uncapped.
+  //
+  // Fixed HERE rather than by forking the vendor bundle: suppress sends while a
+  // composition is in flight, emit ONCE on commit with the already-sent prefix
+  // stripped, and CLEAR the textarea so the substring can never regrow.
+  var _composing = false;
+  var _sentPrefix = '';
+  try {
+    var _ta = body.querySelector('.xterm-helper-textarea');
+    if (_ta) {
+      _ta.addEventListener('compositionstart', function () {
+        _composing = true;
+        _sentPrefix = '';
+      });
+      _ta.addEventListener('compositionend', function (ev) {
+        _composing = false;
+        var full = (ev && typeof ev.data === 'string') ? ev.data : (_ta.value || '');
+        var delta = full;
+        if (_sentPrefix && full.indexOf(_sentPrefix) === 0) {
+          delta = full.slice(_sentPrefix.length);
+        }
+        _sentPrefix = '';
+        // Clearing is the load-bearing half: xterm's _finalizeComposition reads
+        // value.substring(start) off a textarea it never empties.
+        try { _ta.value = ''; } catch (e) {}
+        if (delta) _sendInput(delta);
+      });
+      // iOS re-recognition commits with insertReplacementText, which xterm drops
+      // outright (it accepts only insertText) — while the textarea still grows.
+      // Track it so the compositionend delta is computed against what really went.
+      _ta.addEventListener('beforeinput', function (ev) {
+        if (ev && ev.inputType === 'insertReplacementText' && _composing) {
+          _sentPrefix = '';
+        }
+      });
+    }
+  } catch (e) { /* no helper textarea (older xterm): fall through unguarded */ }
+
+  term.onData(function (d) {
+    // While composing, xterm's own emissions are the cumulative buffer — drop
+    // them; compositionend sends the delta exactly once.
+    if (_composing) { _sentPrefix = _sentPrefix || ''; return; }
+    _sendInput(d);
+  });
   // Keyboard paste: xterm emits Ctrl+V as the control byte \x16, so paste never
   // happened (only right-click, which uses the browser's native paste event).
   // Intercept Ctrl/Cmd+V → read the clipboard → term.paste (honors bracketed

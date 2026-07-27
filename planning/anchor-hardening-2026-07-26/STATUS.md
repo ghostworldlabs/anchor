@@ -69,3 +69,15 @@ Journal  | terminal double-print record CLOSES with this commit; cadence-gap
 ETA      | dictation + token redaction + zh-node next; then release sequence
 To do    | dictation compose box · token redaction · zh-node backoff · journaling
            endpoints+UI · summarizer quality · release · memo
+
+[05:34] P0.3 LANDED — iPad dictation blow-up fixed
+Effort   | Anchor v1.1.1 hardening (steward/v1.2 isolated at b9252a9, untouched)
+Doing    | composition guard + textarea clear + delta-only send + server cap + iOS CSS
+Status   | 6 of ~9 items done
+Tests    | +8 dictation tests; 20 green with the terminal set
+Blocker  | none
+Procs    | none
+Journal  | 1 open (status-cadence gap); terminal + usage records closed
+ETA      | token redaction + zh-node backoff next, then journaling endpoints
+To do    | token redaction · zh-node backoff · journaling endpoints+UI ·
+           summarizer quality · release sequence · collaborator memo

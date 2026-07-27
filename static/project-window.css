@@ -79,3 +79,21 @@
 .ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:center}
 .ecg-saybox input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}
 .ecg-footer{padding:6px 16px 10px;font-size:10px;color:var(--text-dim);text-align:center;font-family:ui-monospace,Consolas,monospace}
+
+/* ── iPad / touch dictation target (2026-07-26 hardening, P0.3) ─────────────
+   xterm hides its helper textarea at 0x0, opacity:0, left:-9999em, z-index:-5.
+   iOS anchors its dictation overlay and its replacement RANGE to the field's
+   rendered rect; with no rect it falls back to replacing the WHOLE field per
+   utterance, which is what drove the cumulative re-send. Give coarse-pointer
+   clients a real (if tiny, effectively invisible) on-screen rect so Safari can
+   do a caret-relative delta insert instead. Desktop is untouched. */
+@media (pointer: coarse) {
+  .xterm .xterm-helper-textarea {
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1em;
+    opacity: 0.01;
+    z-index: 5;
+  }
+}

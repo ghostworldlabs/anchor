@@ -13307,6 +13307,18 @@ def handle_term_input2(handler, path, body):
     data = body.get("data", "")
     if not session:
         handler._send_json({"ok": False, "error": "session required"}, 400)
+    elif len(str(data)) > _term.MAX_TURN_CHARS:
+        # INPUT CAP (2026-07-26 hardening, P0.3). The legacy REPL endpoint has
+        # capped turns since v2; this ConPTY path had NO length guard, so the
+        # iPad dictation blow-up (each utterance re-sending everything said so
+        # far) could pin the PTY with an unbounded write. The client-side
+        # composition guard is the fix; this is the backstop that keeps a
+        # runaway input from reaching the terminal at all.
+        handler._send_json(
+            {"ok": False,
+             "error": f"turn too large ({len(str(data))} chars > "
+                      f"{_term.MAX_TURN_CHARS}); refusing to write it to the PTY",
+             "reason": "turn-too-large"}, 413)
     else:
         out = _termsess.input(session, data)
         if out.get("ok"):
