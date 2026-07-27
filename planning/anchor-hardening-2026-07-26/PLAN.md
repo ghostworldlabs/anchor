@@ -111,6 +111,15 @@ regression tests, journal every fix. Bar: **world class**.
 - **P4 SHIP GATE**: re-vendor, in-bundle smoke (the memo commands), re-cut release
   (v1.1.1 or move the announce), update collaborator memo x3 if anything changes.
 
+## STATUS CADENCE (John, 2026-07-26 — MANDATORY for this effort)
+Post a status update **every ~10 minutes of working time** in the LOCKED format
+(user-global AGENTS.md "Long-run progress updates"): a `[HH:MM]` header, then
+Effort / Doing / Status / Tests / Blocker / Procs / **Journal** rows, then an
+ETA + To do footer — and **lead with the one-line "what this effort is FOR"**
+goal line (memory: feedback-status-about-line). Append each update to
+`STATUS.md` in this folder (tracked, so John can read it any time) AND post it
+in chat. The Journal row now has a real source: `anchor.py friction-report`.
+
 ## Status ledger (update as work proceeds)
 
 - [x] P0 durable state written (this doc + memory)
@@ -168,7 +177,14 @@ regression tests, journal every fix. Bar: **world class**.
       Smoke subset 40 pass / 1 pre-existing fail (test_token_hygiene, at HEAD).
       NOTE: the member_files fix should ALSO fix the blank-summary epidemic —
       verify by regenerating a summary before claiming it.
-- [ ] **NEW REQUIREMENT (John 2026-07-26, IN SCOPE FOR v1.1.1): FRICTION
+- [x] **JOURNALING BUILT + COMMITTED (Anchor 638b0cb)**: friction_journal.py
+      (store + capture + auto-context + lifecycle + friction_report intake
+      brief) + anchor.py CLI (`journal`, `friction-report`, `friction-resolve`)
+      + 10 tests. Verified end-to-end incl. closing a record with a real commit.
+      VERSION -> 1.1.1. STILL TO DO for the feature: the HTTP endpoints
+      (POST /api/rnd/journal_friction, GET /api/rnd/friction) + a UI capture
+      control, so it is reachable from the dashboard, not only the CLI.
+- [x] (superseded — see above) NEW REQUIREMENT (John 2026-07-26): FRICTION
       JOURNALING + sleep-cycle intake.** Full design:
       `JOURNALING-FEATURE.md` in this folder. Verified gap: share_feedback.py
       covers SKILL journals only; docs/friction/*.md were HAND-WRITTEN; Anchor
