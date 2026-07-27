@@ -9979,7 +9979,13 @@ def _ecgberht_project_folder(pid):
     proj = _rnd.get_project(pid)
     if proj is None:
         return None, {"ok": False, "error": "Unknown project"}, 404
-    return proj.get("folder_path", ""), None, 200
+    folder = (proj.get("folder_path") or "").strip()
+    if not folder:
+        # A registry row with a blank folder_path would otherwise reach the
+        # bridge as `--project ""`, which spawns Node to work on nothing.
+        return None, {"ok": False, "error": "project_has_no_folder",
+                      "message": "the project record carries no folder_path"}, 409
+    return folder, None, 200
 
 
 def handle_ecgberht_chamber(handler, path, body):
@@ -10071,44 +10077,85 @@ def _ecgberht_hs_bridge(args, timeout=30):
                 "message": out[:500]}
 
 
+#: The high-seat bridge takes its roots as ONE ``--roots a;b;c`` argument, so a
+#: folder path containing a semicolon would be split into two bogus roots. A
+#: semicolon is legal in a Windows directory name, so this is filtered, not
+#: assumed away.
+_ECGBERHT_ROOT_DELIM = ";"
+
+
 def _ecgberht_portfolio_roots():
     """Active R&D project folders = the High Seat's discovery roots.
-    Registry-derived, never a hardcoded host path."""
+
+    Returns ``(roots, skipped, failed)``. Registry-derived, never a hardcoded
+    host path.
+
+    ``failed`` exists because this used to swallow every exception and return
+    ``[]`` — so a registry read that BLEW UP was reported to the user as the
+    cheerful "no active R&D project folders to steward". An empty portfolio and
+    a broken registry are not the same state and must not render the same.
+
+    ``skipped`` carries any root containing the delimiter (see
+    ``_ECGBERHT_ROOT_DELIM``); including one would silently corrupt the root
+    list the engine sees, so it is dropped and reported rather than mis-split.
+    """
     roots = []
+    skipped = []
     try:
         for entry in _rnd.list_projects(include_archived=False,
                                         include_future=False,
                                         include_retired=False):
             folder = (entry.get("folder_path") or "").strip()
-            if folder and folder not in roots:
-                roots.append(folder)
+            if not folder or folder in roots:
+                continue
+            if _ECGBERHT_ROOT_DELIM in folder:
+                skipped.append(folder)
+                continue
+            roots.append(folder)
     except Exception:
-        pass
-    return roots
+        return [], skipped, True
+    return roots, skipped, False
 
 
 def handle_ecgberht_high_seat(handler, path, body):
     """GET /api/ecgberht/high_seat — Screen 2 view model (raise queue +
     tiles + spoken capacity balancing) over all active project roots."""
-    roots = _ecgberht_portfolio_roots()
+    roots, skipped, failed = _ecgberht_portfolio_roots()
+    if failed:
+        # A registry read that BLEW UP is not an empty portfolio. Say so.
+        handler._send_json({"ok": False, "error": "registry_unreadable",
+                            "message": "could not read the project registry; "
+                                       "the portfolio is unknown, not empty"}, 502)
+        return
     if not roots:
         handler._send_json({"ok": False, "error": "no_projects",
-                            "message": "no active R&D project folders to steward"}, 200)
+                            "message": "no active R&D project folders to steward",
+                            "skipped_roots": skipped}, 200)
         return
-    out = _ecgberht_hs_bridge(["--roots", ";".join(roots)])
+    out = _ecgberht_hs_bridge(["--roots", _ECGBERHT_ROOT_DELIM.join(roots)])
+    if skipped and isinstance(out, dict):
+        out["skipped_roots"] = skipped
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
 def handle_ecgberht_high_seat_badge(handler, path, body):
     """GET /api/ecgberht/high_seat_badge — ⚑ raise-queue length ONLY.
     The single ambient Ecgberht signal anywhere in Anchor (S0-E2)."""
-    roots = _ecgberht_portfolio_roots()
+    roots, _skipped, failed = _ecgberht_portfolio_roots()
+    if failed:
+        # The badge is ambient chrome, so it stays quiet rather than throwing a
+        # banner — but it must not claim a queue of 0, which reads as "nothing
+        # needs you". Report the unknown honestly and let the UI hide it.
+        handler._send_json({"ok": False, "error": "registry_unreadable",
+                            "mode": "badge", "queue_length": None}, 502)
+        return
     if not roots:
         handler._send_json({"ok": True, "mode": "badge",
                             "badge": {"glyph": "⚑", "count": 0},
                             "queue_length": 0}, 200)
         return
-    out = _ecgberht_hs_bridge(["--roots", ";".join(roots), "--badge"])
+    out = _ecgberht_hs_bridge(
+        ["--roots", _ECGBERHT_ROOT_DELIM.join(roots), "--badge"])
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
@@ -10176,6 +10223,11 @@ def handle_ecgberht_high_seat_act(handler, path, body):
 # project folder — traversal-safe — so HTML mockups render best-effort inline
 # (iframe) and everything else opens in the browser viewer. Never a bare
 # path with no open action.
+#: Cap on a single steward artifact served inline. The handler reads the whole
+#: file into memory on a shared server thread, so this is a memory bound, not a
+#: policy preference. 25 MB comfortably covers decision packets and images.
+_ECGBERHT_ARTIFACT_MAX_BYTES = 25 * 1024 * 1024
+
 _ECGBERHT_ARTIFACT_TYPES = {
     ".html": "text/html", ".htm": "text/html",
     ".md": "text/plain", ".markdown": "text/plain", ".txt": "text/plain",
@@ -10208,6 +10260,21 @@ def handle_ecgberht_artifact(handler, path, body):
         return
     if not target.is_file():
         handler._send_json({"ok": False, "error": "artifact_missing"}, 404)
+        return
+    # Bounded read: this runs on a shared server thread and reads the whole file
+    # into memory before sending, so an oversized artifact in a project folder
+    # is an unbounded allocation. Refuse honestly instead of trying.
+    try:
+        size = target.stat().st_size
+    except OSError:
+        handler._send_json({"ok": False, "error": "artifact_unreadable"}, 404)
+        return
+    if size > _ECGBERHT_ARTIFACT_MAX_BYTES:
+        handler._send_json({"ok": False, "error": "artifact_too_large",
+                            "message": "%d bytes exceeds the %d-byte cap"
+                                       % (size, _ECGBERHT_ARTIFACT_MAX_BYTES),
+                            "size": size,
+                            "limit": _ECGBERHT_ARTIFACT_MAX_BYTES}, 413)
         return
     ctype = _ECGBERHT_ARTIFACT_TYPES.get(target.suffix.lower(),
                                          "application/octet-stream")
