@@ -117,6 +117,31 @@ def env(tmp_path, monkeypatch):
         pass
 
 
+def _attach_doc_to_session(eh, repo, pid, sid, lane="planning", n=0):
+    """Give a LIVE session a member document of its own.
+
+    Without this, a freshly started session owns no documents, so the seed's
+    grounding corpus is member TITLES alone and `summarize_session` correctly
+    short-circuits WITHOUT calling the model (2026-07-26 hardening) — which
+    would make these scheduling tests assert against a summary that is never
+    generated. Attaching a real doc keeps them testing what they claim to.
+    """
+    rel = f"{lane}/live-{sid[:8]}-{n}/NOTES.md"
+    p = repo / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        "# Session notes\n\n## What was done\n"
+        "Grouped trio efforts into sessions and cached validated summaries "
+        "so the surface is a truthful memory of the work.\n",
+        encoding="utf-8")
+    eh.record_effort(
+        repo, pid, lane, eh.discovered_job_id(lane, rel), skill="Crucible",
+        extra={"source": eh.SOURCE_DISCOVERED, "kind": "plan-doc",
+               "title": "Session notes", "artifact_path": rel,
+               "status": "imported", "session_id": sid})
+    return rel
+
+
 def _add_plan_session(eh, sessions, repo, pid, plan_dir="planning/rnd-x",
                       created_at=2000.0):
     """Record a discovered planning session with REAL member docs on disk so the
@@ -206,6 +231,7 @@ def test_kill_schedules_one_background_summary_non_blocking(env, monkeypatch):
     # summary still grounds against the lane's discovered docs via the seed corpus.
     live = ts.start_session(pid, "planning", backend="claude")
     live_sid = live["session_id"]
+    _attach_doc_to_session(eh, repo, pid, live_sid)
 
     monkeypatch.setenv(
         "STUB_STREAMJSON_CLAIMS",
@@ -292,6 +318,7 @@ def test_failed_generation_leaves_no_cache(env, monkeypatch):
     _add_plan_session(eh, sessions, repo, pid)
     live = ts.start_session(pid, "planning", backend="claude")
     live_sid = live["session_id"]
+    _attach_doc_to_session(eh, repo, pid, live_sid)
 
     # Point the runner at a stub that exits non-zero → RUN_FAILED → no cache.
     monkeypatch.setenv("ANCHOR_RUNNER_CMD", f"python {FAILRUNNER}")
@@ -395,6 +422,7 @@ def test_finish_to_build_schedules_summary_for_planning_session(env, monkeypatch
     _add_plan_session(eh, sessions, repo, pid)
     plan = ts.start_session(pid, "planning", backend="claude")
     psid = plan["session_id"]
+    _attach_doc_to_session(eh, repo, pid, psid)
     monkeypatch.setenv("STUB_STREAMJSON_CLAIMS",
                        "Cache validated summaries for each session.")
 
@@ -429,6 +457,7 @@ def test_reconcile_dead_schedules_summary(env, monkeypatch):
     _add_plan_session(eh, sessions, repo, pid)
     plan = ts.start_session(pid, "planning", backend="claude")
     psid = plan["session_id"]
+    _attach_doc_to_session(eh, repo, pid, psid)
     monkeypatch.setenv("STUB_STREAMJSON_CLAIMS",
                        "Cache validated summaries for each session.")
 

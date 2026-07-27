@@ -70,6 +70,32 @@ MAX_SEED_DOCS = 12
 MAX_SEED_BYTES = 16 * 1024
 
 #: How many model candidate runs to fuse (frozen design: generate TWICE).
+#: Seed key carrying how many characters of MEMBER DOCUMENT text actually
+#: resolved on disk. When this is 0 the grounding corpus is nothing but titles
+#: and labels, so every claim the model writes gets rejected and the tile
+#: renders "no grounded claims" — the outcome for ~60% of summaries on disk.
+#: It is not a free failure: one such blank cost 194,422 tokens / 66.6s. The
+#: generator short-circuits on it rather than paying for a guaranteed blank.
+SEED_DOC_CHARS = "doc_chars"
+
+
+def seed_can_ground(seed: dict) -> bool:
+    """True iff this seed has anything a claim could actually be grounded in.
+
+    A SESSION seed needs member-document text: with ``doc_chars == 0`` the
+    corpus is member TITLES alone, and `is_grounded` requires two corpus hits
+    at a 0.7 ratio, so no sentence the model can write will survive. A PROJECT
+    seed may legitimately ground an objective in deliverable names and lane
+    activity, so only a wholly empty corpus is hopeless there.
+
+    Fails OPEN — a seed predating ``SEED_DOC_CHARS`` (or built by a caller that
+    doesn't set it) is treated as groundable, so a missing key can never
+    silently suppress summaries.
+    """
+    if (seed.get("kind") or "") == "project":
+        return bool((seed.get("text") or "").strip())
+    return seed.get(SEED_DOC_CHARS) != 0
+
 GENERATE_RUNS = 2
 
 #: Provenance marker for an IMPORTED (brownfield-discovered) session — its effort
@@ -286,6 +312,7 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
     signals = _SECTION_SIGNALS.get(kind, _SECTION_SIGNALS["planning"])
     members_out = []
     anchors = []
+    doc_chars = 0
     corpus_parts = []
     north_star = ""
     members = session.get("member_files", []) or []
@@ -295,6 +322,7 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
         rel = (member.get("artifact_path") or "").strip()
         text = _read_bounded(path) if path is not None else ""
         if text:
+            doc_chars += len(text)
             corpus_parts.append(text)
             if not title:
                 title = _first_heading(text)
@@ -343,6 +371,9 @@ def extraction_seed(folder_path, project_id, lane, session) -> dict:
         "prompts": _session_prompts(session, members),
         "actions": _session_actions(members_out),
         "text": "\n".join(corpus_parts),
+        # How much MEMBER DOCUMENT text actually resolved on disk. 0 means
+        # the corpus is titles only and nothing can ground (SEED_DOC_CHARS).
+        SEED_DOC_CHARS: doc_chars,
     }
 
 
@@ -589,6 +620,15 @@ def _generate_candidates(folder_path, seed: dict, runs: int):
     successful per-run claim-lists and ``failed`` is True iff ANY run returned the
     ``RUN_FAILED`` sentinel (FIX 2 — a failed run must not be cached as success).
     """
+    # EMPTY-CORPUS SHORT-CIRCUIT (2026-07-26 hardening). When NO member artifact
+    # resolves on disk, `_read_bounded` returns "" for every one and the corpus
+    # collapses to titles/labels alone — the model then cannot write a sentence
+    # that passes the grounding ratio, so the tile renders "no grounded claims"
+    # no matter what comes back. Don't pay for a guaranteed blank. A SMALL
+    # corpus is still a real one and still generates; only a corpus with zero
+    # document bytes is hopeless. Seeds that predate this key (or come from
+    # callers that don't set it) are treated as groundable — fail OPEN, so a
+    # missing key can never silently suppress summaries.
     candidates = []
     failed = False
     for _ in range(max(1, runs)):
@@ -667,7 +707,58 @@ def _validate(candidates: list, seed: dict,
             seen.add(norm)
             if is_grounded(claim, corpus_lower, min_ratio=min_ratio):
                 kept.append(claim.strip())
-    return kept
+    # NEAR-DUPLICATE COLLAPSE (2026-07-26 hardening). The union above dedupes
+    # only on EXACT normalized text, so the two generation runs — meant as
+    # cross-run VALIDATION — were being CONCATENATED instead: two paraphrases of
+    # one paragraph both survived. Live result: project summaries that said the
+    # same thing twice (~700 words for one idea) and 29-bullet session summaries
+    # whose second half restated the first. Collapse high-overlap survivors,
+    # keeping the longer (more informative) wording.
+    return _collapse_near_duplicates(kept)
+
+
+#: Content-token overlap (Jaccard) at or above which two claims are "the same
+#: claim, worded differently" and only the longer is kept.
+NEAR_DUP_JACCARD = 0.6
+
+
+def _content_tokens(text: str) -> set:
+    toks = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return {t for t in toks if len(t) >= 3 and t not in _STOPWORDS}
+
+
+def _collapse_near_duplicates(claims: list,
+                              threshold: float = NEAR_DUP_JACCARD) -> list:
+    """Drop claims that restate an already-kept claim; keep the longer wording.
+
+    Order-stable over the survivors. Pure/deterministic — no model call.
+    """
+    out = []
+    sets = []
+    for claim in claims:
+        toks = _content_tokens(claim)
+        if not toks:
+            out.append(claim)
+            sets.append(toks)
+            continue
+        dup_at = -1
+        for i, prev in enumerate(sets):
+            if not prev:
+                continue
+            inter = len(toks & prev)
+            if not inter:
+                continue
+            union = len(toks | prev)
+            if union and (inter / union) >= threshold:
+                dup_at = i
+                break
+        if dup_at < 0:
+            out.append(claim)
+            sets.append(toks)
+        elif len(claim) > len(out[dup_at]):
+            out[dup_at] = claim          # keep the more informative phrasing
+            sets[dup_at] = toks
+    return out
 
 
 # ── (d) Cache layout + render ────────────────────────────────────────────────
@@ -1198,6 +1289,38 @@ def summarize_session(folder_path, project_id, lane, session,
 
         seed = extraction_seed(folder_path, project_id, store_lane, session)
         effort = _aggregate_effort(session)
+        # EMPTY-CORPUS SHORT-CIRCUIT (2026-07-26 hardening). When no member
+        # document resolves on disk the corpus is titles alone and NOTHING the
+        # model writes can pass the grounding filter — the tile renders "no
+        # grounded claims" no matter what comes back. That was the outcome for
+        # ~60% of summaries, and it was not free: one blank cost 194,422 tokens
+        # / 66.6s. Skip the call.
+        #
+        # Deliberately NOT cached. A session's docs are persisted around the
+        # same time the finish hook fires, so an ungroundable read here may just
+        # mean we looked a moment too early; caching it would freeze the blank
+        # tile permanently. The skip costs nothing, so re-evaluating on the next
+        # view costs nothing either — and it self-heals the moment docs land.
+        if not seed_can_ground(seed):
+            return {
+                "session_id": session_id,
+                "lane": seed["lane"],
+                "title": seed.get("title", ""),
+                "claims": [],
+                "member_links": _member_links(seed, project_id, store_lane),
+                "when_run": seed.get("when_run", ""),
+                "what_was_asked": seed.get("what_was_asked", ""),
+                "north_star": seed.get("north_star", ""),
+                "skill": seed.get("skill", ""),
+                "prompts": seed.get("prompts", []),
+                "actions": seed.get("actions", []),
+                "effort": effort,
+                "no_grounded_claims": True,
+                "ungroundable": True,
+                "generated_at": time.time(),
+                "runs": 0,
+            }
+
         candidates, failed = _generate_candidates(folder_path, seed,
                                                   GENERATE_RUNS)
         # FIX 2 — no cache poisoning on failure: if a runner job FAILED/timed
@@ -1440,6 +1563,7 @@ def project_extraction_seed(folder_path, project_id) -> dict:
     title = ""
     sources = []
     anchors = []
+    doc_chars = 0
     corpus_parts = []
 
     # 1. "What the project IS" — first existing identity doc (bounded read).
@@ -1451,6 +1575,7 @@ def project_extraction_seed(folder_path, project_id) -> dict:
             corpus_parts.append(text)
             if not title:
                 title = _first_heading(text)
+            doc_chars += len(text)
             for heading, body in _lift_sections(text, _SECTION_SIGNALS["planning"]):
                 anchors.append({"heading": heading, "body": body, "from": name})
             break
@@ -1466,6 +1591,7 @@ def project_extraction_seed(folder_path, project_id) -> dict:
         except (ValueError, OSError):
             pass
         sources.append(rel)
+        doc_chars += len(text)
         corpus_parts.append(text)
         for heading, body in _lift_sections(text, _SECTION_SIGNALS["planning"]):
             anchors.append({"heading": heading, "body": body, "from": rel})
@@ -1502,6 +1628,7 @@ def project_extraction_seed(folder_path, project_id) -> dict:
         "deliverables": deliverables,
         "activity": activity,
         "text": "\n".join(corpus_parts),
+        SEED_DOC_CHARS: doc_chars,
     }
 
 
@@ -1864,6 +1991,23 @@ def summarize_project(folder_path, project_id, force: bool = False,
                 return cached
 
         seed = project_extraction_seed(folder_path, project_id)
+        # Same empty-corpus short-circuit as the session path, and likewise NOT
+        # cached — an empty project corpus means the identity/plan docs haven't
+        # been written yet, which is a state projects grow out of.
+        if not seed_can_ground(seed):
+            return {
+                "project_id": str(project_id),
+                "kind": "project",
+                "title": seed.get("title", ""),
+                "claims": [],
+                "summary_text": "",
+                "sources": seed.get("sources", []),
+                "no_grounded_claims": True,
+                "ungroundable": True,
+                "generated_at": time.time(),
+                "runs": 0,
+            }
+
         candidates, failed = _generate_project_candidates(
             folder_path, seed, GENERATE_RUNS, runner_env=runner_env)
         if failed or not candidates:
