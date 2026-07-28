@@ -105,21 +105,21 @@ function _ecgHsRenderPacket(body, pid, payload) {
   (pv.cards || []).forEach(function (card) {
     var el = _ecgHsEl('div', 'ecg-hs-pcard' + (card.card === 'remember_the_goal' ? ' goal' : ''));
     if (card.card === 'remember_the_goal') {
-      el.appendChild(_ecgHsEl('h3', null, 'Remember the goal · North Star (Face)'));
+      el.appendChild(_ecgHsEl('h3', null, 'Remember the goal · North Star'));
       el.appendChild(_ecgHsEl('div', card.unknown ? 'unknown' : null, card.goal));
       if (card.unchanged_since) {
-        el.appendChild(_ecgHsEl('div', 'prov', 'Face · unchanged since ' + card.unchanged_since));
+        el.appendChild(_ecgHsEl('div', 'prov', 'unchanged since ' + card.unchanged_since));
       }
     } else if (card.card === 'where_we_are') {
       el.appendChild(_ecgHsEl('h3', null, 'Where we are'));
       el.appendChild(_ecgHsEl('div', card.unknown ? 'unknown' : null, card.line));
-      el.appendChild(_ecgHsEl('div', 'prov', 'Campaign Roadmap · typed ledger'));
+      el.appendChild(_ecgHsEl('div', 'prov', 'from the project roadmap'));
     } else if (card.card === 'since_you_last_looked') {
       el.appendChild(_ecgHsEl('h3', null, 'Since you last looked'));
       el.appendChild(_ecgHsEl('div', card.unknown ? 'unknown' : null,
         card.unknown ? String(card.delta) : JSON.stringify(card.delta)));
     } else if (card.card === 'the_thing_itself') {
-      el.appendChild(_ecgHsEl('h3', null, 'The thing itself · rendered, not linked-and-forgotten'));
+      el.appendChild(_ecgHsEl('h3', null, 'The work itself · shown here, not just linked'));
       if (card.unknown) {
         el.appendChild(_ecgHsEl('div', 'unknown', card.voice));
       } else {
@@ -138,7 +138,7 @@ function _ecgHsRenderPacket(body, pid, payload) {
         el.appendChild(_ecgHsActions([
           { label: 'Open full', pri: true, onclick: function () { window.open(artUrl, '_blank'); } },
           { label: 'Walk me through', onclick: function () {
-              _ecgHsReply(el, 'Walk-through: open-in-viewer + steward narration lands in a later PE wave — for now, "Open full" shows the artifact itself.');
+              _ecgHsReply(el, 'A guided walk-through is not built yet — for now, "Open full" shows the file itself.');
             } }
         ]));
       }
@@ -159,13 +159,12 @@ function _ecgHsRenderPacket(body, pid, payload) {
           decision: decision, who: 'john', why: edits || null
         }, function (out) {
           if (out && out.ok && out.moved) {
-            _ecgHsReply(el, 'Receipt landed — the Roadmap moved (' + card.step_id + ' → done). ' +
-              (out.persisted ? 'Persisted through the single writer.' : ''));
+            _ecgHsReply(el, 'Saved — the roadmap moved (' + card.step_id + ' → done).');
             ecgHighSeatBadge();
           } else if (out && out.ok) {
-            _ecgHsReply(el, 'Held — nothing written until you decide.');
+            _ecgHsReply(el, 'Holding — nothing is saved until you decide.');
           } else {
-            _ecgHsReply(el, 'Refused: ' + ((out && (out.error || out.message)) || 'unknown'));
+            _ecgHsReply(el, "Couldn't do that: " + ((out && (out.error || out.message)) || 'unknown reason'));
           }
         });
       };
@@ -187,7 +186,7 @@ function _ecgHsRenderPacket(body, pid, payload) {
 function ecgHsBringUp(body, pid) {
   _ecgHsGet('/api/ecgberht/bring_up?project_id=' + encodeURIComponent(pid), function (out) {
     if (!out || !out.ok) {
-      _ecgHsReply(body, 'Bring it up failed: ' + ((out && (out.error || out.message)) || 'no response'));
+      _ecgHsReply(body, "I couldn't open that: " + ((out && (out.error || out.message)) || 'no response'));
       return;
     }
     // S0-E5: same overlay, no second window — the altitude hop is a non-event.
@@ -210,10 +209,10 @@ function _ecgHsRenderHighSeat(body, vm) {
     raise.appendChild(_ecgHsActions([
       { label: 'Bring it up', pri: true, onclick: function () { ecgHsBringUp(body, rb.project_id); } },
       { label: 'Later today', onclick: function () {
-          _ecgHsReply(raise, 'Set aside for this sitting — nothing written; it stays in the queue.');
+          _ecgHsReply(raise, 'Set aside for now — nothing saved; it stays in the queue.');
         } },
       { label: 'Tomorrow', onclick: function () {
-          _ecgHsReply(raise, 'Set aside for this sitting — nothing written; it stays in the queue.');
+          _ecgHsReply(raise, 'Set aside for now — nothing saved; it stays in the queue.');
         } }
     ]));
     raise.appendChild(_ecgHsEl('div', 'note', rb.queue_note));
@@ -251,22 +250,22 @@ function _ecgHsRenderHighSeat(body, vm) {
   });
   card.appendChild(_ecgHsActions([
     { label: 'Do that', pri: true, onclick: function () {
-        _ecgHsReply(card, 'Held to the recommended order — no override needed, nothing written.');
+        _ecgHsReply(card, 'Keeping the suggested order — nothing changed, nothing saved.');
       } },
     { label: 'Reorder…', onclick: function () {
-        var to = prompt('Your order (e.g. "trio, foundry") — the override lands as a receipt:');
+        var to = prompt('Your order (e.g. "trio, foundry") — I will record that you changed it:');
         if (to == null || to === '') return;
         _ecgHsPost({
           kind: 'override', who: 'john',
-          why: 'High Seat balancing reorder',
+          why: 'reordered from the High Seat',
           from: (bal.recommendation.order || []).join(','), to: to
         }, function (out) {
           _ecgHsReply(card, out && out.ok
-            ? 'Override receipt landed (who/when/why/from→to).'
-            : 'Refused: ' + ((out && (out.error || out.message)) || 'unknown'));
+            ? 'Saved — your order, and the fact that you set it.'
+            : "Couldn't do that: " + ((out && (out.error || out.message)) || 'unknown reason'));
         });
       } },
-    { label: 'Why? show reasoning', onclick: function () {
+    { label: 'Why this order?', onclick: function () {
         reasons.className = reasons.className.indexOf('open') >= 0
           ? 'ecg-hs-reasons' : 'ecg-hs-reasons open';
       } }
@@ -281,13 +280,13 @@ function _ecgHsRenderHighSeat(body, vm) {
   var cuc = vm.capacity_unknown_chamber;
   if (cuc && cuc.hard_stop) {
     var stop = _ecgHsEl('div', 'ecg-hs-balance ecg-hs-capstop');
-    stop.appendChild(_ecgHsEl('div', 'who', 'Ecgberht · capacity unknown — hard stop'));
+    stop.appendChild(_ecgHsEl('div', 'who', "Ecgberht · I don't know how much capacity is free"));
     stop.appendChild(_ecgHsEl('div', null, cuc.voice +
       (cuc.projects && cuc.projects.length ? ' (' + cuc.projects.join(', ') + ')' : '')));
     var choose = function (choice) {
       var fields = { kind: 'capacity_choice', choice: choice, who: 'john' };
       if (choice === 'override') {
-        var why = prompt('Override the hard stop — why? (lands as a receipt, who/when/why/from→to):');
+        var why = prompt('Run it anyway — why? (I will record who decided and why):');
         if (why == null || why === '') return;
         fields.why = why;
       }
@@ -295,11 +294,11 @@ function _ecgHsRenderHighSeat(body, vm) {
         if (out && out.ok) {
           _ecgHsReply(stop, out.voice ||
             (out.admitted === 'FULL'
-              ? 'FULL admitted via override — the receipt landed (who/when/why/from→to).'
+              ? 'Starting the full run on your say-so — recorded, with your reason.'
               : 'Done.'));
         } else {
-          _ecgHsReply(stop, 'Refused: ' + ((out && (out.error || out.message)) || 'unknown') +
-            ' — no silent FULL, ever.');
+          _ecgHsReply(stop, "Couldn't do that: " + ((out && (out.error || out.message)) || 'unknown reason') +
+            ' — a full run never starts without you saying so.');
         }
       });
     };
@@ -308,7 +307,7 @@ function _ecgHsRenderHighSeat(body, vm) {
                onclick: function () { choose(o.choice); } };
     })));
     stop.appendChild(_ecgHsEl('div', 'mech',
-      'spoken, never a meter · unknown capacity cannot silent-FULL · override = receipt'));
+      'told to you in words, never a made-up meter · a full run never starts by itself while capacity is unknown · choosing to run it anyway is recorded'));
     body.appendChild(stop);
   }
 
@@ -316,7 +315,7 @@ function _ecgHsRenderHighSeat(body, vm) {
   var say = _ecgHsEl('div', 'ecg-hs-say');
   var input = document.createElement('input');
   input.placeholder = vm.saybox.placeholder;
-  var speakBtn = _ecgHsEl('button', null, 'Speak');
+  var speakBtn = _ecgHsEl('button', null, 'Send');
   var speak = function () {
     var text = input.value.trim();
     if (!text) return;
@@ -327,10 +326,10 @@ function _ecgHsRenderHighSeat(body, vm) {
       if (c && c.compiled && c.act === 'bring_it_up' && rb && rb.present) {
         ecgHsBringUp(body, rb.project_id);
       } else if (c && c.compiled) {
-        _ecgHsReply(card, 'Compiled to the closed act "' + c.act + '" — dialogue stays ephemeral.');
+        _ecgHsReply(card, 'Understood that as: ' + c.act.replace(/_/g, ' ') + '.');
       } else {
         _ecgHsReply(card, (c && c.proposal) ? c.proposal
-          : 'That does not compile to a closed act — refuse-with-proposal; nothing was written.');
+          : "I didn't understand that as something I can do — nothing was saved.");
       }
     });
   };
@@ -346,10 +345,37 @@ function _ecgHsLoadHighSeat(body) {
     if (!out || !out.ok) {
       body.innerHTML = '';
       body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
-        'High Seat unavailable: ' + ((out && (out.error || out.message)) || 'no response')));
+        "I can't reach the High Seat right now: " + ((out && (out.error || out.message)) || 'no response')));
       return;
     }
     _ecgHsRenderHighSeat(body, out.high_seat);
+  });
+}
+
+/* ── Inline mount (2026-07-27): the High Seat is now the FIRST dashboard
+   tile rather than a floating dock. The tile's <details> calls this on open
+   and we render the SAME engine view model straight into the tile body — no
+   overlay, no second window. Re-opening the tile re-fetches, so the seat is
+   never stale. The floating dock (openEcgberhtHighSeat, below) is retained
+   for any caller that still wants the overlay form. ── */
+function ecgHighSeatMountInline() {
+  var host = document.getElementById('ecgHighSeatInline');
+  if (!host) return;
+  host.innerHTML = '';
+  host.appendChild(_ecgHsEl('div', 'ecg-hs-quiet', 'Asking Ecgberht where things stand…'));
+  _ecgHsGet('/api/ecgberht/high_seat?', function (out) {
+    if (!out || !out.ok) {
+      host.innerHTML = '';
+      host.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
+        "I can't reach the High Seat right now: " +
+        ((out && (out.error || out.message)) || 'no response')));
+      return;
+    }
+    _ecgHsRenderHighSeat(host, out.high_seat);
+    var foot = _ecgHsEl('div', 'ecg-hs-reply',
+      'One thing at a time · each project gets one line · your answers are saved, the chat is not');
+    host.appendChild(foot);
+    ecgHighSeatBadge();
   });
 }
 
@@ -375,7 +401,7 @@ function openEcgberhtHighSeat() {
     var ti = _ecgHsEl('span', 'ti', 'Ecgberht ');
     var vm = out && out.ok ? out.high_seat : null;
     ti.appendChild(_ecgHsEl('small', null,
-      '· the High Seat — every campaign, one steward above them'));
+      '· the High Seat — all your projects, one place to steer them'));
     bar.appendChild(ti);
     if (vm) {
       bar.appendChild(_ecgHsEl('span', 'seatpill', vm.titlebar.seat_switcher.pill));
@@ -390,7 +416,7 @@ function openEcgberhtHighSeat() {
     };
     bar.appendChild(fsBtn);
     var closeBtn = _ecgHsEl('button', null, '×');
-    closeBtn.title = 'Close (ledger unchanged — a seen receipt is the most a close may write)';
+    closeBtn.title = 'Close (nothing is saved by closing)';
     closeBtn.onclick = closeEcgberhtHighSeat;
     bar.appendChild(closeBtn);
     dock.appendChild(bar);
@@ -399,7 +425,7 @@ function openEcgberhtHighSeat() {
     dock.appendChild(body);
 
     var foot = _ecgHsEl('div', 'ecg-hs-foot',
-      'one raised item at a time · tiles are one line each · rank/force-choice/capacity laws run underneath, not on stage · talk → closed verbs + receipts · dialogue ephemeral');
+      'one decision at a time · one line per project · your answers are saved, the chat is not');
     dock.appendChild(foot);
 
     host.appendChild(dock);
@@ -407,7 +433,7 @@ function openEcgberhtHighSeat() {
       _ecgHsRenderHighSeat(body, vm);
     } else {
       body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
-        'High Seat unavailable: ' + ((out && (out.error || out.message)) || 'no response')));
+        "I can't reach the High Seat right now: " + ((out && (out.error || out.message)) || 'no response')));
     }
 
     var esc = function (e) {

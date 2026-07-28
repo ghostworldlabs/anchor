@@ -22,6 +22,7 @@
 - [x] Sort Box set up -- multiple collaborators, access via Claude code ... — Priority: 1 — energy: med — [commercial]
 - [ ] Figure out flights and where the expenses go — Priority: 1 — energy: med — [commercial]
 - [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
+- [ ] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
 
 
 ## Nexia Impact / Axmra Capital

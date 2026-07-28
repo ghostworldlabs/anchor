@@ -1,0 +1,79 @@
+{
+  "planVersionConstant": "researchPrime-phase1/1",
+  "presentedPlan": {
+    "planVersion": "researchPrime-phase1/1",
+    "objective": "Wave-5 golden: pin the live researchPrime Phase-1 plan artifact",
+    "axis": "A candidate approach is FALSIFIED if it cannot cite a controlled trial.",
+    "branches": [
+      {
+        "id": "B1",
+        "goal": "high-value branch B1",
+        "est_value": 5,
+        "est_cost": 1
+      },
+      {
+        "id": "B2",
+        "goal": "wasteful branch B2",
+        "est_value": 0,
+        "est_cost": 1,
+        "counterfactual_cost": "3 reviewer-hours wasted on a dead end"
+      }
+    ],
+    "baselines": [
+      "Cepeda et al. 2006 distributed-practice meta-analysis"
+    ],
+    "tier": "medium",
+    "stakes": {
+      "id": "w5-stakes",
+      "raw": {
+        "id": "w5-stakes",
+        "declared_stakes": "low",
+        "reversibility": "irreversible"
+      },
+      "axis_tiers": {
+        "declared_stakes": "low",
+        "reversibility": "medium"
+      },
+      "declared_tier": "low",
+      "tier": "medium",
+      "overrides": [
+        {
+          "axis": "reversibility",
+          "from": "low",
+          "to": "medium",
+          "reason": "reversibility='irreversible' forces tier ≥ medium (I6 under-call guard)"
+        }
+      ],
+      "rationale": "adjudicated governor tier=medium (declared=low); upgraded by: reversibility"
+    },
+    "foresight": {
+      "gate": "Oranges",
+      "dropped": [
+        {
+          "branch": "B2",
+          "counterfactual_cost": "3 reviewer-hours wasted on a dead end",
+          "reason": "net value -1 ≤ 0 — drops before spend (counterfactual: 3 reviewer-hours wasted on a dead end)"
+        }
+      ],
+      "reordered": [],
+      "kept": [
+        "B1"
+      ],
+      "value_added": true,
+      "stamp": "foresight value added",
+      "crit3_satisfied": true
+    }
+  },
+  "governance": {
+    "schemaVersion": 1,
+    "triageHash": "<TRIAGE_HASH>",
+    "gate1Decision": "APPROVE",
+    "planHash": "<PLAN_HASH>",
+    "gate2Decision": "APPROVE",
+    "lockedGovernorOutput": {
+      "hash": "mock-hash"
+    },
+    "hostApprovalProvider": "TTY",
+    "skill": "researchPrime"
+  }
+}

@@ -91,3 +91,9 @@ bridge_test*.txt
 .anchor/projects/*/**/journal.jsonl_c1_before.json
 # Phase-0 sidecar snapshot (spend-telemetry-2026-07) — 1GB of engine JSONL, data not code
 .anchor/sidecar-archive/
+
+# Run scratch / backups (2026-07-28) - never deliverables
+test_tmp*/
+*.backup.json
+planning/**/pty-foreman*.log
+planning/**/_*.log

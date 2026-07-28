@@ -1,0 +1,40 @@
+{
+  "id": "04-editor-and-os-cruft",
+  "description": "A live source folder with editor backups, a merge-conflict leftover, and an OS metadata file mixed in. The trap here is `config.json.orig` — it is cruft, but `config.json` next to it is not, and a heuristic that keys on the base name would take both.",
+  "mode": "heuristic",
+  "git": true,
+  "files": [
+    {
+      "path": "app.js",
+      "ageDays": 3,
+      "content": "// live entry point\nconst cfg = require('./config.json');\nconsole.log(cfg.port);\n"
+    },
+    {
+      "path": "config.json",
+      "ageDays": 3,
+      "content": "{\n  \"port\": 8080\n}\n"
+    },
+    {
+      "path": "config.json.orig",
+      "ageDays": 240,
+      "content": "{\n<<<<<<< HEAD\n  \"port\": 8080\n=======\n  \"port\": 3000\n>>>>>>> feature/ports\n}\n"
+    },
+    {
+      "path": "app.js~",
+      "ageDays": 240,
+      "content": "// live entry point\nconst cfg = require('./config.json');\n"
+    },
+    {
+      "path": "notes.txt.swp",
+      "ageDays": 300,
+      "content": "b0VIM 8.2 swap leftover\n"
+    }
+  ],
+  "labels": [
+    { "path": "app.js", "truth": "keep", "why": "the live entry point" },
+    { "path": "config.json", "truth": "keep", "why": "read by app.js at runtime" },
+    { "path": "config.json.orig", "truth": "remove", "why": "merge-conflict leftover containing conflict markers" },
+    { "path": "app.js~", "truth": "remove", "why": "editor backup of a file that is still present and newer" },
+    { "path": "notes.txt.swp", "truth": "remove", "why": "abandoned vim swap file; the notes.txt it belonged to no longer exists" }
+  ]
+}

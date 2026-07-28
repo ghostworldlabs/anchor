@@ -1,0 +1,40 @@
+{
+  "id": "03-report-output-litter",
+  "description": "A reporting job that writes a timestamped output every run and was never cleaned up. The template and the generator are live; the old outputs are litter — but the MOST RECENT output is deliberately labeled keep, because 'generated' does not mean 'disposable'.",
+  "mode": "heuristic",
+  "git": false,
+  "files": [
+    {
+      "path": "generate.py",
+      "ageDays": 15,
+      "content": "# Renders template.md into out/report-<date>.md\nimport datetime\nprint('see template.md')\n"
+    },
+    {
+      "path": "template.md",
+      "ageDays": 15,
+      "content": "# Weekly report\n\n- open incidents: {{open}}\n- closed: {{closed}}\n"
+    },
+    {
+      "path": "out/report-2024-03-01.md",
+      "ageDays": 600,
+      "content": "# Weekly report\n\n- open incidents: 4\n- closed: 11\n"
+    },
+    {
+      "path": "out/report-2024-03-08.md",
+      "ageDays": 593,
+      "content": "# Weekly report\n\n- open incidents: 2\n- closed: 9\n"
+    },
+    {
+      "path": "out/report-latest.md",
+      "ageDays": 6,
+      "content": "# Weekly report\n\n- open incidents: 1\n- closed: 14\n"
+    }
+  ],
+  "labels": [
+    { "path": "generate.py", "truth": "keep", "why": "the generator" },
+    { "path": "template.md", "truth": "keep", "why": "the input the generator renders" },
+    { "path": "out/report-2024-03-01.md", "truth": "remove", "why": "regenerable output from 600 days ago" },
+    { "path": "out/report-2024-03-08.md", "truth": "remove", "why": "regenerable output from 593 days ago" },
+    { "path": "out/report-latest.md", "truth": "keep", "why": "the current output someone is likely reading — recent, and 'generated' is not the same as 'disposable'" }
+  ]
+}

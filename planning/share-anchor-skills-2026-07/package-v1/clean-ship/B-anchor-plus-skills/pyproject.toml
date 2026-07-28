@@ -1,0 +1,21 @@
+[project]
+name = "anchor"
+version = "1.0.0"
+description = "Anchor — per-project productivity & R&D control surface (Python stdlib only at runtime)"
+requires-python = ">=3.8"
+# NOTE: The shipped Anchor product is Python stdlib only. No runtime dependencies.
+# pytest is a dev/test-only dependency and is NOT shipped (see MASTER-PLAN.md "## Constraints").
+
+[project.optional-dependencies]
+dev = ["pytest"]
+# OPTIONAL terminal extra: the v3 ConPTY terminal subsystem (pty_manager's real
+# pywinpty backend) is the ONE place that may use a native dep. It is NOT part of
+# the stdlib-only core import path — installed only via `pip install .[terminal]`.
+terminal = ["pywinpty>=2.0; sys_platform == 'win32'"]
+
+[tool.pytest.ini_options]
+addopts = "-v"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]

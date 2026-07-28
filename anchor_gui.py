@@ -6727,6 +6727,23 @@ def generate_html(projects, tasks, inbox):
         rnd_archive_html = ('<div class="rnd-projects"><p class="rnd-empty">'
                             'Archive unavailable.</p></div>')
 
+    # Projects-tile summary line. The markdown PROJECTS.md count alone reads "0
+    # active" on a dashboard full of R&D work, so the tile counts what it
+    # actually contains: R&D folders + projects, then the markdown-tracked
+    # cards. Best-effort — a registry hiccup degrades the label, never the page.
+    try:
+        _rnd_groups = _rnd.group_by_group()
+        _rnd_folder_n = len(_rnd_groups)
+        _rnd_project_n = sum(len(v) for v in _rnd_groups.values())
+        projects_tile_count = "%d folder%s &middot; %d R&amp;D project%s" % (
+            _rnd_folder_n, "" if _rnd_folder_n == 1 else "s",
+            _rnd_project_n, "" if _rnd_project_n == 1 else "s")
+    except Exception:
+        projects_tile_count = "R&amp;D projects"
+    _md_active = len([p for p in projects if p["status"] == "active"])
+    if _md_active:
+        projects_tile_count += " &middot; %d tracked" % _md_active
+
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
     balance_rows = ""
@@ -7025,6 +7042,41 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .top-task-effort.low {{ background: rgba(74,222,128,0.15); color: var(--success); }}
 .top-task-effort.med {{ background: rgba(251,191,36,0.12); color: var(--warning); }}
 .top-task-effort.high {{ background: rgba(192,132,252,0.12); color: var(--writing); }}
+
+/* ── Dashboard section tiles (2026-07-27) ──────────────────────────────────
+   The dashboard body is four collapsible tiles, in this order:
+   High Seat · Workbench · Tasks · Projects. Each is a plain <details>, so the
+   open/closed state needs no JS; the hint text flips off the [open] attribute
+   ("Click to expand" → "Click to collapse") rather than lying when open. */
+.dash-tile {{
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); margin-bottom: 14px; overflow: hidden;
+}}
+.dash-tile > summary {{
+    display: flex; align-items: center; gap: 10px; padding: 12px 16px;
+    cursor: pointer; list-style: none; font-size: 15px; font-weight: 600;
+    user-select: none;
+}}
+.dash-tile > summary::-webkit-details-marker {{ display: none; }}
+.dash-tile > summary::marker {{ content: ""; }}
+.dash-tile > summary:hover {{ background: var(--surface2); }}
+.dash-tile .tile-ico {{ width: 24px; height: 24px; border-radius: 4px; flex: none; }}
+.dash-tile .tile-glyph {{ font-size: 18px; line-height: 1; flex: none; }}
+.dash-tile .tile-count {{ font-size: 11px; font-weight: 500; color: var(--text-dim); }}
+.dash-tile .tile-hint {{ margin-left: auto; font-size: 12px; font-weight: 400; color: var(--text-dim); white-space: nowrap; }}
+.dash-tile .tile-hint::after {{ content: "\\25BE Click to expand"; }}
+.dash-tile[open] .tile-hint::after {{ content: "\\25B4 Click to collapse"; }}
+.dash-tile .tile-body {{ border-top: 1px solid var(--border); padding: 16px 18px; background: var(--bg); }}
+.dash-tile .tile-body > *:first-child {{ margin-top: 0; }}
+.dash-tile .tile-body .section-header {{ margin-top: 22px; }}
+.dash-tile .tile-body .card-grid {{ margin-bottom: 0; }}
+.dash-tile .tile-body .top-tasks-box {{ margin-bottom: 0; }}
+/* The High Seat leads the stack: larger seal, larger title, gold accent. */
+.dash-tile.tile-seat {{ border-color: rgba(224,164,55,0.45); }}
+.dash-tile.tile-seat > summary {{ font-size: 18px; padding: 16px 18px; color: #e0a437; }}
+.dash-tile.tile-seat .tile-ico {{ width: 44px; height: 44px; border-radius: 6px; }}
+/* The High Seat rendered INSIDE its tile rather than as a floating dock. */
+.ecg-hs-inline {{ color: var(--text); font-size: 13px; }}
 
 /* Stats row */
 .stats-row {{ display: flex; gap: 10px; margin-bottom: 20px; }}
@@ -7447,10 +7499,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
           <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/vendor/brand/zombie-hunter-radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Hunter</button>
           <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Skill Foundry — library, knowledge graph, sleep runs"><img src="/vendor/brand/skill-foundry-icon.jpg?v={BUILD_ID}" style="width:14px;height:14px;border-radius:2px;" alt="" /> Skill Foundry</button>
-          <!-- Ecgberht High Seat (TW6, wireframes v2.1 Screen 0): docked overlay
-               over THIS dashboard; the ⚑ badge (raise-queue length) is the only
-               ambient Ecgberht signal anywhere in Anchor. -->
-          <button class="btn btn-sm ecg-hs-btn" id="ecgHighSeatBtn" onclick="openEcgberhtHighSeat()" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);" title="Ecgberht — the High Seat (every campaign, one steward above them)"><img src="/vendor/brand/ecgberht-portfolio-high-seat.jpg?v={BUILD_ID}" alt="" onerror="this.style.display='none'" /> High Seat<span class="ecg-hs-badge" id="ecgHighSeatBadge"></span></button>
+          <!-- Ecgberht High Seat moved out of this button row (2026-07-27): it is
+               now the FIRST dashboard tile below, and carries the ⚑ badge with
+               it. The badge (raise-queue length) is still the only ambient
+               Ecgberht signal anywhere in Anchor. -->
           <button class="btn btn-sm btn-outline" id="completedBtn" onclick="showView('completed')" style="font-size:11px;padding:4px 10px">&#10003; Completed ({len(done_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('cancelled')" style="font-size:11px;padding:4px 10px;border-color:var(--danger);color:var(--danger)">&#10007; Cancelled ({len(cancelled_tasks)})</button>
           <button class="btn btn-sm btn-outline" onclick="showView('saved')" style="font-size:11px;padding:4px 10px;border-color:var(--warning);color:var(--warning)">&#128337; Saved ({len(saved_tasks)})</button>
@@ -7472,61 +7524,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           {render_model_prefs_controls()}
           <button class="btn btn-sm" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:12px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;" title="Anchor Doctor Diagnostic">&#10010; Anchor Doctor</button>
         </div>
-        <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
       </div>
-      <div class="add-task-bar" id="addTaskBar" style="display:none;flex-wrap:wrap">
-        <input type="text" id="newTask" placeholder="What needs to be done?" onkeypress="if(event.key==='Enter')addTask()" style="min-width:200px" />
-        <select id="newDomain">
-          <option value="academic">Academic</option>
-          <option value="commercial">Commercial</option>
-          <option value="writing">Writing</option>
-          <option value="family">Family</option>
-          <option value="personal">Personal</option>
-        </select>
-        <select id="newPriority">
-          <option value="1">P1</option>
-          <option value="2" selected>P2</option>
-          <option value="3">P3</option>
-        </select>
-        <div class="date-picker-wrap">
-          <input type="date" id="newDue" title="Due date (optional)" />
-          <button type="button" class="cal-toggle" onclick="toggleCalendar('newDue', this)" title="Open calendar">&#128197;</button>
-          <div class="cal-popup" id="cal_newDue"></div>
-        </div>
-        <button class="btn btn-sm" onclick="addTask()">Add</button>
-        <input type="text" id="newNotes" placeholder="Notes — email, link, reference (optional)" style="min-width:200px;flex:1;margin-top:4px" />
-      </div>
-
-      <div class="top-tasks-box">
-        <div class="top-header">
-          <h3>Top Tasks</h3>
-          <span class="top-progress">{top_done} / {len(top_tasks)} done</span>
-        </div>
-        {"".join(top_task_row(t) for t in top_tasks)}
-      </div>
-
-      <!-- Dashboard Workbench Tile -->
-      <!-- Dashboard Workbench Tile -->
-      <details id="dashboard-workbench-details" style="margin: 20px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface);">
-        <summary style="padding: 10px 15px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 10px; list-style: none;">
-          <span class="rnd-dot rnd-active" aria-hidden="true" style="margin:0; width:10px; height:10px; background:var(--accent); border-radius:50%; display:inline-block;"></span>
-          &#128421; Dashboard Workbench
-          <span style="color: var(--text-dim); margin-left: auto; font-size: 12px;">&#9662; Click to expand</span>
-        </summary>
-        <div style="border-top: 1px solid var(--border); background: var(--bg);">
-          <iframe src="/project/__dashboard__" style="width:100%; height:1100px; border:none; border-bottom-left-radius:6px; border-bottom-right-radius:6px; display:block;"></iframe>
-        </div>
-      </details>
-
-      <!-- R&D Projects (home dashboard section) -->
-      <div class="section-header" style="display:flex;align-items:center;gap:8px">
-        <h3>R&amp;D Projects</h3>
-        <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
-      </div>
-      {rnd_projects_html}
-
-      <div class="section-header"><h3>Priority 1 Projects</h3></div>
-      <div class="card-grid">{"".join(project_card(p) for p in p1_projects)}</div>
 
       <div class="stats-row">
         <div class="stat-card"><div class="num">{len([p for p in projects if p["status"]=="active"])}</div><div class="label">Active Projects</div></div>
@@ -7535,13 +7533,117 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div class="stat-card"><div class="num">{len(inbox)}</div><div class="label">In Inbox</div></div>
       </div>
 
-      <div class="section-header"><h3>Other Tasks</h3></div>
-      <div class="task-list">
-        {"".join(task_item(t) for t in other_tasks)}
-      </div>
+      <!-- ── Tile 1 · High Seat ───────────────────────────────────────────
+           The Ecgberht portfolio steward, rendered INSIDE the tile (it used to
+           be a floating dock opened from the toolbar). The ⚑ badge rides on the
+           summary and stays the only ambient Ecgberht signal in Anchor. -->
+      <details class="dash-tile tile-seat" id="tile-highseat"
+               ontoggle="if(this.open)ecgHighSeatMountInline()">
+        <summary title="Ecgberht — the High Seat (all your projects, one place to steer them)">
+          <img class="tile-ico" src="/vendor/brand/ecgberht-portfolio-high-seat.jpg?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
+          High Seat
+          <span class="tile-count">Ecgberht &mdash; all your projects, one place to steer them</span>
+          <span class="ecg-hs-badge" id="ecgHighSeatBadge"></span>
+          <!-- The docked-overlay entry point. Ecgberht's frozen HIGH_SEAT_MOUNT
+               contract is presentation="docked_overlay" on surface="main_dashboard",
+               so the main dashboard must still be able to raise the dock; the
+               inline tile above is the everyday surface, this is the pop-out.
+               It sits INSIDE the tile (not back in the toolbar button row) so the
+               ⚑ badge remains the only ambient Ecgberht signal in Anchor. -->
+          <button class="btn btn-sm btn-outline" id="ecgHighSeatBtn"
+                  onclick="event.preventDefault();event.stopPropagation();openEcgberhtHighSeat()"
+                  title="Open the High Seat as a floating dock"
+                  style="font-size:11px;padding:3px 9px;font-weight:500">&#8599; Dock</button>
+          <span class="tile-hint"></span>
+        </summary>
+        <div class="tile-body"><div class="ecg-hs-inline" id="ecgHighSeatInline"></div></div>
+      </details>
 
-      <div class="section-header"><h3>Priority 2+ Projects</h3></div>
-      <div class="card-grid">{"".join(project_card(p) for p in p2_projects)}</div>
+      <!-- ── Tile 2 · Workbench ──────────────────────────────────────────── -->
+      <details class="dash-tile" id="dashboard-workbench-details">
+        <summary>
+          <span class="tile-glyph" aria-hidden="true">&#128421;</span>
+          Workbench
+          <span class="tile-count">the dashboard's own project cockpit</span>
+          <span class="tile-hint"></span>
+        </summary>
+        <div class="tile-body" style="padding:0">
+          <iframe src="/project/__dashboard__" style="width:100%; height:1100px; border:none; display:block;"></iframe>
+        </div>
+      </details>
+
+      <!-- ── Tile 3 · Tasks ───────────────────────────────────────────────
+           One expanded window holding BOTH groups: P1 (+ anything due now) at
+           the top, then P2/P3 below it. -->
+      <details class="dash-tile" id="tile-tasks">
+        <summary>
+          <span class="tile-glyph" aria-hidden="true">&#10003;</span>
+          Tasks
+          <span class="tile-count">{len(top_tasks)} priority &middot; {len(other_tasks)} other</span>
+          <span class="tile-hint"></span>
+        </summary>
+        <div class="tile-body">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+            <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
+          </div>
+          <div class="add-task-bar" id="addTaskBar" style="display:none;flex-wrap:wrap">
+            <input type="text" id="newTask" placeholder="What needs to be done?" onkeypress="if(event.key==='Enter')addTask()" style="min-width:200px" />
+            <select id="newDomain">
+              <option value="academic">Academic</option>
+              <option value="commercial">Commercial</option>
+              <option value="writing">Writing</option>
+              <option value="family">Family</option>
+              <option value="personal">Personal</option>
+            </select>
+            <select id="newPriority">
+              <option value="1">P1</option>
+              <option value="2" selected>P2</option>
+              <option value="3">P3</option>
+            </select>
+            <div class="date-picker-wrap">
+              <input type="date" id="newDue" title="Due date (optional)" />
+              <button type="button" class="cal-toggle" onclick="toggleCalendar('newDue', this)" title="Open calendar">&#128197;</button>
+              <div class="cal-popup" id="cal_newDue"></div>
+            </div>
+            <button class="btn btn-sm" onclick="addTask()">Add</button>
+            <input type="text" id="newNotes" placeholder="Notes — email, link, reference (optional)" style="min-width:200px;flex:1;margin-top:4px" />
+          </div>
+
+          <div class="top-tasks-box">
+            <div class="top-header">
+              <h3>Priority 1 &amp; due now</h3>
+              <span class="top-progress">{top_done} / {len(top_tasks)} done</span>
+            </div>
+            {"".join(top_task_row(t) for t in top_tasks)}
+          </div>
+
+          <div class="section-header"><h3>Priority 2 &amp; 3</h3></div>
+          <div class="task-list">
+            {"".join(task_item(t) for t in other_tasks) or '<div class="empty-msg">No P2/P3 tasks.</div>'}
+          </div>
+        </div>
+      </details>
+
+      <!-- ── Tile 4 · Projects ────────────────────────────────────────────
+           The R&D project folders (+ New folder, + New Project) first, then the
+           markdown-tracked P1 and P2+ project cards — all in one window. -->
+      <details class="dash-tile" id="tile-projects">
+        <summary>
+          <span class="tile-glyph" aria-hidden="true">&#128193;</span>
+          Projects
+          <span class="tile-count">{projects_tile_count}</span>
+          <span class="tile-hint"></span>
+        </summary>
+        <div class="tile-body">
+          <div class="section-header" style="display:flex;align-items:center;gap:8px">
+            <h3>R&amp;D Projects</h3>
+            <button class="btn btn-sm" onclick="openNewProject()" style="font-size:11px;padding:4px 10px;background:var(--accent)">+ New Project</button>
+          </div>
+          {rnd_projects_html}
+          {f'<div class="section-header"><h3>Priority 1 Projects</h3></div><div class="card-grid">{"".join(project_card(p) for p in p1_projects)}</div>' if p1_projects else ""}
+          {f'<div class="section-header"><h3>Priority 2+ Projects</h3></div><div class="card-grid">{"".join(project_card(p) for p in p2_projects)}</div>' if p2_projects else ""}
+        </div>
+      </details>
     </div>
 
     <!-- Completed view -->

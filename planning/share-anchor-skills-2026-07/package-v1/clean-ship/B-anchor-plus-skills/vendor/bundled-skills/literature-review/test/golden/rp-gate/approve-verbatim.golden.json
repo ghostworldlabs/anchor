@@ -1,0 +1,58 @@
+{
+  "gate1Prompt": {
+    "artifactPath": "<RUN_DIR>/triage-<TRIAGE_HASH>.json",
+    "triageHash": "<TRIAGE_HASH>"
+  },
+  "gate1PromptCount": 1,
+  "gate2Prompt": {
+    "planPath": "<RUN_DIR>/plan-<PLAN_HASH>.json",
+    "planHash": "<PLAN_HASH>",
+    "plan": {
+      "planVersion": "litreview-brownfield-plan/golden-wave5-1",
+      "body": "# Research Plan — Wave-5 RP golden gate fence\n\n## Scope / AXIS\nPin the frozen researchPrime plan-review gate behind a golden-output regression fence.\nAXIS: any drift in a gate record, stamp, or prompt payload FAILS the suite.\n\n## Seeds\n- (seed) 10.1000/wave5-golden-doi — Golden Fence Seed Paper"
+    }
+  },
+  "gate2PromptCount": 1,
+  "triageArtifact": {
+    "inputs": {
+      "objective": "Wave-5 RP golden gate fence (literature-review)",
+      "planProse": "# Research Plan — Wave-5 RP golden gate fence\n\n## Scope / AXIS\nPin the frozen researchPrime plan-review gate behind a golden-output regression fence.\nAXIS: any drift in a gate record, stamp, or prompt payload FAILS the suite.\n\n## Seeds\n- (seed) 10.1000/wave5-golden-doi — Golden Fence Seed Paper"
+    },
+    "timestamp": "<TIMESTAMP>"
+  },
+  "planFile": {
+    "planVersion": "litreview-brownfield-plan/golden-wave5-1",
+    "body": "# Research Plan — Wave-5 RP golden gate fence\n\n## Scope / AXIS\nPin the frozen researchPrime plan-review gate behind a golden-output regression fence.\nAXIS: any drift in a gate record, stamp, or prompt payload FAILS the suite.\n\n## Seeds\n- (seed) 10.1000/wave5-golden-doi — Golden Fence Seed Paper"
+  },
+  "gate1Record": {
+    "triageHash": "<TRIAGE_HASH>",
+    "gate1Decision": "APPROVE"
+  },
+  "gate2Record": {
+    "planHash": "<PLAN_HASH>",
+    "gate2Decision": "APPROVE"
+  },
+  "governance": {
+    "schemaVersion": 1,
+    "triageHash": "<TRIAGE_HASH>",
+    "gate1Decision": "APPROVE",
+    "planHash": "<PLAN_HASH>",
+    "gate2Decision": "APPROVE",
+    "lockedGovernorOutput": {
+      "hash": "mock-hash"
+    },
+    "hostApprovalProvider": "TTY",
+    "skill": "researchPrime"
+  },
+  "returnValue": {
+    "triageHash": "<TRIAGE_HASH>",
+    "planHash": "<PLAN_HASH>"
+  },
+  "returnGovernanceMatchesFile": true,
+  "executionUnblocked": true,
+  "blockedStamps": {
+    "unboundTriage": "Execution blocked: Gate 1 approval not bound to current triage artifact hash",
+    "unboundPlan": "Execution blocked: Gate 2 approval not bound to current plan artifact hash",
+    "missingGate1Record": "Execution blocked: Gate 1 record missing"
+  }
+}

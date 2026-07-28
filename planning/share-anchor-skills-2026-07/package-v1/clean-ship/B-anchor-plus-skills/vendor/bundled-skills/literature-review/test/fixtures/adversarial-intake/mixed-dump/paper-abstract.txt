@@ -1,0 +1,5 @@
+Abstract. We study the effect of deduplication strength on downstream task
+transfer. Across 12 benchmarks, aggressive near-duplicate removal improves
+zero-shot transfer by 3.1 points on average while reducing training tokens by
+18%. The effect reverses beyond a similarity threshold of 0.92, suggesting a
+useful redundancy band. We release our filtering pipeline and all thresholds.

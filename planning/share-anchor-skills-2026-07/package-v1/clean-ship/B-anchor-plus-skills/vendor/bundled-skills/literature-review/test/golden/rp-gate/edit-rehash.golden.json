@@ -1,0 +1,47 @@
+{
+  "presentedPlanHashes": [
+    "<PLAN_HASH_V1>",
+    "<PLAN_HASH_V2>"
+  ],
+  "presentedPlans": [
+    {
+      "planVersion": "litreview-brownfield-plan/golden-wave5-1",
+      "body": "# Research Plan — Wave-5 RP golden gate fence\n\n## Scope / AXIS\nPin the frozen researchPrime plan-review gate behind a golden-output regression fence.\nAXIS: any drift in a gate record, stamp, or prompt payload FAILS the suite.\n\n## Seeds\n- (seed) 10.1000/wave5-golden-doi — Golden Fence Seed Paper"
+    },
+    {
+      "planVersion": "litreview-brownfield-plan/golden-wave5-1",
+      "body": "# Research Plan — Wave-5 RP golden gate fence\n\n## Scope / AXIS\nPin the frozen researchPrime plan-review gate behind a golden-output regression fence.\nAXIS: any drift in a gate record, stamp, or prompt payload FAILS the suite.\n\n## Seeds\n- (seed) 10.1000/wave5-golden-doi — Golden Fence Seed Paper\n\n## User edit\n- Added branch: perturbation-detection sharpness."
+    }
+  ],
+  "planFilesWritten": {
+    "v1": true,
+    "v2": true
+  },
+  "gate2RecordFinal": {
+    "planHash": "<PLAN_HASH_V2>",
+    "gate2Decision": "APPROVE"
+  },
+  "governance": {
+    "schemaVersion": 1,
+    "triageHash": "<TRIAGE_HASH>",
+    "gate1Decision": "APPROVE",
+    "planHash": "<PLAN_HASH_V2>",
+    "gate2Decision": "APPROVE",
+    "lockedGovernorOutput": {
+      "hash": "mock-hash"
+    },
+    "hostApprovalProvider": "TTY",
+    "skill": "researchPrime"
+  },
+  "returnPlanHash": "<PLAN_HASH_V2>",
+  "editBoundedHalt": {
+    "haltError": true,
+    "message": "Run halted at Gate 2: exceeded max EDIT cycles (1)",
+    "haltRecord": {
+      "status": "HALTED",
+      "reason": "Run halted at Gate 2: exceeded max EDIT cycles (1)",
+      "timestamp": "<TIMESTAMP>"
+    },
+    "governanceWritten": false
+  }
+}

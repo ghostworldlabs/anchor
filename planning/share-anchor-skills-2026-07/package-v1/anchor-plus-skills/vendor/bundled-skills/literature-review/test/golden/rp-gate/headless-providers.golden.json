@@ -1,0 +1,67 @@
+{
+  "token": {
+    "governance": {
+      "schemaVersion": 1,
+      "triageHash": "<TRIAGE_HASH>",
+      "gate1Decision": "APPROVE",
+      "planHash": "<PLAN_HASH>",
+      "gate2Decision": "APPROVE",
+      "lockedGovernorOutput": {
+        "hash": "mock-hash"
+      },
+      "hostApprovalProvider": "Token:wave5-golden",
+      "skill": "researchPrime"
+    }
+  },
+  "policyGrant": {
+    "governance": {
+      "schemaVersion": 1,
+      "triageHash": "<TRIAGE_HASH>",
+      "gate1Decision": "APPROVE",
+      "planHash": "<PLAN_HASH>",
+      "gate2Decision": "APPROVE",
+      "lockedGovernorOutput": {
+        "hash": "mock-hash"
+      },
+      "hostApprovalProvider": "PolicyGrant:no-human-host",
+      "skill": "researchPrime"
+    }
+  },
+  "replay": {
+    "governance": {
+      "schemaVersion": 1,
+      "triageHash": "<TRIAGE_HASH>",
+      "gate1Decision": "APPROVE",
+      "planHash": "<PLAN_HASH>",
+      "gate2Decision": "APPROVE",
+      "lockedGovernorOutput": {
+        "hash": "mock-hash"
+      },
+      "hostApprovalProvider": "ReplayFixture:wave5-replay",
+      "skill": "researchPrime"
+    },
+    "planHashMatchesPrior": true
+  },
+  "failureStamps": {
+    "invalidToken": {
+      "haltError": true,
+      "message": "Execution blocked: Invalid or expired signed approval token",
+      "haltRecordWritten": false
+    },
+    "noGrant": {
+      "haltError": true,
+      "message": "Execution blocked: No valid approval provider grant (no human channel, no token)",
+      "haltRecordWritten": false
+    },
+    "badProvenance": {
+      "haltError": true,
+      "message": "Execution blocked: Invalid fixture provenance, expected replay",
+      "haltRecordWritten": false
+    },
+    "replayHashMismatch": {
+      "haltError": true,
+      "message": "Execution blocked: Replay fixture hashes do not match current run",
+      "haltRecordWritten": true
+    }
+  }
+}

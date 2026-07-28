@@ -1,0 +1,43 @@
+{
+  "gate2Abort": {
+    "halt": {
+      "haltError": true,
+      "message": "Run halted at Gate 2 with decision ABORT (Artifact: <PLAN_HASH>)"
+    },
+    "haltRecord": {
+      "status": "HALTED",
+      "reason": "Run halted at Gate 2 with decision ABORT (Artifact: <PLAN_HASH>)",
+      "timestamp": "<TIMESTAMP>"
+    },
+    "gate2Record": {
+      "planHash": "<PLAN_HASH>",
+      "gate2Decision": "ABORT"
+    },
+    "governanceWritten": false,
+    "blockedExecutionStamp": "Execution blocked: Gate 2 decision is ABORT, expected APPROVE"
+  },
+  "gate1Abort": {
+    "halt": {
+      "haltError": true,
+      "message": "Run halted at Gate 1 with decision ABORT (Artifact: <TRIAGE_HASH>)"
+    },
+    "haltRecord": {
+      "status": "HALTED",
+      "reason": "Run halted at Gate 1 with decision ABORT (Artifact: <TRIAGE_HASH>)",
+      "timestamp": "<TIMESTAMP>"
+    },
+    "gate1Record": {
+      "triageHash": "<TRIAGE_HASH>",
+      "gate1Decision": "ABORT"
+    },
+    "gate2RecordWritten": false,
+    "governanceWritten": false
+  },
+  "noResponseHalt": {
+    "halt": {
+      "haltError": true,
+      "message": "Run halted at Gate 2 with decision undefined"
+    },
+    "governanceWritten": false
+  }
+}

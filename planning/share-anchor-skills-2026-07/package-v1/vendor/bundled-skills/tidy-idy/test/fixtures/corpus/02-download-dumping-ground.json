@@ -1,0 +1,34 @@
+{
+  "id": "02-download-dumping-ground",
+  "description": "A folder used as a downloads landing strip. Two byte-identical copies of the same spec PDF stub, an old installer manifest, and one note the owner actually wrote and still edits.",
+  "mode": "heuristic",
+  "git": false,
+  "files": [
+    {
+      "path": "notes.md",
+      "ageDays": 2,
+      "content": "# Notes\n\nStill editing this. Refers to spec-v3.pdf.txt for the numbers.\n"
+    },
+    {
+      "path": "spec-v3.pdf.txt",
+      "ageDays": 40,
+      "content": "SPEC v3\nsection 1: throughput 400/s\nsection 2: latency p99 120ms\n"
+    },
+    {
+      "path": "spec-v3 (1).pdf.txt",
+      "ageDays": 300,
+      "content": "SPEC v3\nsection 1: throughput 400/s\nsection 2: latency p99 120ms\n"
+    },
+    {
+      "path": "setup-1.4.2-manifest.txt",
+      "ageDays": 500,
+      "content": "installer manifest\nversion=1.4.2\nsha256=deadbeef\n"
+    }
+  ],
+  "labels": [
+    { "path": "notes.md", "truth": "keep", "why": "actively edited, and the only file the owner authored" },
+    { "path": "spec-v3.pdf.txt", "truth": "keep", "why": "referenced by notes.md — the copy in use" },
+    { "path": "spec-v3 (1).pdf.txt", "truth": "remove", "why": "byte-identical duplicate download, referenced by nothing, old" },
+    { "path": "setup-1.4.2-manifest.txt", "truth": "remove", "why": "manifest for an installer run 500 days ago; nothing references it" }
+  ]
+}

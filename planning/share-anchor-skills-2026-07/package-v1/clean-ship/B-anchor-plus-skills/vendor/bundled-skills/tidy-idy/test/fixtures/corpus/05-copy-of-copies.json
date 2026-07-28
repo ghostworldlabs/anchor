@@ -1,0 +1,40 @@
+{
+  "id": "05-copy-of-copies",
+  "description": "The classic Windows/macOS duplication chain. Three near-identical copies of a document, two of them byte-identical to the original, one of them genuinely EDITED — which is the trap: the edited copy is the newest content and must survive.",
+  "mode": "heuristic",
+  "git": false,
+  "files": [
+    {
+      "path": "budget.csv",
+      "ageDays": 200,
+      "content": "item,cost\nrent,1200\npower,90\n"
+    },
+    {
+      "path": "budget - Copy.csv",
+      "ageDays": 200,
+      "content": "item,cost\nrent,1200\npower,90\n"
+    },
+    {
+      "path": "budget (1).csv",
+      "ageDays": 200,
+      "content": "item,cost\nrent,1200\npower,90\n"
+    },
+    {
+      "path": "budget-final.csv",
+      "ageDays": 5,
+      "content": "item,cost\nrent,1250\npower,90\ninternet,60\n"
+    },
+    {
+      "path": "README.txt",
+      "ageDays": 5,
+      "content": "budget-final.csv is the one that is current. The others are leftovers.\n"
+    }
+  ],
+  "labels": [
+    { "path": "budget.csv", "truth": "remove", "why": "superseded by budget-final.csv and byte-identical to two other copies" },
+    { "path": "budget - Copy.csv", "truth": "remove", "why": "byte-identical duplicate" },
+    { "path": "budget (1).csv", "truth": "remove", "why": "byte-identical duplicate" },
+    { "path": "budget-final.csv", "truth": "keep", "why": "the current content — newest, and the only copy with the updated figures" },
+    { "path": "README.txt", "truth": "keep", "why": "states which file is current; removing it destroys that knowledge" }
+  ]
+}

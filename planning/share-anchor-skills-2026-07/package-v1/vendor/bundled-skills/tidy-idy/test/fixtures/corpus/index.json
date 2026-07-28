@@ -1,0 +1,13 @@
+{
+  "corpusVersion": 1,
+  "startedIn": "Wave 2",
+  "consumedBy": "the Wave-9 heuristic precision gate (test/corpus.test.mjs validates integrity now)",
+  "members": [
+    "01-abandoned-prototype.json",
+    "02-download-dumping-ground.json",
+    "03-report-output-litter.json",
+    "04-editor-and-os-cruft.json",
+    "05-copy-of-copies.json",
+    "06-legit-small-project.json"
+  ]
+}

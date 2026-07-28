@@ -1,0 +1,34 @@
+{
+  "id": "01-abandoned-prototype",
+  "description": "A working script that grew out of a prototype. The prototype is still sitting next to it, untouched for a year, plus a byte-identical backup copy of it. The live script and its README stay.",
+  "mode": "heuristic",
+  "git": false,
+  "files": [
+    {
+      "path": "resize.mjs",
+      "ageDays": 4,
+      "content": "#!/usr/bin/env node\n// The one that is actually used. See README.md.\nimport { readdir } from 'node:fs/promises';\n\nconst dir = process.argv[2] || '.';\nconst files = await readdir(dir);\nfor (const f of files) {\n  if (!/\\.(png|jpg)$/i.test(f)) continue;\n  console.log('would resize', f);\n}\n"
+    },
+    {
+      "path": "README.md",
+      "ageDays": 4,
+      "content": "# resize\n\nRun `node resize.mjs <dir>` to resize the images in a directory.\n"
+    },
+    {
+      "path": "prototype/resize-first-try.mjs",
+      "ageDays": 420,
+      "content": "// First attempt, kept 'just in case' in early 2025. Superseded by resize.mjs.\nconst fs = require('fs');\nfs.readdir('.', (e, files) => console.log(files));\n"
+    },
+    {
+      "path": "prototype/resize-first-try.mjs.bak",
+      "ageDays": 420,
+      "content": "// First attempt, kept 'just in case' in early 2025. Superseded by resize.mjs.\nconst fs = require('fs');\nfs.readdir('.', (e, files) => console.log(files));\n"
+    }
+  ],
+  "labels": [
+    { "path": "resize.mjs", "truth": "keep", "why": "the live entry point, referenced by the README" },
+    { "path": "README.md", "truth": "keep", "why": "documents the live entry point" },
+    { "path": "prototype/resize-first-try.mjs", "truth": "remove", "why": "superseded prototype, untouched for over a year, referenced by nothing" },
+    { "path": "prototype/resize-first-try.mjs.bak", "truth": "remove", "why": "byte-identical backup of an already-superseded prototype" }
+  ]
+}

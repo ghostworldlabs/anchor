@@ -2572,10 +2572,29 @@ def check_rnd_v7_surface(report: Report, server_proc, rnd_env: dict):
                 rsid = rec["session_id"]
                 # Hard-kill = the deliberate finish transition.
                 _ts.kill(rsid, project_id=pid)
-                # Resolve the discovered session id for the cache assert + blurb.
+                # Resolve the DISCOVERED session id for the cache assert + blurb.
+                #
+                # Pick it by the property the assert actually depends on — the
+                # session must own a member DOCUMENT — instead of assuming it is
+                # the newest (`[0]`). Since usage_capture began writing a
+                # finalized `run-cost` pointer-record per finished session, a
+                # kill also mints an artifact-less `run::run-cost-<sid>` session
+                # that sorts NEWER than the discovered one. Taking `[0]` picked
+                # that metering row, whose grounding corpus is empty, so
+                # `summarizer.seed_can_ground` correctly refuses to generate
+                # (2026-07-26 hardening) and nothing is ever cached. Before that
+                # hardening this step passed only because it was asserting
+                # against a BLANK summary of a cost record — it was encoding the
+                # very defect that hardening fixed.
                 rsess = _sessions.list_sessions(str(proj_folder), pid,
                                                 "research")
-                disc_sid = rsess[0]["session_id"] if rsess else rsid
+
+                def _has_doc(sess):
+                    return any((m.get("artifact_path") or "").strip()
+                               for m in (sess.get("member_files") or []))
+
+                disc_sid = next((s["session_id"] for s in rsess if _has_doc(s)),
+                                rsess[0]["session_id"] if rsess else rsid)
                 os.environ["STUB_STREAMJSON_CLAIMS"] = (
                     "The v7 board integrates live sessions into lane columns.")
                 # Drive the proactive finish hook for the discovered session

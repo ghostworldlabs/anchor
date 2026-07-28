@@ -6142,7 +6142,7 @@ function _ecgSpeak(convo, text) {
     body: body
   }).then(function (r) { return r.json(); }).then(function (j) {
     if (!j || !j.ok) {
-      _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was written.');
+      _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was saved.");
       return;
     }
     if (j.mode === 'recall') {
@@ -6188,17 +6188,15 @@ function _ecgSpeak(convo, text) {
         // S1-E7 — receipted seat switch is a non-event
         convo.appendChild(_ecgEl('div', 'ecg-divider', j.divider_preview.text));
       } else {
-        _ecgStewardMsg(convo, 'Compiled to the closed act “' + (c.label || c.act) +
-          '”' + (c.verb ? ' (verb: ' + c.verb + ')' : '') +
-          (c.receipt_kind ? ' — lands as a ' + c.receipt_kind + ' receipt.' : '.'));
+        _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
       }
     } else {
       var prop = (c.proposal && c.proposal.message) ||
-        'I could not compile that to a closed act; nothing was written.';
+        "I didn't understand that as something I can do — nothing was saved.";
       _ecgStewardMsg(convo, prop);
     }
   }).catch(function () {
-    _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was written.');
+    _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was saved.");
   });
 }
 
@@ -6218,12 +6216,12 @@ function _ecgRenderChamber(host, vm) {
   ti.appendChild(_ecgEl('small', null, '· ' + chamber.titlebar.title.replace(/^Ecgberht · /, '')));
   bar.appendChild(ti);
   var pill = _ecgEl('button', 'ecg-seat-pill', chamber.titlebar.seat_switcher.pill);
-  pill.title = 'which subscription seat drives the steward — Anchor model prefs';
+  pill.title = 'which model Ecgberht is using — set in Anchor model preferences';
   bar.appendChild(pill);
   bar.appendChild(_ecgEl('span', 'sp'));
   bar.appendChild(_ecgEl('span', 'ecg-stamp', chamber.titlebar.stamp));
   var closeBtn = _ecgEl('button', 'ecg-btn', '×');
-  closeBtn.title = 'Close (writes nothing)';
+  closeBtn.title = 'Close (nothing is saved by closing)';
   closeBtn.onclick = closeEcgberhtSeal;
   bar.appendChild(closeBtn);
   dock.appendChild(bar);
@@ -6295,11 +6293,11 @@ function _ecgRenderStandUp(host, su) {
   ico.onerror = function () { this.style.display = 'none'; };
   bar.appendChild(ico);
   var ti = _ecgEl('span', 'ti', 'Ecgberht ');
-  ti.appendChild(_ecgEl('small', null, '· new ground — no steward stands here yet'));
+  ti.appendChild(_ecgEl('small', null, '· nothing set up here yet'));
   bar.appendChild(ti);
   bar.appendChild(_ecgEl('span', 'sp'));
   var closeBtn = _ecgEl('button', 'ecg-btn', '×');
-  closeBtn.title = 'Close (writes nothing)';
+  closeBtn.title = 'Close (nothing is saved by closing)';
   closeBtn.onclick = closeEcgberhtSeal;
   bar.appendChild(closeBtn);
   dock.appendChild(bar);
@@ -6317,7 +6315,7 @@ function _ecgRenderStandUp(host, su) {
     if (!goal) {
       // The steward never fills this in — an empty goal is a refusal.
       _ecgStewardMsg(convo, "I won't invent a goal for you — say what this " +
-        'project is for, in your own words, and I will stand the steward up.');
+        'project is for, in your own words, and I will set it up.');
       goalInput.focus();
       return;
     }
@@ -6327,21 +6325,21 @@ function _ecgRenderStandUp(host, su) {
       body: JSON.stringify({project_id: PROJECT_ID, north_star: goal, who: 'john'})
     }).then(function (r) { return r.json(); }).then(function (out) {
       if (out && out.ok) {
-        _ecgStewardMsg(convo, (out.voice || 'The steward stands.') +
-          ' Created: ' + (out.created || []).join(' + ') + ' — receipt landed.', [
-          {label: 'Open the chamber', onclick: function () {
+        _ecgStewardMsg(convo, (out.voice || 'Set up.') +
+          ' Created: ' + (out.created || []).join(' + ') + ' — saved.', [
+          {label: 'Open it', onclick: function () {
             closeEcgberhtSeal();
             openEcgberhtSeal();
           }}
         ]);
         goalRow.style.display = 'none';
       } else {
-        _ecgStewardMsg(convo, 'Refused: ' +
+        _ecgStewardMsg(convo, "Couldn't do that: " +
           ((out && (out.message || out.error)) || 'no response') +
           ' — nothing was created.');
       }
     }).catch(function () {
-      _ecgStewardMsg(convo, 'The steward bridge did not answer — nothing was created.');
+      _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was created.");
     });
   };
 
@@ -6363,7 +6361,7 @@ function _ecgRenderStandUp(host, su) {
   dock.appendChild(goalRow);
 
   dock.appendChild(_ecgEl('div', 'ecg-footer',
-    'Face + Strip are created from templates on your confirm only · your words become the North Star · nothing is written until then'));
+    'nothing is created until you confirm · your words become the North Star'));
 
   host.appendChild(dock);
   document.addEventListener('keydown', function esc(e) {
@@ -6396,9 +6394,9 @@ function openEcgberhtSeal() {
         bar.appendChild(x);
         dock.appendChild(bar);
         var msg = _ecgEl('div', 'ecg-convo');
-        _ecgStewardMsg(msg, (j && j.error) ? ('The steward engine is not reachable: ' + j.error +
-          '. Nothing was invented and nothing was written.') :
-          'The steward engine is not reachable. Nothing was invented and nothing was written.');
+        _ecgStewardMsg(msg, (j && j.error) ? ("I can't reach Ecgberht right now: " + j.error +
+          '. Nothing was made up and nothing was saved.') :
+          "I can't reach Ecgberht right now. Nothing was made up and nothing was saved.");
         dock.appendChild(msg);
         host.appendChild(dock);
         return;

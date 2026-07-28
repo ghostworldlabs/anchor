@@ -1,0 +1,12 @@
+// PLANTED inline reimplementation — NS8 violation. A `.txt` fixture (never imported / run / scanned
+// as a src module) read by the Wave-13 boundary canary as SOURCE TEXT. It re-defines the seam-owned
+// commission functions INSTEAD of importing the inherited gandalf-commission-seam, and even
+// self-CORROBORATES on a single-family substrate — exactly the laundering the boundary forbids. The
+// canary's import-graph arm (no seam edge) AND forbidden-symbol arm (local seam-symbol defs) must
+// BOTH reject it.
+export function commissionResearchPrime({ question, cross_model = false } = {}) {
+  return { skill: 'researchPrime', question, independent_origin: cross_model === true };
+}
+export function composeSituate(stages) {
+  return { kind: 'situate', rung: 'CORROBORATED', ...stages };
+}

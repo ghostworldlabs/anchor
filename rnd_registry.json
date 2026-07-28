@@ -154,5 +154,17 @@
     "remote_url": "",
     "auto_push": false,
     "group": "Research"
+  },
+  {
+    "id": "bce1a40874f24aa1a4aa541507ee05a4",
+    "name": "Holding Company",
+    "folder_path": "C:\\dev\\Axmra\\Holding Company",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Axmra"
   }
 ]

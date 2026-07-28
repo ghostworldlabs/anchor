@@ -1,0 +1,47 @@
+{
+  "candidates": [
+    {
+      "citationCount": 42,
+      "paperId": "W10GOLDSEED",
+      "title": "Golden Seed Paper",
+      "venue": "Conference on Neural Information Processing Systems",
+      "year": 2021
+    },
+    {
+      "citationCount": 10,
+      "paperId": "W10REFALPHA",
+      "title": "Reference Alpha",
+      "venue": "International Conference on Machine Learning",
+      "year": 2020
+    },
+    {
+      "citationCount": 3,
+      "paperId": "W10REFBETA",
+      "title": "Reference Beta",
+      "venue": "arXiv.org",
+      "year": 2019
+    }
+  ],
+  "mermaidLines": [
+    "graph TD",
+    "  W10GOLDSEED[\"Golden Seed Paper\\n(Conference on Neural Information Processing Systems, 2021)\"]",
+    "  style W10GOLDSEED fill:#ccffcc,stroke:#333,stroke-width:2px",
+    "  W10REFALPHA[\"Reference Alpha\\n(International Conference on Machine Learning, 2020)\"]",
+    "  style W10REFALPHA fill:#ccffcc,stroke:#333,stroke-width:2px",
+    "  W10REFBETA[\"Reference Beta\\n(arXiv.org, 2019)\"]",
+    "  style W10REFBETA fill:#ccffcc,stroke:#333,stroke-width:2px",
+    "  W10GOLDSEED --> W10REFALPHA",
+    "  W10GOLDSEED --> W10REFBETA",
+    ""
+  ],
+  "prisma": {
+    "excluded": 0,
+    "exclusions": [],
+    "identified": 3,
+    "included": 3,
+    "screened": 3
+  },
+  "prismaExclusions": {
+    "exclusions": []
+  }
+}

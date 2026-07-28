@@ -1,0 +1,5 @@
+to read, in no order:
+* survey on retrieval-augmented generation (the 2024 one, long)
+* that blog post on gradient noise scale
+* meta-analysis of instruction-tuning data mixtures — allegedly contradicts our ablation
+maybe skip: the position paper everyone cites but nobody read

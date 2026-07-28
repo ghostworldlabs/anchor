@@ -1,0 +1,11 @@
+{
+  "name": "buildable-project-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A real, buildable Node project used as Crucible's brownfield Stage-0 ingest fixture (Wave 11). It actually builds + tests GREEN, so the Tier-2 reproduce-first probe has a genuine project to reproduce.",
+  "main": "src/calc.mjs",
+  "scripts": {
+    "test": "node --test app-test.mjs"
+  }
+}

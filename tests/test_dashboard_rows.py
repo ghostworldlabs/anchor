@@ -200,6 +200,10 @@ def test_every_brand_img_uses_single_vendored_svg(env):
         # (vendor/brand/skill-foundry-icon.jpg), the documented sibling of the
         # Zombie Hunter radar icon; not a duplicate brand MARK.
         "/vendor/brand/skill-foundry-icon.jpg",
+        # Ecgberht High Seat — the seal on the first dashboard tile's summary
+        # (vendor/brand/ecgberht-portfolio-high-seat.jpg), same documented
+        # feature-icon class as the two above; not a duplicate brand MARK.
+        "/vendor/brand/ecgberht-portfolio-high-seat.jpg",
     }
     srcs = set(
         s.split("?", 1)[0]

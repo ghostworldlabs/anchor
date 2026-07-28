@@ -1,0 +1,40 @@
+{
+  "id": "06-legit-small-project",
+  "description": "THE NEGATIVE CONTROL. A small, tidy, entirely legitimate project — but one with properties that superficially resemble junk: files nothing else references (a licence, a changelog), and a vendored data file that has not been touched in two years because it is a frozen reference table, not neglect. Every label is keep. A corpus without a folder like this measures recall while pretending to measure precision.",
+  "mode": "heuristic",
+  "git": true,
+  "files": [
+    {
+      "path": "main.py",
+      "ageDays": 8,
+      "content": "from lookup import COUNTRY_CODES\n\ndef main():\n    print(len(COUNTRY_CODES))\n\nif __name__ == '__main__':\n    main()\n"
+    },
+    {
+      "path": "lookup.py",
+      "ageDays": 8,
+      "content": "import json, pathlib\n\nCOUNTRY_CODES = json.loads(pathlib.Path(__file__).with_name('iso-3166.json').read_text())\n"
+    },
+    {
+      "path": "iso-3166.json",
+      "ageDays": 730,
+      "content": "{\"AD\": \"Andorra\", \"AE\": \"United Arab Emirates\", \"AF\": \"Afghanistan\"}\n"
+    },
+    {
+      "path": "LICENSE",
+      "ageDays": 730,
+      "content": "MIT License\n\nPermission is hereby granted, free of charge, to any person obtaining a copy...\n"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "ageDays": 400,
+      "content": "# Changelog\n\n## 0.1.0\n- first release\n"
+    }
+  ],
+  "labels": [
+    { "path": "main.py", "truth": "keep", "why": "the entry point" },
+    { "path": "lookup.py", "truth": "keep", "why": "imported by main.py" },
+    { "path": "iso-3166.json", "truth": "keep", "why": "two years old and referenced only by a dynamic path expression — old because it is a FROZEN reference table, not because it is neglected. A remove verdict here is the precision failure the gate exists to catch." },
+    { "path": "LICENSE", "truth": "keep", "why": "referenced by nothing and never edited; removing a licence is never correct" },
+    { "path": "CHANGELOG.md", "truth": "keep", "why": "referenced by nothing, over a year old, and load-bearing project history" }
+  ]
+}
