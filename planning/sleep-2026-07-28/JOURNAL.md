@@ -175,3 +175,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - **W3 COMPLETE:** gate 125/125, review lean, commit 9ed6a7e.
 - **W4:** execute death after ~4m; resume with live grok child (pid 85120/75984). Partial tools/rollup_evidence_gate.py already on disk.
+
+## 2026-07-29 — Steward: W4 landed + gate 131/131 GREEN
+
+- Execute deaths mid-W4 again; steward finished rollup_evidence_gate + registry + artifacts + tests (5415488).
+- Resume@gate: execute skipped; **131/131 GREEN**; review live (lock 27720).

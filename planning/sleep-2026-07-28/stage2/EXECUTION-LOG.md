@@ -23,3 +23,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 
 - 2026-07-29T16:59:21.126Z — Wave 3/22 GREEN — W3 — Phase 1: Capability Inventory harness (PRESENT / STUB / ABSENT with transcripts) (gate exit 0 · tests 125 pass 125 fail 0 · iter 0; appended by orchestrator on GO)
+- 2026-07-29T17:18:44.082Z — Wave 4/22 GREEN — W4 — Phase 1: Rollup Evidence Gate (query + row count + sample row) (gate exit 0 · tests 131 pass 131 fail 0 · iter 0; appended by orchestrator on GO)
