@@ -90,10 +90,23 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **live:** wave 1/22 execute (task triple + containment)
 - **note:** W1 requires John's dated verification-task-triple fields — may need human input soon
 
+## 2026-07-29 — W1 test-immutability HALT + resume
+
+- **outcome:** friction
+- **what:** Fix loop edited `tests/test_verification_task_triple_2026_07_29.py` after gate GREEN 70/70 → test-immutability HALT. Operator committed W1 tools/tests (`084c642`), clear-halt --force, resume. Re-entered execute W1 (iteration reset).
+- **lesson:** keep FIX product-only; test edits belong to EXECUTE.
+
+## 2026-07-29 — W1 PLAN-AMENDMENT-PROPOSAL (applied)
+
+- **outcome:** worked (plan amend; build parked for John)
+- **discovery:** pytest-only gate-command could GO with AWAITING triple (structure green, honesty GWT unenforceable). Review proposed wiring `phase0_go_decision()` into gate-command.
+- **action:** Applied proposed gate-command to IMPLEMENTATION-PLAN.md Wave 1 (optimize-not-lying). `phase0_go_decision()` currently HALT: unconfirmed T1–T3 + unsigned ledger.
+- **not done:** resume until John confirms triple + ledger — would thrash RED honestly until then.
+
 ## Pending
 
-- Foreman 22-wave build monitoring
-- John: fill verification task triple when W1 asks
-- Restore stash after build if needed (`git stash list`)
-- S1 post-build after GREEN
+- **John:** run T1 open / T2 run / T3 stop-restart on v1.2 and confirm in verification-task-triple.json (+ ledger sign-off)
+- Then: --resume --clear-halt from stage2
+- Stash restore later if needed
+- S1 post-build after full GREEN
 
