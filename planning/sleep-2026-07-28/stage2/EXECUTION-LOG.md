@@ -105,3 +105,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** rest of criterion 4 as CANDIDATE-MET structure — Claude/Gemini/Grok each produce a depth-labelled report from their own probe; Gemini timeout isolation leaves Claude and Grok intact and correctly labelled; unlabelled report fails the gate naming the engine and the unlabelled report
 - 2026-07-29T19:58:28.845Z — Wave 15/22 GREEN — W15 — Phase 3: Per-engine independent diagnose for Claude, Gemini, Grok with depth labels (gate exit 0 · tests 513 pass 513 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 16 — W16 Phase 3 Stop summary tile backed by real in-flight inventory (2026-07-29)
+
+- **status:** deliverables landed — `anchor/session/stop_summary.py` (collect_stop_summary from CAPABILITY-INVENTORY control `stop_summary`; structured InFlightItem counts + query_ref; induced faults inventory_unreadable / zero_items / partial_items; unknown ≠ empty ≠ zero_measured), `anchor/ui/stop_summary_tile.py` (render through render_state; three-item list as visible text nodes; generate_html + node --check; stop-summary-e2e traces), `artifacts/failure-states/stop-summary.md` (unknown and empty SEPARATE rows; surface-native stop/summary/tile render), `artifacts/traces/stop-summary-e2e.json` (materialized by gate via write_stop_summary_traces; proof_level rendered-string), `tests/test_stop_summary_2026_07_29.py`
+- **gate:** `pytest -v tests/test_stop_summary_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** stop/summary half of criterion 5 as CANDIDATE-MET structure — three in-flight items render with counts traceable to inventory query `stop_summary.in_flight`; unreadable inventory → unknown never empty-looking "nothing was in flight"; zero items → empty; partial items still listed with counts

@@ -271,3 +271,12 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 ## 2026-07-29 — Steward tick: W15 review live post transport-HALT clear
 
 - Gate re-prove 513/513 GREEN; review in flight (lock 55808, grok 67108). 14/22 waves done pending W15 converge.
+
+## 2026-07-29 — Steward tick: W15 GREEN; W16 execute resume after death
+
+- **W15 COMPLETE:** 513/513, commit f0732c6.
+- **W16:** deaths mid-execute; resumed lock 61780 + grok 88700. 15/22 done.
+
+## 2026-07-29 — Steward tick: W16 review live after mid-review death
+
+- Gate 541/541 GREEN after fix-1. Orchestrator died mid-review; resumed; 2× grok review live (lock 85972). 15/22 pending W16 converge.
