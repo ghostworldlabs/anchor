@@ -112,3 +112,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **gate:** `pytest -v tests/test_stop_summary_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
 - **commit:** (orchestrator records SHA on GO)
 - **note:** stop/summary half of criterion 5 as CANDIDATE-MET structure — three in-flight items render with counts traceable to inventory query `stop_summary.in_flight`; unreadable inventory → unknown never empty-looking "nothing was in flight"; zero items → empty; partial items still listed with counts
+- 2026-07-29T20:42:56.980Z — Wave 16/22 GREEN — W16 — Phase 3: Stop summary tile backed by real in-flight inventory (gate exit 0 · tests 541 pass 541 fail 0 · iter 1; appended by orchestrator on GO)

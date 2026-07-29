@@ -280,3 +280,18 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 ## 2026-07-29 — Steward tick: W16 review live after mid-review death
 
 - Gate 541/541 GREEN after fix-1. Orchestrator died mid-review; resumed; 2× grok review live (lock 85972). 15/22 pending W16 converge.
+
+## 2026-07-29 — Steward tick: W16 committed + review live (again)
+
+- Committed W16 deliverables 48c832c; gate 541/541; review 2× grok (lock 74856).
+
+## 2026-07-29 � Steward: false ambiguity HALT on W16 review transport
+
+- **Symptom:** review:w16#0 unparseable JSON x2 ? HALT [taxonomy:ambiguity] despite note "transport failure, not a plan problem"; gate GREEN 541/541; W16 deliverables committed 48c832c.
+- **Root cause:** `makeAgentDriver` in trio/foreman/bin/wave-workflow.js dropped `transport_failed` when wrapping review results, so answerable:no hit �4.7 ambiguity before T10a degrade.
+- **Fix:** forward `transport_failed:true` from agent result (matches wave-engine T10a + driver contract / P0 2026-07-25 test). Resume --clear-halt @review.
+
+## 2026-07-29 — Steward tick: W16 review live; transport_failed plumbing confirmed in trio
+
+- transport_failed forwarded in wave-workflow + drivers (T10a).
+- Resumed W16 review: gate 541/541, lock 33140, 2× grok. 15/22 pending W16 converge.
