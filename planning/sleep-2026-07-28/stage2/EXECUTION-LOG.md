@@ -113,3 +113,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** stop/summary half of criterion 5 as CANDIDATE-MET structure — three in-flight items render with counts traceable to inventory query `stop_summary.in_flight`; unreadable inventory → unknown never empty-looking "nothing was in flight"; zero items → empty; partial items still listed with counts
 - 2026-07-29T20:42:56.980Z — Wave 16/22 GREEN — W16 — Phase 3: Stop summary tile backed by real in-flight inventory (gate exit 0 · tests 541 pass 541 fail 0 · iter 1; appended by orchestrator on GO)
+
+## Wave 17 — W17 Phase 3 Per-context restart contract (2026-07-29)
+
+- **status:** deliverables landed — `anchor/session/restart.py` (RESTART_CONTRACTS; restart_run/session/engine/workbench entry points; preserved/lost outcome; cannot-restart reasons), `anchor/ui/restart_controls.py` (exactly-one-control render; dead-control + cannot_restart; generate_html + node --check; write_restart_traces), `tools/restart_control_audit.py` (dual-control fail), `artifacts/RESTART-CONTEXTS.md`, `artifacts/failure-states/restart.md` (unknown ≠ empty), `artifacts/traces/restart-e2e.json` + per-context restart-*-e2e.json, `tests/test_restart_contract_2026_07_29.py`
+- **gate:** `pytest -v tests/test_restart_contract_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** restart half of criterion 5 as CANDIDATE-MET structure — exactly one control per context; preserved/lost matches written contract; dual Restart+Restart session fails audit; cannot_restart when not possible (no dead button)
+- 2026-07-29T21:03:02.863Z — Wave 17/22 GREEN — W17 — Phase 3: Per-context restart contract — exactly one control, scope + preserved/lost named (gate exit 0 · tests 565 pass 565 fail 0 · iter 0; steward-land after grok-cli execute death exit=4294967295)

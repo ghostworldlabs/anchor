@@ -295,3 +295,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - transport_failed forwarded in wave-workflow + drivers (T10a).
 - Resumed W16 review: gate 541/541, lock 33140, 2× grok. 15/22 pending W16 converge.
+
+## 2026-07-29 — Steward tick: W16 GREEN; W17 execute live
+
+- **W16 COMPLETE:** 541/541, commit dc9b5e3 (stop summary). Transport fix held for review.
+- **W17:** restart contract execute resumed after death; lock 62256 + grok 51804. 16/22 done.
