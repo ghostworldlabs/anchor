@@ -13,3 +13,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** 5def4c5 (plus subsequent steward/test-fix commits on branch)
 - **note:** steward advanced after Claude monthly spend limit blocked execute; product fixes for empty-HEAD worktree + honest usage rollup included earlier same day
 
+- 2026-07-29T16:14:42.896Z — Wave 1/22 GREEN — W1 — Phase 0: John task triple, containment smoke, shared-artifact ledger (gate exit 0 · tests 74 pass 74 fail 0 · iter 0; appended by orchestrator on GO)
