@@ -121,3 +121,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** restart half of criterion 5 as CANDIDATE-MET structure — exactly one control per context; preserved/lost matches written contract; dual Restart+Restart session fails audit; cannot_restart when not possible (no dead button)
 - 2026-07-29T21:03:02.863Z — Wave 17/22 GREEN — W17 — Phase 3: Per-context restart contract — exactly one control, scope + preserved/lost named (gate exit 0 · tests 565 pass 565 fail 0 · iter 0; steward-land after grok-cli execute death exit=4294967295)
+
+## Wave 18 — W18 Phase 3 File preview shared human-friendly path (2026-07-29)
+
+- **status:** deliverables landed — `anchor/files/preview.py` (docx/pptx/xlsx/pdf shared path; binary guard; unsupported_preview + download), `anchor/ui/preview_view.py` (render_state; unknown≠empty; write_preview_traces; node --check), `artifacts/failure-states/preview.md`, `artifacts/traces/preview-e2e.json`, `tests/test_file_preview_2026_07_29.py`
+- **gate:** `pytest -v tests/test_file_preview_2026_07_29.py`
+- **commit:** (orchestrator records SHA on GO)
+- **note:** criterion 6 CANDIDATE-MET structure — human-friendly preview; no raw binary text dump; unsupported named + download
+- 2026-07-29T21:10:24.726Z — Wave 18/22 GREEN — W18 file preview (gate 31 pass; steward-land after execute death)
