@@ -48,3 +48,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** cost labels from cost_state never 0⇒subscription; `$0.00` only under measured; mid-deploy absent/NULL column → measurement_failed with no `$` and no `(subscription)`
 - 2026-07-29T18:01:38.922Z — Wave 7/22 GREEN — W7 — Phase 2: cost_state enum + migration + dollar-fabrication ban (gate exit 0 · tests 202 pass 202 fail 0 · iter 1; appended by orchestrator on GO)
+
+## Wave 8 — W8 Phase 2 Tri-state conformance harness + failure-state table validator (2026-07-29)
+
+- **status:** deliverables landed — `tests/conformance/tri_state.py` (unknown≠empty≠zero harness; names collapsed pair + call site), `tests/conformance/table_validator.py` (vocabulary bijection + required hardening rows + honesty-theater ban on index/rebuild/reconcile for user tiles), `tests/conformance/html_assert.py` (visible-text-node assertions + node --check over extracted script blocks), `tools/delta_coverage.py` (dated-test coverage; E4 enumerated per-handler list when W1 probe recorded tooling absent), `artifacts/STATE-VOCABULARY-MAP.md` (machine-read hardening↔NamedState bijection), `tests/test_conformance_harness_2026_07_29.py`
+- **gate:** `pytest -v tests/test_conformance_harness_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** shared assertion engine importable by every surface wave; table complete-only (missing backing-store-unreadable fails by name); Doctor tile in index language fails as honesty theater
