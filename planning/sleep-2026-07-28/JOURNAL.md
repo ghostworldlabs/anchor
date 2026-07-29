@@ -180,3 +180,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - Execute deaths mid-W4 again; steward finished rollup_evidence_gate + registry + artifacts + tests (5415488).
 - Resume@gate: execute skipped; **131/131 GREEN**; review live (lock 27720).
+
+## 2026-07-29 — Steward: W4 GREEN; W5 execute death+resume
+
+- **W4 COMPLETE:** gate 131/131, commit b4d7220.
+- **W5:** death mid-execute; resume lock 74920 + grok 20028; partial freeze_gate.py already on disk (~53KB).
