@@ -2334,15 +2334,24 @@ def render_project_tile_html(entry: dict) -> str:
     # R&D view's single global lifetime/30-day toggle (rndRowsRollupWindow) swaps
     # every row's text in place via the read-only `/api/rnd/project_rollup`
     # endpoint, so a no-JS view still shows lifetime totals. Never raises.
+    rate = {}
+    try:
+        rate = _rollhon.project_capture_rate(pid_raw, window="lifetime") or {}
+    except Exception:
+        rate = {}
     try:
         roll = _eh.project_effort_rollup(pid_raw, window=_eh.WINDOW_LIFETIME)
-        roll_txt = html_lib.escape(_fmt_rollup_line(roll))
     except Exception:
-        roll_txt = ""
+        roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0, "sessions": 0}
+    live_n = _live_session_count(pid_raw)
+    try:
+        roll_txt = html_lib.escape(
+            _fmt_project_usage_line(roll, rate=rate, live_count=live_n))
+    except Exception:
+        roll_txt = html_lib.escape("Σ no run sessions yet")
     # Honesty stamp: measured vs unmeasured (incl. Grok wall-clock-only).
     cap_note = ""
     try:
-        rate = _rollhon.project_capture_rate(pid_raw, window="lifetime")
         if int(rate.get("total", 0) or 0) > 0:
             cap_note = " · " + html_lib.escape(
                 _rollhon.capture_rate_text(rate)
@@ -2350,8 +2359,6 @@ def render_project_tile_html(entry: dict) -> str:
                 else _fmt_capture_rate_short(rate))
     except Exception:
         cap_note = ""
-    if not roll_txt:
-        roll_txt = "Σ — no run-session costs yet"
     rollup_block = (
         f'<span class="rnd-row-roll" data-pid="{pid}" data-window="lifetime" '
         f'title="Cost / tokens / time across run sessions (RUN provenance only;'
@@ -4902,11 +4909,21 @@ def _fmt_rollup_line(roll: dict) -> str:
 
     Used by the project-window header (v4 Wave 5). Run-session-only totals (the
     rollup already excludes imported/discovered). Stdlib only; never raises.
+
+    Honesty rules (optimize-not-lying):
+    - Zero activity (no sessions, no tokens, no wall clock) → named empty state,
+      never ``0 tok · (subscription)``.
+    - ``$`` is shown ONLY when the engine reported a nonzero ``cost_usd``.
+    - ``(subscription)`` only when tokens were actually measured and cost is 0
+      (Max-subscription path) — never inferred from a bare zero cost alone.
+    - Sessions with no token measurement use ``0 tok measured`` / ``cost unknown``.
     """
     toks = int(roll.get("tokens", 0) or 0)
     cost = float(roll.get("cost_usd", 0.0) or 0.0)
     ms = int(roll.get("wall_clock_ms", 0) or 0)
     n = int(roll.get("sessions", 0) or 0)
+    if n <= 0 and toks <= 0 and ms <= 0:
+        return "Σ no run sessions yet"
     secs = ms / 1000.0
     if secs >= 3600:
         tstr = f"{secs / 3600.0:.1f}h"
@@ -4920,16 +4937,98 @@ def _fmt_rollup_line(roll: dict) -> str:
         tokstr = f"{toks} tok"
     # No-own-pricing-table (LOCKED, telemetry-resume W5): ``$`` is shown ONLY when
     # the engine itself reported a nonzero ``costUSD``. On the Max-subscription
-    # host the per-message sidecar carries no dollar figure, so a measured session
-    # renders ``… (subscription)`` — Anchor never computes a dollar figure of its
-    # own. (See NORTH-STAR-AMENDMENT.md "No-own-pricing-table".)
-    money = f"${cost:.2f}" if cost > 0 else "(subscription)"
+    # host the per-message sidecar carries no dollar figure, so a *measured*
+    # session renders ``… (subscription)`` — Anchor never computes a dollar
+    # figure of its own. (See NORTH-STAR-AMENDMENT.md "No-own-pricing-table".)
+    if cost > 0:
+        money = f"${cost:.2f}"
+    elif toks > 0:
+        money = "(subscription)"
+    else:
+        money = "cost unknown"
     # When only wall-clock exists (Grok unmeasured / wall-only rows), be explicit.
     if toks == 0 and ms > 0:
         return (f"Σ time {tstr} · {money} · 0 tok measured"
                 f" · {n} session{'' if n == 1 else 's'}")
+    if toks == 0:
+        return (f"Σ 0 tok measured · {money} · {tstr}"
+                f" · {n} session{'' if n == 1 else 's'}")
     return (f"Σ {tokstr} · {money} · {tstr} "
             f"· {n} session{'' if n == 1 else 's'}")
+
+
+
+def _live_session_count(project_id: str) -> int:
+    """Count not-yet-finalized live managed sessions for a project (never raises)."""
+    if not project_id:
+        return 0
+    try:
+        import session_registry as _sreg
+        live_statuses = {
+            getattr(_sreg, "STATUS_RUNNING", "running"),
+            getattr(_sreg, "STATUS_NEEDS_ATTENTION", "needs-attention"),
+            getattr(_sreg, "STATUS_IDLE", "idle"),
+        }
+        n = 0
+        for rec in _sreg.list_sessions(project_id) or []:
+            if (rec or {}).get("status") in live_statuses:
+                n += 1
+        return n
+    except Exception:
+        return 0
+
+
+def _fmt_project_usage_line(roll, rate=None, live_count=0) -> str:
+    """Honest project usage line combining effort rollup + capture-rate + live.
+
+    ``project_effort_rollup`` only counts RUN cost records (tokens/wall). Managed
+    terminal sessions can exist with zero rollup contribution (still live, or
+    finalized unmeasured with no wall row). Never show ``Σ no run sessions yet``
+    when capture-rate or live registry sessions prove activity.
+    """
+    roll = roll or {}
+    toks = int(roll.get("tokens", 0) or 0)
+    ms = int(roll.get("wall_clock_ms", 0) or 0)
+    n = int(roll.get("sessions", 0) or 0)
+    if toks > 0 or ms > 0 or n > 0:
+        return _fmt_rollup_line(roll)
+
+    rate = rate or {}
+    total = int(rate.get("total", 0) or 0)
+    measured = int(rate.get("measured", 0) or 0)
+    unm = int(rate.get("unmeasured", 0) or 0)
+    failed = int(rate.get("capture_failed", 0)
+                 or rate.get("capture-failed", 0) or 0)
+    live = int(live_count or 0)
+
+    if total <= 0 and live <= 0:
+        return "Σ no run sessions yet"
+
+    parts = []
+    if live > 0:
+        parts.append("%d live" % live)
+    if measured > 0:
+        parts.append("%d measured" % measured)
+    if unm > 0:
+        parts.append("%d unmeasured" % unm)
+    if failed > 0:
+        parts.append("%d capture-failed" % failed)
+    if not parts and total > 0:
+        parts.append("%d session%s" % (total, "" if total == 1 else "s"))
+
+    reason_bit = ""
+    reasons = rate.get("reasons") or {}
+    if isinstance(reasons, dict) and reasons:
+        try:
+            top = max(reasons.items(), key=lambda kv: int(kv[1] or 0))
+            if top and top[0]:
+                reason_bit = " (%s)" % top[0]
+        except Exception:
+            reason_bit = ""
+
+    pending = " · usage pending finalize" if live > 0 and measured == 0 else ""
+    return ("Σ 0 tok measured · cost unknown · %s%s%s"
+            % (", ".join(parts), reason_bit, pending))
 
 
 def _fmt_capture_rate_short(rate: dict) -> str:
@@ -4965,8 +5064,16 @@ def render_header_rollup_html(project_id: str) -> str:
         life = _eh.project_effort_rollup(project_id, window=_eh.WINDOW_LIFETIME)
     except Exception:
         return ""
+    rate_life = {}
+    try:
+        rate_life = _rollhon.project_capture_rate(
+            project_id, window="lifetime") or {}
+    except Exception:
+        rate_life = {}
+    live_n = _live_session_count(project_id)
     pid_attr = html_lib.escape(project_id, quote=True)
-    life_txt = html_lib.escape(_fmt_rollup_line(life))
+    life_txt = html_lib.escape(
+        _fmt_project_usage_line(life, rate=rate_life, live_count=live_n))
     # Honest Telemetry W5: the capture-rate stamp beside the numeric rollup —
     # 'measured N/T sessions (lifetime) · K capture-failed'. capture-failed is
     # ALWAYS counted separately (never folded into unmeasured) and tinted red when
@@ -10001,9 +10108,18 @@ def handle_project_rollup(handler, path, body):
         except Exception:
             roll = {"tokens": 0, "cost_usd": 0.0,
                     "wall_clock_ms": 0, "sessions": 0}
+        rate = {}
+        try:
+            rate = _rollhon.project_capture_rate(pid, window=window) or {}
+        except Exception:
+            rate = {}
+        live_n = _live_session_count(pid)
         handler._send_json({"ok": True, "window": window,
                             "rollup": roll,
-                            "text": _fmt_rollup_line(roll)})
+                            "capture_rate": rate,
+                            "live_sessions": live_n,
+                            "text": _fmt_project_usage_line(
+                                roll, rate=rate, live_count=live_n)})
 
 
 def handle_effort_rollup(handler, path, body):

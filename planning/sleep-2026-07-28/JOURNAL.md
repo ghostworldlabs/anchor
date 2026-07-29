@@ -103,10 +103,31 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **action:** Applied proposed gate-command to IMPLEMENTATION-PLAN.md Wave 1 (optimize-not-lying). `phase0_go_decision()` currently HALT: unconfirmed T1–T3 + unsigned ledger.
 - **not done:** resume until John confirms triple + ledger — would thrash RED honestly until then.
 
+## 2026-07-29 — John live T1/T2 over Tailscale (findings, not green confirm)
+
+- **surface:** laptop Tailscale → `http://100.69.215.4:8777/` (Anchor warm-restarted; service Running; TS HTTP 200)
+- **T1:** existing effort tile **opened**. Newish project **Open terminal** (build/research/general) **refused** with named popup: `worktree creation failed (git-worktree-add-failed): fatal: invalid reference: HEAD`. Summary on opened tile weak.
+- **T2:** clicked prompt → Grok window; tokens moved as feedback UI; **project usage row showed no token count** (neither measured number nor named state).
+- **T3:** not run.
+- **artifact:** `stage2/artifacts/verification-task-triple.json` status → `JOHN_RAN_FINDINGS_NOT_CONFIRMED`; `john_live_session` + per-task `john_observation_2026_07_29` filled; **`john_confirmation.confirmed` still false** (optimize-not-lying — findings ≠ signed green baseline).
+- **product class:** open-terminal + invalid HEAD worktree is a known failure class in health_reports; usage silence is a North-Star honesty defect for later surface waves.
+- **Foreman:** remains parked at W1 Phase-0 HALT until John signs confirmations and ledger, or directs a different Phase-0 path.
+
 ## Pending
 
-- **John:** run T1 open / T2 run / T3 stop-restart on v1.2 and confirm in verification-task-triple.json (+ ledger sign-off)
-- Then: --resume --clear-halt from stage2
+- **John decision:** (A) keep Phase-0 HALT and fix open-terminal/usage before green re-run, or (B) sign the observed broken baseline as the triple lines and continue build waves that own those fixes, or (C) hybrid.
+- **Still open:** T3 not run; ledger still UNSIGNED
+- Then: --resume --clear-halt from stage2 only after Phase-0 can honestly GO
 - Stash restore later if needed
 - S1 post-build after full GREEN
+
+
+## 2026-07-29 — Product fixes from John T1/T2 findings (not Foreman wave)
+
+- **F-open-terminal-worktree-HEAD:** empty/unborn git repos (e.g. Holding Company) auto-seed one empty commit so worktree open works; non-git folders open in-place (isolation:none). Live probe on Holding Company: create+remove OK after seed.
+- **F-usage-row-silent/lying:** `_fmt_rollup_line` now named-states: empty → `Σ no run sessions yet`; measured tokens + $0 → `(subscription)`; sessions without tokens → `0 tok measured · cost unknown` (never invent subscription from bare zero).
+- **Tests:** test_worktrees (incl. empty seed + in-place non-git) + rollup honesty cases green.
+- **Deploy:** restart_anchor.ps1 elevated so laptop Tailscale sees the fix.
+- **Not fixed this pass:** effort-tile summary quality; Grok-feedback UI path that burns tokens outside Anchor session capture (usage still won't show for non-session feedback).
+- **Next for John:** re-try T1 open-terminal on Holding Company / newish project; T2 real Open terminal session and check project usage row after a managed turn.
 

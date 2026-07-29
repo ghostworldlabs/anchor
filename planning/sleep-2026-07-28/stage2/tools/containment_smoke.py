@@ -12,6 +12,11 @@ proof of:
 2. **Those root foreign artifacts are byte-identical before and after.**
    Not "we did not mean to touch them" — the SHA-256 of each, taken before and
    after the run, is recorded and compared.
+3. **The protected set does not silently fall behind the repository.**
+   :func:`unprotected_foreign_candidates` reports root files shaped like
+   another effort's Foreman document that :data:`ROOT_FOREIGN_ARTIFACTS` does
+   not cover. It is advisory — a neighbour's unprotected file is a gap to
+   close, not a reason to fail *this* build's own containment verdict.
 
 The hardening law (crucible journal 0080) says containment is asserted far more
 often than it is exercised, so :func:`escape_attempt_suite` actually attempts
@@ -36,6 +41,7 @@ artifact changed, or any attempted escape was not refused.
 """
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -64,6 +70,9 @@ MAX_WRITE_TARGETS = 1000
 
 #: Repo-root documents owned by OTHER efforts. This build reads none of them
 #: and writes none of them; the smoke proves byte-identity across the run.
+#:
+#: ``DESCRIPTION.md`` is first by contract: the escape-attempt suite uses
+#: ``ROOT_FOREIGN_ARTIFACTS[0]`` as the concrete landmine it tries to clobber.
 ROOT_FOREIGN_ARTIFACTS: Tuple[str, ...] = (
     "DESCRIPTION.md",
     "IMPLEMENTATION-PLAN.md",
@@ -77,6 +86,29 @@ ROOT_FOREIGN_ARTIFACTS: Tuple[str, ...] = (
     "FOUNDRY-V2-IMPLEMENTATION-PLAN.md",
     "FOUNDRY-V2-EXECUTION-LOG.md",
     "ANCHOR-STATE.md",
+    # Other Foreman efforts' reports and per-wave execute summaries, which sit
+    # at the repository root exactly where this build must never write.
+    "PHASE3-FOREMAN-TUNING.md",
+    "ANCHOR-OVERHAUL-REPORT-2026-07.md",
+    "WAVE4-EXECUTE-SUMMARY.md",
+    "WAVE7-EXECUTE-SUMMARY.md",
+    "WAVE8-EXECUTE-SUMMARY.md",
+)
+
+#: Filename shapes that only ever appear at the repository root because some
+#: *other* Foreman effort put them there. A root file matching one of these and
+#: absent from :data:`ROOT_FOREIGN_ARTIFACTS` is unprotected drift — the smoke
+#: reports it so the protected set cannot silently fall behind the repository.
+FOREIGN_ARTIFACT_PATTERNS: Tuple[str, ...] = (
+    "DESCRIPTION.md",
+    "IMPLEMENTATION-PLAN.md",
+    "EXECUTION-LOG.md",
+    "DECISION-LOG.md",
+    "*HANDOFF.md",
+    "FOREMAN-*.md",
+    "FOUNDRY-*.md",
+    "WAVE*-EXECUTE-SUMMARY.md",
+    "PHASE*-FOREMAN-*.md",
 )
 
 # Refusal / allowance rules. Every verdict names exactly one of these, so a
@@ -283,6 +315,39 @@ def _foreign_artifact_for(resolved: str, repo: Path) -> Optional[str]:
     return None
 
 
+def unprotected_foreign_candidates(
+    repo: Optional[Path] = None,
+    patterns: Sequence[str] = FOREIGN_ARTIFACT_PATTERNS,
+    known: Sequence[str] = ROOT_FOREIGN_ARTIFACTS,
+) -> List[str]:
+    """Root files that *look* like another effort's Foreman artifact but are
+    not in the protected set.
+
+    This is the drift guard on :data:`ROOT_FOREIGN_ARTIFACTS`: a hand-written
+    list of names is only as good as its last edit, and another Foreman effort
+    dropping a new report at the repository root would otherwise leave that
+    file unhashed and therefore unproven. Sorted for determinism; an
+    unreadable repository root yields ``[]`` rather than raising, because this
+    is a *reporting* signal and never the thing that decides containment.
+    """
+    base = repo_root() if repo is None else Path(repo)
+    protected = {name.lower() for name in known}
+    found = set()
+    try:
+        entries = [p for p in base.iterdir() if p.is_file()]
+    except OSError:
+        return []
+
+    for entry in entries:
+        if entry.name.lower() in protected:
+            continue
+        for pattern in patterns:
+            if fnmatch.fnmatch(entry.name.lower(), pattern.lower()):
+                found.add(entry.name)
+                break
+    return sorted(found)
+
+
 # --------------------------------------------------------------------------
 # Escape-attempt suite (containment is exercised, not asserted)
 # --------------------------------------------------------------------------
@@ -409,6 +474,10 @@ class SmokeResult:
     escape_suite: List[Dict[str, object]] = field(default_factory=list)
     bound_exceeded: bool = False
     problems: List[str] = field(default_factory=list)
+    #: Advisory: root files shaped like another effort's Foreman artifact that
+    #: the protected set does not cover. Reported, never fatal — this run's
+    #: own containment is decided by the verdicts, not by the neighbours.
+    unprotected_candidates: List[str] = field(default_factory=list)
 
     def report(self) -> str:
         lines = ["containment smoke: %s" % ("PASS" if self.ok else "FAIL")]
@@ -437,6 +506,9 @@ class SmokeResult:
         if not self.changed_foreign and self.foreign_before:
             lines.append("  root foreign artifacts byte-identical before/after: %d checked"
                          % len(self.foreign_before))
+        for name in self.unprotected_candidates:
+            lines.append("  ADVISORY unprotected root artifact %s - looks like another "
+                         "effort's Foreman doc but is not in ROOT_FOREIGN_ARTIFACTS" % name)
         return "\n".join(lines)
 
     def as_dict(self) -> Dict[str, object]:
@@ -452,6 +524,7 @@ class SmokeResult:
             "escape_suite": self.escape_suite,
             "bound_exceeded": self.bound_exceeded,
             "problems": self.problems,
+            "unprotected_candidates": self.unprotected_candidates,
         }
 
 
@@ -503,6 +576,7 @@ def run_smoke(
 
     result.foreign_after = snapshot_foreign_artifacts(base)
     result.changed_foreign = compare_snapshots(result.foreign_before, result.foreign_after)
+    result.unprotected_candidates = unprotected_foreign_candidates(repo=base)
 
     for verdict in result.refusals:
         if verdict.foreign_artifact:

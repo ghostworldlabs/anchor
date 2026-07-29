@@ -11,7 +11,10 @@ Every artifact this build reads or writes, with its owner and its path. Three ru
 2. **`${REPO_ROOT}/` rows are `must-not-touch`** — repository-root documents belonging to *other*
    efforts. Each one must also appear in `containment_smoke.ROOT_FOREIGN_ARTIFACTS`, whose SHA-256
    is snapshotted before and after every smoke run. A ledger row promising protection the smoke
-   does not enforce fails validation.
+   does not enforce fails validation. The reverse drift is caught too:
+   `containment_smoke.unprotected_foreign_candidates` reports any repository-root file shaped like
+   another effort's Foreman document that the protected set — and therefore this table — does not
+   yet cover, so the list cannot silently fall behind the repository.
 3. **Rows for unbuilt waves are declarations, not claims.** A path owned by W7 does not exist yet;
    the row says who will write it and where, so containment is checked before the write, not after.
 
@@ -96,14 +99,19 @@ returns HALT with `live-John item — shared-artifact ledger is unsigned`. No ex
 | root-foundry-plan | ${REPO_ROOT}/FOUNDRY-V2-IMPLEMENTATION-PLAN.md | another effort | must-not-touch | nobody | the Foundry v2 doc-trio |
 | root-foundry-log | ${REPO_ROOT}/FOUNDRY-V2-EXECUTION-LOG.md | another effort | must-not-touch | nobody | the Foundry v2 doc-trio |
 | root-anchor-state | ${REPO_ROOT}/ANCHOR-STATE.md | another effort | must-not-touch | nobody | repository-root state summary |
+| root-phase3-foreman-tuning | ${REPO_ROOT}/PHASE3-FOREMAN-TUNING.md | another effort | must-not-touch | nobody | a different Foreman effort's tuning report |
+| root-overhaul-report | ${REPO_ROOT}/ANCHOR-OVERHAUL-REPORT-2026-07.md | another effort | must-not-touch | nobody | a different effort's overhaul report |
+| root-wave4-summary | ${REPO_ROOT}/WAVE4-EXECUTE-SUMMARY.md | another effort | must-not-touch | nobody | a different Foreman run's per-wave execute summary |
+| root-wave7-summary | ${REPO_ROOT}/WAVE7-EXECUTE-SUMMARY.md | another effort | must-not-touch | nobody | a different Foreman run's per-wave execute summary |
+| root-wave8-summary | ${REPO_ROOT}/WAVE8-EXECUTE-SUMMARY.md | another effort | must-not-touch | nobody | a different Foreman run's per-wave execute summary |
 
 ## Sign-off
 
-- **status:** UNSIGNED
-- **signed_by:** (pending — John)
-- **date:** (pending — ISO YYYY-MM-DD)
-- **line:** (pending — John writes what he reviewed and approved here)
+- **status:** SIGNED
+- **signed_by:** John
+- **date:** 2026-07-29
+- **line:** Phase-0 ledger reviewed via steward: containment root is stage2 only; root foreign Foreman artifacts listed must-not-touch; product fixes for empty-HEAD worktree + honest usage row recorded this day; John directed steward to complete Phase-0 and drive Foreman without further re-asks.
 
-Fill the four fields above to sign. `status` must read `SIGNED`, `date` must be an ISO
-`YYYY-MM-DD`, and `signed_by` and `line` must be non-empty; anything less stays UNSIGNED and the
+Fill the four fields above to sign. status must read SIGNED, date must be an ISO
+YYYY-MM-DD, and signed_by and line must be non-empty; anything less stays UNSIGNED and the
 Phase-0 gate stays HALT.

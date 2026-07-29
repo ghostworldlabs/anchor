@@ -7,6 +7,9 @@ Two claims are exercised here, not asserted:
   artifacts are byte-identical before and after a run, and the three escapes
   (``..`` traversal, absolute path, symlink/junction) are each REFUSED BY NAME
   — the rule name, not a prose substring, is what the assertions read.
+* **A protected set that is real, not decorative.** Every protected artifact
+  that exists on disk is genuinely hashed, and a drift guard catches a *new*
+  root-level Foreman document that the protected set does not yet cover.
 * **Coverage toolchain.** ``delta-coverage unavailable`` is recorded as a fact
   when the tooling is absent, and availability is never defaulted to true.
 
@@ -178,6 +181,67 @@ def test_the_smoke_passes_and_root_foreign_artifacts_are_byte_identical():
     assert result.foreign_before == result.foreign_after
     assert result.ok, result.report()
     assert set(result.foreign_before) == set(cs.ROOT_FOREIGN_ARTIFACTS)
+
+
+def test_every_protected_artifact_that_exists_is_actually_hashed():
+    """The protected set is real, not decorative.
+
+    A name in ROOT_FOREIGN_ARTIFACTS that exists on disk must contribute a
+    hash to the snapshot; a name that does not exist contributes ``None``,
+    which is the honest record of *absent* (and an absent file that stays
+    absent is still byte-identical across the run).
+    """
+    snapshot = cs.snapshot_foreign_artifacts(REPO)
+    assert set(snapshot) == set(cs.ROOT_FOREIGN_ARTIFACTS)
+    present = [n for n in cs.ROOT_FOREIGN_ARTIFACTS if (REPO / n).is_file()]
+    assert present, "no protected root artifact exists — the set is decorative"
+    for name in present:
+        assert snapshot[name] == cs.sha256_of(REPO / name)
+        assert len(snapshot[name]) == 64
+
+
+def test_a_new_foreman_artifact_at_the_root_is_detected_as_unprotected(tmp_path):
+    """The drift guard on the hand-written protected set.
+
+    Another effort dropping a report at the repository root would otherwise
+    leave that file unhashed and therefore unproven.
+    """
+    (tmp_path / "WAVE9-EXECUTE-SUMMARY.md").write_text("another run\n", encoding="utf-8")
+    (tmp_path / "FOREMAN-EXECUTION-LOG-OTHER.md").write_text("another log\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("not a foreman artifact\n", encoding="utf-8")
+    (tmp_path / "DESCRIPTION.md").write_text("already protected\n", encoding="utf-8")
+
+    drift = cs.unprotected_foreign_candidates(repo=tmp_path)
+    assert drift == ["FOREMAN-EXECUTION-LOG-OTHER.md", "WAVE9-EXECUTE-SUMMARY.md"]
+    assert "README.md" not in drift, "an ordinary repo doc is not a Foreman artifact"
+    assert "DESCRIPTION.md" not in drift, "an already-protected artifact is not drift"
+
+
+def test_the_drift_guard_is_advisory_and_never_fails_the_smoke(tmp_path):
+    """Drift is reported; it does not decide THIS build's containment."""
+    (tmp_path / "WAVE9-EXECUTE-SUMMARY.md").write_text("another run\n", encoding="utf-8")
+    result = cs.run_smoke(write_targets=["artifacts/x.json"], root=tmp_path,
+                          repo=tmp_path, run_escape_suite=False)
+    assert result.ok, "an unprotected neighbour must not fail our own containment"
+    assert result.unprotected_candidates == ["WAVE9-EXECUTE-SUMMARY.md"]
+    assert "ADVISORY" in result.report()
+    assert "WAVE9-EXECUTE-SUMMARY.md" in result.report()
+    assert result.as_dict()["unprotected_candidates"] == ["WAVE9-EXECUTE-SUMMARY.md"]
+
+
+def test_the_shipped_protected_set_covers_todays_repository_root():
+    """No foreign Foreman artifact sits unprotected at the real repo root.
+
+    If this fails, another effort added a root-level Foreman document and
+    ROOT_FOREIGN_ARTIFACTS (and the ledger's must-not-touch rows) must be
+    extended to cover it before this build writes anything.
+    """
+    drift = cs.unprotected_foreign_candidates(repo=REPO)
+    assert drift == [], (
+        "unprotected root Foreman artifact(s): %s — add them to "
+        "ROOT_FOREIGN_ARTIFACTS and to the ledger's must-not-touch rows"
+        % ", ".join(drift)
+    )
 
 
 def test_a_changed_foreign_artifact_is_reported_with_both_hashes():
