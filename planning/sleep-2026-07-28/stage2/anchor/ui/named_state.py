@@ -89,7 +89,8 @@ _DEF_CANNOT_RETRY = (
 )
 _DEF_CANNOT_OPEN = (
     "the open control cannot run for a named reason (no such project, "
-    "store unreadable, workspace locked, capability absent)."
+    "workspace locked, capability absent). Store unreadable is unknown "
+    "(not cannot_open) — the open reason map must not collapse that pair."
 )
 _DEF_CANNOT_RUN = (
     "the run control cannot run for a named reason (no runnable target, "

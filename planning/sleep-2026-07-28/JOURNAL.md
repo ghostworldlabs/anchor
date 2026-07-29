@@ -210,3 +210,17 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - W8 COMPLETE: gate 229/229, commit d1d3af1 (after immutability clear).
 - Lock 34272 died mid-W9 execute; steward resumed; lock 80792 + grok 79444 alive.
+
+## 2026-07-29 — Steward tick: W9 GREEN; W10 execute live
+
+- **W9 COMPLETE:** gate 270/270, commit aab3c86 (trace/fault/EXECUTION-LOG).
+- **W10:** Open+Run honesty execute running (lock 80792, grok 29276).
+
+## 2026-07-29 — Steward tick: W10 mid-review after fix cycle
+
+- W10 execute ~9m → gate RED 328/330 → fix-1 → GREEN 330/330 → review (~2m, 2× grok).
+- Lock 80792 alive. No intervention.
+
+## 2026-07-29 — Steward tick: W10 review iter 2 after MAJOR fix
+
+- W10: review found 1 MAJOR → fix-2 → gate still 330/330 → re-review (JSON retry once). Lock 80792 alive.

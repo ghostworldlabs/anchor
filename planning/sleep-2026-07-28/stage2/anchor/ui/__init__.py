@@ -14,6 +14,9 @@ from anchor.ui.named_state import (
     validate_failure_state_table,
 )
 
+# W10 surfaces re-exported for convenience; prefer explicit submodule imports
+# in new code (dead_control / open_run_view).
+
 __all__ = [
     "BINDING_EMPTY",
     "BINDING_PENDING",

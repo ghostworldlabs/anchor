@@ -57,3 +57,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **note:** shared assertion engine importable by every surface wave; table complete-only (missing backing-store-unreadable fails by name); Doctor tile in index language fails as honesty theater
 - 2026-07-29T18:11:08.574Z — Wave 8/22 GREEN — W8 — Phase 2: Tri-state conformance harness + failure-state table validator (gate exit 0 · tests 229 pass 229 fail 0 · iter 1; appended by orchestrator on GO)
 - 2026-07-29T18:22:43.805Z — Wave 9/22 GREEN — W9 — Phase 2: End-to-end trace schema, fault injection, EXECUTION-LOG schema (gate exit 0 · tests 270 pass 270 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 10 — W10 Phase 3 Open + Run control honesty (2026-07-29)
+
+- **status:** deliverables landed — `anchor/ui/dead_control.py` (shared dead-control contract), `anchor/session/open_work.py` + `run_work.py` (enumerated CannotOpen/CannotRun), `anchor/ui/open_run_view.py` + `open_run_traces.py`, `artifacts/failure-states/open-run.md`, `artifacts/traces/open-e2e.json` + `run-e2e.json`, `artifacts/EARLY-SLICE-PARTIAL.md` (explicit PARTIAL slice), `tests/test_open_run_2026_07_29.py`
+- **gate:** `pytest -v tests/test_open_run_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** pending — orchestrator stamps the real git SHA on GO (no fabricated or placeholder SHA claimed by the FIX agent)
+- **note:** Open/Run emit live control only for non-STALE live PRESENT inventory; otherwise named cannot-* via render_state with zero clickable no-ops; store-unreadable → unknown ≠ empty; PRESENT still ships e2e traces + failure table; slice labelled PARTIAL (usage/cost/Doctor/stop/restart/preview/cadence unbuilt). Fix-iter-2: e2e traces execute real handlers with real payload SHA-256 hashes and are pinned to builders; open/run view passes head_hash through the dead-control auth seam; cannot_open docstring no longer lists store-unreadable (maps to unknown); workbench node --check when node is on PATH.
+- 2026-07-29T18:48:18.823Z — Wave 10/22 GREEN — W10 — Phase 3: Open + Run control honesty (dead-control contract, named cannot-* states, e2e traces) (gate exit 0 · tests 330 pass 330 fail 0 · iter 2; appended by orchestrator on GO)
