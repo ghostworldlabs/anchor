@@ -199,3 +199,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **Fix:** background shell-kept node run-live (pid 89620) --resume --clear-halt --force.
 - **W6 COMPLETE:** execute+gate **165/165** GREEN, review lean, commit **8bd862c** (named-state vocabulary).
 - **Now:** wave 7/22 execute (cost_state enum) · orchestrator alive.
+
+## 2026-07-29 — Steward: W8 test-immutability HALT cleared
+
+- **HALT:** fix edited tests/conformance/table_validator.py (W8 plan deliverable).
+- **Action:** committed full W8 package (382d9b8); proven ledger; resume@review.
+- **Gate re-prove:** 229/229 GREEN; review live (lock 34272).

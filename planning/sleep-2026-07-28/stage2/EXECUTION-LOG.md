@@ -55,3 +55,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **gate:** `pytest -v tests/test_conformance_harness_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
 - **commit:** (orchestrator records SHA on GO)
 - **note:** shared assertion engine importable by every surface wave; table complete-only (missing backing-store-unreadable fails by name); Doctor tile in index language fails as honesty theater
+- 2026-07-29T18:11:08.574Z — Wave 8/22 GREEN — W8 — Phase 2: Tri-state conformance harness + failure-state table validator (gate exit 0 · tests 229 pass 229 fail 0 · iter 1; appended by orchestrator on GO)
