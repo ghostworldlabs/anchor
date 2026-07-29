@@ -234,3 +234,13 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - Reviewers invalid JSON (transport) misclassified as taxonomy:ambiguity.
 - Gate was 370/370 GREEN. Committed W11 (e0d9407); resume@review; gate re-prove 370/370; review live (83816).
+
+## 2026-07-29 — Steward tick: W11 GREEN; W12 execute started (half plan)
+
+- **W11 COMPLETE:** gate 370/370, review clean, commit b5470a0.
+- **W12:** Usage+time surfacing execute just launched (lock 83816, grok 89232).
+- **Milestone:** 11/22 waves done (~50%).
+
+## 2026-07-29 — Steward tick: W12 execute death+resume
+
+- Lock 83816 died mid-W12 execute; steward resumed (80904 + grok 65344). Still 11/22; W12 execute restarted.

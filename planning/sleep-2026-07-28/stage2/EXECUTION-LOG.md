@@ -73,3 +73,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** attach timeout classified as timeout exactly once; process-gone → named cannot_retry with no Retry control; empty session list ≠ unknown (unreadable/unqueried); one induced fault per reason (timeout, unknown_session, empty_session_list); e2e trace control→handler→capability→state at proof_level rendered-string
 - 2026-07-29T19:06:09.627Z — Wave 11/22 GREEN — W11 — Phase 3: Session attach honesty (timeout classified, no double-print, Retry viable or named) (gate exit 0 · tests 370 pass 370 fail 0 · iter 1; appended by orchestrator on GO)
+
+## Wave 12 — W12 Phase 3 Usage + time surfacing (2026-07-29)
+
+- **status:** deliverables landed — `anchor/usage/rollup_read.py` (PROVEN-only numerals; NO_AGGREGATOR raises at test time; READ_FAILED → unknown never 0/pending; E2 provisional as_of + reconciliation hook), `anchor/ui/usage_tiles.py` (dashboard / workbench / session chrome through `render_state`; four distinct trichotomy labels; generate_html + node --check; usage-e2e traces), `artifacts/failure-states/usage-time.md` (surface-native rows; unknown ≠ empty; mapped via STATE-VOCABULARY-MAP), `artifacts/traces/usage-e2e.json` (materialized by gate via write_usage_traces; proof_level rendered-string), `tests/test_usage_time_surfacing_2026_07_29.py`
+- **gate:** `pytest -v tests/test_usage_time_surfacing_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** usage/time half of criterion 3 as CANDIDATE-MET structure — dashboard pending names aggregation wave with no numeral; workbench zero_measured shows measured 0 distinct from empty/pending/unknown; session chrome READ_FAILED shows unknown with no numeral and no pending wording; E2 provisional carries visible as_of + EXECUTION-LOG reconciliation marker `usage-time-e2-reconciliation`
+- 2026-07-29T19:23:09.759Z — Wave 12/22 GREEN — W12 — Phase 3: Usage + time surfacing gated on the Rollup Evidence Gate (gate exit 0 · tests 408 pass 408 fail 0 · iter 0; appended by orchestrator on GO)
