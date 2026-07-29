@@ -81,3 +81,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** usage/time half of criterion 3 as CANDIDATE-MET structure — dashboard pending names aggregation wave with no numeral; workbench zero_measured shows measured 0 distinct from empty/pending/unknown; session chrome READ_FAILED shows unknown with no numeral and no pending wording; E2 provisional carries visible as_of + EXECUTION-LOG reconciliation marker `usage-time-e2-reconciliation`
 - 2026-07-29T19:23:09.759Z — Wave 12/22 GREEN — W12 — Phase 3: Usage + time surfacing gated on the Rollup Evidence Gate (gate exit 0 · tests 408 pass 408 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 13 — W13 Phase 3 Cost surfacing from cost_state (2026-07-29)
+
+- **status:** deliverables landed — `anchor/ui/cost_view.py` (dashboard / workbench / session chrome cost tiles routed exclusively through `render_cost`; unmeasured-engine path; aggregation-raise → measurement_failed; E2 refused for dollars; zero×cost_state matrix HTML; zero_inference_lint gate wiring; cost-e2e traces), `artifacts/failure-states/cost.md` (unknown ≠ empty; unmeasured + measurement_failed rows; surface-native), `artifacts/traces/cost-e2e.json` (materialized by gate via write_cost_traces; proof_level rendered-string), `tests/test_cost_surfacing_2026_07_29.py`
+- **gate:** `pytest -v tests/test_cost_surfacing_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** cost half of criterion 3 as CANDIDATE-MET structure — every dollar figure backed by cost_state == measured only; uninstrumented engine session chrome shows labelled unmeasured with no `$`; aggregation raise → measurement_failed and exit register refuses E2 on cost tiles; zero_inference_lint clean on cost sources
+- 2026-07-29T19:30:59.167Z — Wave 13/22 GREEN — W13 — Phase 3: Cost surfacing from cost_state (never a fabricated dollar) (gate exit 0 · tests 446 pass 446 fail 0 · iter 0; appended by orchestrator on GO)

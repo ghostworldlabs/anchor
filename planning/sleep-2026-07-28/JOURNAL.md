@@ -244,3 +244,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 ## 2026-07-29 — Steward tick: W12 execute death+resume
 
 - Lock 83816 died mid-W12 execute; steward resumed (80904 + grok 65344). Still 11/22; W12 execute restarted.
+
+## 2026-07-29 — Steward tick: W12 GREEN; W13 execute live
+
+- **W12 COMPLETE:** gate 408/408 first try, commit 5572603 (usage+time surfacing).
+- **W13:** cost_state cost surfacing execute ~3m, lock 80904 + grok 71184.
+- **Milestone:** 12/22 waves.
