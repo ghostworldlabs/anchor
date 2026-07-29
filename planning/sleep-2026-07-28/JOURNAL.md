@@ -229,3 +229,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - **W10 COMPLETE:** 2 fix iters, gate 330/330, commit ca6cb86 (Open/Run honesty).
 - **W11:** execute → gate RED 368/370 → fix-1 in flight (~3m). Lock 80792 + grok alive.
+
+## 2026-07-29 — Steward: W11 false ambiguity HALT cleared
+
+- Reviewers invalid JSON (transport) misclassified as taxonomy:ambiguity.
+- Gate was 370/370 GREEN. Committed W11 (e0d9407); resume@review; gate re-prove 370/370; review live (83816).

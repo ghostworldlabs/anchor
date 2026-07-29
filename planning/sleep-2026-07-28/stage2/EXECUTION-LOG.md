@@ -72,3 +72,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **gate:** `pytest -v tests/test_session_attach_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
 - **commit:** (orchestrator records SHA on GO)
 - **note:** attach timeout classified as timeout exactly once; process-gone → named cannot_retry with no Retry control; empty session list ≠ unknown (unreadable/unqueried); one induced fault per reason (timeout, unknown_session, empty_session_list); e2e trace control→handler→capability→state at proof_level rendered-string
+- 2026-07-29T19:06:09.627Z — Wave 11/22 GREEN — W11 — Phase 3: Session attach honesty (timeout classified, no double-print, Retry viable or named) (gate exit 0 · tests 370 pass 370 fail 0 · iter 1; appended by orchestrator on GO)
