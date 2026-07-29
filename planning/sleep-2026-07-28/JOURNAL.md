@@ -148,3 +148,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **Claude:** `claude -p` returns monthly spend limit (exit 1) → execute/fix error-result 0 tools ~500ms.
 - **Gate RED:** `test_a_partly_confirmed_triple...` expected HALT but shipped triple was fully confirmed → fixed test to wipe confirmations first (commit 9f277df); 74/74 green locally.
 - **Failover:** resume bat routes execute/fix/review to **grok-cli** (cross_model:false honest); relaunch --resume --clear-halt --force.
+
+## 2026-07-29 — Steward: run-live died mid-W2 review; resumed
+
+- **death:** lock pid 76628 dead ~8m after gate GREEN / waiting on review (no further ticks).
+- **action:** stale lock cleared; checkpoint realigned last_commit + status budget_stopped; --resume at review.
+- **result:** W2 execute skipped; gate re-proved 117/117 GREEN; review re-entered (lock 74748 alive). W2 deliverables untracked on disk (anchor/, EXIT-REGISTER.md, tests).
