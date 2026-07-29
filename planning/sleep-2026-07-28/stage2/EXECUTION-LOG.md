@@ -65,3 +65,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** pending — orchestrator stamps the real git SHA on GO (no fabricated or placeholder SHA claimed by the FIX agent)
 - **note:** Open/Run emit live control only for non-STALE live PRESENT inventory; otherwise named cannot-* via render_state with zero clickable no-ops; store-unreadable → unknown ≠ empty; PRESENT still ships e2e traces + failure table; slice labelled PARTIAL (usage/cost/Doctor/stop/restart/preview/cadence unbuilt). Fix-iter-2: e2e traces execute real handlers with real payload SHA-256 hashes and are pinned to builders; open/run view passes head_hash through the dead-control auth seam; cannot_open docstring no longer lists store-unreadable (maps to unknown); workbench node --check when node is on PATH.
 - 2026-07-29T18:48:18.823Z — Wave 10/22 GREEN — W10 — Phase 3: Open + Run control honesty (dead-control contract, named cannot-* states, e2e traces) (gate exit 0 · tests 330 pass 330 fail 0 · iter 2; appended by orchestrator on GO)
+
+## Wave 11 — W11 Phase 3 Session attach honesty (2026-07-29)
+
+- **status:** deliverables landed — `anchor/session/attach.py` (timeout→NamedState.timeout ≠ unknown_session; single error_text emission; `retry_contract` → RetryAction | CannotRetry), `anchor/ui/attach_view.py` (render_state + Retry hidden rather than dead; attach-error-once), `anchor/ui/attach_traces.py`, `artifacts/failure-states/attach.md` (unknown and empty SEPARATE rows), `artifacts/traces/attach-e2e.json`, `tests/test_session_attach_2026_07_29.py`
+- **gate:** `pytest -v tests/test_session_attach_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** attach timeout classified as timeout exactly once; process-gone → named cannot_retry with no Retry control; empty session list ≠ unknown (unreadable/unqueried); one induced fault per reason (timeout, unknown_session, empty_session_list); e2e trace control→handler→capability→state at proof_level rendered-string

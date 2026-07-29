@@ -224,3 +224,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 ## 2026-07-29 — Steward tick: W10 review iter 2 after MAJOR fix
 
 - W10: review found 1 MAJOR → fix-2 → gate still 330/330 → re-review (JSON retry once). Lock 80792 alive.
+
+## 2026-07-29 — Steward tick: W10 GREEN; W11 fix-1 after RED gate
+
+- **W10 COMPLETE:** 2 fix iters, gate 330/330, commit ca6cb86 (Open/Run honesty).
+- **W11:** execute → gate RED 368/370 → fix-1 in flight (~3m). Lock 80792 + grok alive.
