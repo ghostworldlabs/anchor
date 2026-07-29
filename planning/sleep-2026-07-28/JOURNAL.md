@@ -170,3 +170,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - W3 execute agent kept dying; steward completed capability_inventory harness, inventory, transcripts, tests (commit 7ffc4dd).
 - Resume@gate with proven ledger: execute skipped; gate **125/125 GREEN**; review re-entered (lock 24884).
+
+## 2026-07-29 — Steward tick: W3 GREEN; W4 execute death+resume
+
+- **W3 COMPLETE:** gate 125/125, review lean, commit 9ed6a7e.
+- **W4:** execute death after ~4m; resume with live grok child (pid 85120/75984). Partial tools/rollup_evidence_gate.py already on disk.
