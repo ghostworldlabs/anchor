@@ -129,3 +129,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** criterion 6 CANDIDATE-MET structure — human-friendly preview; no raw binary text dump; unsupported named + download
 - 2026-07-29T21:10:24.726Z — Wave 18/22 GREEN — W18 file preview (gate 31 pass; steward-land after execute death)
+
+## Wave 19 — W19 Phase 3 Projects collapsed by default + dual-profile (2026-07-29)
+
+- **status:** deliverables landed — `anchor/ui/projects_tree.py`, `static/js/projects_tree.js`, `artifacts/root-cause-projects-collapse.md`, `artifacts/failure-states/projects-collapse.md`, `tests/test_projects_collapse_2026_07_29.py`
+- **gate:** `pytest -v tests/test_projects_collapse_2026_07_29.py`
+- **note:** criterion 7 CANDIDATE-MET — collapsed default; dual-profile preference; unreadable store → unknown
+- 2026-07-29T21:15:51.337Z — Wave 19/22 GREEN (gate 24 pass; steward-land)
