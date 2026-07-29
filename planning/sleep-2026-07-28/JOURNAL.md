@@ -205,3 +205,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **HALT:** fix edited tests/conformance/table_validator.py (W8 plan deliverable).
 - **Action:** committed full W8 package (382d9b8); proven ledger; resume@review.
 - **Gate re-prove:** 229/229 GREEN; review live (lock 34272).
+
+## 2026-07-29 — Steward tick: W8 GREEN; W9 execute live after resume
+
+- W8 COMPLETE: gate 229/229, commit d1d3af1 (after immutability clear).
+- Lock 34272 died mid-W9 execute; steward resumed; lock 80792 + grok 79444 alive.
