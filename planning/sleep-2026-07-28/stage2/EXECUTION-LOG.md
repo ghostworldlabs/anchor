@@ -40,3 +40,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** trichotomy docstrings locked to Binding definitions verbatim; unknown≠empty≠zero_measured≠pending as four distinct visible labels; merged failure-table rows fail 0080/0081; zero-inference lint flags `cost == 0 → (subscription)`
 - 2026-07-29T17:53:30.966Z — Wave 6/22 GREEN — W6 — Phase 2: Named-state vocabulary + render primitive (unknown ≠ empty ≠ zero) (gate exit 0 · tests 165 pass 165 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 7 — W7 Phase 2 cost_state enum + migration + dollar-fabrication ban (2026-07-29)
+
+- **status:** deliverables landed — `anchor/cost/cost_state.py` (CostState ×4), `anchor/cost/read_cost_state.py` (fail-closed partial migration → measurement_failed), `anchor/cost/render_cost.py` (sole sanctioned renderer; imports `render_state`; raises on `$0.00` outside measured), `migrations/2026_07_29_add_cost_state.sql` (additive column + backfill to unmeasured), `tests/test_cost_state_2026_07_29.py` (zero×state matrix + mid-deploy + spot-check wrong-figure)
+- **gate:** `pytest -v tests/test_cost_state_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** cost labels from cost_state never 0⇒subscription; `$0.00` only under measured; mid-deploy absent/NULL column → measurement_failed with no `$` and no `(subscription)`
+- 2026-07-29T18:01:38.922Z — Wave 7/22 GREEN — W7 — Phase 2: cost_state enum + migration + dollar-fabrication ban (gate exit 0 · tests 202 pass 202 fail 0 · iter 1; appended by orchestrator on GO)

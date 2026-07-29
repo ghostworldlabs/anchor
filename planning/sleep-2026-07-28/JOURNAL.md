@@ -191,3 +191,11 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - Execute deaths mid-W5; steward finished freeze_gate + WAVE-LIST-FREEZE + DOC-TRIO + INSTRUMENTATION-BUDGET + tests (e73d96c).
 - Fixed hash backtick strip + control-id parse for ``open` (open)`` cells.
 - Resume@gate: execute skipped; **137/137 GREEN**; review live (lock 69220).
+
+## 2026-07-29 — Steward tick ~11:55: W5+W6 GREEN; W7 execute live
+
+- **Prior death:** lock 69220 dead mid-W6 execute after W5 GREEN (1c2f150, gate 137/137).
+- **Resume friction:** PowerShell ConvertTo-Json BOM tore checkpoint (clear-halt refused) — rewritten UTF-8; short-lived launches died when parent closed stdio.
+- **Fix:** background shell-kept node run-live (pid 89620) --resume --clear-halt --force.
+- **W6 COMPLETE:** execute+gate **165/165** GREEN, review lean, commit **8bd862c** (named-state vocabulary).
+- **Now:** wave 7/22 execute (cost_state enum) · orchestrator alive.
