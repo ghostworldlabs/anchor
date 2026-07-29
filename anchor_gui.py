@@ -7914,9 +7914,18 @@ window.ANCHOR_AUTH_REQUIRED = {auth_required_js};
 // every mutating POST (X-Anchor-Build); a mismatch renders the reload banner.
 window.ANCHOR_BOOT = {anchor_boot_js};
 function _anchorToken() {{ try {{ return localStorage.getItem('anchor_token') || ''; }} catch (e) {{ return ''; }} }}
-function setAnchorToken() {{
+function setAnchorToken(opts) {{
     const cur = _anchorToken();
-    const t = window.prompt('Paste your Anchor access token:', cur);
+    // Do NOT re-offer a token the server just REJECTED (2026-07-28). The prompt
+    // used to pre-fill the saved value even when that value had just produced a
+    // 401, so pressing OK re-sent the known-bad token and the user looped. After
+    // a token rotation this is exactly what happens on every device that still
+    // holds the old one — "it was still saved" was the symptom.
+    const rejected = !!(opts && opts.rejected) && !!cur;
+    const msg = rejected
+        ? 'Your saved Anchor token was REJECTED (it is probably out of date).\\nPaste the current token:'
+        : 'Paste your Anchor access token:';
+    const t = window.prompt(msg, rejected ? '' : cur);
     if (t === null) return false;
     try {{ if (t) {{ localStorage.setItem('anchor_token', t.trim()); }} else {{ localStorage.removeItem('anchor_token'); }} }} catch (e) {{}}
     return true;
@@ -7939,12 +7948,50 @@ window.addEventListener('DOMContentLoaded', function () {{
     window.__anchorFetchWrapped = true;
     const _origFetch = window.fetch.bind(window);
     let prompting = false;
+    // Rewrite a stale ?token= in a URL so a retry carries the NEW token.
+    function _retok(u) {{
+        try {{
+            const t = _anchorToken();
+            if (!t) return u;
+            return String(u).replace(/([?&]token=)[^&]*/, '$1' + encodeURIComponent(t));
+        }} catch (e) {{ return u; }}
+    }}
     window.fetch = function () {{
-        return _origFetch.apply(null, arguments).then(function (resp) {{
+        const _args = arguments;
+        return _origFetch.apply(null, _args).then(function (resp) {{
             if (resp && resp.status === 401 && window.ANCHOR_AUTH_REQUIRED && !prompting) {{
                 prompting = true;
                 try {{
-                    if (setAnchorToken()) {{ location.reload(); }}
+                    // RETRY, DO NOT RELOAD (2026-07-28). This used to be
+                    // `location.reload()`, which threw away everything the user
+                    // had typed — the High Seat saybox draft and the in-flight
+                    // act itself. After a token rotation that is guaranteed data
+                    // loss on the first click, and it made the steward unusable.
+                    // We already hold the original arguments, so re-issue the
+                    // SAME request with the new token instead.
+                    if (setAnchorToken({{ rejected: true }})) {{
+                        prompting = false;
+                        const a0 = _args[0];
+                        if (typeof a0 === 'string') {{
+                            const a1 = _args[1] ? Object.assign({{}}, _args[1]) : undefined;
+                            if (a1 && a1.headers) {{
+                                try {{
+                                    const h = new Headers(a1.headers);
+                                    if (h.has('X-Anchor-Token')) h.set('X-Anchor-Token', _anchorToken());
+                                    a1.headers = h;
+                                }} catch (e) {{}}
+                            }}
+                            return _origFetch(_retok(a0), a1).then(function (r2) {{
+                                // Still refused with a fresh token — the token is
+                                // wrong, not stale. Reload is the honest last resort.
+                                if (r2 && r2.status === 401) location.reload();
+                                return r2;
+                            }});
+                        }}
+                        // Non-string input (a Request): its body may already be
+                        // consumed, so a retry is not safe. Fall back to reload.
+                        location.reload();
+                    }}
                 }} finally {{
                     prompting = false;
                 }}
