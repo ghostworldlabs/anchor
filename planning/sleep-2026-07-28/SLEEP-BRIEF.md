@@ -162,3 +162,48 @@ This is a v1.2 effort on Anchor, so both trio gates apply:
   and restart buttons must either work or not be shown.
 - **Anchor v1.1.x stays steward-free.** This work is v1.2; collaborators are on
   `v1.1.2` and nothing here ships to them.
+
+---
+
+## 6. PRE-FLIGHT — read before launching Foreman (a live landmine)
+
+`C:\dev\Anchor` root carries a **complete stale Foreman doc-set from three
+different, unrelated efforts**. Launching Foreman with `cwd = C:\dev\Anchor`
+would not halt — it would silently build the WRONG plan:
+
+| Root artifact | Actually points at |
+|---|---|
+| `foreman.config.json` | `planning/anchor-doctor-ui/handoff/` — branch `foreman/doctor-v3`, models pinned `claude-fable-5` |
+| `foreman-checkpoint.json` | `planning/share-canonical-onboard-2026-07/…` — `status: done`, 8/8 |
+| root `IMPLEMENTATION-PLAN.md` | "Anchor Re-architecture — the Butler substrate", dated 2026-07-24 |
+
+Per Foreman §4 an explicit `foreman.config.json` `docs` block **wins over the
+heuristic glob**, so the ambiguity HALT never fires — the doctor-ui plan is simply
+chosen. This is exactly foreman journal 0093 F4 ("refuse to start against a
+foreign checkpoint"), and it is armed right now.
+
+**Therefore:**
+
+1. Crucible emits this effort's doc-trio into **`planning/sleep-2026-07-28/stage2/`**,
+   with its **own** `foreman.config.json` beside it — never at the repo root.
+2. Foreman runs with **`cwd = planning/sleep-2026-07-28/stage2/`**, the same
+   isolation the steward-tracking run used successfully.
+3. **Do not modify or delete the root artifacts.** They belong to other efforts
+   and are not this effort's to clean up.
+
+### Gate command — this repo can spend real money
+
+Anchor's suite is `pytest`. There is history here: **8,816 leaked billable
+sessions (2026-06-20 → 2026-07-14)** from tests spawning real engine processes.
+`tests/conftest.py` is now fail-closed at three layers, but the gate must still
+be **scoped to the tests this effort touches** — a `gate-command:` line per wave
+(Foreman 0086) — never a bare full-suite run. Use `-v`, never `-q` (Foreman
+refuses `-q` at contract time).
+
+### UI waves assert against RENDERED output
+
+Anchor's dashboard JS is generated inside a Python f-string. A source-level
+assertion does not prove what the browser receives, and a brace-escaping mistake
+yields syntactically broken script that no Python test would catch. Follow
+`tests/test_auth_reprompt_2026_07_28.py`: render `generate_html(...)`, assert on
+that string, and run `node --check` over the extracted `<script>` blocks.
