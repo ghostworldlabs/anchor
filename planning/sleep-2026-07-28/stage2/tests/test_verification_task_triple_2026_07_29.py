@@ -107,7 +107,11 @@ def test_an_unconfirmed_triple_halts_with_the_exact_live_john_reason(shipped_tri
 
 
 def test_a_partly_confirmed_triple_still_halts_and_names_the_gaps(shipped_triple):
+    # Shipped artifact may already be fully John-confirmed (Phase-0 GO). Always
+    # wipe confirmations first so this case stays a *partial* confirm, not GO.
     doc = copy.deepcopy(shipped_triple)
+    for task in doc["tasks"]:
+        task["john_confirmation"] = triple.confirmation_template()
     _confirm(doc["tasks"][0])
     result = triple.validate_triple(doc)
     assert result.status == triple.HALT
