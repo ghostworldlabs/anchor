@@ -32,3 +32,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 
 - 2026-07-29T17:39:34.499Z — Wave 5/22 GREEN — W5 — Phase 1: Wave-list freeze + doc-trio amendment procedure (gate exit 0 · tests 137 pass 137 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 6 — W6 Phase 2 Named-state vocabulary + render primitive (2026-07-29)
+
+- **status:** deliverables landed — `anchor/ui/named_state.py` (NamedState ×13, `render_state`, `FAILURE_STATE_TABLE` schema, `generate_html`), `tools/zero_inference_lint.py`, `tests/test_named_state_2026_07_29.py`
+- **gate:** `pytest -v tests/test_named_state_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** trichotomy docstrings locked to Binding definitions verbatim; unknown≠empty≠zero_measured≠pending as four distinct visible labels; merged failure-table rows fail 0080/0081; zero-inference lint flags `cost == 0 → (subscription)`
+- 2026-07-29T17:53:30.966Z — Wave 6/22 GREEN — W6 — Phase 2: Named-state vocabulary + render primitive (unknown ≠ empty ≠ zero) (gate exit 0 · tests 165 pass 165 fail 0 · iter 0; appended by orchestrator on GO)
