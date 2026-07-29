@@ -22,3 +22,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **note:** steward completed after repeated Foreman execute-agent deaths mid-W3 (Claude spend limit + grok-cli process deaths); bootstrap_phase1 inventory rows PRESENT/STUB/ABSENT with evidence
 
 
+- 2026-07-29T16:59:21.126Z — Wave 3/22 GREEN — W3 — Phase 1: Capability Inventory harness (PRESENT / STUB / ABSENT with transcripts) (gate exit 0 · tests 125 pass 125 fail 0 · iter 0; appended by orchestrator on GO)

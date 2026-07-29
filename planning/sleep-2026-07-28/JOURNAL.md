@@ -165,3 +165,8 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - Repeated silent deaths mid-W3 execute (no "launching agent"/complete lines).
 - Relaunched via direct cmd/node (no pty); lock 77764 + child grok.exe 86880 alive at 10:47 — execute agent running.
+
+## 2026-07-29 — Steward: W3 landed + gate GREEN
+
+- W3 execute agent kept dying; steward completed capability_inventory harness, inventory, transcripts, tests (commit 7ffc4dd).
+- Resume@gate with proven ledger: execute skipped; gate **125/125 GREEN**; review re-entered (lock 24884).
