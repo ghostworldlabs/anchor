@@ -154,3 +154,14 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **death:** lock pid 76628 dead ~8m after gate GREEN / waiting on review (no further ticks).
 - **action:** stale lock cleared; checkpoint realigned last_commit + status budget_stopped; --resume at review.
 - **result:** W2 execute skipped; gate re-proved 117/117 GREEN; review re-entered (lock 74748 alive). W2 deliverables untracked on disk (anchor/, EXIT-REGISTER.md, tests).
+
+## 2026-07-29 — Steward: W2 GREEN; death mid-W3; resumed
+
+- **W2 COMPLETE:** gate 117/117, review lean, commit f8b8b7c (7 files exit register).
+- **Death:** lock 74748 dead mid-W3 execute (~2m heartbeat then silence).
+- **Resume:** W3 execute re-entered; lock 85252 alive; grok-cli routing.
+
+## 2026-07-29 — Steward: W3 execute deaths; direct-node relaunch with live grok child
+
+- Repeated silent deaths mid-W3 execute (no "launching agent"/complete lines).
+- Relaunched via direct cmd/node (no pty); lock 77764 + child grok.exe 86880 alive at 10:47 — execute agent running.

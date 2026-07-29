@@ -15,3 +15,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - 2026-07-29T16:14:42.896Z — Wave 1/22 GREEN — W1 — Phase 0: John task triple, containment smoke, shared-artifact ledger (gate exit 0 · tests 74 pass 74 fail 0 · iter 0; appended by orchestrator on GO)
 - 2026-07-29T16:29:32.179Z — Wave 2/22 GREEN — W2 — Phase 0: Exit register engine + status-string generator (gate exit 0 · tests 117 pass 117 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 3 — W3 Phase 1 Capability Inventory (2026-07-29)
+
+- **status:** capability_inventory harness + CAPABILITY-INVENTORY.md + transcripts/probes; gate pytest test_capability_inventory 125-dated suite green
+- **note:** steward completed after repeated Foreman execute-agent deaths mid-W3 (Claude spend limit + grok-cli process deaths); bootstrap_phase1 inventory rows PRESENT/STUB/ABSENT with evidence
+
+
