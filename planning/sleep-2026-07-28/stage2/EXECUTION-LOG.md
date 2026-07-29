@@ -89,3 +89,11 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** cost half of criterion 3 as CANDIDATE-MET structure — every dollar figure backed by cost_state == measured only; uninstrumented engine session chrome shows labelled unmeasured with no `$`; aggregation raise → measurement_failed and exit register refuses E2 on cost tiles; zero_inference_lint clean on cost sources
 - 2026-07-29T19:30:59.167Z — Wave 13/22 GREEN — W13 — Phase 3: Cost surfacing from cost_state (never a fabricated dollar) (gate exit 0 · tests 446 pass 446 fail 0 · iter 0; appended by orchestrator on GO)
+
+## Wave 14 — W14 Phase 3 Doctor really diagnoses + banner→Doctor issue payload (2026-07-29)
+
+- **status:** deliverables landed — `anchor/doctor/diagnose.py` (live readings at diagnose time; findings composed from reading name+value; no seed prose / no tag→prose map; fault→finding contracts), `anchor/doctor/banner_handoff.py` (issue id/source/symptom payload; hash at banner; doctor_entry refuses redetect), `anchor/ui/doctor_view.py` (Diagnose live only when PRESENT; named unavailable otherwise; findings + payload panels; doctor-diagnose-e2e traces), `artifacts/FAULT-FINDING-CONTRACTS.md`, `artifacts/failure-states/doctor-diagnose.md` (unknown ≠ empty), `tests/test_doctor_diagnose_2026_07_29.py`
+- **gate:** `pytest -v tests/test_doctor_diagnose_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** criterion 4 core + Diagnose dead-control as CANDIDATE-MET structure — every finding quotes a live reading; anti-template fault absent from contract table still baseline-diffs a live reading; banner payload id+hash byte-identical into Doctor/trace; re-detection raises RedetectionForbidden; no dead Diagnose button (named cannot_run unavailable state)
+- 2026-07-29T19:46:22.270Z — Wave 14/22 GREEN — W14 — Phase 3: Doctor really diagnoses + banner→Doctor issue payload (gate exit 0 · tests 481 pass 481 fail 0 · iter 1; appended by orchestrator on GO)

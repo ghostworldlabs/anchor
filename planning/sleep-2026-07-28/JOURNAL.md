@@ -250,3 +250,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **W12 COMPLETE:** gate 408/408 first try, commit 5572603 (usage+time surfacing).
 - **W13:** cost_state cost surfacing execute ~3m, lock 80904 + grok 71184.
 - **Milestone:** 12/22 waves.
+
+## 2026-07-29 — Steward tick: W13 GREEN; W14 Doctor execute
+
+- **W13 COMPLETE:** gate 446/446 first try, commit 438b9a3 (cost_state cost surfacing).
+- **W14:** Doctor diagnose + banner payload execute ~5m, lock 80904 + grok 81724.
+- **Milestone:** 13/22 waves.

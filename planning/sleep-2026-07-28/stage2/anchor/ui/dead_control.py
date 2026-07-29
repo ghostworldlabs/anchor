@@ -41,12 +41,14 @@ CONTROL_OPEN = "open"
 CONTROL_RUN = "run"
 CONTROL_RETRY = "retry"
 CONTROL_RESTART = "restart"
+CONTROL_DIAGNOSE = "diagnose"
 
 #: Default cannot-* NamedState per control id (surface-native).
 DEFAULT_CANNOT_STATE: Dict[str, NamedState] = {
     CONTROL_OPEN: NamedState.cannot_open,
     CONTROL_RUN: NamedState.cannot_run,
     CONTROL_RETRY: NamedState.cannot_retry,
+    CONTROL_DIAGNOSE: NamedState.cannot_run,  # diagnose unavailable → cannot_run
     "restart_run": NamedState.cannot_restart,
     "restart_session": NamedState.cannot_restart,
     "restart_engine": NamedState.cannot_restart,
@@ -616,6 +618,7 @@ __all__ = [
     "CONTROL_RUN",
     "CONTROL_RETRY",
     "CONTROL_RESTART",
+    "CONTROL_DIAGNOSE",
     "DEFAULT_CANNOT_STATE",
     "LIVE_CONTROL_CLASS",
     "CANNOT_STATE_CLASS",
