@@ -62,7 +62,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/ui/dead_control.py` (shared dead-control contract), `anchor/session/open_work.py` + `run_work.py` (enumerated CannotOpen/CannotRun), `anchor/ui/open_run_view.py` + `open_run_traces.py`, `artifacts/failure-states/open-run.md`, `artifacts/traces/open-e2e.json` + `run-e2e.json`, `artifacts/EARLY-SLICE-PARTIAL.md` (explicit PARTIAL slice), `tests/test_open_run_2026_07_29.py`
 - **gate:** `pytest -v tests/test_open_run_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** pending — orchestrator stamps the real git SHA on GO (no fabricated or placeholder SHA claimed by the FIX agent)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** Open/Run emit live control only for non-STALE live PRESENT inventory; otherwise named cannot-* via render_state with zero clickable no-ops; store-unreadable → unknown ≠ empty; PRESENT still ships e2e traces + failure table; slice labelled PARTIAL (usage/cost/Doctor/stop/restart/preview/cadence unbuilt). Fix-iter-2: e2e traces execute real handlers with real payload SHA-256 hashes and are pinned to builders; open/run view passes head_hash through the dead-control auth seam; cannot_open docstring no longer lists store-unreadable (maps to unknown); workbench node --check when node is on PATH.
 - 2026-07-29T18:48:18.823Z — Wave 10/22 GREEN — W10 — Phase 3: Open + Run control honesty (dead-control contract, named cannot-* states, e2e traces) (gate exit 0 · tests 330 pass 330 fail 0 · iter 2; appended by orchestrator on GO)
 
@@ -70,7 +70,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/session/attach.py` (timeout→NamedState.timeout ≠ unknown_session; single error_text emission; `retry_contract` → RetryAction | CannotRetry), `anchor/ui/attach_view.py` (render_state + Retry hidden rather than dead; attach-error-once), `anchor/ui/attach_traces.py`, `artifacts/failure-states/attach.md` (unknown and empty SEPARATE rows), `artifacts/traces/attach-e2e.json`, `tests/test_session_attach_2026_07_29.py`
 - **gate:** `pytest -v tests/test_session_attach_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** attach timeout classified as timeout exactly once; process-gone → named cannot_retry with no Retry control; empty session list ≠ unknown (unreadable/unqueried); one induced fault per reason (timeout, unknown_session, empty_session_list); e2e trace control→handler→capability→state at proof_level rendered-string
 - 2026-07-29T19:06:09.627Z — Wave 11/22 GREEN — W11 — Phase 3: Session attach honesty (timeout classified, no double-print, Retry viable or named) (gate exit 0 · tests 370 pass 370 fail 0 · iter 1; appended by orchestrator on GO)
 
@@ -78,7 +78,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/usage/rollup_read.py` (PROVEN-only numerals; NO_AGGREGATOR raises at test time; READ_FAILED → unknown never 0/pending; E2 provisional as_of + reconciliation hook), `anchor/ui/usage_tiles.py` (dashboard / workbench / session chrome through `render_state`; four distinct trichotomy labels; generate_html + node --check; usage-e2e traces), `artifacts/failure-states/usage-time.md` (surface-native rows; unknown ≠ empty; mapped via STATE-VOCABULARY-MAP), `artifacts/traces/usage-e2e.json` (materialized by gate via write_usage_traces; proof_level rendered-string), `tests/test_usage_time_surfacing_2026_07_29.py`
 - **gate:** `pytest -v tests/test_usage_time_surfacing_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** usage/time half of criterion 3 as CANDIDATE-MET structure — dashboard pending names aggregation wave with no numeral; workbench zero_measured shows measured 0 distinct from empty/pending/unknown; session chrome READ_FAILED shows unknown with no numeral and no pending wording; E2 provisional carries visible as_of + EXECUTION-LOG reconciliation marker `usage-time-e2-reconciliation`
 - 2026-07-29T19:23:09.759Z — Wave 12/22 GREEN — W12 — Phase 3: Usage + time surfacing gated on the Rollup Evidence Gate (gate exit 0 · tests 408 pass 408 fail 0 · iter 0; appended by orchestrator on GO)
 
@@ -86,7 +86,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/ui/cost_view.py` (dashboard / workbench / session chrome cost tiles routed exclusively through `render_cost`; unmeasured-engine path; aggregation-raise → measurement_failed; E2 refused for dollars; zero×cost_state matrix HTML; zero_inference_lint gate wiring; cost-e2e traces), `artifacts/failure-states/cost.md` (unknown ≠ empty; unmeasured + measurement_failed rows; surface-native), `artifacts/traces/cost-e2e.json` (materialized by gate via write_cost_traces; proof_level rendered-string), `tests/test_cost_surfacing_2026_07_29.py`
 - **gate:** `pytest -v tests/test_cost_surfacing_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** cost half of criterion 3 as CANDIDATE-MET structure — every dollar figure backed by cost_state == measured only; uninstrumented engine session chrome shows labelled unmeasured with no `$`; aggregation raise → measurement_failed and exit register refuses E2 on cost tiles; zero_inference_lint clean on cost sources
 - 2026-07-29T19:30:59.167Z — Wave 13/22 GREEN — W13 — Phase 3: Cost surfacing from cost_state (never a fabricated dollar) (gate exit 0 · tests 446 pass 446 fail 0 · iter 0; appended by orchestrator on GO)
 
@@ -94,7 +94,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/doctor/diagnose.py` (live readings at diagnose time; findings composed from reading name+value; no seed prose / no tag→prose map; fault→finding contracts), `anchor/doctor/banner_handoff.py` (issue id/source/symptom payload; hash at banner; doctor_entry refuses redetect), `anchor/ui/doctor_view.py` (Diagnose live only when PRESENT; named unavailable otherwise; findings + payload panels; doctor-diagnose-e2e traces), `artifacts/FAULT-FINDING-CONTRACTS.md`, `artifacts/failure-states/doctor-diagnose.md` (unknown ≠ empty), `tests/test_doctor_diagnose_2026_07_29.py`
 - **gate:** `pytest -v tests/test_doctor_diagnose_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** criterion 4 core + Diagnose dead-control as CANDIDATE-MET structure — every finding quotes a live reading; anti-template fault absent from contract table still baseline-diffs a live reading; banner payload id+hash byte-identical into Doctor/trace; re-detection raises RedetectionForbidden; no dead Diagnose button (named cannot_run unavailable state)
 - 2026-07-29T19:46:22.270Z — Wave 14/22 GREEN — W14 — Phase 3: Doctor really diagnoses + banner→Doctor issue payload (gate exit 0 · tests 481 pass 481 fail 0 · iter 1; appended by orchestrator on GO)
 
@@ -102,7 +102,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/doctor/engines/{claude,gemini,grok}.py` (independent probes, each with own failure path + named state), `anchor/doctor/depth_label.py` (depth vocabulary deep/shallow/unavailable; unlabelled report rejected naming engine + report), `anchor/ui/doctor_view.py` (three independently-stated engine rows; one engine failing does not blank or fake the other two; no shared verdict), `artifacts/failure-states/doctor-engines.md` (unknown ≠ empty per engine), `artifacts/traces/doctor-engines-e2e.json` (materialized by gate via write_doctor_engines_traces; proof_level rendered-string), `tests/test_doctor_engines_2026_07_29.py`
 - **gate:** `pytest -v tests/test_doctor_engines_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** rest of criterion 4 as CANDIDATE-MET structure — Claude/Gemini/Grok each produce a depth-labelled report from their own probe; Gemini timeout isolation leaves Claude and Grok intact and correctly labelled; unlabelled report fails the gate naming the engine and the unlabelled report
 - 2026-07-29T19:58:28.845Z — Wave 15/22 GREEN — W15 — Phase 3: Per-engine independent diagnose for Claude, Gemini, Grok with depth labels (gate exit 0 · tests 513 pass 513 fail 0 · iter 0; appended by orchestrator on GO)
 
@@ -110,7 +110,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/session/stop_summary.py` (collect_stop_summary from CAPABILITY-INVENTORY control `stop_summary`; structured InFlightItem counts + query_ref; induced faults inventory_unreadable / zero_items / partial_items; unknown ≠ empty ≠ zero_measured), `anchor/ui/stop_summary_tile.py` (render through render_state; three-item list as visible text nodes; generate_html + node --check; stop-summary-e2e traces), `artifacts/failure-states/stop-summary.md` (unknown and empty SEPARATE rows; surface-native stop/summary/tile render), `artifacts/traces/stop-summary-e2e.json` (materialized by gate via write_stop_summary_traces; proof_level rendered-string), `tests/test_stop_summary_2026_07_29.py`
 - **gate:** `pytest -v tests/test_stop_summary_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** stop/summary half of criterion 5 as CANDIDATE-MET structure — three in-flight items render with counts traceable to inventory query `stop_summary.in_flight`; unreadable inventory → unknown never empty-looking "nothing was in flight"; zero items → empty; partial items still listed with counts
 - 2026-07-29T20:42:56.980Z — Wave 16/22 GREEN — W16 — Phase 3: Stop summary tile backed by real in-flight inventory (gate exit 0 · tests 541 pass 541 fail 0 · iter 1; appended by orchestrator on GO)
 
@@ -118,7 +118,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/session/restart.py` (RESTART_CONTRACTS; restart_run/session/engine/workbench entry points; preserved/lost outcome; cannot-restart reasons), `anchor/ui/restart_controls.py` (exactly-one-control render; dead-control + cannot_restart; generate_html + node --check; write_restart_traces), `tools/restart_control_audit.py` (dual-control fail), `artifacts/RESTART-CONTEXTS.md`, `artifacts/failure-states/restart.md` (unknown ≠ empty), `artifacts/traces/restart-e2e.json` + per-context restart-*-e2e.json, `tests/test_restart_contract_2026_07_29.py`
 - **gate:** `pytest -v tests/test_restart_contract_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** restart half of criterion 5 as CANDIDATE-MET structure — exactly one control per context; preserved/lost matches written contract; dual Restart+Restart session fails audit; cannot_restart when not possible (no dead button)
 - 2026-07-29T21:03:02.863Z — Wave 17/22 GREEN — W17 — Phase 3: Per-context restart contract — exactly one control, scope + preserved/lost named (gate exit 0 · tests 565 pass 565 fail 0 · iter 0; steward-land after grok-cli execute death exit=4294967295)
 
@@ -126,7 +126,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/files/preview.py` (docx/pptx/xlsx/pdf shared path; binary guard; unsupported_preview + download), `anchor/ui/preview_view.py` (render_state; unknown≠empty; write_preview_traces; node --check), `artifacts/failure-states/preview.md`, `artifacts/traces/preview-e2e.json`, `tests/test_file_preview_2026_07_29.py`
 - **gate:** `pytest -v tests/test_file_preview_2026_07_29.py`
-- **commit:** (orchestrator records SHA on GO)
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** criterion 6 CANDIDATE-MET structure — human-friendly preview; no raw binary text dump; unsupported named + download
 - 2026-07-29T21:10:24.726Z — Wave 18/22 GREEN — W18 file preview (gate 31 pass; steward-land after execute death)
 
@@ -134,6 +134,7 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/ui/projects_tree.py`, `static/js/projects_tree.js`, `artifacts/root-cause-projects-collapse.md`, `artifacts/failure-states/projects-collapse.md`, `tests/test_projects_collapse_2026_07_29.py`
 - **gate:** `pytest -v tests/test_projects_collapse_2026_07_29.py`
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** criterion 7 CANDIDATE-MET — collapsed default; dual-profile preference; unreadable store → unknown
 - 2026-07-29T21:15:51.337Z — Wave 19/22 GREEN (gate 24 pass; steward-land)
 
@@ -141,5 +142,21 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 
 - **status:** deliverables landed — `anchor/status/cadence.py`, `anchor/status/staleness.py`, `anchor/ui/status_view.py`, `artifacts/failure-states/cadence.md`, `artifacts/traces/cadence-e2e.json`, `tests/test_status_cadence_2026_07_29.py`
 - **gate:** `pytest -v tests/test_status_cadence_2026_07_29.py`
+- **commit:** bbef96ec1a4fd2ecac83ecbaa15d982ffaf419cb
 - **note:** criterion 8 CANDIDATE-MET — timer-owned cadence; as_of mandatory; stale≠unknown≠empty
 - 2026-07-29T21:16:25.207Z — Wave 20/22 GREEN (gate 31 pass; steward-land)
+
+## Wave 21 — W21 Phase 4 Unnamed-control sweep + dead-control audit + traceability matrix (2026-07-29)
+
+- **status:** deliverables landed — `tools/dead_control_audit.py` (enumerate wired/named_state/hidden/dead; surface-wave join gate W10–W20 GREEN+SHA; TRACEABILITY-MATRIX validator; out-of-criteria ledger; exit-register recon), `tools/ambiguous_zero_audit.py` (numerals/blanks only via render_state/render_cost), `artifacts/TRACEABILITY-MATRIX.md` (criteria 1–10 CANDIDATE-MET only; MET before S1 fails), `artifacts/OUT-OF-CRITERIA-SURFACES.md` (fixed/disabled/E3), `tests/test_sweep_and_traceability_2026_07_29.py`
+- **gate:** `pytest -v tests/test_sweep_and_traceability_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** W21 close-out — join gate blocks GO until W10–W20 GREEN with commit SHA; dead-control + ambiguous-zero audits report findings as build failures; matrix status CANDIDATE-MET only (never MET before S1); out-of-criteria dead controls reject E3 until fixed/removed; exit-register conjunction recomputed (0 signed → OK)
+
+
+## Wave 21 — W21 Phase 4 Unnamed-control sweep + traceability matrix (2026-07-29)
+
+- **status:** deliverables landed — `tools/dead_control_audit.py`, `tools/ambiguous_zero_audit.py`, `artifacts/TRACEABILITY-MATRIX.md`, `artifacts/OUT-OF-CRITERIA-SURFACES.md`, `tests/test_sweep_and_traceability_2026_07_29.py`
+- **gate:** `pytest -v tests/test_sweep_and_traceability_2026_07_29.py`
+- **note:** criteria 1-10 CANDIDATE-MET structural; surface-wave join W10-W20 GREEN; no MET before S1
+- 2026-07-29T21:25:23.264Z — Wave 21/22 GREEN (gate 26 pass; steward-land)
