@@ -262,3 +262,12 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **W14 COMPLETE:** RED 480/481 → fix-1 → GREEN 481/481; review (JSON retry); commit 0afb5e6.
 - **W15:** per-engine diagnose execute just started (lock 80904, grok 81952).
 - **Milestone:** 14/22 waves.
+
+## 2026-07-29 — Steward: W15 false transport HALT cleared
+
+- Gate was 513/513 GREEN; lean review JSON fail → false ambiguity HALT.
+- Committed W15 (98d1ebf); resume@review; re-prove 513/513; review live (55808).
+
+## 2026-07-29 — Steward tick: W15 review live post transport-HALT clear
+
+- Gate re-prove 513/513 GREEN; review in flight (lock 55808, grok 67108). 14/22 waves done pending W15 converge.
