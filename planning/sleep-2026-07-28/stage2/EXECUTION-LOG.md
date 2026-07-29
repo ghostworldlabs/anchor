@@ -136,3 +136,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **gate:** `pytest -v tests/test_projects_collapse_2026_07_29.py`
 - **note:** criterion 7 CANDIDATE-MET — collapsed default; dual-profile preference; unreadable store → unknown
 - 2026-07-29T21:15:51.337Z — Wave 19/22 GREEN (gate 24 pass; steward-land)
+
+## Wave 20 — W20 Phase 3 Status cadence from live telemetry (2026-07-29)
+
+- **status:** deliverables landed — `anchor/status/cadence.py`, `anchor/status/staleness.py`, `anchor/ui/status_view.py`, `artifacts/failure-states/cadence.md`, `artifacts/traces/cadence-e2e.json`, `tests/test_status_cadence_2026_07_29.py`
+- **gate:** `pytest -v tests/test_status_cadence_2026_07_29.py`
+- **note:** criterion 8 CANDIDATE-MET — timer-owned cadence; as_of mandatory; stale≠unknown≠empty
+- 2026-07-29T21:16:25.207Z — Wave 20/22 GREEN (gate 31 pass; steward-land)

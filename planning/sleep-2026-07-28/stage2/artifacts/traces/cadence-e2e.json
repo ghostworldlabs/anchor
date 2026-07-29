@@ -1,0 +1,667 @@
+{
+  "as_of": "2026-07-29T00:00:00Z",
+  "control_id": "cadence_telemetry",
+  "enumerated_reasons": [
+    "ok",
+    "fresh",
+    "stale",
+    "telemetry_outage",
+    "empty_series",
+    "aged_sample",
+    "capability_absent",
+    "missing_as_of"
+  ],
+  "fault_traces": {
+    "aged_sample": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "00bc83b59b291eaada7abba2511a71afa8388b96a882b79c11a43e9ac75dcf83",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "00bc83b59b291eaada7abba2511a71afa8388b96a882b79c11a43e9ac75dcf83",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "00bc83b59b291eaada7abba2511a71afa8388b96a882b79c11a43e9ac75dcf83",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "stale",
+          "kind": "rendered_state",
+          "name": "render_state.stale",
+          "payload_hash": "00bc83b59b291eaada7abba2511a71afa8388b96a882b79c11a43e9ac75dcf83",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "aged_sample",
+      "notes": "W20 cadence e2e under induced fault aged_sample; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "stale",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "empty_series": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "5772a94a25495523e8c1293ffe0f545c50872180ca51029fdd80c4dca8e5344f",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "5772a94a25495523e8c1293ffe0f545c50872180ca51029fdd80c4dca8e5344f",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "5772a94a25495523e8c1293ffe0f545c50872180ca51029fdd80c4dca8e5344f",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "empty",
+          "kind": "rendered_state",
+          "name": "render_state.empty",
+          "payload_hash": "5772a94a25495523e8c1293ffe0f545c50872180ca51029fdd80c4dca8e5344f",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "empty_series",
+      "notes": "W20 cadence e2e under induced fault empty_series; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "empty",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "fresh_ok": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "26889b5d68a7375d4be8390336b7f0e729dcda32d17f286b7610f3e189c49eaf",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "26889b5d68a7375d4be8390336b7f0e729dcda32d17f286b7610f3e189c49eaf",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "26889b5d68a7375d4be8390336b7f0e729dcda32d17f286b7610f3e189c49eaf",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "ok",
+          "kind": "rendered_state",
+          "name": "render_state.ok",
+          "payload_hash": "26889b5d68a7375d4be8390336b7f0e729dcda32d17f286b7610f3e189c49eaf",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": null,
+      "notes": "W20 cadence e2e success path (live telemetry, as_of from sample); structural rendered-string proof only",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "ok",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "completed",
+      "wave_id": "W20"
+    },
+    "stale_with_age": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "2b2be42f00cbc617b9a1fd2124e9f6e7e3483cc72f1f3800d18ad65b55533b9c",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "2b2be42f00cbc617b9a1fd2124e9f6e7e3483cc72f1f3800d18ad65b55533b9c",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "2b2be42f00cbc617b9a1fd2124e9f6e7e3483cc72f1f3800d18ad65b55533b9c",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "stale",
+          "kind": "rendered_state",
+          "name": "render_state.stale",
+          "payload_hash": "2b2be42f00cbc617b9a1fd2124e9f6e7e3483cc72f1f3800d18ad65b55533b9c",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "aged_sample",
+      "notes": "W20 cadence e2e under induced fault aged_sample; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "stale",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "telemetry_outage": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "unknown",
+          "kind": "rendered_state",
+          "name": "render_state.unknown",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "telemetry_outage",
+      "notes": "W20 cadence e2e under induced fault telemetry_outage; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "unknown",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "telemetry_unknown": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "unknown",
+          "kind": "rendered_state",
+          "name": "render_state.unknown",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "telemetry_outage",
+      "notes": "W20 cadence e2e under induced fault telemetry_outage; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "unknown",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    }
+  },
+  "hops": [
+    {
+      "detail": "",
+      "kind": "control_invocation",
+      "name": "cadence-tick",
+      "payload_hash": "fc85d72482245541ad569498a929f1571038f51202b40c05c94bee96bceba2ee",
+      "payload_id": "w20-cadence-ok",
+      "timestamp": "2026-07-29T00:00:00Z"
+    },
+    {
+      "detail": "anchor.status.cadence.read_status_snapshot",
+      "kind": "handler",
+      "name": "anchor.status.cadence.read_status_snapshot",
+      "payload_hash": "fc85d72482245541ad569498a929f1571038f51202b40c05c94bee96bceba2ee",
+      "payload_id": "w20-cadence-ok",
+      "timestamp": "2026-07-29T00:00:00Z"
+    },
+    {
+      "detail": "capability.cadence_telemetry",
+      "kind": "capability_call",
+      "name": "capability.cadence_telemetry",
+      "payload_hash": "fc85d72482245541ad569498a929f1571038f51202b40c05c94bee96bceba2ee",
+      "payload_id": "w20-cadence-ok",
+      "timestamp": "2026-07-29T00:00:00Z"
+    },
+    {
+      "detail": "ok",
+      "kind": "rendered_state",
+      "name": "render_state.ok",
+      "payload_hash": "fc85d72482245541ad569498a929f1571038f51202b40c05c94bee96bceba2ee",
+      "payload_id": "w20-cadence-ok",
+      "timestamp": "2026-07-29T00:00:00Z"
+    }
+  ],
+  "induced_fault": null,
+  "induced_fault_reasons": [
+    "telemetry_outage",
+    "empty_series",
+    "aged_sample"
+  ],
+  "notes": "W20 cadence e2e success path (live telemetry, as_of from sample); structural rendered-string proof only",
+  "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+  "proof_level": "rendered-string",
+  "reason_traces": {
+    "aged_sample": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "9de4bfcce0e6d1579e0084ebd18450d278dd29cfdb6e8b9f6b18ca6696f7f8fc",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "9de4bfcce0e6d1579e0084ebd18450d278dd29cfdb6e8b9f6b18ca6696f7f8fc",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "9de4bfcce0e6d1579e0084ebd18450d278dd29cfdb6e8b9f6b18ca6696f7f8fc",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "stale",
+          "kind": "rendered_state",
+          "name": "render_state.stale",
+          "payload_hash": "9de4bfcce0e6d1579e0084ebd18450d278dd29cfdb6e8b9f6b18ca6696f7f8fc",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "aged_sample",
+      "notes": "W20 cadence e2e under induced fault aged_sample; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "stale",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "capability_absent": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "90751a8efe422514c674e7ee9ccbe8a5dcc89586dbf43b407523934613e2822f",
+          "payload_id": "w20-cadence-capability_absent",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "90751a8efe422514c674e7ee9ccbe8a5dcc89586dbf43b407523934613e2822f",
+          "payload_id": "w20-cadence-capability_absent",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "90751a8efe422514c674e7ee9ccbe8a5dcc89586dbf43b407523934613e2822f",
+          "payload_id": "w20-cadence-capability_absent",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "unknown",
+          "kind": "rendered_state",
+          "name": "render_state.unknown",
+          "payload_hash": "90751a8efe422514c674e7ee9ccbe8a5dcc89586dbf43b407523934613e2822f",
+          "payload_id": "w20-cadence-capability_absent",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "capability_absent",
+      "notes": "W20 cadence e2e under induced fault capability_absent; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "unknown",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "empty_series": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "d418b6944d171d5805383a7f0b4390e506c9a23238b00e7a993b8a82f65793ba",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "d418b6944d171d5805383a7f0b4390e506c9a23238b00e7a993b8a82f65793ba",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "d418b6944d171d5805383a7f0b4390e506c9a23238b00e7a993b8a82f65793ba",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "empty",
+          "kind": "rendered_state",
+          "name": "render_state.empty",
+          "payload_hash": "d418b6944d171d5805383a7f0b4390e506c9a23238b00e7a993b8a82f65793ba",
+          "payload_id": "w20-cadence-empty_series",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "empty_series",
+      "notes": "W20 cadence e2e under induced fault empty_series; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "empty",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "fresh": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "d3439ef1e2e6eb945d7923d483c5e2e1d9dd942e4d0249aa759a879b04427ef4",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "d3439ef1e2e6eb945d7923d483c5e2e1d9dd942e4d0249aa759a879b04427ef4",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "d3439ef1e2e6eb945d7923d483c5e2e1d9dd942e4d0249aa759a879b04427ef4",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "ok",
+          "kind": "rendered_state",
+          "name": "render_state.ok",
+          "payload_hash": "d3439ef1e2e6eb945d7923d483c5e2e1d9dd942e4d0249aa759a879b04427ef4",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "ok",
+      "notes": "W20 cadence e2e under induced fault ok; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "ok",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "completed",
+      "wave_id": "W20"
+    },
+    "ok": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "2574a287d2f7730f8c70e1b254ac90f19a730888f21508e82b0d068f3df5e4d0",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "2574a287d2f7730f8c70e1b254ac90f19a730888f21508e82b0d068f3df5e4d0",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "2574a287d2f7730f8c70e1b254ac90f19a730888f21508e82b0d068f3df5e4d0",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "ok",
+          "kind": "rendered_state",
+          "name": "render_state.ok",
+          "payload_hash": "2574a287d2f7730f8c70e1b254ac90f19a730888f21508e82b0d068f3df5e4d0",
+          "payload_id": "w20-cadence-ok",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "ok",
+      "notes": "W20 cadence e2e under induced fault ok; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "ok",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "completed",
+      "wave_id": "W20"
+    },
+    "stale": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "b4e74418551ffe440cdb971d0f03cca425fd6d2863c0adaa47257493aaad7af0",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "b4e74418551ffe440cdb971d0f03cca425fd6d2863c0adaa47257493aaad7af0",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "b4e74418551ffe440cdb971d0f03cca425fd6d2863c0adaa47257493aaad7af0",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "stale",
+          "kind": "rendered_state",
+          "name": "render_state.stale",
+          "payload_hash": "b4e74418551ffe440cdb971d0f03cca425fd6d2863c0adaa47257493aaad7af0",
+          "payload_id": "w20-cadence-aged_sample",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "aged_sample",
+      "notes": "W20 cadence e2e under induced fault aged_sample; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "stale",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    },
+    "telemetry_outage": {
+      "as_of": "2026-07-29T00:00:00Z",
+      "control_id": "cadence_telemetry",
+      "hops": [
+        {
+          "detail": "",
+          "kind": "control_invocation",
+          "name": "cadence-tick",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "anchor.status.cadence.read_status_snapshot",
+          "kind": "handler",
+          "name": "anchor.status.cadence.read_status_snapshot",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "capability.cadence_telemetry",
+          "kind": "capability_call",
+          "name": "capability.cadence_telemetry",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        },
+        {
+          "detail": "unknown",
+          "kind": "rendered_state",
+          "name": "render_state.unknown",
+          "payload_hash": "f0392cd7948cdbe287157188a8eb231bab9ca7191736d7c431cf5894d842e933",
+          "payload_id": "w20-cadence-telemetry_outage",
+          "timestamp": "2026-07-29T00:00:00Z"
+        }
+      ],
+      "induced_fault": "telemetry_outage",
+      "notes": "W20 cadence e2e under induced fault telemetry_outage; structural rendered-string proof only; handler executed",
+      "proof_disclosure": "structural rendered-string proof only; human-driven user path deferred to S1 (W22); this artifact is not a North Star met claim",
+      "proof_level": "rendered-string",
+      "rendered_state": "unknown",
+      "schema": "end-to-end-trace/v1",
+      "trace_result": "failed_with_named_state",
+      "wave_id": "W20"
+    }
+  },
+  "rendered_state": "ok",
+  "schema": "end-to-end-trace/v1",
+  "staleness_threshold_seconds": 120,
+  "surface": "cadence",
+  "telemetry_source": "cadence_telemetry",
+  "telemetry_source_label": "cadence telemetry source",
+  "trace_result": "completed",
+  "wave_id": "W20"
+}
