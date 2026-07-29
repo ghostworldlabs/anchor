@@ -31,3 +31,4 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **note:** steward completed after execute deaths; fixed hash backtick strip + control-id parse for display cells
 
 
+- 2026-07-29T17:39:34.499Z — Wave 5/22 GREEN — W5 — Phase 1: Wave-list freeze + doc-trio amendment procedure (gate exit 0 · tests 137 pass 137 fail 0 · iter 0; appended by orchestrator on GO)

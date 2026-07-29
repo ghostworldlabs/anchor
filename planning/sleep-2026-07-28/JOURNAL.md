@@ -185,3 +185,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 
 - **W4 COMPLETE:** gate 131/131, commit b4d7220.
 - **W5:** death mid-execute; resume lock 74920 + grok 20028; partial freeze_gate.py already on disk (~53KB).
+
+## 2026-07-29 — Steward: W5 landed + gate 137/137 GREEN
+
+- Execute deaths mid-W5; steward finished freeze_gate + WAVE-LIST-FREEZE + DOC-TRIO + INSTRUMENTATION-BUDGET + tests (e73d96c).
+- Fixed hash backtick strip + control-id parse for ``open` (open)`` cells.
+- Resume@gate: execute skipped; **137/137 GREEN**; review live (lock 69220).
