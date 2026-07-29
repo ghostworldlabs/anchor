@@ -587,6 +587,94 @@ def unqualified_status_reachable(
     return len(rows) == 0 and s1 in {"PASS", "PASSED", "S1 PASS", "S1_PASS"}
 
 
+def is_s1_pass_verdict(s1_verdict: Optional[str]) -> bool:
+    """True when *s1_verdict* is an explicit S1 PASS token (not PENDING)."""
+    s1 = (s1_verdict or "").strip().upper()
+    return s1 in {"PASS", "PASSED", "S1 PASS", "S1_PASS"}
+
+
+def terminal_status_with_s1_attachment(
+    rows: Sequence[ExitRegisterRow] = (),
+    *,
+    s1_verdict: Optional[str] = None,
+    signed_exits: Optional[Sequence[Union[ExitId, str]]] = None,
+) -> str:
+    """Like :func:`terminal_status`, but when the unqualified phrase is
+    reachable, append the North Star met stamp so S1's PASS is visible on the
+    emitted line.
+
+    Default :func:`terminal_status` keeps the exact W2 phrase
+    ``ten criteria met`` for the zero-exit + S1 PASS path (so existing tests
+    stay stable). W22 display / gate paths that want the PASS verdict
+    *attached* call this helper instead.
+
+    When the unqualified phrase is **not** reachable, the result is identical
+    to :func:`terminal_status` (CANDIDATE-MET + North Star pending S1).
+    """
+    base = terminal_status(rows, s1_verdict=s1_verdict, signed_exits=signed_exits)
+    if base == STATUS_UNQUALIFIED and is_s1_pass_verdict(s1_verdict):
+        return "%s; %s" % (STATUS_UNQUALIFIED, STATUS_NORTH_STAR_MET)
+    return base
+
+
+def resolve_s1_verdict(
+    s1_verdict: Optional[str] = None,
+    *,
+    root: Optional[Path] = None,
+    default: str = "PENDING",
+) -> Optional[str]:
+    """Resolve S1 verdict for status emission.
+
+    Preference order:
+
+    1. Explicit *s1_verdict* argument (test injection / live recorder).
+    2. ``artifacts/S1-VALIDATION.md`` under *root* (or containment root).
+    3. *default* (PENDING) — S1 has not been run; never invent PASS.
+    """
+    if s1_verdict is not None and str(s1_verdict).strip():
+        return str(s1_verdict).strip()
+    try:
+        from anchor.build import s1_findings as _s1f  # local import: W22 module
+
+        text_verdict = _s1f.read_s1_verdict(root=root)
+        if text_verdict and str(text_verdict).strip():
+            return str(text_verdict).strip()
+    except Exception:
+        # s1_findings missing or unreadable → fall through to default.
+        pass
+    return default
+
+
+def emit_terminal_status(
+    rows: Sequence[ExitRegisterRow] = (),
+    *,
+    s1_verdict: Optional[str] = None,
+    root: Optional[Path] = None,
+    signed_exits: Optional[Sequence[Union[ExitId, str]]] = None,
+    attach_s1_pass: bool = False,
+) -> str:
+    """Emit terminal status for the build, resolving S1 from injection or file.
+
+    Default *s1_verdict* is unresolved → read S1-VALIDATION.md → PENDING.
+    Unqualified phrasing only when resolved verdict is PASS and zero exits.
+    Set *attach_s1_pass* True to append ``North Star met (S1 PASS)`` when the
+    unqualified phrase is reached (W22 GWT display form).
+    """
+    resolved = resolve_s1_verdict(s1_verdict, root=root)
+    # PENDING / FAIL must not unlock unqualified; only PASS tokens do.
+    if is_s1_pass_verdict(resolved):
+        verdict_for_status: Optional[str] = "PASS"
+    else:
+        verdict_for_status = None
+    if attach_s1_pass:
+        return terminal_status_with_s1_attachment(
+            rows, s1_verdict=verdict_for_status, signed_exits=signed_exits
+        )
+    return terminal_status(
+        rows, s1_verdict=verdict_for_status, signed_exits=signed_exits
+    )
+
+
 # --------------------------------------------------------------------------
 # In-memory register + file ledger
 # --------------------------------------------------------------------------
@@ -643,6 +731,12 @@ class ExitRegister:
 
     def status(self) -> str:
         return terminal_status(self.rows, s1_verdict=self.s1_verdict)
+
+    def status_with_s1_attachment(self) -> str:
+        """Terminal status with S1 PASS stamp attached when unqualified."""
+        return terminal_status_with_s1_attachment(
+            self.rows, s1_verdict=self.s1_verdict
+        )
 
     def may_start_wave(self) -> bool:
         return may_start_subsequent_wave(

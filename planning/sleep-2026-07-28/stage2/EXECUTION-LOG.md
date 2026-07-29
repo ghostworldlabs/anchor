@@ -160,3 +160,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **gate:** `pytest -v tests/test_sweep_and_traceability_2026_07_29.py`
 - **note:** criteria 1-10 CANDIDATE-MET structural; surface-wave join W10-W20 GREEN; no MET before S1
 - 2026-07-29T21:25:23.264Z — Wave 21/22 GREEN (gate 26 pass; steward-land)
+
+## Wave 22 — W22 Phase 5 S1 scaffolding + terminal status (2026-07-29)
+
+- **status:** deliverables landed — `artifacts/S1-VALIDATION.md` (PENDING; not faked PASS), `anchor/build/s1_findings.py`, `tools/release_guard.py`, `exit_register.terminal_status` honesty, `tests/test_s1_and_status_2026_07_29.py`
+- **gate:** `pytest -v tests/test_s1_and_status_2026_07_29.py`; full suite `-k 2026_07_29` 712 pass
+- **note:** structural build complete; North Star pending live S1 with John; S1_VERDICT PENDING; release guard blocks v1.1.x
+- 2026-07-29T21:30:14.012Z — Wave 22/22 GREEN (gate 35 pass; steward-land; S1 live session still required for MET)
