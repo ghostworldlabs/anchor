@@ -256,3 +256,9 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **W13 COMPLETE:** gate 446/446 first try, commit 438b9a3 (cost_state cost surfacing).
 - **W14:** Doctor diagnose + banner payload execute ~5m, lock 80904 + grok 81724.
 - **Milestone:** 13/22 waves.
+
+## 2026-07-29 — Steward tick: W14 GREEN; W15 execute started
+
+- **W14 COMPLETE:** RED 480/481 → fix-1 → GREEN 481/481; review (JSON retry); commit 0afb5e6.
+- **W15:** per-engine diagnose execute just started (lock 80904, grok 81952).
+- **Milestone:** 14/22 waves.

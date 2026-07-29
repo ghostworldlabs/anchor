@@ -97,3 +97,10 @@ _(no waves built yet — Foreman appends a GREEN/HALT entry per wave)_
 - **commit:** (orchestrator records SHA on GO)
 - **note:** criterion 4 core + Diagnose dead-control as CANDIDATE-MET structure — every finding quotes a live reading; anti-template fault absent from contract table still baseline-diffs a live reading; banner payload id+hash byte-identical into Doctor/trace; re-detection raises RedetectionForbidden; no dead Diagnose button (named cannot_run unavailable state)
 - 2026-07-29T19:46:22.270Z — Wave 14/22 GREEN — W14 — Phase 3: Doctor really diagnoses + banner→Doctor issue payload (gate exit 0 · tests 481 pass 481 fail 0 · iter 1; appended by orchestrator on GO)
+
+## Wave 15 — W15 Phase 3 Per-engine independent diagnose with depth labels (2026-07-29)
+
+- **status:** deliverables landed — `anchor/doctor/engines/{claude,gemini,grok}.py` (independent probes, each with own failure path + named state), `anchor/doctor/depth_label.py` (depth vocabulary deep/shallow/unavailable; unlabelled report rejected naming engine + report), `anchor/ui/doctor_view.py` (three independently-stated engine rows; one engine failing does not blank or fake the other two; no shared verdict), `artifacts/failure-states/doctor-engines.md` (unknown ≠ empty per engine), `artifacts/traces/doctor-engines-e2e.json` (materialized by gate via write_doctor_engines_traces; proof_level rendered-string), `tests/test_doctor_engines_2026_07_29.py`
+- **gate:** `pytest -v tests/test_doctor_engines_2026_07_29.py` (orchestrator-owned; also under `-k 2026_07_29`)
+- **commit:** (orchestrator records SHA on GO)
+- **note:** rest of criterion 4 as CANDIDATE-MET structure — Claude/Gemini/Grok each produce a depth-labelled report from their own probe; Gemini timeout isolation leaves Claude and Grok intact and correctly labelled; unlabelled report fails the gate naming the engine and the unlabelled report
