@@ -82,9 +82,18 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **Foreman:** schtasks `Foreman-Anchor-Sleep-20260728` · cwd=stage2 · `--git` branch `foreman/sleep-2026-07-28` · reviewers 2 · cap 3
 - **seats:** coding=claude review=grok-cli
 
+## 2026-07-29 — Foreman started (after dirty-tree recovery)
+
+- **outcome:** worked
+- **git:** commit `eb9ff41` handoff on v1.2; stash `pre-foreman-sleep-2026-07-28 remaining dirty` for non-handoff dirt
+- **branch:** `foreman/sleep-2026-07-28` created from v1.2
+- **live:** wave 1/22 execute (task triple + containment)
+- **note:** W1 requires John's dated verification-task-triple fields — may need human input soon
+
 ## Pending
 
-- Foreman 22-wave build (own monitoring)
-- Dual-root vacuous recovery if needed
-- S1 post-build with John after GREEN
+- Foreman 22-wave build monitoring
+- John: fill verification task triple when W1 asks
+- Restore stash after build if needed (`git stash list`)
+- S1 post-build after GREEN
 
