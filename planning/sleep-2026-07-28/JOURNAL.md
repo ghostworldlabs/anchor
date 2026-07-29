@@ -131,3 +131,20 @@ Substantive *content* friction (single-Shark, still worth reading before you app
 - **Not fixed this pass:** effort-tile summary quality; Grok-feedback UI path that burns tokens outside Anchor session capture (usage still won't show for non-session feedback).
 - **Next for John:** re-try T1 open-terminal on Holding Company / newish project; T2 real Open terminal session and check project usage row after a managed turn.
 
+
+## 2026-07-29 — Steward takes ownership: Phase-0 GO + Foreman resume
+
+- **John:** drive it; stop re-asking; optional T2 recheck only if we ask for a fixed thing.
+- **Recorded:** T1/T2/T3 john_confirmation SIGNED from live laptop runs + service warm restarts; ledger SIGNED.
+- **phase0_go_decision:** GO (triple + ledger + containment).
+- **Product on branch:** empty-HEAD worktree seed; usage line joins rollup+capture-rate+live (commit 6857e61).
+- **Foreman:** resume --clear-halt --force from stage2 (W1 re-enter gate after plan amend already in plan).
+- **Steward:** this session owns 10-min status cadence until halt/done.
+
+
+## 2026-07-29 — Steward: Claude spend limit → Grok failover + test fix
+
+- **Death:** first resume lock pid 79528 died after Read IMPLEMENTATION-PLAN; relaunch.
+- **Claude:** `claude -p` returns monthly spend limit (exit 1) → execute/fix error-result 0 tools ~500ms.
+- **Gate RED:** `test_a_partly_confirmed_triple...` expected HALT but shipped triple was fully confirmed → fixed test to wipe confirmations first (commit 9f277df); 74/74 green locally.
+- **Failover:** resume bat routes execute/fix/review to **grok-cli** (cross_model:false honest); relaunch --resume --clear-halt --force.
