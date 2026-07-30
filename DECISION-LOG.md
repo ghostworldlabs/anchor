@@ -24,3 +24,8 @@ pytest -k "steward or settings or share_ or startup or distro" → 419 passed.
 STANDING: any wave touching ship-manifest-matched files must APPEND the
 distro/ship gate family to its wave gate (see trio/foreman journal 0091).
 Service restart (elevated) still pending for the live UI to pick this up.
+
+## 2026-07-30 — Workbench icon LOCKED: the Watchmaker's Bench
+workbench-icon.jpg = workbench-watchmakers.jpg (John's pick). The ANVIL
+candidate (vendor/brand/workbench-anvil.jpg) is RESERVED as the icon for the
+planned 'anvil' code-validation skill — do not reuse it elsewhere.
