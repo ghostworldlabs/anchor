@@ -5588,6 +5588,7 @@ def render_project_window_html(project_id: str) -> str:
         + "</div>"
     )
     pid_js = json.dumps(project_id)
+    _stew_ui = _steward_ui()  # persona livery for the seal button + boot global
     back_link_normal = '<p><a href="/" target="_top">&larr; Back to dashboard</a></p>'
     # ── rearch W4 (C1 increment 1): the project-window APP-JS block ─────────
     # Chosen by the `frontend` pillar off-switch flag. EMBEDDED (the default)
@@ -5710,6 +5711,26 @@ def render_project_window_html(project_id: str) -> str:
         "instance_id": html_lib.escape(inst["instance_id"]),
         "app_js": pw_app_js_block,
         "cache_bust": cache_bust_script(),
+        # Steward persona livery (2026-07-30): the seal button follows the
+        # active persona (icon + name + label), and window.ANCHOR_STEWARD is
+        # injected BEFORE the app JS so every chamber/overlay display string
+        # resolves through the same persona. (% formatting on purpose — the
+        # W1 interpolation census for this render surface stays undisturbed.)
+        "steward_label": html_lib.escape(_stew_ui["label"], quote=True),
+        "steward_seal_src": html_lib.escape(
+            "/vendor/brand/%s?v=%s" % (_stew_ui["seal"], BUILD_ID), quote=True),
+        "steward_seal_name": html_lib.escape(_stew_ui["seal_name"]),
+        "steward_boot": (
+            "<script>window.ANCHOR_STEWARD = %s;</script>" % json.dumps({
+                "key": _stew_ui["key"],
+                "label": _stew_ui["label"],
+                "seal_src": "/vendor/brand/%s?v=%s" % (_stew_ui["seal"],
+                                                       BUILD_ID),
+                "high_seat_src": "/vendor/brand/%s?v=%s" % (
+                    _stew_ui["high_seat"], BUILD_ID),
+                "seal_name": _stew_ui["seal_name"],
+                "high_seat_name": _stew_ui["high_seat_name"],
+            })),
     }
     # W5: the whole document shell is ONE ``@@slot@@`` template fill — the
     # static path fills the template read from the static FILE; a drifted
@@ -6970,6 +6991,17 @@ def generate_html(projects, tasks, inbox):
     steward_label = _stew["label"]
     steward_hs_name = _stew["high_seat_name"]
     steward_projects_hint = _stew["projects_hint"]
+    # Boot global for the High Seat overlay JS (loads before high-seat.js):
+    # display names + icons in the overlay resolve through this, so the
+    # overlay speaks the same livery as the tiles.
+    steward_boot_json = json.dumps({
+        "key": _stew["key"],
+        "label": steward_label,
+        "seal_src": "/vendor/brand/%s?v=%s" % (steward_seal_icon, BUILD_ID),
+        "high_seat_src": "/vendor/brand/%s?v=%s" % (steward_hs_icon, BUILD_ID),
+        "seal_name": _stew["seal_name"],
+        "high_seat_name": steward_hs_name,
+    })
 
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
@@ -9473,6 +9505,7 @@ function addTaskDomain(domain) {{
      renders the engine view model only; closing it writes nothing. -->
 <link rel="stylesheet" href="/static/high-seat.css?v={BUILD_ID}">
 <div id="ecgHighSeatHost"></div>
+<script>window.ANCHOR_STEWARD = {steward_boot_json};</script>
 <script src="/static/high-seat.js?v={BUILD_ID}"></script>
 </body>
 </html>'''
@@ -11246,7 +11279,6 @@ def handle_tidy_idy_status(handler, path, body):
     status shell at the last launch snapshot (often 42% / save).
     """
     import tidy_idy_runner as _tidy
-    from urllib.parse import parse_qs, urlparse
     # Prefer the live request URI (includes ?project_id=…&token=…); fall back to
     # the strangler path only if somehow empty. Also accept X-Project-Id header
     # (remote status shell sends it so a query-strip bug cannot black-hole polls).
@@ -11302,7 +11334,6 @@ def handle_tidy_idy_proxy(handler, path, body):
     """
     import json as _json
     import tidy_idy_runner as _tidy
-    from urllib.parse import urlparse
 
     parsed = urlparse(path)
     prefix = "/api/rnd/tidy_idy_proxy/"
@@ -11396,7 +11427,6 @@ def handle_tidy_idy_proxy(handler, path, body):
                 # Preserve Anchor auth token on the redirect.
                 tok = None
                 try:
-                    from urllib.parse import parse_qs
                     tok = (parse_qs(parsed.query or "").get("token") or [""])[0]
                 except Exception:
                     tok = ""
@@ -12702,7 +12732,6 @@ def _w9_render_clickable_banner_html(issue, title, body, style_kind="health"):
 def handle_doctor_banner_seed(handler, path, body):
     """GET/POST helper surface for W9 banner→Doctor seed (tests + clients)."""
     # Parse query from handler path when GET
-    from urllib.parse import urlparse, parse_qs
     qs = {}
     try:
         qs = {k: (v[0] if v else "") for k, v in parse_qs(
@@ -15238,7 +15267,6 @@ def _zh_extract_token(handler, qs=None):
     """Token from query or X-Anchor-Token (dashboard convention)."""
     try:
         if qs is None:
-            from urllib.parse import urlparse, parse_qs
             qs = parse_qs(urlparse(getattr(handler, "path", "") or "").query or "")
         t = (qs.get("token") or [""])[0]
         if t:
@@ -15339,7 +15367,6 @@ def handle_zombie_hunter_proxy(handler, path, body):
     if not handler._term_token_ok():
         handler._send_json({"ok": False, "error": "unauthorized"}, 401)
         return
-    from urllib.parse import urlparse
 
     parsed = urlparse(path)
     if not parsed.path.startswith(_ZH_PROXY_PREFIX):
@@ -15441,7 +15468,6 @@ def handle_zombie_hunter_report(handler, path, body):
     # Pure-Python Cached Sweep Report is FALLBACK when Node is down.
     # Query ?legacy=1 forces the Python report.
     try:
-        from urllib.parse import urlparse, parse_qs
         _qs = parse_qs(urlparse(getattr(handler, "path", "") or "").query or "")
         _force_legacy = str((_qs.get("legacy") or ["0"])[0]).strip() in ("1", "true", "yes")
         _tok = _zh_extract_token(handler, _qs)

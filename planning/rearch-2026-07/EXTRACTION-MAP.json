@@ -1,32 +1,32 @@
 {
   "target": "C:\\dev\\Anchor\\anchor_gui.py",
-  "markup_emitting_total": 48,
-  "amendment_count": 48,
-  "accounted": 48,
+  "markup_emitting_total": 47,
+  "amendment_count": 47,
+  "accounted": 47,
   "unclassified": [],
   "by_function": {
-    "generate_html": 30,
-    "render_project_window_html": 18
+    "generate_html": 35,
+    "render_project_window_html": 12
   },
   "blobs": {
     "generate_html": [
       [
-        6046,
-        6096
+        6837,
+        6887
       ],
       [
-        6212,
-        6231
+        7043,
+        7062
       ],
       [
-        6247,
-        8531
+        7078,
+        9511
       ]
     ],
     "render_project_window_html": [
       [
-        4946,
-        4971
+        5686,
+        5713
       ]
     ]
   },
@@ -35,635 +35,649 @@
       "kind": "named-var",
       "occurrences": 3,
       "slots": [
-        "generate_html_L5886_0",
-        "generate_html_L5957_0",
-        "generate_html_L6105_0"
+        "generate_html_L6677_0",
+        "generate_html_L6748_0",
+        "generate_html_L6896_0"
       ]
     },
-    "generate_html_L5887_0": {
+    "generate_html_L6678_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L5887_0"
+        "generate_html_L6678_0"
       ]
     },
     "tier_btn": {
       "kind": "named-var",
       "occurrences": 3,
       "slots": [
-        "generate_html_L5890_0",
-        "generate_html_L5932_0",
-        "generate_html_L5961_0"
+        "generate_html_L6681_0",
+        "generate_html_L6723_0",
+        "generate_html_L6752_0"
       ]
     },
     "gpid_attr": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L5924_0"
+        "generate_html_L6715_0"
       ]
     },
-    "generate_html_L5929_0": {
+    "generate_html_L6720_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L5929_0"
+        "generate_html_L6720_0"
       ]
     },
-    "generate_html_L5935_0": {
+    "generate_html_L6726_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L5935_0"
+        "generate_html_L6726_0"
       ]
     },
-    "generate_html_L5958_0": {
+    "generate_html_L6749_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L5958_0"
+        "generate_html_L6749_0"
       ]
     },
-    "generate_html_L6041_0": {
+    "generate_html_L6832_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6041_0"
+        "generate_html_L6832_0"
       ]
     },
     "d_top_rows": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6080_0"
+        "generate_html_L6871_0"
       ]
     },
     "project_card": {
       "kind": "renderer-call",
       "occurrences": 4,
       "slots": [
-        "generate_html_L6083_0",
-        "generate_html_L6093_0",
-        "generate_html_L6966_0",
-        "generate_html_L6981_0"
+        "generate_html_L6874_0",
+        "generate_html_L6884_0",
+        "generate_html_L7904_0",
+        "generate_html_L7905_0"
       ]
     },
-    "generate_html_L6083_1": {
+    "generate_html_L6874_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6083_1"
+        "generate_html_L6874_1"
       ]
     },
-    "generate_html_L6091_0": {
+    "generate_html_L6882_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6091_0"
+        "generate_html_L6882_0"
       ]
     },
-    "generate_html_L6093_1": {
+    "generate_html_L6884_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6093_1"
+        "generate_html_L6884_1"
       ]
     },
-    "generate_html_L6095_0": {
+    "generate_html_L6886_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6095_0"
+        "generate_html_L6886_0"
       ]
     },
-    "generate_html_L6107_0": {
+    "generate_html_L6898_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6107_0"
+        "generate_html_L6898_0"
       ]
     },
     "balance_rows": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6864_0"
+        "generate_html_L7731_0"
       ]
     },
     "health_banner_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6888_0"
+        "generate_html_L7755_0"
       ]
     },
     "render_model_flex_badge": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6906_0"
+        "generate_html_L7783_0"
+      ]
+    },
+    "render_model_prefs_controls": {
+      "kind": "renderer-call",
+      "occurrences": 1,
+      "slots": [
+        "generate_html_L7784_0"
+      ]
+    },
+    "render_steward_control": {
+      "kind": "renderer-call",
+      "occurrences": 1,
+      "slots": [
+        "generate_html_L7785_0"
       ]
     },
     "top_task_row": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L6942_0"
+        "generate_html_L7878_0"
+      ]
+    },
+    "generate_html_L7883_0": {
+      "kind": "inline-literal",
+      "occurrences": 1,
+      "slots": [
+        "generate_html_L7883_0"
       ]
     },
     "rnd_projects_html": {
       "kind": "named-var",
       "occurrences": 2,
       "slots": [
-        "generate_html_L6963_0",
-        "generate_html_L7052_0"
+        "generate_html_L7903_0",
+        "generate_html_L7978_0"
+      ]
+    },
+    "generate_html_L7904_1": {
+      "kind": "inline-literal",
+      "occurrences": 1,
+      "slots": [
+        "generate_html_L7904_1"
+      ]
+    },
+    "generate_html_L7905_1": {
+      "kind": "inline-literal",
+      "occurrences": 1,
+      "slots": [
+        "generate_html_L7905_1"
       ]
     },
     "rnd_archive_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7064_0"
+        "generate_html_L7990_0"
       ]
     },
     "cache_bust_script": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8528_0"
+        "generate_html_L9501_0"
       ]
     },
     "pid_attr": {
       "kind": "named-var",
-      "occurrences": 13,
+      "occurrences": 9,
       "slots": [
-        "render_project_window_html_L4792_0",
-        "render_project_window_html_L4797_0",
-        "render_project_window_html_L4798_0",
-        "render_project_window_html_L4805_0",
-        "render_project_window_html_L4809_0",
-        "render_project_window_html_L4810_0",
-        "render_project_window_html_L4813_0",
-        "render_project_window_html_L4814_0",
-        "render_project_window_html_L4815_0",
-        "render_project_window_html_L4816_0",
-        "render_project_window_html_L4820_0",
-        "render_project_window_html_L4823_0",
-        "render_project_window_html_L4824_0"
+        "render_project_window_html_L5518_0",
+        "render_project_window_html_L5523_0",
+        "render_project_window_html_L5524_0",
+        "render_project_window_html_L5531_0",
+        "render_project_window_html_L5544_0",
+        "render_project_window_html_L5545_0",
+        "render_project_window_html_L5547_0",
+        "render_project_window_html_L5548_0",
+        "render_project_window_html_L5552_0"
       ]
     },
     "rescan_btn": {
       "kind": "named-var",
       "occurrences": 2,
       "slots": [
-        "render_project_window_html_L4811_0",
-        "render_project_window_html_L4821_0"
-      ]
-    },
-    "upload_btn": {
-      "kind": "named-var",
-      "occurrences": 2,
-      "slots": [
-        "render_project_window_html_L4812_0",
-        "render_project_window_html_L4822_0"
+        "render_project_window_html_L5546_0",
+        "render_project_window_html_L5553_0"
       ]
     },
     "blurb_attr": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "render_project_window_html_L4937_0"
+        "render_project_window_html_L5677_0"
       ]
     }
   },
   "slots": [
     {
-      "slot": "generate_html_L5886_0",
+      "slot": "generate_html_L6677_0",
       "function": "generate_html",
-      "lineno": 5886,
+      "lineno": 6677,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L5887_0",
+      "slot": "generate_html_L6678_0",
       "function": "generate_html",
-      "lineno": 5887,
+      "lineno": 6678,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L5887_0",
+      "helper": "generate_html_L6678_0",
       "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L5890_0",
+      "slot": "generate_html_L6681_0",
       "function": "generate_html",
-      "lineno": 5890,
+      "lineno": 6681,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L5924_0",
+      "slot": "generate_html_L6715_0",
       "function": "generate_html",
-      "lineno": 5924,
+      "lineno": 6715,
       "rule": "markup-named-var:gpid_attr",
       "kind": "named-var",
       "helper": "gpid_attr",
       "expr": "gpid_attr"
     },
     {
-      "slot": "generate_html_L5929_0",
+      "slot": "generate_html_L6720_0",
       "function": "generate_html",
-      "lineno": 5929,
+      "lineno": 6720,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L5929_0",
+      "helper": "generate_html_L6720_0",
       "expr": "f'<span class=\"due-badge\">{esc(p[\"due\"])}</span>' if p.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L5932_0",
+      "slot": "generate_html_L6723_0",
       "function": "generate_html",
-      "lineno": 5932,
+      "lineno": 6723,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L5935_0",
+      "slot": "generate_html_L6726_0",
       "function": "generate_html",
-      "lineno": 5935,
+      "lineno": 6726,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L5935_0",
+      "helper": "generate_html_L6726_0",
       "expr": "f'<div class=\"next-text\">Next: {esc(p[\"next\"])}</div>' if p.get(\"next\") else \"\""
     },
     {
-      "slot": "generate_html_L5957_0",
+      "slot": "generate_html_L6748_0",
       "function": "generate_html",
-      "lineno": 5957,
+      "lineno": 6748,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L5958_0",
+      "slot": "generate_html_L6749_0",
       "function": "generate_html",
-      "lineno": 5958,
+      "lineno": 6749,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L5958_0",
+      "helper": "generate_html_L6749_0",
       "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L5961_0",
+      "slot": "generate_html_L6752_0",
       "function": "generate_html",
-      "lineno": 5961,
+      "lineno": 6752,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L6041_0",
+      "slot": "generate_html_L6832_0",
       "function": "generate_html",
-      "lineno": 6041,
+      "lineno": 6832,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6041_0",
+      "helper": "generate_html_L6832_0",
       "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
     },
     {
-      "slot": "generate_html_L6080_0",
+      "slot": "generate_html_L6871_0",
       "function": "generate_html",
-      "lineno": 6080,
+      "lineno": 6871,
       "rule": "markup-named-var:d_top_rows",
       "kind": "named-var",
       "helper": "d_top_rows",
       "expr": "d_top_rows"
     },
     {
-      "slot": "generate_html_L6083_0",
+      "slot": "generate_html_L6874_0",
       "function": "generate_html",
-      "lineno": 6083,
+      "lineno": 6874,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in d_p1_projects)"
     },
     {
-      "slot": "generate_html_L6083_1",
+      "slot": "generate_html_L6874_1",
       "function": "generate_html",
-      "lineno": 6083,
+      "lineno": 6874,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6083_1",
+      "helper": "generate_html_L6874_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
     },
     {
-      "slot": "generate_html_L6091_0",
+      "slot": "generate_html_L6882_0",
       "function": "generate_html",
-      "lineno": 6091,
+      "lineno": 6882,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6091_0",
+      "helper": "generate_html_L6882_0",
       "expr": "f'<div class=\"section-header\"><h3>Other Tasks</h3></div><div class=\"task-list\">{\"\".join(task_item(t) for t in d_other..."
     },
     {
-      "slot": "generate_html_L6093_0",
+      "slot": "generate_html_L6884_0",
       "function": "generate_html",
-      "lineno": 6093,
+      "lineno": 6884,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in d_p2_projects)"
     },
     {
-      "slot": "generate_html_L6093_1",
+      "slot": "generate_html_L6884_1",
       "function": "generate_html",
-      "lineno": 6093,
+      "lineno": 6884,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6093_1",
+      "helper": "generate_html_L6884_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
     },
     {
-      "slot": "generate_html_L6095_0",
+      "slot": "generate_html_L6886_0",
       "function": "generate_html",
-      "lineno": 6095,
+      "lineno": 6886,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6095_0",
+      "helper": "generate_html_L6886_0",
       "expr": "f'<div class=\"section-header\" style=\"margin-top:24px\"><h3>Completed ({len(d_done)})</h3></div><div class=\"task-list\">..."
     },
     {
-      "slot": "generate_html_L6105_0",
+      "slot": "generate_html_L6896_0",
       "function": "generate_html",
-      "lineno": 6105,
+      "lineno": 6896,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L6107_0",
+      "slot": "generate_html_L6898_0",
       "function": "generate_html",
-      "lineno": 6107,
+      "lineno": 6898,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L6107_0",
+      "helper": "generate_html_L6898_0",
       "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
     },
     {
-      "slot": "generate_html_L6864_0",
+      "slot": "generate_html_L7731_0",
       "function": "generate_html",
-      "lineno": 6864,
+      "lineno": 7731,
       "rule": "markup-named-var:balance_rows",
       "kind": "named-var",
       "helper": "balance_rows",
       "expr": "balance_rows"
     },
     {
-      "slot": "generate_html_L6888_0",
+      "slot": "generate_html_L7755_0",
       "function": "generate_html",
-      "lineno": 6888,
+      "lineno": 7755,
       "rule": "markup-named-var:health_banner_html",
       "kind": "named-var",
       "helper": "health_banner_html",
       "expr": "health_banner_html"
     },
     {
-      "slot": "generate_html_L6906_0",
+      "slot": "generate_html_L7783_0",
       "function": "generate_html",
-      "lineno": 6906,
+      "lineno": 7783,
       "rule": "call-to-renderer:render_model_flex_badge",
       "kind": "renderer-call",
       "helper": "render_model_flex_badge",
       "expr": "render_model_flex_badge()"
     },
     {
-      "slot": "generate_html_L6942_0",
+      "slot": "generate_html_L7784_0",
       "function": "generate_html",
-      "lineno": 6942,
+      "lineno": 7784,
+      "rule": "call-to-renderer:render_model_prefs_controls",
+      "kind": "renderer-call",
+      "helper": "render_model_prefs_controls",
+      "expr": "render_model_prefs_controls()"
+    },
+    {
+      "slot": "generate_html_L7785_0",
+      "function": "generate_html",
+      "lineno": 7785,
+      "rule": "call-to-renderer:render_steward_control",
+      "kind": "renderer-call",
+      "helper": "render_steward_control",
+      "expr": "render_steward_control()"
+    },
+    {
+      "slot": "generate_html_L7878_0",
+      "function": "generate_html",
+      "lineno": 7878,
       "rule": "call-to-renderer:top_task_row",
       "kind": "renderer-call",
       "helper": "top_task_row",
       "expr": "\"\".join(top_task_row(t) for t in top_tasks)"
     },
     {
-      "slot": "generate_html_L6963_0",
+      "slot": "generate_html_L7883_0",
       "function": "generate_html",
-      "lineno": 6963,
+      "lineno": 7883,
+      "rule": "literal-contains-<",
+      "kind": "inline-literal",
+      "helper": "generate_html_L7883_0",
+      "expr": "\"\".join(task_item(t) for t in other_tasks) or '<div class=\"empty-msg\">No P2/P3 tasks.</div>'"
+    },
+    {
+      "slot": "generate_html_L7903_0",
+      "function": "generate_html",
+      "lineno": 7903,
       "rule": "markup-named-var:rnd_projects_html",
       "kind": "named-var",
       "helper": "rnd_projects_html",
       "expr": "rnd_projects_html"
     },
     {
-      "slot": "generate_html_L6966_0",
+      "slot": "generate_html_L7904_0",
       "function": "generate_html",
-      "lineno": 6966,
+      "lineno": 7904,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in p1_projects)"
     },
     {
-      "slot": "generate_html_L6981_0",
+      "slot": "generate_html_L7904_1",
       "function": "generate_html",
-      "lineno": 6981,
+      "lineno": 7904,
+      "rule": "literal-contains-<",
+      "kind": "inline-literal",
+      "helper": "generate_html_L7904_1",
+      "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
+    },
+    {
+      "slot": "generate_html_L7905_0",
+      "function": "generate_html",
+      "lineno": 7905,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in p2_projects)"
     },
     {
-      "slot": "generate_html_L7052_0",
+      "slot": "generate_html_L7905_1",
       "function": "generate_html",
-      "lineno": 7052,
+      "lineno": 7905,
+      "rule": "literal-contains-<",
+      "kind": "inline-literal",
+      "helper": "generate_html_L7905_1",
+      "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
+    },
+    {
+      "slot": "generate_html_L7978_0",
+      "function": "generate_html",
+      "lineno": 7978,
       "rule": "markup-named-var:rnd_projects_html",
       "kind": "named-var",
       "helper": "rnd_projects_html",
       "expr": "rnd_projects_html"
     },
     {
-      "slot": "generate_html_L7064_0",
+      "slot": "generate_html_L7990_0",
       "function": "generate_html",
-      "lineno": 7064,
+      "lineno": 7990,
       "rule": "markup-named-var:rnd_archive_html",
       "kind": "named-var",
       "helper": "rnd_archive_html",
       "expr": "rnd_archive_html"
     },
     {
-      "slot": "generate_html_L8528_0",
+      "slot": "generate_html_L9501_0",
       "function": "generate_html",
-      "lineno": 8528,
+      "lineno": 9501,
       "rule": "call-to-renderer:cache_bust_script",
       "kind": "renderer-call",
       "helper": "cache_bust_script",
       "expr": "cache_bust_script()"
     },
     {
-      "slot": "render_project_window_html_L4792_0",
+      "slot": "render_project_window_html_L5518_0",
       "function": "render_project_window_html",
-      "lineno": 4792,
+      "lineno": 5518,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4797_0",
+      "slot": "render_project_window_html_L5523_0",
       "function": "render_project_window_html",
-      "lineno": 4797,
+      "lineno": 5523,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4798_0",
+      "slot": "render_project_window_html_L5524_0",
       "function": "render_project_window_html",
-      "lineno": 4798,
+      "lineno": 5524,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4805_0",
+      "slot": "render_project_window_html_L5531_0",
       "function": "render_project_window_html",
-      "lineno": 4805,
+      "lineno": 5531,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4809_0",
+      "slot": "render_project_window_html_L5544_0",
       "function": "render_project_window_html",
-      "lineno": 4809,
+      "lineno": 5544,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4810_0",
+      "slot": "render_project_window_html_L5545_0",
       "function": "render_project_window_html",
-      "lineno": 4810,
+      "lineno": 5545,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4811_0",
+      "slot": "render_project_window_html_L5546_0",
       "function": "render_project_window_html",
-      "lineno": 4811,
+      "lineno": 5546,
       "rule": "markup-named-var:rescan_btn",
       "kind": "named-var",
       "helper": "rescan_btn",
       "expr": "rescan_btn"
     },
     {
-      "slot": "render_project_window_html_L4812_0",
+      "slot": "render_project_window_html_L5547_0",
       "function": "render_project_window_html",
-      "lineno": 4812,
-      "rule": "markup-named-var:upload_btn",
-      "kind": "named-var",
-      "helper": "upload_btn",
-      "expr": "upload_btn"
-    },
-    {
-      "slot": "render_project_window_html_L4813_0",
-      "function": "render_project_window_html",
-      "lineno": 4813,
+      "lineno": 5547,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4814_0",
+      "slot": "render_project_window_html_L5548_0",
       "function": "render_project_window_html",
-      "lineno": 4814,
+      "lineno": 5548,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4815_0",
+      "slot": "render_project_window_html_L5552_0",
       "function": "render_project_window_html",
-      "lineno": 4815,
+      "lineno": 5552,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L4816_0",
+      "slot": "render_project_window_html_L5553_0",
       "function": "render_project_window_html",
-      "lineno": 4816,
-      "rule": "markup-named-var:pid_attr",
-      "kind": "named-var",
-      "helper": "pid_attr",
-      "expr": "pid_attr"
-    },
-    {
-      "slot": "render_project_window_html_L4820_0",
-      "function": "render_project_window_html",
-      "lineno": 4820,
-      "rule": "markup-named-var:pid_attr",
-      "kind": "named-var",
-      "helper": "pid_attr",
-      "expr": "pid_attr"
-    },
-    {
-      "slot": "render_project_window_html_L4821_0",
-      "function": "render_project_window_html",
-      "lineno": 4821,
+      "lineno": 5553,
       "rule": "markup-named-var:rescan_btn",
       "kind": "named-var",
       "helper": "rescan_btn",
       "expr": "rescan_btn"
     },
     {
-      "slot": "render_project_window_html_L4822_0",
+      "slot": "render_project_window_html_L5677_0",
       "function": "render_project_window_html",
-      "lineno": 4822,
-      "rule": "markup-named-var:upload_btn",
-      "kind": "named-var",
-      "helper": "upload_btn",
-      "expr": "upload_btn"
-    },
-    {
-      "slot": "render_project_window_html_L4823_0",
-      "function": "render_project_window_html",
-      "lineno": 4823,
-      "rule": "markup-named-var:pid_attr",
-      "kind": "named-var",
-      "helper": "pid_attr",
-      "expr": "pid_attr"
-    },
-    {
-      "slot": "render_project_window_html_L4824_0",
-      "function": "render_project_window_html",
-      "lineno": 4824,
-      "rule": "markup-named-var:pid_attr",
-      "kind": "named-var",
-      "helper": "pid_attr",
-      "expr": "pid_attr"
-    },
-    {
-      "slot": "render_project_window_html_L4937_0",
-      "function": "render_project_window_html",
-      "lineno": 4937,
+      "lineno": 5677,
       "rule": "markup-named-var:blurb_attr",
       "kind": "named-var",
       "helper": "blurb_attr",

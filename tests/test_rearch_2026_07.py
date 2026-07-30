@@ -2365,9 +2365,9 @@ class TestW6aExtractionMap:
         """done-when: the map accounts for all 48 census markup interpolations
         with no unclassified remainder."""
         m = extraction_map
-        assert m["markup_emitting_total"] == _MARKUP_48 == 48
-        assert m["accounted"] == 48
-        assert len(m["slots"]) == 48
+        assert m["markup_emitting_total"] == _MARKUP_48
+        assert m["accounted"] == _MARKUP_48
+        assert len(m["slots"]) == _MARKUP_48
         assert m["unclassified"] == []
 
     def test_accounting_matches_the_census_exactly(self, extraction_map,
@@ -2381,12 +2381,13 @@ class TestW6aExtractionMap:
             assert (m["by_function"][name]
                     == real_census["functions"][name]["counts"][CLASS_MARKUP])
         assert (m["by_function"]["generate_html"]
-                + m["by_function"]["render_project_window_html"] == 48)
+                + m["by_function"]["render_project_window_html"]
+                == _MARKUP_48)
 
     def test_every_slot_maps_to_a_named_helper(self, extraction_map):
         m = extraction_map
         slot_ids = {s["slot"] for s in m["slots"]}
-        assert len(slot_ids) == 48, "slot names must be unique per occurrence"
+        assert len(slot_ids) == _MARKUP_48, ("slot names must be unique per occurrence")
         for s in m["slots"]:
             assert s["helper"], s
             assert s["kind"] in (
@@ -2397,7 +2398,7 @@ class TestW6aExtractionMap:
     def test_helper_grouping_sums_to_48(self, extraction_map):
         m = extraction_map
         assert sum(h["occurrences"]
-                   for h in m["helpers"].values()) == 48
+                   for h in m["helpers"].values()) == _MARKUP_48
         # repeated source symbols collapse to ONE helper with many slots
         assert m["helpers"]["project_card"]["occurrences"] >= 2
         assert m["helpers"]["project_card"]["kind"] == exd.KIND_RENDERER
@@ -2450,7 +2451,7 @@ class TestW6aMapArtifacts:
         md_path = ARTIFACT_DIR / exd.MAP_MD_NAME
         assert set(written) == {json_path, md_path}
         reloaded = json.loads(json_path.read_text(encoding="utf-8"))
-        assert reloaded["accounted"] == 48
+        assert reloaded["accounted"] == _MARKUP_48
         assert "extraction map" in md_path.read_text(encoding="utf-8").lower()
 
 

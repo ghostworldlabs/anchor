@@ -68,6 +68,16 @@ function ecgHighSeatBadge(done) {
   });
 }
 
+/* Steward persona livery (2026-07-30): display names + icons follow
+   window.ANCHOR_STEWARD (server-injected). Ecgberht is the total fallback;
+   engine receipt strings keep engine vocabulary. */
+function _ecgHsStw() { return (window.ANCHOR_STEWARD || {}); }
+function _ecgHsStwLabel() { return _ecgHsStw().label || 'Ecgberht'; }
+function _ecgHsStwName() { return _ecgHsStw().high_seat_name || 'High Seat'; }
+function _ecgHsStwSealSrc() {
+  return _ecgHsStw().seal_src || '/vendor/brand/ecgberht-project-seal.jpg';
+}
+
 function closeEcgberhtHighSeat() {
   var dock = document.getElementById('ecgHighSeatDock');
   if (dock) dock.remove();
@@ -94,7 +104,7 @@ function _ecgHsReply(host, text) {
 /* ── Screen 3: the Decision Packet, rendered in the SAME dock ── */
 function _ecgHsRenderPacket(body, pid, payload) {
   body.innerHTML = '';
-  var crumb = _ecgHsEl('div', 'ecg-hs-crumb', '← back to the High Seat (Esc)');
+  var crumb = _ecgHsEl('div', 'ecg-hs-crumb', '← back to the ' + _ecgHsStwName() + ' (Esc)');
   crumb.onclick = function () { _ecgHsLoadHighSeat(body); };
   body.appendChild(crumb);
 
@@ -227,7 +237,7 @@ function _ecgHsRenderHighSeat(body, vm) {
     var tile = _ecgHsEl('div', 'ecg-hs-tile' + (t.dimmed ? ' dim' : ''));
     var nm = _ecgHsEl('div', 'nm');
     var ico = document.createElement('img');
-    ico.src = '/vendor/brand/ecgberht-project-seal.jpg';
+    ico.src = _ecgHsStwSealSrc();
     ico.alt = '';
     ico.onerror = function () { this.style.display = 'none'; };
     nm.appendChild(ico);
@@ -242,7 +252,7 @@ function _ecgHsRenderHighSeat(body, vm) {
   // S2-E4 — capacity & focus: spoken recommendation + reasons + override
   var bal = vm.balancing;
   var card = _ecgHsEl('div', 'ecg-hs-balance');
-  card.appendChild(_ecgHsEl('div', 'who', 'Ecgberht · capacity & focus'));
+  card.appendChild(_ecgHsEl('div', 'who', _ecgHsStwLabel() + ' · capacity & focus'));
   card.appendChild(_ecgHsEl('div', null, bal.steward_voice));
   var reasons = _ecgHsEl('ul', 'ecg-hs-reasons');
   (bal.recommendation.reasons || []).forEach(function (r) {
@@ -280,7 +290,7 @@ function _ecgHsRenderHighSeat(body, vm) {
   var cuc = vm.capacity_unknown_chamber;
   if (cuc && cuc.hard_stop) {
     var stop = _ecgHsEl('div', 'ecg-hs-balance ecg-hs-capstop');
-    stop.appendChild(_ecgHsEl('div', 'who', "Ecgberht · I don't know how much capacity is free"));
+    stop.appendChild(_ecgHsEl('div', 'who', _ecgHsStwLabel() + " · I don't know how much capacity is free"));
     stop.appendChild(_ecgHsEl('div', null, cuc.voice +
       (cuc.projects && cuc.projects.length ? ' (' + cuc.projects.join(', ') + ')' : '')));
     var choose = function (choice) {
@@ -345,7 +355,7 @@ function _ecgHsLoadHighSeat(body) {
     if (!out || !out.ok) {
       body.innerHTML = '';
       body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
-        "I can't reach the High Seat right now: " + ((out && (out.error || out.message)) || 'no response')));
+        "I can't reach the " + _ecgHsStwName() + " right now: " + ((out && (out.error || out.message)) || 'no response')));
       return;
     }
     _ecgHsRenderHighSeat(body, out.high_seat);
@@ -367,7 +377,7 @@ function ecgHighSeatMountInline() {
     if (!out || !out.ok) {
       host.innerHTML = '';
       host.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
-        "I can't reach the High Seat right now: " +
+        "I can't reach the " + _ecgHsStwName() + " right now: " +
         ((out && (out.error || out.message)) || 'no response')));
       return;
     }
@@ -433,7 +443,7 @@ function openEcgberhtHighSeat() {
       _ecgHsRenderHighSeat(body, vm);
     } else {
       body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
-        "I can't reach the High Seat right now: " + ((out && (out.error || out.message)) || 'no response')));
+        "I can't reach the " + _ecgHsStwName() + " right now: " + ((out && (out.error || out.message)) || 'no response')));
     }
 
     var esc = function (e) {

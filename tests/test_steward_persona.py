@@ -151,3 +151,22 @@ def test_steward_ui_falls_back_complete(monkeypatch):
     for field in ("high_seat", "seal", "high_seat_name", "seal_name",
                   "projects_hint"):
         assert ui.get(field)
+
+
+def test_project_window_livery_slots_and_boot():
+    """Project-level dashboards follow the persona (2026-07-30): the window
+    shell's seal button + boot global are SLOTTED (no hardcoded Ecgberht
+    seal), and both static JS assets resolve display livery through
+    window.ANCHOR_STEWARD with an Ecgberht fallback."""
+    shell = (REPO_ROOT / "static" / "project-window.html").read_text(
+        encoding="utf-8")
+    for slot in ("@@steward_label@@", "@@steward_seal_src@@",
+                 "@@steward_seal_name@@", "@@steward_boot@@"):
+        assert slot in shell, slot
+    assert "src='/vendor/brand/ecgberht-project-seal.jpg'" not in shell
+
+    for asset in ("project-window.js", "high-seat.js"):
+        js = (REPO_ROOT / "static" / asset).read_text(encoding="utf-8")
+        assert "window.ANCHOR_STEWARD" in js, asset
+        # the fallback literal survives ONLY inside the helper functions
+        assert "ico.src = '/vendor/brand/ecgberht-project-seal.jpg';" not in js, asset

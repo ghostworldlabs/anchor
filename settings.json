@@ -2,6 +2,6 @@
   "default_cli": "grok",
   "coding_family": "claude",
   "review_family": "grok",
-  "steward_type": "jarvis",
-  "updated_at": "2026-07-30T06:12:24+00:00"
+  "steward_type": "aladdin",
+  "updated_at": "2026-07-30T06:44:10+00:00"
 }

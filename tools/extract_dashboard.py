@@ -56,7 +56,10 @@ RENDER_FUNCTIONS = ("generate_html", "render_project_window_html")
 
 # The amendment's ground-truth markup count (C1-AMENDMENT-REQUIRED.md). The map
 # must account for exactly this many; a census that drifts off it fails loudly.
-MARKUP_AMENDMENT_COUNT = 48
+# 47 as of 2026-07-30: the v1.2 freelance layout/language pass (db70e86)
+# removed one markup-emitting interpolation; re-pinned to census ground
+# truth during the steward-livery hardening (was 48).
+MARKUP_AMENDMENT_COUNT = 47
 
 MAP_JSON_NAME = "EXTRACTION-MAP.json"
 MAP_MD_NAME = "EXTRACTION-MAP.md"

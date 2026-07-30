@@ -6047,6 +6047,17 @@ document.addEventListener('click', function() {
    card sheets as the opening face (v1 negative).
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Steward persona livery (2026-07-30): the active persona (icons + names)
+   arrives via window.ANCHOR_STEWARD (server-injected boot global). Display
+   strings resolve through these helpers; Ecgberht is the total fallback.
+   Engine receipts keep engine vocabulary — livery is display-only. */
+function _ecgStw() { return (window.ANCHOR_STEWARD || {}); }
+function _ecgStwLabel() { return _ecgStw().label || 'Ecgberht'; }
+function _ecgStwSealSrc() {
+  return _ecgStw().seal_src || '/vendor/brand/ecgberht-project-seal.jpg';
+}
+
+
 function _ecgEl(tag, cls, text) {
   var el = document.createElement(tag);
   if (cls) el.className = cls;
@@ -6068,7 +6079,7 @@ function closeEcgberhtSeal() {
 
 function _ecgStewardMsg(convo, text, actions) {
   var msg = _ecgEl('div', 'ecg-msg steward');
-  msg.appendChild(_ecgEl('div', 'who', 'Ecgberht'));
+  msg.appendChild(_ecgEl('div', 'who', _ecgStwLabel()));
   msg.appendChild(document.createTextNode(text || ''));
   if (actions && actions.length) {
     var act = _ecgEl('div', 'act');
@@ -6142,7 +6153,7 @@ function _ecgSpeak(convo, text) {
     body: body
   }).then(function (r) { return r.json(); }).then(function (j) {
     if (!j || !j.ok) {
-      _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was saved.");
+      _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
       return;
     }
     if (j.mode === 'recall') {
@@ -6181,7 +6192,7 @@ function _ecgSpeak(convo, text) {
         _ecgStewardMsg(convo, j.offer.question, [
           {label: j.offer.actions[0].label, onclick: function () {
             _ecgStewardMsg(convo, 'Parked. ' + j.offer.on_yes);
-          }},
+          } },
           {label: j.offer.actions[1].label}
         ]);
       } else if (j.divider_preview) {
@@ -6196,7 +6207,7 @@ function _ecgSpeak(convo, text) {
       _ecgStewardMsg(convo, prop);
     }
   }).catch(function () {
-    _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was saved.");
+    _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
   });
 }
 
@@ -6208,11 +6219,11 @@ function _ecgRenderChamber(host, vm) {
   // S1-E1 — titlebar: seal icon · steward-of title · seat pill · quiet stamp
   var bar = _ecgEl('div', 'ecg-dbar');
   var ico = _ecgEl('img', 'ecg-seal-ico');
-  ico.src = '/vendor/brand/ecgberht-project-seal.jpg';
+  ico.src = _ecgStwSealSrc();
   ico.alt = '';
   ico.onerror = function () { this.style.display = 'none'; };
   bar.appendChild(ico);
-  var ti = _ecgEl('span', 'ti', 'Ecgberht ');
+  var ti = _ecgEl('span', 'ti', _ecgStwLabel() + ' ');
   ti.appendChild(_ecgEl('small', null, '· ' + chamber.titlebar.title.replace(/^Ecgberht · /, '')));
   bar.appendChild(ti);
   var pill = _ecgEl('button', 'ecg-seat-pill', chamber.titlebar.seat_switcher.pill);
@@ -6288,11 +6299,11 @@ function _ecgRenderStandUp(host, su) {
 
   var bar = _ecgEl('div', 'ecg-dbar');
   var ico = _ecgEl('img', 'ecg-seal-ico');
-  ico.src = '/vendor/brand/ecgberht-project-seal.jpg';
+  ico.src = _ecgStwSealSrc();
   ico.alt = '';
   ico.onerror = function () { this.style.display = 'none'; };
   bar.appendChild(ico);
-  var ti = _ecgEl('span', 'ti', 'Ecgberht ');
+  var ti = _ecgEl('span', 'ti', _ecgStwLabel() + ' ');
   ti.appendChild(_ecgEl('small', null, '· nothing set up here yet'));
   bar.appendChild(ti);
   bar.appendChild(_ecgEl('span', 'sp'));
@@ -6330,7 +6341,7 @@ function _ecgRenderStandUp(host, su) {
           {label: 'Open it', onclick: function () {
             closeEcgberhtSeal();
             openEcgberhtSeal();
-          }}
+          } }
         ]);
         goalRow.style.display = 'none';
       } else {
@@ -6345,11 +6356,11 @@ function _ecgRenderStandUp(host, su) {
 
   // Steward speaks first — Screen 4 stand-up voice, two actions only.
   _ecgStewardMsg(convo, su.voice, [
-    {label: su.actions[0].label, onclick: function () { goalInput.focus(); }},
+    {label: su.actions[0].label, onclick: function () { goalInput.focus(); } },
     {label: su.actions[1].label, onclick: function () {
       // Not now → exit clean: no Face, no Strip, no invented goal.
       closeEcgberhtSeal();
-    }}
+    } }
   ]);
   dock.appendChild(convo);
 
