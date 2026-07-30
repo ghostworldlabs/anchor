@@ -52,12 +52,17 @@ STEWARDS = {
     },
     "jarvis": {
         "label": "Jarvis",
-        "desc": "The unseen English butler — the tipped bowler and the silver salver.",
+        "desc": "The unseen English butler — the tipped bowler and the silver server.",
         "high_seat": "jarvis-high-seat-hat.jpg",
         "seal": "jarvis-seal-salver.jpg",
         "high_seat_name": "Tip of the Hat",
-        "seal_name": "Salver",
-        "projects_hint": "each served on the Salver",
+        # (2026-07-30, John) The tray is called the SERVER, not the "salver" —
+        # at a glance that word reads as "slaver", which is not a thing this
+        # dashboard should ever appear to say. The image filename keeps its
+        # original slug (asset identity + ship manifest); only the human-facing
+        # label changed.
+        "seal_name": "Server",
+        "projects_hint": "each served on the Server",
     },
 }
 VALID_STEWARDS = frozenset(STEWARDS)

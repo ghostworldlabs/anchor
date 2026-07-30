@@ -5224,7 +5224,7 @@ def render_steward_control() -> str:
 
     One steward engine, selectable livery: Ecgberht (throne + wax seal),
     Aladdin (opened cave + genie lamp), Jarvis (tipped bowler + silver
-    salver). Each option's title carries the one-line description. POSTs
+    server). Each option's title carries the one-line description. POSTs
     ``steward_type`` to /api/settings on change, then reloads — the HIGH
     SEAT and SEAL icons are rendered server-side from the setting.
     """
