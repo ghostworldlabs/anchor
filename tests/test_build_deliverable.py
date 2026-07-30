@@ -491,6 +491,8 @@ def test_build_deliverable_in_lane_and_panel_playwright(server, tmp_path):
 
         # ── project A: deliverables panel lists it + panel shows it ──
         pg.goto(f"{base}/project/{pidA}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # v12 Wave 2: the Deliverables panel lives in the Layout-D right column;
         # the board grid is .pgrid.layoutd (covers left + right columns).
         lane_html = pg.inner_html(".pgrid.layoutd")
@@ -511,6 +513,8 @@ def test_build_deliverable_in_lane_and_panel_playwright(server, tmp_path):
 
         # ── project B: dock shows the honest placeholder ──
         pg.goto(f"{base}/project/{pidB}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         bt2 = pg.query_selector('.lane-tile[data-lane="build"]')
         assert bt2, "no build lane tile (B)"
         bt2.click()

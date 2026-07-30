@@ -110,6 +110,18 @@
 .dash-tile.tile-seal .tile-ico{width:44px;height:44px;border-radius:6px}
 .dash-tile .tile-count{font-weight:400;font-size:12px;color:var(--text-dim,#8a90a2)}
 .dash-tile .tile-body{padding:0 16px 14px}
+/* Expand/collapse affordance (2026-07-30, same contract as the main dashboard):
+   a pill on the right of the summary that reads "Click to expand" when closed
+   and "Click to collapse" when open — it never lies about the current state.
+   It sits INSIDE <summary>, so clicking it toggles the tile natively (no JS). */
+.dash-tile .tile-hint{
+  margin-left:auto;font-size:11px;font-weight:600;white-space:nowrap;
+  color:var(--text-dim,#8a90a2);border:1px solid var(--border,#2a3040);
+  background:var(--surface2,#232733);border-radius:6px;padding:3px 9px;cursor:pointer;
+}
+.dash-tile>summary:hover .tile-hint{color:var(--text,#e6e9f0);border-color:#3a4152}
+.dash-tile .tile-hint::after{content:"\25BE Click to expand"}
+.dash-tile[open] .tile-hint::after{content:"\25B4 Click to collapse"}
 
 /* Gold accent (matches the main dashboard steward tile): thin gold outline
    + gold summary on the seal tile. */

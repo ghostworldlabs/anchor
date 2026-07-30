@@ -398,6 +398,8 @@ def test_playwright_kill_planning_build_header_shows_foreman(env):
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.on("dialog", lambda d: d.accept())  # accept the kill confirm()
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             chip_sel = '#sessionBar .live-chip[data-session="%s"]' % psid
             pg.wait_for_selector(chip_sel, timeout=8000)

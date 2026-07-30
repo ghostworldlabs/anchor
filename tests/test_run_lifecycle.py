@@ -353,6 +353,8 @@ def test_close_keeps_tile_reopen_then_kill_removes_it(server):
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.on("dialog", lambda d: d.accept())   # accept the kill confirm()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # The live session surfaces as a reopenable chip in the session bar.
         chip_sel = '#sessionBar .live-chip[data-session="%s"]' % sid

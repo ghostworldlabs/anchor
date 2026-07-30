@@ -224,8 +224,15 @@ def test_workbench_tile_and_icon():
     dashboards reference the production alias."""
     shell = (REPO_ROOT / "static" / "project-window.html").read_text(
         encoding="utf-8")
-    assert "id='tile-workbench'" in shell and "tile-workbench' id='tile-workbench' open" in shell
+    assert "id='tile-workbench'" in shell
+    # (2026-07-30) The workbench tile opens COLLAPSED — a project window must
+    # land on the chamber/summary, not a wall of lanes — and carries the
+    # click-to-expand / click-to-collapse affordance in its summary.
+    assert "tile-workbench' id='tile-workbench' open" not in shell
+    assert "id='tile-workbench'><summary>" in shell
     wb = shell.index("id='tile-workbench'")
+    hint = shell.index("<span class='tile-hint'></span>", wb)
+    assert hint < shell.index("</summary>", wb)  # the affordance rides the summary
     for inner in ("id='kanbanBoard'", "id='sessionBar'", "id='panelStack'"):
         assert shell.index(inner) > wb, inner
     assert shell.index("id='tile-ecgseal'") < wb  # seal tile leads
@@ -233,6 +240,8 @@ def test_workbench_tile_and_icon():
     css = (REPO_ROOT / "static" / "project-window.css").read_text(
         encoding="utf-8")
     assert ".dash-tile.tile-seal{border-color:rgba(224,164,55,0.45)" in css
+    assert ".dash-tile .tile-hint::after{content:\"\\25BE Click to expand\"}" in css
+    assert ".dash-tile[open] .tile-hint::after{content:\"\\25B4 Click to collapse\"}" in css
     js = (REPO_ROOT / "static" / "project-window.js").read_text(
         encoding="utf-8")
     assert "wbt.open = true" in js  # a collapsed workbench never swallows a panel

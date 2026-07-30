@@ -104,6 +104,16 @@ def kill_quietly(session_id):
         pass
 
 
+def open_workbench(pg):
+    """Expand the project window's Workbench tile (2026-07-30: it now opens
+    COLLAPSED, so a project window lands on the summary, not a wall of lanes).
+    Clicks the summary's click-to-expand affordance — the same gesture a user
+    makes — so the lane board / session bar / panel stack become visible. A
+    no-op when the tile is already open (or absent, e.g. an older shell)."""
+    from tests.ui_helpers import expand_workbench
+    expand_workbench(pg)
+
+
 def _panel_term_dims(pg, sid):
     return pg.evaluate(
         "(sid)=>{var w=window.PANELS&&window.PANELS[sid];"
@@ -119,6 +129,7 @@ def flow_terminal_open_and_type(pg, base, pid, sid, text="Zq"):
     the terminal, and prove the typed chars ROUND-TRIP through the stub PTY
     (echo) back into the xterm scrollback buffer."""
     pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    open_workbench(pg)  # the workbench tile now opens collapsed
     chip = f'#sessionBar .live-chip[data-session="{sid}"]'
     pg.wait_for_selector(chip, timeout=8000)
     pg.click(chip)
@@ -158,6 +169,7 @@ def flow_pending_paste_flush(pg, base, pid, doc_rel):
     import pty_manager
 
     pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    open_workbench(pg)  # the workbench tile now opens collapsed
     pg.wait_for_selector("#sessionBar .live-chip", timeout=8000)
     pg.eval_on_selector_all("#sessionBar .live-chip",
                             "els=>els.forEach(e=>e.click())")
@@ -355,6 +367,7 @@ def flow_maximize_restore(pg, base, pid, sid):
     the terminal re-fits larger), then ▢ again to restore (.maxd gone + the
     terminal re-fits back down)."""
     pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    open_workbench(pg)  # the workbench tile now opens collapsed
     chip = f'#sessionBar .live-chip[data-session="{sid}"]'
     pg.wait_for_selector(chip, timeout=8000)
     pg.click(chip)
@@ -401,6 +414,7 @@ def flow_dock_click(pg, base, pid, sid):
     opens BOUND to that effort/session, the xterm mounts in the dock host, and
     the transport (WS or SSE) reaches the OPEN state (readyState === 1)."""
     pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+    open_workbench(pg)  # the workbench tile now opens collapsed
     pg.wait_for_selector(".lane-tile[data-effort-id]", timeout=8000)
     # the dock starts hidden (no effort selected — negative case).
     assert pg.eval_on_selector("#effortDock", "e=>e.style.display") == "none"

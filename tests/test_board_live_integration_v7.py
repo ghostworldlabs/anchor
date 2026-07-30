@@ -393,6 +393,8 @@ def test_playwright_started_session_appears_in_column_and_strip(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # 1) Exactly one Layout-D tile for sid1 in the Plan/Build zone, running.
         #    Initially the sole plan session is the Latest-Plan/Build headline.
@@ -414,6 +416,8 @@ def test_playwright_started_session_appears_in_column_and_strip(server):
         sid2 = ts.start_session(pid, "plan", backend="claude")["session_id"]
         reg.update_session(sid1, status=reg.STATUS_DONE)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # The newer (sid2) is the prominent .headline; the finished sid1 is a
         # .minitile inside the Plan/Build collapsible shelf (#shelf_plan_build),
         # greyed/amber, and still present.

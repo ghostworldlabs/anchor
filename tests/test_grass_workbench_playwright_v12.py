@@ -152,6 +152,8 @@ def test_select_idea_opens_one_session_workbench(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
         pg.click('[data-grass-tile="1"]')
@@ -225,6 +227,8 @@ def test_migrate_to_project_calls_export(server):
         pg.on("response", _on_resp)
         pg.on("dialog", lambda d: d.accept())
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.click('[data-grass-tile="1"]')
         pg.wait_for_selector(f"#grassPanel .gli[data-idea='{iid}']", timeout=8000)
         pg.click(f"#grassPanel .gli[data-idea='{iid}']")
@@ -281,6 +285,8 @@ def test_delete_idea_lands_in_boneyard_tab(server):
         pg.on("response", _on_resp)
         pg.on("dialog", lambda d: d.accept())   # accept the confirm()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.click('[data-grass-tile="1"]')
         victim_sel = f"#grassPanel .gli[data-idea='{victim}']"
         pg.wait_for_selector(victim_sel, timeout=8000)
@@ -330,6 +336,8 @@ def test_no_grass_second_advance_for_v12_idea(server):
         b = p.chromium.launch()
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.click('[data-grass-tile="1"]')
         pg.wait_for_selector(f"#grassPanel .gli[data-idea='{iid}']", timeout=8000)
         pg.click(f"#grassPanel .gli[data-idea='{iid}']")

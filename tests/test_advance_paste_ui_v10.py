@@ -168,6 +168,8 @@ def test_advance_shows_prompt_pasted_unsent_in_browser(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector('#sessionBar .live-chip', timeout=8000)
 
         # Open the research panel + find the Advance control.

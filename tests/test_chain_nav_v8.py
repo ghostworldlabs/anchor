@@ -339,6 +339,8 @@ def test_chain_navigation_in_browser(server):
             pg.on("console",
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{bundle['pid']}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             # The 3 live chips are present; open the BUILD session's panel.
             build_chip = '#sessionBar .live-chip[data-session="%s"]' % ids["build"]

@@ -378,6 +378,8 @@ def test_playwright_kill_no_loss_lifecycle(env):
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.on("dialog", lambda d: d.accept())  # auto-confirm the kill prompt
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             chip_sel = '#sessionBar .live-chip[data-session="%s"]' % sid
             pg.wait_for_selector(chip_sel, timeout=8000)

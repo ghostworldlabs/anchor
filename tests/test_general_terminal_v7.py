@@ -340,6 +340,8 @@ def test_playwright_open_terminal_opens_bare_general_session(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # Baseline: no trio board tiles anywhere (v12 Wave 2: tiles carry their
         # lane on data-lane inside #kanbanBoard; the #cards_<lane> grid is

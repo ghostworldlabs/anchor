@@ -483,6 +483,8 @@ def test_historical_panel_shows_summary_and_continue_works(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         assert pg.eval_on_selector_all(".lane-tile", "e=>e.length") >= 1
 
         # v12 W10: clicking an effort tile opens the SINGLE bottom DOCK bound to

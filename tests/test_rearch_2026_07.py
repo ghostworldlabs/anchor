@@ -1039,6 +1039,8 @@ class TestW2PlaywrightFlows:
                   lambda r: statuses.append(r.status)
                   if "/api/rnd/set_notes" in r.url else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
             # the page booted with the CURRENT build id
             boot_bid = pg.evaluate(
                 "() => window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id")

@@ -696,6 +696,8 @@ def test_grass_dev_not_on_top_strip_after_reload_in_browser(server):
         # Load the project window — repopulate() runs on load and reads
         # /api/rnd/term_sessions to build the top strip.
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # Give the on-load repopulate() a beat to (not) populate #sessionBar.
         # An EMPTY sessionBar is hidden by CSS — so wait for it ATTACHED (not
         # visible) and assert it carries no grass-dev chip.

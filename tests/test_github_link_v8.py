@@ -515,6 +515,8 @@ def test_playwright_link_github_flow(server):
             prompts.pop(0) if prompts else "") if d.type == "prompt"
             else d.accept())
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # 1) Unlinked: Link GitHub present, no Push-now yet.
         pg.wait_for_selector("#ghLinkBtn", timeout=8000)

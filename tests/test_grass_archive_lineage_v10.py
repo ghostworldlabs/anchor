@@ -723,6 +723,8 @@ def test_archive_button_and_lineage_chip_in_browser(pw_server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # Open the grass workbench + select the idea.
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
@@ -774,6 +776,8 @@ def test_archive_button_and_lineage_chip_in_browser(pw_server):
         pg.on("console",
               lambda m: cerrors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # Open the downstream session's panel (it appears in the plan lane column
         # as a live tile). Use openPanel directly for determinism.
         pg.wait_for_function("typeof openPanel === 'function'", timeout=8000)
@@ -828,6 +832,8 @@ def test_board_tile_chip_and_dead_chip_in_browser(pw_server):
         pg.on("console",
               lambda m: errs.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # The plan lane column tile for csid resolves its chip (label, live link).
         sel = ('.tile[data-session="' + csid + '"] .grassorigin')
         pg.wait_for_function(
@@ -853,6 +859,8 @@ def test_board_tile_chip_and_dead_chip_in_browser(pw_server):
         pg.on("console",
               lambda m: errs2.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         sel = ('.tile[data-session="' + csid + '"] .grassorigin')
         pg.wait_for_function(
             "(s)=>{var c=document.querySelector(s);"

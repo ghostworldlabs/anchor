@@ -110,6 +110,8 @@ def test_layoutd_dock_live(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # The live effort renders as a clickable lane tile bound to an effort_id.
         pg.wait_for_selector(".lane-tile[data-effort-id]", timeout=8000)
@@ -244,6 +246,8 @@ def test_layoutd_new_plan_build_starts_plan_effort_and_metrics(server, tmp_path)
                 rollup_called["ok"] = True
         pg.on("response", _on_resp)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # Both new-session controls are present.
         pg.wait_for_selector("#newResearchBtn", timeout=8000)
@@ -337,6 +341,8 @@ def test_layoutd_dock_warn_banner_handoff(server, tmp_path, monkeypatch):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector(f'.lane-tile[data-session="{sid}"]', timeout=8000)
         pg.click(f'.lane-tile[data-session="{sid}"]')
         pg.wait_for_function(
@@ -384,6 +390,8 @@ def test_layoutd_dock_no_double_mount_from_chip(server, tmp_path):
         b = p.chromium.launch()
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector(f'.lane-tile[data-session="{sid}"]', timeout=8000)
         # open the dock from the board effort tile
         pg.click(f'.lane-tile[data-session="{sid}"]')
@@ -432,6 +440,8 @@ def test_layoutd_dock_advance_hidden_at_build(server, tmp_path):
         b = p.chromium.launch()
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector(f'.lane-tile[data-session="{sid}"]', timeout=8000)
         pg.click(f'.lane-tile[data-session="{sid}"]')
         pg.wait_for_function(
@@ -464,6 +474,8 @@ def test_grass_mini_panel_collapse_toggle(server, tmp_path):
         b = p.chromium.launch()
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector("#grassMiniTog", timeout=8000)
         # John tweak: starts COLLAPSED on first load (minimal dashboard).
         assert pg.eval_on_selector(

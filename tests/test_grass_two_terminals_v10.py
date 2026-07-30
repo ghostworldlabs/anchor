@@ -232,6 +232,8 @@ def test_grass_single_session_toggle_in_browser(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
         pg.click('[data-grass-tile="1"]')

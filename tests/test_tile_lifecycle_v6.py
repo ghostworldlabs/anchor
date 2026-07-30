@@ -328,6 +328,8 @@ def test_new_tiles_finish_keeps_greyed_and_grouped(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         def sel(s):
             return '#sessionBar .live-chip[data-session="%s"]' % s

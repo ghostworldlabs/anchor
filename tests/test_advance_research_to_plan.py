@@ -387,6 +387,8 @@ def test_advance_and_breadcrumb_in_browser(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{bundle['pid']}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         # The live research tile is in the session bar.
         pg.wait_for_selector('#sessionBar .live-chip', timeout=8000)
 

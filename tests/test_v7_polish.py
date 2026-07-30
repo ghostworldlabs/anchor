@@ -289,6 +289,8 @@ def test_playwright_started_session_appears_in_column_without_reload(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # 1) The Plan/Build zone starts EMPTY (no sessions yet).
         assert pg.eval_on_selector_all(

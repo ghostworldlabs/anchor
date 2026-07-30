@@ -362,6 +362,8 @@ def test_workbench_playwright_flow(env):
             pg.on("console",
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             # v12 Wave 2 Layout-D: grass is the right-column mini-panel; open the
             # workbench via its "Open workbench →" control (openGrassWorkbench()).

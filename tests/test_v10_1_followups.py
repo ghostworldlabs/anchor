@@ -364,6 +364,8 @@ def test_fix1_restart_reuses_window_in_browser(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # Start a research session (newTermSession → term_start). Invoked directly
         # (it's the same path the "+ new" control calls) for selector robustness.
@@ -450,6 +452,8 @@ def test_fix2_deleted_grass_idea_stays_gone_after_reopen(server):
         # Auto-accept the delete confirm() dialog.
         pg.on("dialog", lambda d: d.accept())
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
         pg.click('[data-grass-tile="1"]')
@@ -529,6 +533,8 @@ def test_fix4_grass_terminal_reflows_on_enlarge_in_browser(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         pg.wait_for_selector('[data-grass-tile="1"]', timeout=8000)
         pg.click('[data-grass-tile="1"]')

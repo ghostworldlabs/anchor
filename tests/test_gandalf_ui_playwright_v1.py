@@ -108,6 +108,8 @@ def test_gandalf_panel_above_grass_and_row_expands(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="domcontentloaded")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # (1) the Gandalf panel renders ABOVE the Grass panel (top coordinate).
         pg.wait_for_selector("#gandalfPanel", timeout=5000)
@@ -204,6 +206,8 @@ def test_gandalf_empty_state_shows_run_button(server, tmp_path):
         b = p.chromium.launch()
         pg = b.new_page()
         pg.goto(f"{base}/project/{pid}", wait_until="domcontentloaded")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
         pg.wait_for_selector("#gandalfPanel", timeout=5000)
         # honest empty state, with a Run button, no run rows.
         empty = pg.query_selector("#gandalfPanel .gandalf-empty")

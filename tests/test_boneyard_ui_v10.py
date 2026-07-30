@@ -429,6 +429,8 @@ def test_boneyard_in_browser(server):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # Open the Boneyard panel.
         pg.click("#openBoneyardBtn")
@@ -579,6 +581,8 @@ def test_boneyard_client_render_escapes_xss(server):
         # failure signal), never let it hang the test.
         pg.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
         pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # v12 Wave 2: wait for the Layout-D board to settle (its async board_html
         # swap reflows the page) before clicking the masthead control, so the

@@ -83,6 +83,8 @@ def test_shelf_toggle_flips_collapsed_class(server, tmp_path):
         pg.on("console",
               lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(f"{base}/project/{pid}", wait_until="domcontentloaded")
+        from tests.ui_helpers import expand_workbench
+        expand_workbench(pg)  # the Workbench tile now opens collapsed
 
         # the research shelf wrapper + its toggle. The shelf starts COLLAPSED
         # (display:none) so wait for it ATTACHED (in the DOM), not visible.

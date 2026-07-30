@@ -136,6 +136,8 @@ def test_first_click_opens_nonblank_layer1_with_resume_live(server, tmp_path):
         try:
             page = b.new_page()
             page.goto(f"{base}/project/{bundle['pid']}", timeout=15000)
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(page)  # the Workbench tile now opens collapsed
             # Find a clickable effort tile (the discovered effort).
             tile = page.locator("[data-effort-id]").first
             tile.wait_for(state="visible", timeout=10000)

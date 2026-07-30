@@ -470,6 +470,8 @@ def test_playwright_finish_to_build(env):
             pg.on("console",
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             chip_sel = '#sessionBar .live-chip[data-session="%s"]' % psid
             pg.wait_for_selector(chip_sel, timeout=8000)
@@ -540,6 +542,8 @@ def test_playwright_vertical_resize_grows_terminal_rows(env):
             pg.on("console",
                   lambda m: errors.append(m.text) if m.type == "error" else None)
             pg.goto(f"{base}/project/{pid}", wait_until="networkidle")
+            from tests.ui_helpers import expand_workbench
+            expand_workbench(pg)  # the Workbench tile now opens collapsed
 
             chip_sel = '#sessionBar .live-chip[data-session="%s"]' % sid
             pg.wait_for_selector(chip_sel, timeout=8000)
