@@ -11,3 +11,16 @@
 ### 3. Graceful Scout Fallback
 - **Decision:** If the Scout pass fails to parse JSON or hits an API timeout, the engine will automatically revert to sending the unpruned payload.
 - **Rationale (Shark Tank Analyst Block):** The pipeline must not fail purely because an optimization step (the Scout) encountered a transient error or malformed response. Rigor must survive optimization failures.
+
+## 2026-07-29 — Steward personas + post-run hardening (Fable session) — COORDINATION NOTE
+For any session resuming Anchor work: master now carries (1) the post-sleep-run
+HARDENING (543a908 — ship-manifest closure of 17 modules, manifest !negation,
+startup-gate scoping; the shippable bundle was un-startable before it) and
+(2) the STEWARD PERSONA feature (4d3ed0c — anchor_settings.steward_type +
+STEWARDS catalog, /api/settings, home-header selector, High Seat + Projects
+tile icons follow the persona; Projects tile now carries the steward's SEAL,
+not a folder glyph). Six persona icons ship from vendor/brand. Gate family:
+pytest -k "steward or settings or share_ or startup or distro" → 419 passed.
+STANDING: any wave touching ship-manifest-matched files must APPEND the
+distro/ship gate family to its wave gate (see trio/foreman journal 0091).
+Service restart (elevated) still pending for the live UI to pick this up.
