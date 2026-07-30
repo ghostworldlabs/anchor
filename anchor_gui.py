@@ -7823,7 +7823,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <!-- ── Tile 2 · Workbench ──────────────────────────────────────────── -->
       <details class="dash-tile" id="dashboard-workbench-details">
         <summary>
-          <span class="tile-glyph" aria-hidden="true">&#128421;</span>
+          <img class="tile-ico" src="/vendor/brand/workbench-icon.jpg?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
           Workbench
           <span class="tile-count">the dashboard's own project cockpit</span>
           <span class="tile-hint"></span>

@@ -155,6 +155,9 @@ vendor/brand/aladdin-high-seat-cave.jpg
 vendor/brand/aladdin-seal-lamp.jpg
 vendor/brand/jarvis-high-seat-hat.jpg
 vendor/brand/jarvis-seal-salver.jpg
+# Workbench tile icon (2026-07-30): production alias of the chosen
+# workbench candidate; home + project dashboards both reference it.
+vendor/brand/workbench-icon.jpg
 # Gandalf the White wizard mark (white robes/staff; the Gandalf tab icon + served
 # by /vendor/brand/). Pure-data SVG, no dependency.
 vendor/brand/gandalf-white-icon.svg

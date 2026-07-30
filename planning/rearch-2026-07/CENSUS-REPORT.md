@@ -10,9 +10,9 @@ hand-edit; re-run the census (the W1 gate test refreshes it).
 
 | function | data | flag | markup-emitting | total |
 |---|---|---|---|---|
-| `generate_html` | 148 | 14 | 35 | 197 |
+| `generate_html` | 149 | 14 | 35 | 198 |
 | `render_project_window_html` | 18 | 3 | 12 | 33 |
-| **total** | 166 | 17 | 47 | 230 |
+| **total** | 167 | 17 | 47 | 231 |
 
 ## Extractable blobs (merged string spans ≥ 20 lines)
 

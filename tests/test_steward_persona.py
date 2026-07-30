@@ -215,3 +215,25 @@ def test_bridge_decodes_utf8():
         assert 'encoding="utf-8"' in src[i:i + 500], "spawn at offset %d" % i
         start = i + 1
     assert found >= 2, found
+
+
+def test_workbench_tile_and_icon():
+    """(2026-07-30) The project window's workbench material (lane board +
+    session bar + panel stack) lives in ONE dash-tile; the seal tile carries
+    the main dashboard's gold outline; the workbench icon ships and both
+    dashboards reference the production alias."""
+    shell = (REPO_ROOT / "static" / "project-window.html").read_text(
+        encoding="utf-8")
+    assert "id='tile-workbench'" in shell and "tile-workbench' id='tile-workbench' open" in shell
+    wb = shell.index("id='tile-workbench'")
+    for inner in ("id='kanbanBoard'", "id='sessionBar'", "id='panelStack'"):
+        assert shell.index(inner) > wb, inner
+    assert shell.index("id='tile-ecgseal'") < wb  # seal tile leads
+    assert "workbench-icon.jpg" in shell
+    css = (REPO_ROOT / "static" / "project-window.css").read_text(
+        encoding="utf-8")
+    assert ".dash-tile.tile-seal{border-color:rgba(224,164,55,0.45)" in css
+    js = (REPO_ROOT / "static" / "project-window.js").read_text(
+        encoding="utf-8")
+    assert "wbt.open = true" in js  # a collapsed workbench never swallows a panel
+    assert (REPO_ROOT / "vendor" / "brand" / "workbench-icon.jpg").is_file()

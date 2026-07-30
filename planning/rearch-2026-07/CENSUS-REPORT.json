@@ -10,9 +10,9 @@
   },
   "functions": {
     "generate_html": {
-      "total": 197,
+      "total": 198,
       "counts": {
-        "data": 148,
+        "data": 149,
         "flag": 14,
         "markup-emitting": 35
       },
@@ -1111,6 +1111,13 @@
         },
         {
           "function": "generate_html",
+          "lineno": 7826,
+          "class": "data",
+          "rule": "default-data",
+          "expr": "BUILD_ID"
+        },
+        {
+          "function": "generate_html",
           "lineno": 7843,
           "class": "data",
           "rule": "default-data",
@@ -1641,10 +1648,10 @@
     }
   },
   "totals": {
-    "data": 166,
+    "data": 167,
     "flag": 17,
     "markup-emitting": 47,
-    "all": 230
+    "all": 231
   },
   "blob_min_lines": 20,
   "blob_spans": {

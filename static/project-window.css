@@ -110,3 +110,9 @@
 .dash-tile.tile-seal .tile-ico{width:44px;height:44px;border-radius:6px}
 .dash-tile .tile-count{font-weight:400;font-size:12px;color:var(--text-dim,#8a90a2)}
 .dash-tile .tile-body{padding:0 16px 14px}
+
+/* Gold accent (matches the main dashboard steward tile): thin gold outline
+   + gold summary on the seal tile. */
+.dash-tile.tile-seal{border-color:rgba(224,164,55,0.45)}
+.dash-tile.tile-seal>summary{font-size:18px;padding:16px 18px;color:#e0a437}
+.dash-tile.tile-workbench .tile-body{padding:0 10px 12px}

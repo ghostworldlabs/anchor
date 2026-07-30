@@ -2455,6 +2455,9 @@ async function newTermSession(lane, backend, opts) {
 // (closePanel — close-to-tile, NON-destructive) + "🗑 Kill" (killPanel,
 // confirm-gated reap that also removes the tile).
 function openPanel(sessionId) {
+  var wbt = document.getElementById('tile-workbench');
+  if (wbt && !wbt.open) wbt.open = true;  // a collapsed workbench must never swallow a live panel
+
   // F1 (W10 Reviewer): never stack a floating panel for a session that is ALREADY
   // open in the bottom dock — route the click to the dock so there is exactly ONE
   // live terminal surface per session (the chip + the board effort tile both point
