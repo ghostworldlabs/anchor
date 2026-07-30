@@ -6149,14 +6149,16 @@ function _ecgRenderRail(rail, runBlock) {
 function _ecgSpeak(convo, text) {
   _ecgJohnMsg(convo, text);
   var recall = /\bremind me\b|\bwhy did we\b/i.test(text);
-  var body = JSON.stringify(recall
+  var body = recall
     ? {project_id: PROJECT_ID, kind: 'recall', text: text}
-    : {project_id: PROJECT_ID, kind: 'speak', text: text});
-  fetch('/api/ecgberht/speak' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: body
-  }).then(function (r) { return r.json(); }).then(function (j) {
+    : {project_id: PROJECT_ID, kind: 'speak', text: text};
+  // (2026-07-30 FIX) via _postJson so the token rides the X-Anchor-Token HEADER
+  // (+ X-Anchor-Build). The do_POST middleware never reads ?token= — a
+  // query-only POST 401s, and the global fetch wrapper turns that 401 into a
+  // token prompt, so the saybox kept re-asking for a token the window already
+  // had. The ?token= query stays for the server-side GET convention parity.
+  _postJson('/api/ecgberht/speak' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), body
+  ).then(function (r) { return r.json(); }).then(function (j) {
     if (!j || !j.ok) {
       _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
       return;
@@ -6335,11 +6337,13 @@ function _ecgRenderStandUp(host, su) {
       goalInput.focus();
       return;
     }
-    fetch('/api/ecgberht/stand_up' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({project_id: PROJECT_ID, north_star: goal, who: 'john'})
-    }).then(function (r) { return r.json(); }).then(function (out) {
+    // (2026-07-30 FIX) via _postJson — the token MUST ride the X-Anchor-Token
+    // header on a POST (the middleware never reads ?token=). Query-only meant
+    // entering a goal here 401'd and the fetch wrapper re-prompted for a token
+    // the window already had, so the stand-up could never be confirmed.
+    _postJson('/api/ecgberht/stand_up' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''),
+              {project_id: PROJECT_ID, north_star: goal, who: 'john'}
+    ).then(function (r) { return r.json(); }).then(function (out) {
       if (out && out.ok) {
         _ecgStewardMsg(convo, (out.voice || 'Set up.') +
           ' Created: ' + (out.created || []).join(' + ') + ' — saved.', [

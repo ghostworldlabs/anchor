@@ -38,10 +38,31 @@ function _ecgHsGet(path, done, fail) {
     .catch(fail || function () {});
 }
 
+// (2026-07-30 FIX) A POST must carry the token in the X-Anchor-Token HEADER.
+// The do_POST middleware reads the header, the Authorization header, or a body
+// `token` field — it NEVER reads the query string (only GET transports gate via
+// ?token=). Sending it query-only made every High Seat act 401, and the global
+// fetch wrapper turns a 401 into a fresh token prompt — so a window that had a
+// perfectly good stored token kept asking for it again. The X-Anchor-Build
+// header comes along too, so a stale tab gets the structured 409 'reload'
+// instead of an opaque failure.
+function _ecgHsHeaders() {
+  var h = { 'Content-Type': 'application/json' };
+  try {
+    var t = (typeof _anchorToken === 'function') ? _anchorToken() : '';
+    if (t) h['X-Anchor-Token'] = t;
+  } catch (e) {}
+  try {
+    var bid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
+    if (bid) h['X-Anchor-Build'] = bid;
+  } catch (e) {}
+  return h;
+}
+
 function _ecgHsPost(body, done) {
   fetch('/api/ecgberht/high_seat_act' + (_ecgHsTok() ? '?' + _ecgHsTok().slice(1) : ''), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: _ecgHsHeaders(),
     body: JSON.stringify(body)
   }).then(function (r) { return r.json(); }).then(done).catch(function () {});
 }

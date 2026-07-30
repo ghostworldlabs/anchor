@@ -327,3 +327,83 @@ def test_fetch_wrapper_401_prompts_home(server_authed):
     pytest.importorskip("playwright.sync_api")
     _env, base, _ = server_authed
     _drive_browser(base, "/")
+
+
+# ── Steward (Ecgberht/Jarvis/Aladdin) POSTs must send the token as a HEADER ──
+# (2026-07-30) John: "I tried to enter a goal into a project level steward and
+# it asked for a token again (which it had stored in the window)."
+#
+# ROOT CAUSE: the three steward MUTATING endpoints were called with the token in
+# the QUERY STRING only (``?token=``). The do_POST middleware reads the token
+# from the X-Anchor-Token header, the Authorization header, or a JSON body
+# ``token`` field — never from the query string (only GET transports gate via
+# ?token=). So every steward act 401'd, and the global fetch wrapper above turns
+# a 401 into a fresh window.prompt — a window with a perfectly good stored token
+# kept asking for it again, and the goal could never be saved.
+
+_STEWARD_POST_ENDPOINTS = ("speak", "stand_up", "high_seat_act")
+
+
+def _asset(name):
+    return (Path(__file__).resolve().parents[1] / "static" / name).read_text(
+        encoding="utf-8")
+
+
+def test_steward_post_call_sites_send_token_header():
+    """Every steward POST call site carries the token in a HEADER.
+
+    Either it goes through ``_postJson`` (which sets X-Anchor-Token +
+    X-Anchor-Build) or it sets X-Anchor-Token itself. A query-only POST is the
+    exact regression that made the steward re-prompt for a stored token.
+    """
+    sources = {n: _asset(n) for n in ("project-window.js", "high-seat.js")}
+    seen = set()
+    for name, src in sources.items():
+        for ep in _STEWARD_POST_ENDPOINTS:
+            for m in re.finditer(r"/api/ecgberht/" + ep, src):
+                # A CALL site is one whose invocation opens just before the
+                # endpoint literal; anything else (a comment, a docstring
+                # mention) is prose and is skipped.
+                before = src[max(0, m.start() - 120):m.start()]
+                if "_postJson(" not in before and "fetch(" not in before:
+                    continue
+                # The call window: the endpoint literal through the options
+                # object (generous, still call-local).
+                seg = src[m.start():m.start() + 400]
+                seen.add((name, ep))
+                assert ("_postJson(" in before
+                        or "X-Anchor-Token" in seg
+                        or "_ecgHsHeaders()" in seg), (
+                    "%s: POST %s must send the token as X-Anchor-Token "
+                    "(a query-only ?token= POST 401s → token re-prompt)" %
+                    (name, ep))
+    # All three mutating endpoints must actually be exercised by the scan —
+    # otherwise a rename would silently empty this test.
+    assert {ep for _n, ep in seen} == set(_STEWARD_POST_ENDPOINTS), seen
+
+
+def test_steward_post_rejects_query_only_token_but_accepts_header(server_authed):
+    """The server contract this fix is built on, pinned.
+
+    Query-only ``?token=`` on a POST is UNAUTHORIZED; the same call with the
+    X-Anchor-Token header is not. If this ever flips, the client fix above can
+    be simplified — until then, a query-only steward POST is a real 401.
+    """
+    import http.client
+    import json as _json
+
+    _env, base, port = server_authed
+    payload = _json.dumps({}).encode()
+
+    def _post(path, headers):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("POST", path, body=payload,
+                  headers=dict({"Content-Type": "application/json"}, **headers))
+        r = c.getresponse()
+        r.read()
+        c.close()
+        return r.status
+
+    assert _post("/api/ecgberht/high_seat_act?token=s3cret", {}) == 401
+    assert _post("/api/ecgberht/high_seat_act",
+                 {"X-Anchor-Token": "s3cret"}) != 401
