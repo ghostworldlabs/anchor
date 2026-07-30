@@ -2415,6 +2415,8 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-grip" aria-hidden="true" '
         f'title="Drag into a folder">&#8942;&#8942;</span>'
         f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
+        f'<img class="rnd-seal-ico" src="{_steward_seal_icon_src()}" alt="" '
+        f'onerror="this.style.display=\'none\'" />'
         f'<span class="rnd-name">{name}</span>'
         f'<span class="rnd-badge rnd-p{pr}">P{pr}</span>'
         f'<span class="rnd-badge rnd-state-{state}">{state}</span>'
@@ -5185,6 +5187,38 @@ def render_model_flex_badge(env=None) -> str:
             f"title='{html_lib.escape(title, quote=True)}'>{label}{_x}</span>{_hide}")
 
 
+_STEWARD_UI_FALLBACK = {
+    "key": "ecgberht", "label": "Ecgberht",
+    "desc": "The royal steward — stone high seat and wax seal (the original).",
+    "high_seat": "ecgberht-portfolio-high-seat.jpg",
+    "seal": "ecgberht-project-seal.jpg",
+    "high_seat_name": "High Seat",
+    "seal_name": "Seal",
+    "projects_hint": "each under Ecgberht&rsquo;s seal",
+}
+
+
+def _steward_ui() -> dict:
+    """TOTAL steward profile for UI renders — every catalog field present.
+
+    The single resolver every steward-branded surface goes through (tiles,
+    rows, selector), so livery can never mix: one persona, one icon pair,
+    one naming set. Settings hiccup → complete Ecgberht fallback.
+    """
+    try:
+        prof = dict(_aset.steward_profile())
+    except Exception:
+        return dict(_STEWARD_UI_FALLBACK)
+    for k, v in _STEWARD_UI_FALLBACK.items():
+        prof.setdefault(k, v)
+    return prof
+
+
+def _steward_seal_icon_src() -> str:
+    """The active persona's SEAL icon src (project-level mark), cache-busted."""
+    return "/vendor/brand/%s?v=%s" % (_steward_ui()["seal"], BUILD_ID)
+
+
 def render_steward_control() -> str:
     """Compact 'Steward' persona select for the home header (2026-07-29).
 
@@ -5194,10 +5228,7 @@ def render_steward_control() -> str:
     ``steward_type`` to /api/settings on change, then reloads — the HIGH
     SEAT and SEAL icons are rendered server-side from the setting.
     """
-    try:
-        prof = _aset.steward_profile()
-    except Exception:
-        prof = {"key": "ecgberht", "seal": "ecgberht-project-seal.jpg"}
+    prof = _steward_ui()
     active = prof.get("key", "ecgberht")
     opts = []
     for key in ("ecgberht", "aladdin", "jarvis"):
@@ -6933,15 +6964,12 @@ def generate_html(projects, tasks, inbox):
     # steward tile; the SEAL icon fronts the Projects tile (the projects are
     # run under the steward's seal). Best-effort — settings hiccup falls back
     # to the Ecgberht originals, never breaks the page.
-    try:
-        _stew = _aset.steward_profile()
-    except Exception:
-        _stew = {"key": "ecgberht", "label": "Ecgberht",
-                 "high_seat": "ecgberht-portfolio-high-seat.jpg",
-                 "seal": "ecgberht-project-seal.jpg"}
+    _stew = _steward_ui()
     steward_hs_icon = _stew["high_seat"]
     steward_seal_icon = _stew["seal"]
     steward_label = _stew["label"]
+    steward_hs_name = _stew["high_seat_name"]
+    steward_projects_hint = _stew["projects_hint"]
 
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
@@ -7596,6 +7624,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 /* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
 .rnd-folder-rows {{ display: flex; flex-direction: column; gap: 6px; }}
 .rnd-row {{ display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }}
+.rnd-seal-ico {{ width: 18px; height: 18px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }}
 .rnd-row:hover {{ border-color: var(--accent); }}
 .rnd-row:focus {{ outline: 2px solid var(--accent); outline-offset: 1px; }}
 .rnd-dot {{ flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); }}
@@ -7739,10 +7768,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
            summary and stays the only ambient Ecgberht signal in Anchor. -->
       <details class="dash-tile tile-seat" id="tile-highseat"
                ontoggle="if(this.open)ecgHighSeatMountInline()">
-        <summary title="Ecgberht — the High Seat (all your projects, one place to steer them)">
+        <summary title="{steward_label} — the {steward_hs_name} (all your projects, one place to steer them)">
           <img class="tile-ico" src="/vendor/brand/{steward_hs_icon}?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
-          High Seat
-          <span class="tile-count">Ecgberht &mdash; all your projects, one place to steer them</span>
+          {steward_hs_name}
+          <span class="tile-count">{steward_label} &mdash; all your projects, one place to steer them</span>
           <span class="ecg-hs-badge" id="ecgHighSeatBadge"></span>
           <!-- The docked-overlay entry point. Ecgberht's frozen HIGH_SEAT_MOUNT
                contract is presentation="docked_overlay" on surface="main_dashboard",
@@ -7752,7 +7781,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
                ⚑ badge remains the only ambient Ecgberht signal in Anchor. -->
           <button class="btn btn-sm btn-outline" id="ecgHighSeatBtn"
                   onclick="event.preventDefault();event.stopPropagation();openEcgberhtHighSeat()"
-                  title="Open the High Seat as a floating dock"
+                  title="Open the {steward_hs_name} as a floating dock"
                   style="font-size:11px;padding:3px 9px;font-weight:500">&#8599; Dock</button>
           <span class="tile-hint"></span>
         </summary>
@@ -7832,7 +7861,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
           <img class="tile-ico" src="/vendor/brand/{steward_seal_icon}?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
           Projects
           <span class="tile-count">{projects_tile_count}</span>
-          <span class="tile-hint">each under {steward_label}&rsquo;s seal</span>
+          <span class="tile-hint">{steward_projects_hint}</span>
         </summary>
         <div class="tile-body">
           <div class="section-header" style="display:flex;align-items:center;gap:8px">

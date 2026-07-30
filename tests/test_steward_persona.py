@@ -101,3 +101,53 @@ def test_steward_control_renders_all_options(settings_env, monkeypatch):
     assert "selected" in jarvis_opt
     # the seal thumbnail of the active persona rides along
     assert s.STEWARDS["jarvis"]["seal"] in html
+
+
+def test_steward_catalog_naming_complete():
+    """Persona-consistent naming (2026-07-30): every persona names BOTH
+    surfaces itself — portfolio (high_seat_name) + project mark (seal_name)
+    + the Projects-tile hint. No mixed livery, no missing field."""
+    import anchor_settings as s
+    for key, meta in s.STEWARDS.items():
+        for field in ("label", "desc", "high_seat", "seal",
+                      "high_seat_name", "seal_name", "projects_hint"):
+            assert meta.get(field), "%s missing %s" % (key, field)
+    # The names John locked: the persona speaks its own tongue.
+    assert s.STEWARDS["aladdin"]["high_seat_name"] == "Cave of Wonders"
+    assert s.STEWARDS["jarvis"]["high_seat_name"] == "Tip of the Hat"
+    assert s.STEWARDS["ecgberht"]["high_seat_name"] == "High Seat"
+
+
+def test_steward_ui_total_and_row_icon_follows_persona(settings_env,
+                                                       monkeypatch):
+    """_steward_ui is TOTAL (every field, any persona) and the project-row
+    seal icon src follows the active persona."""
+    s = settings_env
+    import anchor_gui
+    monkeypatch.setattr(anchor_gui, "_aset", s)
+    for key in ("ecgberht", "aladdin", "jarvis"):
+        s.save_settings(steward_type=key)
+        ui = anchor_gui._steward_ui()
+        for field in ("label", "high_seat", "seal", "high_seat_name",
+                      "seal_name", "projects_hint"):
+            assert ui.get(field), "%s missing in ui for %s" % (field, key)
+        assert ui["key"] == key
+        src = anchor_gui._steward_seal_icon_src()
+        assert s.STEWARDS[key]["seal"] in src
+        assert src.startswith("/vendor/brand/")
+
+
+def test_steward_ui_falls_back_complete(monkeypatch):
+    """A settings-layer explosion still yields a COMPLETE Ecgberht profile."""
+    import anchor_gui
+
+    class _Boom:
+        def steward_profile(self):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(anchor_gui, "_aset", _Boom())
+    ui = anchor_gui._steward_ui()
+    assert ui["key"] == "ecgberht"
+    for field in ("high_seat", "seal", "high_seat_name", "seal_name",
+                  "projects_hint"):
+        assert ui.get(field)

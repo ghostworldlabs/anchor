@@ -34,18 +34,30 @@ STEWARDS = {
         "desc": "The royal steward — stone high seat and wax seal (the original).",
         "high_seat": "ecgberht-portfolio-high-seat.jpg",
         "seal": "ecgberht-project-seal.jpg",
+        # Persona-consistent NAMING (2026-07-30): the portfolio surface and
+        # the project mark are called by the persona's OWN names everywhere
+        # (tile titles, hints, tooltips) — never a mixed livery.
+        "high_seat_name": "High Seat",
+        "seal_name": "Seal",
+        "projects_hint": "each under Ecgberht&rsquo;s seal",
     },
     "aladdin": {
         "label": "Aladdin",
         "desc": "The genie-lamp world — the opened treasure cave and the watchful lamp.",
         "high_seat": "aladdin-high-seat-cave.jpg",
         "seal": "aladdin-seal-lamp.jpg",
+        "high_seat_name": "Cave of Wonders",
+        "seal_name": "Lamp",
+        "projects_hint": "each kept under the Lamp&rsquo;s watch",
     },
     "jarvis": {
         "label": "Jarvis",
         "desc": "The unseen English butler — the tipped bowler and the silver salver.",
         "high_seat": "jarvis-high-seat-hat.jpg",
         "seal": "jarvis-seal-salver.jpg",
+        "high_seat_name": "Tip of the Hat",
+        "seal_name": "Salver",
+        "projects_hint": "each served on the Salver",
     },
 }
 VALID_STEWARDS = frozenset(STEWARDS)
