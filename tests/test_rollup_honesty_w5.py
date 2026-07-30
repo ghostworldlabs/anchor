@@ -330,7 +330,7 @@ class TestDashboardWiring:
         line0 = anchor_gui._fmt_rollup_line(
             {"tokens": 5000, "cost_usd": 0.0, "wall_clock_ms": 60000,
              "sessions": 1})
-        # $ shown ONLY when the engine reported it → '(subscription)' otherwise.
+        # Measured tokens + no engine $ → named (subscription), never $0.00.
         assert "(subscription)" in line0
         assert "$0.00" not in line0
         line1 = anchor_gui._fmt_rollup_line(
@@ -338,6 +338,52 @@ class TestDashboardWiring:
              "sessions": 1})
         assert "$1.25" in line1
         assert "(subscription)" not in line1
+
+    def test_fmt_rollup_line_empty_and_unmeasured_are_named(self):
+        """Optimize-not-lying: never invent subscription/zero as fact."""
+        import anchor_gui
+        empty = anchor_gui._fmt_rollup_line(
+            {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0, "sessions": 0})
+        assert empty == "Σ no run sessions yet"
+        assert "(subscription)" not in empty
+        assert "0 tok" not in empty  # no bare zero-token claim on empty projects
+
+        unmeasured = anchor_gui._fmt_rollup_line(
+            {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0, "sessions": 2})
+        assert "0 tok measured" in unmeasured
+        assert "cost unknown" in unmeasured
+        assert "(subscription)" not in unmeasured
+
+        wall_only = anchor_gui._fmt_rollup_line(
+            {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 90000, "sessions": 1})
+        assert "0 tok measured" in wall_only
+        assert "cost unknown" in wall_only
+        assert "(subscription)" not in wall_only
+
+
+    def test_fmt_project_usage_line_joins_capture_rate(self):
+        """Empty effort rollup + capture-rate sessions must not say no sessions."""
+        import anchor_gui
+        empty_roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0, "sessions": 0}
+        # Pure empty
+        assert anchor_gui._fmt_project_usage_line(empty_roll) == "Σ no run sessions yet"
+        # Capture-rate proves sessions existed
+        line = anchor_gui._fmt_project_usage_line(
+            empty_roll,
+            rate={"total": 1, "measured": 0, "unmeasured": 1,
+                  "capture_failed": 0, "reasons": {"uncorrelated": 1}},
+            live_count=0)
+        assert "no run sessions yet" not in line
+        assert "0 tok measured" in line
+        assert "unmeasured" in line
+        assert "uncorrelated" in line
+        # Live session mid-flight
+        live = anchor_gui._fmt_project_usage_line(
+            empty_roll, rate={}, live_count=1)
+        assert "live" in live
+        assert "pending finalize" in live
+        assert "no run sessions yet" not in live
+
 
     def test_header_rollup_stamps_capture_rate(self, tmp_path, monkeypatch):
         """The project-window header visibly stamps the capture-rate with

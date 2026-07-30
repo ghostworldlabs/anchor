@@ -159,6 +159,112 @@ def _repo_for_project(project_id: str):
     return folder or None
 
 
+#: Seed commit message when a project repo was ``git init``'d but never committed.
+#: Without at least one commit, ``git worktree add`` fails with
+#: ``fatal: invalid reference: HEAD`` and Open terminal is refused.
+SEED_EMPTY_COMMIT_MSG = (
+    "anchor: seed empty repository so session worktrees can attach"
+)
+
+#: Refs tried (in order) when HEAD itself cannot be resolved.
+_START_POINT_FALLBACKS = (
+    "HEAD",
+    "main",
+    "master",
+    "refs/heads/main",
+    "refs/heads/master",
+    "origin/main",
+    "origin/master",
+)
+
+
+def _git_env(repo, args, timeout=_GIT_TIMEOUT, extra_env=None):
+    """Like :func:`_git` but merges ``extra_env`` into the child environment."""
+    cmd = ["git", "-C", str(repo)] + [str(a) for a in args]
+    env = None
+    if extra_env:
+        env = os.environ.copy()
+        env.update(extra_env)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout,
+            env=env, creationflags=_paths.NO_WINDOW,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, None, "", "git invocation failed: %s" % exc
+    return (proc.returncode == 0, proc.returncode,
+            proc.stdout or "", proc.stderr or "")
+
+
+def _resolve_start_point(folder, start_point=None):
+    """Resolve a commit-ish that ``git worktree add`` can attach to.
+
+    Returns ``(ok, start_point_or_none, meta)`` where ``meta`` may include
+    ``seeded_empty_commit: true`` when we had to create the first commit on an
+    unborn/empty repo. Never raises.
+    """
+    meta = {}
+    if start_point is not None and str(start_point).strip():
+        sp = str(start_point).strip()
+        ok, _rc, out, err = _git(folder, ["rev-parse", "--verify", sp])
+        if ok and (out or "").strip():
+            return True, (out or "").strip(), meta
+        return False, None, {
+            "reason": "bad-start-point",
+            "detail": (err or out or ("unresolvable start_point %r" % sp)).strip(),
+        }
+
+    ok_h, _rc_h, out_h, _err_h = _git(folder, ["rev-parse", "--verify", "HEAD"])
+    if ok_h and (out_h or "").strip():
+        return True, (out_h or "").strip(), meta
+
+    for ref in _START_POINT_FALLBACKS:
+        if ref == "HEAD":
+            continue
+        ok_r, _rc_r, out_r, _err_r = _git(
+            folder, ["rev-parse", "--verify", ref])
+        if ok_r and (out_r or "").strip():
+            meta["resolved_via"] = ref
+            return True, (out_r or "").strip(), meta
+
+    ok_a, _rc_a, out_a, _err_a = _git(
+        folder, ["rev-list", "--max-count=1", "--all"])
+    if ok_a and (out_a or "").strip():
+        meta["resolved_via"] = "rev-list-all"
+        return True, (out_a or "").strip(), meta
+
+    # Empty / unborn repo: seed one empty commit so worktree isolation works.
+    seed_env = {
+        "GIT_AUTHOR_NAME": "Anchor",
+        "GIT_AUTHOR_EMAIL": "anchor@localhost",
+        "GIT_COMMITTER_NAME": "Anchor",
+        "GIT_COMMITTER_EMAIL": "anchor@localhost",
+    }
+    ok_c, rc_c, out_c, err_c = _git_env(
+        folder,
+        ["commit", "--allow-empty", "-m", SEED_EMPTY_COMMIT_MSG],
+        extra_env=seed_env,
+    )
+    if not ok_c:
+        return False, None, {
+            "reason": "empty-repo-seed-failed",
+            "detail": (err_c or out_c or "git commit --allow-empty failed").strip(),
+            "returncode": rc_c,
+        }
+    ok_h2, _rc_h2, out_h2, err_h2 = _git(
+        folder, ["rev-parse", "--verify", "HEAD"])
+    if ok_h2 and (out_h2 or "").strip():
+        meta["seeded_empty_commit"] = True
+        meta["seed_message"] = SEED_EMPTY_COMMIT_MSG
+        return True, (out_h2 or "").strip(), meta
+    return False, None, {
+        "reason": "empty-repo-seed-failed",
+        "detail": (err_h2 or out_h2
+                   or "seed commit succeeded but HEAD still unreadable").strip(),
+    }
+
+
+
 # ── create / remove / reap ──────────────────────────────────────────────────
 
 def create_worktree(project_id, session_id, base=None, start_point=None):
@@ -169,9 +275,15 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
     ``managed_base()/<session_id>`` (outside the tracked tree). The branch name
     is deterministic from the session id (:func:`branch_for`).
 
+    Empty / unborn repos (``git init`` with no commits) are auto-seeded with a
+    single empty commit so Open terminal is not refused with
+    ``invalid reference: HEAD``. Non-git project folders run **in-place** in the
+    project folder (no isolation) rather than hard-failing — named in the status
+    dict as ``isolation: "none"``.
+
     Returns ``{"ok": True, "path": str, "branch": str}`` on success, else
-    ``{"ok": False, "reason": ..., "detail": ...}`` (unknown project, not a git
-    repo, git failure) — never raises.
+    ``{"ok": False, "reason": ..., "detail": ...}`` (unknown project, git
+    failure) — never raises.
     """
     if project_id == "__dashboard__":
         return {"ok": True, "path": str(base) if base else _paths.data_dir().parent.as_posix(), "branch": "dashboard-root"}
@@ -187,7 +299,21 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
         return {"ok": False, "reason": "unknown-project",
                 "project_id": project_id}
     if not _is_git_repo(folder):
-        return {"ok": False, "reason": "not-a-git-repo", "folder": str(folder)}
+        # Non-git project folder: still open a terminal, but without worktree
+        # isolation (cwd = project folder). Named so UI/logs never pretend
+        # isolation happened.
+        return {
+            "ok": True,
+            "path": str(folder),
+            "branch": "project-root",
+            "isolation": "none",
+            "reason": "not-a-git-repo-in-place",
+            "detail": (
+                "project folder is not a git repository; session runs in the "
+                "project folder without a managed worktree"
+            ),
+            "folder": str(folder),
+        }
 
     path = worktree_path_for(session_id, base)
     branch = branch_for(session_id)
@@ -202,15 +328,17 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
                     "already": True}
         return {"ok": False, "reason": "path-exists", "path": str(path)}
 
-    # Resolve the start point = repo's current HEAD, so the fresh branch is
-    # rooted at HEAD's tip. Fall back to a sane default branch if HEAD can't be
-    # resolved (e.g. an unusual but committed repo).
-    if start_point is None:
-        ok_h, _rc_h, out_h, _err_h = _git(folder, ["rev-parse", "HEAD"])
-        if ok_h and out_h.strip():
-            start_point = out_h.strip()
-        else:
-            start_point = "HEAD"
+    ok_sp, resolved, sp_meta = _resolve_start_point(folder, start_point)
+    if not ok_sp:
+        return {
+            "ok": False,
+            "reason": sp_meta.get("reason") or "unresolvable-start-point",
+            "detail": sp_meta.get("detail") or (
+                "could not resolve a commit for worktree start point"
+            ),
+            "returncode": sp_meta.get("returncode"),
+        }
+    start_point = resolved
 
     # ALWAYS create a FRESH branch (``-b``) off the resolved start point — never
     # silently attach to a pre-existing branch and inherit its tip. If the branch
@@ -223,7 +351,14 @@ def create_worktree(project_id, session_id, base=None, start_point=None):
                     "detail": (err or out).strip()}
         return {"ok": False, "reason": "git-worktree-add-failed",
                 "detail": (err or out).strip(), "returncode": rc}
-    return {"ok": True, "path": str(path), "branch": branch}
+    result = {"ok": True, "path": str(path), "branch": branch,
+              "isolation": "worktree", "start_point": str(start_point)}
+    if sp_meta.get("seeded_empty_commit"):
+        result["seeded_empty_commit"] = True
+        result["seed_message"] = sp_meta.get("seed_message") or SEED_EMPTY_COMMIT_MSG
+    if sp_meta.get("resolved_via"):
+        result["resolved_via"] = sp_meta["resolved_via"]
+    return result
 
 
 def _worktree_is_registered(repo, path) -> bool:

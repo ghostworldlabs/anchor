@@ -24,6 +24,22 @@ paths.py
 rnd_registry.py
 dir_browser.py
 job_runner.py
+supervisor.py
+foundry_api.py
+foundry_north_star.py
+foundry_ops.py
+foundry_gui_write.py
+skill_runner.py
+foundry_map_gates.py
+foundry_autoload.py
+foundry_gui.py
+foundry_decisions.py
+foundry_journal.py
+rollup_honesty.py
+usage_ledger.py
+usage_capture.py
+narration.py
+anchor_settings.py
 gate_adapter.py
 lanes.py
 effort_history.py
@@ -38,6 +54,7 @@ distro.py
 # unconditional import chain. Without these the shipped bundle raises
 # FileNotFoundError on `import anchor_gui` and the dashboard cannot start
 # at all. They were absent from v1.1.0 and earlier (added 2026-07-26).
+foundry_map.py
 foundry_map_v2.schema.json
 foundry_map_v2.json
 foundry_map_v2.lock.json
@@ -188,5 +205,10 @@ tests/conftest.py
 tests/__init__.py
 tests/fake_claude.py
 tests/test_*.py
+# DENIALS (!pattern): PII-planting suites — they embed synthetic secrets and
+# personal-data shapes BY DESIGN (scrub/redaction tests) and must never ship.
+!tests/test_share_feedback_w6.py
+!tests/test_share_onboard_w5.py
+!tests/test_log_redaction_2026_07_26.py
 tests/fixtures/fake_stream.jsonl
 tests/fixtures/gate_stream.jsonl

@@ -108,13 +108,40 @@ def test_shared_prefix_ids_get_distinct_branches_and_isolated_worktrees(env):
 def test_unknown_project_and_non_git_repo(env, tmp_path):
     wt, rnd = env["wt"], env["rnd"]
     assert wt.create_worktree("no-such-pid", "s")["reason"] == "unknown-project"
-    # A project pointing at a non-git folder.
+    # A project pointing at a non-git folder: Open terminal still works in-place
+    # (no worktree isolation), named clearly so we never pretend isolation ran.
     plain = tmp_path / "plain"
     plain.mkdir()
     p2 = rnd.add_project("Plain", str(plain), scaffold=False)
     res = wt.create_worktree(p2["id"], "s2")
-    assert res["ok"] is False
-    assert res["reason"] == "not-a-git-repo"
+    assert res["ok"] is True
+    assert res["isolation"] == "none"
+    assert res["reason"] == "not-a-git-repo-in-place"
+    assert res["path"] == str(plain)
+    assert res["branch"] == "project-root"
+
+
+def test_empty_unborn_repo_seeds_and_opens_worktree(env, tmp_path):
+    """``git init`` with no commits used to refuse Open terminal with
+    ``fatal: invalid reference: HEAD``. Auto-seed an empty commit and open.
+    """
+    wt, rnd = env["wt"], env["rnd"]
+    empty = tmp_path / "empty-repo"
+    empty.mkdir()
+    assert _git(empty, "init", "-b", "master").returncode == 0
+    # Unborn: rev-parse HEAD must fail before create.
+    assert _git(empty, "rev-parse", "HEAD").returncode != 0
+    p = rnd.add_project("Empty", str(empty), scaffold=False)
+    res = wt.create_worktree(p["id"], "empty-sess")
+    assert res["ok"] is True, res
+    assert res.get("seeded_empty_commit") is True
+    assert res.get("isolation") == "worktree"
+    from pathlib import Path
+    assert Path(res["path"]).is_dir()
+    # HEAD is now a real commit; a second session also works without re-seed noise.
+    res2 = wt.create_worktree(p["id"], "empty-sess-2")
+    assert res2["ok"] is True, res2
+    assert res2.get("seeded_empty_commit") in (None, False)
 
 
 # ── isolation: a dirty file in A is invisible in B and the main tree ──────

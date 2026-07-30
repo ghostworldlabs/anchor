@@ -122,12 +122,19 @@ def _build_tree_with(tmp_path, fixture_name):
     root.mkdir()
     # A legit product file (must pass clean).
     shutil.copy2(REPO_ROOT / "paths.py", root / "paths.py")
+    # paths.py imports first-party pillar_flags (function scope) — stage it so
+    # the import scan does not false-positive as third-party when the root is
+    # a sparse fixture tree (same guard as the share w2 tests).
+    man_lines = ["paths.py", fixture_name]
+    if (REPO_ROOT / "pillar_flags.py").is_file():
+        shutil.copy2(REPO_ROOT / "pillar_flags.py", root / "pillar_flags.py")
+        man_lines.insert(1, "pillar_flags.py")
     # The planted secret, copied to the tree root.
     planted = root / fixture_name
     shutil.copy2(FIXTURE_DIR / fixture_name, planted)
-    # A manifest that allows both.
+    # A manifest that allows all staged files.
     manifest = tmp_path / "manifest.txt"
-    manifest.write_text(f"paths.py\n{fixture_name}\n", encoding="utf-8")
+    manifest.write_text("\n".join(man_lines) + "\n", encoding="utf-8")
     return root, manifest
 
 
@@ -456,6 +463,9 @@ def test_undeclared_native_import_fails_the_build(tmp_path):
     root = tmp_path / "tree"
     root.mkdir()
     shutil.copy2(REPO_ROOT / "paths.py", root / "paths.py")
+    if (REPO_ROOT / "pillar_flags.py").is_file():
+        shutil.copy2(REPO_ROOT / "pillar_flags.py",
+                     root / "pillar_flags.py")
     leaky = root / "leaky_mod.py"
     leaky.write_text("import requests\nx = 1\n", encoding="utf-8")
     manifest = tmp_path / "manifest.txt"
@@ -488,6 +498,42 @@ def test_tests_and_vendor_exempt_from_import_rule():
     # A vendor file with a third-party-looking import is NOT flagged.
     assert distro.scan_third_party_imports(
         [("vendor/x/y.py", _WRITE("import numpy\n"))], root=REPO_ROOT) == []
+
+
+def test_manifest_negation_denies_shippable(tmp_path):
+    """A ``!pattern`` manifest line DENIES a file every allow-pattern covers.
+
+    This is how PII-planting suites (scrub/redaction tests that embed synthetic
+    secrets BY DESIGN) stay out of the stranger-facing bundle without weakening
+    the tests or the scanner (hardening round 2026-07-29)."""
+    root = tmp_path / "tree"
+    (root / "tests").mkdir(parents=True)
+    (root / "tests" / "test_ok.py").write_text("x = 1" + chr(10), encoding="utf-8")
+    (root / "tests" / "test_planty.py").write_text("x = 2" + chr(10), encoding="utf-8")
+    manifest = tmp_path / "manifest.txt"
+    manifest.write_text("tests/test_*.py" + chr(10) + "!tests/test_planty.py" + chr(10),
+                        encoding="utf-8")
+    sel = distro.select_shippable(root=root, manifest_path=manifest)
+    assert "tests/test_ok.py" in sel
+    assert "tests/test_planty.py" not in sel
+
+
+def test_real_manifest_denies_pii_planting_suites():
+    """The live manifest keeps the known PII-planting suites out of the set."""
+    sel = set(distro.select_shippable())
+    for banned in ("tests/test_share_feedback_w6.py",
+                   "tests/test_share_onboard_w5.py",
+                   "tests/test_log_redaction_2026_07_26.py"):
+        assert banned not in sel, banned
+
+
+def test_unquoted_token_rule_exempts_attribute_reads():
+    """``auth_token = self.token`` is a code READ, never a pasted literal."""
+    hits = list(distro._scan_text("m.py", 'auth_token = self.token' + chr(10)))
+    assert hits == []
+    # A genuine pasted literal still trips.
+    hits = list(distro._scan_text("m.py", 'auth_token = ' + 'abcd1234' + 'efgh5678' + chr(10)))
+    assert [h[1] for h in hits] == ["auth-token-value"]
 
 
 # Helper: materialize source text to a temp file path for the import scan, which

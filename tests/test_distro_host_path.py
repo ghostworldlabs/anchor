@@ -234,6 +234,9 @@ def test_seeded_host_path_in_nonvendored_file_raises(trio_repo, tmp_path, monkey
     # A clean product file...
     import shutil
     shutil.copy2(distro.REPO_ROOT / "paths.py", root / "paths.py")
+    if (distro.REPO_ROOT / "pillar_flags.py").is_file():
+        shutil.copy2(distro.REPO_ROOT / "pillar_flags.py",
+                     root / "pillar_flags.py")
     # ...and a leaky non-vendored one (host path assembled at runtime).
     leaky = root / "leaky_mod.py"
     leaky.write_text('BUILD = r"' + _SECRET_WIN + '"\nx = 1\n', encoding="utf-8")
