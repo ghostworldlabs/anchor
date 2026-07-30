@@ -5185,6 +5185,83 @@ def render_model_flex_badge(env=None) -> str:
             f"title='{html_lib.escape(title, quote=True)}'>{label}{_x}</span>{_hide}")
 
 
+def render_steward_control() -> str:
+    """Compact 'Steward' persona select for the home header (2026-07-29).
+
+    One steward engine, selectable livery: Ecgberht (throne + wax seal),
+    Aladdin (opened cave + genie lamp), Jarvis (tipped bowler + silver
+    salver). Each option's title carries the one-line description. POSTs
+    ``steward_type`` to /api/settings on change, then reloads — the HIGH
+    SEAT and SEAL icons are rendered server-side from the setting.
+    """
+    try:
+        prof = _aset.steward_profile()
+    except Exception:
+        prof = {"key": "ecgberht", "seal": "ecgberht-project-seal.jpg"}
+    active = prof.get("key", "ecgberht")
+    opts = []
+    for key in ("ecgberht", "aladdin", "jarvis"):
+        meta = _aset.STEWARDS[key]
+        sel = " selected" if key == active else ""
+        opts.append(
+            "<option value='%s' title=\"%s\"%s>%s</option>"
+            % (key, html_lib.escape(meta["desc"], quote=True), sel,
+               html_lib.escape(meta["label"])))
+    seal_icon = html_lib.escape(str(prof.get("seal", "")), quote=True)
+    desc = html_lib.escape(str(prof.get("desc", "")), quote=True)
+    html = (
+        "<div id='stewardPick' style=\"display:inline-flex;align-items:center;"
+        "gap:6px;font-size:11px;color:var(--text-dim)\" title=\"%s\">"
+        "<img src='/vendor/brand/%s?v=%s' alt='' "
+        "style=\"width:16px;height:16px;border-radius:3px\" "
+        "onerror=\"this.style.display='none'\" />"
+        "<label style=\"display:inline-flex;align-items:center;gap:4px;"
+        "white-space:nowrap\">Steward "
+        "<select id='stewardSelect' style=\"background:var(--surface);"
+        "color:var(--text);border:1px solid var(--border);border-radius:6px;"
+        "padding:2px 6px;font-size:11px;cursor:pointer\">%s</select>"
+        "</label>"
+        "<span id='stewardStatus' style=\"font-size:10px;opacity:.7\"></span>"
+        "</div>"
+    ) % (desc, seal_icon, BUILD_ID, "".join(opts))
+    # Self-contained script (dashboard conventions: X-Anchor-Token on POST;
+    # spaced braces — never consecutive `{{`/`}}` in raw JS).
+    script = r"""
+<script>
+(function () {
+  function tok() {
+    try { return localStorage.getItem('anchor_token') || ''; }
+    catch (e) { return ''; }
+  }
+  function setStatus(m) {
+    var el = document.getElementById('stewardStatus');
+    if (el) el.textContent = m || '';
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var sel = document.getElementById('stewardSelect');
+    if (!sel) return;
+    sel.addEventListener('change', function () {
+      setStatus('saving…');
+      var headers = { 'Content-Type': 'application/json' };
+      var t = tok();
+      if (t) headers['X-Anchor-Token'] = t;
+      fetch('/api/settings', {
+        method: 'POST', headers: headers,
+        body: JSON.stringify({ steward_type: sel.value })
+      }).then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d && d.ok) { setStatus('✓'); location.reload(); }
+          else { setStatus((d && d.error) || 'failed'); }
+        })
+        .catch(function () { setStatus('failed'); });
+    });
+  });
+})();
+</script>
+"""
+    return html + script
+
+
 def render_model_prefs_controls() -> str:
     """Compact Default-terminal / Coding / Review family selects for the home header.
 
@@ -6851,6 +6928,21 @@ def generate_html(projects, tasks, inbox):
     if _md_active:
         projects_tile_count += " &middot; %d tracked" % _md_active
 
+    # Steward persona (selectable livery, 2026-07-29): ONE steward engine,
+    # the user picks the face. The HIGH SEAT icon fronts the portfolio
+    # steward tile; the SEAL icon fronts the Projects tile (the projects are
+    # run under the steward's seal). Best-effort — settings hiccup falls back
+    # to the Ecgberht originals, never breaks the page.
+    try:
+        _stew = _aset.steward_profile()
+    except Exception:
+        _stew = {"key": "ecgberht", "label": "Ecgberht",
+                 "high_seat": "ecgberht-portfolio-high-seat.jpg",
+                 "seal": "ecgberht-project-seal.jpg"}
+    steward_hs_icon = _stew["high_seat"]
+    steward_seal_icon = _stew["seal"]
+    steward_label = _stew["label"]
+
     # Pre-build balance widget rows (avoid nested f-string issues)
     max_count = max(domain_counts.values()) if domain_counts else 1
     balance_rows = ""
@@ -7629,6 +7721,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           {render_model_flex_badge()}
           {render_model_prefs_controls()}
+          {render_steward_control()}
           <button class="btn btn-sm" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:12px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;" title="Anchor Doctor Diagnostic">&#10010; Anchor Doctor</button>
         </div>
       </div>
@@ -7647,7 +7740,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <details class="dash-tile tile-seat" id="tile-highseat"
                ontoggle="if(this.open)ecgHighSeatMountInline()">
         <summary title="Ecgberht — the High Seat (all your projects, one place to steer them)">
-          <img class="tile-ico" src="/vendor/brand/ecgberht-portfolio-high-seat.jpg?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
+          <img class="tile-ico" src="/vendor/brand/{steward_hs_icon}?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
           High Seat
           <span class="tile-count">Ecgberht &mdash; all your projects, one place to steer them</span>
           <span class="ecg-hs-badge" id="ecgHighSeatBadge"></span>
@@ -7736,10 +7829,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
            markdown-tracked P1 and P2+ project cards — all in one window. -->
       <details class="dash-tile" id="tile-projects">
         <summary>
-          <span class="tile-glyph" aria-hidden="true">&#128193;</span>
+          <img class="tile-ico" src="/vendor/brand/{steward_seal_icon}?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
           Projects
           <span class="tile-count">{projects_tile_count}</span>
-          <span class="tile-hint"></span>
+          <span class="tile-hint">each under {steward_label}&rsquo;s seal</span>
         </summary>
         <div class="tile-body">
           <div class="section-header" style="display:flex;align-items:center;gap:8px">
@@ -10017,6 +10110,11 @@ def handle_settings_get(handler, path, body):
         **settings,
         "env": _aset.export_env_overrides(),
         "cross_model": _aset.families_are_cross_model(),
+        # Steward persona catalog + the resolved active profile, so the UI can
+        # render the selector (label + one-line desc + icon pair) without
+        # hardcoding the persona set client-side.
+        "stewards": _aset.STEWARDS,
+        "steward": _aset.steward_profile(settings),
     }
     try:
         payload["host_profile"] = _lanes.detect_host_profile()
@@ -10033,7 +10131,8 @@ def handle_settings_post(handler, path, body):
     """
     body = body or {}
     kwargs = {}
-    for key in ("default_cli", "coding_family", "review_family"):
+    for key in ("default_cli", "coding_family", "review_family",
+                "steward_type"):
         if key in body and body[key] is not None:
             kwargs[key] = body[key]
     if not kwargs:

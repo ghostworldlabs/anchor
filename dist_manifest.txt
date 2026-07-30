@@ -146,6 +146,15 @@ journal.py
 
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
+# Steward persona icon pairs (2026-07-29): the selectable steward UI
+# (anchor_settings.STEWARDS) renders these on the High Seat + Projects
+# tiles; product art, ships with the bundle.
+vendor/brand/ecgberht-portfolio-high-seat.jpg
+vendor/brand/ecgberht-project-seal.jpg
+vendor/brand/aladdin-high-seat-cave.jpg
+vendor/brand/aladdin-seal-lamp.jpg
+vendor/brand/jarvis-high-seat-hat.jpg
+vendor/brand/jarvis-seal-salver.jpg
 # Gandalf the White wizard mark (white robes/staff; the Gandalf tab icon + served
 # by /vendor/brand/). Pure-data SVG, no dependency.
 vendor/brand/gandalf-white-icon.svg

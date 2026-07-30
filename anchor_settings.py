@@ -23,10 +23,38 @@ import paths as _paths
 VALID_CLIS = frozenset({"claude", "gemini", "grok"})
 VALID_FAMILIES = VALID_CLIS
 
+# ── Steward personas (2026-07-29) ────────────────────────────────────────────
+# One steward engine, selectable livery. The HIGH SEAT icon fronts the
+# portfolio steward on the main dashboard; the SEAL icon fronts each project
+# (the Projects tile + future per-project chamber). Icon files live in
+# vendor/brand/ and ship with the bundle.
+STEWARDS = {
+    "ecgberht": {
+        "label": "Ecgberht",
+        "desc": "The royal steward — stone high seat and wax seal (the original).",
+        "high_seat": "ecgberht-portfolio-high-seat.jpg",
+        "seal": "ecgberht-project-seal.jpg",
+    },
+    "aladdin": {
+        "label": "Aladdin",
+        "desc": "The genie-lamp world — the opened treasure cave and the watchful lamp.",
+        "high_seat": "aladdin-high-seat-cave.jpg",
+        "seal": "aladdin-seal-lamp.jpg",
+    },
+    "jarvis": {
+        "label": "Jarvis",
+        "desc": "The unseen English butler — the tipped bowler and the silver salver.",
+        "high_seat": "jarvis-high-seat-hat.jpg",
+        "seal": "jarvis-seal-salver.jpg",
+    },
+}
+VALID_STEWARDS = frozenset(STEWARDS)
+
 DEFAULTS = {
     "default_cli": "grok",
     "coding_family": "claude",
     "review_family": "gemini",
+    "steward_type": "ecgberht",
 }
 
 SETTINGS_NAME = "settings.json"
@@ -62,6 +90,9 @@ def _normalize(raw) -> dict:
         val = raw.get(key)
         if isinstance(val, str) and val.strip() in VALID_CLIS:
             out[key] = val.strip()
+    stew = raw.get("steward_type")
+    if isinstance(stew, str) and stew.strip() in VALID_STEWARDS:
+        out["steward_type"] = stew.strip()
     ts = raw.get("updated_at")
     if isinstance(ts, str) and ts.strip():
         out["updated_at"] = ts.strip()
@@ -105,6 +136,14 @@ def save_settings(**kwargs) -> dict:
                 % (key, val, "|".join(sorted(VALID_CLIS)))
             )
         current[key] = val.strip()
+    if "steward_type" in kwargs:
+        val = kwargs["steward_type"]
+        if not isinstance(val, str) or val.strip() not in VALID_STEWARDS:
+            raise ValueError(
+                "invalid steward_type %r (expected one of %s)"
+                % (val, "|".join(sorted(VALID_STEWARDS)))
+            )
+        current["steward_type"] = val.strip()
     current["updated_at"] = _now_iso()
 
     primary = settings_path()
@@ -170,3 +209,18 @@ def export_env_overrides() -> dict:
         "REVIEW_FAMILY": review,
         "CROSS_MODEL": cross,
     }
+
+
+def steward_profile(settings: dict | None = None) -> dict:
+    """The ACTIVE steward persona: {key, label, desc, high_seat, seal}.
+
+    Total — an unknown/corrupt stored value falls back to the Ecgberht
+    default, so callers can always render an icon pair.
+    """
+    s = settings if isinstance(settings, dict) else load_settings()
+    key = s.get("steward_type") or DEFAULTS["steward_type"]
+    if key not in STEWARDS:
+        key = DEFAULTS["steward_type"]
+    prof = dict(STEWARDS[key])
+    prof["key"] = key
+    return prof
