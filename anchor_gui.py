@@ -10381,6 +10381,10 @@ def _ecgberht_bridge(args, timeout=20):
         res = subprocess.run(
             ["node", str(bridge)] + list(args),
             capture_output=True, text=True, timeout=timeout,
+            # Node emits UTF-8; without this Windows decodes cp1252 and
+            # the steward's dialogue (em-dashes, curly quotes, flags)
+            # turns to mojibake in the chamber/overlay.
+            encoding="utf-8", errors="replace",
             cwd=str(root), creationflags=_paths.NO_WINDOW)
     except Exception as exc:
         return {"ok": False, "error": "bridge_spawn_failed",
@@ -10490,6 +10494,10 @@ def _ecgberht_hs_bridge(args, timeout=30):
         res = subprocess.run(
             ["node", str(bridge)] + list(args),
             capture_output=True, text=True, timeout=timeout,
+            # Node emits UTF-8; without this Windows decodes cp1252 and
+            # the steward's dialogue (em-dashes, curly quotes, flags)
+            # turns to mojibake in the chamber/overlay.
+            encoding="utf-8", errors="replace",
             cwd=str(root), creationflags=_paths.NO_WINDOW)
     except Exception as exc:
         return {"ok": False, "error": "bridge_spawn_failed",

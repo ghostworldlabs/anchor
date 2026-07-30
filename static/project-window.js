@@ -6075,6 +6075,8 @@ function _ecgStatusCls(status) {
 function closeEcgberhtSeal() {
   var dock = document.getElementById('ecgSealDock');
   if (dock) dock.remove();  // close changes nothing in the ledger
+  var tile = document.getElementById('tile-ecgseal');
+  if (tile) tile.open = false;
 }
 
 function _ecgStewardMsg(convo, text, actions) {
@@ -6381,10 +6383,18 @@ function _ecgRenderStandUp(host, su) {
 }
 
 function openEcgberhtSeal() {
+  /* The chamber lives in ONE expandable tile (2026-07-30): the seal
+     button expands it (same pattern as the main dashboard tiles). */
+  var tile = document.getElementById('tile-ecgseal');
+  if (tile && !tile.open) tile.open = true;
+  if (tile) tile.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+  ecgSealMountInline();
+}
+
+function ecgSealMountInline() {
   var host = document.getElementById('ecgSealHost');
   if (!host) return;
-  var existing = document.getElementById('ecgSealDock');
-  if (existing) { existing.scrollIntoView({behavior: 'smooth', block: 'nearest'}); return; }
+  if (document.getElementById('ecgSealDock')) return;
   fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
     .then(function (r) { return r.json(); })
     .then(function (j) {

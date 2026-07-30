@@ -170,3 +170,48 @@ def test_project_window_livery_slots_and_boot():
         assert "window.ANCHOR_STEWARD" in js, asset
         # the fallback literal survives ONLY inside the helper functions
         assert "ico.src = '/vendor/brand/ecgberht-project-seal.jpg';" not in js, asset
+
+
+def test_seal_chamber_is_one_expandable_tile():
+    """(2026-07-30) The project window's chamber lives in ONE expandable
+    dash-tile (main-dashboard pattern): details tile in the shell, idempotent
+    mount, seal button expands it, and the seal logo matches the main
+    dashboard's steward-tile size (44px)."""
+    shell = (REPO_ROOT / "static" / "project-window.html").read_text(
+        encoding="utf-8")
+    assert "id='tile-ecgseal'" in shell
+    assert "ecgSealMountInline()" in shell
+    assert "<div class='ecg-seal-host' id='ecgSealHost'></div>" in shell
+    js = (REPO_ROOT / "static" / "project-window.js").read_text(
+        encoding="utf-8")
+    assert "function ecgSealMountInline()" in js
+    assert "tile.open = true" in js
+    css = (REPO_ROOT / "static" / "project-window.css").read_text(
+        encoding="utf-8")
+    assert ".dash-tile.tile-seal .tile-ico{width:44px;height:44px" in css
+
+
+def test_bridge_decodes_utf8():
+    """(2026-07-30) Both Ecgberht bridges decode Node output as UTF-8 —
+    the mojibake in steward dialogues came from cp1252 default decoding."""
+    import inspect
+    import anchor_gui
+    for fn in ("_ecgberht_bridge", "_ecgberht_hs_bridge"):
+        f = getattr(anchor_gui, fn, None)
+        if f is None:
+            continue
+        src = inspect.getsource(f)
+        assert 'encoding="utf-8"' in src, fn
+    # belt+braces: every bridge spawn carries the explicit encoding within
+    # its call window (the 500 chars after the argv literal).
+    src = (REPO_ROOT / "anchor_gui.py").read_text(encoding="utf-8")
+    needle = '["node", str(bridge)]'
+    start, found = 0, 0
+    while True:
+        i = src.find(needle, start)
+        if i < 0:
+            break
+        found += 1
+        assert 'encoding="utf-8"' in src[i:i + 500], "spawn at offset %d" % i
+        start = i + 1
+    assert found >= 2, found
