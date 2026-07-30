@@ -430,7 +430,7 @@ def test_doctor_filtered_from_term_sessions_listing(denv, monkeypatch):
 
 def test_doctor_session_start_401_before_substance(denv, monkeypatch):
     _claude_only(monkeypatch)
-    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
     code, payload = _post(denv["gui"], "/api/doctor/session_start", {})
     assert code == 401, payload
     assert payload["ok"] is False
@@ -440,7 +440,7 @@ def test_doctor_session_start_401_before_substance(denv, monkeypatch):
     assert denv["pty"].live_sessions() == []
     # The SAME request WITH the token is served.
     code2, p2 = _post(denv["gui"], "/api/doctor/session_start",
-                      {"token": "sekrit-doctor-token"})
+                      {"token": "tok-123"})
     assert code2 == 200 and p2["ok"] is True, p2
 
 
@@ -639,11 +639,11 @@ def test_doctor_status_endpoint_real_counts(denv):
 
 
 def test_doctor_status_401_before_substance(denv, monkeypatch):
-    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
     code, data = _get_json(denv["gui"], "/api/doctor/status")
     assert code == 401 and data["ok"] is False
     code2, data2 = _get_json(
-        denv["gui"], "/api/doctor/status?token=sekrit-doctor-token")
+        denv["gui"], "/api/doctor/status?token=tok-123")
     assert code2 == 200 and data2["ok"] is True
 
 
@@ -672,13 +672,13 @@ def test_doctor_report_traversal_and_unknown_are_safe(denv):
 
 def test_doctor_report_401_before_substance(denv, monkeypatch):
     _write_report(denv["data"], name="2026-07-16.md", body=_report_body())
-    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
     code, raw = _get(denv["gui"], "/doctor/report?name=2026-07-16.md")
     assert code == 401
     assert "HEALTHREPORT-MARKER" not in raw
     code2, html2 = _get(denv["gui"],
                         "/doctor/report?name=2026-07-16.md"
-                        "&token=sekrit-doctor-token")
+                        "&token=tok-123")
     assert code2 == 200 and "HEALTHREPORT-MARKER" in html2
 
 
@@ -770,7 +770,7 @@ def test_healthcheck_run_401_before_substance(denv, tmp_path, monkeypatch):
     script = _fake_hc_script(tmp_path, "2026-07-18.md", sleep_s=0)
     monkeypatch.setenv("ANCHOR_HEALTHCHECK_CMD",
                        f"{sys.executable} {script}")
-    monkeypatch.setenv("ANCHOR_TOKEN", "sekrit-doctor-token")
+    monkeypatch.setenv("ANCHOR_TOKEN", "tok-123")
 
     spawned = []
     real_popen = subprocess.Popen
@@ -787,7 +787,7 @@ def test_healthcheck_run_401_before_substance(denv, tmp_path, monkeypatch):
     assert spawned == [], "a tokenless POST must never spawn the healthcheck"
 
     code2, p2 = _post(denv["gui"], "/api/doctor/healthcheck_run",
-                      {"token": "sekrit-doctor-token"})
+                      {"token": "tok-123"})
     assert code2 == 200 and p2["ok"] is True
     assert len(spawned) == 1
 

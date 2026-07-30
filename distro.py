@@ -252,9 +252,16 @@ def select_shippable(root: Path | None = None,
     """
     root = Path(root) if root else REPO_ROOT
     patterns = load_manifest(manifest_path)
+    # ``!pattern`` lines are explicit DENIALS: a file matching one never ships
+    # even when an allow-pattern (e.g. the tests/test_*.py wildcard) covers it.
+    # This is how PII-planting test files (scrub/redaction suites that embed
+    # synthetic secrets BY DESIGN) stay out of the stranger-facing bundle
+    # without weakening either the tests or the scanner.
+    denies = [p[1:] for p in patterns if p.startswith("!")]
+    allows = [p for p in patterns if not p.startswith("!")]
     selected = []
     for rel_posix, _abs in _iter_repo_files(root):
-        if _match_any(rel_posix, patterns):
+        if _match_any(rel_posix, allows) and not _match_any(rel_posix, denies):
             selected.append(rel_posix)
     return selected
 
@@ -317,6 +324,8 @@ _HOSTPATH_ALLOWED_LEAVES = frozenset({
     "<path>",     # the vendor-scrub genericized token
     "trio",       # author's own trio source repo (doc/comment; W11 genericizes)
     "skill",      # author's own "Skill Foundry" source (doc/comment; W11)
+    "ecgberht",   # author's Ecgberht steward-engine source (doc/comment in
+                  # route_table's TW5/TW6 section headers; same class as trio)
 })
 
 # Any concrete email literal (generic RFC-ish shape). Detection is by PATTERN;
@@ -385,6 +394,10 @@ _PLACEHOLDER_VALUES = {
     "changeme", "your-token-here", "yourtokenhere", "placeholder",
     "xxxxxxxx", "example", "redacted", "s3cret", "tok-123", "hc-tok",
     "your_token_here", "none", "null", "true", "false",
+    "__anchor_token__",  # anchor_gui's serve-time template placeholder (the
+                         # literal is replaced with the real token per request)
+    "confirm-",          # skill_runner's mint prefix: token = "confirm-" +
+                         # os.urandom(16).hex() — the literal is a label only
 }
 
 
@@ -463,6 +476,11 @@ def _scan_text(rel: str, text: str):
     for m in _TOKEN_ASSIGN_UNQUOTED_RE.finditer(text):
         val = m.group("val")
         if val.lower() in _PLACEHOLDER_VALUES:
+            continue
+        # An unquoted "value" that is an attribute path (``self.token``,
+        # ``cls.auth_token``) is a code READ of a runtime value, never a
+        # secret literal — the rule exists to catch pasted literals.
+        if val.startswith(("self.", "cls.")):
             continue
         yield (rel, "auth-token-value", _redact(m.group(0)))
 
@@ -734,13 +752,26 @@ def scan_startup_imports(staging: Path, timeout: int = 180) -> list:
     import tempfile as _tf
 
     staging = Path(staging)
+    # Gate only the startup modules this bundle actually STAGES. A sparse
+    # bundle (docs-only export, fixture tree in tests) does not ship the app,
+    # so "would it start" is not a question it has to answer; a real bundle
+    # stages anchor.py / anchor_gui.py and keeps the full gate.
+    gated = [mod for mod in STARTUP_IMPORTS
+             if (staging / (mod + ".py")).is_file()
+             or (staging / mod / "__init__.py").is_file()]
     hits = []
+    if not gated:
+        return hits
     with _tf.TemporaryDirectory(prefix="anchor-import-gate-") as tmp:
         env = dict(os.environ)
         env["ANCHOR_DATA_DIR"] = tmp
         env["ANCHOR_PTY_BACKEND"] = "stub"
         env["PYTHONIOENCODING"] = "utf-8"
-        for mod in STARTUP_IMPORTS:
+        # The gate must not MUTATE the staging tree it validates: without this
+        # the child interpreter writes __pycache__/*.pyc into the export, which
+        # then ships (and fails staged-set == manifest-selection equality).
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        for mod in gated:
             try:
                 proc = subprocess.run(
                     [sys.executable, "-c", "import " + mod],
