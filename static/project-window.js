@@ -6156,8 +6156,10 @@ function _ecgSpeak(convo, text) {
   // (+ X-Anchor-Build). The do_POST middleware never reads ?token= — a
   // query-only POST 401s, and the global fetch wrapper turns that 401 into a
   // token prompt, so the saybox kept re-asking for a token the window already
-  // had. The ?token= query stays for the server-side GET convention parity.
-  _postJson('/api/ecgberht/speak' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''), body
+  // had. NO ?token= query on a POST: the exact-match route row is compared
+  // against the path, so a query string used to miss the row entirely and
+  // answer 404 "Unknown endpoint".
+  _postJson('/api/ecgberht/speak', body
   ).then(function (r) { return r.json(); }).then(function (j) {
     if (!j || !j.ok) {
       _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
@@ -6338,10 +6340,12 @@ function _ecgRenderStandUp(host, su) {
       return;
     }
     // (2026-07-30 FIX) via _postJson — the token MUST ride the X-Anchor-Token
-    // header on a POST (the middleware never reads ?token=). Query-only meant
-    // entering a goal here 401'd and the fetch wrapper re-prompted for a token
-    // the window already had, so the stand-up could never be confirmed.
-    _postJson('/api/ecgberht/stand_up' + (_tokenQ() ? '?' + _tokenQ().slice(1) : ''),
+    // header on a POST (the middleware never reads ?token=), and the URL must
+    // carry NO query (the exact-match route row is compared against the path,
+    // so ?token= missed the row and answered 404 "Unknown endpoint"). Between
+    // them, those two faults meant entering a goal here could never work with
+    // auth ON — first a token re-prompt, then "Couldn't do that".
+    _postJson('/api/ecgberht/stand_up',
               {project_id: PROJECT_ID, north_star: goal, who: 'john'}
     ).then(function (r) { return r.json(); }).then(function (out) {
       if (out && out.ok) {

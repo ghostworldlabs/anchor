@@ -59,8 +59,11 @@ function _ecgHsHeaders() {
   return h;
 }
 
+// NO ?token= query on the POST either: the exact-match route row is compared
+// against the request path, so a query string missed the row entirely and the
+// act answered 404 "Unknown endpoint".
 function _ecgHsPost(body, done) {
-  fetch('/api/ecgberht/high_seat_act' + (_ecgHsTok() ? '?' + _ecgHsTok().slice(1) : ''), {
+  fetch('/api/ecgberht/high_seat_act', {
     method: 'POST',
     headers: _ecgHsHeaders(),
     body: JSON.stringify(body)

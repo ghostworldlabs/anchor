@@ -16911,8 +16911,23 @@ _MIGRATED_HANDLERS = {
     "handle_project_rollup": handle_project_rollup,
     "handle_effort_rollup": handle_effort_rollup,
     "handle_boneyard": handle_boneyard,
+    # (2026-07-30 FIX) Same omission as stand_up below, found by the new
+    # test_every_migrated_route_has_a_registered_handler gate: both are defined,
+    # both are declared migrated=True in the route table, neither was registered
+    # — and neither has a legacy-chain fallback, so GET /api/rnd/friction and
+    # POST /api/rnd/journal_friction were dead 404s.
+    "handle_friction_list": handle_friction_list,
+    "handle_journal_friction": handle_journal_friction,
     "handle_ecgberht_chamber": handle_ecgberht_chamber,
     "handle_ecgberht_speak": handle_ecgberht_speak,
+    # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
+    # route table, but never registered here — so _strangler_dispatch took its
+    # defensive "migrated row with an unregistered handler" branch, fell through
+    # to the legacy chain, and answered 404 "Unknown endpoint". That is what
+    # John hit setting a project goal: "Couldn't do that: Unknown endpoint —
+    # nothing was created." test_every_migrated_route_has_a_handler now makes
+    # this class of omission impossible to reintroduce.
+    "handle_ecgberht_stand_up": handle_ecgberht_stand_up,
     "handle_ecgberht_high_seat": handle_ecgberht_high_seat,
     "handle_ecgberht_high_seat_badge": handle_ecgberht_high_seat_badge,
     "handle_ecgberht_bring_up": handle_ecgberht_bring_up,
@@ -18183,7 +18198,19 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # table FIRST. Runs AFTER the token middleware, so a migrated POST row is
         # already authenticated. Unmatched / not-yet-migrated POSTs fall through
         # to the legacy if/elif chain below unchanged.
-        if self._strangler_dispatch("POST", self.path, body):
+        #
+        # (2026-07-30 FIX) Dispatch on the PATH-ONLY string, exactly like the
+        # auth lookup two lines up (and like do_GET, which already passes
+        # ``_path_only``). ``_routes.match`` compares an EXACT row with ``path ==
+        # pattern``, so passing the raw request line meant ANY POST carrying a
+        # query string missed its exact row, fell through the strangler, and
+        # answered 404 "Unknown endpoint". That is what broke every steward act
+        # (/api/ecgberht/stand_up?token=… → "Couldn't do that: Unknown
+        # endpoint"): the URLs carry ?token=, so with auth ON they could never
+        # dispatch — and with auth OFF the query is empty, which is why the
+        # suites never saw it. Handlers still receive the FULL URI (query
+        # included) — _strangler_dispatch passes ``self.path`` to the handler.
+        if self._strangler_dispatch("POST", urlparse(self.path).path, body):
             return
             
         # /api/doctor/run removed (doctor V3 wave 1). The V2 handler spawned a

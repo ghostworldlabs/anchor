@@ -407,3 +407,83 @@ def test_steward_post_rejects_query_only_token_but_accepts_header(server_authed)
     assert _post("/api/ecgberht/high_seat_act?token=s3cret", {}) == 401
     assert _post("/api/ecgberht/high_seat_act",
                  {"X-Anchor-Token": "s3cret"}) != 401
+
+
+def test_steward_post_urls_carry_no_query():
+    """A steward POST URL must be a BARE path — no ?token=, no query at all.
+
+    ``route_table.match`` compares an EXACT row with ``path == pattern``, so a
+    POST carrying a query string missed its row, fell through the strangler and
+    answered 404 "Unknown endpoint" — John's "Couldn't do that: Unknown
+    endpoint - nothing was created" when setting a goal. Belt: the client sends
+    a bare path (asserted here); braces: do_POST now dispatches on the path-only
+    string (asserted in the next test), so a query can never misroute again.
+    """
+    for name in ("project-window.js", "high-seat.js"):
+        src = _asset(name)
+        for ep in _STEWARD_POST_ENDPOINTS:
+            for m in re.finditer(r"/api/ecgberht/" + ep, src):
+                before = src[max(0, m.start() - 120):m.start()]
+                if "_postJson(" not in before and "fetch(" not in before:
+                    continue
+                tail = src[m.start() + len("/api/ecgberht/") + len(ep):]
+                # Step over the string literal's CLOSING QUOTE before looking
+                # for a concatenated/inline query — without this the check
+                # silently passes on the very pattern it exists to catch.
+                tail = tail[:80].lstrip("'\" ")
+                assert not tail.startswith(("+", "?")), (
+                    "%s: POST %s must use a BARE path (a query string misses "
+                    "the exact route row -> 404 Unknown endpoint); got %r" %
+                    (name, ep, tail[:60]))
+
+
+def test_post_dispatch_tolerates_a_query_string(server_authed):
+    """do_POST dispatches on the PATH, so a query can never 404 a real route.
+
+    The regression: do_GET passed ``_path_only`` but do_POST passed the raw
+    request line, so ANY exact-row POST carrying a query answered 404 "Unknown
+    endpoint" instead of running its handler.
+    """
+    import http.client
+    import json as _json
+
+    _env, base, port = server_authed
+    payload = _json.dumps({}).encode()
+
+    def _post(path):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        c.request("POST", path, body=payload, headers={
+            "Content-Type": "application/json", "X-Anchor-Token": "s3cret"})
+        r = c.getresponse()
+        r.read()
+        c.close()
+        return r.status
+
+    bare = _post("/api/ecgberht/high_seat_act")
+    withq = _post("/api/ecgberht/high_seat_act?token=s3cret&x=1")
+    assert bare != 404, "the bare route must dispatch"
+    assert withq != 404, (
+        "a query string must not misroute an exact POST row (404 Unknown "
+        "endpoint was the steward's 'Couldn't do that')")
+    assert withq == bare, (bare, withq)
+
+
+def test_every_migrated_route_has_a_registered_handler():
+    """Every ``migrated=True`` route row must resolve to a real handler.
+
+    THE CLASS OF BUG (2026-07-30): ``/api/ecgberht/stand_up`` was defined and
+    declared migrated, but its name was missing from ``_MIGRATED_HANDLERS``.
+    ``_strangler_dispatch`` treats that as "not migrated" and falls through to
+    the legacy chain, which answers 404 "Unknown endpoint" — a declared, live,
+    fully-implemented endpoint silently unreachable, with no startup warning.
+    A route row is a PROMISE; this test makes the promise checkable.
+    """
+    import anchor_gui
+    import route_table as _rt
+
+    registry = anchor_gui._MIGRATED_HANDLERS
+    missing = sorted({r.handler for r in _rt.migrated_routes()
+                      if r.handler not in registry})
+    assert not missing, (
+        "route rows declared migrated=True whose handler is not registered in "
+        "_MIGRATED_HANDLERS (they 404 as 'Unknown endpoint'): %s" % missing)
