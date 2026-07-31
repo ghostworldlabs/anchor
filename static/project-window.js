@@ -6260,6 +6260,75 @@ function _ecgSpeak(convo, text) {
   });
 }
 
+/* (2026-07-31) The chamber's buttons were LABELS ONLY — the goal bar's
+   [Still the goal] / [Refine it] and the opening message's two actions were
+   appended with no onclick, so clicking them did nothing at all. John: "when I
+   try to click the refine button nothing would happen".
+
+   Every one of those buttons already declares a closed ACT in the engine view
+   model (still_the_goal · refine_goal · carry_on · show_detail), and
+   /api/ecgberht/speak already compiles free-form talk into exactly those acts.
+   So a button SAYS its canonical utterance through the existing
+   talk → compile → receipt path; it never invents a private side channel.
+
+   The utterance is keyed off the ACT ID, not the label: the engine's carry_on
+   pattern is /^carry on\b/ and the label is "Fine — carry on", which would not
+   compile. refine_goal is the one act that needs an ARGUMENT (the new goal
+   text), so its button prefills the say line and hands John the cursor — the
+   same affordance the thin-evidence offer button already uses. */
+var _ECG_ACT_SAY = {
+  still_the_goal: 'Still the goal',
+  carry_on: 'Carry on',
+  show_detail: 'Show me the detail'
+};
+//: Acts that need the user to finish the sentence → prefill, never auto-send.
+var _ECG_ACT_PREFILL = {
+  refine_goal: 'Refine goal to '
+};
+
+function _ecgSayLine() { return document.getElementById('ecgSayInput'); }
+
+/* The engine returns the North Star as the raw Face slice — a markdown
+   blockquote plus the section's trailing rule, e.g. "> Ship the thing.\n\n\n---".
+   The goal bar renders it as TEXT, so those markers showed up verbatim on the
+   dashboard. Strip the decoration for DISPLAY only; the stored Face is
+   untouched, and a goal that is genuinely empty stays honestly empty. */
+function _ecgGoalText(raw) {
+  var s = String(raw == null ? '' : raw);
+  s = s.replace(/^\s*(?:-{3,}|_{3,})\s*$/gm, '');   // horizontal rules
+  s = s.replace(/^[ \t]*>[ \t]?/gm, '');            // blockquote markers
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+// Wire ONE chamber action button to its declared act. Unknown acts fall back to
+// speaking the label — the compiler answers with an honest refuse-with-proposal
+// rather than the button silently doing nothing.
+function _ecgWireAct(btn, action) {
+  if (!btn || !action) return btn;
+  var act = action.act || '';
+  btn.onclick = function () {
+    var convo = document.getElementById('ecgConvo');
+    var pre = _ECG_ACT_PREFILL[act];
+    if (pre) {
+      var say = _ecgSayLine();
+      if (say) {
+        say.value = pre;
+        say.focus();
+        try { say.setSelectionRange(say.value.length, say.value.length); } catch (e) {}
+      }
+      if (convo) {
+        _ecgStewardMsg(convo, 'Say the new goal in your own words — I have '
+          + 'started the line for you. Nothing changes until you send it.');
+      }
+      return;
+    }
+    if (!convo) return;
+    _ecgSpeak(convo, _ECG_ACT_SAY[act] || action.label || '');
+  };
+  if (act) btn.title = 'compiles to: ' + act;
+  return btn;
+}
+
 function _ecgRenderChamber(host, vm) {
   var chamber = vm.chamber;
   var dock = _ecgEl('div', 'ecg-dock');
@@ -6291,10 +6360,14 @@ function _ecgRenderChamber(host, vm) {
   goal.id = 'ecgGoalBar';
   var g = _ecgEl('div', 'g');
   g.appendChild(_ecgEl('div', 'lab', chamber.goal_bar.label));
-  g.appendChild(_ecgEl('div', 'txt', chamber.goal_bar.goal));
+  g.appendChild(_ecgEl('div', 'txt', _ecgGoalText(chamber.goal_bar.goal)));
   goal.appendChild(g);
-  goal.appendChild(_ecgEl('button', 'ecg-btn gold', chamber.goal_bar.actions[0].label));
-  goal.appendChild(_ecgEl('button', 'ecg-btn', chamber.goal_bar.actions[1].label));
+  var gacts = chamber.goal_bar.actions || [];
+  for (var gi = 0; gi < gacts.length; gi++) {
+    goal.appendChild(_ecgWireAct(
+      _ecgEl('button', 'ecg-btn' + (gacts[gi].primary ? ' gold' : ''),
+             gacts[gi].label), gacts[gi]));
+  }
   dock.appendChild(goal);
 
   // S1-E3/E4 — Roadmap rail + run block · S1-E5 — conversation main region
@@ -6303,9 +6376,18 @@ function _ecgRenderChamber(host, vm) {
   var convo = _ecgEl('div', 'ecg-convo');
   convo.id = 'ecgConvo';
   var opening = chamber.conversation.opening;
-  _ecgStewardMsg(convo, opening.text, [
-    {label: opening.actions[0].label}, {label: opening.actions[1].label}
-  ]);
+  var omsg = _ecgStewardMsg(convo, opening.text);
+  // The opening actions are wired the same way as the goal bar (they were
+  // label-only too). Built after the message so the buttons can be wired.
+  var oacts = opening.actions || [];
+  if (oacts.length) {
+    var obox = _ecgEl('div', 'act');
+    for (var oi = 0; oi < oacts.length; oi++) {
+      obox.appendChild(_ecgWireAct(
+        _ecgEl('button', 'ecg-btn', oacts[oi].label), oacts[oi]));
+    }
+    omsg.appendChild(obox);
+  }
   body.appendChild(convo);
   dock.appendChild(body);
 

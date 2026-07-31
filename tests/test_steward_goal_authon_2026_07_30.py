@@ -239,3 +239,118 @@ def test_read_endpoints_answer_with_the_query_token_with_auth_on(authed):
 
     # The asymmetry, pinned so a future change to it is deliberate.
     assert _get("/api/ecgberht/high_seat", {"X-Anchor-Token": TOKEN}) == 401
+
+
+# ── The chamber's buttons must DO something (2026-07-31) ────────────────────
+# John: "when I try to click the refine button nothing would happen". The goal
+# bar's [Still the goal] / [Refine it] and the opening message's two actions
+# were appended with no onclick — four dead buttons. Each declares a closed act
+# in the engine view model, so each now speaks its canonical utterance through
+# the existing /api/ecgberht/speak compiler; refine_goal, which needs the new
+# goal text as an argument, prefills the say line instead of auto-sending.
+
+def _chamber_with_goal(pg, base, pid, goal="Original goal for the chamber."):
+    """Stand a project up (so the FULL chamber renders, not the stand-up
+    screen) and return the page sitting in the open chamber."""
+    pg.goto(f"{base}/project/{pid}", wait_until="domcontentloaded")
+    pg.wait_for_selector("#tile-ecgseal", timeout=15000)
+    pg.click("#tile-ecgseal > summary")
+    pg.wait_for_selector("#ecgStandUpGoal", timeout=15000)
+    pg.fill("#ecgStandUpGoal", goal)
+    pg.click("#ecgSealHost button.gold")
+    pg.wait_for_function(
+        "() => {var c = document.getElementById('ecgConvo');"
+        "return c && /saved/i.test(c.textContent);}", timeout=30000)
+    # Re-open: the chamber now renders the goal bar + roadmap rail.
+    pg.reload(wait_until="domcontentloaded")
+    pg.click("#tile-ecgseal > summary")
+    pg.wait_for_selector("#ecgGoalBar", timeout=15000)
+
+
+def test_chamber_buttons_are_wired_not_decorative(authed):
+    """Every chamber action button carries a click handler and a compiles-to
+    hint — none is a bare label."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    pid, base = authed["pid"], authed["base"]
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid)
+            wired = pg.evaluate(
+                "() => Array.from(document.querySelectorAll("
+                "'#ecgGoalBar button, #ecgConvo .ecg-msg.steward .act button'))"
+                ".map(b => ({label: b.textContent, wired: !!b.onclick}))")
+            assert wired, "the chamber rendered no action buttons at all"
+            dead = [w["label"] for w in wired if not w["wired"]]
+            assert not dead, f"decorative (unwired) chamber buttons: {dead}"
+        finally:
+            b.close()
+
+
+def test_refine_it_prefills_the_say_line_and_sends_nothing(authed):
+    """[Refine it] hands John the cursor — it must NOT auto-send a rewrite."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    repo, pid, base = authed["repo"], authed["pid"], authed["base"]
+    original = "Original goal for the chamber."
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid, original)
+            # The goal bar shows the goal WITHOUT its markdown decoration.
+            shown = pg.evaluate(
+                "document.querySelector('#ecgGoalBar .txt').textContent")
+            assert shown.strip() == original, shown
+            assert ">" not in shown and "---" not in shown, \
+                f"raw markdown leaked into the goal bar: {shown!r}"
+
+            pg.click("#ecgGoalBar button:not(.gold)")   # [Refine it]
+            say = pg.input_value("#ecgSayInput")
+            assert say.lower().startswith("refine goal to"), say
+            assert pg.evaluate(
+                "document.activeElement && document.activeElement.id") \
+                == "ecgSayInput", "the say line must take focus"
+        finally:
+            b.close()
+
+    # Nothing was sent, so the Face still carries the ORIGINAL goal.
+    assert original in (repo / "ECGBERHT.md").read_text(encoding="utf-8")
+
+
+def test_still_the_goal_speaks_and_the_steward_answers(authed):
+    """[Still the goal] compiles through the real speak path and is answered."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    pid, base = authed["pid"], authed["base"]
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid)
+            before = pg.evaluate(
+                "document.querySelectorAll('#ecgConvo .ecg-msg').length")
+            pg.click("#ecgGoalBar button.gold")          # [Still the goal]
+            # John's line lands, then the steward answers — never silence.
+            pg.wait_for_function(
+                "n => document.querySelectorAll('#ecgConvo .ecg-msg').length "
+                ">= n + 2", arg=before, timeout=30000)
+            said = pg.evaluate("document.getElementById('ecgConvo').textContent")
+            assert "didn't understand" not in said.lower(), said[-300:]
+            assert "didn't answer" not in said.lower(), said[-300:]
+        finally:
+            b.close()
