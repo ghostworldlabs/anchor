@@ -263,7 +263,13 @@ def test_open_terminal_button_present(env):
     assert len(found) == 1, "the Open terminal button is not in the header"
     # Its onclick (raw HTML, survives the script strip since it's an attribute)
     # launches a bare general session.
-    assert "newGeneral('" in html, \
+    # (2026-07-31) The v12 Layout-D rework moved this affordance into the
+    # board as "+ New general" (newEffort('general') -> newGeneral()).
+    # John asked for the header shortcut BACK as well, so BOTH exist: the
+    # board button for the effort flow, and this header control for a bare
+    # terminal without expanding the (now collapsed) Workbench tile. The
+    # header control calls newGeneral() directly - no lane, no effort wrapper.
+    assert "newGeneral(" in html, \
         "Open terminal button does not launch a general session"
     # Human-meaningful label.
     assert "Open terminal" in html
