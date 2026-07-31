@@ -354,3 +354,61 @@ def test_still_the_goal_speaks_and_the_steward_answers(authed):
             assert "didn't answer" not in said.lower(), said[-300:]
         finally:
             b.close()
+
+
+def test_say_line_grows_with_dictated_text_and_enter_sends(authed):
+    """The say line is a GROWING textarea, not a one-line input.
+
+    John dictates paragraphs into the chamber — "it didn't show everything I was
+    typing ... the window didn't grow as I spoke". A one-line <input> scrolled
+    his own words out of sight before he could read them back. Enter still
+    sends; Shift+Enter must make a newline instead (dictation emits newlines).
+    """
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    pid, base = authed["pid"], authed["base"]
+    para = ("I want this project to stand up a full campaign plan. " * 6).strip()
+
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid)
+            assert pg.eval_on_selector("#ecgSayInput", "el => el.tagName") \
+                == "TEXTAREA", "the say line must be a growing textarea"
+
+            one_row = pg.eval_on_selector(
+                "#ecgSayInput", "el => el.getBoundingClientRect().height")
+            pg.fill("#ecgSayInput", para)
+            pg.eval_on_selector(
+                "#ecgSayInput",
+                "el => el.dispatchEvent(new Event('input', {bubbles: true}))")
+            grown = pg.eval_on_selector(
+                "#ecgSayInput", "el => el.getBoundingClientRect().height")
+            assert grown > one_row, (
+                "the say line must GROW with dictated text (was %s, now %s)"
+                % (one_row, grown))
+            # Everything typed is visible, not scrolled out of sight.
+            assert pg.eval_on_selector(
+                "#ecgSayInput", "el => el.scrollHeight - el.clientHeight <= 2"), \
+                "the grown box must show the whole paragraph, not scroll it away"
+
+            # Shift+Enter is a newline (dictation), plain Enter sends.
+            pg.click("#ecgSayInput")
+            pg.keyboard.press("Shift+Enter")
+            assert "\n" in pg.input_value("#ecgSayInput"), \
+                "Shift+Enter must insert a newline, not send"
+            before = pg.evaluate(
+                "document.querySelectorAll('#ecgConvo .ecg-msg').length")
+            pg.keyboard.press("Enter")
+            pg.wait_for_function(
+                "n => document.querySelectorAll('#ecgConvo .ecg-msg').length > n",
+                arg=before, timeout=30000)
+            assert pg.input_value("#ecgSayInput") == "", \
+                "sending must clear the say line"
+        finally:
+            b.close()

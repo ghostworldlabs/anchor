@@ -6288,6 +6288,41 @@ var _ECG_ACT_PREFILL = {
 
 function _ecgSayLine() { return document.getElementById('ecgSayInput'); }
 
+/* (2026-07-31) A GROWING say line. John dictates whole paragraphs into the
+   chamber — "it didn't show everything I was typing ... the window didn't grow
+   as I spoke" — and a one-line <input> scrolled his own words out of sight, so
+   he could not read back what he had just said before sending it.
+
+   _ecgGrowingInput builds a <textarea> that starts one row tall and grows with
+   its content (capped by the CSS max-height, then it scrolls). ENTER SENDS,
+   Shift+Enter makes a newline — dictation software emits plain newlines, which
+   would otherwise fire a send mid-thought.
+
+   ``onSend`` receives the trimmed text and must return true when it consumed
+   it (the box is then cleared). */
+function _ecgAutoGrow(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.max(el.scrollHeight, 34) + 'px';
+}
+
+function _ecgGrowingInput(id, placeholder, onSend) {
+  var ta = document.createElement('textarea');
+  ta.id = id;
+  ta.rows = 1;
+  ta.placeholder = placeholder || '';
+  ta.setAttribute('aria-multiline', 'true');
+  ta.oninput = function () { _ecgAutoGrow(ta); };
+  ta.onkeydown = function (e) {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    e.preventDefault();
+    var text = (ta.value || '').trim();
+    if (!text) return;
+    if (onSend(text) !== false) { ta.value = ''; _ecgAutoGrow(ta); }
+  };
+  return ta;
+}
+
 /* The engine returns the North Star as the raw Face slice — a markdown
    blockquote plus the section's trailing rule, e.g. "> Ship the thing.\n\n\n---".
    The goal bar renders it as TEXT, so those markers showed up verbatim on the
@@ -6393,19 +6428,16 @@ function _ecgRenderChamber(host, vm) {
 
   // S1-E9 — saybox + footer stamp
   var say = _ecgEl('div', 'ecg-saybox');
-  var input = document.createElement('input');
-  input.id = 'ecgSayInput';
-  input.placeholder = chamber.conversation.saybox.placeholder;
-  input.onkeydown = function (e) {
-    if (e.key === 'Enter' && input.value.trim()) {
-      _ecgSpeak(convo, input.value.trim());
-      input.value = '';
-    }
-  };
+  var input = _ecgGrowingInput('ecgSayInput',
+    chamber.conversation.saybox.placeholder,
+    function (text) { _ecgSpeak(convo, text); return true; });
   say.appendChild(input);
   var speak = _ecgEl('button', 'ecg-btn gold', chamber.conversation.saybox.action);
   speak.onclick = function () {
-    if (input.value.trim()) { _ecgSpeak(convo, input.value.trim()); input.value = ''; }
+    if (!input.value.trim()) return;
+    _ecgSpeak(convo, input.value.trim());
+    input.value = '';
+    _ecgAutoGrow(input);   // collapse the grown box back to one row
   };
   say.appendChild(speak);
   dock.appendChild(say);
@@ -6448,9 +6480,10 @@ function _ecgRenderStandUp(host, su) {
   convo.id = 'ecgConvo';
 
   var goalRow = _ecgEl('div', 'ecg-saybox');
-  var goalInput = document.createElement('input');
-  goalInput.id = 'ecgStandUpGoal';
-  goalInput.placeholder = su.goal_prompt;
+  // A GROWING box here too — the stand-up goal is dictated in whole sentences,
+  // and a one-line input hid everything past the first few words.
+  var goalInput = _ecgGrowingInput('ecgStandUpGoal', su.goal_prompt,
+                                   function () { confirm(); return false; });
 
   var confirm = function () {
     var goal = goalInput.value.trim();
@@ -6502,7 +6535,8 @@ function _ecgRenderStandUp(host, su) {
   goalRow.appendChild(goalInput);
   var setBtn = _ecgEl('button', 'ecg-btn gold', 'Set the goal');
   setBtn.onclick = confirm;
-  goalInput.onkeydown = function (e) { if (e.key === 'Enter') confirm(); };
+  // Enter/Shift+Enter is owned by _ecgGrowingInput (Enter confirms, Shift+Enter
+  // is a newline) — do NOT re-bind onkeydown here or the newline is lost.
   goalRow.appendChild(setBtn);
   dock.appendChild(goalRow);
 

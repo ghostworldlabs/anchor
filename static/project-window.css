@@ -76,8 +76,15 @@
 .ecg-msg .act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .ecg-divider{align-self:center;color:var(--text-dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;border-top:1px dashed var(--border);width:100%;text-align:center;padding-top:8px}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
-.ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:center}
-.ecg-saybox input{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}
+.ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end}
+.ecg-saybox input,.ecg-saybox textarea{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}
+/* (2026-07-31) The say line is a GROWING textarea, not a one-line input. John
+   dictates whole paragraphs into it ("it didn't show everything I was typing
+   ... the window didn't grow as I spoke"); a single-line input scrolled the
+   text out of sight, so he could not read back what he had just said. It
+   starts one row tall and grows with the content up to ~40% of the viewport,
+   then scrolls. Enter sends; Shift+Enter is a newline. */
+.ecg-saybox textarea{resize:vertical;overflow-y:auto;max-height:40vh;min-height:34px;line-height:1.45;font-family:inherit}
 .ecg-footer{padding:6px 16px 10px;font-size:10px;color:var(--text-dim);text-align:center;font-family:ui-monospace,Consolas,monospace}
 
 /* ── iPad / touch dictation target (2026-07-26 hardening, P0.3) ─────────────
