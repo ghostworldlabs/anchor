@@ -544,11 +544,24 @@ def test_boneyard_server_render_escapes_xss(env):
 
     p = _XSSAudit()
     p.feed(html)
-    # No element may carry a live event handler sourced from the payload.
+    # No element may carry a live event handler sourced from the PAYLOAD.
+    #
+    # (2026-07-30) This used to reject `onerror` anywhere in the document, which
+    # made it fail on Anchor's OWN first-party icon fallback — every tile icon
+    # carries onerror="this.style.display='none'" so a missing brand asset
+    # collapses quietly. A blanket ban therefore went permanently red the day
+    # the steward/workbench tile icons shipped, and a permanently red XSS test
+    # guards nothing. The assertion now allows exactly that one static
+    # first-party handler and still fails on ANY other handler value — an
+    # injected onerror=alert(1) trips it as before.
+    _FIRST_PARTY_HANDLERS = {"this.style.display='none'"}
     for tag, attrs in p.els:
         for k in attrs:
-            assert k.lower() not in ("onmouseover", "onerror"), \
-                f"live handler attribute injected: {tag} {k}={attrs.get(k)!r}"
+            if k.lower() not in ("onmouseover", "onerror"):
+                continue
+            val = (attrs.get(k) or "").strip()
+            assert val in _FIRST_PARTY_HANDLERS, \
+                f"live handler attribute injected: {tag} {k}={val!r}"
     # No injected <img> tag with an onerror — the payload tag is text, not markup.
     assert "<img src=x onerror=" not in html, \
         "the <img onerror> payload must be escaped, not rendered as a tag"

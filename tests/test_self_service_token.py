@@ -202,32 +202,61 @@ def test_token_control_visibility_tracks_auth_home(env):
 # The global fetch wrapper source is present + guarded in BOTH pages
 # ════════════════════════════════════════════════════════════════════════════
 
+# RETRY, DO NOT RELOAD. On a 401 with auth on, BOTH pages re-prompt and then
+# RE-ISSUE the original request with the new token. They must NOT reload:
+# location.reload() discards whatever the user had typed — the steward chamber's
+# goal input, the High Seat saybox draft, the in-flight act — which after a token
+# rotation is guaranteed data loss on the first click (John's friction record
+# docs/friction/2026-07-28-high-seat-token-reload-loses-input.md). Home was fixed
+# 2026-07-28; the project window carried the old reload until 2026-07-30.
+def _strip_line_comments(js):
+    """Drop ``//`` line comments so the checks below read CODE, not prose.
+
+    Both wrappers carry a comment explaining why they no longer call
+    location.reload() — scanning raw source would match that explanation and
+    report the very bug it documents.
+    """
+    out = []
+    for line in js.split("\n"):
+        i = line.find("//")
+        # not inside a string/URL ("https://") — these comments start the line
+        if i != -1 and line[:i].strip() in ("", "*"):
+            line = line[:i]
+        out.append(line)
+    return "\n".join(out)
+
+
+def _assert_retry_not_reload(src, where):
+    assert "window.__anchorFetchWrapped" in src, where
+    assert "if (window.__anchorFetchWrapped) return;" in src, where
+    code = _strip_line_comments(src)
+    m = re.search(r"status === 401", code)
+    assert m, "%s: wrapper must check status === 401" % where
+    seg = code[m.start():m.start() + 1200]
+    assert "ANCHOR_AUTH_REQUIRED" in seg, where
+    assert "setAnchorToken(" in seg, where
+    retry = seg.find("_origFetch(")
+    assert retry != -1, (
+        "%s: a 401 must RE-ISSUE the original request with the new token" %
+        where)
+    # A reload still exists as the HONEST LAST RESORT (a genuinely wrong token,
+    # or a Request whose body is already consumed). What must never happen is
+    # reloading INSTEAD of retrying — that is the data-loss path.
+    reload_at = seg.find("location.reload()")
+    assert reload_at == -1 or retry < reload_at, (
+        "%s: the retry must come BEFORE any reload — reloading first discards "
+        "the user's typed input (goal / saybox draft) on the first click "
+        "after a token rotation" % where)
+
+
 def test_fetch_wrapper_present_project_window(env):
-    """The project window installs the guarded global fetch wrapper that reloads
-    on a 401 only when auth is on."""
-    js = env["gui"]._PROJECT_WINDOW_JS
-    assert "window.__anchorFetchWrapped" in js
-    assert "if (window.__anchorFetchWrapped) return;" in js
-    # 401 + auth-on gate + reprompt + reload.
-    m = re.search(r"status === 401", js)
-    assert m, "wrapper must check status === 401"
-    seg = js[m.start():m.start() + 400]
-    assert "ANCHOR_AUTH_REQUIRED" in seg
-    assert "setAnchorToken()" in seg
-    assert "location.reload()" in seg
+    """Project window: wrapper installed, and a 401 RETRIES (never reloads)."""
+    _assert_retry_not_reload(env["gui"]._PROJECT_WINDOW_JS, "project window")
 
 
 def test_fetch_wrapper_present_home(env):
-    """The home dashboard installs the guarded global fetch wrapper too."""
-    html = _home_html(env["gui"])
-    assert "window.__anchorFetchWrapped" in html
-    assert "if (window.__anchorFetchWrapped) return;" in html
-    m = re.search(r"status === 401", html)
-    assert m, "wrapper must check status === 401"
-    seg = html[m.start():m.start() + 400]
-    assert "ANCHOR_AUTH_REQUIRED" in seg
-    assert "setAnchorToken()" in seg
-    assert "location.reload()" in seg
+    """Home dashboard: wrapper installed, and a 401 RETRIES (never reloads)."""
+    _assert_retry_not_reload(_home_html(env["gui"]), "home")
 
 
 # ════════════════════════════════════════════════════════════════════════════

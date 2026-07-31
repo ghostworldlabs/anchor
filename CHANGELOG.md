@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-07-30 — Steward usable with auth on · workbench tile collapsed
+
+- **The steward can set a goal again.** Three independent faults made every
+  steward act impossible on a token-authed dashboard: the POSTs sent the token
+  as `?token=` (the POST middleware never reads the query → 401 → a re-prompt
+  for a token the window already held); `handle_ecgberht_stand_up` was declared
+  `migrated=True` but never registered in `_MIGRATED_HANDLERS` (→ 404 "Unknown
+  endpoint"); and `do_POST` dispatched on the raw request line, so any POST
+  carrying a query missed its exact route row. All three fixed and gated.
+- **Two more dead endpoints found by the new route gate** — `GET
+  /api/rnd/friction` and `POST /api/rnd/journal_friction` had the same missing
+  registration and no legacy fallback. The friction journal's own read endpoint
+  was one of them.
+- **A 401 now retries instead of reloading in the project window** (home already
+  did, since 2026-07-28) — a reload discarded the goal input / saybox draft on
+  the first click after a token rotation.
+- **Workbench tile opens COLLAPSED on project dashboards**, with a click-to-
+  expand / click-to-collapse control on the tile summary.
+- **Jarvis seal label is the "Server"** (was "Salver", which reads wrong at a
+  glance). Image filenames unchanged.
+- **Repaired two long-dead tests**: the fetch-wrapper contract tests asserted a
+  `location.reload()` the product had deliberately dropped, and
+  `test_token_hygiene_lifecycle` had never run a single secret-absence
+  assertion. Both now assert the real contract (the hygiene scan is
+  mutation-checked).
+- **Standing rule added** (DECISION-LOG): auth-off green is not green — any wave
+  touching a mutating endpoint must add an auth-ON case asserting the outcome.
+
 ## v1.0.0 — 2026-07-23
 
 First shareable product release of Anchor + integrated Skill Foundry skills.

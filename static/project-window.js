@@ -18,12 +18,52 @@
   window.__anchorFetchWrapped = true;
   var _origFetch = window.fetch.bind(window);
   var prompting = false;
+  // Rewrite a ?token=… query with the CURRENT token (the GET transport gates
+  // on the query, so a retry must refresh it there too). Same helper the home
+  // page carries.
+  function _retok(u) {
+    try {
+      var t = _anchorToken();
+      if (!t) return u;
+      return String(u).replace(/([?&]token=)[^&]*/,
+                               '$1' + encodeURIComponent(t));
+    } catch (e) { return u; }
+  }
   window.fetch = function () {
-    return _origFetch.apply(null, arguments).then(function (resp) {
+    var _args = arguments;
+    return _origFetch.apply(null, _args).then(function (resp) {
       if (resp && resp.status === 401 && window.ANCHOR_AUTH_REQUIRED && !prompting) {
         prompting = true;
+        // RETRY, DO NOT RELOAD (2026-07-30) — porting the fix the HOME page
+        // already carries (2026-07-28). location.reload() threw away
+        // everything the user had typed: in THIS window that is the steward
+        // chamber's goal input and the saybox draft. After a token rotation
+        // that is guaranteed data loss on the first click. We still hold the
+        // original arguments, so re-issue the SAME request with the new token.
         try {
-          if (setAnchorToken()) { location.reload(); }
+          if (setAnchorToken()) {
+            prompting = false;
+            var a0 = _args[0], a1 = _args[1];
+            if (typeof a0 === 'string') {
+              var opts = a1 ? Object.assign({}, a1) : undefined;
+              if (opts && opts.headers) {
+                try {
+                  var h = new Headers(opts.headers);
+                  if (h.has('X-Anchor-Token')) h.set('X-Anchor-Token', _anchorToken());
+                  opts.headers = h;
+                } catch (e) {}
+              }
+              return _origFetch(_retok(a0), opts).then(function (r2) {
+                // Still refused with a fresh token — the token is wrong, not
+                // stale. Reload is the honest last resort.
+                if (r2 && r2.status === 401) location.reload();
+                return r2;
+              });
+            }
+            // Non-string input (a Request): its body may already be consumed,
+            // so a retry is not safe. Fall back to reload.
+            location.reload();
+          }
         } finally {
           prompting = false;
         }
