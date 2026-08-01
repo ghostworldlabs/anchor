@@ -75,8 +75,10 @@ HOST_ADAPTER_CONTRACTS = {
     "claude": {
         "mechanism": "pointer_junction",
         "target_description": (
-            "~/.claude/skills/<id> is junction/symlink/pointer ONLY → "
-            "SKILLS_ROOT/<id>. Never a second full product copy."
+            "~/.claude/skills/<id> is symlink/junction → SKILLS_ROOT/<id>, "
+            "else a MARKED full copy (v1.1.3 last resort — always loadable, "
+            "tracked by its marker, refreshed on re-onboard). Never an "
+            "untracked second product copy, never a marker-only dir."
         ),
         "config_path": "~/.claude/skills/<id>",
     },
@@ -441,7 +443,13 @@ def anchor_env_path(home=None) -> Path:
 
 
 def _win_create_dir_symlink(link: Path, target: Path) -> bool:
-    """Best-effort Windows directory symlink via ctypes (no shell)."""
+    """Best-effort Windows directory symlink via ctypes (no shell).
+
+    NOTE (v1.1.3): this creates a SYMLINK — the ``0x2`` flag is
+    ``ALLOW_UNPRIVILEGED_CREATE``, which only works with Developer Mode ON. It
+    was historically mislabeled "junction". Real junctions (which need NO
+    privilege on stock Windows) are :func:`_win_create_junction`.
+    """
     if os.name != "nt":
         return False
     try:
@@ -463,77 +471,161 @@ def _win_create_dir_symlink(link: Path, target: Path) -> bool:
     return bool(rc)
 
 
-def _try_link_skill(link: Path, target: Path) -> str:
-    """Create junction/symlink, else pointer marker dir.
+def _win_create_junction(link: Path, target: Path) -> bool:
+    """Create a REAL directory junction (``mklink /J``) — stock-Windows-safe.
 
-    Returns mechanism label: ``symlink`` | ``junction`` | ``pointer``.
-    Never copies product skill bytes into ``link``.
+    Junctions require NO admin rights and NO Developer Mode, unlike symlinks —
+    this is the mechanism that makes skill registration actually work on a
+    default collaborator box (v1.1.3 share-fix; the old chain fell through to
+    a pointer-marker dir Claude Code cannot read, reported as "registered").
+    ``mklink`` is a cmd builtin, so it is invoked through ``cmd /c``.
+    Junction targets must be absolute.
     """
-    target = Path(target)
-    link = Path(link)
-    if link.exists() or link.is_symlink():
-        # Already a link/pointer we own → leave; dual full tree is refused
-        # by callers that inspect product bytes.
-        if link.is_symlink():
-            return "symlink"
-        if (link / CLAUDE_POINTER_MARKER).is_file():
-            return "pointer"
-        # Pre-existing foreign dir: do not clobber.
-        raise SkillsRootError(
-            "claude-pointer-target-exists-not-pointer:%s" % link
-        )
-
-    link.parent.mkdir(parents=True, exist_ok=True)
-
-    # 1) pathlib symlink (works when OS/permissions allow).
+    if os.name != "nt":
+        return False
+    import subprocess
     try:
-        link.symlink_to(target, target_is_directory=True)
-        return "symlink"
+        proc = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(Path(target).resolve())],
+            capture_output=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and Path(link).exists()
+
+
+def _is_dir_junction(p: Path) -> bool:
+    """True iff ``p`` is a Windows directory junction (reparse, not symlink)."""
+    if os.name != "nt":
+        return False
+    try:
+        st = os.stat(str(p), follow_symlinks=False)
     except OSError:
-        pass
+        return False
+    # FILE_ATTRIBUTE_REPARSE_POINT and not a symlink → junction (3.8-safe;
+    # Path.is_junction() only exists on 3.12+).
+    if not (getattr(st, "st_file_attributes", 0) & 0x400):
+        return False
+    try:
+        return not Path(p).is_symlink()
+    except OSError:
+        return False
 
-    # 2) Windows CreateSymbolicLinkW (no shell / mklink).
-    if _win_create_dir_symlink(link, target):
-        if link.exists() or link.is_symlink():
-            return "junction"
 
-    # 3) Documented non-copy load: directory with pointer marker only.
-    # Product bytes stay under SKILLS_ROOT; Claude farm holds no second tree.
-    # Prefer a relative target so hermetic installs never embed C:\Users\...
-    # absolute paths (stranger-zip author-secret scan).
-    link.mkdir(parents=True, exist_ok=False)
+#: Forced link mode for the stranger-sandbox / tests: ``auto`` (default) walks
+#: the full symlink → junction → copy chain; ``junction`` skips the symlink
+#: attempts; ``copy`` goes straight to the full-copy fallback. Lets acceptance
+#: runs exercise the exact mechanism a no-DevMode / no-admin collaborator box
+#: would land on, from a box where symlinks happen to work.
+LINK_MODE_ENV = "ANCHOR_SKILLS_LINK_MODE"
+
+
+def _copy_skill_with_marker(link: Path, target: Path) -> str:
+    """FULL-COPY fallback: real bytes Claude can load + our ownership marker.
+
+    The marker file keeps the dual-copy law satisfied and re-onboard
+    idempotent: line 1 is the (relative when possible) target it mirrors —
+    :func:`read_claude_pointer_target` resolves it — and line 2 records the
+    mechanism. A copy goes stale when SKILLS_ROOT updates; re-onboard
+    refreshes it (the marker marks it OURS, so it is never refused).
+    """
+    import shutil as _sh
+    _sh.copytree(str(target), str(link))
     marker = link / CLAUDE_POINTER_MARKER
     try:
         dest = os.path.relpath(str(target.resolve()), str(link.resolve()))
     except (OSError, ValueError):
-        try:
-            dest = os.path.relpath(str(target), str(link.parent))
-        except (OSError, ValueError):
-            # Last resort: basename-only relative form (same home tree layout).
-            dest = os.path.join("..", "..", "..", "skills", target.name)
-            dest = dest.replace("\\", "/")
-    # Normalize separators for portable markers.
+        dest = os.path.join("..", "..", "..", "skills", target.name)
     dest = str(dest).replace("\\", "/")
-    marker.write_text(dest + "\n", encoding="utf-8", newline="\n")
-    return "pointer"
+    marker.write_text(dest + "\nmechanism: copy\n", encoding="utf-8",
+                      newline="\n")
+    return "copy"
+
+
+def _try_link_skill(link: Path, target: Path) -> str:
+    """Register one skill for Claude: symlink → junction → FULL COPY.
+
+    Returns the mechanism label: ``symlink`` | ``junction`` | ``copy``.
+    v1.1.3 share-fix: the old last resort — a directory holding ONLY a pointer
+    marker file — is retired. Claude Code cannot read a marker dir (no
+    SKILL.md), yet onboard reported the skill "registered": the classic
+    stranger-install failure on a no-DevMode / no-admin Windows box. Every
+    mechanism this chain can now return leaves a tree Claude actually loads.
+    A pre-existing legacy marker-only dir is UPGRADED in place (removed, then
+    re-linked via the chain) so a broken install heals on re-onboard.
+    """
+    target = Path(target)
+    link = Path(link)
+    mode = (os.environ.get(LINK_MODE_ENV) or "auto").strip().lower()
+
+    if link.exists() or link.is_symlink():
+        if link.is_symlink():
+            return "symlink"
+        if _is_dir_junction(link):
+            return "junction"
+        marker = link / CLAUDE_POINTER_MARKER
+        if marker.is_file():
+            if (link / "SKILL.md").is_file():
+                return "copy"  # our v1.1.3 copy fallback — already installed
+            # Legacy pointer-only dir (Claude can't read it): heal in place.
+            import shutil as _sh
+            _sh.rmtree(str(link), ignore_errors=True)
+        else:
+            # Pre-existing foreign dir: do not clobber.
+            raise SkillsRootError(
+                "claude-pointer-target-exists-not-pointer:%s" % link
+            )
+
+    link.parent.mkdir(parents=True, exist_ok=True)
+
+    if mode == "copy":
+        return _copy_skill_with_marker(link, target)
+
+    if mode != "junction":
+        # 1) pathlib symlink (works when OS/permissions allow).
+        try:
+            link.symlink_to(target, target_is_directory=True)
+            return "symlink"
+        except OSError:
+            pass
+
+        # 2) Windows CreateSymbolicLinkW (no shell / mklink) — ALSO a symlink
+        # (needs Developer Mode); honestly labeled since v1.1.3.
+        if _win_create_dir_symlink(link, target):
+            if link.exists() or link.is_symlink():
+                return "symlink"
+
+    # 3) REAL directory junction — works on stock Windows, no privileges.
+    if _win_create_junction(link, target):
+        return "junction"
+
+    # 4) FULL COPY — always loadable, marked as ours.
+    return _copy_skill_with_marker(link, target)
 
 
 def read_claude_pointer_target(link: Path) -> Path | None:
-    """Resolve where a Claude adapter path points (symlink or marker)."""
+    """Resolve where a Claude adapter path points (symlink/junction/marker).
+
+    Marker parsing reads the FIRST line only (v1.1.3 copy-fallback markers
+    carry a second ``mechanism: copy`` line; legacy single-line markers are
+    unchanged). A junction resolves via ``os.path.realpath`` like a symlink.
+    """
     link = Path(link)
     try:
-        if link.is_symlink():
+        if link.is_symlink() or _is_dir_junction(link):
             return Path(os.path.realpath(link))
     except OSError:
         pass
     marker = link / CLAUDE_POINTER_MARKER
     if marker.is_file():
         try:
-            raw = marker.read_text(encoding="utf-8").strip()
+            raw = marker.read_text(encoding="utf-8")
         except OSError:
             return None
-        if raw:
-            p = Path(raw)
+        first = (raw.splitlines() or [""])[0].strip()
+        if first:
+            p = Path(first)
             if not p.is_absolute():
                 # Marker is relative to the skill link dir (or its parent).
                 p = (link / p).resolve()
@@ -542,7 +634,14 @@ def read_claude_pointer_target(link: Path) -> Path | None:
 
 
 def inspect_claude_adapter(home, skill_id: str, *, skills_root=None) -> dict:
-    """Inspect Claude path for skill_id — pointer-only proof for tests."""
+    """Inspect Claude path for skill_id — pointer-only proof for tests.
+
+    v1.1.3: junction- and copy-aware. A directory JUNCTION (the stock-Windows
+    mechanism) counts like a symlink; a marker-carrying FULL COPY (the last
+    resort) is OUR tracked install — ``is_copy`` True, never ``dual_copy``.
+    ``dual_copy`` remains exactly: a full SKILL.md tree with NO link/junction
+    and NO marker (an untracked second product tree).
+    """
     link = claude_skills_home(home) / skill_id
     root = (
         Path(skills_root)
@@ -554,7 +653,9 @@ def inspect_claude_adapter(home, skill_id: str, *, skills_root=None) -> dict:
         "path": str(link),
         "exists": link.exists() or link.is_symlink(),
         "is_symlink": False,
+        "is_junction": False,
         "is_pointer_marker": False,
+        "is_copy": False,
         "pointer_only": False,
         "dual_copy": False,
         "target": None,
@@ -567,8 +668,11 @@ def inspect_claude_adapter(home, skill_id: str, *, skills_root=None) -> dict:
         out["is_symlink"] = link.is_symlink()
     except OSError:
         out["is_symlink"] = False
+    out["is_junction"] = _is_dir_junction(link)
     marker = link / CLAUDE_POINTER_MARKER
-    out["is_pointer_marker"] = marker.is_file() and not out["is_symlink"]
+    out["is_pointer_marker"] = (marker.is_file() and not out["is_symlink"]
+                                and not out["is_junction"])
+    out["is_copy"] = out["is_pointer_marker"] and (link / "SKILL.md").is_file()
     tgt = read_claude_pointer_target(link)
     if tgt is not None:
         out["target"] = str(tgt)
@@ -580,9 +684,10 @@ def inspect_claude_adapter(home, skill_id: str, *, skills_root=None) -> dict:
         except OSError:
             out["matches_skills_root"] = Path(tgt) == expected
     else:
-        # Full directory without marker/symlink = dual-copy smell.
+        # Full directory without marker/symlink/junction = dual-copy smell.
         skill_md = link / "SKILL.md"
-        out["dual_copy"] = skill_md.is_file() and not out["is_symlink"]
+        out["dual_copy"] = (skill_md.is_file() and not out["is_symlink"]
+                            and not out["is_junction"])
         out["pointer_only"] = False
     return out
 

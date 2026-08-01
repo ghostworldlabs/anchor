@@ -1226,6 +1226,17 @@ _PROACTIVE_SUMMARY_ENABLED = (
     os.environ.get("ANCHOR_PROACTIVE_SUMMARY", "").strip().lower()
     in ("1", "true", "yes", "on"))
 
+
+def _proactive_summary_pref(raw) -> bool:
+    """v1.1.3: the server main()'s background-summary decision, testable.
+
+    False ONLY for an EXPLICIT off (``0/false/no/off``) — the shared-install
+    opt-out ``share_onboard.spawn_anchor_server`` sets, so Anchor never spends
+    a collaborator's subscription without an explicit action. Unset/anything
+    else keeps the author default: force-on in ``main()``.
+    """
+    return (raw or "").strip().lower() not in ("0", "false", "no", "off")
+
 _zombie_hunter_started = False
 _ZH_NODE_PORT = 48484
 # System-Wide Sentinel Node server.js (multi-engine Burn Ledger GUI).
@@ -6991,6 +7002,15 @@ def generate_html(projects, tasks, inbox):
     steward_label = _stew["label"]
     steward_hs_name = _stew["high_seat_name"]
     steward_projects_hint = _stew["projects_hint"]
+    # The HIGH SEAT src, resolved ONCE for the tile <img> and the boot global.
+    # _steward_ui() setdefaults MISSING fields only, so a saved profile
+    # carrying a BLANK high_seat would render a bare /vendor/brand/ src; a
+    # blank degrades to the locked Ecgberht original at its shipped path.
+    if str(steward_hs_icon or "").strip():
+        steward_hs_src = "/vendor/brand/%s?v=%s" % (steward_hs_icon, BUILD_ID)
+    else:
+        steward_hs_src = (
+            "/vendor/brand/ecgberht-portfolio-high-seat.jpg?v=%s" % BUILD_ID)
     # Boot global for the High Seat overlay JS (loads before high-seat.js):
     # display names + icons in the overlay resolve through this, so the
     # overlay speaks the same livery as the tiles.
@@ -6998,7 +7018,7 @@ def generate_html(projects, tasks, inbox):
         "key": _stew["key"],
         "label": steward_label,
         "seal_src": "/vendor/brand/%s?v=%s" % (steward_seal_icon, BUILD_ID),
-        "high_seat_src": "/vendor/brand/%s?v=%s" % (steward_hs_icon, BUILD_ID),
+        "high_seat_src": steward_hs_src,
         "seal_name": _stew["seal_name"],
         "high_seat_name": steward_hs_name,
     })
@@ -7801,7 +7821,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <details class="dash-tile tile-seat" id="tile-highseat"
                ontoggle="if(this.open)ecgHighSeatMountInline()">
         <summary title="{steward_label} — the {steward_hs_name} (all your projects, one place to steer them)">
-          <img class="tile-ico" src="/vendor/brand/{steward_hs_icon}?v={BUILD_ID}" alt="" onerror="this.style.display='none'" />
+          <img class="tile-ico" src="{steward_hs_src}" alt="" onerror="this.style.display='none'" />
           {steward_hs_name}
           <span class="tile-count">{steward_label} &mdash; all your projects, one place to steer them</span>
           <span class="ecg-hs-badge" id="ecgHighSeatBadge"></span>
@@ -8175,6 +8195,33 @@ window.ANCHOR_AUTH_REQUIRED = {auth_required_js};
 // every mutating POST (X-Anchor-Build); a mismatch renders the reload banner.
 window.ANCHOR_BOOT = {anchor_boot_js};
 function _anchorToken() {{ try {{ return localStorage.getItem('anchor_token') || ''; }} catch (e) {{ return ''; }} }}
+// ── One-time launcher token hand-off (v1.1.3 share-fix) ──
+// launch_anchor_dashboard.py opens this page ONCE as /?token=<minted>. Store
+// it (localStorage — same slot the manual paste uses), mint the HttpOnly auth
+// cookie so page NAVIGATION (/project/, /report/, term_ws…) authenticates,
+// then STRIP the token from the URL/history. Loopback-only by construction;
+// after this runs no page URL carries the token again.
+(function () {{
+    try {{
+        var _q = new URLSearchParams(window.location.search);
+        var _t = (_q.get('token') || '').trim();
+        if (!_t) return;
+        try {{ localStorage.setItem('anchor_token', _t); }} catch (e) {{}}
+        try {{
+            fetch('/api/auth/login', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json',
+                            'X-Anchor-Token': _t }},
+                body: JSON.stringify({{ token: _t }})
+            }});
+        }} catch (e) {{}}
+        _q.delete('token');
+        var _rest = _q.toString();
+        history.replaceState(null, '',
+            window.location.pathname + (_rest ? '?' + _rest : '') +
+            window.location.hash);
+    }} catch (e) {{}}
+}})();
 function setAnchorToken(opts) {{
     const cur = _anchorToken();
     // Do NOT re-offer a token the server just REJECTED (2026-07-28). The prompt
@@ -18390,15 +18437,26 @@ def main():
     # The live server proactively (re)generates the cached project summary on
     # rescan/discovery (Wave 5). Unit tests leave this off (default) so importing
     # the module never spawns a background model job.
-    _PROACTIVE_SUMMARY_ENABLED = True
-    # v11.1 Wave 1 FIX-3: the keystone's background transcript-refine summary
-    # (terminal_session._trigger_background_source_summary) gates on the
-    # ANCHOR_PROACTIVE_SUMMARY env flag — it reads the env directly to avoid an
-    # import cycle (terminal_session must not import anchor_gui). Set it here in
-    # the SERVER main() path (never imported, never run in tests/healthcheck) so
-    # the refine actually fires in production. Tests/the 5 AM healthcheck never
-    # call main(), so they keep the flag unset/OFF and never spawn live claude.
-    os.environ["ANCHOR_PROACTIVE_SUMMARY"] = "1"
+    #
+    # v1.1.3 share-fix: an EXPLICIT off (ANCHOR_PROACTIVE_SUMMARY=0/off/false/no)
+    # is now honored — background summaries spawn `claude` against the HOST'S
+    # subscription with zero user action, so shared installs default them OFF
+    # (share_onboard.spawn_anchor_server sets the flag; summaries stay available
+    # on demand — the render path always reads the cache, and regenerate is an
+    # explicit click). An UNSET flag keeps today's author behavior: force-on.
+    if not _proactive_summary_pref(os.environ.get("ANCHOR_PROACTIVE_SUMMARY")):
+        _PROACTIVE_SUMMARY_ENABLED = False
+    else:
+        _PROACTIVE_SUMMARY_ENABLED = True
+        # v11.1 Wave 1 FIX-3: the keystone's background transcript-refine summary
+        # (terminal_session._trigger_background_source_summary) gates on the
+        # ANCHOR_PROACTIVE_SUMMARY env flag — it reads the env directly to avoid
+        # an import cycle (terminal_session must not import anchor_gui). Set it
+        # here in the SERVER main() path (never imported, never run in
+        # tests/healthcheck) so the refine actually fires in production.
+        # Tests/the 5 AM healthcheck never call main(), so they keep the flag
+        # unset/OFF and never spawn live claude.
+        os.environ["ANCHOR_PROACTIVE_SUMMARY"] = "1"
     port = 8777
     no_browser = "--no-browser" in sys.argv
     if "--port" in sys.argv:

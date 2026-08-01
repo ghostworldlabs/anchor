@@ -359,7 +359,7 @@ def _is_inside_repo(path: Path) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Service Seam + Foreground Fallback (Wave 7)
+# Service seam (optional) + terminal extra (v1.1.3 honesty rewrite)
 # --------------------------------------------------------------------------- #
 def pick_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -368,75 +368,105 @@ def pick_free_port() -> int:
 
 
 def register_service(token: str) -> dict:
+    """OPTIONAL external service-manager seam (``ANCHOR_SERVICE_CMD``).
+
+    v1.1.3 HONESTY REWRITE. The old implementation tried ``import
+    anchor.registrar`` — which can NEVER succeed anywhere, because the module
+    file ``anchor.py`` shadows the ``anchor/`` directory on every path entry —
+    and its fallback printed ``foreground fallback port: N`` for a port
+    NOTHING was listening on (no ``ANCHOR_FOREGROUND_CMD`` on a collaborator
+    box). A stranger install therefore ended with a confident message about a
+    service that did not exist.
+
+    Now: when ``ANCHOR_SERVICE_CMD`` is set (an admin-provided service
+    wrapper, e.g. an NSSM script), run it and report honestly. Otherwise
+    report ``no_service_manager`` — the SUPPORTED start path is
+    ``launch_anchor_dashboard.py`` (``share_onboard.spawn_anchor_server``),
+    which genuinely starts the server. No fake ports, ever.
+    """
     svc_cmd = os.environ.get("ANCHOR_SERVICE_CMD")
-    fg_cmd = os.environ.get("ANCHOR_FOREGROUND_CMD")
+    if not svc_cmd:
+        return {
+            "status": "no_service_manager",
+            "hint": "start Anchor with: python launch_anchor_dashboard.py "
+                    "(or the desktop icon); run it again after a reboot",
+        }
     env = os.environ.copy()
     env["ANCHOR_TOKEN"] = token
-
-    if svc_cmd:
+    try:
+        subprocess.run(
+            svc_cmd.split() + ["anchor.server"],
+            env=env, check=True, capture_output=True, text=True,
+        )
+        return {"status": "registered"}
+    except (OSError, subprocess.SubprocessError) as e:
+        # Best-effort stub rollback (kept from the old seam contract).
         try:
-            # Note: We pass "anchor.server" as argv to the stub to satisfy the test.
-            # Real argv will be assembled by the registrar in Wave 8.
-            subprocess.run(
-                svc_cmd.split() + ["anchor.server"],
-                env=env,
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            return {"status": "registered"}
-        except subprocess.CalledProcessError as e:
-            # Check if midway failure to rollback
-            if e.stdout and "partial" in e.stdout or e.stderr and "partial" in e.stderr or (e.stdout == "" and e.stderr == ""):
-                # Stub rollback via 'rollback' arg
-                try:
-                    subprocess.run(svc_cmd.split() + ["rollback"], capture_output=True)
-                except Exception:
-                    pass
-                rolled_back = True
-            else:
-                rolled_back = False
-
-            # Fallback to foreground
-            port = pick_free_port()
-            if fg_cmd:
-                subprocess.Popen(
-                    fg_cmd.split() + ["anchor.server", str(port)],
-                    env=env,
-                    start_new_session=True
-                )
-            return {"status": "foreground_fallback", "port": port, "rolled_back": rolled_back}
-    else:
-        # Wave 11: Call registrar directly
-        try:
-            import anchor.registrar as reg
-            port = pick_free_port()
-            unit = reg.build_registrar_unit(sys.executable, port, token)
-            
-            # Log unit to data dir
-            data_dir = _resolve_data_dir()
-            anchor_dir = data_dir / ".anchor"
-            anchor_dir.mkdir(exist_ok=True)
-            unit_file = anchor_dir / "service-unit"
-            
-            if "text" in unit:
-                unit_file.write_text(unit["text"], encoding="utf-8")
-            else:
-                unit_file.write_text(str(unit["argv"]), encoding="utf-8")
-                
-            return {"status": "registered", "unit": unit}
+            subprocess.run(svc_cmd.split() + ["rollback"], capture_output=True)
         except Exception:
-            # Fallback to foreground
-            port = pick_free_port()
-            if fg_cmd:
-                subprocess.Popen(
-                    fg_cmd.split() + ["anchor.server", str(port)],
-                    env=env,
-                    start_new_session=True
-                )
-            return {"status": "foreground_fallback", "port": port, "rolled_back": False}
+            pass
+        detail = ""
+        if isinstance(e, subprocess.CalledProcessError):
+            detail = ((e.stderr or e.stdout or "").strip() or str(e))[:400]
+        else:
+            detail = str(e)[:400]
+        return {"status": "error", "error": detail, "rolled_back": True}
 
-    return {"status": "skipped_no_cmd"}
+
+def install_terminal_extra(pip_argv=None, env=None) -> dict:
+    """Install the optional ``[terminal]`` extra (pywinpty) on Windows.
+
+    v1.1.3: onboard never installed it, so every collaborator's ConPTY
+    terminal opened EMPTY until a manual ``pip install pywinpty`` (the
+    2026-07-30 friction intake's first fix). Windows-only (the extra is
+    sys_platform-gated in pyproject.toml). A failure DEGRADES honestly —
+    Anchor still runs; the terminal feature reports "real terminal
+    unavailable" — and the returned message says exactly what to run by hand.
+
+    Hermetic-test seams: pass ``pip_argv`` explicitly, set
+    ``ANCHOR_ONBOARD_PIP_CMD`` (a stub command), or set
+    ``ANCHOR_ONBOARD_SKIP_PIP=1`` to skip entirely. Never prints the token,
+    never touches the network unless it genuinely pip-installs.
+    """
+    e = os.environ if env is None else env
+    if (e.get("ANCHOR_ONBOARD_SKIP_PIP") or "").strip().lower() in (
+            "1", "true", "yes", "on"):
+        return {"status": "skipped", "installed": False,
+                "message": "pywinpty install skipped (ANCHOR_ONBOARD_SKIP_PIP)"}
+    if os.name != "nt":
+        return {"status": "skipped_non_windows", "installed": False,
+                "message": "pywinpty is Windows-only; skipped on this OS"}
+    # Presence probe via find_spec — never imports the native DLL, and keeps
+    # this module clean under distro's stdlib-only import scan (``winpty`` is
+    # allowed as an *import* only in pty_manager.py).
+    try:
+        import importlib.util
+        if importlib.util.find_spec("winpty") is not None:
+            return {"status": "already_present", "installed": True,
+                    "message": "pywinpty already installed "
+                               "(real ConPTY terminals available)"}
+    except Exception:
+        pass
+    argv = pip_argv
+    if argv is None:
+        cmd = (e.get("ANCHOR_ONBOARD_PIP_CMD") or "").strip()
+        argv = cmd.split() if cmd else [
+            sys.executable, "-m", "pip", "install", "pywinpty>=2.0"]
+    manual = ('install manually:  pip install "pywinpty>=2.0"  — until then '
+              'the terminal feature reports "real terminal unavailable"')
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "error", "installed": False,
+                "message": "pywinpty install FAILED (%s) — %s" % (exc, manual)}
+    if proc.returncode == 0:
+        return {"status": "installed", "installed": True,
+                "message": "pywinpty installed "
+                           "(real ConPTY terminals enabled)"}
+    tail = ((proc.stderr or proc.stdout or "").strip().splitlines() or [""])[-1]
+    return {"status": "failed", "installed": False,
+            "message": "pywinpty install FAILED (%s) — %s"
+                       % (tail[:200], manual)}
 
 
 # --------------------------------------------------------------------------- #
@@ -511,21 +541,18 @@ def main(argv=None) -> int:
     except Exception as exc:
         print("  WARNING: Could not probe capabilities: %s" % exc)
 
-    print("\nservice setup: next step (run the service-registration step "
-          "to bring up the background dashboard).")
-    
-    # Wave 7: Call register_service
-    print("\nRegistering service ...")
-    with open(tok["path"], "r", encoding="utf-8") as f:
-        token_val = f.read().strip()
-    
-    reg_result = register_service(token_val)
-    print("  service status: %s" % reg_result["status"])
-    if reg_result.get("port"):
-        print("  foreground fallback port: %s" % reg_result["port"])
-    if reg_result.get("rolled_back"):
-        print("  mid-registration rollback occurred.")
-    
+    print("\nOptional terminal extra (pywinpty, Windows) ...")
+    term = install_terminal_extra()
+    print("  " + term["message"])
+
+    # v1.1.3 honesty: there is NO service registration in the share path (the
+    # old step imported a module that can never resolve and printed a port
+    # nothing listened on). The launcher genuinely starts the server.
+    print("\nDone. Start Anchor with:")
+    print("  python launch_anchor_dashboard.py")
+    print("(starts the local server if it is down, wires your token, opens the")
+    print(" dashboard in your browser; run it again after a reboot)")
+
     return 0
 
 

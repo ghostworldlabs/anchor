@@ -6105,6 +6105,16 @@ def check_journal_parity(report: Report):
     name = "journal parity gate (classify + recover)"
     import tempfile as _tf
     import shutil as _shutil
+    # v1.1.3 share-fix: ``tools/`` is a DEV-ONLY package that deliberately does
+    # not ship (dist_manifest.txt / distro._OPTIONAL_FIRST_PARTY). On a shipped
+    # collaborator install its absence is documented, not a correctness failure
+    # — a red banner here would be a false alarm (the locked severity rule), so
+    # the rebuild walk SKIPS with a non-blocking warn instead of failing.
+    import importlib.util as _ilu
+    if _ilu.find_spec("tools") is None:
+        report.warn(name, "tools/ (dev-only rearch package) not present on "
+                          "this install — journal-parity rebuild walk skipped")
+        return
     prev_journal = os.environ.get("ANCHOR_JOURNAL")
     prev_data = os.environ.get("ANCHOR_DATA_DIR")
     tmp = None
