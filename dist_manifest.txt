@@ -144,6 +144,83 @@ auth_warn.py
 # runtime (the first instrumented mutation class — session lifecycle, D1).
 journal.py
 
+# ── Session-lifecycle / reaper / foundry runtime modules (v1.1.3 share-fix) ──
+# THE 2026-07-30 INCIDENT CLASS: these modules exist on the author machine and
+# are imported by anchor_gui.py / job_runner.py / pty_manager.py at RUNTIME
+# (lazily, inside try/except — so `import anchor_gui` stays green while the
+# shipped bundle boots degraded: boot reconcile dies, /api/rnd/orphan_check
+# spams ModuleNotFoundError every ~30-60s, kill containment weakens). They were
+# never listed here, so no collaborator install ever received them (see
+# friction-intake-2026-07-30.md). The import-closure gate in distro.py now
+# refuses a build whose staged .py files import an unstaged first-party module,
+# so this class of gap can never ship silently again.
+# NOTE: reaper/reaper_arming/zombie_hunter are the process-reaping daemon — it
+# ships UNARMED by default (the arming ladder + .anchor/reaper.disarmed brake).
+proc_probe.py
+reaper.py
+reaper_arming.py
+freeze_state.py
+zombie_hunter.py
+tidy_idy_runner.py
+foundry_integrity.py
+foundry_safety.py
+foundry_skills.py
+foundry_acceptance.py
+# Found by the new import-closure gate itself (beyond the friction intake's
+# list): orientation (the /api/rnd/orient_session handler's engine) and parity
+# (the C3 journal↔legacy parity classifier the shipped healthcheck walks).
+# Their own closures resolve entirely to already-shipped modules. The dev-only
+# ``tools/`` package stays unshipped (declared in _OPTIONAL_FIRST_PARTY; its
+# consumers degrade by design and the healthcheck skip-warns without it).
+orientation.py
+parity.py
+
+# ── Share / onboard surface (v1.1.3: the REAL cold-start collaborators use) ──
+# USER-ONBOARD.md documents `.\onboard.cmd` → onboard.ps1 → `python -m
+# share_onboard` as the sole cold-start. Until v1.1.3 that surface only shipped
+# because a side builder (planning/…/_build_clean_ship.py) globbed it in past
+# the manifest; the manifest itself listed only onboard.py. It is now listed
+# HERE so distro.py — the one blessed builder — stages the entire cold-start
+# closure. verify_freeze_manifest is a MODULE-LEVEL import of
+# share_ci_ship_gate (shipping one without the other is an instant
+# ModuleNotFoundError — the friction intake's 12th missing module).
+onboard.cmd
+onboard.ps1
+onboard_cli.py
+onboard_bootstrap.py
+launch_anchor_dashboard.py
+USER-ONBOARD.md
+verify_freeze_manifest.py
+share_capability_matrix.py
+share_ci_ship_gate.py
+share_contracts.py
+share_feedback.py
+share_feedback_intake.py
+share_governance.py
+share_home_config.py
+share_onboard.py
+share_package_matrix.py
+share_publish.py
+share_readiness.py
+share_skill_journal.py
+share_skill_seal.py
+share_skills_root.py
+share_sources.py
+share_topology.py
+share_sources_pin.json
+share_freeze_manifest.json
+share_governance_pack/**
+share_schemas/**
+
+# ── Version + changelog + desktop icon (v1.1.3) ─────────────────────────────
+# VERSION ships so a collaborator install self-reports its real version
+# (friction_journal._anchor_version reads the file beside itself; absent →
+# "unknown", which is exactly what the 2026-07-30 intake had to guess around).
+# anchor.ico is the desktop-shortcut branding USER-ONBOARD.md promises.
+VERSION
+CHANGELOG.md
+anchor.ico
+
 # ── Vendored brand asset (Ghost World Labs mark; pure-data SVG) ─────────────
 vendor/brand/gwl-m-icon.svg
 # Steward persona icon pairs (2026-07-29): the selectable steward UI

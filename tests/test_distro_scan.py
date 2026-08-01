@@ -92,9 +92,10 @@ def test_build_stages_only_selected_files(tmp_path):
     staged = {p.relative_to(out).as_posix()
               for p in out.rglob("*") if p.is_file()}
 
-    # Everything staged (minus the emitted README) is in the manifest selection.
+    # Everything staged (minus the build-time-emitted README + the v1.1.3
+    # thin consumer CLAUDE.md) is in the manifest selection.
     selected = set(report["files"])
-    assert staged - {"README.md"} == selected
+    assert staged - {"README.md", "CLAUDE.md"} == selected
 
     # And data files are absent on disk.
     assert not (out / "DASHBOARD.md").exists()

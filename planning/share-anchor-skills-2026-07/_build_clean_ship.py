@@ -1,9 +1,31 @@
-"""One-shot clean ship package builder (no personal runtime state)."""
+"""One-shot clean ship package builder — THIN WRAPPER (v1.1.3 share-fix).
+
+HISTORY / WHY THIS IS NOW THIN. Until v1.1.3 this script was a SECOND builder:
+it started from ``distro.select_shippable()`` but then hand-globbed ~30 extra
+files past the manifest, never ran the startup-import gate, and PRINTED its
+PII/import scan results instead of failing on them. The package collaborators
+received in the 1.1.x share came from THIS script — which is how eleven
+runtime modules could be missing while every gate stayed green
+(``friction-intake-2026-07-30.md``). Two builders with different file sets was
+the root cause; one must win.
+
+NOW: ``distro.py`` is the ONE blessed builder. The manifest owns the file set
+(the cold-start/share surface this script used to glob is listed there), and
+``distro.build_distro`` FAIL-CLOSES on the no-personal-data scan, the
+import-closure gate, and the startup-import gate. This wrapper only:
+
+  1. points the skill-vendoring env at the author machine's source repos
+     (packaging-time only; never baked into shipped files),
+  2. builds Package B by CALLING ``distro.build_distro`` (any gate hit raises
+     — nothing here filters, downgrades, or prints-and-continues), and
+  3. composes Package A (skills-only) from B's already-gated tree + the
+     cold-start subset, re-running the SAME fail-closed scans over A.
+"""
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import distro
 import share_governance as gov
@@ -18,196 +40,122 @@ os.environ.setdefault("ANCHOR_FOUNDRY_DIR", r"C:\dev\Skill Foundry")
 # Gandalf lives under Foundry on this host (not a separate git root).
 os.environ.setdefault("ANCHOR_GANDALF_DIR", r"C:\dev\Skill Foundry")
 
+# Package A cold-start subset (same onboard shell; no Anchor service/desktop
+# gate). Everything here is ALSO on dist_manifest.txt — this list only picks
+# the skills-only slice out of the gated B surface.
+_PACKAGE_A_FILES = (
+    "onboard.cmd",
+    "onboard.ps1",
+    "onboard_cli.py",
+    "onboard.py",
+    "onboard_bootstrap.py",
+    "share_onboard.py",
+    "share_contracts.py",
+    "share_governance.py",
+    "share_home_config.py",
+    "share_publish.py",
+    "share_readiness.py",
+    "share_skill_journal.py",
+    "share_skill_seal.py",
+    "share_skills_root.py",
+    "share_capability_matrix.py",
+    "share_package_matrix.py",
+    "share_feedback.py",
+    "share_feedback_intake.py",
+    "USER-ONBOARD.md",
+    "vendor_skills.py",
+    "distro.py",
+    "paths.py",
+    "VERSION",
+    "CHANGELOG.md",
+    "share_sources_pin.json",
+    "share_freeze_manifest.json",
+)
+
+# Package A deliberately omits the Anchor app (anchor.py / anchor_gui.py /
+# lanes.py …). onboard.py's uses of those are lazy probes inside try/except
+# that degrade honestly, so they are declared optional FOR A ONLY. Package B
+# passes nothing extra — its closure must be total.
+_PACKAGE_A_OPTIONAL = ("anchor", "lanes", "anchor_gui", "pillar_flags",
+                      "verify_freeze_manifest", "share_ci_ship_gate",
+                      "share_sources", "share_topology", "gandalf")
+
+
+def _scan_package_a(a: Path) -> list:
+    """Fail-closed scans over the composed A tree. Returns [] when clean.
+
+    A's skills live at ``skills/`` (not ``vendor/bundled-skills/``), so their
+    rels are mapped to the vendored form for the scan — vendored payloads are
+    already host-path-scrubbed by vendor_skills and must get the same
+    vendored-file semantics (concrete-PII detectors still run; the first-party
+    entropy heuristic does not false-fail on skill payloads). Exactly mirrors
+    how the same bytes were scanned inside B.
+    """
+    files = []
+    for p in sorted(a.rglob("*")):
+        if not p.is_file():
+            continue
+        rel = str(p.relative_to(a)).replace("\\", "/")
+        if rel.startswith("skills/"):
+            rel = "vendor/bundled-skills/" + rel[len("skills/"):]
+        files.append((rel, p))
+    hits = list(distro.scan_paths(files, root=ROOT))
+    hits.extend(distro.scan_import_closure(
+        files, root=ROOT, extra_optional=_PACKAGE_A_OPTIONAL))
+    return hits
+
 
 def main() -> None:
     if OUT.exists():
         shutil.rmtree(OUT)
     b = OUT / "B-anchor-plus-skills"
     a = OUT / "A-skills-only"
-    b.mkdir(parents=True)
     a.mkdir(parents=True)
 
-    selected = distro.select_shippable()
-    deny = (
-        "tests/",
-        ".anchor/",
-        "planning/",
-        "worktrees/",
-        "general/",
-        "bundle_staging/",
-        "swarm/",
-        "logs/",
-    )
-    staged: list[str] = []
-    for rel in selected:
-        r = rel.replace("\\", "/")
-        if any(r.startswith(d) for d in deny):
-            continue
-        if "test_" in Path(r).name:
-            continue
-        staged.append(rel)
-
-    for p in list(ROOT.glob("share_*.py")) + list(ROOT.glob("share_*.json")):
-        rel = str(p.relative_to(ROOT)).replace("\\", "/")
-        if rel not in staged:
-            staged.append(rel)
-    for base in ("share_governance_pack", "share_schemas"):
-        d = ROOT / base
-        if not d.is_dir():
-            continue
-        for p in d.rglob("*"):
-            if p.is_file():
-                rel = str(p.relative_to(ROOT)).replace("\\", "/")
-                if rel not in staged:
-                    staged.append(rel)
-    for name in (
-        "onboard.py",
-        "onboard.cmd",
-        "onboard.ps1",
-        "onboard_cli.py",
-        "onboard_bootstrap.py",
-        "launch_anchor_dashboard.py",
-        "USER-ONBOARD.md",
-        "vendor_skills.py",
-        "distro.py",
-        "paths.py",
-        "pillar_flags.py",
-        "dist_manifest.txt",
-        "gandalf.py",
-        "anchor.py",
-        "anchor_gui.py",
-    ):
-        if (ROOT / name).is_file() and name not in staged:
-            staged.append(name)
-
-    n = 0
-    for rel in staged:
-        src = ROOT / rel
-        if not src.is_file():
-            continue
-        dst = b / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        n += 1
-    print("product", n)
-
-    # vendor_all writes under dest/vendor/bundled-skills
-    # Override gandalf subdir: on this host it lives at skills/gandalf in Foundry.
+    # Gandalf source override (author layout): skills/gandalf under Foundry.
     sources = []
     for name, env_var, subdir in vs.SKILL_SOURCES:
         if name == "gandalf":
             sources.append((name, "ANCHOR_FOUNDRY_DIR", "skills/gandalf"))
         else:
             sources.append((name, env_var, subdir))
-    report = vs.vendor_all(b, sources=sources)
-    # Scrub host paths in product surface too (not only git-archived skills).
-    for p in b.rglob("*"):
-        if p.is_file():
-            try:
-                vs._scrub_file(p)
-            except Exception:
-                pass
-    print(
-        "vendored",
-        [x.get("name") if isinstance(x, dict) else x for x in report.get("vendored", [])],
-    )
-    print(
-        "skipped",
-        [
-            (x.get("name"), x.get("reason"))
-            for x in report.get("skipped", [])
-            if isinstance(x, dict)
-        ],
-    )
-    vendor_dest = b / "vendor" / "bundled-skills"
-    print(
-        "skills",
-        sorted(
-            p.name
-            for p in vendor_dest.iterdir()
-            if p.is_dir() or p.name == "SOURCES.md"
-        ),
-    )
 
-    files = [
-        (str(p.relative_to(b)).replace("\\", "/"), p)
-        for p in b.rglob("*")
-        if p.is_file()
-    ]
-    hits = distro.scan_paths(files)
-    real = []
-    for h in hits or []:
-        s = str(h).lower()
-        if "high-entropy" in s:
-            continue
-        # Planted detector fixtures / env-placeholder token patterns (not author data)
-        if "c:\\users\\john\\secret" in s or "c:\\\\users\\\\john\\\\secret" in s:
-            continue
-        if "__anchor_t" in s:
-            continue
-        if "body.confirmtoken" in s or "confirm_token" in s:
-            continue
-        if "secret-blocked" in s:
-            continue
-        if "process.env" in s:
-            continue
-        if "token=" in s and "encodeuricomponent" in s:
-            continue
-        real.append(h)
-    print("raw", len(hits or []), "real_concern", len(real))
-    for h in real[:40]:
-        print(" ", h)
+    # ── Package B: the blessed fail-closed build. Any PII / import-closure /
+    # startup-import hit RAISES out of here — no filtering, no downgrade.
+    report = distro.build_distro(output_dir=b, vendor_sources=sources)
+    print("B: %d files staged; all gates clean." % len(report["files"]))
 
-    skills_src = vendor_dest
-    shutil.copytree(skills_src, a / "skills")
+    # ── Package A: skills + governance + the cold-start subset, from B's tree.
+    shutil.copytree(b / "vendor" / "bundled-skills", a / "skills")
     gp = a / "governance"
     gp.mkdir()
     for k, v in gov.build_pack_files().items():
         (gp / k).write_text(v, encoding="utf-8")
-    shutil.copy2(ROOT / "share_sources_pin.json", a / "share_sources_pin.json")
-    shutil.copy2(ROOT / "share_freeze_manifest.json", a / "share_freeze_manifest.json")
-    # Package A cold-start (same onboard shell; no Anchor service/desktop gate).
-    for name in (
-        "onboard.cmd",
-        "onboard.ps1",
-        "onboard_cli.py",
-        "onboard.py",
-        "onboard_bootstrap.py",
-        "share_onboard.py",
-        "share_contracts.py",
-        "share_governance.py",
-        "share_home_config.py",
-        "share_publish.py",
-        "share_readiness.py",
-        "share_skill_journal.py",
-        "share_skills_root.py",
-        "USER-ONBOARD.md",
-        "vendor_skills.py",
-        "distro.py",
-        "paths.py",
-    ):
-        src = ROOT / name
+    for name in _PACKAGE_A_FILES:
+        src = b / name          # prefer the GATED staged copy…
+        if not src.is_file():
+            src = ROOT / name   # …else the source file (e.g. not staged in B)
         if src.is_file():
             shutil.copy2(src, a / name)
-    # Copy share_schemas if present
-    schemas = ROOT / "share_schemas"
-    if schemas.is_dir():
-        shutil.copytree(schemas, a / "share_schemas", dirs_exist_ok=True)
-    govpack = ROOT / "share_governance_pack"
-    if govpack.is_dir():
-        shutil.copytree(govpack, a / "share_governance_pack", dirs_exist_ok=True)
+    for base in ("share_schemas", "share_governance_pack"):
+        d = ROOT / base
+        if d.is_dir():
+            shutil.copytree(d, a / base, dirs_exist_ok=True)
     (a / "README.md").write_text(
-        "# Skills package v1.0\n\n"
+        "# Skills package (A)\n\n"
         "Cold-start: .\\onboard.cmd  (or powershell -File .\\onboard.ps1)\n"
-        "Local edits stay local. Install skills + governance pack.\n",
+        "Local edits stay local. Installs skills + governance pack.\n",
         encoding="utf-8",
     )
-    print(
-        "A",
-        sum(1 for _ in a.rglob("*") if _.is_file()),
-        "B",
-        sum(1 for _ in b.rglob("*") if _.is_file()),
-    )
+
+    # ── Fail-closed A scans (same gates, same severity — a hit RAISES).
+    hits = _scan_package_a(a)
+    if hits:
+        shutil.rmtree(a, ignore_errors=True)
+        raise distro.PersonalDataError(hits)
+    n_a = sum(1 for p in a.rglob("*") if p.is_file())
+    print("A: %d files; all gates clean." % n_a)
+    print("clean-ship OUT:", OUT)
 
 
 if __name__ == "__main__":

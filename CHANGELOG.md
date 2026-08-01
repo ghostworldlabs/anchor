@@ -1,5 +1,67 @@
 # Changelog
 
+## v1.1.3 — share-fix (2026-08-01)
+
+The recovery release for the broken 1.1.x collaborator distribution
+(`friction-intake-2026-07-30.md`). No new product features — this release
+makes a stranger install actually work, honestly.
+
+### Packaging (the root cause)
+- `dist_manifest.txt` now lists the 13 runtime modules stranger installs never
+  received: `proc_probe`, `reaper`, `reaper_arming`, `freeze_state`,
+  `zombie_hunter`, `tidy_idy_runner`, `foundry_integrity`, `foundry_safety`,
+  `foundry_skills`, `foundry_acceptance`, `verify_freeze_manifest`, plus
+  `orientation` and `parity` (found by the new gate itself). Their absence is
+  why boot reconcile died, `/api/rnd/orphan_check` spammed
+  `ModuleNotFoundError`, and session bookkeeping ran degraded on every
+  collaborator install.
+- The entire cold-start surface USER-ONBOARD.md documents (`onboard.cmd` /
+  `onboard.ps1` / `share_onboard` and the rest of the `share_*` closure, the
+  launcher, `USER-ONBOARD.md` itself, `anchor.ico`, `VERSION`, this changelog)
+  is now on the manifest — previously it only shipped because a side build
+  script globbed it in past the manifest.
+- `distro.py` is the ONE blessed builder, and it gained an **import-closure
+  gate**: a build fails if any staged product file imports a first-party
+  module that is not staged (lazy imports included — the exact class the old
+  gates could not see). Declared optional absences: `update_transaction`,
+  `tools/` (dev-only; the healthcheck's parity walk now skip-warns without it
+  instead of false-redding the banner).
+- The package now ships a THIN consumer `CLAUDE.md` (build-time emitted, never
+  the author's) so agents debug cheaply instead of exploring blind.
+- NOTE: shipping `reaper`/`reaper_arming`/`zombie_hunter` ships the
+  process-reaping daemon; it is UNARMED by default (arming ladder + the
+  `.anchor/reaper.disarmed` brake) and boot-reconcile is process-liveness-only.
+
+### Install truthfulness
+- Onboard installs the optional terminal extra (`pywinpty`) on Windows for
+  Package B — real ConPTY terminals work without a manual `pip install`.
+- The fake "service registered / foreground fallback port N" message is gone:
+  there is no Windows service in the share path. `launch_anchor_dashboard.py`
+  (and the desktop icon that targets it) now genuinely starts the server when
+  it is down. After a reboot, run the launcher again.
+- Skill registration for Claude now tries symlink → **directory junction**
+  (works on stock Windows — no admin, no Developer Mode) → **full copy** as
+  the last resort, and reports which mechanism was used. The old silent
+  pointer-marker fallback — a folder Claude Code cannot read, reported as
+  "registered" — is retired.
+- Version stamps aligned: `VERSION` = `pyproject.toml` = this changelog. The
+  previously-circulated "1.1.2" was a hand-stamp no repo state reproduces.
+
+### Security defaults (shared installs)
+- The launcher wires the onboard-minted `ANCHOR_TOKEN` into the server
+  environment and hands it to the browser once (then it is stripped from the
+  URL and carried by localStorage + the HttpOnly auth cookie). Mutating
+  `/api/*` routes and the terminal/WS surface therefore require the token on
+  every collaborator install by default.
+- Background model summaries are OPT-IN on shared installs (the launcher sets
+  `ANCHOR_PROACTIVE_SUMMARY=0`): Anchor never spends a collaborator's Claude
+  subscription without an explicit action. Author-style installs (flag unset)
+  keep proactive summaries on.
+- Known residual (documented, accepted for 1.1.x): with the default
+  `ANCHOR_AUTH_MODE=open`, read-only data-plane GETs stay unauthenticated on
+  loopback. Full data-plane enforcement (`enforce` + the static frontend) is
+  the v1.2 hardening track.
+
 ## 2026-07-30 — Steward usable with auth on · workbench tile collapsed
 
 - **The steward can set a goal again.** Three independent faults made every
