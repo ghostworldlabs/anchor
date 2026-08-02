@@ -69,18 +69,35 @@ loud-on-hole.
   started** under the stub PTY · errors.log ZERO ModuleNotFoundError.
 - Sandbox re-run 10/10; targeted test net 200 passed.
 
+## Status 2026-08-02 (later) — pushed; clean-profile run 8/8; VM gate open
+
+- **Pushed**: `master` + tag `v1.1.3` → origin (`E:\anchor.git`).
+- **Clean-profile VM-approximation run 8/8 PASS** — see
+  `CLEAN-PROFILE-RUN.md` (fresh profile + fresh venv + PATH without
+  git/node/claude): real pywinpty pip-install exercised; 13 skills
+  Claude-readable via junction-only; bare-box AND with-git journeys green;
+  zero ModuleNotFoundError.
+- **Problems journaled** (friction journal): `2026-08-02-02` journal-CLI
+  --help papercut (open) · `-03` wrapper sys.path (resolved 70c50a0) ·
+  `-04` Package-A closure on lazy foundry_integrity (resolved 70c50a0) ·
+  `-05` TRUE-VM verification pending (open — the collaborator-invite gate).
+
 ## What YOU (John) still do before re-sharing
 
-1. **Push** (your call): `git push origin master v1.1.3`
-2. **VM check** (clean Windows box / fresh user account, NO Developer Mode,
-   NO admin): zip + copy `C:\dev\Anchor-ship\clean-ship\B-anchor-plus-skills`
-   over, then `powershell -ExecutionPolicy Bypass -File .\tools\vm_check.ps1`
-   → then walk `.\onboard.cmd` interactively once.
-3. **Tell collaborators**: wipe the old install (delete the old package
+1. **The true VM check** (the one thing this box can't do non-elevated):
+   - EITHER enable Windows Sandbox (elevated):
+     `Enable-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -All`
+     then reboot — after that the run can be fully automated;
+   - OR on any VM/spare machine: copy
+     `C:\dev\Anchor-ship\clean-ship\B-anchor-plus-skills`, run
+     `powershell -ExecutionPolicy Bypass -File .\tools\vm_check.ps1`, then
+     walk `.\onboard.cmd` once interactively.
+   Then resolve journal entry `2026-08-02-05` and invite collaborators.
+2. **Tell collaborators**: wipe the old install (delete the old package
    folder + `%USERPROFILE%\.claude\skills\*` entries that are marker-only
    dirs — or just re-run onboard, which heals them), unzip v1.1.3, run
    `.\onboard.cmd`, then `python launch_anchor_dashboard.py`.
-4. **Your own machine is untouched**: the NSSM service env has no
+3. **Your own machine is untouched**: the NSSM service env has no
    `ANCHOR_PROACTIVE_SUMMARY`, so summaries stay proactive; the launcher
    short-circuits when :8777 is already up. NOTE: next `nssm restart anchor`
    picks up the anchor_gui.py changes (token-bootstrap JS + summarizer flag
