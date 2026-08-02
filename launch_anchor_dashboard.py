@@ -30,9 +30,10 @@ import share_onboard as sob  # noqa: E402
 
 DEFAULT_URL = sob.DEFAULT_LOCAL_DASHBOARD_URL
 # v1.1.3: a COLD anchor_gui boot (large module import + boot reconcile) can
-# take several seconds — 8×0.5s raced it and gave up. 24×0.5s (~12s) covers a
-# slow first boot; an already-running server still short-circuits instantly.
-DEFAULT_RETRIES = 24
+# take several seconds — 8×0.5s raced it and gave up. 40×0.5s (~20s) covers a
+# slow first boot on a modest collaborator box; an already-running server
+# still short-circuits instantly.
+DEFAULT_RETRIES = 40
 DEFAULT_SLEEP_S = 0.5
 
 
@@ -81,7 +82,15 @@ def ensure_dashboard_running(
         if start_fn is not None:
             start_result = start_fn()
         else:
-            start_result = sob.start_package_b_service(home=home, token=token)
+            # v1.1.3: start the server on the PORT this launcher is probing,
+            # so a non-default ANCHOR_DASHBOARD_URL is honored end-to-end.
+            from urllib.parse import urlparse as _up
+            try:
+                _port = _up(url).port
+            except ValueError:
+                _port = None
+            start_result = sob.start_package_b_service(
+                home=home, token=token, port=_port)
         report["start_result"] = start_result
 
         after = before

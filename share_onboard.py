@@ -1592,6 +1592,7 @@ def start_package_b_service(
     start_fn=None,
     home=None,
     token: str | None = None,
+    port: int | None = None,
 ) -> dict:
     """Attempt Package B service start (injectable for hermetic tests).
 
@@ -1599,7 +1600,10 @@ def start_package_b_service(
     dual gate requires a subsequent HTTP probe OK. The production path (no
     inject) calls :func:`spawn_anchor_server` since v1.1.3 — the old
     :func:`onboard.register_service` default was dead code that started
-    nothing (see its docstring).
+    nothing (see its docstring). ``port`` (v1.1.3) rides through to the
+    spawn so a launcher probing a non-default dashboard URL starts the
+    server on THAT port (also what lets the pull-dry-run walk the real
+    launcher on an isolated port beside a live :8777).
     """
     if start_fn is not None:
         try:
@@ -1644,7 +1648,7 @@ def start_package_b_service(
     # means "a spawn was launched" — B success STILL requires the dual gate's
     # subsequent HTTP probe to come back OK (the launcher re-probes).
     try:
-        raw = spawn_anchor_server(token=token)
+        raw = spawn_anchor_server(token=token, port=port)
         started = bool(raw.get("started"))
         codes = []
         if not started:

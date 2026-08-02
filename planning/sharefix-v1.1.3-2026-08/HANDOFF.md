@@ -51,25 +51,36 @@ symlink creation FAILS in-process on this very machine, so the junction path
 is what real collaborators will exercise) · doctor quiet-on-complete /
 loud-on-hole.
 
+## Status 2026-08-02 — effort FINISHED locally (merge + tag done)
+
+- Branch merged to master (`--no-ff`), tagged **v1.1.3** locally. NOT pushed.
+- **Artifact built** (fail-closed, all gates): `C:\dev\Anchor-ship\clean-ship\`
+  — `B-anchor-plus-skills` (989 staged files) + `A-skills-only` (601 files).
+  Built trees now land OUTSIDE the repo (default `<repo-parent>/Anchor-ship`,
+  override `ANCHOR_SHIP_OUT`) so stale product copies never pollute
+  `planning/` again.
+- **Pull dry run 7/7 GREEN** (`tools/pull_dry_run.py`, 2026-08-02): the built
+  B package was copied to a fresh scratch dir (simulated collaborator unzip)
+  and the REAL journey ran against that copy — doctor quiet · hermetic B
+  onboard installs 13 skills all Claude-readable (junction-forced) with
+  readiness **ready** · the REAL `launch_anchor_dashboard.py` genuinely
+  spawned the server on an isolated port with the token wired (exit 0,
+  GET / 200) · tokenless POST 401 / tokened 200 · **New General session
+  started** under the stub PTY · errors.log ZERO ModuleNotFoundError.
+- Sandbox re-run 10/10; targeted test net 200 passed.
+
 ## What YOU (John) still do before re-sharing
 
-1. **Merge + tag** (after your review):
-   ```
-   git checkout master
-   git merge --no-ff sharefix/v1.1.3
-   git tag -a v1.1.3 -m "v1.1.3 share-fix"
-   git push origin master v1.1.3
-   ```
-2. **Build the package**: `python planning/share-anchor-skills-2026-07/_build_clean_ship.py`
-   (or `python distro.py -o <dir>` for B only). Any gate hit now FAILS the build.
-3. **VM check** (clean Windows box / fresh user account, NO Developer Mode,
-   NO admin): unzip package → `powershell -ExecutionPolicy Bypass -File
-   .\tools\vm_check.ps1` → then walk `.\onboard.cmd` interactively once.
-4. **Tell collaborators**: wipe the old install (delete the old package
+1. **Push** (your call): `git push origin master v1.1.3`
+2. **VM check** (clean Windows box / fresh user account, NO Developer Mode,
+   NO admin): zip + copy `C:\dev\Anchor-ship\clean-ship\B-anchor-plus-skills`
+   over, then `powershell -ExecutionPolicy Bypass -File .\tools\vm_check.ps1`
+   → then walk `.\onboard.cmd` interactively once.
+3. **Tell collaborators**: wipe the old install (delete the old package
    folder + `%USERPROFILE%\.claude\skills\*` entries that are marker-only
    dirs — or just re-run onboard, which heals them), unzip v1.1.3, run
    `.\onboard.cmd`, then `python launch_anchor_dashboard.py`.
-5. **Your own machine is untouched**: the NSSM service env has no
+4. **Your own machine is untouched**: the NSSM service env has no
    `ANCHOR_PROACTIVE_SUMMARY`, so summaries stay proactive; the launcher
    short-circuits when :8777 is already up. NOTE: next `nssm restart anchor`
    picks up the anchor_gui.py changes (token-bootstrap JS + summarizer flag

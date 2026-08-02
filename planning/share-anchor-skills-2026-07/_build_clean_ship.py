@@ -25,14 +25,23 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
-import distro
-import share_governance as gov
-import vendor_skills as vs
-
 ROOT = Path(__file__).resolve().parents[2]
-OUT = Path(__file__).resolve().parent / "package-v1" / "clean-ship"
+# Runnable from anywhere: the repo root carries the modules, not planning/.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import distro                      # noqa: E402
+import share_governance as gov     # noqa: E402
+import vendor_skills as vs         # noqa: E402
+# v1.1.3: built trees live OUTSIDE the repo (default <repo-parent>/Anchor-ship,
+# override via ANCHOR_SHIP_OUT). The old in-repo planning/…/package-v1 output
+# accumulated 61MB of stale product duplicates that agents crawled, hygiene
+# tests tripped over, and nobody could tell apart from the real shipped zip.
+OUT = Path(os.environ.get("ANCHOR_SHIP_OUT")
+           or (ROOT.parent / "Anchor-ship")) / "clean-ship"
 
 # Author machine layout for packaging only (never baked into shipped files).
 os.environ.setdefault("ANCHOR_TRIO_DIR", r"C:\dev\trio")
@@ -78,7 +87,11 @@ _PACKAGE_A_FILES = (
 # passes nothing extra — its closure must be total.
 _PACKAGE_A_OPTIONAL = ("anchor", "lanes", "anchor_gui", "pillar_flags",
                       "verify_freeze_manifest", "share_ci_ship_gate",
-                      "share_sources", "share_topology", "gandalf")
+                      "share_sources", "share_topology", "gandalf",
+                      # distro.py's skill-integrity manifest step imports this
+                      # lazily inside try/except (A ships distro for its scan
+                      # helpers only; a skills-only tree never builds bundles).
+                      "foundry_integrity")
 
 
 def _scan_package_a(a: Path) -> list:

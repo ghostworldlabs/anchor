@@ -121,6 +121,12 @@ _DENY_DIR_COMPONENTS = {
 _DENY_BASENAME_SUFFIXES = (
     "-checkpoint.json",
 )
+# Basename PREFIX denials (v1.1.3): loose skill self-test files living at the
+# skill ROOT (e.g. gandalf's test_sdk.py, which references the forbidden
+# Gemini SDK) — dev-only, same class as the test/ dir denial above.
+_DENY_BASENAME_PREFIXES = (
+    "test_",
+)
 # Directory-name suffix matches (e.g. anything ending in "-out").
 _DENY_DIR_SUFFIXES = (
     "-out",
@@ -154,6 +160,9 @@ def _is_denied(rel: Path) -> bool:
         return True
     for suf in _DENY_BASENAME_SUFFIXES:
         if base.endswith(suf):
+            return True
+    for pre in _DENY_BASENAME_PREFIXES:
+        if base.startswith(pre):
             return True
 
     # .env* — drop everything EXCEPT .env.example.
