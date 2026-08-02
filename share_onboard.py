@@ -2765,6 +2765,38 @@ def run_share_onboard(
             "result": {"skipped": True, "package_id": package_id},
         })
 
+    # ── 6c. Access token (Package B) — v1.1.3 token-wiring keystone ────────
+    # The launcher wires the ONBOARD-MINTED token into the spawned server
+    # (mutating APIs + terminals gated by default), but THIS path — the
+    # documented `.\onboard.cmd → python -m share_onboard` cold start — never
+    # minted one; only the legacy `python onboard.py` core did. Found while
+    # preparing the true-VM run: a collaborator would have ended auth-OPEN.
+    # Idempotent (an existing token is kept), written OUT-OF-TREE via the
+    # same seam the launcher reads (onboard._default_token_path), value
+    # never logged. HERMETIC GUARD: a bare pytest context with no
+    # ANCHOR_DATA_DIR redirect must never write the real user profile.
+    if package_id == "B":
+        data_override = (env.get("ANCHOR_DATA_DIR") or "").strip() or None
+        if data_override is None and env.get("PYTEST_CURRENT_TEST"):
+            tok_res = {"skipped": True,
+                       "reason": "hermetic-pytest-no-data-dir-redirect"}
+        else:
+            try:
+                t = onboard.generate_token(data_dir=data_override)
+                tok_res = {"created": bool(t.get("created")),
+                           "in_repo": bool(t.get("in_repo")),
+                           "path": t.get("path")}
+                if t.get("created"):
+                    rb.record(t["path"])
+            except Exception as exc:
+                tok_res = {"error": str(exc)}
+        report["steps"].append({"step": "access_token", "result": tok_res})
+    else:
+        report["steps"].append({
+            "step": "access_token",
+            "result": {"skipped": True, "package_id": package_id},
+        })
+
     # ── 7. Seat probes ─────────────────────────────────────────────────────
     seats = probe_all_seats(
         mock_results=mock_seat_results,

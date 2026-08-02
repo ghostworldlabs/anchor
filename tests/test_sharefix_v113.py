@@ -349,6 +349,56 @@ def test_proactive_summary_pref_explicit_off_only():
         assert anchor_gui._proactive_summary_pref(off) is False, off
 
 
+# ── Package-B onboard mints the launcher token (v1.1.3 keystone) ─────────────
+
+def _tiny_bundle(tmp_path):
+    src = tmp_path / "bundle"
+    (src / "demo").mkdir(parents=True)
+    (src / "demo" / "SKILL.md").write_text("# demo\n", encoding="utf-8")
+    return src
+
+
+def test_share_onboard_b_mints_token_into_data_dir(tmp_path):
+    """The documented cold start (`python -m share_onboard`, package B) must
+    leave the token the launcher wires — the legacy onboard.py core was the
+    only minter until v1.1.3 (found preparing the true-VM run)."""
+    data = tmp_path / "data"
+    env = {"ANCHOR_DATA_DIR": str(data)}  # hermetic redirect, no PYTEST key
+    rep = sob.run_share_onboard(
+        tmp_path / "home", package_id="B",
+        skills_src=_tiny_bundle(tmp_path),
+        mock_seat_results={"claude": True},
+        desktop_dir=str(tmp_path / "Desktop"),
+        dialogue_complete=True,
+        env=env)
+    step = next(s["result"] for s in rep["steps"]
+                if s["step"] == "access_token")
+    assert step.get("created") is True
+    assert step.get("in_repo") is False
+    tok_file = data / ".anchor" / "onboard-token"
+    assert tok_file.is_file()
+    assert tok_file.read_text(encoding="utf-8").strip()
+    # And the launcher-side reader resolves the SAME token.
+    assert sob.read_onboard_token(data) == tok_file.read_text(
+        encoding="utf-8").strip()
+
+
+def test_share_onboard_b_token_hermetic_guard(tmp_path):
+    """A bare pytest context with no data-dir redirect must NOT write the
+    real user profile — the step skips honestly."""
+    env = {"PYTEST_CURRENT_TEST": "x"}  # no ANCHOR_DATA_DIR
+    rep = sob.run_share_onboard(
+        tmp_path / "home2", package_id="B",
+        skills_src=_tiny_bundle(tmp_path),
+        mock_seat_results={"claude": True},
+        desktop_dir=str(tmp_path / "Desktop2"),
+        dialogue_complete=True,
+        env=env)
+    step = next(s["result"] for s in rep["steps"]
+                if s["step"] == "access_token")
+    assert step.get("skipped") is True
+
+
 # ── doctor: deterministic missing-module probe ───────────────────────────────
 
 def test_doctor_finds_missing_module(tmp_path):
