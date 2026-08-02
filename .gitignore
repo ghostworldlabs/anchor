@@ -97,3 +97,10 @@ test_tmp*/
 *.backup.json
 planning/**/pty-foreman*.log
 planning/**/_*.log
+
+# v1.1.3 share-fix: the stale built package-v1 trees were REMOVED from git
+# (61MB of duplicated product; they made agents crawl old copies and tripped
+# the gemini-sdk hygiene test). The last on-disk build — the ancestor of what
+# collaborators actually received — is kept LOCALLY for provenance under
+# _archive/ but never re-tracked; git history (pre-v1.1.3) holds the rest.
+_archive/share-package-v1-snapshot-2026-08-01/

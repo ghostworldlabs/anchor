@@ -109,10 +109,23 @@ _DENY_DIR_COMPONENTS = {
     "_archive",
     "scratch",
     "litreview-out",
+    # v1.1.3 share-fix: skill self-test suites are DEV-ONLY and carry planted
+    # secret/token fixtures BY DESIGN (e.g. tidy-idy's secret-triage tests) —
+    # exactly the class Anchor deny-lists from its own shipped tests. A
+    # consumer bundle never runs a skill's own test suite, so the trees are
+    # dead weight that can only trip the fail-closed ship scan.
+    "test",
+    "tests",
 }
 # Glob-ish suffix / pattern matches on the basename.
 _DENY_BASENAME_SUFFIXES = (
     "-checkpoint.json",
+)
+# Basename PREFIX denials (v1.1.3): loose skill self-test files living at the
+# skill ROOT (e.g. gandalf's test_sdk.py, which references the forbidden
+# Gemini SDK) — dev-only, same class as the test/ dir denial above.
+_DENY_BASENAME_PREFIXES = (
+    "test_",
 )
 # Directory-name suffix matches (e.g. anything ending in "-out").
 _DENY_DIR_SUFFIXES = (
@@ -147,6 +160,9 @@ def _is_denied(rel: Path) -> bool:
         return True
     for suf in _DENY_BASENAME_SUFFIXES:
         if base.endswith(suf):
+            return True
+    for pre in _DENY_BASENAME_PREFIXES:
+        if base.startswith(pre):
             return True
 
     # .env* — drop everything EXCEPT .env.example.

@@ -21,13 +21,21 @@ import job_runner
 #: Env override for the tidy-idy CLI entry (absolute path to tidy-idy.mjs).
 ENTRY_ENV = "ANCHOR_TIDY_IDY_ENTRY"
 
-#: Well-known locations: installed Skill Foundry first (has status page), then
-#: any local worktree / user-skill copy.
-_DEFAULT_CANDIDATES = (
-    Path(r"C:\dev\Skill Foundry\skills\tidy-idy\bin\tidy-idy.mjs"),
-    Path(r"C:\dev\skill-foundry-tidyidy-wt\skills\tidy-idy\bin\tidy-idy.mjs"),
-    Path.home() / ".claude" / "skills" / "tidy-idy" / "bin" / "tidy-idy.mjs",
-)
+#: Well-known locations: an env-declared Skill Foundry checkout first (has the
+#: status page), then the user-skill copy. No hardcoded author-machine paths —
+#: a host without the skill resolves None and the runner degrades honestly
+#: (v1.1.3 share-fix: the old literal worktree path tripped the ship scan).
+def _default_candidates():
+    cands = []
+    foundry = (os.environ.get("ANCHOR_FOUNDRY_DIR") or "").strip()
+    if foundry:
+        cands.append(Path(foundry) / "skills" / "tidy-idy" / "bin" / "tidy-idy.mjs")
+    cands.append(
+        Path.home() / ".claude" / "skills" / "tidy-idy" / "bin" / "tidy-idy.mjs")
+    return tuple(cands)
+
+
+_DEFAULT_CANDIDATES = _default_candidates()
 
 BUILD_LANE = "build"
 TIDY_JOB_TYPE = "tidy"

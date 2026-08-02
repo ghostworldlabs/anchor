@@ -29,7 +29,11 @@ if str(_ROOT) not in sys.path:
 import share_onboard as sob  # noqa: E402
 
 DEFAULT_URL = sob.DEFAULT_LOCAL_DASHBOARD_URL
-DEFAULT_RETRIES = 8
+# v1.1.3: a COLD anchor_gui boot (large module import + boot reconcile) can
+# take several seconds — 8×0.5s raced it and gave up. 40×0.5s (~20s) covers a
+# slow first boot on a modest collaborator box; an already-running server
+# still short-circuits instantly.
+DEFAULT_RETRIES = 40
 DEFAULT_SLEEP_S = 0.5
 
 
@@ -78,7 +82,15 @@ def ensure_dashboard_running(
         if start_fn is not None:
             start_result = start_fn()
         else:
-            start_result = sob.start_package_b_service(home=home, token=token)
+            # v1.1.3: start the server on the PORT this launcher is probing,
+            # so a non-default ANCHOR_DASHBOARD_URL is honored end-to-end.
+            from urllib.parse import urlparse as _up
+            try:
+                _port = _up(url).port
+            except ValueError:
+                _port = None
+            start_result = sob.start_package_b_service(
+                home=home, token=token, port=_port)
         report["start_result"] = start_result
 
         after = before
@@ -95,8 +107,18 @@ def ensure_dashboard_running(
 
     if open_browser:
         opener = open_fn if open_fn is not None else webbrowser.open
+        # v1.1.3 token hand-off: give the dashboard the token ONCE via the
+        # loopback URL. The page stores it (localStorage), mints the HttpOnly
+        # auth cookie (POST /api/auth/login), and strips it from the URL —
+        # after that, navigation + API calls authenticate without a token in
+        # any page URL. Loopback-only by construction (checked above).
+        open_url = url
+        if token:
+            from urllib.parse import quote
+            sep = "&" if "?" in url else "?"
+            open_url = url + sep + "token=" + quote(token, safe="")
         try:
-            opener(url)
+            opener(open_url)
             report["browser_opened"] = True
         except Exception as exc:
             report["reason_codes"].append("browser_open_failed")
@@ -132,9 +154,16 @@ def main(argv=None) -> int:
     )
     args = p.parse_args(argv)
 
+    # v1.1.3: resolve the onboard-minted token so (a) a spawned server gets it
+    # in its env (mutating APIs + terminals gated by default) and (b) the
+    # browser receives it once via the loopback URL. Never printed/logged.
+    token = (os.environ.get("ANCHOR_TOKEN") or "").strip() or \
+        sob.read_onboard_token()
+
     report = ensure_dashboard_running(
         url=args.url,
         home=args.home,
+        token=token,
         open_browser=not args.no_browser,
         retries=args.retries,
     )

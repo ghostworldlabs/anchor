@@ -1503,17 +1503,107 @@ def write_desktop_lnk_shortcut(
     return url_result
 
 
+def read_onboard_token(data_dir=None) -> str | None:
+    """Read the onboard-minted ``ANCHOR_TOKEN`` value, or None.
+
+    Resolves the same out-of-tree path :func:`onboard.generate_token` writes
+    (default ``~/.anchor/.anchor/onboard-token``). Returns the VALUE for
+    wiring into a spawned server's environment / the one-time browser
+    hand-off — callers must never log it.
+    """
+    try:
+        p = onboard._default_token_path(data_dir)
+        raw = p.read_text(encoding="utf-8").strip()
+        return raw or None
+    except OSError:
+        return None
+
+
+#: Env the spawned shared-install server gets by DEFAULT (explicit env wins).
+#: ANCHOR_PROACTIVE_SUMMARY=0 — background model summaries are OPT-IN on a
+#: shared install: Anchor must never spend a collaborator's Claude
+#: subscription without an explicit action (v1.1.3 decision). An
+#: author-style install (launched by NSSM with the flag unset) keeps
+#: proactive summaries on.
+SPAWN_ENV_DEFAULTS = {"ANCHOR_PROACTIVE_SUMMARY": "0"}
+
+
+def spawn_anchor_server(
+    *,
+    package_root=None,
+    token: str | None = None,
+    data_dir=None,
+    port: int | None = None,
+    env=None,
+    popen_fn=None,
+) -> dict:
+    """GENUINELY start ``anchor_gui.py`` as a detached background process.
+
+    v1.1.3: this is the function the share path never had. The old chain
+    (launcher → ``start_package_b_service`` → ``onboard.register_service``)
+    ended in dead code — nothing ever spawned the server, the launcher's
+    re-probes failed, and the browser opened on a dead URL.
+
+    Wiring: the onboard-minted token (param → env ``ANCHOR_TOKEN`` → token
+    file) is exported into the child env, so every mutating ``/api/*`` route
+    and the terminal/WS surface require it by default on a collaborator
+    install. ``SPAWN_ENV_DEFAULTS`` applies (background summaries opt-in).
+    Detached: survives the launcher exiting; no console window on Windows.
+    ``popen_fn`` is the hermetic-test seam (no real process).
+    """
+    import subprocess
+
+    root = Path(package_root) if package_root is not None else _REPO_ROOT
+    gui = root / "anchor_gui.py"
+    if not gui.is_file():
+        return {"started": False, "status": "no_anchor_gui",
+                "error": "anchor_gui.py not found in the package root",
+                "token_wired": False}
+    e = dict(os.environ if env is None else env)
+    tok = token or (e.get("ANCHOR_TOKEN") or "").strip() or read_onboard_token(data_dir)
+    if tok:
+        e["ANCHOR_TOKEN"] = tok
+    for k, v in SPAWN_ENV_DEFAULTS.items():
+        e.setdefault(k, v)
+    argv = [sys.executable, str(gui), "--no-browser"]
+    if port:
+        argv += ["--port", str(port)]
+    kwargs = {}
+    if os.name == "nt":
+        # DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = 0x00000008 | 0x08000000 | 0x00000200
+    else:
+        kwargs["start_new_session"] = True
+    opener = popen_fn or subprocess.Popen
+    try:
+        proc = opener(
+            argv, cwd=str(root), env=e,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, **kwargs)
+    except Exception as exc:
+        return {"started": False, "status": "spawn_failed",
+                "error": str(exc), "token_wired": bool(tok)}
+    return {"started": True, "status": "spawned",
+            "pid": getattr(proc, "pid", None), "token_wired": bool(tok)}
+
+
 def start_package_b_service(
     *,
     start_fn=None,
     home=None,
     token: str | None = None,
+    port: int | None = None,
 ) -> dict:
     """Attempt Package B service start (injectable for hermetic tests).
 
     ``foreground_fallback`` alone is **never** treated as B success — the
-    dual gate requires a subsequent HTTP probe OK. Default path calls
-    :func:`onboard.register_service` when no inject is provided.
+    dual gate requires a subsequent HTTP probe OK. The production path (no
+    inject) calls :func:`spawn_anchor_server` since v1.1.3 — the old
+    :func:`onboard.register_service` default was dead code that started
+    nothing (see its docstring). ``port`` (v1.1.3) rides through to the
+    spawn so a launcher probing a non-default dashboard URL starts the
+    server on THAT port (also what lets the pull-dry-run walk the real
+    launcher on an isolated port beside a live :8777).
     """
     if start_fn is not None:
         try:
@@ -1554,29 +1644,25 @@ def start_package_b_service(
             "raw": out,
         }
 
-    # Production best-effort: existing onboard seam (may foreground_fallback).
+    # Production path (v1.1.3): genuinely spawn the server. "started" here
+    # means "a spawn was launched" — B success STILL requires the dual gate's
+    # subsequent HTTP probe to come back OK (the launcher re-probes).
     try:
-        tok = token
-        if tok is None and home is not None:
-            # Token path-only: never put body into report.
-            tok = "share-onboard-package-b"
-        raw = onboard.register_service(tok or "share-onboard-package-b")
-        status = str((raw or {}).get("status") or "")
-        fg = status == "foreground_fallback"
-        started = status == "registered" and not fg
+        raw = spawn_anchor_server(token=token, port=port)
+        started = bool(raw.get("started"))
         codes = []
-        if fg:
-            codes.append("foreground_fallback_not_b_success")
         if not started:
             codes.append("anchor_service_unavailable")
         return {
             "attempted": True,
             "started": started,
-            "status": status or "unknown",
-            "foreground_fallback": fg,
-            "error": None,
+            "status": raw.get("status") or "unknown",
+            "foreground_fallback": False,
+            "error": raw.get("error"),
             "reason_codes": codes,
-            "raw": {"status": status},  # no token body
+            # No token body — only whether one was wired.
+            "raw": {"status": raw.get("status"),
+                    "token_wired": bool(raw.get("token_wired"))},
         }
     except Exception as exc:
         return {
@@ -2658,6 +2744,25 @@ def run_share_onboard(
         report["steps"].append({
             "step": "scaffold_anchor",
             "result": {"skipped": True},
+        })
+
+    # ── 6b. Terminal extra (Package B, Windows) — v1.1.3 ───────────────────
+    # pywinpty was never installed by any onboard path, so collaborator
+    # terminals opened EMPTY until a manual pip install (the 2026-07-30
+    # friction intake). Probe-first (already-present short-circuits without
+    # touching pip); a failure degrades honestly and never blocks onboard.
+    # Hermetic seams: ANCHOR_ONBOARD_SKIP_PIP / ANCHOR_ONBOARD_PIP_CMD.
+    if package_id == "B":
+        try:
+            term_extra = onboard.install_terminal_extra(env=env)
+        except Exception as exc:  # never let the extra kill an onboard
+            term_extra = {"status": "error", "installed": False,
+                          "message": "pywinpty step errored: %s" % exc}
+        report["steps"].append({"step": "terminal_extra", "result": term_extra})
+    else:
+        report["steps"].append({
+            "step": "terminal_extra",
+            "result": {"skipped": True, "package_id": package_id},
         })
 
     # ── 7. Seat probes ─────────────────────────────────────────────────────

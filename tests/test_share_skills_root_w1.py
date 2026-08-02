@@ -121,9 +121,13 @@ def test_claude_register_creates_pointer_not_dual_copy(tmp_path):
         assert insp["exists"] is True
         assert insp["pointer_only"] is True, insp
         assert insp["dual_copy"] is False
-        assert insp["is_symlink"] or insp["is_pointer_marker"]
+        # v1.1.3 chain: symlink → junction → marked full copy (the retired
+        # pointer-marker-only dir can no longer be created; a marker now
+        # implies our tracked copy fallback).
+        assert (insp["is_symlink"] or insp["is_junction"]
+                or insp["is_pointer_marker"])
         # realpath of target under SKILLS_ROOT
-        if insp["is_symlink"]:
+        if insp["is_symlink"] or insp["is_junction"]:
             assert _realpath(insp["path"]).startswith(_realpath(root))
         else:
             assert insp["matches_skills_root"] is True

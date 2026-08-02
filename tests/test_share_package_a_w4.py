@@ -307,6 +307,13 @@ def test_package_a_refuses_re_onboard_when_dual_claude_copy(tmp_path):
     if dual.exists() or dual.is_symlink():
         if dual.is_symlink():
             dual.unlink()
+        elif ssr._is_dir_junction(dual):
+            # v1.1.3 chain: on a no-DevMode host the register lands a REAL
+            # junction; rmtree refuses reparse points — rmdir removes the
+            # junction itself without touching the target.
+            import os as _os
+
+            _os.rmdir(dual)
         else:
             import shutil
 

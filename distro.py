@@ -169,6 +169,30 @@ class PersonalDataError(Exception):
         )
 
 
+class ImportClosureError(Exception):
+    """The staged set is import-incomplete — a staged product file imports a
+    first-party module that is NOT staged (and not declared optional).
+
+    THE v1.1.x SHARE INCIDENT CLASS (friction-intake-2026-07-30): eleven
+    runtime modules (reaper / freeze_state / zombie_hunter / proc_probe / …)
+    existed on the author machine but were absent from ``dist_manifest.txt``.
+    Because every consumer imports them LAZILY inside try/except, the
+    startup-import gate stayed green while collaborator installs booted
+    degraded and spammed ModuleNotFoundError. A content scan cannot catch an
+    ABSENT file, and a top-level import probe cannot catch a lazy import —
+    only a static walk of every import in every staged file can. This gate is
+    that walk. ``hits`` mirrors :class:`PersonalDataError`.
+    """
+
+    def __init__(self, hits):
+        self.hits = list(hits)
+        lines = [f"  {rel}: {cat}: {snip}" for (rel, cat, snip) in self.hits]
+        super().__init__(
+            "import-closure gate FAILED — staged files import UNSTAGED "
+            "first-party module(s):\n" + "\n".join(lines)
+        )
+
+
 # ── Manifest (deny-by-default allowlist) ─────────────────────────────────────
 
 def load_manifest(manifest_path: Path | None = None) -> list[str]:
@@ -389,6 +413,23 @@ _TOKEN_VALUE_RE = re.compile(
 # shape detectors above, so the generic run deliberately excludes "_" and "-".
 _GENERIC_ENTROPY_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}(?![A-Za-z0-9+/])")
 
+# A dotted identifier chain (``panel.token``, ``process.env.X``,
+# ``body.confirmToken``) — a code READ of a runtime value, never a pasted
+# secret literal. Generalizes the old self./cls. special case (v1.1.3). A
+# real dotted secret (a JWT) is caught by its concrete shape detector.
+_DOTTED_CHAIN_RE = re.compile(
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)+")
+
+
+def _is_code_expression_value(val: str) -> bool:
+    """True when an assign-pattern "value" is code, not a secret literal:
+    a call expression (contains parens — ``encodeURIComponent(tok)``) or a
+    dotted identifier chain. Secret literals contain neither."""
+    if "(" in val or ")" in val:
+        return True
+    return _DOTTED_CHAIN_RE.fullmatch(val) is not None
+
+
 # Placeholder values that are NOT real secrets even if assigned to a token key.
 _PLACEHOLDER_VALUES = {
     "changeme", "your-token-here", "yourtokenhere", "placeholder",
@@ -467,9 +508,22 @@ def _scan_text(rel: str, text: str):
             continue
         yield (rel, "user-profile-path", _snip(m.group(0)))
 
+    # v1.1.3: the KEY-assignment detectors are tuned for first-party Python;
+    # over VENDORED skill payloads (already host-path/PII-scrubbed at vendor
+    # time, with PROVENANCE) they false-fired on JS config reads and named
+    # fixture strings — which the retired side builder handled by silently
+    # filtering ALL hits. Now, honestly and narrowly: code-expression values
+    # are skipped everywhere, and for vendored files an assign hit must carry
+    # a plausibly-REAL (high-entropy) value. The concrete secret SHAPES
+    # (AKIA / JWT / sk- / ghp_ / Bearer) still run over every file unchanged.
+    _vendored = _is_vendored(rel)
     for m in _TOKEN_ASSIGN_QUOTED_RE.finditer(text):
         val = m.group("val")
         if val.lower() in _PLACEHOLDER_VALUES:
+            continue
+        if _is_code_expression_value(val):
+            continue
+        if _vendored and not _looks_high_entropy(val):
             continue
         yield (rel, "auth-token-value", _redact(m.group(0)))
 
@@ -478,9 +532,12 @@ def _scan_text(rel: str, text: str):
         if val.lower() in _PLACEHOLDER_VALUES:
             continue
         # An unquoted "value" that is an attribute path (``self.token``,
-        # ``cls.auth_token``) is a code READ of a runtime value, never a
-        # secret literal — the rule exists to catch pasted literals.
-        if val.startswith(("self.", "cls.")):
+        # ``cls.auth_token``, ``panel.token``, ``process.env.X``) or a call
+        # expression is a code READ of a runtime value, never a secret
+        # literal — the rule exists to catch pasted literals.
+        if val.startswith(("self.", "cls.")) or _is_code_expression_value(val):
+            continue
+        if _vendored and not _looks_high_entropy(val):
             continue
         yield (rel, "auth-token-value", _redact(m.group(0)))
 
@@ -672,6 +729,87 @@ def scan_third_party_imports(files, root: Path | None = None):
     return hits
 
 
+# ── Import-closure gate (v1.1.3 share-fix) ───────────────────────────────────
+#
+# First-party modules a staged file may import WITHOUT them being staged. Each
+# entry is a DELIBERATE, documented exclusion whose every consumer degrades
+# safely when it is absent (lazy import inside try/except). Anything else that
+# is first-party-in-source but missing from the staged set fails the build.
+_OPTIONAL_FIRST_PARTY = {
+    "update_transaction": (
+        "deliberately NOT shipped (see the doctor.py manifest block): its "
+        "closure drags the foundry update subsystem; anchor.py and doctor.py "
+        "import it lazily inside try/except and skip silently when absent"
+    ),
+    "tools": (
+        "dev-only rearch package (extract/census/spike/drain scripts) — never "
+        "ships. journal.py's write-tripwire pairing degrades to a no-op "
+        "without it (documented best-effort import), and the healthcheck's "
+        "journal-parity rebuild walk skip-warns when it is absent"
+    ),
+}
+
+
+def scan_import_closure(files, root: Path | None = None, extra_optional=()):
+    """Static import-closure over the staged set. Empty list == closed.
+
+    For every staged, first-party (non-``vendor/``, non-``tests/``) ``.py``
+    file, EVERY import — module-scope or lazy-inside-a-function (``ast.walk``
+    sees both) — of a module that is first-party in the SOURCE tree must
+    resolve to a module in the STAGED set, or sit in the declared
+    :data:`_OPTIONAL_FIRST_PARTY` list. Anything else is a
+    ships-broken-by-omission gap: the file will ImportError (module-level) or
+    log-and-degrade (lazy) on a stranger install.
+
+    ``extra_optional`` extends the optional list for a SPARSER package that
+    deliberately omits modules whose consumers degrade (e.g. Package A —
+    skills-only — omits anchor.py/lanes.py, which onboard.py probes lazily
+    inside try/except). The full Package B build passes nothing extra.
+
+    Returns ``(rel, "import-closure", detail)`` hits, mirroring the other
+    scanners. Stdlib/third-party imports are out of scope here (the
+    third-party scan owns those).
+    """
+    root = Path(root) if root else REPO_ROOT
+    optional = set(_OPTIONAL_FIRST_PARTY) | set(extra_optional)
+    first_party = _first_party_module_names(root)
+    staged_names = set()
+    staged_pys = []
+    for rel, abspath in files:
+        rel_norm = rel.replace("\\", "/")
+        if not rel_norm.endswith(".py"):
+            continue
+        if "/" not in rel_norm:
+            staged_names.add(rel_norm[:-3])
+        elif rel_norm.endswith("/__init__.py"):
+            # A staged package: its top-level dir name is importable.
+            staged_names.add(rel_norm.split("/", 1)[0])
+        staged_pys.append((rel_norm, abspath))
+    # ``tests`` ships (dev-only) and is a first-party package name.
+    staged_names.add("tests")
+
+    hits = []
+    for rel_norm, abspath in staged_pys:
+        if _is_vendored(rel_norm) or _is_test_file(rel_norm):
+            continue
+        try:
+            text = abspath.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for module, lineno in _import_top_levels(text):
+            if module not in first_party:
+                continue  # stdlib / third-party — not this gate's job
+            if module in staged_names or module in optional:
+                continue
+            hits.append((
+                rel_norm,
+                "import-closure",
+                f"imports first-party '{module}' (line {lineno}) which is "
+                f"NOT staged and not declared optional",
+            ))
+    return hits
+
+
 def _snip(s: str, n: int = 60) -> str:
     s = s.replace("\n", " ")
     return s if len(s) <= n else s[:n] + "…"
@@ -846,6 +984,56 @@ def emit_readme(staging: Path) -> Path:
     return readme
 
 
+# ── Consumer agent-context file (v1.1.3 token-burn discipline) ───────────────
+#
+# The package used to ship with NO agent-context file, so a collaborator asking
+# Claude "why is Anchor broken?" explored blind: reading the 18k-line
+# anchor_gui.py whole, crawling the 13 vendored skills, or invoking the paid
+# multi-agent trio as a debug tool — burning their usage limits on what a
+# deterministic probe answers for free. This THIN consumer CLAUDE.md (emitted
+# at build time; NEVER the author's own CLAUDE.md, which stays unstaged) gives
+# any agent the cheap path first. Keep it short — it is loaded into every
+# agent session a collaborator runs in the package tree.
+_CONSUMER_CLAUDE_MD = """# Anchor — collaborator install (agent notes)
+
+This is a data-free Anchor distribution. Read this before exploring.
+
+## Debugging an install: cheap checks FIRST
+1. `python doctor.py` — deterministic install health (missing modules,
+   pywinpty, engine CLIs, token, server). No model calls, free.
+2. Tail `logs/errors.log` under the data dir (default `~/.anchor`) — boot
+   problems land there.
+3. Only then read code, and read it NARROWLY.
+
+## Reading rules (token discipline)
+- Do NOT read `anchor_gui.py` end-to-end (18,000+ lines) — grep for the
+  symbol you need and read that region only.
+- Do NOT crawl `vendor/bundled-skills/` — those are 13 packaged skills, not
+  app code.
+- Do NOT bulk-scan `starter/`, `static/`, or `vendor/` trees.
+
+## Paid tools are not debug tools
+researchPrime / Crucible / Foreman / Gandalf are intentional MULTI-AGENT
+skills: one invocation fans out many model calls against the user's paid
+subscription. Never invoke them to diagnose an install problem.
+
+## Running Anchor
+- Start: `python launch_anchor_dashboard.py` (starts the server if needed,
+  then opens the dashboard). After a reboot, run it again.
+- The server is `anchor_gui.py` (Python stdlib only; optional `pywinpty` for
+  real terminals). Default port 8777, loopback only.
+- The API token lives OUTSIDE this tree (default
+  `~/.anchor/.anchor/onboard-token`); the launcher wires it automatically.
+"""
+
+
+def emit_claude_md(staging: Path) -> Path:
+    """Write the thin consumer CLAUDE.md into the staging dir. Returns path."""
+    p = Path(staging) / "CLAUDE.md"
+    p.write_text(_CONSUMER_CLAUDE_MD, encoding="utf-8")
+    return p
+
+
 # ── Build ────────────────────────────────────────────────────────────────────
 
 def build_distro(root: Path | None = None,
@@ -951,6 +1139,10 @@ def build_distro(root: Path | None = None,
             )
 
     readme_path = emit_readme(output_dir) if emit_readme_file else None
+    # The thin consumer agent-context file (v1.1.3): emitted like the README —
+    # generated at build time, never copied from the author tree (the author's
+    # own CLAUDE.md is deliberately NOT on the manifest and never ships).
+    claude_md_path = emit_claude_md(output_dir) if emit_readme_file else None
 
     # Scan the staged set (NOT the source tree) — what we'd actually ship. The
     # import scan derives first-party module names from the SOURCE ``root`` being
@@ -958,11 +1150,25 @@ def build_distro(root: Path | None = None,
     scan_pairs = list(staged_pairs)
     if readme_path is not None:
         scan_pairs.append(("README.md", readme_path))
+    if claude_md_path is not None:
+        scan_pairs.append(("CLAUDE.md", claude_md_path))
     hits = scan_paths(scan_pairs, root=root)
     if hits:
         if cleanup_on_fail:
             shutil.rmtree(output_dir, ignore_errors=True)
         raise PersonalDataError(hits)
+
+    # IMPORT-CLOSURE GATE (v1.1.3): a staged product file must never import a
+    # first-party module that is absent from the staged set (unless declared
+    # optional). Static, sees LAZY imports too — the exact class of gap the
+    # 2026-07-30 collaborator incident shipped (reaper/freeze_state/… existed
+    # in source, were unlisted in the manifest, and every import was lazy, so
+    # both the content scans and the startup-import probe stayed green).
+    closure_hits = scan_import_closure(scan_pairs, root=root)
+    if closure_hits:
+        if cleanup_on_fail:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        raise ImportClosureError(closure_hits)
 
     # STARTUP GATE: everything above reads file CONTENT, which structurally
     # cannot detect a file that is simply ABSENT from the manifest. Load the
@@ -979,6 +1185,7 @@ def build_distro(root: Path | None = None,
         "staging": output_dir,
         "files": selected,
         "readme": readme_path,
+        "claude_md": claude_md_path,
         "vendored_skills": vendor_report,
     }
 
@@ -1046,6 +1253,9 @@ def _main(argv=None):
     except StartupImportError as exc:
         print("BUILD FAILED:\n" + str(exc))
         return 3
+    except ImportClosureError as exc:
+        print("BUILD FAILED:\n" + str(exc))
+        return 4
 
     print(f"Built data-free export -> {report['staging']}")
     print(f"  {len(report['files'])} files staged; scan clean.")
