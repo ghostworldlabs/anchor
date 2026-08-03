@@ -82,17 +82,36 @@ loud-on-hole.
   `-04` Package-A closure on lazy foundry_integrity (resolved 70c50a0) ·
   `-05` TRUE-VM verification pending (open — the collaborator-invite gate).
 
+## Status 2026-08-02 (later still) — token keystone fixed; sandbox staged, reboot pending
+
+- **Decision-2 keystone gap found + fixed (6a276f4)**: the documented
+  `.\onboard.cmd → python -m share_onboard` cold start never minted the
+  access token (only legacy `python onboard.py` did) — the launcher had
+  nothing to wire and collaborators would have run auth-OPEN.
+  `run_share_onboard` (B) now mints through the launcher's own seam;
+  hermetic-guarded; artifact REBUILT with the fix; tag v1.1.3 re-pointed
+  (dd9c843) + pushed (safe — nothing distributed yet). Journaled
+  `2026-08-02-06`, resolved.
+- **Windows Sandbox**: feature ENABLED (UAC approved) — `RestartNeeded=True`;
+  the binary does not exist until a reboot.
+- **Fully-automated true-VM check STAGED** at `C:\dev\Anchor-ship\vm-sandbox\`
+  (package copy w/ token fix · Python 3.12.10 installer · in-sandbox driver
+  covering: python-less bootstrap honesty → REAL onboard (token mint +
+  pywinpty pip install + junction skills into the fresh profile) → REAL
+  launcher on default :8777 with the token read from the MINTED file →
+  401/200 → engine-less term_start honesty + stub session → clean errors.log
+  · host driver that launches, polls, prints the verdict, closes).
+
 ## What YOU (John) still do before re-sharing
 
-1. **The true VM check** (the one thing this box can't do non-elevated):
-   - EITHER enable Windows Sandbox (elevated):
-     `Enable-WindowsOptionalFeature -Online -FeatureName "Containers-DisposableClientVM" -All`
-     then reboot — after that the run can be fully automated;
-   - OR on any VM/spare machine: copy
-     `C:\dev\Anchor-ship\clean-ship\B-anchor-plus-skills`, run
-     `powershell -ExecutionPolicy Bypass -File .\tools\vm_check.ps1`, then
-     walk `.\onboard.cmd` once interactively.
-   Then resolve journal entry `2026-08-02-05` and invite collaborators.
+1. **Reboot PUTER** when convenient (if live Anchor sessions matter right
+   now, park them warm first: `python tools/pre_restart_drain.py`). The
+   reboot also cold-deploys the v1.1.3 code into the NSSM service (no-ops
+   for your config).
+2. **Run the sandbox check** (or ask Claude to):
+   `python C:\dev\Anchor-ship\vm-sandbox\host_run.py`
+   — one command; prints the PASS/FAIL verdict from inside the sandbox.
+3. If green: resolve journal entry `2026-08-02-05` and invite collaborators.
 2. **Tell collaborators**: wipe the old install (delete the old package
    folder + `%USERPROFILE%\.claude\skills\*` entries that are marker-only
    dirs — or just re-run onboard, which heals them), unzip v1.1.3, run
