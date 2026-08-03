@@ -102,16 +102,42 @@ loud-on-hole.
   401/200 → engine-less term_start honesty + stub session → clean errors.log
   · host driver that launches, polls, prints the verdict, closes).
 
-## What YOU (John) still do before re-sharing
+## Status 2026-08-02 (final) — PRE-VM COLLABORATOR DROP READY (John's call, traveling)
 
-1. **Reboot PUTER** when convenient (if live Anchor sessions matter right
-   now, park them warm first: `python tools/pre_restart_drain.py`). The
-   reboot also cold-deploys the v1.1.3 code into the NSSM service (no-ops
-   for your config).
-2. **Run the sandbox check** (or ask Claude to):
+John cannot reboot for ~2 days and explicitly chose to let a few
+collaborators try v1.1.3 BEFORE the Windows-Sandbox VM check. Final
+hardening pass done (the "parable of the orange" review — instructions
+rewritten around what a user actually needs):
+
+- **Docs fixed via the user-needs walk**: zip-first install (with the
+  Mark-of-the-Web "Unblock" step), up-front "what you need" split
+  (dashboard-only vs AI features), "first ten minutes", the FRICTION-JOURNAL
+  feedback loop (`anchor.py journal` → `friction-report` → send to John),
+  data-lives-in-the-package-folder upgrade warning, and the errors.log
+  location corrected in BOTH USER-ONBOARD.md and the shipped CLAUDE.md
+  (default data dir = the package folder, NOT ~/.anchor).
+- **Final artifact rebuilt** (B 989 / A 601, all gates), element audit
+  14/14, and ALL THREE suites re-run against it: pull dry run 7/7 ·
+  clean-profile 8/8 · build sandbox 10/10.
+- **Ready to send, at `C:\dev\Anchor-ship\`**:
+  `Anchor-plus-skills-v1.1.3.zip` (9.7 MB) · `Skills-only-v1.1.3.zip`
+  (3.6 MB) · `SHA256SUMS.txt` · `SHARE-NOTE.md` (paste-ready message).
+- **Accepted residual for the early drop** (documented in SHARE-NOTE): the
+  genuinely-untested residue is a foreign Windows image + the winget/
+  python.org bootstrap on a python-less box; both degrade with honest
+  printed instructions. vm-sandbox pkg refreshed to the FINAL build.
+
+## Remaining steps
+
+1. **John, from the road**: send the zip(s) + SHARE-NOTE text to a few
+   collaborators. Ask them to use the friction journal for anything that
+   hurts.
+2. **After returning (~2 days)**: reboot PUTER (park live sessions warm
+   first if needed: `python tools/pre_restart_drain.py`; reboot also
+   cold-deploys v1.1.3 into the NSSM service — no-ops for your config).
+3. **Run the sandbox check** (or ask Claude to):
    `python C:\dev\Anchor-ship\vm-sandbox\host_run.py`
-   — one command; prints the PASS/FAIL verdict from inside the sandbox.
-3. If green: resolve journal entry `2026-08-02-05` and invite collaborators.
+4. If green: resolve journal `2026-08-02-05`; widen the invite list.
 2. **Tell collaborators**: wipe the old install (delete the old package
    folder + `%USERPROFILE%\.claude\skills\*` entries that are marker-only
    dirs — or just re-run onboard, which heals them), unzip v1.1.3, run

@@ -1001,8 +1001,8 @@ This is a data-free Anchor distribution. Read this before exploring.
 ## Debugging an install: cheap checks FIRST
 1. `python doctor.py` — deterministic install health (missing modules,
    pywinpty, engine CLIs, token, server). No model calls, free.
-2. Tail `logs/errors.log` under the data dir (default `~/.anchor`) — boot
-   problems land there.
+2. Tail `logs/errors.log` INSIDE THIS PACKAGE FOLDER (the package dir is the
+   default data dir) — boot problems land there.
 3. Only then read code, and read it NARROWLY.
 
 ## Reading rules (token discipline)
