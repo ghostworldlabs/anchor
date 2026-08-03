@@ -147,14 +147,30 @@ John chose clone distribution over zips. Done:
   clone → onboard.cmd → launcher; upgrades = `git pull`; zips remain at
   `C:\dev\Anchor-ship\` as the no-github fallback.
 
+## Status 2026-08-03 — repo PUBLIC; republished from clean HEAD
+
+- **Repo flipped PUBLIC** (John's call — low-touch sharing, no invites).
+  All-rights-reserved, no LICENSE = default copyright. Docs de-invited
+  (USER-ONBOARD / SHARE-NOTE / TEST-EMAIL) and republished.
+- **Gate save + process rule**: rebuilding from the working tree FAILED the
+  import-closure gate — uncommitted v1.2 steward WIP (`anchor_gui.py` +
+  `commission_executor.py`) had appeared in the tree. Correct refusal.
+  **RULE: share builds run from a clean worktree of committed HEAD**
+  (`git worktree add <tmp> master` → `ANCHOR_SHIP_OUT="C:\dev\Anchor-ship"
+  python <tmp>/planning/share-anchor-skills-2026-07/_build_clean_ship.py`),
+  journaled `2026-08-03-01` (open: make the builder enforce this itself).
+  NOTE for John: that steward WIP sits UNCOMMITTED in C:\dev\Anchor — a
+  service restart would run it; it was NOT shipped (verified: the public
+  clone has zero commission_executor references).
+- **Verified on the PUBLIC repo**: anonymous-style fresh clone = 991 files,
+  13 skills, public-docs present, no WIP leak, **pull dry run 7/7 against
+  the clone**. Zips + vm-sandbox pkg refreshed to the same build.
+
 ## Remaining steps
 
-1. **John, from the road**:
-   - invite each collaborator (read-only):
-     `gh api repos/johncliechty/anchor-plus-skills/collaborators/<username> -X PUT -f permission=pull`
-     (or repo → Settings → Collaborators → Add people)
-   - send them the message in `SHARE-NOTE.md` (clone edition). Ask them to
-     use the friction journal for anything that hurts.
+1. **John, from the road**: just send `TEST-EMAIL.md` (no invites needed
+   now) to whoever should try it. Clone URL:
+   `https://github.com/johncliechty/anchor-plus-skills`
 2. **After returning (~2 days)**: reboot PUTER (park live sessions warm
    first if needed: `python tools/pre_restart_drain.py`; reboot also
    cold-deploys v1.1.3 into the NSSM service — no-ops for your config).
