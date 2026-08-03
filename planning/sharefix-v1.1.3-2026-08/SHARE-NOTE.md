@@ -7,8 +7,7 @@
 > it fixed. v1.1.3 is a recovery release that has been through an automated
 > "stranger install" test suite.
 >
-> I've invited you to the private GitHub repo — accept the invite (check the
-> email on your GitHub account), then on Windows:
+> On Windows (you just need git — no GitHub account required):
 >
 > ```
 > cd C:\dev                (create the folder if needed)
@@ -18,8 +17,7 @@
 > python launch_anchor_dashboard.py
 > ```
 >
-> - The first clone pops a browser sign-in — use the GitHub account that got
->   the invite. Need git? `winget install --id Git.Git`
+> - Need git? `winget install --id Git.Git`
 > - `onboard.cmd` installs Python via winget if you don't have it, walks a
 >   short dialogue, installs 13 Claude Code skills, and sets up the local
 >   dashboard (http://localhost:8777 — nothing leaves your machine).
@@ -47,10 +45,10 @@
 
 ## Notes for John (not part of the message)
 
-- **Invite each collaborator** (before sending the note):
-  `gh api repos/johncliechty/anchor-plus-skills/collaborators/<their-github-username> -X PUT -f permission=pull`
-  (or repo page → Settings → Collaborators → Add people). `permission=pull`
-  = read/clone only.
+- **Repo is PUBLIC as of 2026-08-03** (John's call — low-touch sharing, no
+  invites needed). All-rights-reserved, no LICENSE file = default copyright;
+  visible but not licensed for reuse. To go private again:
+  `gh repo edit johncliechty/anchor-plus-skills --visibility private --accept-visibility-change-consequences`
 - **Republish after any fix**: `python tools/publish_share_repo.py`
   (rebuilds nothing itself — run the clean-ship builder first; it syncs the
   built B tree into the published repo, commits, tags, pushes). Collaborators
