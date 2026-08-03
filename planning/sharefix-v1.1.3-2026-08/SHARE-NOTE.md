@@ -1,4 +1,4 @@
-# Share note — paste-ready message for collaborators (v1.1.3)
+# Share note — paste-ready message for collaborators (v1.1.3, clone edition)
 
 > Subject: Anchor v1.1.3 — fixed install, please give it a try
 >
@@ -7,27 +7,30 @@
 > it fixed. v1.1.3 is a recovery release that has been through an automated
 > "stranger install" test suite.
 >
-> **Pick one zip:**
-> - `Anchor-plus-skills-v1.1.3.zip` — the full product: a local dashboard at
->   http://localhost:8777 (nothing leaves your machine) + 13 Claude Code
->   skills. Most of you want this one.
-> - `Skills-only-v1.1.3.zip` — just the skills for Claude Code, no server.
+> I've invited you to the private GitHub repo — accept the invite (check the
+> email on your GitHub account), then on Windows:
 >
-> **Install (Windows):**
-> 1. Right-click the zip → Properties → check "Unblock" → OK. Extract into
->    `C:\dev` (make the folder if needed). Keep this folder — your Anchor
->    data will live inside it.
-> 2. Open a terminal in the extracted folder and run:  `.\onboard.cmd`
->    (it installs Python via winget if you don't have it, walks you through
->    a short dialogue, installs the skills, and sets up the dashboard).
-> 3. Start it:  `python launch_anchor_dashboard.py`  (or the new desktop
->    icon). After any reboot, just run it again.
+> ```
+> cd C:\dev                (create the folder if needed)
+> git clone https://github.com/johncliechty/anchor-plus-skills.git
+> cd anchor-plus-skills
+> .\onboard.cmd
+> python launch_anchor_dashboard.py
+> ```
+>
+> - The first clone pops a browser sign-in — use the GitHub account that got
+>   the invite. Need git? `winget install --id Git.Git`
+> - `onboard.cmd` installs Python via winget if you don't have it, walks a
+>   short dialogue, installs 13 Claude Code skills, and sets up the local
+>   dashboard (http://localhost:8777 — nothing leaves your machine).
+> - After a reboot, just run the launcher again (no auto-start yet).
+> - **Upgrades later are just `git pull`** — your data stays untouched.
 >
 > **For the AI features** (in-dashboard terminals, research/plan/build
 > sessions) you also need the Claude Code CLI + your subscription
-> (`npm install -g @anthropic-ai/claude-code`), plus git and Node.js. The
-> dashboard works without them — AI features just report unavailable.
-> Nothing spends your Claude subscription without an explicit action by you.
+> (`npm install -g @anthropic-ai/claude-code`) plus Node.js. The dashboard
+> works without them — AI features just report unavailable. Nothing spends
+> your Claude subscription without an explicit action by you.
 >
 > **If ANYTHING is broken or annoying** — this is the important part —
 > please take 30 seconds in the package folder:
@@ -39,18 +42,27 @@
 > and send me the friction-report output. That exact loop is how the last
 > round of bugs got found and fixed.
 >
-> Full instructions are in `USER-ONBOARD.md` inside the zip. All rights
+> Full instructions are in `USER-ONBOARD.md` in the repo. All rights
 > reserved — please don't redistribute.
 
 ## Notes for John (not part of the message)
 
-- Zips + SHA256SUMS live at `C:\dev\Anchor-ship\` — attach or share via
-  Drive/OneDrive if over mail limits.
+- **Invite each collaborator** (before sending the note):
+  `gh api repos/johncliechty/anchor-plus-skills/collaborators/<their-github-username> -X PUT -f permission=pull`
+  (or repo page → Settings → Collaborators → Add people). `permission=pull`
+  = read/clone only.
+- **Republish after any fix**: `python tools/publish_share_repo.py`
+  (rebuilds nothing itself — run the clean-ship builder first; it syncs the
+  built B tree into the published repo, commits, tags, pushes). Collaborators
+  then just `git pull`.
+- Zips remain at `C:\dev\Anchor-ship\` as a no-github fallback
+  (`Anchor-plus-skills-v1.1.3.zip` 9.7 MB · `Skills-only-v1.1.3.zip` 3.6 MB
+  · SHA256SUMS.txt).
 - This drop goes out BEFORE the Windows-Sandbox VM check (reboot pending,
-  John traveling — accepted 2026-08-02). Evidence base: build sandbox 10/10,
-  pull dry run 7/7, clean-profile run 8/8 — all against the final artifact.
-  The genuinely-untested residue: a foreign Windows image and the
+  John traveling — accepted 2026-08-02). Evidence: build sandbox 10/10, pull
+  dry run 7/7, clean-profile 8/8, element audit 14/14 — all against the
+  final artifact. Untested residue: a foreign Windows image + the
   winget/python.org bootstrap on a python-less box; both degrade with honest
-  printed instructions if they fail.
+  printed instructions.
 - After the reboot: `python C:\dev\Anchor-ship\vm-sandbox\host_run.py`, then
-  resolve friction `2026-08-02-05`.
+  resolve friction `2026-08-02-05` and widen the invite list.

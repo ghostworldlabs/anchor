@@ -127,11 +127,34 @@ rewritten around what a user actually needs):
   python.org bootstrap on a python-less box; both degrade with honest
   printed instructions. vm-sandbox pkg refreshed to the FINAL build.
 
+## Status 2026-08-02 (clone distribution) — GITHUB REPO LIVE
+
+John chose clone distribution over zips. Done:
+
+- **Private repo published**: `https://github.com/johncliechty/anchor-plus-skills`
+  — the built, gated Package B tree (991 files, tag v1.1.3), NOT the author
+  monorepo. Publisher: `tools/publish_share_repo.py` (mirror → force-add →
+  **count invariant**: refuses to push if any built file failed to track).
+- **Publish bug found + fixed on first contact**: the shipped .gitignore's
+  unanchored author rules (`gandalf/`, my new `domains/` `logs/` set)
+  silently dropped the WHOLE gandalf skill + the starter scaffold from the
+  first publish. Fixed: rules root-anchored, publisher force-adds + count
+  invariant; verified by a REAL clone from github.com — 991 files, 13
+  skills, starter present, **pull dry run 7/7 against the clone**, and user
+  data files created in a clone are invisible to git (`git pull` upgrade is
+  data-safe, proven).
+- Docs rewritten clone-first (USER-ONBOARD + SHARE-NOTE): accept invite →
+  clone → onboard.cmd → launcher; upgrades = `git pull`; zips remain at
+  `C:\dev\Anchor-ship\` as the no-github fallback.
+
 ## Remaining steps
 
-1. **John, from the road**: send the zip(s) + SHARE-NOTE text to a few
-   collaborators. Ask them to use the friction journal for anything that
-   hurts.
+1. **John, from the road**:
+   - invite each collaborator (read-only):
+     `gh api repos/johncliechty/anchor-plus-skills/collaborators/<username> -X PUT -f permission=pull`
+     (or repo → Settings → Collaborators → Add people)
+   - send them the message in `SHARE-NOTE.md` (clone edition). Ask them to
+     use the friction journal for anything that hurts.
 2. **After returning (~2 days)**: reboot PUTER (park live sessions warm
    first if needed: `python tools/pre_restart_drain.py`; reboot also
    cold-deploys v1.1.3 into the NSSM service — no-ops for your config).
