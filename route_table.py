@@ -251,6 +251,13 @@ ROUTES = [
     # each project root, and the portfolio altitude folds projections read-only.
     _r("POST", "/api/ecgberht/register_projects", AUTH_TOKEN,
        handler="handle_ecgberht_register_projects", migrated=True),
+    # 2026-08-04 — the missing SC1 path. A dictated project description compiles
+    # to a PROPOSED scaffolding (preview writes nothing) and, on an explicit
+    # confirm, becomes roadmap steps through the single writer.
+    _r("POST", "/api/ecgberht/scaffold_preview", AUTH_TOKEN,
+       handler="handle_ecgberht_scaffold_preview", migrated=True),
+    _r("POST", "/api/ecgberht/scaffold_confirm", AUTH_TOKEN,
+       handler="handle_ecgberht_scaffold_confirm", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

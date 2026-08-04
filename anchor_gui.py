@@ -10604,6 +10604,72 @@ def _ecgberht_steward_cli(args, timeout=30):
         return {"ok": False, "error": "bridge_bad_json", "message": out[:500]}
 
 
+def handle_ecgberht_scaffold_preview(handler, path, body):
+    """POST /api/ecgberht/scaffold_preview — dictation -> PROPOSED scaffolding.
+
+    The chamber compiles talk through a closed ELEVEN-act table, none of which is
+    "scaffold this project", so a dictated project description used to dead-end at
+    "could not compile that to a closed act". This is that missing path.
+
+    PURE: the bridge's preview is zero-model and writes NOTHING — no ledger entry,
+    no session envelope — because seeing a proposal should cost nothing. The write
+    is a separate, explicit act (scaffold_confirm).
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    text = (b.get("text") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not text:
+        handler._send_json({"ok": False, "error": "empty_text",
+                            "message": "Nothing to scaffold — say what the project is."}, 400)
+        return
+    if _ecgberht_reject_oversized(handler, text):
+        return
+    args = ["--project", folder, "--scaffold-preview", text]
+    if (b.get("goal") or "").strip():
+        args.extend(["--goal", (b.get("goal") or "").strip()])
+    out = _ecgberht_bridge(args)
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_scaffold_confirm(handler, path, body):
+    """POST /api/ecgberht/scaffold_confirm — write the confirmed stages.
+
+    The ONE write on this path: opens the session envelope, proposes through the
+    spine, then batch-confirms, so the steps land in roadmap_events via the single
+    writer. Carries ``who`` because a confirmation is a human decision.
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    text = (b.get("text") or b.get("description") or "").strip()
+    stages = b.get("stages")
+    if not text and not stages:
+        handler._send_json({"ok": False, "error": "empty_scaffold",
+                            "message": "Nothing to confirm."}, 400)
+        return
+    if text and _ecgberht_reject_oversized(handler, text):
+        return
+    fields = {
+        "project_path": folder,
+        "goal": b.get("goal"),
+        "description": text or None,
+        "stages": stages or None,
+        "who": b.get("who") or "john",
+    }
+    if b.get("client_event_id"):
+        fields["client_event_id"] = b["client_event_id"]
+    out = _ecgberht_bridge(["--project", folder,
+                            "--scaffold-confirm", json.dumps(fields)])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
 def handle_ecgberht_register_projects(handler, path, body):
     """POST /api/ecgberht/register_projects — join active projects to the portfolio.
 
@@ -17328,6 +17394,8 @@ _MIGRATED_HANDLERS = {
     # this class of omission impossible to reintroduce.
     "handle_ecgberht_stand_up": handle_ecgberht_stand_up,
     "handle_ecgberht_register_projects": handle_ecgberht_register_projects,
+    "handle_ecgberht_scaffold_preview": handle_ecgberht_scaffold_preview,
+    "handle_ecgberht_scaffold_confirm": handle_ecgberht_scaffold_confirm,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

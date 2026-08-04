@@ -430,3 +430,107 @@ def test_say_line_grows_with_dictated_text_and_enter_sends(authed):
                 "sending must clear the say line"
         finally:
             b.close()
+
+
+# ── Dictation → scaffolding, in the browser (2026-08-04) ────────────────────
+# John set a goal, dictated what the project was, pressed send, and got
+# "Ecgberht could not compile that to a closed act." The chamber compiles talk
+# through a closed ELEVEN-act table and none of them is "scaffold this project";
+# the scaffolding engine was built and proven by an acceptance test that IMPORTS
+# it, so the criterion was true of the engine and false of the product.
+#
+# This test enters where the person enters: it types into the real say box and
+# reads what the steward says back. No endpoint is called directly.
+
+def test_dictating_a_project_description_offers_stages_not_a_refusal(authed):
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    pid, base = authed["pid"], authed["base"]
+    dictation = ("This project is about teaching an MBA course on AI. I want to "
+                 "build a syllabus, develop case studies, create assessments, and "
+                 "pilot it with a small cohort.")
+
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid, goal="Teach an MBA course on AI")
+
+            pg.fill("#ecgSayInput", dictation)
+            pg.press("#ecgSayInput", "Enter")
+
+            # The steward must OFFER stages, not dead-end on the act list.
+            pg.wait_for_function(
+                "() => {var c=document.getElementById('ecgConvo');"
+                " return c && c.querySelector('.ecg-scaffold-steps');}",
+                timeout=30000)
+
+            said = pg.text_content("#ecgConvo")
+            assert "could not compile that to a closed act" not in said, said[-400:]
+
+            steps = pg.eval_on_selector_all(
+                "#ecgConvo .ecg-scaffold-steps li",
+                "els => els.map(e => e.textContent.toLowerCase())")
+            assert len(steps) >= 3, f"expected several stages, got {steps}"
+            joined = " | ".join(steps)
+            assert "syllabus" in joined, joined
+            assert "case studies" in joined, joined
+            assert not any(s.startswith("this project is about") for s in steps), (
+                "narration was turned into a stage: %s" % joined)
+
+            # Nothing is written until it is confirmed.
+            assert "nothing is written yet" in said.lower(), said[-400:]
+
+            # And the confirm button is real, not a label.
+            wired = pg.evaluate(
+                "() => {var b=Array.from(document.querySelectorAll("
+                "'#ecgConvo .act button')).find(x=>/confirm/i.test(x.textContent));"
+                " return b ? !!b.onclick : null;}")
+            assert wired is True, "the Confirm button is missing or decorative"
+        finally:
+            b.close()
+
+
+def test_confirming_the_scaffolding_writes_the_steps(authed):
+    """Clicking Confirm must actually land steps on the campaign roadmap."""
+    pytest.importorskip("playwright.sync_api")
+    from playwright.sync_api import sync_playwright
+
+    pid, base = authed["pid"], authed["base"]
+    folder = Path(authed["repo"])
+    dictation = ("I want to build a syllabus, develop case studies, and pilot it "
+                 "with a small cohort.")
+
+    with sync_playwright() as p:
+        b = p.chromium.launch()
+        pg = b.new_page()
+        pg.add_init_script(
+            "window.localStorage.setItem('anchor_token', '%s');"
+            "window.prompt = function(){ return null; };" % TOKEN)
+        try:
+            _chamber_with_goal(pg, base, pid, goal="Teach an MBA course on AI")
+            pg.fill("#ecgSayInput", dictation)
+            pg.press("#ecgSayInput", "Enter")
+            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=30000)
+
+            pg.click("#ecgConvo .act button:has-text('Confirm')")
+            pg.wait_for_function(
+                "() => {var c=document.getElementById('ecgConvo');"
+                " return c && /on the campaign roadmap now/i.test(c.textContent);}",
+                timeout=30000)
+
+            said = pg.text_content("#ecgConvo")
+            assert "Could not write that" not in said, said[-400:]
+        finally:
+            b.close()
+
+    # The OUTCOME, on disk: step_create events in the campaign ledger.
+    ledger = folder / "roadmap.json"
+    assert ledger.exists(), "no roadmap.json was written"
+    events = json.loads(ledger.read_text(encoding="utf-8")).get("roadmap_events", [])
+    creates = [e for e in events if e.get("kind") == "step_create"]
+    assert len(creates) >= 3, f"only {len(creates)} step_create events: {events}"

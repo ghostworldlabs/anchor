@@ -145,3 +145,9 @@
 .dash-tile.tile-seal{border-color:rgba(224,164,55,0.45)}
 .dash-tile.tile-seal>summary{font-size:18px;padding:16px 18px;color:#e0a437}
 .dash-tile.tile-workbench .tile-body{padding:0 10px 12px}
+
+/* Dictation → scaffolding offer (2026-08-04). Proposed stages shown BEFORE any
+   write, so the list reads as a proposal to check, not a result to accept. */
+.ecg-scaffold-steps { margin: 8px 0 4px; padding-left: 22px; }
+.ecg-scaffold-steps li { margin: 4px 0; line-height: 1.4; }
+.ecg-scaffold-done { color: #8b93a7; font-size: 11px; margin-top: 2px; }

@@ -6251,12 +6251,96 @@ function _ecgSpeak(convo, text) {
         _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
       }
     } else {
-      var prop = (c.proposal && c.proposal.message) ||
-        "I didn't understand that as something I can do — nothing was saved.";
-      _ecgStewardMsg(convo, prop);
+      // (2026-08-04) A free-form utterance that matches no closed act used to
+      // dead-end here with "could not compile that to a closed act" — which is
+      // exactly what a person gets when they DESCRIBE THEIR PROJECT, the one
+      // thing North Star SC1 says must produce a scaffolding. The engine could
+      // always do it; nothing reached it. Offer it now, before the refusal.
+      _ecgOfferScaffold(convo, text, c);
     }
   }).catch(function () {
     _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
+  });
+}
+
+/* (2026-08-04) DICTATION -> SCAFFOLDING.
+
+   The chamber compiles talk through a closed eleven-act table. Describing a
+   project matches none of them, so the steward refused and offered the act list —
+   the first thing John hit in real use. The scaffolding engine existed and was
+   proven, but no surface reached it.
+
+   Preview is PURE: zero-model, zero writes, no session envelope, because seeing a
+   proposal should cost nothing. Only [Confirm] writes, and it writes through the
+   single writer. If the text carries no stages the steward ASKS rather than
+   inventing a plan. */
+function _ecgOfferScaffold(convo, text, compiled) {
+  var refusal = (compiled && compiled.proposal && compiled.proposal.message) ||
+    "I didn't understand that as something I can do — nothing was saved.";
+
+  _postJson('/api/ecgberht/scaffold_preview', {
+    project_id: PROJECT_ID,
+    text: text
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (!j || !j.ok || !j.compiled) {
+      // Honest: either it heard no stages (and says what would work), or the
+      // surface failed. Never silently swallow into the old dead end.
+      _ecgStewardMsg(convo, (j && j.message) || refusal);
+      return;
+    }
+    var steps = (j.proposal && j.proposal.steps) || [];
+    var msg = _ecgStewardMsg(convo,
+      'I heard ' + steps.length + ' stage' + (steps.length === 1 ? '' : 's') +
+      '. Nothing is written yet — confirm and they become the campaign roadmap.');
+
+    var list = _ecgEl('ol', 'ecg-scaffold-steps');
+    steps.forEach(function (st) {
+      var li = _ecgEl('li', null, st.name);
+      if (st.done_when) {
+        li.appendChild(_ecgEl('div', 'ecg-scaffold-done', 'done when: ' + st.done_when));
+      }
+      list.appendChild(li);
+    });
+    msg.appendChild(list);
+
+    var act = _ecgEl('div', 'act');
+    var yes = _ecgEl('button', 'ecg-btn pri', 'Confirm — build the roadmap');
+    yes.onclick = function () {
+      yes.disabled = true;
+      yes.textContent = 'Writing…';
+      _postJson('/api/ecgberht/scaffold_confirm', {
+        project_id: PROJECT_ID,
+        text: text
+      }).then(function (r) { return r.json(); }).then(function (k) {
+        if (!k || !k.ok) {
+          yes.disabled = false;
+          yes.textContent = 'Confirm — build the roadmap';
+          _ecgStewardMsg(convo, 'Could not write that: ' +
+            ((k && (k.message || k.error)) || 'no response') + ' — nothing was saved.');
+          return;
+        }
+        var n = (k.step_ids || []).length;
+        _ecgStewardMsg(convo, 'Written. ' + n + ' stage' + (n === 1 ? '' : 's') +
+          ' are on the campaign roadmap now.');
+        act.remove();
+        if (typeof ecgSealMountInline === 'function') ecgSealMountInline();
+      }).catch(function () {
+        yes.disabled = false;
+        yes.textContent = 'Confirm — build the roadmap';
+        _ecgStewardMsg(convo, "That didn't go through — nothing was saved.");
+      });
+    };
+    var no = _ecgEl('button', 'ecg-btn', 'Not that');
+    no.onclick = function () {
+      act.remove();
+      _ecgStewardMsg(convo, 'Left alone — nothing was written. Tell me the stages ' +
+        'you want and I will propose again.');
+    };
+    act.appendChild(yes);
+    act.appendChild(no);
+    msg.appendChild(act);
+  }).catch(function () {
+    _ecgStewardMsg(convo, refusal);
   });
 }
 
