@@ -235,27 +235,25 @@ def test_read_endpoints_answer_with_the_query_token_with_auth_on(authed):
                  "/api/rnd/friction?limit=3&token=%s" % TOKEN):
         assert _get(path) == 200, path
 
-    # The two PORTFOLIO reads are PINNED SEPARATELY, not dropped (2026-08-04).
+    # The two PORTFOLIO reads: EMPTY IS NOT BROKEN (fixed 2026-08-04).
     #
-    # The token transport works — that is what this test is about, and it is
-    # asserted below by the NOT-401. But on a host where no steward act has ever
-    # been performed, the portfolio index home (%USERPROFILE%\.steward\portfolio)
-    # has never been written: it is created LAZILY by the first index write
-    # (engine ledger-spine.mjs -> ingestWrite). The engine reports that absence as
-    # GLANCE_INDEX_MISSING and Anchor maps ok:false -> 502, so a FRESH INSTALL is
-    # told its index is BROKEN when it is merely EMPTY — and the remedy the text
-    # names ("run the index audit fix") is not on the CLI's closed verb surface.
+    # These used to answer 502. On a host where no project has joined the
+    # portfolio, the index home (%USERPROFILE%\.steward\portfolio) has never been
+    # written — it is created by `register`, the one verb that mints a project
+    # marker. The engine reports the absence as GLANCE_INDEX_MISSING, and Anchor
+    # mapped ok:false -> 502, so a FRESH INSTALL was told its index was BROKEN when
+    # it was merely EMPTY, over a remedy ("run the index audit fix") that was not on
+    # any reachable verb surface.
     #
-    # That is a product finding for review, NOT something this test should paper
-    # over with a loosened status check. So the current contract is pinned exactly:
-    # when the finding is fixed this assertion FAILS and forces a deliberate update.
+    # Both now answer 200 with the honest empty state AND the action that resolves
+    # it. This assertion was previously pinned at 502 precisely so that fixing the
+    # finding would fail the test and force this deliberate update.
     for path in ("/api/ecgberht/high_seat?token=%s" % TOKEN,
                  "/api/ecgberht/high_seat_badge?token=%s" % TOKEN):
         assert _get(path) != 401, "%s: token transport broken (401)" % path
-        assert _get(path) == 502, (
-            "%s no longer answers 502 on a never-initialized portfolio index — "
-            "if the empty-vs-broken finding was fixed, assert the new honest "
-            "200 here" % path)
+        assert _get(path) == 200, (
+            "%s must answer 200 with the honest empty state, never a 502 banner, "
+            "when no project has joined the portfolio yet" % path)
 
     # The asymmetry, pinned so a future change to it is deliberate.
     assert _get("/api/ecgberht/high_seat", {"X-Anchor-Token": TOKEN}) == 401

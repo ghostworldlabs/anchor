@@ -85,7 +85,18 @@ function ecgHighSeatBadge(done) {
       if (done) done(false);
       return;
     }
-    var n = out.queue_length || 0;
+    // (2026-08-04) ok:true does NOT imply a known queue. When no project has
+    // joined the portfolio the server answers ok:true with queue_length null —
+    // the count is UNKNOWN, not zero. `out.queue_length || 0` would have turned
+    // that null into a confident "⚑ 0", which is precisely the "nothing needs
+    // you" lie the comment above forbids. Hide the badge instead.
+    if (out.queue_length == null) {
+      badge.textContent = '';
+      badge.className = 'ecg-hs-badge';
+      if (done) done(true);
+      return;
+    }
+    var n = out.queue_length;
     badge.textContent = '⚑ ' + n;
     badge.className = n > 0 ? 'ecg-hs-badge on' : 'ecg-hs-badge';
     if (done) done(true);
@@ -374,12 +385,68 @@ function _ecgHsRenderHighSeat(body, vm) {
   body.appendChild(say);
 }
 
+/* The never-joined portfolio (2026-08-04 hardening).
+
+   `register` is the only verb that mints a project marker, a minted project_id is
+   the only thing the engine indexes, and the index is what this surface reads — so
+   until projects join, the High Seat has nothing to show. That is EMPTY, and it
+   used to render as a 502 "can't reach the steward" banner quoting a remedy the
+   operator had no way to run. Say what is true and offer the act. */
+function _ecgHsRenderEmptyPortfolio(body, out) {
+  body.innerHTML = '';
+  var wrap = _ecgHsEl('div', 'ecg-hs-empty');
+  wrap.appendChild(_ecgHsEl('div', 'ecg-hs-empty-title',
+    _ecgHsStwName() + ' — no projects have joined yet'));
+  wrap.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
+    (out && out.message) ||
+    'This is empty, not broken. Register your active projects to see them here.'));
+  if (out && out.candidate_roots) {
+    wrap.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
+      out.candidate_roots + ' active project' +
+      (out.candidate_roots === 1 ? '' : 's') + ' ready to join.'));
+  }
+  // Reuse the dock's existing action-row styling (.ecg-hs-actions > button.pri)
+  // rather than inventing classes with no CSS behind them.
+  var row = _ecgHsEl('div', 'ecg-hs-actions');
+  var btn = _ecgHsEl('button', 'pri', 'Register my projects');
+  row.appendChild(btn);
+  btn.onclick = function () {
+    btn.disabled = true;
+    btn.textContent = 'Registering…';
+    fetch('/api/ecgberht/register_projects', {
+      method: 'POST', headers: _ecgHsHeaders(), body: JSON.stringify({})
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j || j.ok === false) {
+        btn.disabled = false;
+        btn.textContent = 'Register my projects';
+        wrap.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
+          'Could not register: ' + ((j && (j.message || j.error)) || 'no response')));
+        return;
+      }
+      _ecgHsLoadHighSeat(body); // re-read: the index now has rows
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = 'Register my projects';
+    });
+  };
+  wrap.appendChild(row);
+  body.appendChild(wrap);
+}
+
 function _ecgHsLoadHighSeat(body) {
   _ecgHsGet('/api/ecgberht/high_seat?', function (out) {
     if (!out || !out.ok) {
       body.innerHTML = '';
       body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet',
         "I can't reach the " + _ecgHsStwName() + " right now: " + ((out && (out.error || out.message)) || 'no response')));
+      return;
+    }
+    // (2026-08-04) EMPTY IS NOT BROKEN, and it is not a rendered view model
+    // either: ok:true with no projects registered carries no `high_seat`, so
+    // passing it to the renderer would paint an undefined view. Offer the ONE
+    // action that resolves the state instead of a dead panel.
+    if (out.empty || !out.high_seat) {
+      _ecgHsRenderEmptyPortfolio(body, out);
       return;
     }
     _ecgHsRenderHighSeat(body, out.high_seat);

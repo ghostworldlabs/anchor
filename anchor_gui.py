@@ -10569,6 +10569,99 @@ def _ecgberht_hs_bridge(args, timeout=30):
                 "message": out[:500]}
 
 
+def _ecgberht_steward_cli(args, timeout=30):
+    """Spawn the Ecgberht STEWARD PORTFOLIO CLI (`bin/steward.mjs`) and parse JSON.
+
+    A SECOND closed surface, separate from the fifteen per-project talk verbs the
+    seal-chamber bridge speaks. Anchor needs exactly one verb from it — ``register``
+    — because that is the only path that mints a project marker, a minted
+    (dashed-UUID) project_id is the only thing the engine will index, and the index
+    is what the High Seat reads. Anchor's own project ids are 32-hex WITHOUT dashes
+    and deliberately never cross this boundary as an identity.
+    """
+    import subprocess
+    root = _ecgberht_root()
+    cli = root / "bin" / "steward.mjs"
+    if not cli.exists():
+        return {"ok": False, "error": "ecgberht_engine_missing",
+                "message": "steward CLI not found (set ECGBERHT_ROOT or keep the "
+                           "Ecgberht checkout beside Anchor)"}
+    try:
+        res = subprocess.run(
+            ["node", str(cli)] + list(args),
+            capture_output=True, text=True, timeout=timeout,
+            encoding="utf-8", errors="replace",
+            cwd=str(root), creationflags=_paths.NO_WINDOW)
+    except Exception as exc:
+        return {"ok": False, "error": "bridge_spawn_failed", "message": str(exc)}
+    out = (res.stdout or "").strip()
+    if not out:
+        return {"ok": False, "error": "bridge_no_output",
+                "message": (res.stderr or "").strip()[:500]}
+    try:
+        return json.loads(out) if out.startswith("{") else json.loads(out.splitlines()[-1])
+    except Exception:
+        return {"ok": False, "error": "bridge_bad_json", "message": out[:500]}
+
+
+def handle_ecgberht_register_projects(handler, path, body):
+    """POST /api/ecgberht/register_projects — join active projects to the portfolio.
+
+    An EXPLICIT human act, never automatic. Registering writes a steward marker
+    into each project root, and the portfolio altitude's contract is that it folds
+    projections READ-ONLY and never writes to a project store — so this cannot ride
+    a read path (that is precisely why it is a POST with a confirm, not a lazy
+    side effect of rendering the High Seat).
+
+    Idempotent for the caller: a root already marked answers ``already_registered``
+    with the SAME project id and is counted as registered, not as an error.
+    """
+    roots, skipped, failed = _ecgberht_portfolio_roots()
+    if failed:
+        handler._send_json({"ok": False, "error": "registry_unreadable",
+                            "message": "could not read the project registry; "
+                                       "the portfolio is unknown, not empty"}, 502)
+        return
+
+    only = (body or {}).get("root")
+    if only:
+        roots = [r for r in roots if str(r) == str(only)]
+        if not roots:
+            handler._send_json({"ok": False, "error": "unknown_root",
+                                "message": "that project is not an active R&D root"}, 404)
+            return
+
+    if not roots:
+        handler._send_json({"ok": True, "registered": 0, "already": 0, "failed": 0,
+                            "results": [], "skipped_roots": skipped,
+                            "message": "No active projects to register."}, 200)
+        return
+
+    results, n_new, n_old, n_bad = [], 0, 0, 0
+    for r in roots:
+        out = _ecgberht_steward_cli(["register", "--root", str(r)])
+        ok = bool(out.get("ok"))
+        already = bool(out.get("already_registered"))
+        if ok and already:
+            n_old += 1
+        elif ok:
+            n_new += 1
+        else:
+            n_bad += 1
+        results.append({"root": str(r), "ok": ok, "already_registered": already,
+                        "project_id": out.get("project_id"),
+                        "code": out.get("code") or out.get("error"),
+                        "message": (out.get("message") or out.get("text") or "")[:300]})
+
+    handler._send_json({"ok": n_bad == 0, "registered": n_new, "already": n_old,
+                        "failed": n_bad, "results": results,
+                        "skipped_roots": skipped,
+                        "message": "%d newly registered, %d already in the portfolio%s."
+                                   % (n_new, n_old,
+                                      ", %d refused" % n_bad if n_bad else "")},
+                       200 if n_bad == 0 else 207)
+
+
 #: Cap on user text handed to a bridge AS A COMMAND-LINE ARGUMENT. This is not
 #: the PTY path: ``rnd_terminal.MAX_TURN_CHARS`` (100_000) writes to a child's
 #: STDIN, which has no such limit. Here the text becomes argv, and Windows caps
@@ -10663,6 +10756,26 @@ def handle_ecgberht_high_seat(handler, path, body):
     if isinstance(out, dict):
         if skipped:
             out["skipped_roots"] = skipped
+        # EMPTY IS NOT BROKEN (hardening 2026-08-04). A portfolio index that has
+        # never been written is a portfolio nobody has JOINED yet — not a damaged
+        # one. It used to surface as a 502 banner quoting a remedy ("run the index
+        # audit fix") that was not on any reachable verb surface, which is the
+        # unknown-vs-empty honesty defect pointed the wrong way round. Report the
+        # honest empty state, at 200, WITH the action that resolves it.
+        if out.get("code") == "GLANCE_INDEX_MISSING" or                 out.get("error") == "GLANCE_INDEX_MISSING":
+            handler._send_json({
+                "ok": True,
+                "empty": True,
+                "code": "GLANCE_NO_PROJECTS_REGISTERED",
+                "message": "No projects have joined the portfolio yet — this is "
+                           "empty, not broken. Register your active projects to "
+                           "see them here.",
+                "can_register": True,
+                "register_endpoint": "/api/ecgberht/register_projects",
+                "candidate_roots": len(roots),
+                "skipped_roots": skipped,
+            }, 200)
+            return
         # Map bridge garbage into the glance failure surface (never a blank panel).
         if out.get("error") == "bridge_bad_json":
             out["code"] = "GLANCE_INDEX_UNPARSEABLE"
@@ -10704,6 +10817,18 @@ def handle_ecgberht_high_seat_badge(handler, path, body):
         out["bridge_bad_json"] = True
         out["mode"] = "badge"
         out["queue_length"] = None
+    # EMPTY IS NOT BROKEN (hardening 2026-08-04) — mirrors the high_seat handler.
+    # No project has joined the portfolio yet, so the queue length is genuinely
+    # UNKNOWN rather than zero: `queue_length: None` keeps the badge hidden instead
+    # of asserting the reassuring "nothing needs you" the index cannot support.
+    if isinstance(out, dict) and (out.get("code") == "GLANCE_INDEX_MISSING"
+                                  or out.get("error") == "GLANCE_INDEX_MISSING"):
+        handler._send_json({"ok": True, "mode": "badge", "empty": True,
+                            "code": "GLANCE_NO_PROJECTS_REGISTERED",
+                            "queue_length": None,
+                            "message": "No projects have joined the portfolio yet."},
+                           200)
+        return
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
@@ -17202,6 +17327,7 @@ _MIGRATED_HANDLERS = {
     # nothing was created." test_every_migrated_route_has_a_handler now makes
     # this class of omission impossible to reintroduce.
     "handle_ecgberht_stand_up": handle_ecgberht_stand_up,
+    "handle_ecgberht_register_projects": handle_ecgberht_register_projects,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

@@ -134,3 +134,18 @@
    honest options, amber accent. No meter has ever been rendered here. */
 .ecg-hs-capstop { border-color: #7a5a1e; }
 .ecg-hs-capstop .who { color: #e0a437; }
+
+/* The never-joined portfolio (2026-08-04 hardening). `register` is the only verb
+   that mints a project marker, and the index it writes is what this surface reads
+   — so until projects join there is genuinely nothing to show. Styled as a calm
+   empty state, deliberately NOT as the amber .ecg-hs-raise alarm: empty is not
+   broken, and it used to render as a "can't reach the steward" failure banner. */
+.ecg-hs-empty {
+  border: 1px solid #2a2f3c; border-radius: 12px; padding: 18px 20px;
+  margin-bottom: 14px; color: #aeb4c2;
+}
+.ecg-hs-empty-title {
+  color: #d7dbe4; font-size: 14px; font-weight: 600; margin-bottom: 8px;
+}
+.ecg-hs-empty .ecg-hs-quiet { border: 0; padding: 0; margin: 0 0 6px; }
+.ecg-hs-empty .ecg-hs-actions { margin-top: 12px; }

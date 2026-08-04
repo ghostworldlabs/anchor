@@ -245,6 +245,12 @@ ROUTES = [
     # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)
     _r("POST", "/api/ecgberht/stand_up", AUTH_TOKEN,
        handler="handle_ecgberht_stand_up", migrated=True),
+    # Hardening 2026-08-04 — join active projects to the portfolio index. The
+    # ONLY path that mints a project marker, and therefore the only way the High
+    # Seat can ever have rows. A POST because registering WRITES a marker into
+    # each project root, and the portfolio altitude folds projections read-only.
+    _r("POST", "/api/ecgberht/register_projects", AUTH_TOKEN,
+       handler="handle_ecgberht_register_projects", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

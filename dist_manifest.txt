@@ -135,6 +135,17 @@ gandalf.py
 route_table.py
 auth_warn.py
 
+# ── Ecgberht steward HOST CONTRACTS (2026-08) ──────────────────────────────
+# Anchor implements host contracts ONLY for the Ecgberht foundry skill (North
+# Star v5 non-goal: no steward logic in Anchor Python). Both are stdlib-only and
+# imported by anchor_gui.py at runtime, so the deny-by-default import-closure
+# gate requires them staged: commission_executor (runs a CONFIRMED commission
+# and returns the durable handback per the SKILL-OWNED contract) and
+# status_outbox (the Anchor-side status producer on the Wave-13 ingestion seam).
+# `node` — the skill host — is an EXTERNAL CLI through a seam, like git/gh.
+commission_executor.py
+status_outbox.py
+
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the
 # ONE schema-validated emit() choke point + the Butler envelope + the blessed
