@@ -57,9 +57,9 @@
 - [ ] Get Trust Structure Verified — Priority: 1 — energy: med — [personal]
 - [x] Create a verified Trust Structure Doc and PPT to Share with Family — Priority: 1 — energy: med — [family]
 - [ ] Draft my updated version of the MBA class — Priority: 1 — energy: med — [academic]
-- [ ] Get a working version of Ecgberht working — Priority: 1 — energy: med — [personal]
+- [x] Get a working version of Ecgberht working — Priority: 1 — energy: med — [personal]
 - [x] Get a working version of Skill Foundry working — Priority: 1 — energy: med — [personal]
-- [ ] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
+- [x] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
 - [ ] Get Stanford's feedback on Trust Docs — Priority: 1 — energy: med — [family]
 
 
