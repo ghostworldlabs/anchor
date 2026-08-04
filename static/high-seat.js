@@ -481,7 +481,15 @@ function openEcgberhtHighSeat() {
   });
 }
 
-/* Ambient init: the badge is the only Ecgberht signal outside the overlay. */
+/* Ambient init: the badge is the only Ecgberht signal outside the overlay.
+   Wave 17 poll contract (latency tests import these names — do not rename):
+   - ECG_HS_MIN_MS = one healthy visible-tab poll interval
+   - ECG_HS_MAX_MS = geometric backoff ceiling under consecutive failures
+   - document.hidden → skip poll entirely; pagehide → clear timer
+   Under failure backoff latency may reach MAX_MS; under a hidden tab polls
+   skip entirely — both are the contract, not silent violations. */
+var ECG_HS_MIN_MS = 90000;
+var ECG_HS_MAX_MS = 15 * 60 * 1000;
 (function () {
   // The badge poll reaches an endpoint that SPAWNS A NODE SUBPROCESS on the
   // server, so a plain 90s setInterval means every open tab — including ones
@@ -490,7 +498,7 @@ function openEcgberhtHighSeat() {
   // shape as the zombie-hunter restart storm, just slower. So: skip the poll
   // while the tab is hidden (refresh once on becoming visible), and back off
   // geometrically on consecutive failures, resetting on the first success.
-  var MIN_MS = 90000, MAX_MS = 15 * 60 * 1000;
+  var MIN_MS = ECG_HS_MIN_MS, MAX_MS = ECG_HS_MAX_MS;
   var fails = 0, timer = null;
 
   var delay = function () {

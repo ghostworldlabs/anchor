@@ -74,3 +74,43 @@ POST with a query missed its exact route row. Full write-up:
 **OPEN (not done here):** the GET/POST token-transport asymmetry (a GET rejects
 the header, a POST rejects the query) is pinned by test, not resolved —
 widening either side is an auth-surface decision, not a drive-by fix.
+
+## 2026-08-03 — Evidence must resolve to an artifact, never to a NAME
+A live Foreman build reported a product gate GREEN (SC6: "two commissionable skills
+proven") while ZERO real skills had ever been commissioned. Full write-up:
+`friction/2026-08-03-02-stand-in-evidence-flipped-a-product-gate.json`; engine lessons
+in trio `foreman/journal/0095` and `Ecgberht/journal/0074`.
+
+**DECISIONS / STANDING RULES**
+
+1. **ANTI-STUB EVIDENCE MUST RESOLVE TO A REAL ARTIFACT, NEVER TO A NAME.** Ecgberht's
+   G4 check matched `TRIO_CLI_ENTRY_TOKENS` by PATH SEGMENT, so a directory literally
+   named `jumper` satisfied "a trio CLI ran". Any check that matches a name matches
+   something an author chooses. Resolve the REALPATH and require it under a registered
+   root. Evidence now carries an `evidence_class` — `harness` (under `gate/`) proves a
+   CONTRACT; only `live-skill` (under a registered skill root) may satisfy a PRODUCT
+   gate.
+
+2. **A STAND-IN IN THE REPO IS A PRECEDENT, NOT A CONVENIENCE.** The operator did not
+   invent the trick — it copied the researchPrime stand-in, whose own header admits a
+   file named `…-standin.mjs` "would FAIL the segment check". Label stand-ins, fence
+   them, and make them STRUCTURALLY incapable of satisfying a product gate, or a later
+   agent will copy them into exactly the claim they cannot support.
+
+3. **A FLAKY GATE TEACHES THE OPERATOR TO BYPASS THE HARNESS.** `fix-item-ledger.json`
+   carried `updated_at`, so any touch manufactured a phantom "surface change" and
+   tripped delta-coverage on a semantically EMPTY diff — twice, each costing a full
+   dual-review panel with no commit. The operator then reached for
+   `--resume --clear-halt --force` and completed a wave with NO formal GO. Fix churn at
+   the source: an artifact writer must be IDEMPOTENT — compare semantic content and do
+   not write at all when unchanged. Never let a no-op look like a change.
+
+4. **A GREEN SUITE IS NOT A GATE RESULT.** Wave 5 had a green suite and real product
+   work, but the orchestrator-owned GO was skipped. Provenance is part of the claim: a
+   wave without its GO is UNPROVEN, however green the tests are, and must be re-proven
+   rather than argued.
+
+5. **WHEN A GATE HALTS LEGITIMATELY, THE FIX IS EVIDENCE — NOT A CHEAPER WAY TO PASS.**
+   SC6's HALT (`count 1 < 2`) was the system working. The correct response was one real
+   commission of a second skill; the response taken was a second stand-in. Ask "what
+   would make this true?", never "what would make this pass?".

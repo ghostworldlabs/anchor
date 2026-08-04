@@ -41,6 +41,16 @@
 /* the bounded parked-worktree budget stamp in the project header */
 .dhead .pwbudget{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace}
 
+/* ── Ecgberht Chamber UI (Wave 18) — failure + typed artifact surfaces ── */
+.ecg-chamber-fail{padding:10px 12px;border:1px solid var(--border,#333);border-radius:6px;background:var(--surface2,#1a1a1a);margin:8px 0}
+.ecg-chamber-fail .code{font:11px/1.3 ui-monospace,monospace;color:var(--accent,#eab308);margin-bottom:4px}
+.ecg-chamber-fail .text{font-size:13px;color:var(--text,#ddd)}
+.ecg-chamber-steps .ecg-step{display:flex;gap:8px;padding:4px 0;font-size:13px}
+.ecg-chamber-artifact.commissioned-artifact-card{border-left:3px solid var(--accent,#eab308);padding:8px 10px;margin:8px 0}
+.ecg-chamber-artifact .hash,.typed-artifact .hash{font:11px/1.3 ui-monospace,monospace;opacity:.75}
+.ecg-chamber-proposal .spend{margin:8px 0;padding:8px;border:1px dashed var(--border,#444);border-radius:4px}
+.ecg-chamber-steps-host,.ecg-chamber-artifact-host{min-height:0}
+
 /* ── Ecgberht Seal chamber (wireframes v2.1 Screen 1) — docked overlay over the project view ── */
 .ecg-seal-btn{display:inline-flex;align-items:center;gap:5px}
 .ecg-seal-ico{width:14px;height:14px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:middle}

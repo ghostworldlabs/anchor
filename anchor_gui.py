@@ -5624,6 +5624,11 @@ def render_project_window_html(project_id: str) -> str:
             + PROJECT_WINDOW_JS_ASSET + "?v="
             + static_asset_version(PROJECT_WINDOW_JS_ASSET)
             + "'></script>"
+            # Wave 18 chamber UI (steps/proposal/artifact/correction) — token
+            # routes only; poller adopts high-seat.js:485-528 by name.
+            "<script src='" + STATIC_URL_PREFIX + "/chamber-ui.js?v="
+            + static_asset_version("chamber-ui.js")
+            + "'></script>"
         )
     else:
         try:
@@ -5650,6 +5655,10 @@ def render_project_window_html(project_id: str) -> str:
             + anchor_boot_script(project_window_boot_extra(project_id)) + "\n"
             + _PROJECT_WINDOW_JS +
             "</script>"
+            # Wave 18 chamber UI (same asset as static branch).
+            "<script src='" + STATIC_URL_PREFIX + "/chamber-ui.js?v="
+            + static_asset_version("chamber-ui.js")
+            + "'></script>"
         )
     # ── rearch W5 (C1 increment 2): the shell-CSS block ─────────────────────
     # Chosen by the SAME `frontend` pillar flag as the W4 app-JS block above
@@ -10624,7 +10633,12 @@ def _ecgberht_portfolio_roots():
 
 def handle_ecgberht_high_seat(handler, path, body):
     """GET /api/ecgberht/high_seat — Screen 2 view model (raise queue +
-    tiles + spoken capacity balancing) over all active project roots."""
+    tiles + spoken capacity balancing) over the portfolio index.
+
+    Wave 17: semicolon-skipped roots are passed via ``--skipped`` JSON so they
+    render as named unknown rows (row count never shrinks). The fold answers
+    from the index; bridge_bad_json maps to GLANCE_INDEX_UNPARSEABLE text.
+    """
     roots, skipped, failed = _ecgberht_portfolio_roots()
     if failed:
         # A registry read that BLEW UP is not an empty portfolio. Say so.
@@ -10632,20 +10646,41 @@ def handle_ecgberht_high_seat(handler, path, body):
                             "message": "could not read the project registry; "
                                        "the portfolio is unknown, not empty"}, 502)
         return
-    if not roots:
+    args = []
+    if roots:
+        args.extend(["--roots", _ECGBERHT_ROOT_DELIM.join(roots)])
+    # Wave 17 delimiter guard: skipped roots cross the boundary as JSON, not
+    # in the ';'-joined argv (which would mis-split them).
+    if skipped:
+        args.extend(["--skipped", json.dumps(skipped)])
+    if not roots and not skipped:
         handler._send_json({"ok": False, "error": "no_projects",
-                            "message": "no active R&D project folders to steward",
+                            "code": "GLANCE_PORTFOLIO_EMPTY",
+                            "message": "No active projects registered.",
                             "skipped_roots": skipped}, 200)
         return
-    out = _ecgberht_hs_bridge(["--roots", _ECGBERHT_ROOT_DELIM.join(roots)])
-    if skipped and isinstance(out, dict):
-        out["skipped_roots"] = skipped
+    out = _ecgberht_hs_bridge(args)
+    if isinstance(out, dict):
+        if skipped:
+            out["skipped_roots"] = skipped
+        # Map bridge garbage into the glance failure surface (never a blank panel).
+        if out.get("error") == "bridge_bad_json":
+            out["code"] = "GLANCE_INDEX_UNPARSEABLE"
+            out["message"] = (
+                "Index snapshot or bridge output unreadable — nothing is guessed."
+            )
+            out["bridge_bad_json"] = True
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
 def handle_ecgberht_high_seat_badge(handler, path, body):
     """GET /api/ecgberht/high_seat_badge — ⚑ raise-queue length ONLY.
-    The single ambient Ecgberht signal anywhere in Anchor (S0-E2)."""
+    The single ambient Ecgberht signal anywhere in Anchor (S0-E2).
+
+    Wave 17: BADGE PATH BOUNDED — the bridge ``--badge`` mode answers from the
+    portfolio-index badge cache / attention cells (no discoverStrips root walk).
+    At most one short-lived bridge process per client poll interval.
+    """
     roots, _skipped, failed = _ecgberht_portfolio_roots()
     if failed:
         # The badge is ambient chrome, so it stays quiet rather than throwing a
@@ -10654,13 +10689,21 @@ def handle_ecgberht_high_seat_badge(handler, path, body):
         handler._send_json({"ok": False, "error": "registry_unreadable",
                             "mode": "badge", "queue_length": None}, 502)
         return
-    if not roots:
-        handler._send_json({"ok": True, "mode": "badge",
-                            "badge": {"glyph": "⚑", "count": 0},
-                            "queue_length": 0}, 200)
-        return
-    out = _ecgberht_hs_bridge(
-        ["--roots", _ECGBERHT_ROOT_DELIM.join(roots), "--badge"])
+    # Wave 17: --badge is index-only; roots are optional (cache / attention).
+    # Still pass roots when present for transport parity; walk path is retired
+    # inside the bridge (buildBadgeFromIndex — never verbStatus/discoverStrips).
+    args = ["--badge"]
+    if roots:
+        args.extend(["--roots", _ECGBERHT_ROOT_DELIM.join(roots)])
+    out = _ecgberht_hs_bridge(args)
+    if isinstance(out, dict) and out.get("error") == "bridge_bad_json":
+        out["code"] = "GLANCE_INDEX_UNPARSEABLE"
+        out["message"] = (
+            "Index snapshot or bridge output unreadable — nothing is guessed."
+        )
+        out["bridge_bad_json"] = True
+        out["mode"] = "badge"
+        out["queue_length"] = None
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
@@ -10786,6 +10829,190 @@ def handle_ecgberht_artifact(handler, path, body):
     ctype = _ECGBERHT_ARTIFACT_TYPES.get(target.suffix.lower(),
                                          "application/octet-stream")
     handler._send_bytes(target.read_bytes(), ctype, cache="no-cache")
+
+
+# ── Ecgberht Chamber UI (Wave 18 — steps / proposals / artifacts / corrections)
+# Spawns scripts/chamber-ui-bridge.mjs. Token-auth only (OPEN_ROUTES review:
+# none of these routes are open). I52 scaffold chrome refusal + T-CON-18 path
+# containment live in the engine; handlers only bridge.
+
+
+def _ecgberht_chamber_ui_bridge(args, timeout=30):
+    """Spawn the Ecgberht chamber-ui bridge (Node) and parse its one-line JSON."""
+    import subprocess
+    root = _ecgberht_root()
+    bridge = root / "scripts" / "chamber-ui-bridge.mjs"
+    if not bridge.exists():
+        return {"ok": False, "error": "ecgberht_engine_missing",
+                "code": "CHAMBER_DEP_MISSING",
+                "message": "chamber-ui bridge not found (set ECGBERHT_ROOT "
+                           "or keep Ecgberht checkout beside Anchor)"}
+    try:
+        proc = subprocess.run(
+            ["node", str(bridge), *args],
+            capture_output=True, timeout=timeout, cwd=str(root),
+            # windowsHide / CREATE_NO_WINDOW not available on subprocess.run
+            # flags portably; Anchor's service host already hides children.
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "bridge_timeout",
+                "code": "CHAMBER_DEP_DEAD",
+                "message": "chamber-ui bridge timed out — last good state "
+                           "shown with its age when available"}
+    except OSError as e:
+        return {"ok": False, "error": "bridge_spawn_failed",
+                "code": "CHAMBER_DEP_MISSING",
+                "message": "chamber-ui bridge could not start: %s" % e}
+    raw = (proc.stdout or b"").decode("utf-8", errors="replace").strip()
+    if not raw:
+        return {"ok": False, "error": "bridge_no_output",
+                "code": "CHAMBER_DEP_GARBAGE",
+                "message": "chamber-ui bridge produced no output — unreadable"}
+    # Last non-empty line is the JSON payload (stdout purity).
+    line = raw.splitlines()[-1]
+    try:
+        return json.loads(line)
+    except Exception:
+        return {"ok": False, "error": "bridge_bad_json",
+                "code": "CHAMBER_DEP_GARBAGE",
+                "message": "chamber-ui bridge returned unreadable JSON — "
+                           "shown as an error, nothing invented.",
+                "bridge_bad_json": True}
+
+
+def handle_ecgberht_chamber_steps(handler, path, body):
+    """GET /api/ecgberht/chamber_steps?project_id= — Wave 18 steps view."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    out = _ecgberht_chamber_ui_bridge(["--project", folder, "--steps"])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_chamber_proposal(handler, path, body):
+    """GET /api/ecgberht/chamber_proposal?project_id=&proposal= — proposal/confirm surface.
+
+    ``proposal`` is a URL-encoded JSON proposal body (hash-bound confirm wiring
+    is client-side + POST chamber_confirm). Without a proposal body the surface
+    answers CHAMBER_EMPTY honestly.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    proposal_raw = (q.get("proposal", [""])[0] or "").strip()
+    if not proposal_raw:
+        # Empty-but-valid: nothing to confirm yet (CHAMBER_EMPTY).
+        out = _ecgberht_chamber_ui_bridge(["--proposal", "null"])
+        handler._send_json(
+            out if isinstance(out, dict) else {
+                "ok": True, "empty": True,
+                "code": "CHAMBER_EMPTY",
+                "message": "Proposal/confirm: nothing here yet.",
+            },
+            200,
+        )
+        return
+    out = _ecgberht_chamber_ui_bridge(["--project", folder,
+                                      "--proposal", proposal_raw])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_chamber_confirm(handler, path, body):
+    """POST /api/ecgberht/chamber_confirm — hash-bound confirm (idempotent).
+
+    Body: { project_id, proposal, proposal_hash, client_event_id?, who? }.
+    Post-render mutation surfaces confirm-hash-mismatch; double-submit of the
+    same client_event_id does not double-commit.
+    """
+    pid = str(body.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    payload = {
+        "proposal": body.get("proposal"),
+        "proposal_hash": body.get("proposal_hash"),
+        "client_event_id": body.get("client_event_id"),
+        "who": body.get("who") or "john",
+    }
+    out = _ecgberht_chamber_ui_bridge([
+        "--project", folder,
+        "--confirm", json.dumps(payload),
+    ])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_chamber_artifact(handler, path, body):
+    """GET /api/ecgberht/chamber_artifact?project_id=&rel=&bundle_hash= —
+
+    Wave 18 artifact view via packet-view classify/build + I52 scaffold
+    exemption + bundle-hash gate. Path escape → CHAMBER_PATH_REFUSED.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    rel = (q.get("rel", [""])[0] or "").strip()
+    bundle_hash = (q.get("bundle_hash", [""])[0] or "").strip() or None
+    kind = (q.get("kind", [""])[0] or "").strip() or "stage_artifact"
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    artifact = {
+        "kind": kind,
+        "path": rel or None,
+        "bundle_hash": bundle_hash,
+        "title": (q.get("title", [""])[0] or "").strip() or None,
+    }
+    # Scaffold probe: kind=scaffold_proposal must refuse chrome (I52).
+    out = _ecgberht_chamber_ui_bridge([
+        "--project", folder,
+        "--artifact", json.dumps(artifact),
+    ])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_chamber_correct(handler, path, body):
+    """POST /api/ecgberht/chamber_correct — propose or confirm a correction.
+
+    Body modes:
+      { action: 'propose', project_id, artifact, correction_text, who? }
+      { action: 'confirm', project_id, proposal, proposal_hash, client_event_id?, who? }
+    NEW VERSION is hash-bound; prior version stays addressable.
+    """
+    pid = str(body.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    action = str(body.get("action", "propose") or "propose").strip()
+    if action == "confirm":
+        payload = {
+            "proposal": body.get("proposal"),
+            "proposal_hash": body.get("proposal_hash"),
+            "client_event_id": body.get("client_event_id"),
+            "who": body.get("who") or "john",
+        }
+        out = _ecgberht_chamber_ui_bridge([
+            "--project", folder,
+            "--confirm-correction", json.dumps(payload),
+        ])
+    else:
+        payload = {
+            "artifact": body.get("artifact"),
+            "correction_text": body.get("correction_text"),
+            "who": body.get("who") or "john",
+        }
+        out = _ecgberht_chamber_ui_bridge([
+            "--project", folder,
+            "--correct", json.dumps(payload),
+        ])
+    handler._send_json(out, 200 if out.get("ok") else 502)
 
 
 def handle_build_deliverable(handler, path, body):
@@ -16975,6 +17202,15 @@ _MIGRATED_HANDLERS = {
     # nothing was created." test_every_migrated_route_has_a_handler now makes
     # this class of omission impossible to reintroduce.
     "handle_ecgberht_stand_up": handle_ecgberht_stand_up,
+    # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
+    # route_table.py and their handlers DEFINED here, but never registered - the
+    # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by
+    # test_every_migrated_route_has_a_registered_handler before first use.
+    "handle_ecgberht_chamber_steps": handle_ecgberht_chamber_steps,
+    "handle_ecgberht_chamber_proposal": handle_ecgberht_chamber_proposal,
+    "handle_ecgberht_chamber_confirm": handle_ecgberht_chamber_confirm,
+    "handle_ecgberht_chamber_artifact": handle_ecgberht_chamber_artifact,
+    "handle_ecgberht_chamber_correct": handle_ecgberht_chamber_correct,
     "handle_ecgberht_high_seat": handle_ecgberht_high_seat,
     "handle_ecgberht_high_seat_badge": handle_ecgberht_high_seat_badge,
     "handle_ecgberht_bring_up": handle_ecgberht_bring_up,
@@ -18519,6 +18755,20 @@ def main():
         job_runner.reconcile_on_startup()
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
+
+    try:
+        # Wave 4 / NS criterion 15: commission durable handback boot reconcile.
+        # Adopts complete handback pairs; names dead runs / missing handbacks /
+        # stranded launch intents — never silently absorbs. Best-effort.
+        import commission_executor as _ce
+        _cr = _ce.reconcile_commissions_on_startup()
+        if _cr.get("results"):
+            _logger.info(
+                "commission_executor.boot_reconcile: %d result(s), adopted=%s"
+                % (len(_cr["results"]), _cr.get("adopted_count", 0))
+            )
+    except Exception as e:
+        _logger.error(f"commission_executor.reconcile_commissions_on_startup failed: {e}")
 
     try:
         # rearch W15: re-adopt in-flight jobs through the supervisor seam — a

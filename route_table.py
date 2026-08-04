@@ -259,6 +259,19 @@ ROUTES = [
        handler="handle_ecgberht_bring_up", migrated=True),
     _r("GET", "/api/ecgberht/artifact", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_ecgberht_artifact", migrated=True),
+    # ── Ecgberht Chamber UI (Wave 18 — steps, proposals, artifacts, corrections)
+    # Token-auth only (OPEN_ROUTES review: none of these are open). Bridge:
+    # Ecgberht scripts/chamber-ui-bridge.mjs. Specific prefixes before generics.
+    _r("GET", "/api/ecgberht/chamber_steps", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_chamber_steps", migrated=True),
+    _r("GET", "/api/ecgberht/chamber_proposal", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_chamber_proposal", migrated=True),
+    _r("POST", "/api/ecgberht/chamber_confirm", AUTH_TOKEN,
+       handler="handle_ecgberht_chamber_confirm", migrated=True),
+    _r("GET", "/api/ecgberht/chamber_artifact", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_chamber_artifact", migrated=True),
+    _r("POST", "/api/ecgberht/chamber_correct", AUTH_TOKEN,
+       handler="handle_ecgberht_chamber_correct", migrated=True),
     _r("GET", "/api/rnd/remote_status", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_remote_status", migrated=True),
     _r("GET", "/api/rnd/project_rollup", AUTH_TOKEN, match=MATCH_PREFIX,

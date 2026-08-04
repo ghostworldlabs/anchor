@@ -11,5 +11,13 @@
  "2026-07-28-05-general-session-small-tab-open-attach-er",
  "2026-07-28-06-projects-tab-opens-with-all-project-fold",
  "2026-07-28-07-general-attach-error-was-timeout-doubled",
- "2026-07-28-08-high-seat-token-re-prompt-saved-then-rel"
+ "2026-07-28-08-high-seat-token-re-prompt-saved-then-rel",
+ "2026-08-02-01-help",
+ "2026-08-02-02-anchor-py-journal-has-no-help-guard-any",
+ "2026-08-02-03-clean-ship-wrapper-could-not-run-as-a-sc",
+ "2026-08-02-04-package-a-build-tripped-its-own-import-c",
+ "2026-08-02-05-true-clean-vm-verification-still-pending",
+ "2026-08-02-06-share-onboard-cold-start-never-minted-th",
+ "2026-08-02-07-first-github-publish-silently-dropped-th",
+ "2026-08-03-01-share-builds-must-run-from-committed-hea"
 ]
