@@ -6186,12 +6186,255 @@ function _ecgRenderRail(rail, runBlock) {
   return aside;
 }
 
+/* (2026-08-04) THE EPHEMERAL CONVERSATION.
+
+   E5 says chat is NEVER persisted — Strip receipts, roadmap events and the Face are
+   the sole ledger. That does NOT mean the steward has to be amnesiac: the turns live
+   HERE, in page memory, get replayed for continuity, and die with the page. Reloading
+   the window loses them and that is correct — the durable continuity is the open
+   scaffold_proposal on the ledger, which is what makes turn N+1 a REFINEMENT of the
+   scaffolding rather than a restart. */
+var _ECG_TURNS = [];
+
+function _ecgNoteTurn(role, text) {
+  if (!text) return;
+  _ECG_TURNS.push({role: role, text: String(text)});
+  if (_ECG_TURNS.length > 24) _ECG_TURNS = _ECG_TURNS.slice(-24);
+}
+
+/* The steward's answer to a turn: what it said, what it still needs, and — when it
+   has enough to be useful — a proposal to react to. */
+function _ecgRenderStewardTurn(convo, j) {
+  _ecgNoteTurn('steward', j.say);
+  var msg = _ecgStewardMsg(convo, j.say);
+
+  if (j.asks && j.asks.length) {
+    var ul = _ecgEl('ul', 'ecg-asks');
+    j.asks.forEach(function (q) { ul.appendChild(_ecgEl('li', null, q)); });
+    msg.appendChild(ul);
+  }
+  if (j.proposal && j.proposal.steps && j.proposal.steps.length) {
+    _ecgRenderProposal(convo, msg, j);
+  }
+  return msg;
+}
+
+/* A proposed scaffolding, with its Parable-of-the-Oranges annotations. Nothing is
+   written until [Confirm], and Confirm binds to the proposal HASH — so what lands on
+   the roadmap is exactly what was on screen, never a re-derivation of the prose. */
+function _ecgRenderProposal(convo, msg, j) {
+  var steps = j.proposal.steps;
+  msg.appendChild(_ecgEl('div', 'ecg-scaffold-note',
+    'That is ' + steps.length + ' stage' + (steps.length === 1 ? '' : 's') +
+    '. Nothing is written yet — confirm and they become the campaign roadmap.'));
+
+  var list = _ecgEl('ol', 'ecg-scaffold-steps');
+  steps.forEach(function (st) {
+    var li = _ecgEl('li', null, st.name);
+    if (st.done_when) {
+      li.appendChild(_ecgEl('div', 'ecg-scaffold-done', 'done when: ' + st.done_when));
+    }
+    var or = st.oranges_annotations || [];
+    if (or.length) {
+      var ol = _ecgEl('ul', 'ecg-oranges');
+      or.forEach(function (o) { ol.appendChild(_ecgEl('li', null, o)); });
+      li.appendChild(ol);
+    }
+    list.appendChild(li);
+  });
+  msg.appendChild(list);
+
+  if (j.foresight && j.foresight.length) {
+    var fs = _ecgEl('div', 'ecg-foresight');
+    fs.appendChild(_ecgEl('div', 'ecg-foresight-h', 'What bites later:'));
+    var fl = _ecgEl('ul', null);
+    j.foresight.forEach(function (f) { fl.appendChild(_ecgEl('li', null, f)); });
+    fs.appendChild(fl);
+    msg.appendChild(fs);
+  }
+
+  var act = _ecgEl('div', 'act');
+  var yes = _ecgEl('button', 'ecg-btn pri', 'Confirm — build the roadmap');
+  yes.onclick = function () {
+    yes.disabled = true;
+    yes.textContent = 'Writing…';
+    _postJson('/api/ecgberht/scaffold_confirm', {
+      project_id: PROJECT_ID,
+      proposal_hash: j.proposal_hash,
+      proposal_id: j.proposal_id
+    }).then(function (r) { return r.json(); }).then(function (k) {
+      if (!k || !k.ok) {
+        yes.disabled = false;
+        yes.textContent = 'Confirm — build the roadmap';
+        _ecgStewardMsg(convo, 'Could not write that: ' +
+          ((k && (k.message || k.error)) || 'no response') + ' — nothing was saved.');
+        return;
+      }
+      var n = (k.step_ids || []).length;
+      _ecgStewardMsg(convo, 'Written. ' + n + ' stage' + (n === 1 ? '' : 's') +
+        ' are on the campaign roadmap now.');
+      act.remove();
+      if (typeof ecgSealMountInline === 'function') ecgSealMountInline();
+    }).catch(function () {
+      yes.disabled = false;
+      yes.textContent = 'Confirm — build the roadmap';
+      _ecgStewardMsg(convo, "That didn't go through — nothing was saved.");
+    });
+  };
+  var no = _ecgEl('button', 'ecg-btn', 'Not that');
+  no.onclick = function () {
+    act.remove();
+    _ecgStewardMsg(convo, 'Left alone — nothing was written. Tell me what to change ' +
+      'and I will rework it.');
+  };
+  act.appendChild(yes);
+  act.appendChild(no);
+  msg.appendChild(act);
+}
+
+/* Talking costs a model call, and nothing is spent without a human saying so. ONE
+   confirmation covers the whole session — never a prompt per sentence. */
+function _ecgOfferEnvelope(convo, j, retryText) {
+  var msg = _ecgStewardMsg(convo, j.say || j.message ||
+    'Talking costs a model call and there is no confirmed session budget yet.');
+  var act = _ecgEl('div', 'act');
+  var go = _ecgEl('button', 'ecg-btn pri', 'Confirm session budget');
+  go.onclick = function () {
+    go.disabled = true;
+    go.textContent = 'Confirming…';
+    _postJson('/api/ecgberht/envelope_confirm', {project_id: PROJECT_ID}
+    ).then(function (r) { return r.json(); }).then(function (k) {
+      if (!k || !k.ok) {
+        go.disabled = false;
+        go.textContent = 'Confirm session budget';
+        _ecgStewardMsg(convo, 'Could not open a session budget: ' +
+          ((k && (k.message || k.error)) || 'no response'));
+        return;
+      }
+      act.remove();
+      _ecgStewardMsg(convo, k.message || 'Session budget confirmed — we can talk.');
+      if (retryText) _ecgConverse(convo, retryText, true);
+    }).catch(function () {
+      go.disabled = false;
+      go.textContent = 'Confirm session budget';
+      _ecgStewardMsg(convo, "That didn't go through.");
+    });
+  };
+  act.appendChild(go);
+  msg.appendChild(act);
+}
+
+/* Reaching the spend cap is a CHECKPOINT, not a wall. The steward has already stopped
+   and reported what it spent; this is John answering "carry on". Raising is still a
+   human confirmation and is recorded with who. */
+function _ecgOfferRaise(convo, j, retryText) {
+  var msg = _ecgStewardMsg(convo, j.say || j.message ||
+    "We've reached the session budget, so I stopped rather than keep spending.");
+  if (!j.can_raise) return;
+
+  var act = _ecgEl('div', 'act');
+  var suggested = Math.max(1, Math.ceil((Number(j.max_spend_usd) || 1) * 2));
+  var go = _ecgEl('button', 'ecg-btn pri', 'Raise to $' + suggested + ' and carry on');
+  go.onclick = function () {
+    go.disabled = true;
+    go.textContent = 'Raising…';
+    _postJson('/api/ecgberht/envelope_raise', {
+      project_id: PROJECT_ID, max_spend_usd: suggested
+    }).then(function (r) { return r.json(); }).then(function (k) {
+      if (!k || !k.ok) {
+        go.disabled = false;
+        go.textContent = 'Raise to $' + suggested + ' and carry on';
+        _ecgStewardMsg(convo, 'Could not raise the budget: ' +
+          ((k && (k.message || k.error)) || 'no response'));
+        return;
+      }
+      act.remove();
+      _ecgStewardMsg(convo, k.message || 'Budget raised — carrying on.');
+      if (retryText) _ecgConverse(convo, retryText, true);
+    }).catch(function () {
+      go.disabled = false;
+      go.textContent = 'Raise to $' + suggested + ' and carry on';
+      _ecgStewardMsg(convo, "That didn't go through.");
+    });
+  };
+  var stop = _ecgEl('button', 'ecg-btn', 'Leave it — stop here');
+  stop.onclick = function () {
+    act.remove();
+    _ecgStewardMsg(convo, 'Stopped. Nothing further was spent.');
+  };
+  act.appendChild(go);
+  act.appendChild(stop);
+  msg.appendChild(act);
+}
+
+/* (2026-08-04) TALK TO THE STEWARD.
+
+   Was: everything went to /speak, which compiled against a closed ELEVEN-act table,
+   and anything that matched none of them dead-ended on "could not compile that to a
+   closed act" — which is what John got the first time he described his own project.
+
+   Now: free-form speech goes to /converse, where the ENGINE routes it (control verbs
+   still compile deterministically; only genuine talk reaches the seat). Provenance
+   recall stays on /speak because it answers from the record with a source chip, which
+   is a different and honest capability. */
+function _ecgConverse(convo, text, isRetry) {
+  if (!isRetry) { _ecgJohnMsg(convo, text); _ecgNoteTurn('john', text); }
+  var thinking = _ecgStewardMsg(convo, 'Thinking…');
+  thinking.classList.add('ecg-thinking');
+
+  _postJson('/api/ecgberht/converse', {
+    project_id: PROJECT_ID,
+    text: text,
+    turns: _ECG_TURNS.slice(0, -1)
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    thinking.remove();
+    if (!j) {
+      _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
+      return;
+    }
+    if (j.code === 'CONVERSE_NO_ENVELOPE' || j.status_code === 'CONVERSE_NO_ENVELOPE') {
+      _ecgOfferEnvelope(convo, j, text);
+      return;
+    }
+    if (j.code === 'CONVERSE_BUDGET_REACHED') {
+      _ecgOfferRaise(convo, j, text);
+      return;
+    }
+    if (!j.ok) {
+      // Honest failure: say what happened, never dress it up as an answer.
+      _ecgStewardMsg(convo, j.say || j.message || j.user_text ||
+        _ecgStwLabel() + " didn't answer — nothing was saved.");
+      return;
+    }
+    if (j.lane === 'act' && j.compiled) {
+      _ecgHandleAct(convo, j.compiled, text);
+      return;
+    }
+    _ecgRenderStewardTurn(convo, j);
+  }).catch(function () {
+    thinking.remove();
+    _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
+  });
+}
+
+/* A compiled CONTROL act — deterministic, no model, no spend. */
+function _ecgHandleAct(convo, c, text) {
+  if (c.act === 'park_that') {
+    _ecgStewardMsg(convo, 'Parked — captured as a soft-vet receipt, not a roadmap step.');
+    return;
+  }
+  if (c.act === 'switch_seat' && c.args && c.args.seat) {
+    convo.appendChild(_ecgEl('div', 'ecg-divider', 'seat → ' + c.args.seat));
+    return;
+  }
+  _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
+}
+
 function _ecgSpeak(convo, text) {
-  _ecgJohnMsg(convo, text);
   var recall = /\bremind me\b|\bwhy did we\b/i.test(text);
-  var body = recall
-    ? {project_id: PROJECT_ID, kind: 'recall', text: text}
-    : {project_id: PROJECT_ID, kind: 'speak', text: text};
+  if (!recall) { _ecgConverse(convo, text); return; }
+  _ecgJohnMsg(convo, text);
+  var body = {project_id: PROJECT_ID, kind: 'recall', text: text};
   // (2026-07-30 FIX) via _postJson so the token rides the X-Anchor-Token HEADER
   // (+ X-Anchor-Build). The do_POST middleware never reads ?token= — a
   // query-only POST 401s, and the global fetch wrapper turns that 401 into a
@@ -6234,113 +6477,12 @@ function _ecgSpeak(convo, text) {
       }
       return;
     }
-    var c = j.compiled || {};
-    if (c.compiled) {
-      if (j.offer) {
-        // S1-E6 — Grasscatcher offer beat (receipt only on yes, via closed verb)
-        _ecgStewardMsg(convo, j.offer.question, [
-          {label: j.offer.actions[0].label, onclick: function () {
-            _ecgStewardMsg(convo, 'Parked. ' + j.offer.on_yes);
-          } },
-          {label: j.offer.actions[1].label}
-        ]);
-      } else if (j.divider_preview) {
-        // S1-E7 — receipted seat switch is a non-event
-        convo.appendChild(_ecgEl('div', 'ecg-divider', j.divider_preview.text));
-      } else {
-        _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
-      }
-    } else {
-      // (2026-08-04) A free-form utterance that matches no closed act used to
-      // dead-end here with "could not compile that to a closed act" — which is
-      // exactly what a person gets when they DESCRIBE THEIR PROJECT, the one
-      // thing North Star SC1 says must produce a scaffolding. The engine could
-      // always do it; nothing reached it. Offer it now, before the refusal.
-      _ecgOfferScaffold(convo, text, c);
-    }
+    // Only recall reaches /speak now — everything else routes to /converse, where
+    // the ENGINE decides act-vs-talk. If a non-recall payload somehow lands here,
+    // say so rather than rendering a half-understood answer.
+    _ecgStewardMsg(convo, _ecgStwLabel() + " couldn't answer that from the record.");
   }).catch(function () {
     _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
-  });
-}
-
-/* (2026-08-04) DICTATION -> SCAFFOLDING.
-
-   The chamber compiles talk through a closed eleven-act table. Describing a
-   project matches none of them, so the steward refused and offered the act list —
-   the first thing John hit in real use. The scaffolding engine existed and was
-   proven, but no surface reached it.
-
-   Preview is PURE: zero-model, zero writes, no session envelope, because seeing a
-   proposal should cost nothing. Only [Confirm] writes, and it writes through the
-   single writer. If the text carries no stages the steward ASKS rather than
-   inventing a plan. */
-function _ecgOfferScaffold(convo, text, compiled) {
-  var refusal = (compiled && compiled.proposal && compiled.proposal.message) ||
-    "I didn't understand that as something I can do — nothing was saved.";
-
-  _postJson('/api/ecgberht/scaffold_preview', {
-    project_id: PROJECT_ID,
-    text: text
-  }).then(function (r) { return r.json(); }).then(function (j) {
-    if (!j || !j.ok || !j.compiled) {
-      // Honest: either it heard no stages (and says what would work), or the
-      // surface failed. Never silently swallow into the old dead end.
-      _ecgStewardMsg(convo, (j && j.message) || refusal);
-      return;
-    }
-    var steps = (j.proposal && j.proposal.steps) || [];
-    var msg = _ecgStewardMsg(convo,
-      'I heard ' + steps.length + ' stage' + (steps.length === 1 ? '' : 's') +
-      '. Nothing is written yet — confirm and they become the campaign roadmap.');
-
-    var list = _ecgEl('ol', 'ecg-scaffold-steps');
-    steps.forEach(function (st) {
-      var li = _ecgEl('li', null, st.name);
-      if (st.done_when) {
-        li.appendChild(_ecgEl('div', 'ecg-scaffold-done', 'done when: ' + st.done_when));
-      }
-      list.appendChild(li);
-    });
-    msg.appendChild(list);
-
-    var act = _ecgEl('div', 'act');
-    var yes = _ecgEl('button', 'ecg-btn pri', 'Confirm — build the roadmap');
-    yes.onclick = function () {
-      yes.disabled = true;
-      yes.textContent = 'Writing…';
-      _postJson('/api/ecgberht/scaffold_confirm', {
-        project_id: PROJECT_ID,
-        text: text
-      }).then(function (r) { return r.json(); }).then(function (k) {
-        if (!k || !k.ok) {
-          yes.disabled = false;
-          yes.textContent = 'Confirm — build the roadmap';
-          _ecgStewardMsg(convo, 'Could not write that: ' +
-            ((k && (k.message || k.error)) || 'no response') + ' — nothing was saved.');
-          return;
-        }
-        var n = (k.step_ids || []).length;
-        _ecgStewardMsg(convo, 'Written. ' + n + ' stage' + (n === 1 ? '' : 's') +
-          ' are on the campaign roadmap now.');
-        act.remove();
-        if (typeof ecgSealMountInline === 'function') ecgSealMountInline();
-      }).catch(function () {
-        yes.disabled = false;
-        yes.textContent = 'Confirm — build the roadmap';
-        _ecgStewardMsg(convo, "That didn't go through — nothing was saved.");
-      });
-    };
-    var no = _ecgEl('button', 'ecg-btn', 'Not that');
-    no.onclick = function () {
-      act.remove();
-      _ecgStewardMsg(convo, 'Left alone — nothing was written. Tell me the stages ' +
-        'you want and I will propose again.');
-    };
-    act.appendChild(yes);
-    act.appendChild(no);
-    msg.appendChild(act);
-  }).catch(function () {
-    _ecgStewardMsg(convo, refusal);
   });
 }
 

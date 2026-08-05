@@ -432,24 +432,54 @@ def test_say_line_grows_with_dictated_text_and_enter_sends(authed):
             b.close()
 
 
-# ── Dictation → scaffolding, in the browser (2026-08-04) ────────────────────
+# ── TALKING to the steward, in the browser (2026-08-04) ─────────────────────
 # John set a goal, dictated what the project was, pressed send, and got
-# "Ecgberht could not compile that to a closed act." The chamber compiles talk
-# through a closed ELEVEN-act table and none of them is "scaffold this project";
-# the scaffolding engine was built and proven by an acceptance test that IMPORTS
-# it, so the criterion was true of the engine and false of the product.
+# "Ecgberht could not compile that to a closed act." The chamber compiled talk
+# through a closed ELEVEN-act table and none of them is "describe my project".
+# The replacement is a CONVERSATION: free-form speech goes to the steward's seat
+# model, which answers and proposes a scaffolding he refines by talking.
 #
-# This test enters where the person enters: it types into the real say box and
-# reads what the steward says back. No endpoint is called directly.
+# These tests enter where the PERSON enters — typing into the real say box and
+# reading what comes back. No endpoint is called directly.
+#
+# THE SEAT IS REPLAYED FROM A REAL RECORDED REPLY (captured live by
+# Ecgberht/scripts/record-steward-fixture.mjs). What this lane proves is that the
+# SURFACE IS WIRED: say box → /api/ecgberht/converse → rendered proposal →
+# confirm → steps on disk. The model's actual behaviour against John's verbatim
+# text is proven under a STRICT prompt hash in the Ecgberht bridge lane
+# (test/wh4-conversational-steward.test.mjs), which is where drift must fail.
 
-def test_dictating_a_project_description_offers_stages_not_a_refusal(authed):
+ECG_ROOT = Path(__file__).resolve().parents[2] / "Ecgberht"
+BROWSER_REPLY = ECG_ROOT / "test" / "fixtures" / "steward-reply-browser.json"
+
+
+@pytest.fixture
+def talking(authed, monkeypatch):
+    """`authed`, plus a replayed seat so the browser lane never calls a model."""
+    if not BROWSER_REPLY.exists():
+        pytest.fail(
+            "the recorded seat reply is missing (%s) — run "
+            "`node scripts/record-steward-fixture.mjs` in the Ecgberht checkout. "
+            "This lane must never silently skip: a skipped acceptance test is how "
+            "three vacuous guards nearly shipped." % BROWSER_REPLY)
+    monkeypatch.setenv("ECGBERHT_SEAT_REPLAY", str(BROWSER_REPLY))
+    return authed
+
+
+def _say(pg, text):
+    pg.fill("#ecgSayInput", text)
+    pg.press("#ecgSayInput", "Enter")
+
+
+def test_describing_the_project_starts_a_conversation_not_a_refusal(talking):
+    """The exact walk John made: set a goal, describe the project, press send."""
     pytest.importorskip("playwright.sync_api")
     from playwright.sync_api import sync_playwright
 
-    pid, base = authed["pid"], authed["base"]
-    dictation = ("This project is about teaching an MBA course on AI. I want to "
-                 "build a syllabus, develop case studies, create assessments, and "
-                 "pilot it with a small cohort.")
+    pid, base = talking["pid"], talking["base"]
+    dictation = ("We are going to revamp my BA 815 course. I want to integrate AI "
+                 "throughout, replace the written quizzes with AI-run oral exams, "
+                 "and open the tool track beyond just R.")
 
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -458,52 +488,51 @@ def test_dictating_a_project_description_offers_stages_not_a_refusal(authed):
             "window.localStorage.setItem('anchor_token', '%s');"
             "window.prompt = function(){ return null; };" % TOKEN)
         try:
-            _chamber_with_goal(pg, base, pid, goal="Teach an MBA course on AI")
+            _chamber_with_goal(pg, base, pid, goal="Revamp BA 815 with AI throughout")
+            _say(pg, dictation)
 
-            pg.fill("#ecgSayInput", dictation)
-            pg.press("#ecgSayInput", "Enter")
-
-            # The steward must OFFER stages, not dead-end on the act list.
+            # Talking costs a model call, so the steward asks ONCE for a budget.
             pg.wait_for_function(
                 "() => {var c=document.getElementById('ecgConvo');"
-                " return c && c.querySelector('.ecg-scaffold-steps');}",
-                timeout=30000)
-
+                " return c && /session budget/i.test(c.textContent);}", timeout=30000)
             said = pg.text_content("#ecgConvo")
             assert "could not compile that to a closed act" not in said, said[-400:]
 
-            steps = pg.eval_on_selector_all(
-                "#ecgConvo .ecg-scaffold-steps li",
-                "els => els.map(e => e.textContent.toLowerCase())")
-            assert len(steps) >= 3, f"expected several stages, got {steps}"
-            joined = " | ".join(steps)
-            assert "syllabus" in joined, joined
-            assert "case studies" in joined, joined
-            assert not any(s.startswith("this project is about") for s in steps), (
-                "narration was turned into a stage: %s" % joined)
-
-            # Nothing is written until it is confirmed.
-            assert "nothing is written yet" in said.lower(), said[-400:]
-
-            # And the confirm button is real, not a label.
+            # And that offer is a real control, not a label.
             wired = pg.evaluate(
                 "() => {var b=Array.from(document.querySelectorAll("
-                "'#ecgConvo .act button')).find(x=>/confirm/i.test(x.textContent));"
-                " return b ? !!b.onclick : null;}")
-            assert wired is True, "the Confirm button is missing or decorative"
+                "'#ecgConvo .act button')).find(x=>/confirm session budget/i.test("
+                "x.textContent)); return b ? !!b.onclick : null;}")
+            assert wired is True, "the budget button is missing or decorative"
+
+            pg.click("#ecgConvo .act button:has-text('Confirm session budget')")
+
+            # Budget confirmed → the utterance is retried and the steward answers
+            # with a scaffolding to react to.
+            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=60000)
+            steps = pg.eval_on_selector_all(
+                "#ecgConvo .ecg-scaffold-steps > li",
+                "els => els.map(e => e.textContent.toLowerCase())")
+            assert len(steps) >= 3, f"expected a real campaign, got {steps}"
+
+            said = pg.text_content("#ecgConvo")
+            assert "nothing is written yet" in said.lower(), said[-400:]
+
+            # The Parable of the Oranges must reach the screen, not just the JSON.
+            oranges = pg.eval_on_selector_all(
+                "#ecgConvo .ecg-oranges > li", "els => els.length")
+            assert oranges > 0, "no Oranges annotations rendered for any stage"
         finally:
             b.close()
 
 
-def test_confirming_the_scaffolding_writes_the_steps(authed):
-    """Clicking Confirm must actually land steps on the campaign roadmap."""
+def test_confirming_the_conversation_writes_the_steps(talking):
+    """Clicking Confirm must land the reviewed stages on the campaign roadmap."""
     pytest.importorskip("playwright.sync_api")
     from playwright.sync_api import sync_playwright
 
-    pid, base = authed["pid"], authed["base"]
-    folder = Path(authed["repo"])
-    dictation = ("I want to build a syllabus, develop case studies, and pilot it "
-                 "with a small cohort.")
+    pid, base = talking["pid"], talking["base"]
+    folder = Path(talking["repo"])
 
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -512,25 +541,38 @@ def test_confirming_the_scaffolding_writes_the_steps(authed):
             "window.localStorage.setItem('anchor_token', '%s');"
             "window.prompt = function(){ return null; };" % TOKEN)
         try:
-            _chamber_with_goal(pg, base, pid, goal="Teach an MBA course on AI")
-            pg.fill("#ecgSayInput", dictation)
-            pg.press("#ecgSayInput", "Enter")
-            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=30000)
+            _chamber_with_goal(pg, base, pid, goal="Revamp BA 815 with AI throughout")
+            _say(pg, "Revamp the course: integrate AI, move quizzes to oral exams, "
+                     "and widen the tool track beyond R.")
+            pg.wait_for_function(
+                "() => {var c=document.getElementById('ecgConvo');"
+                " return c && /session budget/i.test(c.textContent);}", timeout=30000)
+            pg.click("#ecgConvo .act button:has-text('Confirm session budget')")
+            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=60000)
+
+            shown = pg.eval_on_selector_all(
+                "#ecgConvo .ecg-scaffold-steps > li",
+                "els => els.map(e => e.firstChild.textContent.trim())")
 
             pg.click("#ecgConvo .act button:has-text('Confirm')")
             pg.wait_for_function(
                 "() => {var c=document.getElementById('ecgConvo');"
                 " return c && /on the campaign roadmap now/i.test(c.textContent);}",
                 timeout=30000)
-
             said = pg.text_content("#ecgConvo")
             assert "Could not write that" not in said, said[-400:]
         finally:
             b.close()
 
-    # The OUTCOME, on disk: step_create events in the campaign ledger.
+    # The OUTCOME, on disk — and it must match what was on SCREEN.
     ledger = folder / "roadmap.json"
     assert ledger.exists(), "no roadmap.json was written"
     events = json.loads(ledger.read_text(encoding="utf-8")).get("roadmap_events", [])
     creates = [e for e in events if e.get("kind") == "step_create"]
-    assert len(creates) >= 3, f"only {len(creates)} step_create events: {events}"
+    assert len(creates) >= 3, f"only {len(creates)} step_create events"
+    assert [e["name"] for e in creates] == shown, (
+        "what landed on the roadmap differs from what was shown before confirming")
+
+    # E5: the conversation itself left no transcript behind.
+    raw = ledger.read_text(encoding="utf-8")
+    assert not any(k in raw for k in ("chat_turn", "dialogue_turn", "transcript")), raw[:400]

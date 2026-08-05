@@ -258,6 +258,17 @@ ROUTES = [
        handler="handle_ecgberht_scaffold_preview", migrated=True),
     _r("POST", "/api/ecgberht/scaffold_confirm", AUTH_TOKEN,
        handler="handle_ecgberht_scaffold_confirm", migrated=True),
+    # 2026-08-04 — THE CONVERSATIONAL DOOR. Free-form speech goes to the steward's
+    # seat model (with the Face, roadmap and Strip as context) instead of dead-ending
+    # on the closed act table; control verbs still compile deterministically in the
+    # engine. envelope_confirm is the one human "yes, spend on this session" that
+    # covers the whole conversation, so the steward never asks per sentence.
+    _r("POST", "/api/ecgberht/converse", AUTH_TOKEN,
+       handler="handle_ecgberht_converse", migrated=True),
+    _r("POST", "/api/ecgberht/envelope_confirm", AUTH_TOKEN,
+       handler="handle_ecgberht_envelope_confirm", migrated=True),
+    _r("POST", "/api/ecgberht/envelope_raise", AUTH_TOKEN,
+       handler="handle_ecgberht_envelope_raise", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

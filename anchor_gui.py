@@ -10650,7 +10650,12 @@ def handle_ecgberht_scaffold_confirm(handler, path, body):
         return
     text = (b.get("text") or b.get("description") or "").strip()
     stages = b.get("stages")
-    if not text and not stages:
+    # THE CONVERSATIONAL PATH confirms by PROPOSAL HASH: the proposal is already a
+    # typed scaffold_proposal on the ledger, and binding to its hash is what makes
+    # "what gets written is exactly what you reviewed" true. Without this the browser
+    # sent a hash, the host dropped it, and the confirm 400'd as "Nothing to confirm".
+    proposal_hash = (b.get("proposal_hash") or "").strip()
+    if not text and not stages and not proposal_hash:
         handler._send_json({"ok": False, "error": "empty_scaffold",
                             "message": "Nothing to confirm."}, 400)
         return
@@ -10663,10 +10668,121 @@ def handle_ecgberht_scaffold_confirm(handler, path, body):
         "stages": stages or None,
         "who": b.get("who") or "john",
     }
+    if proposal_hash:
+        fields["proposal_hash"] = proposal_hash
+        if (b.get("proposal_id") or "").strip():
+            fields["proposal_id"] = b["proposal_id"].strip()
     if b.get("client_event_id"):
         fields["client_event_id"] = b["client_event_id"]
     out = _ecgberht_bridge(["--project", folder,
                             "--scaffold-confirm", json.dumps(fields)])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_converse(handler, path, body):
+    """POST /api/ecgberht/converse — TALK to the steward (2026-08-04).
+
+    The chamber used to compile free-form speech through a closed ELEVEN-act table,
+    so describing or refining a project dead-ended on "could not compile that to a
+    closed act". This is the conversational door: routing happens in the ENGINE
+    (control verbs still compile deterministically; only genuine talk reaches the
+    seat), and the reply is a conversational answer plus, when there is enough to be
+    useful, a typed proposal for review.
+
+    ``turns`` carries the EPHEMERAL conversation so far — the browser page holds it,
+    it is replayed for continuity, and it is never persisted anywhere. The durable
+    continuity comes from the open scaffold_proposal on the ledger.
+
+    Nothing is written here; confirming stays a separate explicit act.
+
+    TIMEOUT: a real seat call is slow — measured 60-162s end-to-end on this host —
+    so this path gets its own generous bound. The default 20s would kill every turn.
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    text = (b.get("text") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not text:
+        handler._send_json({"ok": False, "error": "empty_text",
+                            "message": "Say something and the steward will answer."}, 400)
+        return
+    if _ecgberht_reject_oversized(handler, text):
+        return
+    args = ["--project", folder, "--converse", text]
+    packed = _ecgberht_pack_turns(b.get("turns"))
+    if packed:
+        args.extend(["--turns", json.dumps(packed)])
+    if (b.get("who") or "").strip():
+        args.extend(["--who", (b.get("who") or "").strip()])
+    out = _ecgberht_bridge(args, timeout=ECGBERHT_CONVERSE_TIMEOUT_S)
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_envelope_confirm(handler, path, body):
+    """POST /api/ecgberht/envelope_confirm — the human "yes, spend on this session".
+
+    Talking to the steward costs a model call, and nothing is spent without human
+    confirmation. Asking per sentence would be unusable, so ONE confirmation covers
+    the session until a bound trips (compiles / synthetic spend / TTL, whichever
+    first). This is that one confirmation.
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    fields = {"project_path": folder, "who": b.get("who") or "john"}
+    # The dollar cap is the USER'S to set — the engine defaults only apply when he
+    # does not name one. Turns are unlimited by construction on this path.
+    cap = b.get("max_spend_usd")
+    if cap is not None:
+        try:
+            cap = float(cap)
+        except (TypeError, ValueError):
+            handler._send_json({"ok": False, "error": "bad_max_spend",
+                                "message": "max_spend_usd must be a number."}, 400)
+            return
+        if cap <= 0:
+            handler._send_json({"ok": False, "error": "bad_max_spend",
+                                "message": "max_spend_usd must be greater than zero."}, 400)
+            return
+        fields["max_spend_usd"] = cap
+    if b.get("client_event_id"):
+        fields["client_event_id"] = b["client_event_id"]
+    out = _ecgberht_bridge(["--project", folder,
+                            "--envelope-confirm", json.dumps(fields)])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_envelope_raise(handler, path, body):
+    """POST /api/ecgberht/envelope_raise — "go past it".
+
+    Reaching the spend cap STOPS the steward and asks; this is the human answering
+    "carry on". Raising is still a confirmation, recorded on the ledger with who —
+    the cap moves only because a person said so.
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    try:
+        cap = float(b.get("max_spend_usd"))
+    except (TypeError, ValueError):
+        handler._send_json({"ok": False, "error": "bad_max_spend",
+                            "message": "Raising the budget needs a numeric cap."}, 400)
+        return
+    fields = {"project_path": folder, "who": b.get("who") or "john",
+              "max_spend_usd": cap}
+    if b.get("client_event_id"):
+        fields["client_event_id"] = b["client_event_id"]
+    out = _ecgberht_bridge(["--project", folder,
+                            "--envelope-raise", json.dumps(fields)])
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
@@ -10748,6 +10864,41 @@ def _ecgberht_reject_oversized(handler, text):
                         "length": len(text),
                         "limit": _ECGBERHT_MAX_SPOKEN_CHARS}, 413)
     return True
+
+
+#: A real seat call is SLOW — measured 60s (refinement) to 162s (first turn, with
+#: read-only grounding) on this host. The shared bridge default of 20s would kill
+#: every conversational turn, so the converse path carries its own bound. It stays
+#: under the engine's own SEAT_TIMEOUT_MS so the child dies before the parent gives up.
+ECGBERHT_CONVERSE_TIMEOUT_S = 240
+
+#: Ephemeral conversation replayed to the steward for continuity. Bounded by CHARS,
+#: not just count: the turns ride as ONE argv value alongside the utterance, and the
+#: steward's own replies run to a thousand characters each, so a naive "last N turns"
+#: would silently walk into the same Windows command-line ceiling that
+#: `_ecgberht_reject_oversized` exists to prevent. Oldest turns are dropped first —
+#: the durable continuity is the open scaffold_proposal on the ledger, not this.
+ECGBERHT_MAX_EPHEMERAL_TURNS = 12
+_ECGBERHT_MAX_TURNS_CHARS = 12_000
+
+
+def _ecgberht_pack_turns(turns):
+    """Newest-first char-budgeted slice of the ephemeral turns, restored to order."""
+    if not isinstance(turns, list):
+        return []
+    kept, used = [], 0
+    for turn in reversed(turns[-ECGBERHT_MAX_EPHEMERAL_TURNS:]):
+        if not isinstance(turn, dict):
+            continue
+        text = str(turn.get("text") or "")
+        if not text.strip():
+            continue
+        if used + len(text) > _ECGBERHT_MAX_TURNS_CHARS:
+            break
+        kept.append({"role": str(turn.get("role") or "john"), "text": text})
+        used += len(text)
+    kept.reverse()
+    return kept
 
 
 #: The high-seat bridge takes its roots as ONE ``--roots a;b;c`` argument, so a
@@ -17396,6 +17547,9 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_register_projects": handle_ecgberht_register_projects,
     "handle_ecgberht_scaffold_preview": handle_ecgberht_scaffold_preview,
     "handle_ecgberht_scaffold_confirm": handle_ecgberht_scaffold_confirm,
+    "handle_ecgberht_converse": handle_ecgberht_converse,
+    "handle_ecgberht_envelope_confirm": handle_ecgberht_envelope_confirm,
+    "handle_ecgberht_envelope_raise": handle_ecgberht_envelope_raise,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by
