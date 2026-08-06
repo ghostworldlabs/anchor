@@ -110,6 +110,11 @@
 .ecg-divider{align-self:center;color:var(--text-dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;border-top:1px dashed var(--border);width:100%;text-align:center;padding-top:8px}
 /* (2026-08-06) A commissioned run's report: the decision John owes, set off. */
 .ecg-run-needs{margin-top:6px;padding:6px 9px;border-left:2px solid #e0a437;background:rgba(224,164,55,.07);border-radius:6px;font-size:12.5px}
+/* The RUNNING strip — the persistent "something is genuinely working" signal. */
+.ecg-run-strip{margin:0 16px 8px;border:1px solid #2c4a33;border-radius:8px;background:rgba(52,168,83,.08);padding:6px 10px}
+.ecg-run-strip .row{display:flex;align-items:center;gap:9px;padding:3px 0;font-size:13px}
+.ecg-run-strip .dot{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
+@keyframes ecgpulse{0%,100%{opacity:1}50%{opacity:.35}}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
 .ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end}
 .ecg-saybox input,.ecg-saybox textarea{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}

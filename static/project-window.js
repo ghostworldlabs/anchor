@@ -6555,6 +6555,27 @@ function _ecgCommissionPropose(convo, skill) {
   _postJson('/api/ecgberht/commission_propose', body)
     .then(function (r) { return r.json(); }).then(function (j) {
       waiting.remove();
+      // (2026-08-06) ONE CARD, EVER. John's chamber stacked a fresh Gandalf
+      // card on every turn — including while Gandalf was ALREADY RUNNING.
+      // A live run for this step → point at the strip; a pending card for
+      // this step → point at it. Never a second card.
+      if (j && j.ok) {
+        var running = _ECG_RUNS_CACHE.some(function (r) {
+          return r.outcome === 'running' && r.step_id === j.step_id;
+        });
+        if (running) {
+          _ecgStewardMsg(convo, 'That one is already running — see the green ' +
+            'Running strip below (Open the session shows it working).');
+          return;
+        }
+        if (_ECG_PENDING_GO && document.body.contains(_ECG_PENDING_GO) &&
+            _ECG_PENDING_GO._ecgStep === j.step_id) {
+          _ecgStewardMsg(convo, 'The Go card for that is already up, just below — ' +
+            'say "go" or click it.');
+          _ECG_PENDING_GO.focus();
+          return;
+        }
+      }
       if (!j || !j.ok) {
         // A step with no TYPE cannot pick its own skill — offer the choice
         // instead of a dead-end (the refusal literally says "say which skill",
@@ -6582,22 +6603,27 @@ function _ecgCommissionPropose(convo, skill) {
         'I’ll come get you the moment it needs you. Nothing starts until you say go.');
       var act = _ecgEl('div', 'act');
       var go = _ecgEl('button', 'ecg-btn pri', 'Go — run ' + j.skill);
+      go._ecgStep = j.step_id;
+      _ECG_PENDING_GO = go;
       go.onclick = function () {
         go.disabled = true;
         go.textContent = 'Starting…';
+        if (_ECG_PENDING_GO === go) _ECG_PENDING_GO = null;
         _postJson('/api/ecgberht/commission_go', {
           project_id: PROJECT_ID, proposal: j
         }).then(function (r) { return r.json(); }).then(function (k) {
           if (!k || !k.ok) {
             go.disabled = false;
             go.textContent = 'Go — run ' + j.skill;
+            _ECG_PENDING_GO = go;
             _ecgStewardMsg(convo, 'Could not start it: ' +
               ((k && (k.message || k.error)) || 'no response') + ' — nothing is running.');
             return;
           }
           act.remove();
-          _ecgStewardMsg(convo, k.say ||
-            ('Commissioned — ' + j.skill + ' is running in a managed session.'));
+          _ecgStewardMsg(convo, (k.say ||
+            ('Commissioned — ' + j.skill + ' is running in a managed session.')) +
+            ' Watch it on the green Running strip below.');
           _ecgRefreshRail();
           _ecgWatchCommissionRuns(convo);
         }).catch(function () {
@@ -6625,6 +6651,42 @@ function _ecgCommissionPropose(convo, skill) {
 var _ECG_RUN_POLL = null;
 var _ECG_RUN_SEEN = {};
 var _ECG_RUN_PRIMED = false;
+var _ECG_RUNS_CACHE = [];   // last-poll records — card dedup + "is it running"
+var _ECG_PENDING_GO = null; // the live Go button, so "go" in chat can press it
+
+/* (2026-08-06, from John's day one) THE RUNNING STRIP. Two Gandalfs ran for
+   12 minutes while the chamber showed nothing — "how do I know something is
+   running?" is answered HERE: a persistent green-dot row per live run, with
+   the session window one click away. */
+function _ecgRenderRunningStrip(runs) {
+  var dock = document.getElementById('ecgSealDock');
+  if (!dock) return;
+  var strip = document.getElementById('ecgRunStrip');
+  var live = (runs || []).filter(function (r) { return r.outcome === 'running'; });
+  if (!live.length) { if (strip) strip.remove(); return; }
+  if (!strip) {
+    strip = _ecgEl('div', 'ecg-run-strip');
+    strip.id = 'ecgRunStrip';
+    var say = dock.querySelector('.ecg-saybox');
+    dock.insertBefore(strip, say || null);
+  }
+  strip.textContent = '';
+  live.forEach(function (r) {
+    var row = _ecgEl('div', 'row');
+    row.appendChild(_ecgEl('span', 'dot', '●'));
+    var mins = '';
+    try {
+      var t = new Date(String(r.at).replace(' ', 'T'));
+      mins = ' · ' + Math.max(0, Math.round((Date.now() - t.getTime()) / 60000)) + 'm';
+    } catch (e) {}
+    row.appendChild(_ecgEl('span', null,
+      (r.skill || 'skill') + ' running' + mins + ' — working in a session I manage'));
+    var open = _ecgEl('button', 'ecg-btn', 'Open the session');
+    open.onclick = function () { try { openPanel(r.session_id); } catch (e) {} };
+    row.appendChild(open);
+    strip.appendChild(row);
+  });
+}
 
 function _ecgWatchCommissionRuns(convo) {
   if (_ECG_RUN_POLL) return;
@@ -6647,6 +6709,8 @@ function _ecgWatchCommissionRuns(convo) {
             }
           });
         }
+        _ECG_RUNS_CACHE = j.runs || [];
+        _ecgRenderRunningStrip(_ECG_RUNS_CACHE);
         var pending = false;
         (j.runs || []).forEach(function (run) {
           if (!run.session_id) return;
@@ -6700,6 +6764,19 @@ function _ecgRenderRunReport(convo, run) {
 }
 
 function _ecgSpeak(convo, text) {
+  // (2026-08-06) NO MAGIC WORDS. A Go card is up and John says go — that IS
+  // the click. "go", "run it", "yes go", "start it", "run gandalf" all press
+  // the pending button instead of taking a model round-trip that re-proposes
+  // the card he is literally answering.
+  if (_ECG_PENDING_GO && document.body.contains(_ECG_PENDING_GO) &&
+      !_ECG_PENDING_GO.disabled &&
+      /^(yes[,.! ]*)?(go|run( it| \w+)?|start( it)?|do it|launch( it)?)[.! ]*$/i
+        .test(String(text).trim())) {
+    _ecgJohnMsg(convo, text);
+    _ecgNoteTurn('john', text);
+    _ECG_PENDING_GO.click();
+    return;
+  }
   var recall = /\bremind me\b|\bwhy did we\b/i.test(text);
   if (!recall) { _ecgConverse(convo, text); return; }
   _ecgJohnMsg(convo, text);
