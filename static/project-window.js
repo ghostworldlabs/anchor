@@ -6222,6 +6222,12 @@ function _ecgRenderStewardTurn(convo, j) {
   if (j.proposal && j.proposal.steps && j.proposal.steps.length) {
     _ecgRenderProposal(convo, msg, j);
   }
+  // (2026-08-06) "Start Gandalf" in conversation routes HERE: the model signals
+  // wants_commission instead of pretending work began (it cannot start
+  // anything), and the commission card appears — one Go from a real run.
+  if (j.wants_commission) {
+    _ecgCommissionPropose(convo, j.commission_skill || null);
+  }
   _ecgScrollToLatest(convo);
   return msg;
 }

@@ -184,8 +184,9 @@ def test_confirm_and_launch_drives_to_asked_and_brings_it_home(tmp_path, bridge_
 
 
 def test_skill_without_a_session_lane_is_refused_by_name(tmp_path, bridge_env):
-    prop = {**PROPOSAL, "skill": "Gandalf"}
-    # The stub's confirm echoes the proposal's skill back.
+    # (2026-08-06 hardening) Gandalf/Jumper now commission via the general
+    # lane; only a skill with NO path at all refuses.
+    prop = {**PROPOSAL, "skill": "legal-beagle"}
     out = cs.confirm_and_launch(
         str(tmp_path), prop, project_id="p",
         start_session_fn=fake_start_session,
@@ -324,3 +325,63 @@ def test_ingest_bridge_failure_is_a_fact_john_gets(tmp_path, bridge_env):
     assert rec["outcome"] == "asked"
     assert rec["ingest_error"] == "forced_failure"
     assert "could not read it back" in rec["report"]["say"]
+
+
+# ── Hardening 2026-08-06: Gandalf/Jumper via the general lane ───────────────
+
+def test_gandalf_commissions_through_general_lane_with_skill_loading_brief(tmp_path, bridge_env):
+    """Gandalf has no dedicated lane; the general session's opening turn IS the
+    brief, so the brief loads the skill by name. John's step 1 is a Gandalf
+    read — without this his first Go refused."""
+    captured = {}
+
+    def start(project_id, lane, backend="claude", label="", seed_context=None,
+              lean_worktree=True, **_kw):
+        captured.update(lane=lane, seed=seed_context)
+        return {"session_id": "sess-g1", "pid": 1, "proc_create_time": 1.0,
+                "backend": backend, "worktree_path": "C:/wt/g1"}
+
+    prop = {**PROPOSAL, "skill": "Gandalf"}
+    pty = ScriptedPty(["Gandalf loaded \u2014 what would you like to do?", "",
+                       "Read the drop. Wrote REPORT.md."])
+    out = cs.confirm_and_launch(
+        str(tmp_path), prop, project_id="p",
+        start_session_fn=start,
+        read_fn=pty.read_fn, write_fn=pty.write_fn,
+        runner_kwargs=fast_runner_kwargs(),
+        thread_factory=inline_thread_factory,
+    )
+    assert out["ok"] is True, out
+    assert out["lane"] == "general"
+    assert captured["lane"] == "general"
+    assert captured["seed"].startswith("Load the Gandalf skill now")
+    assert "COMMISSION BRIEF" in captured["seed"]
+
+
+# ── Hardening 2026-08-06: campaign state banks itself ───────────────────────
+
+def test_commit_campaign_state_banks_and_is_idempotent(tmp_path):
+    (tmp_path / "roadmap.json").write_text("{}")
+    eco = tmp_path / ".ecgberht"
+    eco.mkdir()
+    (eco / "conversation-log.json").write_text("{}")
+
+    first = cs.commit_campaign_state(str(tmp_path), "test")
+    # ensure_git_repo's bootstrap commit banks the first state.
+    assert first["ok"] is True
+
+    (tmp_path / "roadmap.json").write_text('{"changed": true}')
+    second = cs.commit_campaign_state(str(tmp_path), "after change")
+    assert second["ok"] is True
+    assert second["committed"] is True
+
+    third = cs.commit_campaign_state(str(tmp_path), "no change")
+    assert third["ok"] is True
+    assert third["committed"] is False
+    assert third["reason"] == "nothing-new"
+
+
+def test_commit_campaign_state_never_raises_on_a_hostile_folder(tmp_path):
+    out = cs.commit_campaign_state(str(tmp_path / "does-not-exist"), "x")
+    assert isinstance(out, dict)
+    assert "ok" in out

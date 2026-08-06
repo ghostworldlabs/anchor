@@ -270,14 +270,28 @@ def confirm_and_launch(
     step_id = job.get("step_id") or proposal.get("step_id")
     commission_id = (job.get("commission_id") or job.get("job_id")
                      or proposal.get("proposal_id"))
+
+    # Lane resolution. researchPrime/Crucible/Foreman have dedicated lanes whose
+    # seeds load them. Gandalf and Jumper have NO lane — but a `general` session
+    # sends its seed_context ALONE as the opening turn, so the brief itself can
+    # load the skill by name (they are registered globally). Found in hardening
+    # 2026-08-06: John's step 1 IS a Gandalf read; without this his first Go
+    # refused. Truly unknown skills still refuse by name.
     lane = _ce.lane_for_commissioned_skill(skill)
+    load_preamble = None
+    if not lane and str(skill).lower() in ("gandalf", "jumper"):
+        lane = "general"
+        load_preamble = (
+            f"Load the {skill} skill now. Confirm it's ready by greeting me "
+            f"EXACTLY once with: \"{skill} loaded — what would you like to do?\" "
+            "Then stop and wait for my next message.\n\n")
     if not lane:
         return {"ok": False, "error": "skill_has_no_session_lane",
                 "message": f"'{skill}' has no managed-session lane — it cannot "
                            "run as a commissioned session yet.",
                 "skill": skill, "confirm": confirmed}
 
-    brief = build_brief(proposal, skill=skill)
+    brief = (load_preamble or "") + build_brief(proposal, skill=skill)
 
     def _launch(**kwargs):
         return _ce.launch_commission_in_session(
