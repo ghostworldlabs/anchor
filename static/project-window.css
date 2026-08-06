@@ -115,6 +115,21 @@
 .ecg-run-strip .row{display:flex;align-items:center;gap:9px;padding:3px 0;font-size:13px}
 .ecg-run-strip .dot{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
 @keyframes ecgpulse{0%,100%{opacity:1}50%{opacity:.35}}
+/* (2026-08-06 evening) THE RUN LEDGER — always-on, board-level. Green pulse =
+   running · amber pulse = needs you · GOLD = finished · dim gold = watch ended
+   · red = died. Click Report for the steward's read; Open for the terminal. */
+.ecg-run-ledger{margin:0 0 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);padding:4px 12px}
+.ecg-run-ledger .lrow{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;border-top:1px dashed var(--border)}
+.ecg-run-ledger .lrow:first-child{border-top:0}
+.ecg-run-ledger .lrow .lbl{flex:1}
+.ecg-run-ledger .lrow .dot{font-size:15px}
+.ecg-run-ledger .lrow.run .dot{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
+.ecg-run-ledger .lrow.ask .dot{color:#e0a437;animation:ecgpulse 1.2s ease-in-out infinite}
+.ecg-run-ledger .lrow.done .dot{color:#d4af37}
+.ecg-run-ledger .lrow.stale .dot{color:#9a8a4a}
+.ecg-run-ledger .lrow.dead .dot{color:#e05b4f}
+.ecg-run-ledger .lreport{margin:2px 0 8px 25px;padding:8px 11px;border-left:2px solid #d4af37;background:rgba(212,175,55,.06);border-radius:6px;font-size:12.8px;line-height:1.5}
+.ecg-run-ledger .lrec{margin-top:5px;color:var(--text-dim)}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
 .ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end}
 .ecg-saybox input,.ecg-saybox textarea{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}

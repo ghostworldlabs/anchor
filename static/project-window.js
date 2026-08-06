@@ -239,7 +239,141 @@ window.addEventListener('DOMContentLoaded', function () {
     var m = (window.location.hash || '').match(/^#session=([\w.-]+)/);
     if (m) setTimeout(function () { try { openPanel(m[1]); } catch (e) {} }, 400);
   } catch (e) {}
+  // (2026-08-06 evening) THE RUN LEDGER lives on the BOARD, not inside the
+  // chamber — two Gandalfs ran to completion invisibly because the only
+  // indicator needed the chamber open AND the run still live. This is the
+  // always-on view: green pulse = running, gold = finished, amber = needs you.
+  try { _ecgMountRunLedger(); } catch (e) {}
+  // (2026-08-06 evening) SIMPLE WORKBENCH: John works in General terminals;
+  // research/plan/build get commissioned by the steward and watched from the
+  // ledger. Hide the trio zones + their start buttons (client-side so the
+  // server render and its test pins stay untouched; a later tidy wave can
+  // remove them server-side).
+  try { _ecgSimplifyBoard(); } catch (e) {}
 });
+
+function _ecgSimplifyBoard() {
+  ['research', 'plan_build'].forEach(function (z) {
+    document.querySelectorAll("[data-zone='" + z + "']").forEach(function (el) {
+      var lbl = el.previousElementSibling;
+      if (lbl && lbl.className === 'sectionlbl') lbl.style.display = 'none';
+      el.style.display = 'none';
+    });
+    ['shelf_' + z, 'tgl_' + z].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+  });
+  ['newResearchBtn', 'newPlanBuildBtn'].forEach(function (id) {
+    var b = document.getElementById(id);
+    if (b) b.style.display = 'none';
+  });
+  var g = document.getElementById('newGeneralBtn');
+  if (g) g.textContent = '+ New general terminal';
+}
+
+/* ── The Run Ledger (board-level; the chamber strip reuses its data) ───────── */
+var _ECG_LEDGER_POLL = null;
+
+function _ecgMountRunLedger() {
+  var grid = document.querySelector('.pgrid.layoutd');
+  if (!grid || document.getElementById('ecgRunLedger')) return;
+  var host = document.createElement('div');
+  host.id = 'ecgRunLedger';
+  host.className = 'ecg-run-ledger';
+  grid.parentNode.insertBefore(host, grid);
+  var tick = function () {
+    fetch('/api/ecgberht/commission_runs?project_id=' +
+          encodeURIComponent(PROJECT_ID) + _tokenQ())
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        _ECG_RUNS_CACHE = j.runs || [];
+        _ecgRenderRunLedger(host, _ECG_RUNS_CACHE);
+        try {
+          var convo = document.getElementById('ecgConvo');
+          if (convo) _ecgRenderRunningStrip(_ECG_RUNS_CACHE);
+        } catch (e) {}
+      })
+      .catch(function () {});
+  };
+  tick();
+  _ECG_LEDGER_POLL = setInterval(tick, 15000);
+}
+
+function _ecgRunStateBits(run) {
+  if (run.outcome === 'running') {
+    return { cls: 'run', dot: '●', phrase: 'running — working in a session I manage' };
+  }
+  if (run.outcome === 'asked') {
+    return { cls: 'ask', dot: '●', phrase: 'needs you — it asked a question' };
+  }
+  if (run.outcome === 'produced') {
+    return { cls: 'done', dot: '●', phrase: 'finished — report ready' };
+  }
+  if (run.outcome === 'quiet' || run.outcome === 'timeout') {
+    return { cls: 'stale', dot: '●', phrase: run.outcome === 'quiet'
+      ? 'went quiet — report ready, session may still be working'
+      : 'watch ended — report ready, session may still be working' };
+  }
+  return { cls: 'dead', dot: '●', phrase: String(run.outcome || 'unknown') };
+}
+
+function _ecgRunAge(at) {
+  try {
+    var t = new Date(String(at).replace(' ', 'T'));
+    var m = Math.max(0, Math.round((Date.now() - t.getTime()) / 60000));
+    return m < 60 ? m + 'm' : Math.round(m / 60) + 'h';
+  } catch (e) { return ''; }
+}
+
+function _ecgRenderRunLedger(host, runs) {
+  host.textContent = '';
+  var rows = (runs || []).slice(0, 5);
+  if (!rows.length) { host.style.display = 'none'; return; }
+  host.style.display = '';
+  rows.forEach(function (run) {
+    var bits = _ecgRunStateBits(run);
+    var row = _ecgEl('div', 'lrow ' + bits.cls);
+    row.appendChild(_ecgEl('span', 'dot', bits.dot));
+    row.appendChild(_ecgEl('span', 'lbl',
+      (run.skill || 'skill') + ' · ' + bits.phrase + ' · ' + _ecgRunAge(run.at)));
+    var openBtn = _ecgEl('button', 'ecg-btn', 'Open the session');
+    openBtn.onclick = function () { try { openPanel(run.session_id); } catch (e) {} };
+    row.appendChild(openBtn);
+    if (run.report && (run.report.say || run.report.needs)) {
+      var repBtn = _ecgEl('button', 'ecg-btn', 'Report');
+      repBtn.onclick = function () {
+        var open = row.nextElementSibling;
+        if (open && open.className === 'lreport') { open.remove(); return; }
+        var rep = _ecgEl('div', 'lreport');
+        if (run.report.say) rep.appendChild(_ecgEl('div', null, run.report.say));
+        if (run.report.needs) {
+          rep.appendChild(_ecgEl('div', 'ecg-run-needs', 'Waiting on you: ' + run.report.needs));
+        }
+        if (run.report.recommend) {
+          rep.appendChild(_ecgEl('div', 'lrec', 'My recommendation: ' + run.report.recommend));
+        }
+        row.parentNode.insertBefore(rep, row.nextSibling);
+      };
+      row.appendChild(repBtn);
+    }
+    if (run.outcome === 'asked' || run.outcome === 'quiet' || run.outcome === 'timeout') {
+      var back = _ecgEl('button', 'ecg-btn',
+        run.outcome === 'asked' ? 'Hand it back' : 'Keep watching');
+      back.onclick = function () {
+        back.disabled = true;
+        _postJson('/api/ecgberht/commission_watch', {
+          project_id: PROJECT_ID, session_id: run.session_id
+        }).then(function (r) { return r.json(); }).then(function (k) {
+          back.textContent = (k && k.ok) ? 'Watching ✓' : 'Could not re-arm';
+        }).catch(function () { back.disabled = false; });
+      };
+      row.appendChild(back);
+    }
+    host.appendChild(row);
+  });
+}
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
   var tok = _anchorToken();
