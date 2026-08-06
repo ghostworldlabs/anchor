@@ -1042,3 +1042,102 @@ def reconcile_commissions_on_startup(store_root: Optional[Path | str] = None) ->
         root = Path(store_root)
     root.mkdir(parents=True, exist_ok=True)
     return boot_reconcile(root)
+
+
+# ── Managed-session launcher (2026-08-06) ────────────────────────────────────
+#
+# WHY THIS EXISTS. The default launcher drives a commission as a piped one-shot
+# job and tries to ANSWER the skill's human gates itself, by writing plain text
+# into the child's stdin after auto-dismissing an AskUserQuestion. That path is
+# documented in job_runner as "best-effort continuation, not guaranteed", and it
+# is why Crucible and Foreman were both marked ``executor_not_proven``: a skill
+# that asks a real question is not reliably resumable that way.
+#
+# John's read, and it is the right one: a skill hitting a gate is not a problem
+# to route around — it is the skill saying "I need the human". So this launcher
+# does not fake an answer. It runs the commission as a MANAGED TERMINAL SESSION
+# (the same substrate the project window already shows), which means:
+#
+#   * the session is registered, attachable, and survives the service restarting
+#   * when the skill asks something, it just waits — no auto-dismiss, no guessing
+#   * John can open THAT session, read everything it did, type an answer, and
+#     hand it back, exactly as if he had run the CLI himself
+#
+# Nothing about the trio changes. This is a different execution strategy behind
+# the SAME ``launch_fn`` seam ``execute_confirmed_commission`` already exposes.
+
+#: Lane a commissioned skill runs in. The lane carries the skill seed
+#: (lanes.SKILL_PLAN == "crucible"), so the session opens already loaded.
+COMMISSION_SKILL_LANE = {
+    "Crucible": "plan",
+    "crucible": "plan",
+    "Foreman": "build",
+    "foreman": "build",
+    "researchPrime": "research",
+    "researchprime": "research",
+}
+
+
+def lane_for_commissioned_skill(skill: str) -> Optional[str]:
+    """Lane whose seed loads ``skill``, or None when the skill has no lane."""
+    if not skill:
+        return None
+    return COMMISSION_SKILL_LANE.get(str(skill)) or COMMISSION_SKILL_LANE.get(
+        str(skill).lower()
+    )
+
+
+def launch_commission_in_session(
+    *,
+    lane: str,
+    project_id: str,
+    prompt: Optional[str] = None,
+    backend: str = "claude",
+    start_session_fn: Optional[Callable] = None,
+    label: str = "",
+    **_ignored: Any,
+) -> dict:
+    """``launch_fn`` that starts a MANAGED SESSION instead of a piped job.
+
+    Returns the record shape ``execute_confirmed_commission`` expects
+    (``pid`` / ``proc_create_time`` / ``job_id`` / ``command``), with the managed
+    session id carried as ``job_id`` so the commission binds to a session a human
+    can actually open.
+
+    ``start_session_fn`` is injectable so this is testable without a live PTY.
+    """
+    starter = start_session_fn
+    if starter is None:
+        import terminal_session as _ts
+
+        starter = _ts.start_session
+
+    rec = starter(
+        project_id,
+        lane,
+        backend=backend,
+        label=label or "commission",
+        # The brief rides in as the session's opening turn, folded onto the lane
+        # seed — so the session comes up with the skill loaded AND the work stated.
+        seed_context=prompt,
+    )
+    if not isinstance(rec, dict):
+        raise RuntimeError("start_session did not return a session record")
+
+    session_id = rec.get("session_id") or rec.get("id")
+    if not session_id:
+        raise RuntimeError("session record carries no session_id")
+
+    return {
+        "pid": rec.get("pid"),
+        "proc_create_time": rec.get("proc_create_time"),
+        # The session IS the run handle. Binding to it is what lets the steward
+        # raise "this needs you" and drop John into the very session that asked.
+        "job_id": session_id,
+        "session_id": session_id,
+        "managed_session": True,
+        "lane": lane,
+        "backend": rec.get("backend") or backend,
+        "command": rec.get("command") or rec.get("cmdline"),
+        "worktree_path": rec.get("worktree_path"),
+    }
