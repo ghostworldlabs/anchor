@@ -381,6 +381,11 @@ function _ecgRenderRunLedger(host, runs) {
         if (run.report.recommend) {
           rep.appendChild(_ecgEl('div', 'lrec', 'My recommendation: ' + run.report.recommend));
         }
+        (run.prior_reports || []).slice().reverse().forEach(function (pr) {
+          if (!pr || !pr.say) return;
+          rep.appendChild(_ecgEl('div', 'lrec', 'Earlier read: ' + pr.say));
+          if (pr.needs) rep.appendChild(_ecgEl('div', 'ecg-run-needs', 'It asked: ' + pr.needs));
+        });
         row.parentNode.insertBefore(rep, row.nextSibling);
       };
       row.appendChild(repBtn);

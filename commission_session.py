@@ -183,6 +183,7 @@ def list_runs(folder: str) -> list:
             "at": rec.get("at"),
             "watch_count": rec.get("watch_count", 1),
             "report": rec.get("report"),
+            "prior_reports": rec.get("prior_reports") or [],
             "raised": rec.get("raised"),
         })
     rows.sort(key=lambda r: r.get("at") or "", reverse=True)
@@ -431,8 +432,15 @@ def finish_run(folder, project_id, record, result) -> dict:
     report, conversation log, raise, handback — via the ingest bridge."""
     session_id = record["session_id"]
     transcript = result.get("transcript", "") or ""
+    # A re-armed watch must never ERASE the first watch's read (found live
+    # 2026-08-06: watch 2 saw only post-snap silence and its thin report
+    # replaced the rich verdict). Every prior report is kept.
+    prior_reports = list(record.get("prior_reports") or [])
+    if isinstance(record.get("report"), dict) and record["report"].get("say"):
+        prior_reports.append(record["report"])
     updated = {
         **record,
+        "prior_reports": prior_reports,
         "outcome": result.get("outcome"),
         "ran": result.get("ran"),
         "elapsed_s": result.get("elapsed_s"),
