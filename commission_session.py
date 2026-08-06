@@ -458,7 +458,60 @@ def finish_run(folder, project_id, record, result) -> dict:
         updated["ingest_error"] = ingest.get("error")
 
     _atomic_write_json(_run_record_path(folder, session_id), updated)
+    # A finished run changed campaign state (record, attention, log) — bank it.
+    commit_campaign_state(
+        folder, f"{record.get('skill', 'skill')} run {result.get('outcome')}")
     return {"ok": True, "record": updated, "ingest": ingest}
+
+
+# ── Campaign state → git (a crash costs nothing) ────────────────────────────
+
+#: The campaign's durable surfaces — staged EXPLICITLY, never `git add -A`
+#: (the user's unrelated changes are not the steward's to commit).
+CAMPAIGN_STATE_PATHS = (
+    "roadmap.json", "ECGBERHT.md", "Anchor.md", "strip.json",
+    ".ecgberht", ".anchor",
+)
+
+
+def commit_campaign_state(folder, label: str = "campaign state") -> dict:
+    """Commit the steward's campaign surfaces in the PROJECT repo. Best-effort,
+    never raises — John's standing rule (2026-08-06, his first real campaigns):
+    'you should be committing things as we go along so they don't lose
+    anything.' Both his campaigns sat untracked for a day before this existed.
+    """
+    out = {"ok": False, "committed": False, "reason": "ok"}
+    try:
+        import subprocess as _sp
+        import project_bootstrap as _pb
+        folder = str(folder)
+        _pb.ensure_git_repo(folder)
+
+        def _git(*args):
+            return _sp.run(["git", *args], cwd=folder, capture_output=True,
+                           text=True, timeout=60,
+                           creationflags=getattr(_paths, "NO_WINDOW", 0))
+
+        present = [p for p in CAMPAIGN_STATE_PATHS
+                   if (Path(folder) / p).exists()]
+        if not present:
+            out.update(ok=True, reason="no-campaign-state")
+            return out
+        _git("add", "--", *present)
+        staged = _git("diff", "--cached", "--name-only")
+        if not (staged.stdout or "").strip():
+            out.update(ok=True, reason="nothing-new")
+            return out
+        done = _git("-c", "user.email=ecgberht@anchor.local",
+                    "-c", "user.name=Ecgberht Steward",
+                    "commit", "-m", f"ecgberht: {label}")
+        out.update(ok=done.returncode == 0, committed=done.returncode == 0,
+                   reason="ok" if done.returncode == 0
+                   else (done.stderr or done.stdout or "commit-failed")[:200])
+        return out
+    except Exception as exc:
+        out["reason"] = str(exc)[:200]
+        return out
 
 
 # ── Hand it back (after John answered in the session) ───────────────────────

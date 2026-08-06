@@ -6319,22 +6319,41 @@ function _ecgRenderProposal(convo, _msg, j) {
       if (pinned) pinned.remove();
       act.remove();
       if (typeof ecgSealMountInline === 'function') ecgSealMountInline();
+      // (2026-08-06) ACCEPT = GO. Show the roadmap in the rail AND in the
+      // conversation, then drive: propose the first step's commission — one
+      // Go button away from execution, zero further handshakes.
+      _ecgRefreshRail(function (rail) {
+        _ecgPrintRoadmap(convo, rail);
+        _ecgCommissionPropose(convo);
+      });
     }).catch(function () {
       yes.disabled = false;
       yes.textContent = 'Confirm — build the roadmap';
       _ecgStewardMsg(convo, "That didn't go through — nothing was saved.");
     });
   };
-  var no = _ecgEl('button', 'ecg-btn', 'Not that');
-  no.onclick = function () {
+  // (2026-08-06) REFINE ITERATES, NOTHING DISAPPEARS. "Not that" used to
+  // DELETE the pinned scaffolding — one stray click and John watched his plan
+  // vanish, then thought the steward had lost it ("what happened, we had a
+  // plan"). The proposal is still the open proposal on the ledger; the panel
+  // now stays through refinement rounds and only Confirm ends planning.
+  var refine = _ecgEl('button', 'ecg-btn', 'Refine it — tell me what to change');
+  refine.onclick = function () {
+    var say = _ecgSayLine();
+    _ecgStewardMsg(convo, 'Tell me what to change — the scaffolding stays pinned ' +
+      'below and I rework it in place until you confirm.');
+    if (say) { say.placeholder = 'What should change in the scaffolding?'; say.focus(); }
+  };
+  var aside = _ecgEl('button', 'ecg-btn', 'Set aside');
+  aside.onclick = function () {
     var pinned = document.getElementById('ecgScaffoldPin');
-    if (pinned) pinned.remove();
-    act.remove();
-    _ecgStewardMsg(convo, 'Left alone — nothing was written. Tell me what to change ' +
-      'and I will rework it.');
+    if (pinned) pinned.open = false;
+    _ecgStewardMsg(convo, 'Set aside — it stays pinned (collapsed) below. Talk to me ' +
+      'to rework it, or open it and confirm when ready. Nothing was written.');
   };
   act.appendChild(yes);
-  act.appendChild(no);
+  act.appendChild(refine);
+  act.appendChild(aside);
   msg.appendChild(act);
 }
 
@@ -6464,6 +6483,39 @@ function _ecgConverse(convo, text, isRetry) {
   });
 }
 
+/* (2026-08-06) REFRESH THE RAIL IN PLACE. The chamber view model was fetched
+   once at open, so a roadmap confirmed DURING the conversation never reached
+   the Campaign Roadmap rail — John watched an empty rail sit beside a live
+   ten-stage campaign. Re-fetch and swap just the aside; the conversation is
+   untouched. Returns the fresh rail (for printing the roadmap back). */
+function _ecgRefreshRail(done) {
+  fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      var ch = j && j.ok && j.chamber;
+      if (!ch || !ch.roadmap_rail) { if (done) done(null); return; }
+      var dock = document.getElementById('ecgSealDock');
+      var old = dock && dock.querySelector('aside.ecg-rail');
+      if (old) old.replaceWith(_ecgRenderRail(ch.roadmap_rail, ch.run_block));
+      if (done) done(ch.roadmap_rail);
+    })
+    .catch(function () { if (done) done(null); });
+}
+
+/* Print the confirmed roadmap back into the conversation — "I saved it" is not
+   showing it. One line per step, in order. */
+function _ecgPrintRoadmap(convo, rail) {
+  if (!rail || !rail.steps || !rail.steps.length) return;
+  var msg = _ecgStewardMsg(convo, 'The campaign roadmap, as written:');
+  var ol = _ecgEl('ol', 'ecg-roadmap-echo');
+  rail.steps.forEach(function (s) {
+    ol.appendChild(_ecgEl('li', null, (s.name || s.id || '') +
+      (s.substatus ? ' — ' + s.substatus : '')));
+  });
+  msg.appendChild(ol);
+  _ecgScrollToLatest(convo);
+}
+
 /* A compiled CONTROL act — deterministic, no model, no spend. */
 function _ecgHandleAct(convo, c, text) {
   if (c.act === 'park_that') {
@@ -6540,6 +6592,7 @@ function _ecgCommissionPropose(convo, skill) {
           act.remove();
           _ecgStewardMsg(convo, k.say ||
             ('Commissioned — ' + j.skill + ' is running in a managed session.'));
+          _ecgRefreshRail();
           _ecgWatchCommissionRuns(convo);
         }).catch(function () {
           go.disabled = false;
@@ -6610,6 +6663,7 @@ function _ecgWatchCommissionRuns(convo) {
 }
 
 function _ecgRenderRunReport(convo, run) {
+  _ecgRefreshRail();
   var rep = run.report || {};
   var msg = _ecgStewardMsg(convo, rep.say ||
     (run.skill + ' stopped (' + run.outcome + ').'));

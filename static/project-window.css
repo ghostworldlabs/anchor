@@ -90,9 +90,13 @@
 
 /* THE SCAFFOLDING IS PINNED, not scrolled away with the chat. It is the thing he is
    working ON; losing it up the scrollback is the complaint. */
+/* (2026-08-06) The scaffolding is the thing being decided — give it room.
+   30vh was "a little awkward... should be bigger" (John, first real use). */
 .ecg-scaffold-pin{border:1px solid var(--border);border-left:2px solid #c9a227;
   border-radius:8px;margin:0 16px;background:var(--surface2);flex:0 0 auto;
-  max-height:30vh;overflow-y:auto}
+  max-height:62vh;overflow-y:auto;font-size:13.5px;line-height:1.5}
+.ecg-roadmap-echo{margin:6px 0 2px 18px;padding:0}
+.ecg-roadmap-echo li{margin:3px 0}
 .ecg-scaffold-pin > summary{cursor:pointer;padding:7px 12px;font-size:11px;
   letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);user-select:none}
 .ecg-scaffold-pin .body{padding:0 12px 10px}

@@ -10676,6 +10676,16 @@ def handle_ecgberht_scaffold_confirm(handler, path, body):
         fields["client_event_id"] = b["client_event_id"]
     out = _ecgberht_bridge(["--project", folder,
                             "--scaffold-confirm", json.dumps(fields)])
+    # (2026-08-06) Plan approval banks the campaign: John's standing rule is
+    # commit-as-we-go, and both his first real campaigns sat untracked for a
+    # day. Best-effort — a git hiccup never breaks the confirm he just made.
+    if out.get("ok"):
+        try:
+            import commission_session as _cs
+            out["campaign_commit"] = _cs.commit_campaign_state(
+                folder, "roadmap confirmed")
+        except Exception:
+            pass
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
