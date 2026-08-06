@@ -6490,12 +6490,29 @@ function _ecgHandleAct(convo, c, text) {
    loop drives it → the report comes back HERE, in the chamber, and the ⚑
    raise fetches John when the skill needs him. */
 
-function _ecgCommissionPropose(convo) {
+function _ecgCommissionPropose(convo, skill) {
   var waiting = _ecgStewardMsg(convo, 'Framing the commission…');
-  _postJson('/api/ecgberht/commission_propose', { project_id: PROJECT_ID })
+  var body = { project_id: PROJECT_ID };
+  if (skill) body.skill = skill;
+  _postJson('/api/ecgberht/commission_propose', body)
     .then(function (r) { return r.json(); }).then(function (j) {
       waiting.remove();
       if (!j || !j.ok) {
+        // A step with no TYPE cannot pick its own skill — offer the choice
+        // instead of a dead-end (the refusal literally says "say which skill",
+        // and buttons are how the chamber lets him say it).
+        if (j && j.error === 'skill_unresolved') {
+          var m = _ecgStewardMsg(convo,
+            'This step doesn’t say which kind of work it is — which skill should I run?');
+          var pick = _ecgEl('div', 'act');
+          ['researchPrime', 'Crucible', 'Foreman', 'Gandalf', 'Jumper'].forEach(function (s) {
+            var b = _ecgEl('button', 'ecg-btn', s);
+            b.onclick = function () { pick.remove(); _ecgCommissionPropose(convo, s); };
+            pick.appendChild(b);
+          });
+          m.appendChild(pick);
+          return;
+        }
         _ecgStewardMsg(convo, (j && (j.message || j.error))
           ? 'I can’t commission yet: ' + (j.message || j.error)
           : 'I couldn’t frame a commission — nothing was launched.');
