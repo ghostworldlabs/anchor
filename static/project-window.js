@@ -272,6 +272,32 @@ function _ecgSimplifyBoard() {
   if (g) g.textContent = '+ New general terminal';
 }
 
+/* (2026-08-06) Run-state dots ON the scaffolding bullets: the rail step that
+   owns a run gets its dot (green pulse = running · amber = needs you · gold =
+   finished) and becomes clickable — straight into the workbench session. */
+function _ecgAnnotateRailRuns() {
+  var rows = document.querySelectorAll('.ecg-rail .ecg-step[data-step]');
+  rows.forEach(function (row) {
+    var stepId = row.getAttribute('data-step');
+    if (!stepId) return;
+    var run = null;
+    (_ECG_RUNS_CACHE || []).forEach(function (r) {
+      if (r.step_id === stepId && (!run || String(r.at) > String(run.at))) run = r;
+    });
+    var old = row.querySelector('.rundot');
+    if (!run) { if (old) old.remove(); return; }
+    var bits = _ecgRunStateBits(run);
+    if (!old) {
+      old = _ecgEl('span', '', '●');
+      row.insertBefore(old, row.firstChild);
+    }
+    old.className = 'rundot ' + bits.cls;
+    old.title = (run.skill || '') + ' — ' + bits.phrase + ' (click to open the session)';
+    row.classList.add('has-run');
+    row.onclick = function () { try { openPanel(run.session_id); } catch (e) {} };
+  });
+}
+
 /* ── The Run Ledger (board-level; the chamber strip reuses its data) ───────── */
 var _ECG_LEDGER_POLL = null;
 
@@ -290,6 +316,7 @@ function _ecgMountRunLedger() {
         if (!j || !j.ok) return;
         _ECG_RUNS_CACHE = j.runs || [];
         _ecgRenderRunLedger(host, _ECG_RUNS_CACHE);
+        try { _ecgAnnotateRailRuns(); } catch (e) {}
         try {
           var convo = document.getElementById('ecgConvo');
           if (convo) _ecgRenderRunningStrip(_ECG_RUNS_CACHE);
@@ -6301,12 +6328,17 @@ function _ecgRenderRail(rail, runBlock) {
     for (var i = 0; i < rail.steps.length; i++) {
       var s = rail.steps[i];
       var row = _ecgEl('div', 'ecg-step ' + _ecgStatusCls(s.status));
+      // (2026-08-06) The step id rides the DOM so run-state dots can land on
+      // the very bullet the run belongs to (John: "that's where the green
+      // should show up as well").
+      row.setAttribute('data-step', s.id || '');
       row.appendChild(_ecgEl('span', 'm', s.marker));
       var body = _ecgEl('span', null, (s.id ? s.id + ' ' : '') + (s.name || ''));
       body.appendChild(_ecgEl('small', null, s.substatus || ''));
       row.appendChild(body);
       aside.appendChild(row);
     }
+    setTimeout(_ecgAnnotateRailRuns, 0);
   }
   var rb = _ecgEl('div', 'ecg-runblock');
   rb.id = 'ecgRunBlock';
