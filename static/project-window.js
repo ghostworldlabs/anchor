@@ -302,13 +302,27 @@ function _ecgAnnotateRailRuns() {
 var _ECG_LEDGER_POLL = null;
 
 function _ecgMountRunLedger() {
-  var grid = document.querySelector('.pgrid.layoutd');
-  if (!grid || document.getElementById('ecgRunLedger')) return;
-  var host = document.createElement('div');
-  host.id = 'ecgRunLedger';
-  host.className = 'ecg-run-ledger';
-  grid.parentNode.insertBefore(host, grid);
+  // (2026-08-06, the "exactly the same" round) The ledger first mounted INSIDE
+  // the collapsed Workbench accordion — built, served, and invisible. It lives
+  // at PAGE level now: above the Seal/Workbench tiles, in view the moment the
+  // page opens. Mount retries ride the poll, so a late-rendering page still
+  // gets it.
+  var mount = function () {
+    if (document.getElementById('ecgRunLedger')) return true;
+    var anchorEl = document.getElementById('tile-workbench') ||
+                   document.querySelector('.pgrid.layoutd');
+    if (!anchorEl) return false;
+    var host = document.createElement('div');
+    host.id = 'ecgRunLedger';
+    host.className = 'ecg-run-ledger';
+    var target = document.getElementById('tile-workbench') || anchorEl;
+    target.parentNode.insertBefore(host, target);
+    return true;
+  };
+  mount();
   var tick = function () {
+    if (!mount()) return;
+    var host = document.getElementById('ecgRunLedger');
     fetch('/api/ecgberht/commission_runs?project_id=' +
           encodeURIComponent(PROJECT_ID) + _tokenQ())
       .then(function (r) { return r.json(); })
