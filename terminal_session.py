@@ -558,7 +558,7 @@ def _engine_launch_argv(cmd, backend, engine_uuid):
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
                   parent_session_id=None, paste_prompt=None, grass_origin=None,
                   effort_id=None, effort_managed=False, actor=None,
-                  extra_cli_args=None):
+                  extra_cli_args=None, lean_worktree=False):
     """Start a live, worktree-isolated, registered terminal session.
 
     Resolves ``project_id`` in ``rnd_registry``, mints ONE session id, creates a
@@ -671,7 +671,12 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
         origin = _resolve_grass_origin_from_chain(parent_id, parent_rec)
 
     # 1) Isolated worktree first — if this fails we never start a PTY.
-    wt = _wt.create_worktree(project_id, sid)
+    # ``lean_worktree`` skips heavy binaries in the checkout. A commissioned skill
+    # needs the project's text and code, not its media: on the MBA Teaching AI repo
+    # (a 1.27 GB zip committed to git) this is 0.3 MB / 0.1s instead of 1430 MB / 5.3s.
+    wt = _wt.create_worktree(
+        project_id, sid,
+        exclude_globs=_wt.LEAN_EXCLUDE_GLOBS if lean_worktree else None)
     if not wt.get("ok"):
         raise TerminalSessionError(
             "worktree creation failed (%s): %s"

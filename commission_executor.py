@@ -1095,6 +1095,7 @@ def launch_commission_in_session(
     backend: str = "claude",
     start_session_fn: Optional[Callable] = None,
     label: str = "",
+    lean_worktree: bool = True,
     **_ignored: Any,
 ) -> dict:
     """``launch_fn`` that starts a MANAGED SESSION instead of a piped job.
@@ -1120,6 +1121,9 @@ def launch_commission_in_session(
         # The brief rides in as the session's opening turn, folded onto the lane
         # seed — so the session comes up with the skill loaded AND the work stated.
         seed_context=prompt,
+        # Commissions get a LEAN checkout by default — the skill needs the project's
+        # text and code, not its media (measured 0.3 MB vs 1430 MB on MBA Teaching AI).
+        lean_worktree=lean_worktree,
     )
     if not isinstance(rec, dict):
         raise RuntimeError("start_session did not return a session record")
