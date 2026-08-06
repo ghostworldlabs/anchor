@@ -248,18 +248,44 @@ function _ecgHsRenderHighSeat(body, vm) {
   if (rb && rb.present) {
     var raise = _ecgHsEl('div', 'ecg-hs-raise');
     raise.appendChild(_ecgHsEl('h3', null, rb.heading));
-    var line = (rb.project_id || '') + ' — ' + rb.summary +
-      (rb.time_estimate ? ' · ' + rb.time_estimate : '');
-    raise.appendChild(_ecgHsEl('div', null, line));
-    raise.appendChild(_ecgHsActions([
-      { label: 'Bring it up', pri: true, onclick: function () { ecgHsBringUp(body, rb.project_id); } },
+    // THE BRIEFING (2026-08-06). The engine has carried did/next since W4 and
+    // nothing rendered it — so the raise read as a nag ("needs input") and
+    // John had to open the project to ask what it had done and what it would
+    // do next. Render the briefing lines when they exist; the one-line summary
+    // stays as the fallback for raises that carry no briefing.
+    if (rb.briefing && rb.briefing.length > 1) {
+      raise.appendChild(_ecgHsEl('div', 'ecg-hs-raise-proj', rb.project_id || ''));
+      rb.briefing.forEach(function (line) {
+        raise.appendChild(_ecgHsEl('div', 'ecg-hs-brief-line', line));
+      });
+      if (rb.time_estimate) {
+        raise.appendChild(_ecgHsEl('div', 'note', rb.time_estimate));
+      }
+    } else {
+      var line = (rb.project_id || '') + ' — ' + rb.summary +
+        (rb.time_estimate ? ' · ' + rb.time_estimate : '');
+      raise.appendChild(_ecgHsEl('div', null, line));
+    }
+    var raiseActs = [
+      { label: 'Bring it up', pri: true, onclick: function () { ecgHsBringUp(body, rb.project_id); } }
+    ];
+    // A raise born from a commissioned session carries that session — opening
+    // IT (not just the project) is how John answers the skill directly.
+    if (rb.session_id && rb.project_id) {
+      raiseActs.push({ label: 'Open the session', onclick: function () {
+        window.location.href = '/project/' + encodeURIComponent(rb.project_id) +
+          '#session=' + encodeURIComponent(rb.session_id);
+      } });
+    }
+    raiseActs.push(
       { label: 'Later today', onclick: function () {
           _ecgHsReply(raise, 'Set aside for now — nothing saved; it stays in the queue.');
         } },
       { label: 'Tomorrow', onclick: function () {
           _ecgHsReply(raise, 'Set aside for now — nothing saved; it stays in the queue.');
         } }
-    ]));
+    );
+    raise.appendChild(_ecgHsActions(raiseActs));
     raise.appendChild(_ecgHsEl('div', 'note', rb.queue_note));
     body.appendChild(raise);
   } else {

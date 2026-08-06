@@ -233,6 +233,12 @@ window.addEventListener('DOMContentLoaded', function () {
       try { _resolveGrassOriginChips(document); } catch (e) {}
     });
   } catch (e) {}
+  // (2026-08-06) Deep link from the High Seat raise: #session=<id> opens THAT
+  // session's panel — "Bring it up" lands John in the very session that asked.
+  try {
+    var m = (window.location.hash || '').match(/^#session=([\w.-]+)/);
+    if (m) setTimeout(function () { try { openPanel(m[1]); } catch (e) {} }, 400);
+  } catch (e) {}
 });
 function _postJson(url, payload) {
   var headers = {'Content-Type': 'application/json'};
@@ -6468,7 +6474,152 @@ function _ecgHandleAct(convo, c, text) {
     convo.appendChild(_ecgEl('div', 'ecg-divider', 'seat → ' + c.args.seat));
     return;
   }
+  // (2026-08-06) "go ahead with the commission" — the steward proposes for the
+  // step in hand and shows exactly what would run; NOTHING launches until the
+  // Go button (the hash-bound confirm). Deterministic path end to end.
+  if (c.act === 'confirm_commission') {
+    _ecgCommissionPropose(convo);
+    return;
+  }
   _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
+}
+
+/* ── Conversation → commission (steward run-loop W5, 2026-08-06) ─────────────
+   The steward actually RUNS a skill. propose → John's Go (hash-bound confirm)
+   → a managed session (skill loaded, brief seeded, lean worktree) → the run
+   loop drives it → the report comes back HERE, in the chamber, and the ⚑
+   raise fetches John when the skill needs him. */
+
+function _ecgCommissionPropose(convo) {
+  var waiting = _ecgStewardMsg(convo, 'Framing the commission…');
+  _postJson('/api/ecgberht/commission_propose', { project_id: PROJECT_ID })
+    .then(function (r) { return r.json(); }).then(function (j) {
+      waiting.remove();
+      if (!j || !j.ok) {
+        _ecgStewardMsg(convo, (j && (j.message || j.error))
+          ? 'I can’t commission yet: ' + (j.message || j.error)
+          : 'I couldn’t frame a commission — nothing was launched.');
+        return;
+      }
+      var msg = _ecgStewardMsg(convo,
+        'I propose commissioning ' + j.skill + ' for “' +
+        (j.step_name || j.step_id) + '”. It runs in a session I manage — ' +
+        'I’ll come get you the moment it needs you. Nothing starts until you say go.');
+      var act = _ecgEl('div', 'act');
+      var go = _ecgEl('button', 'ecg-btn pri', 'Go — run ' + j.skill);
+      go.onclick = function () {
+        go.disabled = true;
+        go.textContent = 'Starting…';
+        _postJson('/api/ecgberht/commission_go', {
+          project_id: PROJECT_ID, proposal: j
+        }).then(function (r) { return r.json(); }).then(function (k) {
+          if (!k || !k.ok) {
+            go.disabled = false;
+            go.textContent = 'Go — run ' + j.skill;
+            _ecgStewardMsg(convo, 'Could not start it: ' +
+              ((k && (k.message || k.error)) || 'no response') + ' — nothing is running.');
+            return;
+          }
+          act.remove();
+          _ecgStewardMsg(convo, k.say ||
+            ('Commissioned — ' + j.skill + ' is running in a managed session.'));
+          _ecgWatchCommissionRuns(convo);
+        }).catch(function () {
+          go.disabled = false;
+          go.textContent = 'Go — run ' + j.skill;
+          _ecgStewardMsg(convo, 'That didn’t go through — nothing is running.');
+        });
+      };
+      var no = _ecgEl('button', 'ecg-btn', 'Not now');
+      no.onclick = function () {
+        act.remove();
+        _ecgStewardMsg(convo, 'Left alone — nothing was launched.');
+      };
+      act.appendChild(go);
+      act.appendChild(no);
+      msg.appendChild(act);
+    }).catch(function () {
+      waiting.remove();
+      _ecgStewardMsg(convo, 'That didn’t go through — nothing was launched.');
+    });
+}
+
+/* Poll the run records while a commission is out; when it stops, render the
+   steward's REPORT (not the transcript) + the two moves John actually has. */
+var _ECG_RUN_POLL = null;
+var _ECG_RUN_SEEN = {};
+var _ECG_RUN_PRIMED = false;
+
+function _ecgWatchCommissionRuns(convo) {
+  if (_ECG_RUN_POLL) return;
+  var tick = function () {
+    fetch('/api/ecgberht/commission_runs?project_id=' +
+          encodeURIComponent(PROJECT_ID) + _tokenQ())
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok) return;
+        // First look after a page load: history is history — do not replay
+        // old reports as if they just happened. The exception is a run still
+        // WAITING on John (asked): that is his open loop, so it surfaces.
+        if (!_ECG_RUN_PRIMED) {
+          _ECG_RUN_PRIMED = true;
+          (j.runs || []).forEach(function (run, i) {
+            if (!run.session_id || run.outcome === 'running') return;
+            var stillWaiting = run.outcome === 'asked' && i === 0;
+            if (!stillWaiting) {
+              _ECG_RUN_SEEN[run.session_id + ':' + String(run.watch_count || 0)] = true;
+            }
+          });
+        }
+        var pending = false;
+        (j.runs || []).forEach(function (run) {
+          if (!run.session_id) return;
+          if (run.outcome === 'running') { pending = true; return; }
+          var key = run.session_id + ':' + String(run.watch_count || 0);
+          if (_ECG_RUN_SEEN[key]) return;
+          _ECG_RUN_SEEN[key] = true;
+          _ecgRenderRunReport(convo, run);
+        });
+        var stillWatching = (j.watching || []).length > 0;
+        if (!pending && !stillWatching && _ECG_RUN_POLL) {
+          clearInterval(_ECG_RUN_POLL);
+          _ECG_RUN_POLL = null;
+        }
+      })
+      .catch(function () {});
+  };
+  _ECG_RUN_POLL = setInterval(tick, 15000);
+  setTimeout(tick, 3000);
+}
+
+function _ecgRenderRunReport(convo, run) {
+  var rep = run.report || {};
+  var msg = _ecgStewardMsg(convo, rep.say ||
+    (run.skill + ' stopped (' + run.outcome + ').'));
+  if (rep.needs) {
+    msg.appendChild(_ecgEl('div', 'ecg-run-needs', 'Waiting on you: ' + rep.needs));
+  }
+  var act = _ecgEl('div', 'act');
+  var open = _ecgEl('button', 'ecg-btn' + (rep.needs ? ' pri' : ''), 'Open the session');
+  open.onclick = function () { try { openPanel(run.session_id); } catch (e) {} };
+  act.appendChild(open);
+  if (run.outcome === 'asked') {
+    var back = _ecgEl('button', 'ecg-btn', 'Hand it back to the steward');
+    back.onclick = function () {
+      back.disabled = true;
+      _postJson('/api/ecgberht/commission_watch', {
+        project_id: PROJECT_ID, session_id: run.session_id
+      }).then(function (r) { return r.json(); }).then(function (k) {
+        _ecgStewardMsg(convo, (k && k.ok)
+          ? (k.say || 'Watching again — I’ll take it from here.')
+          : 'Could not re-arm the watch: ' + ((k && (k.message || k.error)) || 'no response'));
+        if (k && k.ok) _ecgWatchCommissionRuns(convo);
+      }).catch(function () { back.disabled = false; });
+    };
+    act.appendChild(back);
+  }
+  msg.appendChild(act);
+  _ecgScrollToLatest(convo);
 }
 
 function _ecgSpeak(convo, text) {
@@ -6713,6 +6864,9 @@ function _ecgRenderChamber(host, vm) {
   dock.appendChild(_ecgEl('div', 'ecg-footer', footer));
 
   host.appendChild(dock);
+  // (2026-08-06) A commission may already be out (or just stopped) when the
+  // chamber opens — start the run poll so its report lands here unprompted.
+  try { _ecgWatchCommissionRuns(convo); } catch (e) {}
   document.addEventListener('keydown', function esc(e) {
     if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
   });

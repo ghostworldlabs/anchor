@@ -150,11 +150,17 @@ def run_commissioned_session(
     on_tick: Optional[Callable[[dict], None]] = None,
     sleep_fn: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    watch_only: bool = False,
 ) -> dict:
     """Drive a loaded skill session with ONE work turn, then watch.
 
     Returns ``{outcome, transcript, elapsed_s, sent_work_turn, ...}`` where
     ``outcome`` is one of the RUN_* constants. Never answers a question.
+
+    ``watch_only=True`` re-arms the watch WITHOUT sending anything — the mode
+    for "John answered the question in the session and handed it back". The
+    cursor snaps to the CURRENT end of output first, so the old question can
+    never re-classify as a fresh ASKED.
     """
     started = clock()
     cursor = 0
@@ -162,6 +168,19 @@ def run_commissioned_session(
     sent = False
     last_new_output = started
     deadline = started + max_seconds
+
+    if watch_only:
+        try:
+            snap = read_fn(session_id, cursor)
+        except Exception as exc:
+            return _result(RUN_DIED, transcript, started, clock(), False,
+                           detail=f"{type(exc).__name__}: {exc}")
+        cursor = snap.get("next", 0)
+        if snap.get("status") == "dead":
+            return _result(RUN_DIED, transcript, started, clock(), False)
+        # From here the loop behaves as if the work turn was already sent —
+        # because it was, in the run this one resumes.
+        sent = True
 
     while clock() < deadline:
         try:

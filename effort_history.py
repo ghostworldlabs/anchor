@@ -2556,7 +2556,13 @@ _DOC_EXCLUDE_DIRS = (".anchor", ".git", "node_modules", "__pycache__",
 #: Bare trio doc filenames we persist even when they sit at the project root (not
 #: under a lane dir) — the canonical plan/report/log artifacts.
 _DOC_ROOT_NAMES = ("master-plan.md", "implementation-plan.md",
-                   "execution-log.md", "report.md", "handoff.md")
+                   "execution-log.md", "report.md", "handoff.md",
+                   # (2026-08-06, found live) Crucible's Stage-0 artifact and
+                   # the decision log are trio docs too — a commissioned run
+                   # wrote NORTH-STAR.md at the worktree root and the kill-path
+                   # persist dropped it as "no-docs". The run loop's PRODUCED
+                   # patterns already recognize both names.
+                   "north-star.md", "decision-log.md")
 
 #: Document extensions we consider persistable produced artifacts.
 _DOC_EXTS = (".md", ".pdf")

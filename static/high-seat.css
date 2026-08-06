@@ -56,6 +56,10 @@
 }
 .ecg-hs-raise h3 { margin: 0 0 6px; color: #e0a437; font-size: 14px; }
 .ecg-hs-raise .note { color: #8b93a7; font-size: 11px; margin-top: 8px; }
+/* (2026-08-06) The briefing: did / waiting-on-you / next, one line each —
+   the raise answers John's questions before he asks them. */
+.ecg-hs-raise-proj { color: #8b93a7; font-size: 11px; margin-bottom: 4px; }
+.ecg-hs-brief-line { margin: 2px 0; line-height: 1.45; }
 .ecg-hs-quiet {
   border: 1px solid #2a2f3c; border-radius: 12px; padding: 12px 16px;
   margin-bottom: 14px; color: #aeb4c2;

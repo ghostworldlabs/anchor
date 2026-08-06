@@ -10786,6 +10786,109 @@ def handle_ecgberht_envelope_raise(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+# ── Ecgberht: conversation → commission (steward run-loop W5, 2026-08-06) ────
+# The steward actually RUNS a skill: propose for the step in hand → John's
+# hash-bound confirm → a managed session with the skill loaded and the brief
+# seeded → the run loop drives it → the run comes home (report + ⚑ raise via
+# the ingest bridge). commission_session.py owns the join; these handlers are
+# thin doors. The watcher lives on a daemon thread of THIS service — the
+# long-lived process (a throwaway process kills the PTY it starts).
+
+def handle_ecgberht_commission_propose(handler, path, body):
+    """POST /api/ecgberht/commission_propose — propose for the step in hand.
+
+    READ-ONLY: the reply carries requires_confirm + the proposal John binds.
+    Nothing is launched and nothing is written until commission_go.
+    """
+    import commission_session as _cs
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    out = _cs.propose(folder,
+                      step_id=(b.get("step_id") or None),
+                      skill=(b.get("skill") or None),
+                      depth=(b.get("depth") or None))
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_commission_go(handler, path, body):
+    """POST /api/ecgberht/commission_go — John said go.
+
+    Hash-confirm through the engine, launch the managed session (lean
+    worktree, skill loaded, brief seeded), start the watcher. Returns at once
+    with the session id; the raise arrives when the skill needs John.
+    """
+    import commission_session as _cs
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    proposal = b.get("proposal")
+    if not isinstance(proposal, dict):
+        handler._send_json({"ok": False, "error": "proposal_required",
+                            "message": "commission_go needs the proposal from "
+                                       "commission_propose."}, 400)
+        return
+    # The request already passed the token middleware; revalidate at launch
+    # with the same service token so the executor's launch-auth law stays real.
+    tok = _paths.expected_token()
+    out = _cs.confirm_and_launch(
+        folder, proposal,
+        project_id=pid,
+        who=(b.get("who") or "john"),
+        backend=(b.get("backend") or "claude"),
+        auth_ctx={"token": tok} if tok else None,
+        expected_token=tok,
+        enforce_auth=bool(tok),
+    )
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_commission_watch(handler, path, body):
+    """POST /api/ecgberht/commission_watch — "hand it back to the steward".
+
+    John answered the skill's question IN the session; this re-arms the watch
+    WITHOUT sending anything (the cursor snaps past the old question first).
+    """
+    import commission_session as _cs
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    sid = (b.get("session_id") or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    out = _cs.rearm_watch(folder, pid, sid)
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_commission_runs(handler, path, body):
+    """GET /api/ecgberht/commission_runs?project_id= — the project's runs.
+
+    SAFE projections (no worktree paths, no transcript bodies) newest-first —
+    what the chamber polls to say "running / needs you / here's the report".
+    """
+    import commission_session as _cs
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    rows = _cs.list_runs(folder)
+    watching = [r["session_id"] for r in rows
+                if r.get("session_id") and _cs.watcher_active(r["session_id"])]
+    handler._send_json({"ok": True, "runs": rows, "watching": watching}, 200)
+
+
 def handle_ecgberht_register_projects(handler, path, body):
     """POST /api/ecgberht/register_projects — join active projects to the portfolio.
 
@@ -17550,6 +17653,11 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_converse": handle_ecgberht_converse,
     "handle_ecgberht_envelope_confirm": handle_ecgberht_envelope_confirm,
     "handle_ecgberht_envelope_raise": handle_ecgberht_envelope_raise,
+    # (2026-08-06) steward run-loop W5: conversation → commission join.
+    "handle_ecgberht_commission_propose": handle_ecgberht_commission_propose,
+    "handle_ecgberht_commission_go": handle_ecgberht_commission_go,
+    "handle_ecgberht_commission_watch": handle_ecgberht_commission_watch,
+    "handle_ecgberht_commission_runs": handle_ecgberht_commission_runs,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

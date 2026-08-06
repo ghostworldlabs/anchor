@@ -104,6 +104,8 @@
 .ecg-msg.john{align-self:flex-end;border-right:2px solid var(--border)}
 .ecg-msg .act{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
 .ecg-divider{align-self:center;color:var(--text-dim);font-size:11px;font-family:ui-monospace,Consolas,monospace;border-top:1px dashed var(--border);width:100%;text-align:center;padding-top:8px}
+/* (2026-08-06) A commissioned run's report: the decision John owes, set off. */
+.ecg-run-needs{margin-top:6px;padding:6px 9px;border-left:2px solid #e0a437;background:rgba(224,164,55,.07);border-radius:6px;font-size:12.5px}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
 .ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end}
 .ecg-saybox input,.ecg-saybox textarea{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}

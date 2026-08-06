@@ -269,6 +269,15 @@ ROUTES = [
        handler="handle_ecgberht_envelope_confirm", migrated=True),
     _r("POST", "/api/ecgberht/envelope_raise", AUTH_TOKEN,
        handler="handle_ecgberht_envelope_raise", migrated=True),
+    # (2026-08-06) steward run-loop W5: the steward actually RUNS a skill.
+    _r("POST", "/api/ecgberht/commission_propose", AUTH_TOKEN,
+       handler="handle_ecgberht_commission_propose", migrated=True),
+    _r("POST", "/api/ecgberht/commission_go", AUTH_TOKEN,
+       handler="handle_ecgberht_commission_go", migrated=True),
+    _r("POST", "/api/ecgberht/commission_watch", AUTH_TOKEN,
+       handler="handle_ecgberht_commission_watch", migrated=True),
+    _r("GET", "/api/ecgberht/commission_runs", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_commission_runs", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so
