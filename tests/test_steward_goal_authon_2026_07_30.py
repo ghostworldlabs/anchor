@@ -450,19 +450,30 @@ def test_say_line_grows_with_dictated_text_and_enter_sends(authed):
 # (test/wh4-conversational-steward.test.mjs), which is where drift must fail.
 
 ECG_ROOT = Path(__file__).resolve().parents[2] / "Ecgberht"
-BROWSER_REPLY = ECG_ROOT / "test" / "fixtures" / "steward-reply-browser.json"
+def _seat_tape(monkeypatch, name):
+    """Point the server's bridge spawns at a recorded tape, or FAIL loudly.
+
+    Never skip: a skipped acceptance test is how three vacuous guards nearly shipped.
+    """
+    f = ECG_ROOT / "test" / "fixtures" / name
+    if not f.exists():
+        pytest.fail(
+            "the recorded seat tape is missing (%s) — run "
+            "`node scripts/record-steward-fixture.mjs` in the Ecgberht checkout." % f)
+    monkeypatch.setenv("ECGBERHT_SEAT_REPLAY", str(f))
 
 
 @pytest.fixture
 def talking(authed, monkeypatch):
-    """`authed`, plus a replayed seat so the browser lane never calls a model."""
-    if not BROWSER_REPLY.exists():
-        pytest.fail(
-            "the recorded seat reply is missing (%s) — run "
-            "`node scripts/record-steward-fixture.mjs` in the Ecgberht checkout. "
-            "This lane must never silently skip: a skipped acceptance test is how "
-            "three vacuous guards nearly shipped." % BROWSER_REPLY)
-    monkeypatch.setenv("ECGBERHT_SEAT_REPLAY", str(BROWSER_REPLY))
+    """`authed` + a TALK-ONLY tape: the steward converses and frames nothing."""
+    _seat_tape(monkeypatch, "steward-browser-talk.json")
+    return authed
+
+
+@pytest.fixture
+def planning(authed, monkeypatch):
+    """`authed` + a tape that reaches the frontier tier: talk, then a framed plan."""
+    _seat_tape(monkeypatch, "steward-browser-plan.json")
     return authed
 
 
@@ -472,7 +483,12 @@ def _say(pg, text):
 
 
 def test_describing_the_project_starts_a_conversation_not_a_refusal(talking):
-    """The exact walk John made: set a goal, describe the project, press send."""
+    """The exact walk John made: set a goal, describe the project, press send.
+
+    Two regressions guarded here, both his words:
+      "it didn't ask me anything about it just threw it up there"  -> no plan on turn 1
+      "I have to approve some amount of effort before it will do anything" -> no budget gate
+    """
     pytest.importorskip("playwright.sync_api")
     from playwright.sync_api import sync_playwright
 
@@ -491,48 +507,31 @@ def test_describing_the_project_starts_a_conversation_not_a_refusal(talking):
             _chamber_with_goal(pg, base, pid, goal="Revamp BA 815 with AI throughout")
             _say(pg, dictation)
 
-            # Talking costs a model call, so the steward asks ONCE for a budget.
+            # The steward ANSWERS. No act-table dead end, and no budget dialog first.
             pg.wait_for_function(
                 "() => {var c=document.getElementById('ecgConvo');"
-                " return c && /session budget/i.test(c.textContent);}", timeout=30000)
+                " return c && !c.textContent.includes('Thinking…');}", timeout=60000)
             said = pg.text_content("#ecgConvo")
             assert "could not compile that to a closed act" not in said, said[-400:]
+            assert "session budget" not in said.lower(), (
+                "a budget dialog stood between him and talking: %s" % said[-400:])
 
-            # And that offer is a real control, not a label.
-            wired = pg.evaluate(
-                "() => {var b=Array.from(document.querySelectorAll("
-                "'#ecgConvo .act button')).find(x=>/confirm session budget/i.test("
-                "x.textContent)); return b ? !!b.onclick : null;}")
-            assert wired is True, "the budget button is missing or decorative"
-
-            pg.click("#ecgConvo .act button:has-text('Confirm session budget')")
-
-            # Budget confirmed → the utterance is retried and the steward answers
-            # with a scaffolding to react to.
-            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=60000)
-            steps = pg.eval_on_selector_all(
-                "#ecgConvo .ecg-scaffold-steps > li",
-                "els => els.map(e => e.textContent.toLowerCase())")
-            assert len(steps) >= 3, f"expected a real campaign, got {steps}"
-
-            said = pg.text_content("#ecgConvo")
-            assert "nothing is written yet" in said.lower(), said[-400:]
-
-            # The Parable of the Oranges must reach the screen, not just the JSON.
-            oranges = pg.eval_on_selector_all(
-                "#ecgConvo .ecg-oranges > li", "els => els.length")
-            assert oranges > 0, "no Oranges annotations rendered for any stage"
+            # And it TALKED rather than dumping a scaffolding on him.
+            pinned = pg.evaluate(
+                "() => !!document.getElementById('ecgScaffoldPin')")
+            assert pinned is False, (
+                "the opening turn produced a scaffolding instead of a conversation")
         finally:
             b.close()
 
 
-def test_confirming_the_conversation_writes_the_steps(talking):
+def test_confirming_the_conversation_writes_the_steps(planning):
     """Clicking Confirm must land the reviewed stages on the campaign roadmap."""
     pytest.importorskip("playwright.sync_api")
     from playwright.sync_api import sync_playwright
 
-    pid, base = talking["pid"], talking["base"]
-    folder = Path(talking["repo"])
+    pid, base = planning["pid"], planning["base"]
+    folder = Path(planning["repo"])
 
     with sync_playwright() as p:
         b = p.chromium.launch()
@@ -542,19 +541,16 @@ def test_confirming_the_conversation_writes_the_steps(talking):
             "window.prompt = function(){ return null; };" % TOKEN)
         try:
             _chamber_with_goal(pg, base, pid, goal="Revamp BA 815 with AI throughout")
-            _say(pg, "Revamp the course: integrate AI, move quizzes to oral exams, "
-                     "and widen the tool track beyond R.")
-            pg.wait_for_function(
-                "() => {var c=document.getElementById('ecgConvo');"
-                " return c && /session budget/i.test(c.textContent);}", timeout=30000)
-            pg.click("#ecgConvo .act button:has-text('Confirm session budget')")
-            pg.wait_for_selector("#ecgConvo .ecg-scaffold-steps", timeout=60000)
+            # A turn that asks for the plan: the frontier tier frames it, and it lands
+            # in the PINNED panel rather than scrolling away in the conversation.
+            _say(pg, "Frame that into a plan now.")
+            pg.wait_for_selector("#ecgScaffoldPin .ecg-scaffold-steps", timeout=120000)
 
             shown = pg.eval_on_selector_all(
-                "#ecgConvo .ecg-scaffold-steps > li",
+                "#ecgScaffoldPin .ecg-scaffold-steps > li",
                 "els => els.map(e => e.firstChild.textContent.trim())")
 
-            pg.click("#ecgConvo .act button:has-text('Confirm')")
+            pg.click("#ecgScaffoldPin .act button:has-text('Confirm')")
             pg.wait_for_function(
                 "() => {var c=document.getElementById('ecgConvo');"
                 " return c && /on the campaign roadmap now/i.test(c.textContent);}",

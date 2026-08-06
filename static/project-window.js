@@ -6216,14 +6216,50 @@ function _ecgRenderStewardTurn(convo, j) {
   if (j.proposal && j.proposal.steps && j.proposal.steps.length) {
     _ecgRenderProposal(convo, msg, j);
   }
+  _ecgScrollToLatest(convo);
   return msg;
+}
+
+/* (2026-08-06) Keep the conversation pinned to the newest message, like a terminal. */
+function _ecgScrollToLatest(convo) {
+  if (convo) convo.scrollTop = convo.scrollHeight;
+}
+
+/* The PINNED scaffolding panel — lives outside the scrolling conversation so it cannot
+   disappear up the scrollback while John is working on it. Replaced wholesale on each
+   re-proposal, so what is pinned is always the current scaffolding. */
+function _ecgScaffoldPin() {
+  var convo = document.getElementById('ecgConvo');
+  if (!convo || !convo.parentNode) return null;
+  var pin = document.getElementById('ecgScaffoldPin');
+  if (!pin) {
+    pin = document.createElement('details');
+    pin.id = 'ecgScaffoldPin';
+    pin.className = 'ecg-scaffold-pin';
+    pin.open = true;
+    // Directly after the conversation, above the say box.
+    convo.parentNode.insertBefore(pin, convo.nextSibling);
+  }
+  pin.textContent = '';
+  return pin;
 }
 
 /* A proposed scaffolding, with its Parable-of-the-Oranges annotations. Nothing is
    written until [Confirm], and Confirm binds to the proposal HASH — so what lands on
    the roadmap is exactly what was on screen, never a re-derivation of the prose. */
-function _ecgRenderProposal(convo, msg, j) {
+function _ecgRenderProposal(convo, _msg, j) {
   var steps = j.proposal.steps;
+  // Render into the PIN, not the message — the chat scrolls, the scaffolding stays.
+  var pin = _ecgScaffoldPin();
+  var msg = pin || _msg;
+  if (pin) {
+    var sum = _ecgEl('summary', null,
+      'Scaffolding — ' + steps.length + ' stage' + (steps.length === 1 ? '' : 's') +
+      ' · not written yet');
+    pin.appendChild(sum);
+    msg = _ecgEl('div', 'body');
+    pin.appendChild(msg);
+  }
   msg.appendChild(_ecgEl('div', 'ecg-scaffold-note',
     'That is ' + steps.length + ' stage' + (steps.length === 1 ? '' : 's') +
     '. Nothing is written yet — confirm and they become the campaign roadmap.'));
@@ -6273,6 +6309,8 @@ function _ecgRenderProposal(convo, msg, j) {
       var n = (k.step_ids || []).length;
       _ecgStewardMsg(convo, 'Written. ' + n + ' stage' + (n === 1 ? '' : 's') +
         ' are on the campaign roadmap now.');
+      var pinned = document.getElementById('ecgScaffoldPin');
+      if (pinned) pinned.remove();
       act.remove();
       if (typeof ecgSealMountInline === 'function') ecgSealMountInline();
     }).catch(function () {
@@ -6283,6 +6321,8 @@ function _ecgRenderProposal(convo, msg, j) {
   };
   var no = _ecgEl('button', 'ecg-btn', 'Not that');
   no.onclick = function () {
+    var pinned = document.getElementById('ecgScaffoldPin');
+    if (pinned) pinned.remove();
     act.remove();
     _ecgStewardMsg(convo, 'Left alone — nothing was written. Tell me what to change ' +
       'and I will rework it.');
@@ -6381,6 +6421,7 @@ function _ecgConverse(convo, text, isRetry) {
   if (!isRetry) { _ecgJohnMsg(convo, text); _ecgNoteTurn('john', text); }
   var thinking = _ecgStewardMsg(convo, 'Thinking…');
   thinking.classList.add('ecg-thinking');
+  _ecgScrollToLatest(convo);
 
   _postJson('/api/ecgberht/converse', {
     project_id: PROJECT_ID,
