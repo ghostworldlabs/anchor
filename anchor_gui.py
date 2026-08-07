@@ -11057,9 +11057,15 @@ def handle_ecgberht_run_pulse(handler, path, body):
         import terminal_session as _ts
         r = _ts.read_since(sid, cursor)
         chunk = (r or {}).get("chunk") or ""
-        out["tail"] = _strip_terminal_noise(chunk)[-4000:]
+        if not chunk and cursor == 0 and rec.get("transcript_tail"):
+            # A parked/dead session reads EMPTY, not an exception (live-found
+            # 2026-08-07 after the warm drain) — the banked tail is the truth.
+            out["tail"] = _strip_terminal_noise(rec["transcript_tail"])[-4000:]
+            out["live"] = False
+        else:
+            out["tail"] = _strip_terminal_noise(chunk)[-4000:]
+            out["live"] = True
         out["cursor"] = (r or {}).get("cursor", cursor)
-        out["live"] = True
     except Exception:
         out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
         out["cursor"] = cursor
@@ -11304,6 +11310,28 @@ def handle_ecgberht_high_seat(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def _hs_pick_entry(entries):
+    """One folder can host N registered projects (live: BA815 has two). Pick
+    the one that OWNS the work — the entry whose effort store holds the most
+    files — so the High Seat click lands on the project id John actually
+    uses, never an empty sibling registration."""
+    best, best_score = None, -1
+    for e in entries:
+        score = 0
+        try:
+            store = Path(e["folder_path"]) / ".anchor" / "projects" / e["id"]
+            if store.exists():
+                for _root, _dirs, files in os.walk(store):
+                    score += len(files)
+                    if score > 500:
+                        break
+        except Exception:
+            score = 0
+        if score > best_score:
+            best, best_score = e, score
+    return best
+
+
 def _hs_enrich_tiles(out):
     """(2026-08-07, John) The High Seat rows become a real portfolio glance:
     each tile gains the ANCHOR project id (path-passport: matched by resolved
@@ -11318,7 +11346,8 @@ def _hs_enrich_tiles(out):
         by_folder = {}
         for entry in _rnd.list_projects():
             try:
-                by_folder[str(Path(entry["folder_path"]).resolve())] = entry
+                by_folder.setdefault(
+                    str(Path(entry["folder_path"]).resolve()), []).append(entry)
             except Exception:
                 continue
         for t in tiles:
@@ -11326,12 +11355,14 @@ def _hs_enrich_tiles(out):
             if not p:
                 continue
             try:
-                entry = by_folder.get(str(Path(p).resolve()))
+                entry = _hs_pick_entry(by_folder.get(str(Path(p).resolve())) or [])
             except Exception:
                 entry = None
             if not entry:
                 continue
             t["anchor_project_id"] = entry["id"]
+            if entry.get("name"):
+                t["display_name"] = entry["name"]
             try:
                 runs = _cs.list_runs(entry["folder_path"])
                 if runs:

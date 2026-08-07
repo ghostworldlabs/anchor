@@ -305,7 +305,7 @@ function _ecgHsRenderHighSeat(body, vm) {
     ico.alt = '';
     ico.onerror = function () { this.style.display = 'none'; };
     nm.appendChild(ico);
-    nm.appendChild(_ecgHsEl('span', null, t.name));
+    nm.appendChild(_ecgHsEl('span', null, t.display_name || t.name));
     if (t.now_running) nm.appendChild(_ecgHsEl('span', 'hs-live', '●'));
     tile.appendChild(nm);
     tile.appendChild(_ecgHsEl('div', 'goal', t.goal_phrase));
