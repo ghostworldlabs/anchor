@@ -270,6 +270,25 @@ function _ecgSimplifyBoard() {
   });
   var g = document.getElementById('newGeneralBtn');
   if (g) g.textContent = '+ New general terminal';
+  // (2026-08-06, John round 2) The trio was hidden INSIDE the workbench but
+  // still announced OUTSIDE it: the "Research: 0 · Planning: 0 · Build: 0"
+  // chips row and the tile subtitle both said the old shape. Quiet them too.
+  document.querySelectorAll('.rnd-status-line').forEach(function (el) {
+    el.style.display = 'none';
+  });
+  var wb = document.getElementById('tile-workbench');
+  var sum = wb && wb.querySelector('summary');
+  if (sum) {
+    sum.childNodes.forEach(function (n) {
+      if (n.nodeType === 3 || (n.nodeType === 1 && /research/i.test(n.textContent || ''))) {
+        if (/research\s*·\s*plan/i.test(n.textContent || '')) {
+          n.textContent = (n.nodeType === 3)
+            ? ' general terminal — sessions & panels'
+            : 'general terminal — sessions & panels';
+        }
+      }
+    });
+  }
 }
 
 /* (2026-08-06) Run-state dots ON the scaffolding bullets: the rail step that
@@ -284,15 +303,23 @@ function _ecgAnnotateRailRuns() {
     (_ECG_RUNS_CACHE || []).forEach(function (r) {
       if (r.step_id === stepId && (!run || String(r.at) > String(run.at))) run = r;
     });
-    var old = row.querySelector('.rundot');
-    if (!run) { if (old) old.remove(); return; }
-    var bits = _ecgRunStateBits(run);
-    if (!old) {
-      old = _ecgEl('span', '', '●');
-      row.insertBefore(old, row.firstChild);
+    // (2026-08-06, John) The state lives INSIDE the bullet — the step's own
+    // marker fills gold when its run finished, pulses a green center while
+    // running — never a second dot beside the circle.
+    var marker = row.querySelector('.m');
+    if (!marker) return;
+    if (marker._ecgOrig === undefined) marker._ecgOrig = marker.textContent;
+    if (!run) {
+      marker.textContent = marker._ecgOrig;
+      marker.className = 'm';
+      row.classList.remove('has-run');
+      row.onclick = null;
+      return;
     }
-    old.className = 'rundot ' + bits.cls;
-    old.title = (run.skill || '') + ' — ' + bits.phrase + ' (click to open the session)';
+    var bits = _ecgRunStateBits(run);
+    marker.textContent = run.outcome === 'running' ? '◉' : '●';
+    marker.className = 'm mrun ' + bits.cls;
+    marker.title = (run.skill || '') + ' — ' + bits.phrase + ' (click to open the session)';
     row.classList.add('has-run');
     row.onclick = function () { try { openPanel(run.session_id); } catch (e) {} };
   });
@@ -329,17 +356,51 @@ function _ecgMountRunLedger() {
       .then(function (j) {
         if (!j || !j.ok) return;
         _ECG_RUNS_CACHE = j.runs || [];
-        _ecgRenderRunLedger(host, _ECG_RUNS_CACHE);
+        // Page level: ONE thin ambient line — glance without opening anything.
+        _ecgRenderAmbientRuns(host, _ECG_RUNS_CACHE);
+        // Inside the Seal: the full run tiles, completion order, above the
+        // say box (John: "each of these tiles should be inside of the seal
+        // dialogue, at the bottom, in the order they were completed").
+        var dock = document.getElementById('ecgSealDock');
+        if (dock) {
+          var cl = document.getElementById('ecgChamberLedger');
+          if (!cl) {
+            cl = _ecgEl('div', 'ecg-run-ledger');
+            cl.id = 'ecgChamberLedger';
+            var say = dock.querySelector('.ecg-saybox');
+            dock.insertBefore(cl, say || null);
+          }
+          _ecgRenderRunLedger(cl, _ECG_RUNS_CACHE.slice().reverse());
+        }
         try { _ecgAnnotateRailRuns(); } catch (e) {}
-        try {
-          var convo = document.getElementById('ecgConvo');
-          if (convo) _ecgRenderRunningStrip(_ECG_RUNS_CACHE);
-        } catch (e) {}
       })
       .catch(function () {});
   };
   tick();
   _ECG_LEDGER_POLL = setInterval(tick, 15000);
+}
+
+/* The thin page-level line: state dots + a phrase, click opens the Seal. */
+function _ecgRenderAmbientRuns(host, runs) {
+  host.textContent = '';
+  var rows = (runs || []).slice(0, 3);
+  if (!rows.length) { host.style.display = 'none'; return; }
+  host.style.display = '';
+  host.classList.add('ambient');
+  var line = _ecgEl('div', 'lrow');
+  rows.forEach(function (run) {
+    var bits = _ecgRunStateBits(run);
+    var seg = _ecgEl('span', 'seg ' + bits.cls);
+    seg.appendChild(_ecgEl('span', 'dot', '●'));
+    seg.appendChild(_ecgEl('span', null, ' ' + (run.skill || 'run') + ' ' +
+      (run.outcome === 'running' ? 'running' :
+       run.outcome === 'asked' ? 'needs you' : 'finished')));
+    line.appendChild(seg);
+  });
+  line.appendChild(_ecgEl('span', 'lbl', ' — open the Seal for reports'));
+  line.style.cursor = 'pointer';
+  line.onclick = function () { try { openEcgberhtSeal(); } catch (e) {} };
+  host.appendChild(line);
 }
 
 function _ecgRunStateBits(run) {
@@ -400,6 +461,14 @@ function _ecgRenderRunLedger(host, runs) {
           rep.appendChild(_ecgEl('div', 'lrec', 'Earlier read: ' + pr.say));
           if (pr.needs) rep.appendChild(_ecgEl('div', 'ecg-run-needs', 'It asked: ' + pr.needs));
         });
+        // The report is the steward's READ; the session's full transcript is
+        // persisted in the project — one click for the whole thing.
+        var tl = _ecgEl('a', 'lrec', 'Open the full transcript →');
+        tl.href = '/artifact/' + encodeURIComponent(PROJECT_ID) +
+          '?path=' + encodeURIComponent('general/' +
+            String(run.session_id).slice(0, 12) + '-transcript.md') + _tokenQ();
+        tl.target = '_blank';
+        rep.appendChild(tl);
         row.parentNode.insertBefore(rep, row.nextSibling);
       };
       row.appendChild(repBtn);
@@ -3376,21 +3445,16 @@ function _mountReadOnlyBody(sessionId, host, s) {
     ? '<div class="ro-note">Session is running in the background — no live '
       + 'terminal attached.</div>'
     : '';
-  // Skeleton with a Continue button (always available for a historical session)
-  // and a region we fill async from the cached session summary.
+  // Skeleton + async summary region. (2026-08-06: the old '▶ Continue in a
+  // live session' button here duplicated Layer-1's '▶ Resume live' — two
+  // restart buttons for one act, John's exact complaint. Layer-1's control,
+  // which dedups against an already-minted continuation, is the one that
+  // stays.)
   host.innerHTML = runningNote
     + '<div class="ro-past" data-session="' + _esc(sessionId) + '">'
-    + '<div class="ro-actions">'
-    + '<button class="ro-continue" type="button">▶ Continue in a live session</button>'
-    + '</div>'
     + '<div class="ro-detail"><div class="summ-loading">loading past-session '
     + 'summary…</div></div>'
     + '</div>';
-  var btn = host.querySelector('.ro-continue');
-  if (btn) btn.onclick = function (e) {
-    e.stopPropagation();
-    continueSession(sessionId, s.lane);
-  };
   var detail = host.querySelector('.ro-detail');
   _fillPastSessionDetail(sessionId, (s && s.lane) || '', detail);
   // telemetry-resume W3 — the Layer-1 WARM narrated view. Prepend the
@@ -6724,6 +6788,16 @@ function _ecgHandleAct(convo, c, text) {
     _ecgCommissionPropose(convo);
     return;
   }
+  // (2026-08-06, John) "Carry on" used to echo itself and stop — he said yes
+  // and nothing happened. Carrying on IS a request to drive: hand it to the
+  // steward as a full talk turn (worded past the act table's 8-word gate) so
+  // the next concrete move — including a commission card — actually comes.
+  if (c.act === 'carry_on') {
+    _ecgConverse(convo,
+      'Carry on — decide the next concrete move on this campaign and drive it forward now.',
+      true);
+    return;
+  }
   _ecgStewardMsg(convo, 'Understood that as: ' + (c.label || c.act) + '.');
 }
 
@@ -6839,39 +6913,6 @@ var _ECG_RUN_PRIMED = false;
 var _ECG_RUNS_CACHE = [];   // last-poll records — card dedup + "is it running"
 var _ECG_PENDING_GO = null; // the live Go button, so "go" in chat can press it
 
-/* (2026-08-06, from John's day one) THE RUNNING STRIP. Two Gandalfs ran for
-   12 minutes while the chamber showed nothing — "how do I know something is
-   running?" is answered HERE: a persistent green-dot row per live run, with
-   the session window one click away. */
-function _ecgRenderRunningStrip(runs) {
-  var dock = document.getElementById('ecgSealDock');
-  if (!dock) return;
-  var strip = document.getElementById('ecgRunStrip');
-  var live = (runs || []).filter(function (r) { return r.outcome === 'running'; });
-  if (!live.length) { if (strip) strip.remove(); return; }
-  if (!strip) {
-    strip = _ecgEl('div', 'ecg-run-strip');
-    strip.id = 'ecgRunStrip';
-    var say = dock.querySelector('.ecg-saybox');
-    dock.insertBefore(strip, say || null);
-  }
-  strip.textContent = '';
-  live.forEach(function (r) {
-    var row = _ecgEl('div', 'row');
-    row.appendChild(_ecgEl('span', 'dot', '●'));
-    var mins = '';
-    try {
-      var t = new Date(String(r.at).replace(' ', 'T'));
-      mins = ' · ' + Math.max(0, Math.round((Date.now() - t.getTime()) / 60000)) + 'm';
-    } catch (e) {}
-    row.appendChild(_ecgEl('span', null,
-      (r.skill || 'skill') + ' running' + mins + ' — working in a session I manage'));
-    var open = _ecgEl('button', 'ecg-btn', 'Open the session');
-    open.onclick = function () { try { openPanel(r.session_id); } catch (e) {} };
-    row.appendChild(open);
-    strip.appendChild(row);
-  });
-}
 
 function _ecgWatchCommissionRuns(convo) {
   if (_ECG_RUN_POLL) return;
@@ -6895,7 +6936,6 @@ function _ecgWatchCommissionRuns(convo) {
           });
         }
         _ECG_RUNS_CACHE = j.runs || [];
-        _ecgRenderRunningStrip(_ECG_RUNS_CACHE);
         var pending = false;
         (j.runs || []).forEach(function (run) {
           if (!run.session_id) return;

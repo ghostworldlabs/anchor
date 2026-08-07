@@ -130,13 +130,12 @@
 .ecg-run-ledger .lrow.dead .dot{color:#e05b4f}
 .ecg-run-ledger .lreport{margin:2px 0 8px 25px;padding:8px 11px;border-left:2px solid #d4af37;background:rgba(212,175,55,.06);border-radius:6px;font-size:12.8px;line-height:1.5}
 .ecg-run-ledger .lrec{margin-top:5px;color:var(--text-dim)}
-/* Run-state dots on the scaffolding bullets in the seal rail. */
-.ecg-rail .ecg-step .rundot{margin-right:6px;font-size:12px}
-.ecg-rail .ecg-step .rundot.run{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
-.ecg-rail .ecg-step .rundot.ask{color:#e0a437;animation:ecgpulse 1.2s ease-in-out infinite}
-.ecg-rail .ecg-step .rundot.done{color:#d4af37}
-.ecg-rail .ecg-step .rundot.stale{color:#9a8a4a}
-.ecg-rail .ecg-step .rundot.dead{color:#e05b4f}
+/* Run state INSIDE the scaffolding bullet: the step's own marker fills. */
+.ecg-rail .ecg-step .m.mrun.run{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
+.ecg-rail .ecg-step .m.mrun.ask{color:#e0a437;animation:ecgpulse 1.2s ease-in-out infinite}
+.ecg-rail .ecg-step .m.mrun.done{color:#d4af37}
+.ecg-rail .ecg-step .m.mrun.stale{color:#9a8a4a}
+.ecg-rail .ecg-step .m.mrun.dead{color:#e05b4f}
 .ecg-rail .ecg-step.has-run{cursor:pointer}
 .ecg-rail .ecg-step.has-run:hover{background:rgba(212,175,55,.07);border-radius:6px}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
