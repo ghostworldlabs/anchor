@@ -148,6 +148,12 @@
 .ecg-stepdetail .sd-sug{margin:2px 0 0 6px;color:var(--text-dim)}
 .ecg-stepdetail .sd-ready{margin-top:6px;color:#34a853}
 .ecg-stepdetail .sd-loading{color:var(--text-dim)}
+.ecg-stepdetail .sd-name{font-weight:600;margin-bottom:4px}
+.ecg-stepdetail .sd-name .sd-status{font-weight:400;font-size:10.5px;color:var(--text-dim);margin-left:7px;text-transform:uppercase;letter-spacing:.04em}
+.ecg-stepdetail .sd-mine{color:#7aa2f7}
+.ecg-stepdetail .sd-addwrap{display:flex;gap:6px;margin-top:8px}
+.ecg-stepdetail .sd-add{flex:1;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:5px;color:var(--text);font-size:12.3px;padding:4px 8px}
+.ecg-stepdetail .sd-add:focus{outline:none;border-color:#7aa2f7}
 .ecg-impact{margin-top:8px;padding:7px 10px;border-left:2px solid #7aa2f7;background:rgba(122,162,247,.07);border-radius:6px;font-size:12.8px}
 .ecg-orange{margin-top:5px;font-size:12.5px;color:#e0a437}
 .ecg-directive{margin-top:7px;border:1px solid var(--border);border-left:2px solid #c9a227;border-radius:8px;padding:8px 11px;background:var(--surface2)}

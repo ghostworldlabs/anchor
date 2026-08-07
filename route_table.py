@@ -278,6 +278,10 @@ ROUTES = [
        handler="handle_ecgberht_commission_watch", migrated=True),
     _r("GET", "/api/ecgberht/commission_runs", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_ecgberht_commission_runs", migrated=True),
+    _r("GET", "/api/ecgberht/step_detail", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_step_detail", migrated=True),
+    _r("POST", "/api/ecgberht/step_note", AUTH_TOKEN,
+       handler="handle_ecgberht_step_note", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

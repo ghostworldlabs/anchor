@@ -241,6 +241,7 @@ def confirm_and_launch(
     who: str = "john",
     backend: str = "claude",
     directive: Optional[str] = None,
+    record_extra: Optional[dict] = None,
     watch: bool = True,
     start_session_fn: Optional[Callable] = None,
     read_fn: Optional[Callable] = None,
@@ -354,6 +355,10 @@ def confirm_and_launch(
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "watch_count": 0,
         "worktree_path": launched.get("worktree_path"),
+        # e.g. the autonomy chain depth — merged BEFORE the watcher starts so
+        # the watcher's in-memory record carries it to its own finish_run
+        # (a post-launch disk patch would be silently dropped at run end).
+        **(record_extra or {}),
     }
     _atomic_write_json(_run_record_path(folder, session_id), record)
 
@@ -429,14 +434,22 @@ def _watch_session(folder, project_id, record, *, watch_only,
         write_fn = write_fn or _ts.input
 
     kwargs = dict(DEFAULT_RUNNER_KWARGS) if runner_kwargs is None else dict(runner_kwargs)
-    result = _cr.run_commissioned_session(
-        session_id,
-        WORK_TURN,
-        read_fn=read_fn,
-        write_fn=write_fn,
-        watch_only=watch_only,
-        **kwargs,
-    )
+    try:
+        result = _cr.run_commissioned_session(
+            session_id,
+            WORK_TURN,
+            read_fn=read_fn,
+            write_fn=write_fn,
+            watch_only=watch_only,
+            **kwargs,
+        )
+    except Exception as exc:
+        # (2026-08-07 shark round) A runner exception used to kill the daemon
+        # thread SILENTLY — the record stranded "running" forever and John was
+        # never fetched. A dead watcher is a died run: report it honestly.
+        result = {"outcome": "died", "ran": None, "elapsed_s": None,
+                  "transcript": "", "transcript_chars": 0,
+                  "watcher_error": str(exc)[:300]}
     return finish_run(folder, project_id, record, result,
                       read_fn=read_fn, write_fn=write_fn,
                       runner_kwargs=runner_kwargs)
@@ -508,6 +521,14 @@ def finish_run(folder, project_id, record, result, *,
         }
         updated["ingest_error"] = ingest.get("error")
 
+    if result.get("watcher_error"):
+        updated["watcher_error"] = result.get("watcher_error")
+
+    # BANK the terminal state FIRST (2026-08-07 shark round): the auto hop
+    # spawns bridge processes and can block for seconds — during which the
+    # rest of the system must already see this run as finished, not running.
+    _atomic_write_json(_run_record_path(folder, session_id), updated)
+
     # CARRY ON (2026-08-07): reflection said the next move is fully determined
     # by what is on file — no decision is John's — so launch it now. Only after
     # a clean produced run (asked/died/timeout always come back to him), and
@@ -515,8 +536,9 @@ def finish_run(folder, project_id, record, result, *,
     updated["auto_continue"] = _maybe_auto_continue(
         folder, project_id, updated, ingest,
         read_fn=read_fn, write_fn=write_fn, runner_kwargs=runner_kwargs)
+    if updated["auto_continue"] is not None:
+        _atomic_write_json(_run_record_path(folder, session_id), updated)
 
-    _atomic_write_json(_run_record_path(folder, session_id), updated)
     # A finished run changed campaign state (record, attention, log) — bank it.
     commit_campaign_state(
         folder, f"{record.get('skill', 'skill')} run {result.get('outcome')}")
@@ -537,6 +559,25 @@ def _maybe_auto_continue(folder, project_id, updated, ingest, *,
             return None
         if nxt.get("needs_human") is not False:
             return None
+        # Defense in depth (2026-08-07 shark round): an unattended hop must
+        # aim a NAMED roadmap step with one of the five commissionable
+        # engines — the engine parse enforces both, this refuses if anything
+        # slipped through a stale bridge.
+        if nxt.get("skill") not in ("researchPrime", "Crucible", "Foreman",
+                                    "Gandalf", "Jumper"):
+            return {"launched": False, "reason": "skill-not-commissionable",
+                    "detail": str(nxt.get("skill"))[:60]}
+        if not nxt.get("step_id"):
+            return {"launched": False, "reason": "no-step-id",
+                    "say": "The next move named no roadmap step — bringing "
+                           "it to John instead."}
+        # A stuck model re-proposing the move that JUST ran is the classic
+        # burn loop (shark P1) — an identical hop always goes back to John.
+        if (nxt.get("step_id") == updated.get("step_id")
+                and nxt.get("skill") == updated.get("skill")):
+            return {"launched": False, "reason": "same-move",
+                    "say": "The next move would repeat the run that just "
+                           "finished — checking with you instead of looping."}
         if updated.get("outcome") != "produced":
             return {"launched": False, "reason": "outcome-not-produced",
                     "say": "The next move was ready but this run didn't end "
@@ -546,11 +587,26 @@ def _maybe_auto_continue(folder, project_id, updated, ingest, *,
             return {"launched": False, "reason": "auto-chain-cap",
                     "say": f"I've carried on {chain} times in a row without "
                            "you — checking in before the next move."}
+        # The finished session's PTY is usually STILL OPEN, and the executor's
+        # DEGRADED one-run-at-a-time scan refuses a new launch while a prior
+        # intent's pid is alive (found in the 2026-08-07 hardening pass —
+        # without this every auto hop dies EXEC_SUBSTRATE_BUSY). The run is
+        # produced + ingested + reflected: park it gracefully (close is
+        # warm-resumable, docs persisted; John reopens it any time).
+        try:
+            import terminal_session as _ts
+            _ts.close_session(updated.get("session_id"),
+                              project_id=project_id, actor="steward-auto-continue")
+        except Exception:
+            pass
         proposed = propose(folder, step_id=(nxt.get("step_id") or None),
                            skill=nxt.get("skill"))
         if not proposed.get("ok"):
+            detail = proposed.get("error") or proposed.get("message")
             return {"launched": False, "reason": "propose-refused",
-                    "detail": proposed.get("error") or proposed.get("message")}
+                    "detail": detail,
+                    "say": "I tried to carry on but couldn't frame the next "
+                           f"commission ({detail}) — your call from here."}
         tok = _paths.expected_token()
         launched = confirm_and_launch(
             folder, proposed,
@@ -559,24 +615,23 @@ def _maybe_auto_continue(folder, project_id, updated, ingest, *,
             # the confirming authority, never a fabricated human click.
             who="john-standing-autonomy",
             directive=nxt.get("directive"),
+            # Chain depth rides the record FROM BIRTH — the watcher's
+            # in-memory copy must carry it or its finish_run would drop it
+            # (cap bypass, found in the 2026-08-07 hardening pass).
+            record_extra={"auto_chain": chain + 1,
+                          "auto_from": updated.get("session_id")},
             read_fn=read_fn, write_fn=write_fn, runner_kwargs=runner_kwargs,
             auth_ctx={"token": tok} if tok else None,
             expected_token=tok,
             enforce_auth=bool(tok),
         )
         if not launched.get("ok"):
+            detail = launched.get("error") or launched.get("message")
             return {"launched": False, "reason": "launch-refused",
-                    "detail": launched.get("error") or launched.get("message")}
+                    "detail": detail,
+                    "say": "I tried to carry on but the launch was refused "
+                           f"({detail}) — nothing is running; your call."}
         new_sid = launched.get("session_id")
-        # The new record inherits the chain depth so the cap is real.
-        try:
-            rec_path = _run_record_path(folder, new_sid)
-            new_rec = json.loads(rec_path.read_text(encoding="utf-8"))
-            new_rec["auto_chain"] = chain + 1
-            new_rec["auto_from"] = updated.get("session_id")
-            _atomic_write_json(rec_path, new_rec)
-        except Exception:
-            pass
         return {"launched": True, "session_id": new_sid,
                 "skill": launched.get("skill"), "step_id": launched.get("step_id"),
                 "auto_chain": chain + 1,

@@ -10931,6 +10931,35 @@ def handle_ecgberht_step_detail(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def handle_ecgberht_step_note(handler, path, body):
+    """POST /api/ecgberht/step_note — John adds detail from the rail panel.
+
+    {project_id, step_id, note} → the note lands durably on the step's
+    findings ledger (source: john). The chamber sends the conversational
+    refinement turn separately; this is only the durable write.
+    """
+    b = body or {}
+    pid = (b.get("project_id") or "").strip()
+    step_id = (b.get("step_id") or "").strip()
+    note = (b.get("note") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not step_id or not note:
+        handler._send_json({"ok": False,
+                            "error": "step_id and note required"}, 400)
+        return
+    # Same argv ceiling as every spoken act (shark F3): an unbounded note
+    # dies as an opaque bridge_spawn_failed near the 32k command-line cap,
+    # and anything over the converse cap half-succeeds (saved but unspoken).
+    if _ecgberht_reject_oversized(handler, note):
+        return
+    out = _ecgberht_bridge(["--project", folder, "--step-note", step_id,
+                            "--note", note, "--who", "john"])
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
 def handle_ecgberht_commission_runs(handler, path, body):
     """GET /api/ecgberht/commission_runs?project_id= — the project's runs.
 
@@ -17720,6 +17749,7 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_commission_watch": handle_ecgberht_commission_watch,
     "handle_ecgberht_commission_runs": handle_ecgberht_commission_runs,
     "handle_ecgberht_step_detail": handle_ecgberht_step_detail,
+    "handle_ecgberht_step_note": handle_ecgberht_step_note,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

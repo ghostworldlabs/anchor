@@ -428,8 +428,12 @@ def test_auto_continue_launches_when_reflection_frees_it(tmp_path, bridge_env, m
     def fake_confirm(folder, proposal, **kw):
         seen["proposal"] = proposal
         seen["kw"] = kw
+        # Mirror the real confirm_and_launch: record_extra lands on the record
+        # from birth (the watcher's in-memory copy must carry the chain).
+        extra = kw.get("record_extra") or {}
         cs._atomic_write_json(cs._run_record_path(folder, "sess-a2"),
-                              {"session_id": "sess-a2", "outcome": "running"})
+                              {"session_id": "sess-a2", "outcome": "running",
+                               **extra})
         return {"ok": True, "session_id": "sess-a2",
                 "skill": "researchPrime", "step_id": "s2"}
 
@@ -488,3 +492,48 @@ def test_auto_continue_defers_when_john_is_needed(tmp_path, bridge_env, monkeypa
     auto = out["record"]["auto_continue"]
     assert auto["launched"] is False
     assert auto["reason"] == "outcome-not-produced"
+
+
+def test_auto_continue_never_repeats_the_same_move(tmp_path, bridge_env, monkeypatch):
+    # (Shark round) A stuck model re-proposing the run that JUST finished is
+    # the classic burn loop — an identical hop must go to John, never launch.
+    reply = _reflection_reply(needs_human=False)
+    reply["reflection"]["next"]["step_id"] = "s1"       # same step...
+    reply["reflection"]["next"]["skill"] = "Gandalf"    # ...same skill as sess-a1
+    bridge_env.mkdir(parents=True, exist_ok=True)
+    (bridge_env / "reply-ingest-run.json").write_text(
+        json.dumps(reply), encoding="utf-8")
+    monkeypatch.setattr(cs, "confirm_and_launch",
+                        lambda *a, **k: pytest.fail("same move must not relaunch"))
+    record, result = _produced_record_and_result()
+    out = cs.finish_run(str(tmp_path), "proj-1", record, result)
+    auto = out["record"]["auto_continue"]
+    assert auto["launched"] is False
+    assert auto["reason"] == "same-move"
+
+
+def test_watcher_exception_becomes_an_honest_died_run(tmp_path, bridge_env, monkeypatch):
+    # (Shark round) A runner exception used to kill the watcher thread
+    # silently, stranding the record "running" forever. Now it finishes as a
+    # died run: record terminal, watcher_error carried, John raised.
+    # (The runner classifies read-errors itself, so target the wrapper: the
+    # runner CALL raising is the stranded-thread scenario.)
+    def exploding_runner(*a, **k):
+        raise RuntimeError("PTY vanished mid-read")
+
+    monkeypatch.setattr(cs._cr, "run_commissioned_session", exploding_runner)
+    out = cs.confirm_and_launch(
+        str(tmp_path), PROPOSAL,
+        project_id="proj-1",
+        start_session_fn=fake_start_session,
+        read_fn=lambda *a, **k: {"chunk": "", "cursor": 0, "status": "running"},
+        write_fn=lambda *a, **k: None,
+        runner_kwargs=fast_runner_kwargs(),
+        thread_factory=inline_thread_factory,
+    )
+    assert out["ok"] is True, out
+    rec = cs.load_run_record(str(tmp_path), "sess-t1")
+    assert rec["outcome"] == "died"
+    assert "PTY vanished" in rec["watcher_error"]
+    modes = [c["mode"] for c in bridge_calls(bridge_env)]
+    assert "ingest-run" in modes, "the died run must still be brought home"

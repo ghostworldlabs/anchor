@@ -310,6 +310,12 @@ function _ecgToggleStepDetail(row, stepId) {
           'Could not read that step: ' + ((j && (j.message || j.error)) || 'no response')));
         return;
       }
+      // WHAT IS INTENDED for this step, first — the reason the panel exists.
+      if (j.name) {
+        var hd = _ecgEl('div', 'sd-name', j.name);
+        if (j.status) hd.appendChild(_ecgEl('span', 'sd-status', j.status));
+        panel.appendChild(hd);
+      }
       if (j.done_when) panel.appendChild(_ecgEl('div', 'sd-done', 'Done when: ' + j.done_when));
       var haveAny = false;
       // The findings ledger — what runs and reflection have fed this step.
@@ -342,6 +348,63 @@ function _ecgToggleStepDetail(row, stepId) {
       } else if (j.ready === true) {
         panel.appendChild(_ecgEl('div', 'sd-ready', 'Ready to commission.'));
       }
+      // (2026-08-07, John) Not just looking at it: detail added HERE lands on
+      // the step's ledger, and the steward picks it up in the chamber to
+      // refine — the talking tier reacts now, the thinking tier folds it in
+      // at the next reflection.
+      var wrap = _ecgEl('div', 'sd-addwrap');
+      var inp = document.createElement('input');
+      inp.className = 'sd-add';
+      inp.type = 'text';
+      inp.placeholder = 'Add detail or ask about this step…';
+      var add = _ecgEl('button', 'ecg-btn', 'Add');
+      var send = function () {
+        var t = (inp.value || '').trim();
+        if (!t || add.disabled) return;
+        add.disabled = true;
+        _postJson('/api/ecgberht/step_note', {
+          project_id: PROJECT_ID, step_id: stepId, note: t
+        }).then(function (r) { return r.json(); }).then(function (k) {
+          add.disabled = false;
+          if (!k || !k.ok) {
+            wrap.appendChild(_ecgEl('div', 'sd-loading', 'Could not save that: ' +
+              ((k && (k.message || k.error)) || 'no response')));
+            return;
+          }
+          inp.value = '';
+          // Show it landed, in place.
+          panel.insertBefore(
+            _ecgEl('div', 'sd-fact sd-mine', '• ' + t), wrap);
+          // Then the steward reacts to it in the chamber — the refinement
+          // conversation John asked for, with the step named. The chamber
+          // mounts ASYNC on first open, so retry for it (shark F5: a slow
+          // mount must not silently eat the promised reply, and an expiry
+          // says so IN the panel — the note itself is already safe).
+          var say = 'About the step “' + (j.name || stepId) + '”: ' + t;
+          var noteFail = 'Your note IS saved on the step — ' + _ecgStwLabel() +
+            ' just didn’t answer. Ask again in the chamber when you like.';
+          var tries = 0;
+          var kick = function () {
+            var convo = document.getElementById('ecgConvo');
+            if (convo) { _ecgConverse(convo, say, false, noteFail); return; }
+            if (++tries <= 40) { setTimeout(kick, 250); return; }
+            if (document.body.contains(wrap)) {
+              wrap.appendChild(_ecgEl('div', 'sd-loading',
+                'Saved. The chamber didn’t open to discuss it — open the Seal and ask there.'));
+            }
+          };
+          try { openEcgberhtSeal(); } catch (e) {}
+          kick();
+        }).catch(function () {
+          add.disabled = false;
+          wrap.appendChild(_ecgEl('div', 'sd-loading', "That didn't go through."));
+        });
+      };
+      add.onclick = send;
+      inp.onkeydown = function (ev) { if (ev.key === 'Enter') send(); };
+      wrap.appendChild(inp);
+      wrap.appendChild(add);
+      panel.appendChild(wrap);
     })
     .catch(function () {
       panel.textContent = '';
@@ -524,6 +587,10 @@ function _ecgRunAge(at) {
 }
 
 function _ecgRenderRunLedger(host, runs) {
+  // (Shark F6a) Never wipe the ledger while John is READING a report in it —
+  // the 15s tick used to snap the expander shut mid-read. Stale-but-stable
+  // wins; the next tick after he closes it refreshes.
+  if (host.querySelector('.lreport')) return;
   host.textContent = '';
   var rows = (runs || []).slice(0, 5);
   if (!rows.length) { host.style.display = 'none'; return; }
@@ -6515,10 +6582,14 @@ function _ecgRenderRail(rail, runBlock) {
       row.appendChild(body);
       // (2026-08-07, John) Clicking the step TEXT opens its accumulated detail
       // + suggestions; the dot (marker) keeps opening the session when one ran.
-      body.onclick = function (e) {
-        e.stopPropagation();
-        _ecgToggleStepDetail(row, s.id);
-      };
+      // Captured PER ITERATION (shark F1): a shared `var` closure made every
+      // click open the LAST step's panel and write notes to the WRONG ledger.
+      body.onclick = (function (rr, sid) {
+        return function (e) {
+          e.stopPropagation();
+          _ecgToggleStepDetail(rr, sid);
+        };
+      })(row, s.id);
       aside.appendChild(row);
     }
     setTimeout(_ecgAnnotateRailRuns, 0);
@@ -6808,7 +6879,10 @@ function _ecgOfferRaise(convo, j, retryText) {
    still compile deterministically; only genuine talk reaches the seat). Provenance
    recall stays on /speak because it answers from the record with a source chip, which
    is a different and honest capability. */
-function _ecgConverse(convo, text, isRetry) {
+function _ecgConverse(convo, text, isRetry, failText) {
+  // failText (shark F4): the note flow saves DURABLY before talking — its
+  // failure copy must never claim "nothing was saved" about a saved note.
+  var failMsg = failText || (_ecgStwLabel() + " didn't answer — nothing was saved.");
   if (!isRetry) { _ecgJohnMsg(convo, text); _ecgNoteTurn('john', text); }
   var thinking = _ecgStewardMsg(convo, 'Thinking…');
   thinking.classList.add('ecg-thinking');
@@ -6821,7 +6895,7 @@ function _ecgConverse(convo, text, isRetry) {
   }).then(function (r) { return r.json(); }).then(function (j) {
     thinking.remove();
     if (!j) {
-      _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
+      _ecgStewardMsg(convo, failMsg);
       return;
     }
     if (j.code === 'CONVERSE_NO_ENVELOPE' || j.status_code === 'CONVERSE_NO_ENVELOPE') {
@@ -6834,8 +6908,7 @@ function _ecgConverse(convo, text, isRetry) {
     }
     if (!j.ok) {
       // Honest failure: say what happened, never dress it up as an answer.
-      _ecgStewardMsg(convo, j.say || j.message || j.user_text ||
-        _ecgStwLabel() + " didn't answer — nothing was saved.");
+      _ecgStewardMsg(convo, j.say || j.message || j.user_text || failMsg);
       return;
     }
     if (j.lane === 'act' && j.compiled) {
@@ -6845,7 +6918,7 @@ function _ecgConverse(convo, text, isRetry) {
     _ecgRenderStewardTurn(convo, j);
   }).catch(function () {
     thinking.remove();
-    _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
+    _ecgStewardMsg(convo, failMsg);
   });
 }
 
@@ -6862,7 +6935,17 @@ function _ecgRefreshRail(done) {
       if (!ch || !ch.roadmap_rail) { if (done) done(null); return; }
       var dock = document.getElementById('ecgSealDock');
       var old = dock && dock.querySelector('aside.ecg-rail');
-      if (old) old.replaceWith(_ecgRenderRail(ch.roadmap_rail, ch.run_block));
+      // (Shark F6b) A refresh replaces the WHOLE aside — including an open
+      // step-detail panel and any half-typed note in it. An OPEN panel always
+      // wins (John's law: things must not vanish under him); the rail catches
+      // up on the first refresh after the panel closes.
+      if (old) {
+        if (old.querySelector('.ecg-stepdetail')) {
+          if (done) done(ch.roadmap_rail);
+          return;
+        }
+        old.replaceWith(_ecgRenderRail(ch.roadmap_rail, ch.run_block));
+      }
       if (done) done(ch.roadmap_rail);
     })
     .catch(function () { if (done) done(null); });
@@ -7172,6 +7255,12 @@ function _ecgRenderRunReport(convo, run) {
   // rule) — say so, never offer a second Go for a run that is live.
   var auto = run.auto_continue || null;
   if (auto && auto.launched) {
+    // A run is ALREADY live — a stale Go card must not be pressable by the
+    // go-phrase regex answering "carried on" (shark F2).
+    if (_ECG_PENDING_GO) {
+      try { _ECG_PENDING_GO.disabled = true; } catch (e) {}
+      _ECG_PENDING_GO = null;
+    }
     var on = _ecgStewardMsg(convo, auto.say ||
       ('Carried on without you — ' + (auto.skill || 'the next skill') +
        ' is running with the directive I composed.'));
