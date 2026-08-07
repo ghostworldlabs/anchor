@@ -10774,6 +10774,39 @@ def handle_ecgberht_converse(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def handle_ecgberht_high_seat_say(handler, path, body):
+    """POST /api/ecgberht/high_seat_say — TALK to the steward at portfolio
+    level (2026-08-07, John: "I don't want to click a new project button —
+    I want to just talk to it").
+
+    Routes the utterance through the __dashboard__ project's steward (its
+    campaign IS running Anchor, and it carries the auto-opened envelope) with
+    the PORTFOLIO: prefix the talk instruction knows. A spoken "start a
+    project" comes back as the typed project_create act — the High Seat
+    renders the confirm card; nothing is created until John clicks it.
+    """
+    b = body or {}
+    text = (b.get("text") or "").strip()
+    if not text:
+        handler._send_json({"ok": False, "error": "empty_text",
+                            "message": "Say something and the steward will answer."}, 400)
+        return
+    if _ecgberht_reject_oversized(handler, text):
+        return
+    folder, err, status = _ecgberht_project_folder("__dashboard__")
+    if err is not None:
+        handler._send_json({"ok": False, "error": "no_dashboard_steward",
+                            "message": "The dashboard steward is not set up — "
+                                       "open a project's Seal instead."}, 502)
+        return
+    args = ["--project", folder, "--converse", "PORTFOLIO: " + text]
+    packed = _ecgberht_pack_turns(b.get("turns"))
+    if packed:
+        args.extend(["--turns", json.dumps(packed)])
+    out = _ecgberht_bridge(args, timeout=ECGBERHT_CONVERSE_TIMEOUT_S)
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
 def handle_ecgberht_envelope_confirm(handler, path, body):
     """POST /api/ecgberht/envelope_confirm — the human "yes, spend on this session".
 
@@ -11052,6 +11085,19 @@ def handle_ecgberht_run_pulse(handler, path, body):
         "auto_chain": rec.get("auto_chain"),
         "north_star": _read_face_north_star(folder),
     }
+    def _latest_status_block(text):
+        """The skills' own ⏱/[HH:MM] 10-minute status table, when one rode
+        the output — John's #1 want on the pulse. Last occurrence wins."""
+        try:
+            import re as _re
+            hits = [m.start() for m in
+                    _re.finditer(r"⏱|^\[\d{2}:\d{2}\]", text, _re.M)]
+            if not hits:
+                return None
+            return text[hits[-1]:hits[-1] + 700].strip() or None
+        except Exception:
+            return None
+
     # Live tail while running; the banked tail once it stopped.
     try:
         import terminal_session as _ts
@@ -11070,6 +11116,9 @@ def handle_ecgberht_run_pulse(handler, path, body):
         out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
         out["cursor"] = cursor
         out["live"] = False
+    out["latest_status"] = _latest_status_block(out.get("tail") or "") \
+        or _latest_status_block(
+            _strip_terminal_noise(rec.get("transcript_tail") or ""))
     handler._send_json(out, 200)
 
 
@@ -14131,8 +14180,24 @@ def handle_doctor_session_start(handler, path, body):
             "swarm_ratio": plan.get("swarm_ratio"),
             "reason": plan.get("reason", ""),
         }
+    resolve = bool(body.get("resolve"))
     try:
-        if short_only or issue:
+        if resolve and issue:
+            # (2026-08-07, John) RESOLVE mode: no plan, no wandering diagnose
+            # — a SHORT execution brief (short also mangles less on the PTY
+            # paste path, bug 0080). The session launches with the normal
+            # write posture, never --permission-mode plan.
+            seed = (
+                "ANCHOR DOCTOR - RESOLVE THIS ISSUE NOW\n"
+                "issue: %s\n"
+                "component: %s\n"
+                "Do: reproduce it minimally, FIX it in this folder (edit code/"
+                "config/tests as needed), verify the fix (run the relevant "
+                "check), then report what changed in 5 lines. Ask John only "
+                "if the fix requires a real product decision."
+                % ((issue.get("message") or "")[:400],
+                   (issue.get("component") or "")[:120]))
+        elif short_only or issue:
             seed = start_plan.get("seedText") or _w8_format_doctor_short_seed_text(
                 start_plan.get("seed"))
         else:
@@ -14143,7 +14208,7 @@ def handle_doctor_session_start(handler, path, body):
                 "(briefing assembly failed: %s)" % exc)
     try:
         rec, attached = _termsess.start_doctor_session(
-            seed_context=seed, backend=backend)
+            seed_context=seed, backend=backend, resolve=resolve)
     except _termsess.TerminalSessionError as exc:
         handler._send_json({
             "ok": False,
@@ -14694,7 +14759,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       component: it.component || '',
       suggestedChecks: []
     };
-    window.runDiagnose({ fromBanner: true });
+    window.runDiagnose({ fromBanner: true, resolve: true });
   };
   var AUTO_DIAGNOSE = false;
   (function parseBannerIssueFromQuery() {
@@ -14778,6 +14843,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       startBody.short = true;
       startBody.shortSeed = true;
     }
+    // (2026-08-07) Resolve mode: execution posture, no --permission-mode plan.
+    if (opts.resolve) startBody.resolve = true;
     fetch('/api/doctor/session_start', { method: 'POST', headers: hdrs(), body: JSON.stringify(startBody) })
       .then(function (r) { return r.json(); })
       .then(function (p) {
@@ -14787,7 +14854,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           var eng = document.getElementById('termEngine');
           if (eng && p.session.backend) eng.textContent = p.session.backend + (p.attached ? ' (reattached)' : '');
           term.write('[doctor] Session started async on ' + (p.session.backend || ZH_ENG)
-            + (opts.fromBanner ? ' (banner seed)' : '') + '.\\r\\n');
+            + (opts.fromBanner ? ' (banner seed)' : '') + (opts.resolve ? ' (RESOLVE mode)' : '') + '.\\r\\n');
+          if (p.attached && opts.resolve) {
+            term.write('[doctor] NOTE: attached to an EXISTING session (its posture stands). '
+              + 'Kill it and click Resolve this again for a fresh execution session.\\r\\n');
+          }
           attach();
         } else {
           var status = (p && p.status) || 'error';
@@ -18018,6 +18089,7 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_step_detail": handle_ecgberht_step_detail,
     "handle_ecgberht_step_note": handle_ecgberht_step_note,
     "handle_ecgberht_run_pulse": handle_ecgberht_run_pulse,
+    "handle_ecgberht_high_seat_say": handle_ecgberht_high_seat_say,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

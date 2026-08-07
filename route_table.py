@@ -284,6 +284,8 @@ ROUTES = [
        handler="handle_ecgberht_step_note", migrated=True),
     _r("GET", "/api/ecgberht/run_pulse", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_ecgberht_run_pulse", migrated=True),
+    _r("POST", "/api/ecgberht/high_seat_say", AUTH_TOKEN,
+       handler="handle_ecgberht_high_seat_say", migrated=True),
     # ── Ecgberht High Seat (TW6 — wireframes v2.1 Screens 0+2+3) ──────────
     # Same live-Anchor host + Ecgberht engine bridge (high-seat-bridge.mjs).
     # Specific prefixes are registered BEFORE the bare /high_seat prefix so

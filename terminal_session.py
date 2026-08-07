@@ -946,7 +946,7 @@ def live_doctor_session():
     return None
 
 
-def start_doctor_session(seed_context=None, backend=None):
+def start_doctor_session(seed_context=None, backend=None, resolve=False):
     """Start (or attach to) THE doctor agentic session (doctor V3 Wave 2).
 
     Returns ``(record, attached)``. Idempotent: while one doctor session is
@@ -956,7 +956,10 @@ def start_doctor_session(seed_context=None, backend=None):
     the reserved ``__doctor__`` pseudo-project: bare ``general`` lane (the
     briefing is the ``seed_context``, delivered once by the seed-once
     mechanism), cwd = the live Anchor folder (no worktree), and the engine CLI
-    in READ-ONLY plan permission mode (:data:`DOCTOR_READONLY_CLI_ARGS`).
+    in READ-ONLY plan permission mode (:data:`DOCTOR_READONLY_CLI_ARGS`) —
+    UNLESS ``resolve=True`` (2026-08-07, John: "when you hit resolve this it
+    should actually … resolve it, not do a plan"): a RESOLVE session launches
+    with the engine's normal write posture so it can actually fix the issue.
     Output/input ride the EXISTING term_ws / term_stream2 / term_input2 /
     term_kill transports keyed by the returned ``session_id`` — no new
     transport. The caller resolves ``backend`` honestly via
@@ -966,10 +969,11 @@ def start_doctor_session(seed_context=None, backend=None):
     if existing is not None:
         return existing, True
     backend = backend or _reg.BACKEND_CLAUDE
+    extra = [] if resolve else list(DOCTOR_READONLY_CLI_ARGS.get(backend, ()))
     rec = start_session(
         DOCTOR_PROJECT_ID, DOCTOR_LANE, backend=backend, label=DOCTOR_LABEL,
         seed_context=seed_context,
-        extra_cli_args=list(DOCTOR_READONLY_CLI_ARGS.get(backend, ())))
+        extra_cli_args=extra)
     return rec, False
 
 

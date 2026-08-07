@@ -343,6 +343,34 @@ function _ecgToggleStepDetail(row, stepId) {
           panel.appendChild(_ecgEl('div', 'sd-fact', '• ' + k.replace(/_/g, ' ') + ': ' + text));
         });
       }
+      // WHAT RAN HERE (2026-08-07, John: the roadmap is where outputs live —
+      // "what was it given … what did it get for the summary … open the
+      // report"): each run for THIS step, its brief, its outcome, its
+      // report summary, one click to the session.
+      var stepRuns = (_ECG_RUNS_CACHE || []).filter(function (r) {
+        return r.step_id === stepId;
+      });
+      if (stepRuns.length) {
+        haveAny = true;
+        panel.appendChild(_ecgEl('div', 'sd-runh', 'What ran here'));
+        stepRuns.forEach(function (r) {
+          var runRow = _ecgEl('div', 'sd-run');
+          runRow.appendChild(_ecgEl('div', null,
+            (r.skill || 'run') + ' · ' + r.outcome + ' · ' + _ecgRunAge(r.at)));
+          if (r.directive) {
+            runRow.appendChild(_ecgEl('div', 'sd-fact', 'Given: ' +
+              String(r.directive).slice(0, 160)));
+          }
+          if (r.report && r.report.say) {
+            runRow.appendChild(_ecgEl('div', 'sd-fact',
+              String(r.report.say).slice(0, 240)));
+          }
+          var op = _ecgEl('button', 'ecg-btn', 'Open the session');
+          op.onclick = function () { try { openPanel(r.session_id); } catch (e) {} };
+          runRow.appendChild(op);
+          panel.appendChild(runRow);
+        });
+      }
       if (!haveAny) {
         panel.appendChild(_ecgEl('div', 'sd-loading',
           'No detail gathered for this step yet — runs and conversation fill it in.'));
@@ -491,14 +519,36 @@ function _ecgMountRunLedger() {
         // dialogue, at the bottom, in the order they were completed").
         var dock = document.getElementById('ecgSealDock');
         if (dock) {
-          var cl = document.getElementById('ecgChamberLedger');
-          if (!cl) {
-            cl = _ecgEl('div', 'ecg-run-ledger');
+          // (2026-08-07, John) The DIALOG is the spine: the say box sits
+          // DIRECTLY under the last steward message, and the run tiles fold
+          // ABOVE the conversation — visible, never in between, dismissible.
+          var fold = document.getElementById('ecgChamberRunFold');
+          if (!fold) {
+            fold = document.createElement('details');
+            fold.className = 'ecg-run-fold';
+            fold.id = 'ecgChamberRunFold';
+            var sum = document.createElement('summary');
+            sum.id = 'ecgChamberRunSum';
+            fold.appendChild(sum);
+            var cl = _ecgEl('div', 'ecg-run-ledger');
             cl.id = 'ecgChamberLedger';
-            var say = dock.querySelector('.ecg-saybox');
-            dock.insertBefore(cl, say || null);
+            fold.appendChild(cl);
+            var convoEl = dock.querySelector('.ecg-convo');
+            dock.insertBefore(fold, convoEl || null);
           }
-          _ecgRenderRunLedger(cl, _ECG_RUNS_CACHE.slice().reverse());
+          var live = _ECG_RUNS_CACHE.filter(function (r) {
+            return r.outcome === 'running' || r.outcome === 'asked';
+          }).length;
+          var doneN = _ECG_RUNS_CACHE.length - live;
+          var sumEl = document.getElementById('ecgChamberRunSum');
+          if (sumEl) {
+            sumEl.textContent = 'Runs — ' +
+              (live ? live + ' live/waiting · ' : '') + doneN + ' finished';
+          }
+          // Live runs keep the fold open so nothing active hides.
+          if (live && !fold.open) fold.open = true;
+          _ecgRenderRunLedger(document.getElementById('ecgChamberLedger'),
+            _ECG_RUNS_CACHE.slice().reverse());
           try { _ecgDriveNext(); } catch (e) {}
         }
         try { _ecgAnnotateRailRuns(); } catch (e) {}
@@ -570,6 +620,11 @@ function _ecgPulseOpen() {
   win.appendChild(star);
   var brief = _ecgEl('div', 'pw-brief', '');
   win.appendChild(brief);
+  // The skills' own ⏱ 10-minute status table, when one rode the output —
+  // the single thing John most wants to see here.
+  var stat = _ecgEl('pre', 'pw-status', '');
+  stat.style.display = 'none';
+  win.appendChild(stat);
   var tail = _ecgEl('pre', 'pw-tail', '');
   win.appendChild(tail);
   var act = _ecgEl('div', 'act');
@@ -597,6 +652,10 @@ function _ecgPulseOpen() {
           (j.at ? ' · since ' + _ecgRunAge(j.at) : '');
         star.textContent = j.north_star ? 'North star: ' + j.north_star : '';
         brief.textContent = j.directive ? 'Brief: ' + j.directive : '';
+        if (j.latest_status) {
+          stat.textContent = j.latest_status;
+          stat.style.display = '';
+        }
         if (j.tail) {
           tail.textContent = (tail.textContent + j.tail).slice(-8000);
           tail.scrollTop = tail.scrollHeight;
@@ -650,7 +709,27 @@ function _ecgDriveNext() {
     if (!candidate && id && !ranSteps[id]) candidate = id;
   });
   if (!candidate) return;
-  _ecgCommissionPropose(convo, null, candidate);
+  _ecgComposeAndPropose(convo, null, candidate);
+}
+
+/* (2026-08-07, John) NEVER a blind Go: "it should have — hey, this is what
+   researchPrime's gonna work on … are you fine with this, do you want to
+   refine it, then we go forward." Every manual/auto commission first asks
+   the steward to COMPOSE the brief (it knows the campaign's findings); the
+   reply renders the directive card — the statement, Refine, Go. If no
+   directive comes back, _ecgRenderStewardTurn falls through to the plain
+   propose card, so a commission is never lost. */
+var _ECG_COMPOSE_STEP = null;
+
+function _ecgComposeAndPropose(convo, skill, stepId) {
+  _ECG_COMPOSE_STEP = stepId || null;
+  _ecgConverse(convo,
+    'Commission ' + (skill || 'the right skill') +
+    (stepId ? ' for the roadmap step "' + stepId + '"' : ' for the step in hand') +
+    ': compose the exact brief you would send — what it should find out or ' +
+    'do, grounded in everything this campaign knows — and show it to me ' +
+    'before anything runs.',
+    true);
 }
 
 /* The thin page-level line: state dots + a phrase, click opens the Seal. */
@@ -702,13 +781,19 @@ function _ecgRunAge(at) {
   } catch (e) { return ''; }
 }
 
+var _ECG_DISMISSED_RUNS = {};
+
 function _ecgRenderRunLedger(host, runs) {
   // (Shark F6a) Never wipe the ledger while John is READING a report in it —
   // the 15s tick used to snap the expander shut mid-read. Stale-but-stable
   // wins; the next tick after he closes it refreshes.
   if (host.querySelector('.lreport')) return;
   host.textContent = '';
-  var rows = (runs || []).slice(0, 5);
+  var rows = (runs || []).filter(function (r) {
+    // Dismissed FINISHED tiles stay gone; live/waiting ones cannot be hidden.
+    return !(_ECG_DISMISSED_RUNS[r.session_id] &&
+             r.outcome !== 'running' && r.outcome !== 'asked');
+  }).slice(0, 8);
   if (!rows.length) { host.style.display = 'none'; return; }
   host.style.display = '';
   rows.forEach(function (run) {
@@ -717,6 +802,18 @@ function _ecgRenderRunLedger(host, runs) {
     row.appendChild(_ecgEl('span', 'dot', bits.dot));
     row.appendChild(_ecgEl('span', 'lbl',
       (run.skill || 'skill') + ' · ' + bits.phrase + ' · ' + _ecgRunAge(run.at)));
+    if (run.outcome !== 'running' && run.outcome !== 'asked') {
+      var dis = _ecgEl('button', 'ldismiss', '×');
+      dis.title = 'Dismiss this tile (the run record stays)';
+      dis.onclick = function (ev) {
+        ev.stopPropagation();
+        _ECG_DISMISSED_RUNS[run.session_id] = true;
+        var rep = row.nextElementSibling;
+        if (rep && rep.className === 'lreport') rep.remove();
+        row.remove();
+      };
+      row.appendChild(dis);
+    }
     var openBtn = _ecgEl('button', 'ecg-btn', 'Open the session');
     openBtn.onclick = function () { try { openPanel(run.session_id); } catch (e) {} };
     row.appendChild(openBtn);
@@ -6767,10 +6864,12 @@ function _ecgRenderStewardTurn(convo, j) {
     if (j.commission_directive) {
       _ecgDirectiveCard(convo, {
         skill: j.commission_skill || 'researchPrime',
-        step_id: null,
+        // A compose-first flow knows which step it was composing FOR.
+        step_id: _ECG_COMPOSE_STEP || null,
         directive: j.commission_directive,
         why: null,
       });
+      _ECG_COMPOSE_STEP = null;
     } else {
       _ecgCommissionPropose(convo, j.commission_skill || null);
     }
@@ -7156,7 +7255,7 @@ function _ecgCommissionPropose(convo, skill, stepId) {
           var pick = _ecgEl('div', 'act');
           ['researchPrime', 'Crucible', 'Foreman', 'Gandalf', 'Jumper'].forEach(function (s) {
             var b = _ecgEl('button', 'ecg-btn', s);
-            b.onclick = function () { pick.remove(); _ecgCommissionPropose(convo, s); };
+            b.onclick = function () { pick.remove(); _ecgComposeAndPropose(convo, s); };
             pick.appendChild(b);
           });
           m.appendChild(pick);
@@ -7171,6 +7270,12 @@ function _ecgCommissionPropose(convo, skill, stepId) {
         'I propose commissioning ' + j.skill + ' for “' +
         (j.step_name || j.step_id) + '”. It runs in a session I manage — ' +
         'I’ll come get you the moment it needs you. Nothing starts until you say go.');
+      // Even the fallback card says what the run is AIMED at — never a
+      // blind Go (2026-08-07, John: "it's just doing research on what?").
+      if (j.step && j.step.done_when) {
+        msg.appendChild(_ecgEl('div', 'ecg-directive',
+          'It will be aimed at: ' + j.step.done_when));
+      }
       var act = _ecgEl('div', 'act');
       var go = _ecgEl('button', 'ecg-btn pri', 'Go — run ' + j.skill);
       go._ecgStep = j.step_id;

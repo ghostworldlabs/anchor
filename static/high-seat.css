@@ -175,3 +175,13 @@
   cursor: pointer; color: #8b93a5; font-size: 12px; padding: 4px 2px;
 }
 .ecg-hs-more[open] summary { margin-bottom: 8px; }
+.ecg-hs-sayrow { display: flex; gap: 8px; margin-top: 12px; }
+.ecg-hs-say {
+  flex: 1; min-width: 0; background: #14161d; border: 1px solid #2a2f3c;
+  border-radius: 7px; color: #d7dbe4; font-size: 13px; padding: 8px 11px;
+}
+.ecg-hs-say:focus { outline: none; border-color: #7aa2f7; }
+.ecg-hs-createcard {
+  margin-top: 10px; border: 1px solid #7aa2f7; border-radius: 10px;
+  padding: 12px 14px; color: #d7dbe4; font-size: 13px;
+}

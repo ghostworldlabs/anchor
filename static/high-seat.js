@@ -228,7 +228,19 @@ function _ecgHsRenderPacket(body, pid, payload) {
   wrap.appendChild(_ecgHsEl('div', 'ecg-hs-pcard prov', pv.footer_stamp));
 }
 
+var _ECG_HS_RAISED_ANCHOR_ID = null;
+
 function ecgHsBringUp(body, pid) {
+  // (2026-08-07, John opened a "chamber empty … nothing here yet" overlay on
+  // the deck project.) The RICH chamber lives on the project page — when the
+  // raised project maps to an Anchor id, go THERE (#seal auto-opens it)
+  // instead of the thin packet overlay. The overlay stays as the fallback
+  // for a raise we cannot map.
+  if (_ECG_HS_RAISED_ANCHOR_ID) {
+    window.location.href = '/project/' +
+      encodeURIComponent(_ECG_HS_RAISED_ANCHOR_ID) + '#seal';
+    return;
+  }
   _ecgHsGet('/api/ecgberht/bring_up?project_id=' + encodeURIComponent(pid), function (out) {
     if (!out || !out.ok) {
       _ecgHsReply(body, "I couldn't open that: " + ((out && (out.error || out.message)) || 'no response'));
@@ -240,6 +252,52 @@ function ecgHsBringUp(body, pid) {
 }
 
 /* ── Screen 2: the High Seat body ── */
+/* The typed confirm card a spoken "start a project" becomes. Nothing is
+   created until the click; an existing folder registers brownfield and the
+   server fires its first-scan Gandalf on its own. */
+function _ecgHsProjectCreateCard(host, pc) {
+  var card = _ecgHsEl('div', 'ecg-hs-createcard');
+  var name = pc.name || (String(pc.folder).replace(/[\\\/]+$/, '')
+    .split(/[\\\/]/).pop() || 'project');
+  card.appendChild(_ecgHsEl('div', null,
+    'Create “' + name + '” at ' + pc.folder + '?'));
+  var acts = _ecgHsEl('div', 'ecg-hs-actions');
+  var go = _ecgHsEl('button', 'ecg-hs-btn pri', 'Create it');
+  go.onclick = function () {
+    go.disabled = true;
+    go.textContent = 'Creating…';
+    fetch('/api/rnd/new_project', {
+      method: 'POST',
+      headers: _ecgHsHeaders(),
+      body: JSON.stringify({ mode: 'auto', name: name, folder_path: pc.folder })
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      var entry = j && j.entry;
+      if (!j || j.ok === false || !entry) {
+        go.disabled = false;
+        go.textContent = 'Create it';
+        _ecgHsReply(card, 'Could not create it: ' +
+          ((j && (j.message || j.error)) || 'no response') + ' — nothing was made.');
+        return;
+      }
+      _ecgHsReply(card, 'Created — opening its steward. ' +
+        (j.path_existed
+          ? 'Existing material found; the first Gandalf read starts on its own.'
+          : 'Fresh folder scaffolded.'));
+      window.location.href = '/project/' + encodeURIComponent(entry.id) + '#seal';
+    }).catch(function () {
+      go.disabled = false;
+      go.textContent = 'Create it';
+      _ecgHsReply(card, 'That didn’t go through — nothing was made.');
+    });
+  };
+  var no = _ecgHsEl('button', 'ecg-hs-btn', 'Not now');
+  no.onclick = function () { card.remove(); };
+  acts.appendChild(go);
+  acts.appendChild(no);
+  card.appendChild(acts);
+  host.appendChild(card);
+}
+
 function _ecgHsRenderHighSeat(body, vm) {
   body.innerHTML = '';
 
@@ -299,6 +357,14 @@ function _ecgHsRenderHighSeat(body, vm) {
   // registered rest fold behind one line (2026-08-07: two real campaigns
   // must not drown in a stack of quiet registrations).
   var allTiles = vm.tiles.tiles || [];
+  // Map the raised project to its Anchor id so "Bring it up" can land in the
+  // REAL chamber (project page #seal) rather than the thin overlay.
+  _ECG_HS_RAISED_ANCHOR_ID = null;
+  allTiles.forEach(function (t) {
+    if (t.state_kind === 'raised' && t.anchor_project_id) {
+      _ECG_HS_RAISED_ANCHOR_ID = t.anchor_project_id;
+    }
+  });
   var activeTiles = allTiles.filter(function (t) { return t.active_campaign; });
   var quietTiles = allTiles.filter(function (t) { return !t.active_campaign; });
   if (!activeTiles.length) { activeTiles = allTiles; quietTiles = []; }
@@ -343,41 +409,51 @@ function _ecgHsRenderHighSeat(body, vm) {
     body.appendChild(more);
   }
 
-  // (2026-08-07, John) Project management FROM the High Seat: create a new
-  // project without hand-registering. Deterministic + confirmed — the server
-  // registers, bootstraps, and (brownfield) fires the first-scan Gandalf.
+  // (2026-08-07, John: "I want to just TALK to it") The High Seat saybox:
+  // free speech to the portfolio steward. "Start a project at <path>" comes
+  // back as a typed confirm card — an existing folder joins brownfield and
+  // its first Gandalf read fires on its own.
   var mk = _ecgHsEl('div', 'ecg-hs-newproj');
-  var mkBtn = _ecgHsEl('button', 'ecg-hs-btn', '+ New project');
-  mkBtn.onclick = function () {
-    var folder = prompt('Folder for the project (full path — existing folder ' +
-      'joins as brownfield; a new path is created):');
-    if (!folder) return;
-    var name = prompt('Project name:',
-      (folder.replace(/[\\\/]+$/, '').split(/[\\\/]/).pop() || ''));
-    if (!name) return;
-    mkBtn.disabled = true;
-    fetch('/api/rnd/new_project', {
+  var sayRow = _ecgHsEl('div', 'ecg-hs-sayrow');
+  var sayInp = document.createElement('input');
+  sayInp.type = 'text';
+  sayInp.className = 'ecg-hs-say';
+  sayInp.placeholder = 'Talk to ' + _ecgHsStwName() +
+    ' — e.g. “start a new project called X at C:\\dev\\X”';
+  var sayBtn = _ecgHsEl('button', 'ecg-hs-btn', 'Say it');
+  var sendSay = function () {
+    var t = (sayInp.value || '').trim();
+    if (!t || sayBtn.disabled) return;
+    sayBtn.disabled = true;
+    sayBtn.textContent = 'Thinking…';
+    fetch('/api/ecgberht/high_seat_say', {
       method: 'POST',
       headers: _ecgHsHeaders(),
-      body: JSON.stringify({mode: 'auto', name: name, folder_path: folder})
+      body: JSON.stringify({ text: t })
     }).then(function (r) { return r.json(); }).then(function (j) {
-      mkBtn.disabled = false;
-      var entry = j && j.entry;
-      if (!j || j.ok === false || !entry) {
-        _ecgHsReply(mk, 'Could not create it: ' +
-          ((j && (j.message || j.error)) || 'no response') + ' — nothing was made.');
+      sayBtn.disabled = false;
+      sayBtn.textContent = 'Say it';
+      if (!j || !j.ok) {
+        _ecgHsReply(mk, (j && (j.say || j.message || j.error)) ||
+          'No answer came back — nothing was done.');
         return;
       }
-      _ecgHsReply(mk, 'Created “' + name + '” — opening its steward. ' +
-        (j.path_existed ? 'Existing material found; a first Gandalf read starts on its own.'
-                        : 'Fresh folder scaffolded.'));
-      window.location.href = '/project/' + encodeURIComponent(entry.id) + '#seal';
+      sayInp.value = '';
+      _ecgHsReply(mk, j.say || '…');
+      if (j.project_create && j.project_create.folder) {
+        _ecgHsProjectCreateCard(mk, j.project_create);
+      }
     }).catch(function () {
-      mkBtn.disabled = false;
-      _ecgHsReply(mk, 'That didn’t go through — nothing was made.');
+      sayBtn.disabled = false;
+      sayBtn.textContent = 'Say it';
+      _ecgHsReply(mk, 'That didn’t go through — nothing was done.');
     });
   };
-  mk.appendChild(mkBtn);
+  sayBtn.onclick = sendSay;
+  sayInp.onkeydown = function (ev) { if (ev.key === 'Enter') sendSay(); };
+  sayRow.appendChild(sayInp);
+  sayRow.appendChild(sayBtn);
+  mk.appendChild(sayRow);
   body.appendChild(mk);
 
   // S2-E4 — capacity & focus: spoken recommendation + reasons + override
