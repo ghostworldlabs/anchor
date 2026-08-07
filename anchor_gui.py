@@ -4523,7 +4523,12 @@ def _render_layoutd_html(folder_path, project_id):
     general_zone = _render_layoutd_zone(
         "general", "General", "&#128187; Latest General session",
         general_sessions, folder_path, project_id, effort_index=effort_index)
-    gandalf_panel = _render_layoutd_gandalf_panel(folder_path, project_id)
+    # (2026-08-07, John) The Gandalf panel is OUTSIDE the steward — commissioned
+    # Gandalf runs live in the Seal's ledger now, so the project page drops the
+    # standalone tab. It stays in the dashboard's slim Workbench (John's four
+    # right-hand tiles there include it).
+    gandalf_panel = (_render_layoutd_gandalf_panel(folder_path, project_id)
+                     if project_id == "__dashboard__" else "")
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
     files_panel = _render_layoutd_files_panel(folder_path, project_id)
@@ -5727,7 +5732,8 @@ def render_project_window_html(project_id: str) -> str:
         "shell_css": shell_css_block,
         "seal_tile": seal_tile,
         "wb_open": " open" if slim else "",
-        "back_link": "" if project_id == "__dashboard__" else back_link_normal,
+        # (2026-08-07, John) no back-link on project pages — not needed.
+        "back_link": "",
         "notes_attr": notes_attr,
         "blurb_attr": blurb_attr,
         "folder": folder,

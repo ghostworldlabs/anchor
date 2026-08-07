@@ -399,7 +399,21 @@ function _ecgDriveNext() {
     _ECG_AUTODROVE = true; return;                              // card already up
   }
   _ECG_AUTODROVE = true;
-  _ecgCommissionPropose(convo);
+  // (2026-08-07, John) NEVER re-propose a step that already ran — his "yes"
+  // to a re-proposed deep read spent a second heavy pass. The candidate is
+  // the FIRST roadmap step with no run record; when every listed step has
+  // run, propose nothing and let the conversation drive.
+  var ranSteps = {};
+  (_ECG_RUNS_CACHE || []).forEach(function (r) {
+    if (r.step_id) ranSteps[r.step_id] = true;
+  });
+  var candidate = null;
+  document.querySelectorAll('.ecg-rail .ecg-step[data-step]').forEach(function (row) {
+    var id = row.getAttribute('data-step');
+    if (!candidate && id && !ranSteps[id]) candidate = id;
+  });
+  if (!candidate) return;
+  _ecgCommissionPropose(convo, null, candidate);
 }
 
 /* The thin page-level line: state dots + a phrase, click opens the Seal. */
@@ -6829,10 +6843,11 @@ function _ecgHandleAct(convo, c, text) {
    loop drives it → the report comes back HERE, in the chamber, and the ⚑
    raise fetches John when the skill needs him. */
 
-function _ecgCommissionPropose(convo, skill) {
+function _ecgCommissionPropose(convo, skill, stepId) {
   var waiting = _ecgStewardMsg(convo, 'Framing the commission…');
   var body = { project_id: PROJECT_ID };
   if (skill) body.skill = skill;
+  if (stepId) body.step_id = stepId;
   _postJson('/api/ecgberht/commission_propose', body)
     .then(function (r) { return r.json(); }).then(function (j) {
       waiting.remove();
