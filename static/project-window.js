@@ -291,6 +291,64 @@ function _ecgSimplifyBoard() {
   }
 }
 
+/* (2026-08-07, John) Click a step's text → its accumulated detail unfolds:
+   done-when, everything runs and talk have fed into it, and what it still
+   needs (suggestions). Read-only, deterministic, no model call. */
+function _ecgToggleStepDetail(row, stepId) {
+  var open = row.nextElementSibling;
+  if (open && open.className === 'ecg-stepdetail') { open.remove(); return; }
+  var panel = _ecgEl('div', 'ecg-stepdetail');
+  panel.appendChild(_ecgEl('div', 'sd-loading', 'gathering what we know…'));
+  row.parentNode.insertBefore(panel, row.nextSibling);
+  fetch('/api/ecgberht/step_detail?project_id=' + encodeURIComponent(PROJECT_ID) +
+        '&step_id=' + encodeURIComponent(stepId) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      panel.textContent = '';
+      if (!j || !j.ok) {
+        panel.appendChild(_ecgEl('div', 'sd-loading',
+          'Could not read that step: ' + ((j && (j.message || j.error)) || 'no response')));
+        return;
+      }
+      if (j.done_when) panel.appendChild(_ecgEl('div', 'sd-done', 'Done when: ' + j.done_when));
+      var haveAny = false;
+      // The findings ledger — what runs and reflection have fed this step.
+      (j.findings || []).forEach(function (f) {
+        haveAny = true;
+        var row = _ecgEl('div', 'sd-fact', '• ' + (f.finding || f));
+        if (f.source) row.title = 'from ' + f.source + (f.at ? ' · ' + String(f.at).slice(0, 10) : '');
+        panel.appendChild(row);
+      });
+      var d = j.detail || {};
+      var elements = d.elements || d.answers || null;
+      if (elements && typeof elements === 'object') {
+        Object.keys(elements).forEach(function (k) {
+          var v = elements[k];
+          var text = (v && typeof v === 'object') ? (v.value ?? v.answer ?? '') : v;
+          if (!text) return;
+          haveAny = true;
+          panel.appendChild(_ecgEl('div', 'sd-fact', '• ' + k.replace(/_/g, ' ') + ': ' + text));
+        });
+      }
+      if (!haveAny) {
+        panel.appendChild(_ecgEl('div', 'sd-loading',
+          'No detail gathered for this step yet — runs and conversation fill it in.'));
+      }
+      if (j.suggestions && j.suggestions.length) {
+        panel.appendChild(_ecgEl('div', 'sd-sugh', 'Still needed before this step can run:'));
+        j.suggestions.forEach(function (s) {
+          panel.appendChild(_ecgEl('div', 'sd-sug', '· ' + (s.question || s.element || s)));
+        });
+      } else if (j.ready === true) {
+        panel.appendChild(_ecgEl('div', 'sd-ready', 'Ready to commission.'));
+      }
+    })
+    .catch(function () {
+      panel.textContent = '';
+      panel.appendChild(_ecgEl('div', 'sd-loading', "That didn't load — try again."));
+    });
+}
+
 /* (2026-08-06) Run-state dots ON the scaffolding bullets: the rail step that
    owns a run gets its dot (green pulse = running · amber = needs you · gold =
    finished) and becomes clickable — straight into the workbench session. */
@@ -6452,9 +6510,15 @@ function _ecgRenderRail(rail, runBlock) {
       // should show up as well").
       row.setAttribute('data-step', s.id || '');
       row.appendChild(_ecgEl('span', 'm', s.marker));
-      var body = _ecgEl('span', null, (s.id ? s.id + ' ' : '') + (s.name || ''));
+      var body = _ecgEl('span', 'steptext', (s.id ? s.id + ' ' : '') + (s.name || ''));
       body.appendChild(_ecgEl('small', null, s.substatus || ''));
       row.appendChild(body);
+      // (2026-08-07, John) Clicking the step TEXT opens its accumulated detail
+      // + suggestions; the dot (marker) keeps opening the session when one ran.
+      body.onclick = function (e) {
+        e.stopPropagation();
+        _ecgToggleStepDetail(row, s.id);
+      };
       aside.appendChild(row);
     }
     setTimeout(_ecgAnnotateRailRuns, 0);
@@ -6510,8 +6574,19 @@ function _ecgRenderStewardTurn(convo, j) {
   // (2026-08-06) "Start Gandalf" in conversation routes HERE: the model signals
   // wants_commission instead of pretending work began (it cannot start
   // anything), and the commission card appears — one Go from a real run.
+  // (2026-08-07) With a composed directive, the DIRECTIVE card renders — the
+  // brief John iterates on before Go; without one, the plain propose flow.
   if (j.wants_commission) {
-    _ecgCommissionPropose(convo, j.commission_skill || null);
+    if (j.commission_directive) {
+      _ecgDirectiveCard(convo, {
+        skill: j.commission_skill || 'researchPrime',
+        step_id: null,
+        directive: j.commission_directive,
+        why: null,
+      });
+    } else {
+      _ecgCommissionPropose(convo, j.commission_skill || null);
+    }
   }
   _ecgScrollToLatest(convo);
   return msg;
@@ -6994,11 +7069,81 @@ function _ecgWatchCommissionRuns(convo) {
   setTimeout(tick, 3000);
 }
 
+/* (2026-08-07) THE DIRECTIVE CARD — the steward's composed next move, with
+   its Parable-of-the-Oranges why. John iterates or approves; Go chains
+   propose→launch with the directive riding the session brief. */
+function _ecgDirectiveCard(convo, next) {
+  if (!next || !next.directive || !next.skill) return;
+  var msg = _ecgStewardMsg(convo, 'My next move' +
+    (next.why ? ' — ' + next.why : '') + ':');
+  var dv = _ecgEl('div', 'ecg-directive');
+  dv.appendChild(_ecgEl('div', 'dvh', 'Directive for ' + next.skill + ':'));
+  dv.appendChild(_ecgEl('div', 'dvt', next.directive));
+  msg.appendChild(dv);
+  var act = _ecgEl('div', 'act');
+  var go = _ecgEl('button', 'ecg-btn pri', 'Go — run ' + next.skill + ' with this brief');
+  go._ecgStep = next.step_id || null;
+  _ECG_PENDING_GO = go;
+  go.onclick = function () {
+    go.disabled = true;
+    go.textContent = 'Starting…';
+    if (_ECG_PENDING_GO === go) _ECG_PENDING_GO = null;
+    var body = { project_id: PROJECT_ID, skill: next.skill };
+    if (next.step_id) body.step_id = next.step_id;
+    _postJson('/api/ecgberht/commission_propose', body)
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (!j || !j.ok) throw new Error((j && (j.message || j.error)) || 'propose failed');
+        return _postJson('/api/ecgberht/commission_go', {
+          project_id: PROJECT_ID, proposal: j, directive: next.directive
+        }).then(function (r) { return r.json(); });
+      }).then(function (k) {
+        if (!k || !k.ok) throw new Error((k && (k.message || k.error)) || 'launch failed');
+        act.remove();
+        _ecgStewardMsg(convo, (k.say || 'Commissioned.') +
+          ' The directive rides its opening brief — watch the ledger below.');
+        _ecgRefreshRail();
+        _ecgWatchCommissionRuns(convo);
+      }).catch(function (e) {
+        go.disabled = false;
+        go.textContent = 'Go — run ' + next.skill + ' with this brief';
+        _ECG_PENDING_GO = go;
+        _ecgStewardMsg(convo, 'Could not start it: ' + e.message + ' — nothing is running.');
+      });
+  };
+  var refine = _ecgEl('button', 'ecg-btn', 'Refine the brief');
+  refine.onclick = function () {
+    var say = _ecgSayLine();
+    _ecgStewardMsg(convo, 'Tell me what to change about the directive — I\'ll ' +
+      'bring back a revised card.');
+    if (say) { say.placeholder = 'What should the ' + next.skill + ' directive say instead?'; say.focus(); }
+  };
+  var no = _ecgEl('button', 'ecg-btn', 'Not now');
+  no.onclick = function () { act.remove(); _ecgStewardMsg(convo, 'Held — nothing launched.'); };
+  act.appendChild(go);
+  act.appendChild(refine);
+  act.appendChild(no);
+  msg.appendChild(act);
+  _ecgScrollToLatest(convo);
+}
+
 function _ecgRenderRunReport(convo, run) {
   _ecgRefreshRail();
   var rep = run.report || {};
   var msg = _ecgStewardMsg(convo, rep.say ||
     (run.skill + ' stopped (' + run.outcome + ').'));
+  // (2026-08-07) The reflection: what this run CHANGES, its oranges, and the
+  // composed next move — the thinking between runs John asked for.
+  var refl = run.reflection || {};
+  if (refl.impact) {
+    msg.appendChild(_ecgEl('div', 'ecg-impact', 'What this changes: ' + refl.impact));
+  }
+  (refl.oranges || []).forEach(function (o) {
+    msg.appendChild(_ecgEl('div', 'ecg-orange', '🍊 ' + o));
+  });
+  if (refl.fed_steps && refl.fed_steps.length) {
+    msg.appendChild(_ecgEl('div', 'lrec', 'Fed into the plan: ' +
+      refl.fed_steps.map(function (f) { return f.step_id + ' (' + f.facts + ')'; }).join(' · ')));
+  }
   if (rep.needs) {
     msg.appendChild(_ecgEl('div', 'ecg-run-needs', 'Waiting on you: ' + rep.needs));
   }
@@ -7022,6 +7167,22 @@ function _ecgRenderRunReport(convo, run) {
     act.appendChild(back);
   }
   msg.appendChild(act);
+  // The reflection's composed next move. When the reflection said no human
+  // input was needed, the host already CARRIED ON (John's standing autonomy
+  // rule) — say so, never offer a second Go for a run that is live.
+  var auto = run.auto_continue || null;
+  if (auto && auto.launched) {
+    var on = _ecgStewardMsg(convo, auto.say ||
+      ('Carried on without you — ' + (auto.skill || 'the next skill') +
+       ' is running with the directive I composed.'));
+    on.appendChild(_ecgEl('div', 'lrec',
+      'Watch it on the Running strip; say "stop" any time to pull me back.'));
+  } else if (refl.next && refl.next.directive) {
+    if (auto && auto.say) {
+      _ecgStewardMsg(convo, auto.say);
+    }
+    _ecgDirectiveCard(convo, refl.next);
+  }
   _ecgScrollToLatest(convo);
 }
 

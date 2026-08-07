@@ -10881,6 +10881,8 @@ def handle_ecgberht_commission_go(handler, path, body):
         project_id=pid,
         who=(b.get("who") or "john"),
         backend=(b.get("backend") or "claude"),
+        # (2026-08-07) The iterated, John-approved directive rides the brief.
+        directive=(b.get("directive") or None),
         auth_ctx={"token": tok} if tok else None,
         expected_token=tok,
         enforce_auth=bool(tok),
@@ -10906,6 +10908,26 @@ def handle_ecgberht_commission_watch(handler, path, body):
         handler._send_json({"ok": False, "error": "session_id required"}, 400)
         return
     out = _cs.rearm_watch(folder, pid, sid)
+    handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def handle_ecgberht_step_detail(handler, path, body):
+    """GET /api/ecgberht/step_detail?project_id=&step_id= — the rail click.
+
+    Everything the campaign has accumulated on one scaffolding step + what it
+    still needs (suggestions). Read-only, deterministic, no model call.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    step_id = (q.get("step_id", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not step_id:
+        handler._send_json({"ok": False, "error": "step_id required"}, 400)
+        return
+    out = _ecgberht_bridge(["--project", folder, "--step-detail", step_id])
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
@@ -17697,6 +17719,7 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_commission_go": handle_ecgberht_commission_go,
     "handle_ecgberht_commission_watch": handle_ecgberht_commission_watch,
     "handle_ecgberht_commission_runs": handle_ecgberht_commission_runs,
+    "handle_ecgberht_step_detail": handle_ecgberht_step_detail,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by

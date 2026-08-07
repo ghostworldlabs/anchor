@@ -385,3 +385,106 @@ def test_commit_campaign_state_never_raises_on_a_hostile_folder(tmp_path):
     out = cs.commit_campaign_state(str(tmp_path / "does-not-exist"), "x")
     assert isinstance(out, dict)
     assert "ok" in out
+
+
+# ── Auto-continue (John's standing autonomy rule, 2026-08-07) ───────────────
+
+def _reflection_reply(needs_human):
+    return {
+        "ok": True,
+        "report": {"say": "Run landed.", "produced": ["REPORT.md"], "needs": None},
+        "reflection": {
+            "impact": "The read reframed step 2.",
+            "next": {
+                "step_id": "s2", "skill": "researchPrime",
+                "directive": "Investigate oral-exam rubrics at 100-student scale.",
+                "why": "The rubric gap decides the grade book.",
+                "needs_human": needs_human,
+                "needs_human_why": None,
+            },
+            "oranges": [], "fed_steps": [],
+        },
+        "raised": False,
+        "handback": {"ok": True, "ingested": False, "reason": "no_ingestable_handback"},
+    }
+
+
+def _produced_record_and_result():
+    record = {"session_id": "sess-a1", "commission_id": "c1", "skill": "Gandalf",
+              "step_id": "s1", "lane": "general", "project_id": "proj-1",
+              "outcome": "running", "watch_count": 0}
+    result = {"outcome": "produced", "ran": True, "elapsed_s": 60,
+              "transcript": "verdict text", "transcript_chars": 12}
+    return record, result
+
+
+def test_auto_continue_launches_when_reflection_frees_it(tmp_path, bridge_env, monkeypatch):
+    bridge_env.mkdir(parents=True, exist_ok=True)
+    (bridge_env / "reply-ingest-run.json").write_text(
+        json.dumps(_reflection_reply(needs_human=False)), encoding="utf-8")
+
+    seen = {}
+
+    def fake_confirm(folder, proposal, **kw):
+        seen["proposal"] = proposal
+        seen["kw"] = kw
+        cs._atomic_write_json(cs._run_record_path(folder, "sess-a2"),
+                              {"session_id": "sess-a2", "outcome": "running"})
+        return {"ok": True, "session_id": "sess-a2",
+                "skill": "researchPrime", "step_id": "s2"}
+
+    monkeypatch.setattr(cs, "confirm_and_launch", fake_confirm)
+    record, result = _produced_record_and_result()
+    out = cs.finish_run(str(tmp_path), "proj-1", record, result)
+
+    auto = out["record"]["auto_continue"]
+    assert auto["launched"] is True, auto
+    assert auto["session_id"] == "sess-a2"
+    assert auto["auto_chain"] == 1
+    # The hop proposed for the reflection's step and carried its directive,
+    # confirmed by the standing rule — never a fabricated human click.
+    assert seen["proposal"]["skill"] == "researchPrime"
+    assert seen["kw"]["directive"].startswith("Investigate oral-exam")
+    assert seen["kw"]["who"] == "john-standing-autonomy"
+    # The chain depth is durable on the NEW record so the cap is real.
+    new_rec = cs.load_run_record(str(tmp_path), "sess-a2")
+    assert new_rec["auto_chain"] == 1
+    assert new_rec["auto_from"] == "sess-a1"
+
+
+def test_auto_continue_stops_at_the_chain_cap(tmp_path, bridge_env, monkeypatch):
+    bridge_env.mkdir(parents=True, exist_ok=True)
+    (bridge_env / "reply-ingest-run.json").write_text(
+        json.dumps(_reflection_reply(needs_human=False)), encoding="utf-8")
+    monkeypatch.setattr(cs, "confirm_and_launch",
+                        lambda *a, **k: pytest.fail("cap must stop the hop"))
+    record, result = _produced_record_and_result()
+    record["auto_chain"] = cs.AUTO_CHAIN_CAP
+    out = cs.finish_run(str(tmp_path), "proj-1", record, result)
+    auto = out["record"]["auto_continue"]
+    assert auto["launched"] is False
+    assert auto["reason"] == "auto-chain-cap"
+
+
+def test_auto_continue_defers_when_john_is_needed(tmp_path, bridge_env, monkeypatch):
+    monkeypatch.setattr(cs, "confirm_and_launch",
+                        lambda *a, **k: pytest.fail("needs_human must defer"))
+    bridge_env.mkdir(parents=True, exist_ok=True)
+
+    # needs_human true → no hop at all (the directive card asks John).
+    (bridge_env / "reply-ingest-run.json").write_text(
+        json.dumps(_reflection_reply(needs_human=True)), encoding="utf-8")
+    record, result = _produced_record_and_result()
+    out = cs.finish_run(str(tmp_path), "proj-1", record, result)
+    assert out["record"]["auto_continue"] is None
+
+    # needs_human false but the run did not end clean → back to John.
+    (bridge_env / "reply-ingest-run.json").write_text(
+        json.dumps(_reflection_reply(needs_human=False)), encoding="utf-8")
+    record, result = _produced_record_and_result()
+    record["session_id"] = "sess-a3"
+    result["outcome"] = "asked"
+    out = cs.finish_run(str(tmp_path), "proj-1", record, result)
+    auto = out["record"]["auto_continue"]
+    assert auto["launched"] is False
+    assert auto["reason"] == "outcome-not-produced"

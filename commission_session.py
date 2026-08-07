@@ -184,6 +184,9 @@ def list_runs(folder: str) -> list:
             "watch_count": rec.get("watch_count", 1),
             "report": rec.get("report"),
             "prior_reports": rec.get("prior_reports") or [],
+            "reflection": rec.get("reflection"),
+            "auto_continue": rec.get("auto_continue"),
+            "auto_chain": rec.get("auto_chain"),
             "raised": rec.get("raised"),
         })
     rows.sort(key=lambda r: r.get("at") or "", reverse=True)
@@ -237,6 +240,7 @@ def confirm_and_launch(
     project_id: str,
     who: str = "john",
     backend: str = "claude",
+    directive: Optional[str] = None,
     watch: bool = True,
     start_session_fn: Optional[Callable] = None,
     read_fn: Optional[Callable] = None,
@@ -292,7 +296,16 @@ def confirm_and_launch(
                            "run as a commissioned session yet.",
                 "skill": skill, "confirm": confirmed}
 
-    brief = (load_preamble or "") + build_brief(proposal, skill=skill)
+    # (2026-08-07) THE DIRECTIVE. The steward composes the brief from what the
+    # campaign has learned (the reflection), John iterates and approves it, and
+    # it rides here as the heart of the session's opening context — the "glue"
+    # between runs he asked for.
+    directive_block = ""
+    if directive and str(directive).strip():
+        directive_block = (
+            "COMMISSION DIRECTIVE (composed by the steward from the campaign's "
+            "current state; approved by John):\n" + str(directive).strip() + "\n\n")
+    brief = (load_preamble or "") + directive_block + build_brief(proposal, skill=skill)
 
     def _launch(**kwargs):
         return _ce.launch_commission_in_session(
@@ -424,12 +437,25 @@ def _watch_session(folder, project_id, record, *, watch_only,
         watch_only=watch_only,
         **kwargs,
     )
-    return finish_run(folder, project_id, record, result)
+    return finish_run(folder, project_id, record, result,
+                      read_fn=read_fn, write_fn=write_fn,
+                      runner_kwargs=runner_kwargs)
 
 
-def finish_run(folder, project_id, record, result) -> dict:
+#: How many runs the steward may chain WITHOUT John touching the campaign.
+#: John's standing rule (2026-08-07): "I want the steward to be able to do as
+#: much as it can without asking me" — but an unattended chain still checks in
+#: after this many consecutive auto-hops, so an abandoned campaign never
+#: burns unbounded runs.
+AUTO_CHAIN_CAP = 3
+
+
+def finish_run(folder, project_id, record, result, *,
+               read_fn=None, write_fn=None, runner_kwargs=None) -> dict:
     """The run stopped: persist the record, then hand it to the engine —
-    report, conversation log, raise, handback — via the ingest bridge."""
+    report, conversation log, raise, handback — via the ingest bridge.
+    If the reflection says the next move needs no human input, CARRY ON:
+    launch it unasked (John's standing autonomy rule), capped by AUTO_CHAIN_CAP."""
     session_id = record["session_id"]
     transcript = result.get("transcript", "") or ""
     # A re-armed watch must never ERASE the first watch's read (found live
@@ -468,6 +494,9 @@ def finish_run(folder, project_id, record, result) -> dict:
 
     if ingest.get("ok"):
         updated["report"] = ingest.get("report")
+        # (2026-08-07) The frontier reflection: impact, findings fed into the
+        # scaffolding, and the composed next-move directive John iterates on.
+        updated["reflection"] = ingest.get("reflection")
         updated["raised"] = ingest.get("raised")
         updated["handback"] = (ingest.get("handback") or {}).get("ingested") \
             if isinstance(ingest.get("handback"), dict) else None
@@ -479,11 +508,84 @@ def finish_run(folder, project_id, record, result) -> dict:
         }
         updated["ingest_error"] = ingest.get("error")
 
+    # CARRY ON (2026-08-07): reflection said the next move is fully determined
+    # by what is on file — no decision is John's — so launch it now. Only after
+    # a clean produced run (asked/died/timeout always come back to him), and
+    # never more than AUTO_CHAIN_CAP hops without him touching the campaign.
+    updated["auto_continue"] = _maybe_auto_continue(
+        folder, project_id, updated, ingest,
+        read_fn=read_fn, write_fn=write_fn, runner_kwargs=runner_kwargs)
+
     _atomic_write_json(_run_record_path(folder, session_id), updated)
     # A finished run changed campaign state (record, attention, log) — bank it.
     commit_campaign_state(
         folder, f"{record.get('skill', 'skill')} run {result.get('outcome')}")
     return {"ok": True, "record": updated, "ingest": ingest}
+
+
+def _maybe_auto_continue(folder, project_id, updated, ingest, *,
+                         read_fn=None, write_fn=None,
+                         runner_kwargs=None) -> Optional[dict]:
+    """The autonomy hop: propose + confirm + launch the reflection's next move
+    when it declared needs_human false. Returns the note stored on the run
+    record (None when the situation simply doesn't call for one). Best-effort —
+    a failed hop is a recorded fact, never an exception up the watcher."""
+    try:
+        reflection = ingest.get("reflection") if ingest.get("ok") else None
+        nxt = (reflection or {}).get("next") if isinstance(reflection, dict) else None
+        if not (isinstance(nxt, dict) and nxt.get("skill") and nxt.get("directive")):
+            return None
+        if nxt.get("needs_human") is not False:
+            return None
+        if updated.get("outcome") != "produced":
+            return {"launched": False, "reason": "outcome-not-produced",
+                    "say": "The next move was ready but this run didn't end "
+                           "clean — bringing it to John instead."}
+        chain = int(updated.get("auto_chain") or 0)
+        if chain >= AUTO_CHAIN_CAP:
+            return {"launched": False, "reason": "auto-chain-cap",
+                    "say": f"I've carried on {chain} times in a row without "
+                           "you — checking in before the next move."}
+        proposed = propose(folder, step_id=(nxt.get("step_id") or None),
+                           skill=nxt.get("skill"))
+        if not proposed.get("ok"):
+            return {"launched": False, "reason": "propose-refused",
+                    "detail": proposed.get("error") or proposed.get("message")}
+        tok = _paths.expected_token()
+        launched = confirm_and_launch(
+            folder, proposed,
+            project_id=project_id,
+            # Honest provenance: John's 2026-08-07 standing autonomy rule is
+            # the confirming authority, never a fabricated human click.
+            who="john-standing-autonomy",
+            directive=nxt.get("directive"),
+            read_fn=read_fn, write_fn=write_fn, runner_kwargs=runner_kwargs,
+            auth_ctx={"token": tok} if tok else None,
+            expected_token=tok,
+            enforce_auth=bool(tok),
+        )
+        if not launched.get("ok"):
+            return {"launched": False, "reason": "launch-refused",
+                    "detail": launched.get("error") or launched.get("message")}
+        new_sid = launched.get("session_id")
+        # The new record inherits the chain depth so the cap is real.
+        try:
+            rec_path = _run_record_path(folder, new_sid)
+            new_rec = json.loads(rec_path.read_text(encoding="utf-8"))
+            new_rec["auto_chain"] = chain + 1
+            new_rec["auto_from"] = updated.get("session_id")
+            _atomic_write_json(rec_path, new_rec)
+        except Exception:
+            pass
+        return {"launched": True, "session_id": new_sid,
+                "skill": launched.get("skill"), "step_id": launched.get("step_id"),
+                "auto_chain": chain + 1,
+                "say": f"Carried on without you: {launched.get('skill')} is now "
+                       "running with the directive I composed — "
+                       + (nxt.get("why") or "it needed no decision of yours.")}
+    except Exception as exc:
+        return {"launched": False, "reason": "auto-continue-threw",
+                "detail": str(exc)[:200]}
 
 
 # ── Campaign state → git (a crash costs nothing) ────────────────────────────
