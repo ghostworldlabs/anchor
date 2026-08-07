@@ -14814,6 +14814,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         window.runDiagnose({ fromBanner: true });
       } else if (AUTO_DIAGNOSE && BANNER_ISSUE && ZH_ENG_HEALTH[ZH_ENG] === false) {
         term.write('[doctor] Banner diagnose deferred — engine ' + ZH_ENG + ' disabled with health; shell usable.\\r\\n');
+      } else if (!BANNER_ISSUE && DOCTOR_ISSUES.length && ZH_ENG_HEALTH[ZH_ENG] !== false) {
+        // (2026-08-07, John) Opening the doctor PLAINLY while the health
+        // banner is red behaves exactly like clicking the banner: the top
+        // issue loads into the terminal unasked.
+        BANNER_ISSUE = {
+          issueId: 'report-issue-0',
+          message: '[' + (DOCTOR_ISSUES[0].component || 'health') + '] ' + DOCTOR_ISSUES[0].detail,
+          component: DOCTOR_ISSUES[0].component || '',
+          suggestedChecks: []
+        };
+        term.write('[doctor] Health issues found — loading the top one (same as the banner click). '
+          + 'Use "Resolve this" above to FIX it.\\r\\n');
+        window.runDiagnose({ fromBanner: true });
       }
     })
     .catch(function () {
