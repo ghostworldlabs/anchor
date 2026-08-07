@@ -11372,6 +11372,11 @@ def _hs_enrich_tiles(out):
                         r.get("outcome"), f"last run {r.get('outcome')}")
                     t["now_line"] = f"{r.get('skill', 'skill')} · {state}"
                     t["now_running"] = r.get("outcome") == "running"
+                    # A campaign John has actually RUN is active — it renders
+                    # up front; registered-but-untouched projects collapse
+                    # (2026-08-07: "just two projects are running right now —
+                    # it should just have those two tiles").
+                    t["active_campaign"] = True
             except Exception:
                 pass
             try:
@@ -14236,10 +14241,13 @@ def _doctor_stats():
     except OSError:
         files = []
     reports = []
+    newest_body = None
     for p in files[:10]:
         try:
             body = p.read_text(encoding="utf-8", errors="replace")
             st = _doctor_report_status(body)
+            if newest_body is None:
+                newest_body = body
         except OSError:
             st = "unknown"
         reports.append({"name": p.name, "date": p.stem, "status": st})
@@ -14260,7 +14268,34 @@ def _doctor_stats():
         "days_ago": days_ago,
         "report_count": len(files),
         "reports": reports,
+        # (2026-08-07, John) The doctor LEADS with the diagnosis it already
+        # has — the newest report's Issues, parsed deterministically — so
+        # opening the page answers "what's wrong?" instantly, no model run.
+        "issues": _doctor_latest_issues(newest_body or ""),
     }
+
+
+def _doctor_latest_issues(body):
+    """The newest report's '## Issues' lines as {component, detail} rows —
+    the instant diagnosis the /doctor page leads with. Never raises."""
+    try:
+        m = re.search(r"^## Issues[^\n]*\n+(.*?)(?=^## |\Z)", body, re.S | re.M)
+        if not m:
+            return []
+        out = []
+        for ln in m.group(1).splitlines():
+            ln = ln.strip()
+            if not ln.startswith("- "):
+                continue
+            mm = re.match(r"- \[([^\]]+)\]\s*(.*)", ln)
+            comp = mm.group(1) if mm else ""
+            detail = (mm.group(2) if mm else ln[2:]).strip()
+            out.append({"component": comp[:120], "detail": detail[:400]})
+            if len(out) >= 8:
+                break
+        return out
+    except Exception:
+        return []
 
 
 def handle_doctor_status(handler, path, body):
@@ -14510,10 +14545,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   <div class="cols">
     <div class="col-left">
+      __ISSUES_BLOCK__
       <div class="card panel">
         <h3>Diagnostics</h3>
-        <button class="btn" id="runBtn" onclick="runDiagnostics()">Run diagnostics</button>
-        <div class="hint">Runs anchor_healthcheck.py in the background; output tails below live.</div>
+        <button class="btn" id="runBtn" onclick="runDiagnostics()">Re-run full health check</button>
+        <div class="hint">FULL re-run of anchor_healthcheck.py (several minutes). The daily 5 AM run already produced the report the cards above read from — use "Resolve this" on a found issue instead of re-running.</div>
         <pre id="hcout" class="hcout"></pre>
       </div>
       <div class="card panel">
@@ -14645,6 +14681,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
   // W9 / SC7 — banner→Doctor seed from URL query (1:1 fields; not a markdown path).
   var BANNER_ISSUE = null;
+  // (2026-08-07) The instant diagnosis: issues parsed server-side from the
+  // newest health report. "Resolve this" seeds the doctor session with the
+  // one issue — no full re-run, no blank agentic wandering.
+  var DOCTOR_ISSUES = __ISSUES_JSON__;
+  window.resolveIssue = function (i) {
+    var it = DOCTOR_ISSUES[i];
+    if (!it) return;
+    BANNER_ISSUE = {
+      issueId: 'report-issue-' + i,
+      message: '[' + (it.component || 'health') + '] ' + it.detail,
+      component: it.component || '',
+      suggestedChecks: []
+    };
+    window.runDiagnose({ fromBanner: true });
+  };
   var AUTO_DIAGNOSE = false;
   (function parseBannerIssueFromQuery() {
     try {
@@ -14895,9 +14946,36 @@ def render_doctor_page_html():
         ("__LAST_AGO__", esc(ago)),
         ("__REPORT_COUNT__", str(s["report_count"])),
         ("__REPORTS_LIST__", reports_html),
+        ("__ISSUES_BLOCK__", _doctor_issues_block_html(s)),
+        ("__ISSUES_JSON__", json.dumps(s.get("issues") or [])),
     ):
         page = page.replace(key, value)
     return page
+
+
+def _doctor_issues_block_html(s):
+    """The lead panel: what the last health run FOUND, with one-click
+    resolve. Empty string when the latest report is clean."""
+    issues = s.get("issues") or []
+    if not issues:
+        return ""
+    rows = []
+    for i, it in enumerate(issues):
+        comp = html_lib.escape(it.get("component") or "health")
+        detail = html_lib.escape((it.get("detail") or "")[:220])
+        rows.append(
+            '<div class="issue-row" style="display:flex;gap:10px;align-items:'
+            'flex-start;margin:6px 0;font-size:13px;line-height:1.45">'
+            f'<div style="flex:1"><b>[{comp}]</b> {detail}</div>'
+            f'<button class="btn" onclick="resolveIssue({i})" '
+            'style="flex:none">Resolve this</button></div>')
+    return (
+        '<div class="card panel" style="border-color:#b45309">'
+        '<h3 style="color:#e0a437">Found by the last health run</h3>'
+        + "".join(rows)
+        + '<div class="hint">Parsed from the newest report — no model was '
+          'run to show this. "Resolve this" opens the doctor session '
+          'seeded with the one issue.</div></div>')
 
 
 def handle_term_input2(handler, path, body):

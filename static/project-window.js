@@ -518,17 +518,22 @@ function _ecgMountRunLedger() {
 var _ECG_PULSE = { sid: null, cursor: 0, timer: null };
 
 function _ecgPulseSync(runs) {
-  var running = (runs || []).filter(function (r) { return r.outcome === 'running'; })[0];
+  // The tab shows whenever the campaign HAS runs (2026-08-07, John: "I don't
+  // see that anywhere" — it only existed while something was mid-run). A
+  // running run wins the stage; else the newest run, state-colored:
+  // green pulse = running · amber = needs you · gold = last run.
+  var all = runs || [];
+  var current = all.filter(function (r) { return r.outcome === 'running'; })[0] || all[0];
   var tab = document.getElementById('ecgPulseTab');
-  if (!running) {
+  if (!current) {
     if (tab) tab.remove();
     _ecgPulseClose();
     _ECG_PULSE.sid = null;
     return;
   }
-  if (_ECG_PULSE.sid !== running.session_id) {
+  if (_ECG_PULSE.sid !== current.session_id) {
     // A different run took the stage — the panel re-primes from zero.
-    _ECG_PULSE.sid = running.session_id;
+    _ECG_PULSE.sid = current.session_id;
     _ECG_PULSE.cursor = 0;
     _ecgPulseClose();
   }
@@ -539,10 +544,15 @@ function _ecgPulseSync(runs) {
     tab.title = 'What is this run doing right now?';
     document.body.appendChild(tab);
   }
+  var state = current.outcome === 'running' ? 'running'
+    : current.outcome === 'asked' ? 'needs you'
+      : 'last run · ' + current.outcome;
+  tab.className = 'ecg-pulse-tab ' +
+    (current.outcome === 'running' ? 'p-run'
+      : current.outcome === 'asked' ? 'p-ask' : 'p-done');
   tab.textContent = '';
   tab.appendChild(_ecgEl('span', 'pdot', '●'));
-  tab.appendChild(_ecgEl('span', 'plbl',
-    (running.skill || 'run') + ' · running'));
+  tab.appendChild(_ecgEl('span', 'plbl', (current.skill || 'run') + ' · ' + state));
 }
 
 function _ecgPulseOpen() {

@@ -170,3 +170,8 @@
   0%, 100% { opacity: 1; }
   50% { opacity: .35; }
 }
+.ecg-hs-more { margin-top: 10px; }
+.ecg-hs-more summary {
+  cursor: pointer; color: #8b93a5; font-size: 12px; padding: 4px 2px;
+}
+.ecg-hs-more[open] summary { margin-bottom: 8px; }

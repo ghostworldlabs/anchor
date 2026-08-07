@@ -295,8 +295,15 @@ function _ecgHsRenderHighSeat(body, vm) {
   // S2-E3 — tiles: seal + goal-phrase + one state pill each; never a table.
   // (2026-08-07, John) Each row is a LIVE glance — what's happening now +
   // lifetime spend — and clicking it opens that project's steward directly.
+  // Active campaigns (real runs on record) render up front; the merely-
+  // registered rest fold behind one line (2026-08-07: two real campaigns
+  // must not drown in a stack of quiet registrations).
+  var allTiles = vm.tiles.tiles || [];
+  var activeTiles = allTiles.filter(function (t) { return t.active_campaign; });
+  var quietTiles = allTiles.filter(function (t) { return !t.active_campaign; });
+  if (!activeTiles.length) { activeTiles = allTiles; quietTiles = []; }
   var tiles = _ecgHsEl('div', 'ecg-hs-tiles');
-  (vm.tiles.tiles || []).forEach(function (t) {
+  var renderTile = function (t, host) {
     var tile = _ecgHsEl('div', 'ecg-hs-tile' + (t.dimmed ? ' dim' : '') +
       (t.anchor_project_id ? ' clickable' : ''));
     var nm = _ecgHsEl('div', 'nm');
@@ -319,9 +326,22 @@ function _ecgHsRenderHighSeat(body, vm) {
       };
       tile.title = 'Open this project’s steward';
     }
-    tiles.appendChild(tile);
-  });
+    host.appendChild(tile);
+  };
+  activeTiles.forEach(function (t) { renderTile(t, tiles); });
   body.appendChild(tiles);
+  if (quietTiles.length) {
+    var more = document.createElement('details');
+    more.className = 'ecg-hs-more';
+    var sum = document.createElement('summary');
+    sum.textContent = quietTiles.length + ' quieter project' +
+      (quietTiles.length === 1 ? '' : 's') + ' — registered, no campaign yet';
+    more.appendChild(sum);
+    var qhost = _ecgHsEl('div', 'ecg-hs-tiles');
+    quietTiles.forEach(function (t) { renderTile(t, qhost); });
+    more.appendChild(qhost);
+    body.appendChild(more);
+  }
 
   // (2026-08-07, John) Project management FROM the High Seat: create a new
   // project without hand-registering. Deterministic + confirmed — the server
