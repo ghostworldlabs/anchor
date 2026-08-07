@@ -355,6 +355,9 @@ def confirm_and_launch(
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "watch_count": 0,
         "worktree_path": launched.get("worktree_path"),
+        # The composed brief rides the record so the pulse tile can show WHAT
+        # this run was aimed at (2026-08-07, John's inspect-naturally ask).
+        "directive": (str(directive).strip() if directive else None),
         # e.g. the autonomy chain depth — merged BEFORE the watcher starts so
         # the watcher's in-memory record carries it to its own finish_run
         # (a post-launch disk patch would be silently dropped at run end).

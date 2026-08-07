@@ -239,6 +239,13 @@ window.addEventListener('DOMContentLoaded', function () {
     var m = (window.location.hash || '').match(/^#session=([\w.-]+)/);
     if (m) setTimeout(function () { try { openPanel(m[1]); } catch (e) {} }, 400);
   } catch (e) {}
+  // (2026-08-07) Deep link from a High Seat project row: #seal lands John
+  // straight in this project's steward, chamber open.
+  try {
+    if ((window.location.hash || '') === '#seal') {
+      setTimeout(function () { try { openEcgberhtSeal(); } catch (e) {} }, 400);
+    }
+  } catch (e) {}
   // (2026-08-06 evening) THE RUN LEDGER lives on the BOARD, not inside the
   // chamber — two Gandalfs ran to completion invisibly because the only
   // indicator needed the chamber open AND the run still live. This is the
@@ -495,11 +502,110 @@ function _ecgMountRunLedger() {
           try { _ecgDriveNext(); } catch (e) {}
         }
         try { _ecgAnnotateRailRuns(); } catch (e) {}
+        try { _ecgPulseSync(_ECG_RUNS_CACHE); } catch (e) {}
       })
       .catch(function () {});
   };
   tick();
   _ECG_LEDGER_POLL = setInterval(tick, 15000);
+}
+
+/* (2026-08-07, John) THE PULSE — the 10-minute-status feel, in the page.
+   While a commissioned run is live, a slim vertical tab hugs the right edge;
+   click it and a panel opens with what the run IS (skill · step · the
+   composed brief), what it serves (the North star), and its most recent
+   output — the skills' own ⏱ status blocks ride in that tail. */
+var _ECG_PULSE = { sid: null, cursor: 0, timer: null };
+
+function _ecgPulseSync(runs) {
+  var running = (runs || []).filter(function (r) { return r.outcome === 'running'; })[0];
+  var tab = document.getElementById('ecgPulseTab');
+  if (!running) {
+    if (tab) tab.remove();
+    _ecgPulseClose();
+    _ECG_PULSE.sid = null;
+    return;
+  }
+  if (_ECG_PULSE.sid !== running.session_id) {
+    // A different run took the stage — the panel re-primes from zero.
+    _ECG_PULSE.sid = running.session_id;
+    _ECG_PULSE.cursor = 0;
+    _ecgPulseClose();
+  }
+  if (!tab) {
+    tab = _ecgEl('div', 'ecg-pulse-tab');
+    tab.id = 'ecgPulseTab';
+    tab.onclick = _ecgPulseOpen;
+    tab.title = 'What is this run doing right now?';
+    document.body.appendChild(tab);
+  }
+  tab.textContent = '';
+  tab.appendChild(_ecgEl('span', 'pdot', '●'));
+  tab.appendChild(_ecgEl('span', 'plbl',
+    (running.skill || 'run') + ' · running'));
+}
+
+function _ecgPulseOpen() {
+  if (document.getElementById('ecgPulseWin')) { _ecgPulseClose(); return; }
+  var win = _ecgEl('div', 'ecg-pulse-win');
+  win.id = 'ecgPulseWin';
+  var bar = _ecgEl('div', 'pw-bar');
+  bar.appendChild(_ecgEl('span', 'ti', 'Run pulse'));
+  var x = _ecgEl('button', 'ecg-btn', '×');
+  x.onclick = _ecgPulseClose;
+  bar.appendChild(x);
+  win.appendChild(bar);
+  win.appendChild(_ecgEl('div', 'pw-head', 'reading the run…'));
+  var star = _ecgEl('div', 'pw-star', '');
+  win.appendChild(star);
+  var brief = _ecgEl('div', 'pw-brief', '');
+  win.appendChild(brief);
+  var tail = _ecgEl('pre', 'pw-tail', '');
+  win.appendChild(tail);
+  var act = _ecgEl('div', 'act');
+  var open = _ecgEl('button', 'ecg-btn', 'Open the session');
+  open.onclick = function () {
+    var sid = _ECG_PULSE.sid;
+    try { openPanel(sid); } catch (e) {}
+  };
+  act.appendChild(open);
+  win.appendChild(act);
+  document.body.appendChild(win);
+  var poll = function () {
+    var sid = _ECG_PULSE.sid;
+    if (!sid || !document.getElementById('ecgPulseWin')) return;
+    fetch('/api/ecgberht/run_pulse?project_id=' + encodeURIComponent(PROJECT_ID) +
+          '&session_id=' + encodeURIComponent(sid) +
+          '&cursor=' + _ECG_PULSE.cursor + _tokenQ())
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.ok || !document.getElementById('ecgPulseWin')) return;
+        win.querySelector('.pw-head').textContent =
+          (j.skill || 'run') + (j.step_id ? ' · ' + j.step_id : '') +
+          ' · ' + (j.outcome || '') +
+          (j.auto_chain ? ' · auto hop ' + j.auto_chain : '') +
+          (j.at ? ' · since ' + _ecgRunAge(j.at) : '');
+        star.textContent = j.north_star ? 'North star: ' + j.north_star : '';
+        brief.textContent = j.directive ? 'Brief: ' + j.directive : '';
+        if (j.tail) {
+          tail.textContent = (tail.textContent + j.tail).slice(-8000);
+          tail.scrollTop = tail.scrollHeight;
+        }
+        if (j.cursor != null) _ECG_PULSE.cursor = j.cursor;
+        if (j.outcome && j.outcome !== 'running') {
+          win.querySelector('.pw-head').textContent += ' — finished; the report lands in the chamber';
+        }
+      })
+      .catch(function () {});
+  };
+  poll();
+  _ECG_PULSE.timer = setInterval(poll, 12000);
+}
+
+function _ecgPulseClose() {
+  var win = document.getElementById('ecgPulseWin');
+  if (win) win.remove();
+  if (_ECG_PULSE.timer) { clearInterval(_ECG_PULSE.timer); _ECG_PULSE.timer = null; }
 }
 
 /* (2026-08-07, John) OPEN = DRIVE. He opens the Seal and it used to sit

@@ -148,6 +148,7 @@ def test_confirm_and_launch_drives_to_asked_and_brings_it_home(tmp_path, bridge_
     out = cs.confirm_and_launch(
         str(tmp_path), PROPOSAL,
         project_id="proj-1",
+        directive="Aim at the syllabus decisions first.",
         start_session_fn=fake_start_session,
         read_fn=pty.read_fn, write_fn=pty.write_fn,
         runner_kwargs=fast_runner_kwargs(),
@@ -170,6 +171,8 @@ def test_confirm_and_launch_drives_to_asked_and_brings_it_home(tmp_path, bridge_
     assert rec["ran"] is True
     assert rec["skill"] == "Crucible"
     assert rec["watch_count"] == 1
+    # The composed brief is durable on the record — the pulse tile reads it.
+    assert rec["directive"] == "Aim at the syllabus decisions first."
     assert "North Star" in rec["transcript_tail"]
     assert rec["report"]["needs"] == "Which option?"
     assert rec["raised"] is True

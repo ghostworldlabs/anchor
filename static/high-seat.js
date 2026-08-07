@@ -292,10 +292,13 @@ function _ecgHsRenderHighSeat(body, vm) {
     body.appendChild(_ecgHsEl('div', 'ecg-hs-quiet', rb ? rb.voice : ''));
   }
 
-  // S2-E3 — tiles: seal + goal-phrase + one state pill each; never a table
+  // S2-E3 — tiles: seal + goal-phrase + one state pill each; never a table.
+  // (2026-08-07, John) Each row is a LIVE glance — what's happening now +
+  // lifetime spend — and clicking it opens that project's steward directly.
   var tiles = _ecgHsEl('div', 'ecg-hs-tiles');
   (vm.tiles.tiles || []).forEach(function (t) {
-    var tile = _ecgHsEl('div', 'ecg-hs-tile' + (t.dimmed ? ' dim' : ''));
+    var tile = _ecgHsEl('div', 'ecg-hs-tile' + (t.dimmed ? ' dim' : '') +
+      (t.anchor_project_id ? ' clickable' : ''));
     var nm = _ecgHsEl('div', 'nm');
     var ico = document.createElement('img');
     ico.src = _ecgHsStwSealSrc();
@@ -303,12 +306,59 @@ function _ecgHsRenderHighSeat(body, vm) {
     ico.onerror = function () { this.style.display = 'none'; };
     nm.appendChild(ico);
     nm.appendChild(_ecgHsEl('span', null, t.name));
+    if (t.now_running) nm.appendChild(_ecgHsEl('span', 'hs-live', '●'));
     tile.appendChild(nm);
     tile.appendChild(_ecgHsEl('div', 'goal', t.goal_phrase));
+    if (t.now_line) tile.appendChild(_ecgHsEl('div', 'hs-now', t.now_line));
+    if (t.spend_line) tile.appendChild(_ecgHsEl('div', 'hs-spend', t.spend_line));
     tile.appendChild(_ecgHsEl('div', 'pill' + (t.state_kind === 'raised' ? ' raised' : ''), t.state_pill));
+    if (t.anchor_project_id) {
+      tile.onclick = function () {
+        window.location.href = '/project/' +
+          encodeURIComponent(t.anchor_project_id) + '#seal';
+      };
+      tile.title = 'Open this project’s steward';
+    }
     tiles.appendChild(tile);
   });
   body.appendChild(tiles);
+
+  // (2026-08-07, John) Project management FROM the High Seat: create a new
+  // project without hand-registering. Deterministic + confirmed — the server
+  // registers, bootstraps, and (brownfield) fires the first-scan Gandalf.
+  var mk = _ecgHsEl('div', 'ecg-hs-newproj');
+  var mkBtn = _ecgHsEl('button', 'ecg-hs-btn', '+ New project');
+  mkBtn.onclick = function () {
+    var folder = prompt('Folder for the project (full path — existing folder ' +
+      'joins as brownfield; a new path is created):');
+    if (!folder) return;
+    var name = prompt('Project name:',
+      (folder.replace(/[\\\/]+$/, '').split(/[\\\/]/).pop() || ''));
+    if (!name) return;
+    mkBtn.disabled = true;
+    fetch('/api/rnd/new_project', {
+      method: 'POST',
+      headers: _ecgHsHeaders(),
+      body: JSON.stringify({mode: 'auto', name: name, folder_path: folder})
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      mkBtn.disabled = false;
+      var entry = j && j.entry;
+      if (!j || j.ok === false || !entry) {
+        _ecgHsReply(mk, 'Could not create it: ' +
+          ((j && (j.message || j.error)) || 'no response') + ' — nothing was made.');
+        return;
+      }
+      _ecgHsReply(mk, 'Created “' + name + '” — opening its steward. ' +
+        (j.path_existed ? 'Existing material found; a first Gandalf read starts on its own.'
+                        : 'Fresh folder scaffolded.'));
+      window.location.href = '/project/' + encodeURIComponent(entry.id) + '#seal';
+    }).catch(function () {
+      mkBtn.disabled = false;
+      _ecgHsReply(mk, 'That didn’t go through — nothing was made.');
+    });
+  };
+  mk.appendChild(mkBtn);
+  body.appendChild(mk);
 
   // S2-E4 — capacity & focus: spoken recommendation + reasons + override
   var bal = vm.balancing;

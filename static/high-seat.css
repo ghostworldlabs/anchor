@@ -153,3 +153,20 @@
 }
 .ecg-hs-empty .ecg-hs-quiet { border: 0; padding: 0; margin: 0 0 6px; }
 .ecg-hs-empty .ecg-hs-actions { margin-top: 12px; }
+
+/* (2026-08-07, John) Rows are a live portfolio glance: happening-now line +
+   lifetime spend + a green breathing dot while a run is live; the whole row
+   clicks through to that project's steward (#seal deep link). */
+.ecg-hs-tile.clickable { cursor: pointer; }
+.ecg-hs-tile.clickable:hover { outline: 1px solid #7aa2f7; }
+.ecg-hs-tile .hs-live {
+  color: #34a853; margin-left: 6px;
+  animation: ecghslive 1.6s ease-in-out infinite;
+}
+.ecg-hs-tile .hs-now { font-size: 11.5px; color: #7aa2f7; margin-top: 2px; }
+.ecg-hs-tile .hs-spend { font-size: 11px; color: #8b93a5; }
+.ecg-hs-newproj { margin-top: 12px; }
+@keyframes ecghslive {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .35; }
+}

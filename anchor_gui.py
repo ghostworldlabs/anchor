@@ -10162,6 +10162,20 @@ def handle_new_project(handler, path, body):
     mode = body.get("mode", "existing")
     name = body.get("name", "")
     priority = body.get("priority", 2)
+    # (2026-08-07, John — High Seat "+ New project") mode 'auto': one folder
+    # path decides. Existing folder → brownfield register (discover/adopt +
+    # first-scan Gandalf fire inside); missing → create it under its parent.
+    if mode == "auto":
+        folder = Path(str(body.get("folder_path", ""))).expanduser()
+        if folder.exists():
+            res = select_existing_project(name or folder.name, str(folder),
+                                          priority=priority)
+            handler._send_json({"ok": True, "path_existed": True, **res})
+        else:
+            res = create_new_folder_project(
+                name or folder.name, str(folder.parent), priority=priority)
+            handler._send_json({"ok": True, "path_existed": False, **res})
+        return
     if mode == "new_folder":
         res = create_new_folder_project(
             name, body.get("parent_path", ""),
@@ -10960,6 +10974,99 @@ def handle_ecgberht_step_note(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+_ANSI_RE = None
+
+
+def _strip_terminal_noise(s):
+    """Strip ANSI/OSC control sequences + CRs so a live PTY tail reads as
+    text in the pulse tile. Stdlib re only; never raises."""
+    global _ANSI_RE
+    try:
+        if _ANSI_RE is None:
+            import re as _re
+            _ANSI_RE = _re.compile(
+                r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
+                r"|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f]")
+        return _ANSI_RE.sub("", str(s)).replace("\r", "")
+    except Exception:
+        return str(s)
+
+
+def _read_face_north_star(folder):
+    """The '## North star' blockquote from the project's ECGBERHT.md face —
+    a display line for the pulse tile. Read-only, best-effort, never raises."""
+    try:
+        text = (Path(folder) / "ECGBERHT.md").read_text(
+            encoding="utf-8", errors="replace")
+        lines, grab = [], False
+        for ln in text.splitlines():
+            if ln.strip().lower().startswith("## north star"):
+                grab = True
+                continue
+            if grab:
+                if ln.startswith("#") or (lines and not ln.strip()):
+                    break
+                if ln.lstrip().startswith(">"):
+                    lines.append(ln.lstrip()[1:].strip())
+        star = " ".join(x for x in lines if x).replace("**", "")
+        return star or None
+    except Exception:
+        return None
+
+
+def handle_ecgberht_run_pulse(handler, path, body):
+    """GET /api/ecgberht/run_pulse?project_id=&session_id=&cursor= — the live
+    heartbeat of a commissioned run (2026-08-07, John: "a 10 minute status
+    update... I can just look and inspect what's happening in a very easy
+    natural way"). Read-only: the run record (skill · step · directive · age)
+    + the campaign's North star + the session's RECENT output (the skills'
+    own ⏱ status blocks ride in it). Cursor-incremental like the terminals.
+    """
+    import commission_session as _cs
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or "").strip()
+    sid = (q.get("session_id", [""])[0] or "").strip()
+    try:
+        cursor = int(q.get("cursor", ["0"])[0] or 0)
+    except ValueError:
+        cursor = 0
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    rec = _cs.load_run_record(folder, sid)
+    if not rec:
+        handler._send_json({"ok": False, "error": "unknown_run"}, 404)
+        return
+    out = {
+        "ok": True,
+        "session_id": sid,
+        "skill": rec.get("skill"),
+        "step_id": rec.get("step_id"),
+        "outcome": rec.get("outcome"),
+        "at": rec.get("at"),
+        "directive": rec.get("directive"),
+        "auto_chain": rec.get("auto_chain"),
+        "north_star": _read_face_north_star(folder),
+    }
+    # Live tail while running; the banked tail once it stopped.
+    try:
+        import terminal_session as _ts
+        r = _ts.read_since(sid, cursor)
+        chunk = (r or {}).get("chunk") or ""
+        out["tail"] = _strip_terminal_noise(chunk)[-4000:]
+        out["cursor"] = (r or {}).get("cursor", cursor)
+        out["live"] = True
+    except Exception:
+        out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
+        out["cursor"] = cursor
+        out["live"] = False
+    handler._send_json(out, 200)
+
+
 def handle_ecgberht_commission_runs(handler, path, body):
     """GET /api/ecgberht/commission_runs?project_id= — the project's runs.
 
@@ -11193,7 +11300,58 @@ def handle_ecgberht_high_seat(handler, path, body):
                 "Index snapshot or bridge output unreadable — nothing is guessed."
             )
             out["bridge_bad_json"] = True
+        _hs_enrich_tiles(out)
     handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def _hs_enrich_tiles(out):
+    """(2026-08-07, John) The High Seat rows become a real portfolio glance:
+    each tile gains the ANCHOR project id (path-passport: matched by resolved
+    folder, never the steward registry id), a happening-NOW line from the
+    project's commission runs, and its lifetime spend — so "what's going on /
+    how are we using tokens" is answered on sight. Best-effort, read-only."""
+    try:
+        tiles = ((out.get("high_seat") or {}).get("tiles") or {}).get("tiles")
+        if not tiles:
+            return
+        import commission_session as _cs
+        by_folder = {}
+        for entry in _rnd.list_projects():
+            try:
+                by_folder[str(Path(entry["folder_path"]).resolve())] = entry
+            except Exception:
+                continue
+        for t in tiles:
+            p = t.get("project_path")
+            if not p:
+                continue
+            try:
+                entry = by_folder.get(str(Path(p).resolve()))
+            except Exception:
+                entry = None
+            if not entry:
+                continue
+            t["anchor_project_id"] = entry["id"]
+            try:
+                runs = _cs.list_runs(entry["folder_path"])
+                if runs:
+                    r = runs[0]
+                    state = {"running": "running now",
+                             "asked": "waiting on you"}.get(
+                        r.get("outcome"), f"last run {r.get('outcome')}")
+                    t["now_line"] = f"{r.get('skill', 'skill')} · {state}"
+                    t["now_running"] = r.get("outcome") == "running"
+            except Exception:
+                pass
+            try:
+                roll = _eh.project_effort_rollup(entry["id"], window="lifetime")
+                cost = (roll or {}).get("cost_usd") or (roll or {}).get("cost")
+                if cost:
+                    t["spend_line"] = "$%.2f lifetime" % float(cost)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def handle_ecgberht_high_seat_badge(handler, path, body):
@@ -17750,6 +17908,7 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_commission_runs": handle_ecgberht_commission_runs,
     "handle_ecgberht_step_detail": handle_ecgberht_step_detail,
     "handle_ecgberht_step_note": handle_ecgberht_step_note,
+    "handle_ecgberht_run_pulse": handle_ecgberht_run_pulse,
     # (2026-08-04) Wave 18 chamber UI: five routes were declared migrated=True in
     # route_table.py and their handlers DEFINED here, but never registered - the
     # exact defect that made stand_up answer 404 "Unknown endpoint". Caught by
