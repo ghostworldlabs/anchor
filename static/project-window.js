@@ -533,8 +533,15 @@ function _ecgMountRunLedger() {
             var cl = _ecgEl('div', 'ecg-run-ledger');
             cl.id = 'ecgChamberLedger';
             fold.appendChild(cl);
-            var convoEl = dock.querySelector('.ecg-convo');
-            dock.insertBefore(fold, convoEl || null);
+            // Insert at the TOP of the conversation COLUMN (the fold's
+            // parent must be the ref node's parent — inserting into dock
+            // with a nested ref throws and silently killed this tick).
+            var convoEl = document.getElementById('ecgConvo');
+            if (convoEl && convoEl.parentNode) {
+              convoEl.parentNode.insertBefore(fold, convoEl);
+            } else {
+              dock.appendChild(fold);
+            }
           }
           var live = _ECG_RUNS_CACHE.filter(function (r) {
             return r.outcome === 'running' || r.outcome === 'asked';
@@ -614,19 +621,44 @@ function _ecgPulseOpen() {
   var x = _ecgEl('button', 'ecg-btn', '×');
   x.onclick = _ecgPulseClose;
   bar.appendChild(x);
+  // The bar itself closes too — click open, click closed (John).
+  bar.onclick = function (ev) { if (ev.target === bar) _ecgPulseClose(); };
   win.appendChild(bar);
   win.appendChild(_ecgEl('div', 'pw-head', 'reading the run…'));
+  // (2026-08-07, John) TWO things matter here: the North star + charge as
+  // scannable bullets, and the skills' own ⏱ 10-minute status updates.
+  // Raw output folds away.
   var star = _ecgEl('div', 'pw-star', '');
   win.appendChild(star);
   var brief = _ecgEl('div', 'pw-brief', '');
   win.appendChild(brief);
-  // The skills' own ⏱ 10-minute status table, when one rode the output —
-  // the single thing John most wants to see here.
   var stat = _ecgEl('pre', 'pw-status', '');
   stat.style.display = 'none';
   win.appendChild(stat);
+  var rawFold = document.createElement('details');
+  rawFold.className = 'pw-rawfold';
+  var rawSum = document.createElement('summary');
+  rawSum.textContent = 'Raw session output';
+  rawFold.appendChild(rawSum);
   var tail = _ecgEl('pre', 'pw-tail', '');
-  win.appendChild(tail);
+  rawFold.appendChild(tail);
+  win.appendChild(rawFold);
+
+  // Prose → '• ' bullets: honor '- ' lines when present (composed
+  // directives), else split on sentences, cap the count.
+  var bullets = function (text, cap) {
+    var t = String(text || '').trim();
+    if (!t) return '';
+    var lines = t.split(/\n+/).map(function (s) { return s.trim(); })
+      .filter(Boolean);
+    if (lines.length < 2) {
+      lines = t.split(/(?<=[.!?])\s+/).map(function (s) { return s.trim(); })
+        .filter(Boolean);
+    }
+    return lines.slice(0, cap || 4).map(function (s) {
+      return '• ' + s.replace(/^[-·•]\s*/, '');
+    }).join('\n');
+  };
   var act = _ecgEl('div', 'act');
   var open = _ecgEl('button', 'ecg-btn', 'Open the session');
   open.onclick = function () {
@@ -650,10 +682,12 @@ function _ecgPulseOpen() {
           ' · ' + (j.outcome || '') +
           (j.auto_chain ? ' · auto hop ' + j.auto_chain : '') +
           (j.at ? ' · since ' + _ecgRunAge(j.at) : '');
-        star.textContent = j.north_star ? 'North star: ' + j.north_star : '';
-        brief.textContent = j.directive ? 'Brief: ' + j.directive : '';
+        star.textContent = j.north_star
+          ? 'NORTH STAR\n' + bullets(j.north_star, 3) : '';
+        brief.textContent = j.directive
+          ? 'THE CHARGE\n' + bullets(j.directive, 6) : '';
         if (j.latest_status) {
-          stat.textContent = j.latest_status;
+          stat.textContent = '⏱ LATEST STATUS\n' + j.latest_status;
           stat.style.display = '';
         }
         if (j.tail) {
@@ -7710,9 +7744,13 @@ function _ecgRenderChamber(host, vm) {
   }
   dock.appendChild(goal);
 
-  // S1-E3/E4 — Roadmap rail + run block · S1-E5 — conversation main region
+  // S1-E3/E4 — Roadmap rail + run block · S1-E5 — conversation main region.
+  // (2026-08-07, John) The conversation lives in its own COLUMN: run fold on
+  // top, the dialog, and the say box DIRECTLY under the last message — never
+  // at the far bottom of the dock.
   var body = _ecgEl('div', 'ecg-chamber');
   body.appendChild(_ecgRenderRail(chamber.roadmap_rail, chamber.run_block));
+  var col = _ecgEl('div', 'ecg-convo-col');
   var convo = _ecgEl('div', 'ecg-convo');
   convo.id = 'ecgConvo';
   var opening = chamber.conversation.opening;
@@ -7728,10 +7766,9 @@ function _ecgRenderChamber(host, vm) {
     }
     omsg.appendChild(obox);
   }
-  body.appendChild(convo);
-  dock.appendChild(body);
+  col.appendChild(convo);
 
-  // S1-E9 — saybox + footer stamp
+  // S1-E9 — saybox INSIDE the conversation column, right under the dialog.
   var say = _ecgEl('div', 'ecg-saybox');
   var input = _ecgGrowingInput('ecgSayInput',
     chamber.conversation.saybox.placeholder,
@@ -7745,7 +7782,9 @@ function _ecgRenderChamber(host, vm) {
     _ecgAutoGrow(input);   // collapse the grown box back to one row
   };
   say.appendChild(speak);
-  dock.appendChild(say);
+  col.appendChild(say);
+  body.appendChild(col);
+  dock.appendChild(body);
   var footer = chamber.footer_stamp +
     (vm.parity && vm.parity.agrees ? ' · CLI parity: status agrees' : '');
   dock.appendChild(_ecgEl('div', 'ecg-footer', footer));
@@ -7754,6 +7793,24 @@ function _ecgRenderChamber(host, vm) {
   // (2026-08-06) A commission may already be out (or just stopped) when the
   // chamber opens — start the run poll so its report lands here unprompted.
   try { _ecgWatchCommissionRuns(convo); } catch (e) {}
+  // (2026-08-07, John) THE STEWARD DRIVES. Opening the chamber is the cue:
+  // it says where the campaign stands, what is running and what that run is
+  // doing, and the next concrete move — then pushes it (compose-first card
+  // when the next move is a run). Once per page load; his reply continues
+  // the same conversation.
+  if (!window._ECG_OPENED_DRIVE) {
+    window._ECG_OPENED_DRIVE = true;
+    setTimeout(function () {
+      try {
+        _ecgConverse(convo,
+          'Open the chamber: in a few short lines, where does this campaign ' +
+          'stand — what finished and what it changed, what is running RIGHT ' +
+          'NOW and what it is doing, and the ONE next concrete move. Then ' +
+          'drive it: if the next move is a run, compose its brief.',
+          true);
+      } catch (e) {}
+    }, 600);
+  }
   document.addEventListener('keydown', function esc(e) {
     if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
   });
