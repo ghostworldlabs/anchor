@@ -371,6 +371,7 @@ function _ecgMountRunLedger() {
             dock.insertBefore(cl, say || null);
           }
           _ecgRenderRunLedger(cl, _ECG_RUNS_CACHE.slice().reverse());
+          try { _ecgDriveNext(); } catch (e) {}
         }
         try { _ecgAnnotateRailRuns(); } catch (e) {}
       })
@@ -378,6 +379,27 @@ function _ecgMountRunLedger() {
   };
   tick();
   _ECG_LEDGER_POLL = setInterval(tick, 15000);
+}
+
+/* (2026-08-07, John) OPEN = DRIVE. He opens the Seal and it used to sit
+   there. Now, once per page load, when the chamber is open with a roadmap and
+   nothing running and no card pending and no unanswered question — the next
+   step's commission card comes up UNPROMPTED, one Go from moving. */
+var _ECG_AUTODROVE = false;
+function _ecgDriveNext() {
+  if (_ECG_AUTODROVE) return;
+  var convo = document.getElementById('ecgConvo');
+  if (!convo) return;
+  if (!document.querySelector('.ecg-rail .ecg-step')) return;   // no roadmap yet
+  var running = _ECG_RUNS_CACHE.some(function (r) { return r.outcome === 'running'; });
+  if (running) { _ECG_AUTODROVE = true; return; }               // ledger shows it
+  var newest = _ECG_RUNS_CACHE[0];
+  if (newest && newest.outcome === 'asked') { _ECG_AUTODROVE = true; return; } // answer first
+  if (_ECG_PENDING_GO && document.body.contains(_ECG_PENDING_GO)) {
+    _ECG_AUTODROVE = true; return;                              // card already up
+  }
+  _ECG_AUTODROVE = true;
+  _ecgCommissionPropose(convo);
 }
 
 /* The thin page-level line: state dots + a phrase, click opens the Seal. */
@@ -6995,7 +7017,7 @@ function _ecgSpeak(convo, text) {
   // the card he is literally answering.
   if (_ECG_PENDING_GO && document.body.contains(_ECG_PENDING_GO) &&
       !_ECG_PENDING_GO.disabled &&
-      /^(yes[,.! ]*)?(go|run( it| \w+)?|start( it)?|do it|launch( it)?)[.! ]*$/i
+      /^(ok[,.! ]*)?(yes[,.! ]*)?(let'?s go|go ahead|go for it|go|run( it| \w+)?|start( it)?|do it|launch( it)?)[.! ]*$/i
         .test(String(text).trim())) {
     _ecgJohnMsg(convo, text);
     _ecgNoteTurn('john', text);

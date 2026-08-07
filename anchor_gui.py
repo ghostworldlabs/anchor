@@ -865,26 +865,34 @@ def static_asset(rel_path: str):
     return target.read_bytes(), ctype
 
 
-#: Per-process cache of minted content-hash versions {rel_path: hash8}.
+#: Cache of minted content-hash versions {rel_path: (mtime, size, hash8)}.
+#: Keyed on the file's (mtime, size) so an EDIT re-mints WITHOUT a restart —
+#: the once-per-process mint (2026-08-06) served John three rounds of stale UI:
+#: the page kept referencing the old ?v= while the bytes on disk were new.
 _static_asset_versions = {}
 
 
 def static_asset_version(rel_path: str) -> str:
     """The content-hash cache-buster for a static asset (the ``?v=<hash8>``).
 
-    sha256 of the file bytes, first 8 hex chars, minted ONCE per process (a
-    restart re-mints it, so a deploy that changes the file changes every
-    page's asset URL). A missing asset honestly returns ``"missing"`` and is
-    NOT cached, so the version heals as soon as the file exists.
+    sha256 of the CURRENT file bytes, first 8 hex chars, re-minted whenever
+    the file's (mtime, size) changes — so a changed file changes every page's
+    asset URL on the next render, restart or not. A missing asset honestly
+    returns ``"missing"`` and is not cached, healing as soon as it exists.
     """
+    try:
+        st = (STATIC_DIR / rel_path.lstrip("/")).stat()
+        key = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return "missing"
     cached = _static_asset_versions.get(rel_path)
-    if cached is not None:
-        return cached
+    if cached is not None and cached[0] == key:
+        return cached[1]
     asset = static_asset(rel_path)
     if asset is None:
         return "missing"
     ver = _hashlib.sha256(asset[0]).hexdigest()[:8]
-    _static_asset_versions[rel_path] = ver
+    _static_asset_versions[rel_path] = (key, ver)
     return ver
 
 
@@ -4503,24 +4511,18 @@ def _render_layoutd_html(folder_path, project_id):
     zones = _layoutd_zones(folder_path, project_id, sessions_by_lane)
     # v12 W10: bind the tiles to the effort view (session_id → effort dict).
     effort_index = _build_effort_index(project_id)
-    research_zone = _render_layoutd_zone(
-        "research", "Research", "&#128300; Latest Research",
-        zones["research"], folder_path, project_id, effort_index=effort_index)
-    plan_build_zone = _render_layoutd_zone(
-        "plan_build", "Plan/Build", "&#128208;&#8594;&#128296; Latest Plan / Build",
-        zones["plan_build"], folder_path, project_id, effort_index=effort_index)
-    # General sessions zone (bare terminals): most-recent headline + older-runs
-    # shelf, mirroring the research / plan-build zones. Rendered ONLY when the
-    # project actually has general sessions (unlike the always-present trio zones)
-    # — so a project with no general activity is unchanged, and general sessions
-    # are still started from the existing top "Open terminal" control (newGeneral,
-    # which refreshes the board so this zone appears).
+    # (2026-08-07, John — the simple workbench, SERVER-side this time.) The
+    # Research and Plan/Build zones are gone: John works in general terminals,
+    # and steward-commissioned trio runs are watched from the run ledger, not
+    # board columns. Sessions in those lanes stay reachable via the session
+    # bar chips and the ledger's "Open the session".
+    research_zone = ""
+    plan_build_zone = ""
+    # The GENERAL zone is the board now — always rendered, empty state included.
     general_sessions = zones.get("general", []) or []
-    general_zone = ""
-    if general_sessions:
-        general_zone = _render_layoutd_zone(
-            "general", "General", "&#128187; Latest General session",
-            general_sessions, folder_path, project_id, effort_index=effort_index)
+    general_zone = _render_layoutd_zone(
+        "general", "General", "&#128187; Latest General session",
+        general_sessions, folder_path, project_id, effort_index=effort_index)
     gandalf_panel = _render_layoutd_gandalf_panel(folder_path, project_id)
     grass_panel = _render_layoutd_grass_panel(folder_path, project_id)
     deliv_panel = _render_layoutd_deliverables_panel(folder_path, project_id)
@@ -4529,20 +4531,15 @@ def _render_layoutd_html(folder_path, project_id):
     # starts an effort at the Research stage, "+ New plan/build" starts one at the
     # Plan stage (W6 supports starting at research OR plan). Both go through
     # newEffort(stage) → term_start (effort_managed=True), token-authed.
+    # (2026-08-07, John) One start control: the general terminal. Research /
+    # plan / build work is commissioned through the steward, not hand-started
+    # from board buttons.
     new_effort = (
         "<div class='neweffort-wrap' style='margin:0 0 18px;display:flex;gap:8px'>"
-        "<button class='btn primary neweffort' id='newResearchBtn' "
-        "onclick=\"newEffort('research')\" "
-        "title='Start a new effort at the Research stage'>"
-        "+ New research</button>"
-        "<button class='btn primary neweffort' id='newPlanBuildBtn' "
-        "onclick=\"newEffort('plan')\" "
-        "title='Start a new effort at the Plan stage (then advance to Build)'>"
-        "+ New plan/build</button>"
         "<button class='btn primary neweffort' id='newGeneralBtn' "
         "onclick=\"newEffort('general')\" "
-        "title='Start a new general session'>"
-        "+ New general</button></div>"
+        "title='Start a new general terminal session'>"
+        "+ New general terminal</button></div>"
     )
     board = (
         "<div class='pgrid layoutd'>"
@@ -5702,10 +5699,34 @@ def render_project_window_html(project_id: str) -> str:
         f"<div style='padding:8px 18px;border-bottom:1px solid var(--border);"
         f"font-size:12.5px;color:var(--text-dim);white-space:pre-wrap'>"
         f"&#128221; {notes_esc}</div>" if notes_raw.strip() else "")
+    # ── SLIM MODE (2026-08-07, John) ─────────────────────────────────────────
+    # The main dashboard's Workbench tile iframes THIS page for the
+    # __dashboard__ pseudo-project — and got a nested project cockpit with a
+    # steward inside it. Slim = what that tile is FOR: general-terminal admin
+    # + the right-hand tiles. No Seal, no chips, workbench open by default.
+    slim = (project_id == "__dashboard__")
+    # The seal tile is a SLOT now: pre-filled markup (slot values are never
+    # re-scanned, so the steward values are baked in here, not @@-referenced).
+    seal_tile = "" if slim else (
+        "<details class='dash-tile tile-seal' id='tile-ecgseal' "
+        "ontoggle=\"if(this.open)ecgSealMountInline()\"><summary title='"
+        + html_lib.escape(_stew_ui["label"], quote=True)
+        + " — the steward chamber (take charge)'><img class='tile-ico' src='"
+        + html_lib.escape("/vendor/brand/%s?v=%s" % (_stew_ui["seal"], BUILD_ID), quote=True)
+        + "' alt='' onerror=\"this.style.display='none'\"/> "
+        + html_lib.escape(_stew_ui["seal_name"])
+        + "<span class='tile-count'>" + html_lib.escape(_stew_ui["label"])
+        + " &mdash; the steward chamber</span></summary>"
+        "<div class='tile-body'><div class='ecg-seal-host' id='ecgSealHost'></div>"
+        "<div class='ecg-chamber-steps-host' id='ecgChamberStepsHost' data-wave='18'></div>"
+        "<div class='ecg-chamber-artifact-host' id='ecgChamberArtifactHost' data-wave='18'></div>"
+        "</div></details>")
     slots = {
         "name": name,
         "xterm_prefix": XTERM_URL_PREFIX,
         "shell_css": shell_css_block,
+        "seal_tile": seal_tile,
+        "wb_open": " open" if slim else "",
         "back_link": "" if project_id == "__dashboard__" else back_link_normal,
         "notes_attr": notes_attr,
         "blurb_attr": blurb_attr,
@@ -5722,7 +5743,9 @@ def render_project_window_html(project_id: str) -> str:
         "objective_block": objective_block,
         "blurb_block": blurb_block,
         "notes_block": notes_block,
-        "status_line": status,
+        # (2026-08-07, John) The Research/Planning/Build counter chips are the
+        # old shape of the course — gone from the project page entirely.
+        "status_line": "",
         "kanban": kanban,
         "dock_chrome": dock_chrome,
         "boneyard_tpl": boneyard_tpl,
@@ -18653,7 +18676,11 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                 else:
                     data, ctype = asset
-                    self._send_bytes(data, ctype, cache="public, max-age=86400")
+                    # no-cache (revalidate each use), NOT max-age=86400: the
+                    # day-long cache pinned three rounds of stale UI to John's
+                    # browser. Local server, ~300KB — refetch is free; stale
+                    # app code is not.
+                    self._send_bytes(data, ctype, cache="no-cache")
             elif self.path.startswith(ANCHOR_TERM_URL_PREFIX):
                 # Read-only vendored terminal-console static asset (Wave 7),
                 # served like KaTeX (traversal-safe). Backs the interactive

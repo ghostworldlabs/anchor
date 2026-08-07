@@ -114,7 +114,7 @@
 .ecg-run-strip{margin:0 16px 8px;border:1px solid #2c4a33;border-radius:8px;background:rgba(52,168,83,.08);padding:6px 10px}
 .ecg-run-strip .row{display:flex;align-items:center;gap:9px;padding:3px 0;font-size:13px}
 .ecg-run-strip .dot{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
-@keyframes ecgpulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes ecgpulse{0%,100%{opacity:1}50%{opacity:.35} }
 /* (2026-08-06 evening) THE RUN LEDGER — always-on, board-level. Green pulse =
    running · amber pulse = needs you · GOLD = finished · dim gold = watch ended
    · red = died. Click Report for the steward's read; Open for the terminal. */
