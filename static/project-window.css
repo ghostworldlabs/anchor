@@ -67,6 +67,7 @@
 .ecg-btn.gold{border-color:#c9a227;color:#c9a227}
 .ecg-chamber{display:flex;gap:0;min-height:260px}
 .ecg-convo-col{flex:1;min-width:0;display:flex;flex-direction:column}
+.ecg-livestatus{padding:5px 16px;font-size:11.5px;color:#34a853;border-top:1px dashed var(--border);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ecg-convo-col .ecg-saybox{border-top:1px solid var(--border)}
 .ecg-convo-col .ecg-run-fold{padding:6px 16px 0}
 .ecg-rail{flex:0 0 270px;border-right:1px solid var(--border);padding:12px 14px;overflow:auto}

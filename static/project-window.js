@@ -552,10 +552,16 @@ function _ecgMountRunLedger() {
             sumEl.textContent = 'Runs — ' +
               (live ? live + ' live/waiting · ' : '') + doneN + ' finished';
           }
-          // Live runs keep the fold open so nothing active hides.
-          if (live && !fold.open) fold.open = true;
+          // Auto-open ONCE per page load when something is live; after John
+          // closes it, his choice stands (2026-08-07: "keeps opening on its
+          // own — which is not what it should be doing").
+          if (live && !fold.open && !window._ECG_FOLD_AUTOOPENED) {
+            fold.open = true;
+            window._ECG_FOLD_AUTOOPENED = true;
+          }
           _ecgRenderRunLedger(document.getElementById('ecgChamberLedger'),
             _ECG_RUNS_CACHE.slice().reverse());
+          try { _ecgLiveStatusLine(); } catch (e) {}
           try { _ecgDriveNext(); } catch (e) {}
         }
         try { _ecgAnnotateRailRuns(); } catch (e) {}
@@ -565,6 +571,44 @@ function _ecgMountRunLedger() {
   };
   tick();
   _ECG_LEDGER_POLL = setInterval(tick, 15000);
+}
+
+/* (2026-08-07, John) The ONE live status line in the dialog, updated IN
+   PLACE — timestamp + what's running + elapsed + the latest ⏱ headline.
+   Sits right above the say box; disappears when nothing is live. */
+function _ecgLiveStatusLine() {
+  var running = (_ECG_RUNS_CACHE || []).filter(function (r) {
+    return r.outcome === 'running';
+  })[0];
+  var say = document.querySelector('.ecg-convo-col .ecg-saybox');
+  var line = document.getElementById('ecgLiveStatus');
+  if (!running) { if (line) line.remove(); return; }
+  if (!line && say && say.parentNode) {
+    line = _ecgEl('div', 'ecg-livestatus');
+    line.id = 'ecgLiveStatus';
+    say.parentNode.insertBefore(line, say);
+  }
+  if (!line) return;
+  var now = new Date();
+  var hh = ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+  line.textContent = '⏱ ' + hh + ' · ' + (running.skill || 'run') +
+    ' running · started ' + _ecgRunAge(running.at) +
+    (window._ECG_LAST_STATUS_LINE ? ' · ' + window._ECG_LAST_STATUS_LINE : '');
+  // Refresh the ⏱ headline from the pulse read (cheap: huge cursor skips
+  // the tail; the status scan is server-side over the full buffer).
+  fetch('/api/ecgberht/run_pulse?project_id=' + encodeURIComponent(PROJECT_ID) +
+        '&session_id=' + encodeURIComponent(running.session_id) +
+        '&cursor=999999999' + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok && j.latest_status) {
+        var first = String(j.latest_status).split('\n')
+          .map(function (s) { return s.trim(); })
+          .filter(function (s) { return s && !/^[─—-]+$/.test(s); })
+          .slice(0, 2).join(' · ');
+        window._ECG_LAST_STATUS_LINE = first.slice(0, 160);
+      }
+    }).catch(function () {});
 }
 
 /* (2026-08-07, John) THE PULSE — the 10-minute-status feel, in the page.

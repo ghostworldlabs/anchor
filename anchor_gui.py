@@ -11098,11 +11098,20 @@ def handle_ecgberht_run_pulse(handler, path, body):
         except Exception:
             return None
 
-    # Live tail while running; the banked tail once it stopped.
+    # Live tail while running; the banked tail once it stopped. The ⏱ status
+    # scan reads the WHOLE retained buffer — a status table emitted between
+    # polls must be CAUGHT, not missed because the fresh chunk lacked one
+    # (2026-08-07, John: "you have to catch the status and store it").
+    full_text = ""
     try:
         import terminal_session as _ts
         r = _ts.read_since(sid, cursor)
         chunk = (r or {}).get("chunk") or ""
+        try:
+            full = _ts.read_since(sid, 0)
+            full_text = _strip_terminal_noise((full or {}).get("chunk") or "")
+        except Exception:
+            full_text = ""
         if not chunk and cursor == 0 and rec.get("transcript_tail"):
             # A parked/dead session reads EMPTY, not an exception (live-found
             # 2026-08-07 after the warm drain) — the banked tail is the truth.
@@ -11116,7 +11125,8 @@ def handle_ecgberht_run_pulse(handler, path, body):
         out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
         out["cursor"] = cursor
         out["live"] = False
-    out["latest_status"] = _latest_status_block(out.get("tail") or "") \
+    out["latest_status"] = _latest_status_block(full_text) \
+        or _latest_status_block(out.get("tail") or "") \
         or _latest_status_block(
             _strip_terminal_noise(rec.get("transcript_tail") or ""))
     handler._send_json(out, 200)
