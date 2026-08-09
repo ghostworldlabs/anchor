@@ -23,6 +23,7 @@
 - [ ] Figure out flights and where the expenses go — Priority: 1 — energy: med — [commercial]
 - [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
 - [x] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
+- [ ] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
 
 
 ## Nexia Impact / Axmra Capital

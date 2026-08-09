@@ -46,7 +46,7 @@
 - [x] Get Zombie Hunter Done & In V1 of Anchor — Priority: 1 — energy: med — [commercial]
 - [x] Get Skill Foundry Working w/ GUI V1.1 of Anchor — Priority: 1 — energy: med — [commercial]
 - [ ] Run get data sets for effort with Peter Ebbes — Priority: 1 — energy: med — [academic]
-- [ ] Update the Liechty Family Trusts and Share — Priority: 1 — energy: med — [family]
+- [x] Update the Liechty Family Trusts and Share — Priority: 1 — energy: med — [family]
 - [x] Contact David Bears — Priority: 1 — energy: med — [commercial]
 - [x] Sort Box set up -- multiple collaborators, access via Claude code ... — Priority: 1 — energy: med — [commercial]
 - [ ] Expenses to sort — Priority: 1 — energy: med — [personal] — Notes: LinkedIn 2/15/26, $254.28. Marriott 1/26/26, SpringHill Suites $166.71 Ref #  898292533 3 to 5 business days ...
@@ -54,13 +54,17 @@
 - [x] Cancel box subscirption — Priority: 1 — energy: med — [personal]
 - [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
 - [x] Figure out Youth Super Activity Trip — Priority: 1 — energy: med — [personal]
-- [ ] Get Trust Structure Verified — Priority: 1 — energy: med — [personal]
+- [x] Get Trust Structure Verified — Priority: 1 — energy: med — [personal]
 - [x] Create a verified Trust Structure Doc and PPT to Share with Family — Priority: 1 — energy: med — [family]
 - [ ] Draft my updated version of the MBA class — Priority: 1 — energy: med — [academic]
 - [x] Get a working version of Ecgberht working — Priority: 1 — energy: med — [personal]
 - [x] Get a working version of Skill Foundry working — Priority: 1 — energy: med — [personal]
 - [x] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
-- [ ] Get Stanford's feedback on Trust Docs — Priority: 1 — energy: med — [family]
+- [x] Get Stanford's feedback on Trust Docs — Priority: 1 — energy: med — [family]
+- [x] Build presentation for Community of Practice for Smeal — Priority: 1 — energy: med — [academic]
+- [x] Share my trust and trust summary doc w/Brothers. — Priority: 1 — energy: med — [family]
+- [ ] Revise the two family trusts and share with Stanford to get in place. — Priority: 1 — energy: med — [family]
+- [ ] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
 
 
 ### P1 (carried — Mon/Tue)

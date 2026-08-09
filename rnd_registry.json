@@ -166,5 +166,29 @@
     "remote_url": "",
     "auto_push": false,
     "group": "Axmra"
+  },
+  {
+    "id": "41fa29ec85014237bf81fafb2c8d0dd8",
+    "name": "MBA Teaching with AI Presentation",
+    "folder_path": "C:\\dev\\MBA Teaching AI",
+    "priority": 1,
+    "state": "retired",
+    "notes": "",
+    "blurb": "CLAUDE.md",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Teaching"
+  },
+  {
+    "id": "eca208f8a62b4fd495faf493761112a3",
+    "name": "MBA Teaching with AI",
+    "folder_path": "C:\\dev\\MBA Teaching AI\\MBA Teaching with AI",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Teaching"
   }
 ]
