@@ -145,6 +145,12 @@ auth_warn.py
 # `node` — the skill host — is an EXTERNAL CLI through a seam, like git/gh.
 commission_executor.py
 status_outbox.py
+# Steward run-loop 2026-08 (imported by anchor_gui.py handlers): the
+# commission-session join (propose→confirm→launch→watch→ingest, the
+# auto-continue hop, the campaign auto-commit) and its stdlib-only
+# runner (drive/classify). Both stdlib-only per the same law.
+commission_session.py
+commission_runner.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

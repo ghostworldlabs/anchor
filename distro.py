@@ -114,6 +114,7 @@ MANIFEST_NAME = "dist_manifest.txt"
 _EMAIL_ALLOWLIST = frozenset({
     "anchor@localhost",        # git identity used by effort_history auto-commits
     "noreply@anthropic.com",   # Claude Code co-author trailer
+    "ecgberht@anchor.local",   # git identity used by commission_session campaign auto-commits
 })
 _EMAIL_ALLOWLIST_DOMAINS = ("example.com", "example.org", "example.net")
 
