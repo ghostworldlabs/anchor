@@ -2,10 +2,10 @@
   "job_id": "disc-274ba87a956ea1f0",
   "project_id": "f69f6d66171f4dbd95c8c45db6846d97",
   "lane": "planning",
-  "created_at": 1784404617.734892,
+  "created_at": 1784924341.42398,
   "source": "discovered",
   "kind": "plan-doc",
-  "title": "Implementation Plan: Anchor Doctor UI V2",
+  "title": "Implementation Plan: Anchor Doctor UI V3 — Honest Agentic Diagnostics",
   "artifact_path": "planning/anchor-doctor-ui/handoff/IMPLEMENTATION-PLAN.md",
   "status": "imported"
 }
