@@ -1,11 +1,17 @@
 {
   "docs": {
-    "description": "planning/anchor-doctor-ui/handoff/DESCRIPTION.md",
-    "plan": "planning/anchor-doctor-ui/handoff/IMPLEMENTATION-PLAN.md",
-    "execution_log": "planning/anchor-doctor-ui/handoff/EXECUTION-LOG.md"
+    "description": "planning/steward-chamber-2026-08-09/DESCRIPTION.md",
+    "plan": "planning/steward-chamber-2026-08-09/IMPLEMENTATION-PLAN.md",
+    "execution_log": "planning/steward-chamber-2026-08-09/EXECUTION-LOG.md"
   },
-  "git": { "enabled": true, "branch": "foreman/doctor-v3" },
-  "budget": { "max_waves_per_run": 4, "max_fix_iters_per_wave": 4 },
+  "git": {
+    "enabled": true,
+    "branch": "foreman/steward-chamber"
+  },
+  "budget": {
+    "max_waves_per_run": 12,
+    "max_fix_iters_per_wave": 4
+  },
   "models": {
     "execute": "claude:claude-fable-5",
     "fix": "claude:claude-fable-5",
