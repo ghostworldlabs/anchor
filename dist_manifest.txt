@@ -151,6 +151,16 @@ status_outbox.py
 # runner (drive/classify). Both stdlib-only per the same law.
 commission_session.py
 commission_runner.py
+# Steward chamber 2026-08 (W4): commission_session.py imports chamber_manifest
+# (the versioned pipeline-manifest owner/lint) and chamber_projections (the
+# chamber sidecar append/atomic-write substrate) at runtime, so the deny-by-
+# default import-closure gate requires both staged. Both stdlib-only.
+# chamber/manifest-schema.json is chamber_manifest.load_schema()'s runtime
+# data document (the F2 versioned schema the lint validates against) — absent,
+# the shipped manifest lint dies FileNotFoundError (the foundry_map lesson).
+chamber_manifest.py
+chamber_projections.py
+chamber/manifest-schema.json
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

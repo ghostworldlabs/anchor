@@ -262,6 +262,18 @@ def confirm_and_launch(
     if not proposal or not isinstance(proposal, dict):
         return {"ok": False, "error": "proposal_required"}
 
+    # W4 commission-time manifest lint (steward-chamber plan, F2): a NEW
+    # scaffold (born under the manifest convention) without a valid sidecar
+    # manifest is a HARD refusal before anything is confirmed or launched;
+    # a campaign predating the manifest routes to the W5 brownfield dual
+    # path (route "brownfield-w5") and proceeds.
+    import chamber_manifest as _cm
+    manifest_lint = _cm.commission_time_lint(folder)
+    if not manifest_lint.get("ok"):
+        return {"ok": False, "error": manifest_lint.get("error"),
+                "message": manifest_lint.get("message"),
+                "manifest_lint": manifest_lint}
+
     confirmed = run_bridge("confirm", {
         "project": str(folder),
         "proposal": proposal,
@@ -364,6 +376,21 @@ def confirm_and_launch(
         **(record_extra or {}),
     }
     _atomic_write_json(_run_record_path(folder, session_id), record)
+
+    # W4 chamber sidecar: the commission_start event-time projection, plus the
+    # manifest hash keyed to the commission id from the run record's EXISTING
+    # receipt fields (route "manifest" only). Best-effort — a sidecar hiccup
+    # never blocks a launch John just confirmed; the projections are
+    # rebuildable derived data (W5 cold-open rebuild).
+    try:
+        import chamber_projections as _cproj
+        _cproj.record_commission_start(
+            folder, commission_id, session_id=session_id,
+            step_id=step_id, skill=skill, lane=lane)
+        if manifest_lint.get("route") == _cm.ROUTE_MANIFEST:
+            _cm.record_manifest_hash(folder, record)
+    except Exception:
+        pass
 
     watching = False
     if watch:
