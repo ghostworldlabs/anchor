@@ -63,7 +63,7 @@
 - [x] Get Stanford's feedback on Trust Docs — Priority: 1 — energy: med — [family]
 - [x] Build presentation for Community of Practice for Smeal — Priority: 1 — energy: med — [academic]
 - [x] Share my trust and trust summary doc w/Brothers. — Priority: 1 — energy: med — [family]
-- [ ] Revise the two family trusts and share with Stanford to get in place. — Priority: 1 — energy: med — [family]
+- [x] Revise the two family trusts and share with Stanford to get in place. — Priority: 1 — energy: med — [family]
 - [ ] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
 
 

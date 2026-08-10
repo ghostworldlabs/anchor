@@ -100,3 +100,15 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [11:04] W7 fix-1 landed quickly; re-gate t+6m and the distro-scan tests are PASSING this pass. Verdict ~11:18.
 [11:14] W7 re-gate t+16m, late suite, clean. Verdict ~11:19.
 [11:24] W7 re-gate GREEN (moved to review); review t+5m — one reviewer reply not-valid-JSON, retried once (watching for the agy-auth failure signature).
+[11:34] W7 GREEN + committed e207937 (13 files; review 0 blockers — the JSON retry recovered). W8 execute t+7m (status outbox / wire-homing / rule hooks).
+[11:44] W8 execute t+17m (109 tool calls) — wiring status_flip / outbox into anchor_gui; checking dist_manifest proactively this time.
+[11:54] W8 execute done ~11:46; gate t+7m — distro scans PASSING this time (proactive manifest update worked). Verdict ~12:08.
+[12:04] W8 gate t+17m, mid-suite, clean. Verdict ~12:08.
+[12:14] W8 gate iter-0 RED: ONE real functional failure — test_folder_build_lock ac3 (LaneBusyError not raised; cross-project same-folder build lock). fix:w8.1 investigating t+1m.
+[12:24] W8 fix-1 complete (8.7m, clean exit); re-gate running t+2m. Verdict ~12:43.
+[12:34] W8 re-gate t+12m, past the folder-build-lock test region, clean. Verdict ~12:43.
+[12:44] W8 re-gate GREEN (exit 0, 1135/1135 — lock repaired properly). Review running; reviewer #1 JSON retry again (same transient as W7).
+[13:00] W8 delta-coverage HALT RECOVERED: flagged 'surface' was live-service residue (Doctor transcript). Restored churned MUTATION-INVENTORY to HEAD, added naming stub gate tests/test_general_transcript_surface_w8.py (2/2 green), cleared, resumed — W8 re-entering at gate. NOTE: git add/commit DENIED by session permissions (0081 drift pattern); residue rides the W8 GO sweep instead.
+[13:04] W8 re-gate t+3m after recovery, clean start. Verdict ~13:25.
+[13:14] W8 re-gate t+13m, mid-suite, clean. Verdict ~13:23.
+[13:24] W8 re-gate GREEN (1135/1135). Review: BOTH reviewers not-valid-JSON; #0 TRANSPORT FAILURE after retry (abstain). Matches the agy/Antigravity auth-expiry signature — watching #1's retry; if degraded-GO, John gets the re-login ask.

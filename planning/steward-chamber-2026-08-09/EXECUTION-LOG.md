@@ -8,3 +8,4 @@
 - 2026-08-10T14:07:42.037Z — Wave 5/12 GREEN — W5 Phase-1 Substrate: brownfield derivation, reconciliation, brief precompute, cold-open rebuild (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
 - 2026-08-10T16:12:16.620Z — Wave 6/12 GREEN — W6 Phase-1 Proof: painted M1 vertical slice, <2s + zero-model-call CI (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
 - 2026-08-10T17:26:19.961Z — Wave 7/12 GREEN — W7 Phase-2 Rail: verbatim M1 mount + DOM-diff kill gate, run_pulse re-home, ETA medians (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
+- 2026-08-10T19:25:14.889Z — Wave 8/12 GREEN — W8 Phase-2 Talk: E1 co-landed whole, say box live, ease count starts (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
