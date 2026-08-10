@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "artifact": "chamber-tile-affordance-inventory",
+  "owner_file": "chamber_status_overlay.py",
+  "plan_ref": "planning/steward-chamber-2026-08-09/IMPLEMENTATION-PLAN.md :: Wave 9 (C11 - tile-affordance functional inventory + parity map, landed BEFORE STATUS is called complete)",
+  "law": "Every functional affordance the bottom run tiles carry (log links, kill control, historical runs, raw output and the rest) is REGISTERED here as a row grounding itself in a SOURCE marker that still exists in the tile code, and every row RESOLVES: an 'equivalent' row names a LIVE rail/STATUS (or surviving-surface) target marker that must still exist in code; a 'proposed-equivalent' or 'proposed-loss' row carries the decision material John rules on at the W12 signing. The CI gate (chamber_status_overlay.tile_affordance_problems, exercised by tests/test_chamber_close_ci_w9.py) fails by name on a stale source marker, a dead equivalent claim, or an undecided row - a living registry, never a Phase-0 snapshot.",
+  "signing_law": "W12 tile retirement may ONLY execute against this map once John signs it (C11): every row resolved to a live rail/STATUS equivalent or a John-signed accepted loss, and rail+STATUS parity SIGNED - no tile code is deleted before the signature. This artifact lands in W9 UNSIGNED (signed_by_john: false); W12 records the signature.",
+  "signed_by_john": false,
+  "rows": [
+    {
+      "id": "ambient-runs-line",
+      "affordance": "Page-level ambient runs line - glance the live/finished run states without opening anything",
+      "source_file": "static/project-window.js",
+      "source_marker": "_ecgRenderAmbientRuns",
+      "parity": {
+        "kind": "equivalent",
+        "target_file": "chamber_rail.py",
+        "target_marker": "run-now",
+        "note": "The M1 progress strip's run-now line carries the same glance state inside the Seal; the STATUS overlay adds the latest captured status table on demand."
+      }
+    },
+    {
+      "id": "run-report-read",
+      "affordance": "Per-run steward report read on the tile's Report expander (say / needs / recommendation)",
+      "source_file": "static/project-window.js",
+      "source_marker": "lreport",
+      "parity": {
+        "kind": "equivalent",
+        "target_file": "chamber_rail.py",
+        "target_marker": "report ▸",
+        "note": "A done rail step carries its R-YIELD-LINE one-line yield plus the report link into the existing /report viewer, which serves the full steward read."
+      }
+    },
+    {
+      "id": "historical-runs",
+      "affordance": "Historical finished-runs access in completion order, including each run's earlier/prior reports",
+      "source_file": "static/project-window.js",
+      "source_marker": "prior_reports",
+      "parity": {
+        "kind": "equivalent",
+        "target_file": "chamber_rail.py",
+        "target_marker": "class=\"fstep done\"",
+        "note": "Every completed step stands permanently on the rail as a done fstep with its yield + report link; the run records themselves persist in the project sidecar regardless of any surface."
+      }
+    },
+    {
+      "id": "full-transcript-log-link",
+      "affordance": "One-click full session transcript (the log link into the traversal-safe /artifact route)",
+      "source_file": "static/project-window.js",
+      "source_marker": "Open the full transcript",
+      "parity": {
+        "kind": "proposed-equivalent",
+        "note": "The transcript is PERSISTED in the project (general/<session>-transcript.md) and stays reachable through the existing traversal-safe /artifact route independent of any tile. PROPOSAL for the W12 signing: surface a transcript link on the rail runcard's links row; if John declines, he signs the absent link as an accepted loss - the data itself is never lost."
+      }
+    },
+    {
+      "id": "open-live-session",
+      "affordance": "Open the live session panel from a run tile (raw PTY output / direct terminal access)",
+      "source_file": "static/project-window.js",
+      "source_marker": "Open the session",
+      "parity": {
+        "kind": "equivalent",
+        "target_file": "chamber_rail.py",
+        "target_marker": "data-open-session",
+        "note": "The rail runcard's session ▸ link opens the SAME session panel (openPanel); the session-panel surface itself is not a bottom tile and is not retired by W12."
+      }
+    },
+    {
+      "id": "kill-control",
+      "affordance": "Kill control - Kill → Boneyard on the session panel the tile opens",
+      "source_file": "static/project-window.js",
+      "source_marker": "killPanel",
+      "parity": {
+        "kind": "equivalent",
+        "target_file": "static/project-window.js",
+        "target_marker": "function killPanel",
+        "note": "The kill lives on the session panel (a surviving surface, not a bottom tile); post-retirement it is reached via the rail runcard's session ▸ link instead of a tile's Open-the-session button. No kill capability is lost."
+      }
+    },
+    {
+      "id": "dismiss-finished-tile",
+      "affordance": "Dismiss a finished run tile from the fold (presentation-only; the run record stays)",
+      "source_file": "static/project-window.js",
+      "source_marker": "ldismiss",
+      "parity": {
+        "kind": "proposed-loss",
+        "note": "The rail is state-derived: done steps fold into the flow and the STATUS overlay lists only what remains, so there is nothing to dismiss. PROPOSED ACCEPTED LOSS for John's W12 signature - the affordance was presentation-only and destroyed no data."
+      }
+    },
+    {
+      "id": "rearm-watch",
+      "affordance": "'Hand it back' / 'Keep watching' re-arm on an asked/quiet/timeout run tile (commission_watch)",
+      "source_file": "static/project-window.js",
+      "source_marker": "Hand it back",
+      "parity": {
+        "kind": "proposed-equivalent",
+        "note": "W10's serialized decision-gate queue renders asked/died/quiet runs as head cards whose resolve re-arms through the SAME commission_watch seam - the drawn card replaces the tile button. To be verified against the landed W10 queue at the W12 signing; until then the tile control stands (no tile is removed before the signature)."
+      }
+    }
+  ]
+}

@@ -38,3 +38,51 @@ Sayplainlywhenhealthy;preferinspect-then-suggestovermutation.
 [STATUS 13:04] Wave: 8/12 | Budget: 9 waves | State: running
 
 [STATUS 13:14] Wave: 8/12 | Budget: 9 waves | State: running
+
+[STATUS 13:24] Wave: 8/12 | Budget: 11 waves | State: running
+
+[STATUS 13:34] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 13:44] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 13:54] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 14:04] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 14:14] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 14:24] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 14:34] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 14:44] Wave: 9/12 | Budget: 10 waves | State: halted
+
+[STATUS 14:54] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:04] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:14] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:24] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:34] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:44] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 15:54] Wave: 9/12 | Budget: 10 waves | State: running
+
+[STATUS 16:04] Wave: 9/12 | Budget: 11 waves | State: halted
+
+[STATUS 16:14] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 16:24] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 16:34] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 16:44] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 16:54] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 17:04] Wave: 9/12 | Budget: 11 waves | State: running
+
+[STATUS 17:14] Wave: 9/12 | Budget: 11 waves | State: running

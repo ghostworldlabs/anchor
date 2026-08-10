@@ -432,6 +432,15 @@ def _esc(value) -> str:
     return _html.escape(str(value if value is not None else ""), quote=True)
 
 
+#: F5 link-scheme law (steward-chamber W9): a yield's report link renders as
+#: an anchor ONLY when it targets one of the fixed internal read routes;
+#: anything else (javascript:, an agent-invented path) renders as inert
+#: escaped text. Mirrors chamber_dom_law.INTERNAL_HREF_PREFIXES minus the
+#: in-page "#" (chamber_dom_law is CI-only and never imported by product
+#: code; tests/test_chamber_dom_law_w9.py pins the mirror in sync).
+_REPORT_LINK_PREFIXES = ("/artifact/", "/report/", "/summary/")
+
+
 def _first_not_done(steps: list) -> dict | None:
     for s in steps:
         if s.get("status") != "done":
@@ -536,7 +545,7 @@ def _render_fstep(step: dict) -> str:
         y = step.get("yield")
         if y and y.get("text"):
             link = y.get("report_link")
-            if isinstance(link, str) and link.startswith("/"):
+            if isinstance(link, str) and link.startswith(_REPORT_LINK_PREFIXES):
                 inner = '%s · <a href="%s">report ▸</a>' \
                         % (_esc(y["text"]), _esc(link))
             else:

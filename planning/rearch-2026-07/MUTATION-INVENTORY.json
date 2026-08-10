@@ -68,7 +68,7 @@
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "replace",
       "site": "paths.py:_replace_with_retry",
-      "count": 62
+      "count": 66
     },
     {
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
@@ -80,7 +80,7 @@
       "store": ".anchor/projects/pid-w1/grass/efforts/idea-<id>.json",
       "op": "write",
       "site": "paths.py:atomic_write_text",
-      "count": 68
+      "count": 72
     },
     {
       "store": ".anchor/projects/pid-w1/grass/index.json",
@@ -92,13 +92,19 @@
       "store": ".anchor/projects/pid-w1/grass/index.json",
       "op": "write",
       "site": "effort_history.py:_save_index",
-      "count": 131
+      "count": 135
+    },
+    {
+      "store": ".anchor/projects/pid-w1/grass/index.json",
+      "op": "replace",
+      "site": "paths.py:_replace_with_retry",
+      "count": 4
     },
     {
       "store": ".anchor/sessions.json",
       "op": "replace",
       "site": "session_registry.py:_atomic_replace",
-      "count": 136
+      "count": 144
     },
     {
       "store": ".anchor/sessions.json",
@@ -116,7 +122,7 @@
       "store": ".anchor/sessions.json",
       "op": "write",
       "site": "session_registry.py:_write_sessions_locked",
-      "count": 136
+      "count": 144
     }
   ]
 }

@@ -244,6 +244,20 @@ ROUTES = [
     # zero-model read over the W4/W5 sidecar projections (chamber_open).
     _r("GET", "/api/ecgberht/seal_open", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_ecgberht_seal_open", migrated=True),
+    # (steward-chamber W9) STATUS overlay as drawn: latest ⏱ table + remaining
+    # steps with n>=3 median ETAs — the same zero-spawn/zero-model bounded read
+    # as seal_open, rendered via chamber_status_overlay.
+    _r("GET", "/api/ecgberht/status_overlay", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_status_overlay", migrated=True),
+    # (steward-chamber W9) The injection-clock deliverable read (SAFE
+    # projection; argv/cwd never serialize) …
+    _r("GET", "/api/ecgberht/deliverable_state", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_deliverable_state", migrated=True),
+    # … and the ONE deliverable-action mutator (F3: shell:false, list-argv from
+    # the code-owned verb allow-list, contained path, pinned cwd; labeled inert
+    # otherwise). Row + red-to-green proof in chamber/routes-inventory.json.
+    _r("POST", "/api/ecgberht/deliverable_action", AUTH_TOKEN,
+       handler="handle_ecgberht_deliverable_action", migrated=True),
     _r("POST", "/api/ecgberht/speak", AUTH_TOKEN,
        handler="handle_ecgberht_speak", migrated=True),
     # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)

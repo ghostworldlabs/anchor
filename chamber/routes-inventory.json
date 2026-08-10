@@ -56,6 +56,7 @@
     { "method": "POST", "pattern": "/api/ecgberht/high_seat_act", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/ecgberht/chamber_confirm", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/ecgberht/chamber_correct", "match": "exact", "auth": "token" },
+    { "method": "POST", "pattern": "/api/ecgberht/deliverable_action", "match": "exact", "auth": "token", "landed_by": "steward-chamber W9 (F3 deliverable action registry; red-to-green in tests/test_chamber_close_ci_w9.py)" },
     { "method": "POST", "pattern": "/api/settings", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/doctor/healthcheck_run", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/auth/login", "match": "exact", "auth": "token" },

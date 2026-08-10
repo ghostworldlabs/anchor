@@ -10558,7 +10558,7 @@ def handle_ecgberht_seal_open(handler, path, body):
     # processes (never touches the Node bridge), zero writes.
     import chamber_rail
     try:
-        view = chamber_rail.seal_rail_view(folder)
+        view = chamber_rail.seal_rail_view(folder, project_id=pid)
         stw = _steward_ui()
         html_out = chamber_rail.render_seal_rail_html(
             view, steward={"label": stw.get("label") or "Ecgberht"})
@@ -10569,6 +10569,108 @@ def handle_ecgberht_seal_open(handler, path, body):
         return
     handler._send_json({"ok": True, "view": view, "html": html_out,
                         "css": css_out}, 200)
+
+
+def handle_ecgberht_status_overlay(handler, path, body):
+    """GET /api/ecgberht/status_overlay — the W9 STATUS overlay, exactly as
+    drawn (steward-chamber C2/C9).
+
+    John's "most recent status update + what's left and how long": the
+    latest captured ⏱ status table (or the honest pre-emission / idle face)
+    plus the remaining rail steps with their n>=3 median ETAs, rendered
+    server-side as the verbatim §overlays structure
+    (``chamber_status_overlay.render_status_overlay_html`` over the same
+    bounded ``chamber_rail.seal_rail_view`` read the Seal open uses). Pure
+    read — ZERO model calls, ZERO child processes (never the Node bridge),
+    ZERO writes; every slot value escaped (F5); token-authed like every
+    chamber read (401 before substance).
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_rail
+    import chamber_status_overlay
+    try:
+        view = chamber_rail.seal_rail_view(folder, project_id=pid)
+        html_out = chamber_status_overlay.render_status_overlay_html(view)
+        ov = chamber_status_overlay.overlay_view(view)
+    except Exception as exc:  # honest failure — never a blank or a guess
+        handler._send_json({"ok": False, "error": "status_overlay_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json({"ok": True, "html": html_out,
+                        "table_state": ov.get("table_state"),
+                        "degraded": ov.get("degraded")}, 200)
+
+
+def handle_ecgberht_deliverable_state(handler, path, body):
+    """GET /api/ecgberht/deliverable_state — the W9 injection-clock read
+    (steward-chamber C2, F3).
+
+    The SAFE deliverable projection the open chamber polls on the injection
+    clock to flip the ◇ box live the moment the ENGINE-FED landing exists on
+    disk — no reopen, never model-remembered
+    (``chamber_deliverable.deliverable_state``: manifest + disk + the W4
+    landing projection are the only sources). Read-only; relative paths
+    only; argv/cwd never serialize; zero model calls; zero spawns.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_deliverable
+    try:
+        out = chamber_deliverable.deliverable_state(folder, project_id=pid)
+    except Exception as exc:  # honest failure — never a guess
+        handler._send_json({"ok": False, "error": "deliverable_state_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json(out, 200)
+
+
+def handle_ecgberht_deliverable_action(handler, path, body):
+    """POST /api/ecgberht/deliverable_action — invoke THE registry action
+    for the project's declared deliverable (steward-chamber W9, C10 — F3).
+
+    The ONE chamber execution path, F3-bounded end to end: the action is
+    re-resolved server-side from the validated manifest at invoke time
+    (never trusted from the client — the request carries only the project
+    id), so the spawn — when one is armed at all — is ``shell:false`` with a
+    LIST argv built from the CODE-OWNED verb allow-list's fixed prefix plus
+    the symlink/junction-resolved CONTAINED output path, cwd pinned to the
+    project folder. Anything else — unknown type, disallowed verb, hostile
+    path content, an uncontained resolution, not-landed — answers the
+    LABELED inert state with its NAMED reason and executes NOTHING (409).
+    An armed ``open-report`` action answers its internal href and spawns
+    nothing. Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_close_ci_w9.py).
+    """
+    pid = str(body.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_deliverable
+    try:
+        action = chamber_deliverable.action_for_project(folder, project_id=pid)
+        result = chamber_deliverable.invoke_action(action)
+    except Exception as exc:  # honest failure — never a guess, never a spawn
+        handler._send_json({"ok": False, "error": "deliverable_action_failed",
+                            "message": str(exc)}, 500)
+        return
+    if not result.get("ok"):
+        # The labeled inert state: named reason + user-visible label,
+        # nothing executed. 409 — the affordance is honestly not armed.
+        result.setdefault("error", "deliverable_action_inert")
+        handler._send_json(result, 409)
+        return
+    handler._send_json(result, 200)
 
 
 def handle_ecgberht_speak(handler, path, body):
@@ -18063,6 +18165,13 @@ _MIGRATED_HANDLERS = {
     # (steward-chamber W6) The deterministic-first painted M1 slice open —
     # registered WITH its route row (the stand_up 404 lesson below).
     "handle_ecgberht_seal_open": handle_ecgberht_seal_open,
+    # (steward-chamber W9) STATUS overlay + F3 deliverable action registry —
+    # each registered WITH its route row (same lesson): the overlay read, the
+    # injection-clock deliverable read, and the ONE deliverable-action
+    # mutator (row + red-to-green in chamber/routes-inventory.json).
+    "handle_ecgberht_status_overlay": handle_ecgberht_status_overlay,
+    "handle_ecgberht_deliverable_state": handle_ecgberht_deliverable_state,
+    "handle_ecgberht_deliverable_action": handle_ecgberht_deliverable_action,
     "handle_ecgberht_speak": handle_ecgberht_speak,
     # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
     # route table, but never registered here — so _strangler_dispatch took its

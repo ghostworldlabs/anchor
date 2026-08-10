@@ -582,6 +582,19 @@ def finish_run(folder, project_id, record, result, *,
     except Exception:
         pass
 
+    # W9 deliverable landing (steward chamber, C2 — ENGINE-FED, never
+    # model-remembered): the run just stopped, so if the manifest-declared
+    # output now exists CONTAINED on disk, record the W4 deliverable_landing
+    # projection NOW — the open chamber's injection-clock poll flips the ◇
+    # box live with no reopen. Idempotent per output path; best-effort by
+    # the same contract as the brief precompute above (a sidecar hiccup
+    # never blocks a run finishing).
+    try:
+        import chamber_deliverable as _chamber_deliverable
+        _chamber_deliverable.record_landing_if_present(folder, updated)
+    except Exception:
+        pass
+
     # A finished run changed campaign state (record, attention, log) — bank it.
     commit_campaign_state(
         folder, f"{record.get('skill', 'skill')} run {result.get('outcome')}")

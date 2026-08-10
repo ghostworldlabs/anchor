@@ -112,3 +112,26 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [13:04] W8 re-gate t+3m after recovery, clean start. Verdict ~13:25.
 [13:14] W8 re-gate t+13m, mid-suite, clean. Verdict ~13:23.
 [13:24] W8 re-gate GREEN (1135/1135). Review: BOTH reviewers not-valid-JSON; #0 TRANSPORT FAILURE after retry (abstain). Matches the agy/Antigravity auth-expiry signature — watching #1's retry; if degraded-GO, John gets the re-login ask.
+[13:34] W8 GREEN + committed d5c93ee (11 files) — but review:degraded (BOTH reviewers transport-failed; agy auth expiry confirmed pattern). W9 execute t+8m. DECISION posted to John: Antigravity re-login vs accept degraded review for W9-12.
+[13:44] W9 execute t+18m (76 tool calls) — writing chamber_status_overlay.py. Antigravity re-login decision still open with John.
+[13:54] W9 execute done ~13:45; gate t+8m — distro scans passing (manifest updated in-wave again). Verdict ~14:07.
+[14:04] W9 gate t+18m, late suite, clean. Verdict ~14:08.
+[14:14] W9 gate iter-0 RED: one pytest fail (project_window session_summary unknown-session terminal contract). fix:w9.1 done in 4.6m; re-gate t+1m. Verdict ~14:33.
+[14:24] W9 re-gate t+11m, mid-suite, clean. Verdict ~14:33.
+[14:34] W9 re-gate t+21m, final stretch, clean. Verdict imminent.
+[14:46] W9 delta-coverage HALT #2 RECOVERED (same transcript residue — live service keeps appending to it): restored transcript+inventory to HEAD content (0070 tactic), added in-wave W9 naming test (3/3 green), cleared, resumed — W9 re-entering at gate. Expect possible recurrence at W10-12 wave-ends; same 3-minute tactic applies.
+[14:54] W9 resume chose a fresh execute pass (t+7m, 50 calls — completing the wave before re-gating). Gate follows. Verdict ~15:30.
+[15:04] W9 execute t+17m (83 calls) — editing project-window.js (STATUS overlay wiring). Gate next.
+[15:14] W9 execute done ~15:07; gate t+7m, distro scans passing. Verdict ~15:29.
+[15:24] W9 gate t+17m, late suite, clean. Verdict ~15:29.
+[15:34] W9 iter-1 gate RED: distro import-closure (the fresh execute added modules without manifest entries — chamber_deliverable etc.). fix:w9.2 on it t+5m — the routine 1-iter class. Iter 2 of cap 4.
+[15:44] W9 fix-2 landed; re-gate t+8m, distro region passing. Verdict ~15:58.
+[15:54] W9 re-gate t+18m, late suite, clean. Verdict ~15:58.
+[16:05] W9 delta-coverage HALT #3 RECOVERED — this one was LEGITIMATE (real W9 surfaces untested: route_table rows + project-window.js overlay). Wrote test_chamber_status_overlay_routes_w9.py (3/3 green: routes declared/token-authed/migrated, handlers resolve, frontend calls only declared endpoints), cleared, resumed. W9 re-entering (brief execute, then gate).
+[16:14] W9 final execute pass t+8m (60 calls). Gate after.
+[16:24] W9 execute t+18m, near call cap; gate follows. Verdict ~16:50.
+[16:34] W9 gate t+8m, distro region clean. Verdict ~16:48.
+[16:44] W9 gate t+18m, late suite, clean. Verdict ~16:48.
+[16:54] W9 iter-2 gate caught a REAL security-shaped fail: the wave's own DOM-law test (hostile href painted as link target in the deliv box). fix-3 landed in 4m (iter 3 of cap 4); re-gate t+2m. Verdict ~17:12.
+[17:04] W9 re-gate t+12m, mid-suite, clean (past the chamber DOM-law region). Verdict ~17:12.
+[17:14] W9 gate GREEN on iter 3 (exit 0, 1135/1135). Review running (expect degraded unless agy auth restored). GO next.

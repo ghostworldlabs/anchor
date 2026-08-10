@@ -197,6 +197,20 @@ chamber_open.py
 chamber_rail.py
 chamber_pulse.py
 chamber_eta.py
+# Steward chamber 2026-08 (W9): chamber_rail now imports chamber_deliverable
+# (the ENGINE-FED deliverable-state projection + the F3-bounded registry
+# action) at MODULE scope, anchor_gui.py's status_overlay handler imports
+# chamber_status_overlay (the verbatim §overlays STATUS-table render over the
+# same bounded rail read) and its deliverable_state / deliverable_action
+# handlers import chamber_deliverable at runtime, and commission_session.py
+# records the deliverable landing through it best-effort on run finish — so
+# the deny-by-default import-closure gate requires both staged. Both
+# stdlib-only; they read only the target project folder (roadmap.json /
+# .anchor/chamber/) — no repo data files. chamber_dom_law (the CI DOM-slot
+# sink lint) does NOT ship: no shipped module imports it, and its data
+# document (chamber/dom-slot-inventory.json) stays repo-side with it.
+chamber_deliverable.py
+chamber_status_overlay.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

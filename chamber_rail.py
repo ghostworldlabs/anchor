@@ -44,6 +44,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import chamber_deliverable as cdeliv
 import chamber_eta as ce
 import chamber_manifest as cm
 import chamber_open as copen
@@ -115,11 +116,18 @@ def _manifest_skills(manifest) -> dict:
     return out
 
 
-def seal_rail_view(folder) -> dict:
+def seal_rail_view(folder, project_id=None) -> dict:
     """The FULL M1 view: ``chamber_open.seal_open_view`` (the bounded W6
     open — tail-read, capped run-record reads, degraded-rail refusals all
     unchanged) enriched with typed edges, rulebook states, the pulse step
-    slot, and the guarded ETA rows. Read-only; deterministic."""
+    slot, and the guarded ETA rows. Read-only; deterministic.
+
+    W9: when the manifest declares a deliverable, the view's deliverable
+    carries the F3-bounded ``action`` — the SAFE projection of the
+    chamber-local action registry's resolution (armed href / armed spawn
+    verb / the labeled inert state with its named reason). ``project_id``
+    (optional) lets an armed ``open-report`` action carry its internal
+    ``/artifact/`` href; argv/cwd never ride the view."""
     view = copen.seal_open_view(folder)
     view["rail_schema"] = SCHEMA
     if view.get("degraded"):
@@ -191,6 +199,18 @@ def seal_rail_view(folder) -> dict:
     stats["pulse_record_read"] = pulse_read
     stats["run_record_reads"] = (reads_so_far + pulse_read
                                  + collected["extra_reads"])
+
+    # W9 (F3): the declared deliverable's registry action — the SAFE
+    # projection only (verb / label / relative path / named inert reason;
+    # argv and cwd NEVER serialize into a view). Disk existence + the
+    # validated manifest are the only sources (never model-remembered).
+    dv = view.get("deliverable")
+    if isinstance(dv, dict) and isinstance(manifest, dict):
+        mdv = manifest.get("deliverable")
+        if isinstance(mdv, dict) and mdv.get("declared"):
+            dv["type"] = mdv.get("type")
+            dv["action"] = cdeliv.public_action(
+                cdeliv.resolve_action(folder, mdv, project_id=project_id))
     return view
 
 
@@ -225,7 +245,10 @@ def _yield_html(step: dict) -> str:
     y = step.get("yield")
     if y and y.get("text"):
         link = y.get("report_link")
-        if isinstance(link, str) and link.startswith("/"):
+        # F5 link-scheme law (W9): only the fixed internal read routes render
+        # as an anchor (copen._REPORT_LINK_PREFIXES — the code-owned mirror of
+        # chamber_dom_law.INTERNAL_HREF_PREFIXES); anything else is inert text.
+        if isinstance(link, str) and link.startswith(copen._REPORT_LINK_PREFIXES):
             inner = '%s · <a href="%s">report ▸</a>' \
                     % (_esc(y["text"]), _esc(link))
         else:
@@ -361,7 +384,7 @@ def _flow_html(view: dict) -> str:
         '</div>'
         '%s%s'
         '</aside>'
-    ) % (steps_html, copen._render_deliv(view))
+    ) % (steps_html, cdeliv.render_deliv_box(view))
 
 
 def render_seal_rail_html(view: dict, steward: dict | None = None) -> str:
