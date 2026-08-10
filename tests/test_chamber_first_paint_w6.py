@@ -122,10 +122,16 @@ def test_measured_first_open_paints_under_2s_and_lands_the_decision_log(
             pg.wait_for_function("window.ECG_SEAL_PAINT_MS != null",
                                  timeout=20000)
             paint_ms = pg.evaluate("window.ECG_SEAL_PAINT_MS")
-            painted_dock = pg.evaluate(
-                "!!document.querySelector('#ecgSealSlice .dock')")
-            degraded = pg.evaluate(
-                "!!document.querySelector('#ecgSealSlice .degrail')")
+            # (steward-chamber W7) The mount is STYLE-ISOLATED: the slice
+            # markup lives inside #ecgSealSlice's shadow root carrying the
+            # signed mockup's verbatim CSS (light-DOM fallback when the CSS
+            # pin cannot serve) — the probe pierces whichever mounted.
+            _in_slice = ("(function(){var s=document.getElementById("
+                         "'ecgSealSlice');if(!s)return false;"
+                         "var r=s.shadowRoot||s;return !!r.querySelector(%r);"
+                         "})()")
+            painted_dock = pg.evaluate(_in_slice % ".dock")
+            degraded = pg.evaluate(_in_slice % ".degrail")
             try:
                 _DEVTEST.mkdir(exist_ok=True)
                 pg.screenshot(path=str(_DEVTEST / "w6_seal_first_paint.png"),

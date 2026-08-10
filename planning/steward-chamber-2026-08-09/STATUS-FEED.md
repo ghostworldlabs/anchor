@@ -92,3 +92,11 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [09:44] W6 gate iter-1 RED on distro import-closure (pytest itself 1135/1135); fix:w6.1 editing dist_manifest.txt — the known 1-iteration fix. Re-gate next.
 [09:54] W6 fix-1 landed (dist_manifest.txt); re-gate running t+8m, clean so far. Verdict ~10:08.
 [10:04] W6 re-gate t+18m, deep in suite (steward auth-on tests), clean. Verdict ~10:08.
+[10:14] W6 GREEN + committed c5ce636 (gate 1135/1135, 2 reviewers 0 blockers, 1 fix iter). W7 execute running t+2m (full M1 rail + DOM-diff kill gate + run_pulse re-home + ETA medians).
+[10:24] W7 execute t+11m (84 tool calls) — studying the W6 slice + tests before mounting the full rail.
+[10:34] W7 execute hit its 20m per-call cap (SIGKILL, 104 tool calls — same pattern as W6); gate running t+1m will tell the truth about what landed.
+[10:44] W7 gate t+11m, mid-suite, clean so far. Verdict ~10:55.
+[10:54] W7 gate RED: distro import-closure again — anchor_gui.py imports new chamber_rail/chamber_pulse, not yet in dist_manifest.txt (pytest 6 FAILED, all this class; node lane 1135/1135). fix:w7.1 on it — the known 1-iter fix.
+[11:04] W7 fix-1 landed quickly; re-gate t+6m and the distro-scan tests are PASSING this pass. Verdict ~11:18.
+[11:14] W7 re-gate t+16m, late suite, clean. Verdict ~11:19.
+[11:24] W7 re-gate GREEN (moved to review); review t+5m — one reviewer reply not-valid-JSON, retried once (watching for the agy-auth failure signature).

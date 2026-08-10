@@ -178,9 +178,25 @@ chamber_coldopen.py
 # projections + the ledger tail, and the verbatim-mockup slice renderer) at
 # runtime, so the import-closure gate requires it staged. Stdlib-only; it
 # reads only the target project folder (roadmap.json / .anchor/commission-runs)
-# — no repo data files. chamber_mockup_diff stays test-only (never imported by
-# product code) and does not ship.
+# — no repo data files. chamber_mockup_diff does not ship (see the W7 block
+# below — now a declared-optional lazy import).
 chamber_open.py
+# Steward chamber 2026-08 (W7): anchor_gui.py's seal-open handler now imports
+# chamber_rail (the full M1 rail — typed edges, rulebook states, pulse ⏱ seed,
+# guarded ETA medians — over the same bounded W6 open) and the run_pulse
+# handler imports chamber_pulse (the extracted pulse data core) at runtime;
+# chamber_rail imports chamber_eta (the guarded per-skill ETA medians) at
+# module scope. The deny-by-default import-closure gate requires all three
+# staged. All stdlib-only; they read only the target project folder
+# (roadmap.json / .anchor/chamber/ / .anchor/commission-runs) — no repo data
+# files. chamber_mockup_diff STILL does not ship: its data document (the
+# signed mockups.html) lives under planning/ (never shipped), and its one
+# product consumer — chamber_rail.mockup_css — imports it lazily inside
+# try/except and degrades honestly to the scoped W6 stylesheet when absent,
+# so it is declared in distro.py's _OPTIONAL_FIRST_PARTY instead.
+chamber_rail.py
+chamber_pulse.py
+chamber_eta.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

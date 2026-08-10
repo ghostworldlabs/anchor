@@ -338,3 +338,81 @@ def verify_slice_render(render_html: str, spec: dict,
         problems.append("required drawn element missing from the painted "
                         "%s slice: %s" % (mode, miss))
     return problems
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# W7: the verbatim mockup CSS (the style-isolated mount imports it as-is)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_STYLE_RE = re.compile(r"<style>(.*?)</style>", re.DOTALL)
+
+
+def mockup_style_text(mockup_text: str | None = None, root=None,
+                      gate_record_path=None) -> str:
+    """The signed mockup's ``<style>`` block, VERBATIM (steward-chamber W7).
+
+    The full M1 mount imports the mockup CSS verbatim into its
+    style-isolated container (shadow root); this is the ONLY sanctioned
+    source — extracted from the hash-verified signed mockups.html, so the
+    imported CSS can never drift from the C9 pin. Raises
+    :class:`MockupPinError` when the pin fails or the signed file carries no
+    style block (hard fail — never a silently different stylesheet).
+    """
+    text = mockup_text if mockup_text is not None \
+        else load_signed_mockup(root, gate_record_path)
+    m = _STYLE_RE.search(text)
+    if not m:
+        raise MockupPinError(
+            "C9 pin: the signed mockup carries no <style> block — the "
+            "verbatim CSS import has no signed source")
+    return m.group(1)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# W7: full-M1 mount verification — view-aware required skeleton
+# ═════════════════════════════════════════════════════════════════════════════
+
+#: The full-mount base skeleton (always painted by the healthy full M1
+#: shell). REQUIRED_HEALTHY minus the rail-step row, which is view-
+#: conditional below (an empty rail — e.g. every step still 'proposed',
+#: R-PROPOSED-EXCLUDED — honestly paints no fstep).
+_REQUIRED_FULL_BASE = tuple(sig for sig in REQUIRED_HEALTHY
+                            if sig != ("div", ("fstep",)))
+
+#: Feature-conditional drawn requirements for the FULL mount (W7): each rides
+#: only when the view actually carries the state that draws it.
+REQUIRED_RUNCARD = (("div", ("runcard",)), ("div", ("ttable",)))
+REQUIRED_RUNCARD_LINKS = (("div", ("links",)), ("a", ()))
+REQUIRED_DELIV = (("div", ("deliv",)),)
+REQUIRED_FSTEP = (("div", ("fstep",)),)
+
+
+def m1_required_for_view(view: dict) -> tuple:
+    """The drawn base signatures the FULL M1 mount MUST paint for ``view``
+    (the two-directional law: what the data says exists must be drawn)."""
+    if view.get("degraded"):
+        return REQUIRED_DEGRADED
+    required = list(_REQUIRED_FULL_BASE)
+    steps = view.get("steps") or []
+    if steps:
+        required.extend(REQUIRED_FSTEP)
+    if view.get("live_run"):
+        required.extend(REQUIRED_RUNCARD)
+        slot = view.get("pulse_slot") or {}
+        if slot.get("status_block"):
+            # A captured ⏱ block draws the REAL runcard with its links row.
+            required.extend(REQUIRED_RUNCARD_LINKS)
+    if view.get("deliverable"):
+        required.extend(REQUIRED_DELIV)
+    return tuple(required)
+
+
+def verify_m1_render(render_html: str, spec: dict, view: dict) -> list:
+    """The W7 full-mount kill-gate check: no invented structure against the
+    hash-pinned signed spec AND the view-conditional drawn skeleton present
+    (an empty dock or a swallowed feature can never diff green)."""
+    problems = diff_render(render_html, spec)
+    for miss in missing_required(render_html, m1_required_for_view(view)):
+        problems.append("required drawn element missing from the painted "
+                        "full M1 mount: %s" % miss)
+    return problems

@@ -400,6 +400,9 @@ def seal_open_view(folder) -> dict:
         "ok": True,
         "degraded": None,
         "steps": step_rows,
+        # The rows this open ALREADY read (W7's ETA medians reuse them so the
+        # whole-open read backstop holds; the HTTP layer strips this key).
+        "_run_rows": runs,
         "goal": goal,
         "brief": {
             "as_of": (brief or {}).get("as_of"),

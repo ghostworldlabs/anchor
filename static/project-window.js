@@ -6820,6 +6820,7 @@ function _ecgStatusCls(status) {
 function closeEcgberhtSeal() {
   var dock = document.getElementById('ecgSealDock');
   if (dock) dock.remove();  // close changes nothing in the ledger
+  try { _ecgSealStopPulsePoll(); } catch (e) { /* poll not armed */ }
   var slice = document.getElementById('ecgSealSlice');
   if (slice) slice.remove();  // the W6 painted slice closes the same way — read-only
   var tile = document.getElementById('tile-ecgseal');
@@ -7984,8 +7985,45 @@ function openEcgberhtSeal() {
    degraded-rail state whose [Rebuild projections] affordance carries the W5
    cold-open command — the open path itself never rebuilds. */
 function _ecgSealDropSlice() {
+  _ecgSealStopPulsePoll();
   var s = document.getElementById('ecgSealSlice');
   if (s) s.remove();
+}
+
+/* (steward-chamber W7) run_pulse re-homed into the running step: the painted
+   rail's ⏱ card seeds from the banked record server-side, then this poll —
+   the CHAMBER consumer of the same run_pulse data core the tiles consume —
+   refreshes the latest ⏱ status block in place. Read-only GETs; stops when
+   the run leaves 'running' or the slice closes. */
+var _ecgPulseTimer = null;
+function _ecgSealStopPulsePoll() {
+  if (_ecgPulseTimer) { clearInterval(_ecgPulseTimer); _ecgPulseTimer = null; }
+}
+function _ecgSealStartPulsePoll(root, view) {
+  _ecgSealStopPulsePoll();
+  var live = view && view.live_run;
+  if (!live || !live.session_id) return;
+  var sid = live.session_id;
+  _ecgPulseTimer = setInterval(function () {
+    if (!document.getElementById('ecgSealSlice')) { _ecgSealStopPulsePoll(); return; }
+    fetch('/api/ecgberht/run_pulse?project_id=' + encodeURIComponent(PROJECT_ID) +
+          '&session_id=' + encodeURIComponent(sid) + _tokenQ())
+      .then(function (r) { return r.json(); })
+      .then(function (p) {
+        if (!p || !p.ok) return;
+        var card = root.querySelector('.fstep.run .runcard');
+        if (card && p.latest_status) {
+          var tt = card.querySelector('.ttable');
+          if (tt) {
+            var eta = card.getAttribute('data-eta-line');
+            tt.textContent = p.latest_status + (eta ? '\n' + eta : '');
+          }
+          card.classList.remove('warm');  // a captured block ends the drawn pre-emission face
+        }
+        if (p.outcome && p.outcome !== 'running') _ecgSealStopPulsePoll();
+      })
+      .catch(function () { /* a missed poll is silent — next tick retries */ });
+  }, 15000);
 }
 
 function _ecgSealPaintSlice(host) {
@@ -7998,14 +8036,47 @@ function _ecgSealPaintSlice(host) {
       if (document.getElementById('ecgSealSlice')) return;
       var slice = document.createElement('div');
       slice.id = 'ecgSealSlice';
-      slice.innerHTML = j.html;   // server-escaped verbatim-mockup markup
-      slice.addEventListener('click', function (ev) {
+      /* (W7) STYLE-ISOLATED mount: the server ships the SIGNED mockup's
+         verbatim CSS (hash-pinned extraction — chamber_rail.mockup_css) and
+         the markup mounts inside a shadow root carrying exactly that
+         stylesheet, so page styles cannot bleed in and the mockup CSS
+         applies verbatim. Anchor's tokens inherit through the host (custom
+         properties cross the shadow boundary). When the pin cannot serve
+         the CSS the mount falls back to the light DOM + the page's scoped
+         W6 stylesheet — honest degraded styling, never a silent restyle. */
+      var root = slice;
+      if (j.css && slice.attachShadow) {
+        try { root = slice.attachShadow({ mode: 'open' }); } catch (e) { root = slice; }
+      }
+      if (root !== slice) {
+        var st = document.createElement('style');
+        st.textContent = j.css;
+        root.appendChild(st);
+        var wrap = document.createElement('div');
+        wrap.innerHTML = j.html;  // server-escaped verbatim-mockup markup
+        while (wrap.firstChild) root.appendChild(wrap.firstChild);
+      } else {
+        slice.innerHTML = j.html; // server-escaped verbatim-mockup markup
+      }
+      root.addEventListener('click', function (ev) {
         var t = ev.target;
-        if (t && t.getAttribute && t.getAttribute('data-seal-close') != null) {
+        if (!t || !t.getAttribute) return;
+        if (t.getAttribute('data-seal-close') != null) {
           closeEcgberhtSeal();  // the slice's × — read-only, writes nothing
+          return;
+        }
+        var sid = t.getAttribute('data-open-session');
+        if (sid) {
+          ev.preventDefault();
+          if (typeof openPanel === 'function') openPanel(sid);  // session ▸ — the actual terminal
+          return;
+        }
+        if (t.getAttribute('data-status-overlay') != null) {
+          ev.preventDefault();  // the STATUS overlay lands in W9; never a raw jump
         }
       });
       host.appendChild(slice);
+      _ecgSealStartPulsePoll(root, j.view);
       /* 'seal-painted' lands on the FIRST FULL-FRAME COMMIT after the slice
          mounts (double rAF = the painted frame), per the plan's mark law.
          The measured delta rides window.ECG_SEAL_PAINT_MS for CI/sign-off. */

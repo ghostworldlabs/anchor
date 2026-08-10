@@ -10551,17 +10551,24 @@ def handle_ecgberht_seal_open(handler, path, body):
     if err is not None:
         handler._send_json(err, status)
         return
-    import chamber_open
+    # W7: the FULL M1 rail (chamber_rail — typed edges, rulebook states,
+    # pulse ⏱ seed, guarded ETA medians) over the same bounded W6 open; the
+    # response also carries the SIGNED mockup's verbatim CSS for the
+    # style-isolated (shadow-root) mount. Still zero model calls, zero child
+    # processes (never touches the Node bridge), zero writes.
+    import chamber_rail
     try:
-        view = chamber_open.seal_open_view(folder)
+        view = chamber_rail.seal_rail_view(folder)
         stw = _steward_ui()
-        html_out = chamber_open.render_seal_slice_html(
+        html_out = chamber_rail.render_seal_rail_html(
             view, steward={"label": stw.get("label") or "Ecgberht"})
+        css_out = chamber_rail.mockup_css()
     except Exception as exc:  # honest failure — never a blank or a guess
         handler._send_json({"ok": False, "error": "seal_open_failed",
                             "message": str(exc)}, 500)
         return
-    handler._send_json({"ok": True, "view": view, "html": html_out}, 200)
+    handler._send_json({"ok": True, "view": view, "html": html_out,
+                        "css": css_out}, 200)
 
 
 def handle_ecgberht_speak(handler, path, body):
@@ -11042,44 +11049,21 @@ def handle_ecgberht_step_note(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
-_ANSI_RE = None
-
-
 def _strip_terminal_noise(s):
     """Strip ANSI/OSC control sequences + CRs so a live PTY tail reads as
-    text in the pulse tile. Stdlib re only; never raises."""
-    global _ANSI_RE
-    try:
-        if _ANSI_RE is None:
-            import re as _re
-            _ANSI_RE = _re.compile(
-                r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
-                r"|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f]")
-        return _ANSI_RE.sub("", str(s)).replace("\r", "")
-    except Exception:
-        return str(s)
+    text in the pulse tile. (steward-chamber W7: the implementation moved
+    into the run_pulse data core — ``chamber_pulse.strip_terminal_noise`` —
+    this delegate keeps the historical symbol for existing callers/tests.)"""
+    import chamber_pulse as _cp2
+    return _cp2.strip_terminal_noise(s)
 
 
 def _read_face_north_star(folder):
     """The '## North star' blockquote from the project's ECGBERHT.md face —
-    a display line for the pulse tile. Read-only, best-effort, never raises."""
-    try:
-        text = (Path(folder) / "ECGBERHT.md").read_text(
-            encoding="utf-8", errors="replace")
-        lines, grab = [], False
-        for ln in text.splitlines():
-            if ln.strip().lower().startswith("## north star"):
-                grab = True
-                continue
-            if grab:
-                if ln.startswith("#") or (lines and not ln.strip()):
-                    break
-                if ln.lstrip().startswith(">"):
-                    lines.append(ln.lstrip()[1:].strip())
-        star = " ".join(x for x in lines if x).replace("**", "")
-        return star or None
-    except Exception:
-        return None
+    a display line for the pulse tile. (steward-chamber W7: implementation
+    moved into ``chamber_pulse.read_face_north_star``; delegate kept.)"""
+    import chamber_pulse as _cp2
+    return _cp2.read_face_north_star(folder)
 
 
 def handle_ecgberht_run_pulse(handler, path, body):
@@ -11089,8 +11073,14 @@ def handle_ecgberht_run_pulse(handler, path, body):
     natural way"). Read-only: the run record (skill · step · directive · age)
     + the campaign's North star + the session's RECENT output (the skills'
     own ⏱ status blocks ride in it). Cursor-incremental like the terminals.
+
+    steward-chamber W7 (wire-homing row run_pulse, C12): this owner symbol
+    REMAINS the tile endpoint — the payload production is SPLIT into the
+    data core ``chamber_pulse.pulse_payload`` (parity proven against the
+    committed pulse-stream replay fixtures BEFORE anything was deleted; the
+    chamber's running-step ⏱ slot is the second consumer of the same core).
+    The HTTP contract here is unchanged.
     """
-    import commission_session as _cs
     q = parse_qs(urlparse(handler.path).query)
     pid = (q.get("project_id", [""])[0] or "").strip()
     sid = (q.get("session_id", [""])[0] or "").strip()
@@ -11105,65 +11095,11 @@ def handle_ecgberht_run_pulse(handler, path, body):
     if not sid:
         handler._send_json({"ok": False, "error": "session_id required"}, 400)
         return
-    rec = _cs.load_run_record(folder, sid)
-    if not rec:
+    import chamber_pulse as _cp2
+    out = _cp2.pulse_payload(folder, sid, cursor)
+    if out is None:
         handler._send_json({"ok": False, "error": "unknown_run"}, 404)
         return
-    out = {
-        "ok": True,
-        "session_id": sid,
-        "skill": rec.get("skill"),
-        "step_id": rec.get("step_id"),
-        "outcome": rec.get("outcome"),
-        "at": rec.get("at"),
-        "directive": rec.get("directive"),
-        "auto_chain": rec.get("auto_chain"),
-        "north_star": _read_face_north_star(folder),
-    }
-    def _latest_status_block(text):
-        """The skills' own ⏱/[HH:MM] 10-minute status table, when one rode
-        the output — John's #1 want on the pulse. Last occurrence wins."""
-        try:
-            import re as _re
-            hits = [m.start() for m in
-                    _re.finditer(r"⏱|^\[\d{2}:\d{2}\]", text, _re.M)]
-            if not hits:
-                return None
-            return text[hits[-1]:hits[-1] + 700].strip() or None
-        except Exception:
-            return None
-
-    # Live tail while running; the banked tail once it stopped. The ⏱ status
-    # scan reads the WHOLE retained buffer — a status table emitted between
-    # polls must be CAUGHT, not missed because the fresh chunk lacked one
-    # (2026-08-07, John: "you have to catch the status and store it").
-    full_text = ""
-    try:
-        import terminal_session as _ts
-        r = _ts.read_since(sid, cursor)
-        chunk = (r or {}).get("chunk") or ""
-        try:
-            full = _ts.read_since(sid, 0)
-            full_text = _strip_terminal_noise((full or {}).get("chunk") or "")
-        except Exception:
-            full_text = ""
-        if not chunk and cursor == 0 and rec.get("transcript_tail"):
-            # A parked/dead session reads EMPTY, not an exception (live-found
-            # 2026-08-07 after the warm drain) — the banked tail is the truth.
-            out["tail"] = _strip_terminal_noise(rec["transcript_tail"])[-4000:]
-            out["live"] = False
-        else:
-            out["tail"] = _strip_terminal_noise(chunk)[-4000:]
-            out["live"] = True
-        out["cursor"] = (r or {}).get("cursor", cursor)
-    except Exception:
-        out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
-        out["cursor"] = cursor
-        out["live"] = False
-    out["latest_status"] = _latest_status_block(full_text) \
-        or _latest_status_block(out.get("tail") or "") \
-        or _latest_status_block(
-            _strip_terminal_noise(rec.get("transcript_tail") or ""))
     handler._send_json(out, 200)
 
 

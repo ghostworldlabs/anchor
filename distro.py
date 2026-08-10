@@ -758,6 +758,14 @@ _OPTIONAL_FIRST_PARTY = {
         "without it (documented best-effort import), and the healthcheck's "
         "journal-parity rebuild walk skip-warns when it is absent"
     ),
+    "chamber_mockup_diff": (
+        "test-only signed-mockup hash pin/diff (steward-chamber W6/W7) — "
+        "never ships: its data document (the signed mockups.html) lives under "
+        "planning/, which the manifest excludes. Its one product consumer, "
+        "chamber_rail.mockup_css, imports it lazily inside try/except and "
+        "degrades to the scoped W6 stylesheet when it is absent (honest "
+        "degraded styling; the C9 CI diff gate owns the pin)"
+    ),
 }
 
 
