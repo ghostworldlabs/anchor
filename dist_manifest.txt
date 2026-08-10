@@ -161,6 +161,18 @@ commission_runner.py
 chamber_manifest.py
 chamber_projections.py
 chamber/manifest-schema.json
+# Steward chamber 2026-08 (W5): commission_session.py imports chamber_reconcile
+# (the reflection-landing brief projector) at runtime, so the import-closure
+# gate requires it staged. chamber_coldopen (the one-time cold-open rebuild
+# CLI — the documented cure when the sidecar is absent/broken) and
+# chamber_brownfield (its manifest derivation, imported by coldopen) ship with
+# it: the sidecar without its rebuild tool is the ships-broken-by-omission
+# class this gate exists for. All three stdlib-only; they read/write only the
+# target project folder (roadmap.json / .ecgberht/ / .anchor/chamber/) — no
+# repo data files beyond the W4 schema above.
+chamber_reconcile.py
+chamber_brownfield.py
+chamber_coldopen.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

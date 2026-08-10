@@ -569,6 +569,19 @@ def finish_run(folder, project_id, record, result, *,
     if updated["auto_continue"] is not None:
         _atomic_write_json(_run_record_path(folder, session_id), updated)
 
+    # W5 brief precompute (steward chamber): the reflection just landed, so
+    # precompute the situation brief into the chamber sidecar NOW — the next
+    # Seal open paints it with zero model calls (E8: steward-plane sidecar
+    # only; roadmap/receipts/reflection stores untouched). Best-effort by
+    # contract — a projector hiccup never blocks a run finishing; the W5
+    # cold-open rebuild is the cure. Runs BEFORE the campaign commit so the
+    # sidecar rides the same bank.
+    try:
+        import chamber_reconcile as _chamber_reconcile
+        _chamber_reconcile.on_reflection_landing(folder)
+    except Exception:
+        pass
+
     # A finished run changed campaign state (record, attention, log) — bank it.
     commit_campaign_state(
         folder, f"{record.get('skill', 'skill')} run {result.get('outcome')}")

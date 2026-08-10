@@ -114,3 +114,11 @@ in trio `foreman/journal/0095` and `Ecgberht/journal/0074`.
    SC6's HALT (`count 1 < 2`) was the system working. The correct response was one real
    commission of a second skill; the response taken was a second stand-in. Ask "what
    would make this true?", never "what would make this pass?".
+
+## 2026-08-10 — W1 batched mockup-amendment gate SIGNED (steward-chamber build)
+John approved ALL TEN undrawn states as batched (chat, ~05:41), drawer drawn
+NOW (row 9 not deferred). Full record: chamber/MOCKUP-AMENDMENT-GATE.md.
+Signed post-amendment hash of mockups.html (the C9 DOM-diff pin):
+sha256 = 4a7f7953852b5563fd10e073f7cab8c1ac7930390d0743726b54aebc31aeedde
+Every later mockup-verbatim claim pins to that hash; deviations only via the
+amendment gate. NS-hard collision rule unaffected.
