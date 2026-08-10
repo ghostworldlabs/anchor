@@ -6820,6 +6820,8 @@ function _ecgStatusCls(status) {
 function closeEcgberhtSeal() {
   var dock = document.getElementById('ecgSealDock');
   if (dock) dock.remove();  // close changes nothing in the ledger
+  var slice = document.getElementById('ecgSealSlice');
+  if (slice) slice.remove();  // the W6 painted slice closes the same way — read-only
   var tile = document.getElementById('tile-ecgseal');
   if (tile) tile.open = false;
 }
@@ -7959,6 +7961,10 @@ function _ecgRenderStandUp(host, su) {
 }
 
 function openEcgberhtSeal() {
+  /* (steward-chamber W6) 'seal-open' marks the Seal click — the C1 paint
+     budget ('seal-open' → 'seal-painted' < 2000ms) starts HERE, before any
+     fetch or layout work. */
+  try { performance.mark('seal-open'); } catch (e) { /* marks unsupported */ }
   /* The chamber lives in ONE expandable tile (2026-07-30): the seal
      button expands it (same pattern as the main dashboard tiles). */
   var tile = document.getElementById('tile-ecgseal');
@@ -7967,16 +7973,70 @@ function openEcgberhtSeal() {
   ecgSealMountInline();
 }
 
+/* ── steward-chamber W6: the deterministic-first painted M1 slice ──────────
+   The Seal paints in <2s from the W4/W5 sidecar projections through
+   GET /api/ecgberht/seal_open (chamber_open.py — zero model calls, zero
+   child processes, zero writes; server-rendered verbatim-mockup markup with
+   every slot value escaped). The legacy bridge chamber still hydrates
+   afterward and the slice yields to it — the slice is the C1 instant-paint
+   proof, not a retirement of the interactive chamber (tiles/affordances
+   retire only on signed parity, W12). A fresh deploy paints the DRAWN
+   degraded-rail state whose [Rebuild projections] affordance carries the W5
+   cold-open command — the open path itself never rebuilds. */
+function _ecgSealDropSlice() {
+  var s = document.getElementById('ecgSealSlice');
+  if (s) s.remove();
+}
+
+function _ecgSealPaintSlice(host) {
+  if (document.getElementById('ecgSealSlice')) return;
+  fetch('/api/ecgberht/seal_open?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.ok || !j.html) return;               // honest: no slice — the legacy path still paints
+      if (document.getElementById('ecgSealDock')) return; // legacy chamber already hydrated
+      if (document.getElementById('ecgSealSlice')) return;
+      var slice = document.createElement('div');
+      slice.id = 'ecgSealSlice';
+      slice.innerHTML = j.html;   // server-escaped verbatim-mockup markup
+      slice.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (t && t.getAttribute && t.getAttribute('data-seal-close') != null) {
+          closeEcgberhtSeal();  // the slice's × — read-only, writes nothing
+        }
+      });
+      host.appendChild(slice);
+      /* 'seal-painted' lands on the FIRST FULL-FRAME COMMIT after the slice
+         mounts (double rAF = the painted frame), per the plan's mark law.
+         The measured delta rides window.ECG_SEAL_PAINT_MS for CI/sign-off. */
+      requestAnimationFrame(function () { requestAnimationFrame(function () {
+        try {
+          performance.mark('seal-painted');
+          var m = performance.measure('seal-open-to-paint', 'seal-open', 'seal-painted');
+          if (m && m.duration != null) {
+            window.ECG_SEAL_PAINT_MS = m.duration;
+          } else {
+            var es = performance.getEntriesByName('seal-open-to-paint');
+            window.ECG_SEAL_PAINT_MS = es.length ? es[es.length - 1].duration : null;
+          }
+        } catch (e) { /* marks unsupported — never break the paint */ }
+      }); });
+    })
+    .catch(function () { /* deterministic paint unavailable — legacy path continues */ });
+}
+
 function ecgSealMountInline() {
   var host = document.getElementById('ecgSealHost');
   if (!host) return;
   if (document.getElementById('ecgSealDock')) return;
+  _ecgSealPaintSlice(host);  // W6 deterministic-first paint; never blocks the hydrate below
   fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
     .then(function (r) { return r.json(); })
     .then(function (j) {
       if (j && j.ok && j.mode === 'stand_up' && j.stand_up) {
         // TW7 Screen 4 — empty project: stand-up conversation, never an
         // invented chamber over a steward that does not exist.
+        _ecgSealDropSlice();
         _ecgRenderStandUp(host, j.stand_up);
         return;
       }
@@ -7999,6 +8059,7 @@ function ecgSealMountInline() {
         return;
       }
       _ecgRenderChamber(host, j);
+      _ecgSealDropSlice();  // the interactive chamber has hydrated — the W6 slice yields
     })
     .catch(function () { /* leave the dashboard untouched */ });
 }

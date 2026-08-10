@@ -6,3 +6,4 @@
 - 2026-08-10T01:45:56.289Z — Wave 3/12 GREEN — W3 Phase-0 Enforcement Infra: auth+CSRF fixture, ease classifier, E1 bound parser (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
 - 2026-08-10T04:18:28.456Z — Wave 4/12 GREEN — W4 Phase-1 Substrate: event-time projections + versioned manifest schema, lint, hash (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 2; appended by orchestrator on GO)
 - 2026-08-10T14:07:42.037Z — Wave 5/12 GREEN — W5 Phase-1 Substrate: brownfield derivation, reconciliation, brief precompute, cold-open rebuild (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)
+- 2026-08-10T16:12:16.620Z — Wave 6/12 GREEN — W6 Phase-1 Proof: painted M1 vertical slice, <2s + zero-model-call CI (gate exit 0 · tests 1135 pass 1135 fail 0 · iter 1; appended by orchestrator on GO)

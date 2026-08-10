@@ -240,6 +240,10 @@ ROUTES = [
     # UI host: live C:\dev\Anchor (hardened line). Engine: C:\dev\Ecgberht.
     _r("GET", "/api/ecgberht/chamber", AUTH_TOKEN, match=MATCH_PREFIX,
        handler="handle_ecgberht_chamber", migrated=True),
+    # (steward-chamber W6) Deterministic-first painted M1 slice: zero-spawn /
+    # zero-model read over the W4/W5 sidecar projections (chamber_open).
+    _r("GET", "/api/ecgberht/seal_open", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_seal_open", migrated=True),
     _r("POST", "/api/ecgberht/speak", AUTH_TOKEN,
        handler="handle_ecgberht_speak", migrated=True),
     # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)

@@ -10529,6 +10529,41 @@ def handle_ecgberht_chamber(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def handle_ecgberht_seal_open(handler, path, body):
+    """GET /api/ecgberht/seal_open — the W6 painted vertical-slice M1 open
+    (steward-chamber C1).
+
+    DETERMINISTIC-FIRST: the response derives from the W4/W5 sidecar
+    projections + the ledger tail alone (``chamber_open.seal_open_view``,
+    bounded reads: snapshot tail-read + the 200-read run-record backstop) and
+    is rendered as the verbatim-mockup slice (``render_seal_slice_html``,
+    every slot value escaped) — ZERO model calls, ZERO child processes (this
+    handler never touches the Node bridge), ZERO writes. A fresh deploy
+    (sidecar absent / schema-stale) answers the DRAWN degraded-rail state
+    (AG-DEGRADED-RAIL) carrying the explicit W5 cold-open rebuild affordance
+    — never an inline rebuild on the open path. The W6 CI suite
+    (tests/test_chamber_seal_ci_w6.py) asserts the spawn/network trace, the
+    <2s budget, and the C9 DOM/class diff on every chamber change.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_open
+    try:
+        view = chamber_open.seal_open_view(folder)
+        stw = _steward_ui()
+        html_out = chamber_open.render_seal_slice_html(
+            view, steward={"label": stw.get("label") or "Ecgberht"})
+    except Exception as exc:  # honest failure — never a blank or a guess
+        handler._send_json({"ok": False, "error": "seal_open_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json({"ok": True, "view": view, "html": html_out}, 200)
+
+
 def handle_ecgberht_speak(handler, path, body):
     """POST /api/ecgberht/speak — compile saybox talk (closed acts only)."""
     pid = str(body.get("project_id", "") or "").strip()
@@ -18089,6 +18124,9 @@ _MIGRATED_HANDLERS = {
     "handle_friction_list": handle_friction_list,
     "handle_journal_friction": handle_journal_friction,
     "handle_ecgberht_chamber": handle_ecgberht_chamber,
+    # (steward-chamber W6) The deterministic-first painted M1 slice open —
+    # registered WITH its route row (the stand_up 404 lesson below).
+    "handle_ecgberht_seal_open": handle_ecgberht_seal_open,
     "handle_ecgberht_speak": handle_ecgberht_speak,
     # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
     # route table, but never registered here — so _strangler_dispatch took its

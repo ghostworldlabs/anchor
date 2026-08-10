@@ -173,6 +173,14 @@ chamber/manifest-schema.json
 chamber_reconcile.py
 chamber_brownfield.py
 chamber_coldopen.py
+# Steward chamber 2026-08 (W6): anchor_gui.py's seal-open handler imports
+# chamber_open (the zero-model first-paint read over the W4/W5 sidecar
+# projections + the ledger tail, and the verbatim-mockup slice renderer) at
+# runtime, so the import-closure gate requires it staged. Stdlib-only; it
+# reads only the target project folder (roadmap.json / .anchor/commission-runs)
+# — no repo data files. chamber_mockup_diff stays test-only (never imported by
+# product code) and does not ship.
+chamber_open.py
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

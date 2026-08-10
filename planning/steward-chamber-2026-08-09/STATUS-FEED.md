@@ -79,3 +79,16 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [07:45] Channel VERIFIED — John ack'd the first table. W5 gate t+5m, suite progressing (distro scan tests).
 [07:54] W5 gate t+13m, suite progressing (healthcheck tests), no failures surfaced. Verdict ~08:03.
 [08:04] W5 gate RE-PROVED GREEN (exit 0, 1135/1135). Now in adversarial review (t+2m, 2 reviewers). Wave GO after review/judge.
+[08:14] W5 GREEN + committed 5181e92 (41 files, gate 1135/1135, 0 blocking findings). W6 execute running t+6m (painted M1 vertical slice).
+[08:24] W6 execute t+16m, 57 tool calls — wiring the painted M1 slice (seal mount, chamber tests). Healthy pace.
+[08:34] W6 execute done; gate running t+6m (distro scans), no failures surfaced. Verdict ~08:50.
+[08:44] W6 gate t+16m, deep in suite (reconcile tests), clean so far. Verdict ~08:50.
+[08:54] W6 HALT vacuous-GREEN (chamber_open.py unexercised by any test). Playbook: writing real AUTH-ON chamber tests, prove green, then clear --force + resume. Recovery in progress.
+[09:00] W6 vacuous-GREEN RECOVERED per playbook: wrote tests/test_chamber_open_w6.py (12 real tests exercising chamber_open.py — tail-read bound, 200-read cap refusal, degraded-rail first-open, 2x-budget <2s, escape/import-closure laws), proved 12/12 green, cleared --force, resumed. W6 execute re-running.
+[09:04] W6 execute t+3m (18 tool calls) — reading chamber_enforcement + project-window.js for the painted mount.
+[09:14] W6 execute t+13m (38 tool calls) — actively editing project-window.js (the painted M1 mount wiring).
+[09:24] W6 execute complete at 09:20; gate running t+3m. Verdict ~09:42.
+[09:34] W6 gate t+13m, mid-suite, clean so far. Verdict ~09:42.
+[09:44] W6 gate iter-1 RED on distro import-closure (pytest itself 1135/1135); fix:w6.1 editing dist_manifest.txt — the known 1-iteration fix. Re-gate next.
+[09:54] W6 fix-1 landed (dist_manifest.txt); re-gate running t+8m, clean so far. Verdict ~10:08.
+[10:04] W6 re-gate t+18m, deep in suite (steward auth-on tests), clean. Verdict ~10:08.
