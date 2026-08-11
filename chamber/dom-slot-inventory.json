@@ -52,6 +52,13 @@
       "functions": [
         { "name": "render_deliv_box", "placeholders": 12, "slots": "description · output rel (button title) · action href · action label · inert reason+label" }
       ]
+    },
+    {
+      "module": "chamber_gates",
+      "wave_of_record": "W10",
+      "functions": [
+        { "name": "render_gate_queue_html", "placeholders": 8, "slots": "store error · empty-queue depth line · card prose lines (incl. swept paths, text only) · head gate id · kind class/label · depth line" }
+      ]
     }
   ],
   "js_sinks": {

@@ -258,6 +258,20 @@ ROUTES = [
     # otherwise). Row + red-to-green proof in chamber/routes-inventory.json.
     _r("POST", "/api/ecgberht/deliverable_action", AUTH_TOKEN,
        handler="handle_ecgberht_deliverable_action", migrated=True),
+    # (steward-chamber W10) The serialized decision-gate queue (E5): the
+    # read-only head-only queue state + render …
+    _r("GET", "/api/ecgberht/gate_queue", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_gate_queue", migrated=True),
+    # … and its three mutators — resolve/skip the HEAD gate (serialization
+    # law: a non-head gate refuses by name) and the sweep-card binding that
+    # releases the E2 enqueue gate (C5/F4). Rows + red-to-green proof in
+    # chamber/routes-inventory.json (tests/test_chamber_gate_routes_w10.py).
+    _r("POST", "/api/ecgberht/gate_resolve", AUTH_TOKEN,
+       handler="handle_ecgberht_gate_resolve", migrated=True),
+    _r("POST", "/api/ecgberht/gate_skip", AUTH_TOKEN,
+       handler="handle_ecgberht_gate_skip", migrated=True),
+    _r("POST", "/api/ecgberht/sweep_bind", AUTH_TOKEN,
+       handler="handle_ecgberht_sweep_bind", migrated=True),
     _r("POST", "/api/ecgberht/speak", AUTH_TOKEN,
        handler="handle_ecgberht_speak", migrated=True),
     # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)

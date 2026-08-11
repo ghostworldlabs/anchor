@@ -135,3 +135,12 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [16:54] W9 iter-2 gate caught a REAL security-shaped fail: the wave's own DOM-law test (hostile href painted as link target in the deliv box). fix-3 landed in 4m (iter 3 of cap 4); re-gate t+2m. Verdict ~17:12.
 [17:04] W9 re-gate t+12m, mid-suite, clean (past the chamber DOM-law region). Verdict ~17:12.
 [17:14] W9 gate GREEN on iter 3 (exit 0, 1135/1135). Review running (expect degraded unless agy auth restored). GO next.
+[17:24] W9 GREEN + committed 18838af — and review was GENUINE this time (2 reviewers responded, 0 blockers; no transport failures — agy channel looks restored). W10 execute t+6m.
+[17:34] W10 execute t+16m (94 calls) — writing chamber_gates.py (the E2 enqueue-gate / sweep machinery).
+[17:44] W10 gate t+6m — two F's in distro scans (chamber_gates.py likely missing from dist_manifest). Gate will go RED; the routine 1-iter fix follows.
+[17:54] W10 gate t+16m — additional F in test_project_summary_v5 beyond the distro pair; full picture at verdict ~18:00, then the fix iter.
+[18:04] W10 iter-0 RED as expected; fix:w10.1 t+5m working the failures (reading commission_session).
+[18:14] W10 fix-1 landed (~7m); re-gate t+7m, distro region clean this pass. Watch point: the paint-budget test mid-suite. Verdict ~18:28.
+[18:24] W10 re-gate t+17m — the paint-budget and project_summary regions both passed clean. Verdict ~18:28.
+[18:34] W10 gate GREEN at 18:28 (iter 1). Review t+5m — reviewer #1 on its JSON retry (channel wobbling again); #0 quiet so far.
+[18:44] W10 delta HALT (transcript residue #3) recovered in 8 min: restore + W10 naming test (green) + resume. W10 re-entering.

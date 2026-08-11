@@ -10673,6 +10673,116 @@ def handle_ecgberht_deliverable_action(handler, path, body):
     handler._send_json(result, 200)
 
 
+def handle_ecgberht_gate_queue(handler, path, body):
+    """GET /api/ecgberht/gate_queue — the serialized decision-gate queue as
+    VISIBLE STATE (steward-chamber W10, E5).
+
+    Head-only by law: the response carries every gate's id/kind/status (the
+    queue is inspectable) but card CONTENT only for the HEAD, and the
+    server-rendered ``html`` paints exactly one prose card
+    (``chamber_gates.render_gate_queue_html`` — every slot escaped, F5;
+    swept paths are text, never markup). Pure read — no model, no spawn,
+    no write; token-authed like every chamber read."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_gates
+    state = chamber_gates.queue_state(folder)
+    out = dict(state)
+    out["html"] = chamber_gates.render_gate_queue_html(state)
+    handler._send_json(out, 200 if state.get("ok") else 500)
+
+
+def handle_ecgberht_gate_resolve(handler, path, body):
+    """POST /api/ecgberht/gate_resolve — resolve the HEAD decision gate
+    (steward-chamber W10, E5).
+
+    The serialization law lives server-side: only the queue HEAD may
+    resolve; a non-head gate_id is refused by name (409) and releases
+    nothing. Resolving releases the next card, returned as ``released``.
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_gate_routes_w10.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    gate_id = str(b.get("gate_id", "") or "").strip()
+    if not gate_id:
+        handler._send_json({"ok": False, "error": "gate_id required"}, 400)
+        return
+    import chamber_gates
+    out = chamber_gates.resolve_gate(folder, gate_id,
+                                     resolution=b.get("resolution"))
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
+def handle_ecgberht_gate_skip(handler, path, body):
+    """POST /api/ecgberht/gate_skip — skip the HEAD decision gate
+    (steward-chamber W10, E5; same head-only serialization law as resolve).
+    Token-authed + F6; row in chamber/routes-inventory.json."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    gate_id = str(b.get("gate_id", "") or "").strip()
+    if not gate_id:
+        handler._send_json({"ok": False, "error": "gate_id required"}, 400)
+        return
+    import chamber_gates
+    out = chamber_gates.skip_gate(folder, gate_id)
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
+def handle_ecgberht_sweep_bind(handler, path, body):
+    """POST /api/ecgberht/sweep_bind — run the two-tier containment-checked
+    worktree sweep for a died/quiet/timeout run and BIND its card into the
+    decision-gate queue (steward-chamber W10, C5/E2/F4).
+
+    The state-machine transition that releases the E2 enqueue gate: tier 1
+    lands declared-deliverable-glob matches onto the step, tier 2 lists the
+    worktree's unclaimed changes BY PATH ONLY (symlink- and
+    junction-resolved containment both directions; nothing is executed),
+    and the card takes the queue HEAD — a held gate is re-queued behind it,
+    never dropped. Campaign state auto-commits after the bind (V3 landing
+    class: sweep landing). Token-authed + F6; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_gate_routes_w10.py."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    sid = str(b.get("session_id", "") or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    import chamber_gates
+    import commission_session as _cs
+    record = _cs.load_run_record(folder, sid)
+    if record is None:
+        # An honest sweep still binds for a record that vanished: the death
+        # row is what blocks E2, and only a bound card may release it.
+        record = {"session_id": sid}
+    try:
+        swept = chamber_gates.run_sweep(folder, record)
+        out = chamber_gates.bind_sweep_card(folder, swept, session_id=sid)
+    except Exception as exc:  # honest failure — never a half-bound queue
+        handler._send_json({"ok": False, "error": "sweep_bind_failed",
+                            "message": str(exc)}, 500)
+        return
+    out["sweep"] = (swept.get("sweep") if isinstance(swept, dict) else None)
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
 def handle_ecgberht_speak(handler, path, body):
     """POST /api/ecgberht/speak — compile saybox talk (closed acts only)."""
     pid = str(body.get("project_id", "") or "").strip()
@@ -18172,6 +18282,14 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_status_overlay": handle_ecgberht_status_overlay,
     "handle_ecgberht_deliverable_state": handle_ecgberht_deliverable_state,
     "handle_ecgberht_deliverable_action": handle_ecgberht_deliverable_action,
+    # (steward-chamber W10) Serialized decision-gate queue (E5) + the E2
+    # sweep-card binding — each registered WITH its route row (the stand_up
+    # 404 lesson): the head-only queue read, the resolve/skip mutators, and
+    # the died→sweep bind that releases the E2 enqueue gate.
+    "handle_ecgberht_gate_queue": handle_ecgberht_gate_queue,
+    "handle_ecgberht_gate_resolve": handle_ecgberht_gate_resolve,
+    "handle_ecgberht_gate_skip": handle_ecgberht_gate_skip,
+    "handle_ecgberht_sweep_bind": handle_ecgberht_sweep_bind,
     "handle_ecgberht_speak": handle_ecgberht_speak,
     # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
     # route table, but never registered here — so _strangler_dispatch took its

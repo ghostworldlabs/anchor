@@ -37,6 +37,7 @@ sys.path.insert(0, str(ANCHOR))
 
 import chamber_deliverable as cdeliv  # noqa: E402
 import chamber_dom_law as cdl  # noqa: E402
+import chamber_gates as cgates  # noqa: E402  (W10 row: gate-queue render)
 import chamber_open as copen  # noqa: E402
 import chamber_rail as crail  # noqa: E402
 import chamber_status_overlay as cso  # noqa: E402
@@ -333,6 +334,22 @@ def _drive_deliv_box(p):
     return [cdeliv.render_deliv_box(v) for v in _hostile_deliv_views(p)]
 
 
+def _drive_gate_queue(p):
+    # (steward-chamber W10) The gate-queue render's agent-influenced slots:
+    # card prose (incl. swept paths from git status), kind, gate id, and the
+    # unreadable-store error string.
+    return [
+        cgates.render_gate_queue_html({
+            "ok": True, "queued_count": 3,
+            "head": {"gate_id": p, "kind": p,
+                     "text": "line one %s\nline two" % p,
+                     "card": {"text": p}}}),
+        cgates.render_gate_queue_html(
+            {"ok": True, "queued_count": 0, "head": None}),
+        cgates.render_gate_queue_html({"ok": False, "error": p}),
+    ]
+
+
 #: module.function -> the composed hostile drive that exercises it. The
 #: top-level renders call every registered helper, so each drive covers its
 #: module's rows; the completeness assertion keeps this map equal to the
@@ -357,6 +374,7 @@ HOSTILE_FIXTURES = {
     "chamber_rail.render_seal_rail_html": _drive_rail,
     "chamber_status_overlay.render_status_overlay_html": _drive_overlay,
     "chamber_deliverable.render_deliv_box": _drive_deliv_box,
+    "chamber_gates.render_gate_queue_html": _drive_gate_queue,
 }
 
 

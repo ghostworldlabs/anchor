@@ -274,6 +274,20 @@ def confirm_and_launch(
                 "message": manifest_lint.get("message"),
                 "manifest_lint": manifest_lint}
 
+    # W10 E2 enqueue gate (steward-chamber, C5 — ENGINE-ENFORCED on THIS
+    # seam, the W2-proven leg b): while the campaign carries a death whose
+    # containment-checked sweep card is not yet BOUND into the decision-gate
+    # queue, a re-commission is REFUSED with the named finding — before the
+    # engine confirm, before any spend. The guard fails CLOSED on an
+    # unreadable gate store (a safety gate never guesses).
+    import chamber_gates as _cgates
+    e2 = _cgates.enqueue_guard(folder)
+    if not e2.get("ok"):
+        return {"ok": False, "error": e2.get("error"),
+                "finding": e2.get("finding"),
+                "message": e2.get("message"),
+                "blocking_deaths": e2.get("blocking_deaths")}
+
     confirmed = run_bridge("confirm", {
         "project": str(folder),
         "proposal": proposal,
@@ -592,6 +606,20 @@ def finish_run(folder, project_id, record, result, *,
     try:
         import chamber_deliverable as _chamber_deliverable
         _chamber_deliverable.record_landing_if_present(folder, updated)
+    except Exception:
+        pass
+
+    # W10 died→sweep-card state machine (steward-chamber, C5/E2): a run that
+    # ended died/quiet/timeout registers SWEEP-PENDING now — from here the
+    # E2 gate in confirm_and_launch blocks any re-commission until the
+    # containment-checked sweep card is bound into the queue, and a HELD
+    # gate is never dropped (the transition never touches the queue head).
+    # Best-effort by the same sidecar contract as the hooks above; the E2
+    # refusal itself is enforced at the confirm_and_launch seam.
+    try:
+        if result.get("outcome") in ("died", "quiet", "timeout"):
+            import chamber_gates as _cgates
+            _cgates.on_run_death(folder, updated)
     except Exception:
         pass
 
