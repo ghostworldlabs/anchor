@@ -8,9 +8,9 @@ This session is autosaved: its produced documents and latest transcript are copi
 - **Skill / seed:** Here is the context to work on: ANCHOR DOCTOR — SHORT DIAGNOSE SEED (W8/SC6)
 
 ## Produced documents
-- general/dbc27481dbd0-transcript.md
 - general/efd9839d5192-transcript.md
 - planning/steward-chamber-2026-08-09/STATUS-FEED.md
+- planning/steward-chamber-2026-08-09/TEST-DEBT-REGISTER.md
 
 ## To resume
 Reopen this session's tile in the Anchor project window, or use "Continue in a live session" — the resume seed loads the documents above.

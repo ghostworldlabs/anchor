@@ -1,5 +1,15 @@
 # Test-debt register — gate deselects for the steward-chamber build (2026-08-09)
 
+> **W12 disposition (Phase-4 Close):** the stale-UI deselect families below
+> are resolved in `chamber/W12-AUDIT-REPORT.md` § "Stale-UI test-debt
+> disposition" — each row maps to an existing M1-DOM equivalent suite or is
+> marked pending John's signature at the W12 tile-retirement signing gate
+> (`chamber/TILE-RETIREMENT-GATE.md`). CI pins the mapping
+> (`chamber_audit.test_debt_problems`, asserted by
+> `tests/test_chamber_release_bundle_w12.py`). The deselect lines in
+> `scripts/run-all-tests.mjs` stand until John rules; removing them ahead of
+> the signature would red the gate on surfaces the plan retired.
+
 The pre-launch gate proof found 63 failures on HEAD. Disposition:
 
 ## Fixed for real before launch (18)

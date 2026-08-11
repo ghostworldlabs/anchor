@@ -50,7 +50,8 @@
       "source_marker": "Open the full transcript",
       "parity": {
         "kind": "proposed-equivalent",
-        "note": "The transcript is PERSISTED in the project (general/<session>-transcript.md) and stays reachable through the existing traversal-safe /artifact route independent of any tile. PROPOSAL for the W12 signing: surface a transcript link on the rail runcard's links row; if John declines, he signs the absent link as an accepted loss - the data itself is never lost."
+        "note": "The transcript is PERSISTED in the project (general/<session>-transcript.md) and stays reachable through the existing traversal-safe /artifact route independent of any tile. PROPOSAL for the W12 signing: surface a transcript link on the rail runcard's links row; if John declines, he signs the absent link as an accepted loss - the data itself is never lost.",
+        "w12_verification": "VERIFIED at audit: the persisted transcripts exist and the /artifact route serves them, but the signed M1 mockup carries NO transcript link on the runcard links row - adding one would deviate from the C9 hash-pinned DOM diff and needs the W1 amendment gate. DECISION FOR JOHN AT SIGNING: (a) order a mockup amendment adding the link (row becomes equivalent), or (b) sign the absent link as an accepted loss (john_ruling: accepted-loss). Until ruled, this row blocks retirement and the tile stands."
       }
     },
     {
@@ -94,7 +95,8 @@
       "source_marker": "Hand it back",
       "parity": {
         "kind": "proposed-equivalent",
-        "note": "W10's serialized decision-gate queue renders asked/died/quiet runs as head cards whose resolve re-arms through the SAME commission_watch seam - the drawn card replaces the tile button. To be verified against the landed W10 queue at the W12 signing; until then the tile control stands (no tile is removed before the signature)."
+        "note": "W10's serialized decision-gate queue renders asked/died/quiet runs as head cards whose resolve re-arms through the SAME commission_watch seam - the drawn card replaces the tile button. To be verified against the landed W10 queue at the W12 signing; until then the tile control stands (no tile is removed before the signature).",
+        "w12_verification": "VERIFIED at audit AGAINST THE LANDED W10 QUEUE: the resolve path (handle_ecgberht_gate_resolve -> chamber_gates.resolve_gate -> _finish_gate) does NOT invoke commission_session.rearm_watch - the W9 proposal's re-arm claim is NOT yet wired; the tile's 'Hand it back'/'Keep watching' control remains the only re-arm surface. DECISION FOR JOHN AT SIGNING: (a) keep this tile control standing (exclude it from retirement) until a wired queue-card re-arm lands through an amendment, or (b) sign the lost one-click re-arm as an accepted loss (john_ruling: accepted-loss; rearm_watch stays reachable programmatically). Until ruled, this row blocks retirement and the tile stands."
       }
     }
   ]

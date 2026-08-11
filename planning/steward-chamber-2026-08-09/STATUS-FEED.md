@@ -164,3 +164,11 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [11:34] W11 re-proof gate t+13m, mid-suite, clean. Verdict ~11:42.
 [11:44] W11 re-proof gate t+23m, final files, clean. Verdict in the next minutes.
 [11:57] W11 delta HALT (transcript residue #4, flagged at wave-end after a GREEN gate) recovered: restore + W11 naming test (3/3) + resume pid 161260.
+[13:43] W11 GREEN 147b34b (12:23, during the gap). W12 THEN SPUN FOR 80 MIN ON NOTHING: usage limit killed execute:w12 AND fix 1/2/3 at launch (0 tools, ~1s each), so the gate kept re-proving the W11 tree (3x 23-min cycles) while review escalated 1->3->4 blockers. Limit now clear (probe OK). Killed engine 161260, cleared stale lock, reset checkpoint to wave-12 EXECUTE iter 0, relaunched pid 159344 — execute:w12 alive at t+100s/9 tools.
+[13:44] W12 execute t+2m (11 calls) — surveying the Ecgberht test dir for the cross-criterion audit.
+[13:54] W12 execute t+12m (68 calls), healthy — no launch death, no stall.
+[14:04] W12 execute t+22m (98 calls) — writing/iterating chamber_close_report.py (the ease report + cross-criterion audit engine).
+[14:14] W12 execute t+32m (131 calls) — self-testing its work (running pytest on its own new tests + distro checks) before handing to the gate.
+[14:24] W12 execute completed ~14:17 (35m, no kill); gate t+6m — distro region passing (manifest updated in-wave). Verdict ~14:40.
+[14:34] W12 gate t+16m, mid-suite, clean. Verdict ~14:41.
+[14:44] W12 gate GREEN (exit 0, 1135/1135) on the real build. Review t+1m — this is the review that found 4 blockers against the EMPTY wave; now it reads actual work.
