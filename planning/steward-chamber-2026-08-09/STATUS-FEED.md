@@ -144,3 +144,23 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [18:24] W10 re-gate t+17m — the paint-budget and project_summary regions both passed clean. Verdict ~18:28.
 [18:34] W10 gate GREEN at 18:28 (iter 1). Review t+5m — reviewer #1 on its JSON retry (channel wobbling again); #0 quiet so far.
 [18:44] W10 delta HALT (transcript residue #3) recovered in 8 min: restore + W10 naming test (green) + resume. W10 re-entering.
+[08:41-08:44 2026-08-11] RELAY GAP OWNED: session ticks starved overnight (last tick 18:44); W10 went GREEN 3e90f70 on its own; W11 HALTed 19:59 — execute agent DIED AT LAUNCH (858ms, 0 tools, transient claude-CLI spawn failure), gate then saw only residue churn -> vacuous. Recovered 08:44: residue restored to HEAD, cleared, resumed — execute:w11 alive at t+80s/19 tools (launch failure did not recur).
+[08:54] W11 execute t+11m (70 calls) — reading commission_session + Ecgberht engine hooks (E3 handback machinery).
+[09:04] W11 execute used its full 20m (115 tools, capped like W6/W7/W9); gate running t+1m. Verdict ~09:25.
+[09:14] W11 gate t+11m, mid-suite, clean so far. Verdict ~09:25.
+[09:24] W11 gate t+21m, final stretch, clean. Verdict imminent.
+[09:36] W11 vacuous HALT #2 (this morning's 20m execute investigated but wrote NOTHING — wave spans two repos, orientation ate the window). Structural fix: relaunched engine detached (pid 155844) with --call-timeout-min 45 — execute:w11 now has a 45m window. If this one also lands nothing, escalating to John.
+[09:44] W11 execute (45m window) t+7m, 52 calls — orienting on chamber_directive/status_overlay + step-findings for the REFINE work. 38m of window left.
+[09:54] W11 execute WRITING for real this attempt: chamber_corrections/preload/rebrief/refine.py + triage/audit/standing-rules artifacts landed, now editing commission_session.py. t+17m of 45m.
+[10:04] W11 execute t+27m — now writing the wave's TESTS (test_chamber_rebrief_w11.py). 18m of window left.
+[10:14] W11 execute finished ~10:09 (33m used, well inside the 45m window); gate running t+4m. Verdict ~10:32.
+[10:24] W11 gate t+14m, mid-suite, clean — including the distro region (manifest was updated in-wave). Verdict ~10:32.
+[10:34] W11 gate iter-0 RED: 6 pytest fails — 3 in the wave's OWN new tests (rebrief channel, F6 auth set, concurrent-writer confirm) + 3 W6 seal-CI regressions (HTTP paint paths). fix:w11.1 launched t+1m. Real functional work for the fix loop.
+[10:44] W11 fix-1 t+10m (39 calls), working the 6-failure set.
+[10:54] W11 fix-1 done (~15m); re-gate t+5m, clean so far. Verdict ~11:10.
+[11:04] W11 re-gate t+15m — past the chamber seal-CI and W11-test regions with no failure banner. Verdict ~11:10.
+[11:14] W11 test-immutability HALT recovered: fix agent's conftest.py edit JUDGED LEGITIMATE (precision teardown repair — old global gc-sweep killed still-owned fixture servers, breaking the seal-CI HTTP tests under W11's mandated concurrent tests; assertions untouched; gate was GREEN 1135/1135). Cleared, resumed pid 150232 (45m window). 3-min recovery.
+[11:24] W11 re-proof gate t+3m (brief execute re-verified first). Verdict ~11:42.
+[11:34] W11 re-proof gate t+13m, mid-suite, clean. Verdict ~11:42.
+[11:44] W11 re-proof gate t+23m, final files, clean. Verdict in the next minutes.
+[11:57] W11 delta HALT (transcript residue #4, flagged at wave-end after a GREEN gate) recovered: restore + W11 naming test (3/3) + resume pid 161260.

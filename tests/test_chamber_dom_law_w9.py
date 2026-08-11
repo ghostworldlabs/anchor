@@ -40,6 +40,7 @@ import chamber_dom_law as cdl  # noqa: E402
 import chamber_gates as cgates  # noqa: E402  (W10 row: gate-queue render)
 import chamber_open as copen  # noqa: E402
 import chamber_rail as crail  # noqa: E402
+import chamber_refine as crefine  # noqa: E402  (W11 rows: REFINE overlay)
 import chamber_status_overlay as cso  # noqa: E402
 
 
@@ -350,6 +351,28 @@ def _drive_gate_queue(p):
     ]
 
 
+def _drive_refine(p):
+    # (steward-chamber W11) The REFINE overlay's agent-influenced slots:
+    # message who/text, steward label, draft summary, and the 'plan moved'
+    # card's finding/title/prose/diff rows (diff rows are TEXT, never
+    # markup — a hostile diff line must paint inert).
+    return [
+        crefine.render_refine_overlay_html({
+            "steward_label": p,
+            "summary": p,
+            "messages": [{"who": "john", "text": p},
+                         {"who": p, "text": p}],
+            "plan_moved": {"finding": p, "title": p, "section_id": p,
+                           "prose": p,
+                           "diff": ["-" + p, "+" + p, " " + p]},
+        }),
+        crefine.render_plan_moved_card_html(
+            {"finding": p, "title": p, "prose": p,
+             "diff": ["-" + p, "+" + p]}),
+        crefine.render_refine_overlay_html({}),
+    ]
+
+
 #: module.function -> the composed hostile drive that exercises it. The
 #: top-level renders call every registered helper, so each drive covers its
 #: module's rows; the completeness assertion keeps this map equal to the
@@ -375,6 +398,8 @@ HOSTILE_FIXTURES = {
     "chamber_status_overlay.render_status_overlay_html": _drive_overlay,
     "chamber_deliverable.render_deliv_box": _drive_deliv_box,
     "chamber_gates.render_gate_queue_html": _drive_gate_queue,
+    "chamber_refine.render_refine_overlay_html": _drive_refine,
+    "chamber_refine.render_plan_moved_card_html": _drive_refine,
 }
 
 

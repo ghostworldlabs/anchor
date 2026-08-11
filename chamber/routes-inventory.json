@@ -60,6 +60,8 @@
     { "method": "POST", "pattern": "/api/ecgberht/gate_resolve", "match": "exact", "auth": "token", "landed_by": "steward-chamber W10 (E5 serialized gate queue: resolve the HEAD gate; red-to-green in tests/test_chamber_gate_routes_w10.py)" },
     { "method": "POST", "pattern": "/api/ecgberht/gate_skip", "match": "exact", "auth": "token", "landed_by": "steward-chamber W10 (E5 serialized gate queue: skip the HEAD gate; red-to-green in tests/test_chamber_gate_routes_w10.py)" },
     { "method": "POST", "pattern": "/api/ecgberht/sweep_bind", "match": "exact", "auth": "token", "landed_by": "steward-chamber W10 (E2/F4 sweep-card binding: two-tier containment-checked sweep bound into the queue; red-to-green in tests/test_chamber_gate_routes_w10.py)" },
+    { "method": "POST", "pattern": "/api/ecgberht/refine_confirm", "match": "exact", "auth": "token", "landed_by": "steward-chamber W11 (REFINE overlay: the section-scoped hash-bound plan write - ledger writes only on confirm; genuine conflict answers the drawn 'plan moved' card WITH diff; red-to-green in tests/test_chamber_refine_routes_w11.py)" },
+    { "method": "POST", "pattern": "/api/ecgberht/rebrief", "match": "exact", "auth": "token", "landed_by": "steward-chamber W11 (E7 mid-flight re-brief in the audited live-with-receipt mode - paced-PTY write, receipt on the step, NO relaunch; refused-and-queued during an active sweep; red-to-green in tests/test_chamber_refine_routes_w11.py)" },
     { "method": "POST", "pattern": "/api/settings", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/doctor/healthcheck_run", "match": "exact", "auth": "token" },
     { "method": "POST", "pattern": "/api/auth/login", "match": "exact", "auth": "token" },

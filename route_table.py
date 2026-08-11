@@ -272,6 +272,21 @@ ROUTES = [
        handler="handle_ecgberht_gate_skip", migrated=True),
     _r("POST", "/api/ecgberht/sweep_bind", AUTH_TOKEN,
        handler="handle_ecgberht_sweep_bind", migrated=True),
+    # (steward-chamber W11) The REFINE-THE-PLAN overlay: the read-only
+    # draft/sections/overlay-html state …
+    _r("GET", "/api/ecgberht/refine_state", AUTH_TOKEN, match=MATCH_PREFIX,
+       handler="handle_ecgberht_refine_state", migrated=True),
+    # … its ONE plan-writing mutator — the SECTION-SCOPED HASH-BOUND confirm
+    # (writes only on a matching section hash; a moved section answers the
+    # drawn 'plan moved' card WITH diff, draft preserved) — and the E7
+    # mid-flight re-brief write (live channel, acknowledgment receipt on the
+    # step, NO relaunch; refused-and-queued during an active sweep). Rows +
+    # red-to-green proof in chamber/routes-inventory.json
+    # (tests/test_chamber_refine_routes_w11.py).
+    _r("POST", "/api/ecgberht/refine_confirm", AUTH_TOKEN,
+       handler="handle_ecgberht_refine_confirm", migrated=True),
+    _r("POST", "/api/ecgberht/rebrief", AUTH_TOKEN,
+       handler="handle_ecgberht_rebrief", migrated=True),
     _r("POST", "/api/ecgberht/speak", AUTH_TOKEN,
        handler="handle_ecgberht_speak", migrated=True),
     # TW7 Screen 4 — stand-up confirm ONLY path (empty project → Face+Strip)

@@ -8147,6 +8147,60 @@ function _ecgSealOpenStatusOverlay(root) {
     .catch(function () { /* the overlay simply does not open — never a guess */ });
 }
 
+/* (steward-chamber W11) The REFINE-THE-PLAN overlay, exactly as drawn
+   (§overlays right frame): server-rendered talk-to-edit dock. Talk stays
+   DRAFT — the plan writes ONLY through POST /api/ecgberht/refine_confirm,
+   the section-scoped hash-bound confirm; a genuine same-section conflict
+   answers 409 with the drawn 'plan moved' card WITH diff (server-escaped),
+   painted in place of the dock body. Toggled from [Refine the plan],
+   closed by its ×, the backdrop, or Esc. */
+function _ecgSealOpenRefineOverlay(root) {
+  var old = root.querySelector('#ecgRefineOverlay');
+  if (old) { old.remove(); return; }
+  fetch('/api/ecgberht/refine_state?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.ok || !j.html) return;
+      if (root.querySelector('#ecgRefineOverlay')) return;
+      var rov = document.createElement('div');
+      rov.id = 'ecgRefineOverlay';
+      rov.innerHTML = j.html;  // server-escaped verbatim-mockup markup (registered F5 sink)
+      root.appendChild(rov);
+      var page = rov.querySelector('.page');
+      if (page) {
+        page.addEventListener('click', function (e2) {
+          if (e2.target === page) rov.remove();  // click outside the dock closes
+        });
+      }
+      var onEsc = function (e3) {
+        if (e3.key === 'Escape') { rov.remove(); document.removeEventListener('keydown', onEsc); }
+      };
+      document.addEventListener('keydown', onEsc);
+    })
+    .catch(function () { /* the overlay simply does not open — never a guess */ });
+}
+
+/* The refine-confirm write path: section id + bound hash ride the overlay's
+   armed dataset (set by the draft flow); the server re-checks the hash —
+   this client NEVER decides a conflict. On 409 the server's drawn 'plan
+   moved' card (WITH diff) replaces the dock body via the registered sink. */
+function _ecgRefineConfirm(root, rov) {
+  var sec = rov.getAttribute('data-refine-section') || '';
+  var bound = rov.getAttribute('data-refine-hash') || '';
+  var text = rov.getAttribute('data-refine-text') || '';
+  if (!sec) { rov.remove(); return; }
+  _postJson('/api/ecgberht/refine_confirm',
+    { project_id: PROJECT_ID, section_id: sec, bound_hash: bound, new_text: text })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok) { rov.remove(); return; }
+      if (j && j.html) {
+        rov.innerHTML = j.html;  // the drawn 'plan moved' card (registered F5 sink)
+      }
+    })
+    .catch(function () { /* the confirm did not land — the draft is preserved server-side */ });
+}
+
 function _ecgSealPaintSlice(host) {
   if (document.getElementById('ecgSealSlice')) return;
   fetch('/api/ecgberht/seal_open?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
@@ -8201,6 +8255,35 @@ function _ecgSealPaintSlice(host) {
           ev.preventDefault();
           var ovl = root.querySelector('#ecgStatusOverlay');
           if (ovl) ovl.remove();
+          var rvl = root.querySelector('#ecgRefineOverlay');
+          if (rvl) rvl.remove();
+          return;
+        }
+        if (t.getAttribute('data-refine-overlay') != null) {
+          ev.preventDefault();
+          _ecgSealOpenRefineOverlay(root);  // W11: the drawn REFINE overlay — talk stays draft
+          return;
+        }
+        if (t.getAttribute('data-refine-confirm') != null) {
+          ev.preventDefault();
+          var rcv = root.querySelector('#ecgRefineOverlay');
+          if (rcv) _ecgRefineConfirm(root, rcv);  // hash-bound: the server decides
+          return;
+        }
+        if (t.getAttribute('data-refine-keep') != null) {
+          ev.preventDefault();  // keep refining — the dock stays open, nothing writes
+          return;
+        }
+        if (t.getAttribute('data-refine-discard') != null) {
+          ev.preventDefault();
+          var rdv = root.querySelector('#ecgRefineOverlay');
+          var rsec = rdv ? (rdv.getAttribute('data-refine-section') || '') : '';
+          if (rsec) {
+            _postJson('/api/ecgberht/refine_confirm',
+              { project_id: PROJECT_ID, action: 'discard', section_id: rsec })
+              .catch(function () { /* draft discard is best-effort */ });
+          }
+          if (rdv) rdv.remove();
           return;
         }
         var dh = t.getAttribute('data-deliv-href');

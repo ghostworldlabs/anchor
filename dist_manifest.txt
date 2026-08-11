@@ -225,6 +225,25 @@ chamber_status_overlay.py
 # imports it (its consumers are the W10 CI fixture suite), the same repo-side
 # status as chamber_dom_law above until a product consumer lands.
 chamber_gates.py
+# Steward chamber 2026-08 (W11): anchor_gui.py's refine_state / refine_confirm
+# handlers import chamber_refine (the REFINE overlay: section-scoped
+# hash-bound confirm + the drawn 'plan moved' card WITH diff), its rebrief
+# handler imports chamber_rebrief (the E7 live re-brief: paced-PTY delivery,
+# receipt on the step, sweep-contention queueing — reads the committed
+# chamber/rebrief-channel-audit.json mode record at runtime),
+# commission_session.py folds chamber_preload (the E6 standing-preferences
+# preload; reads chamber/standing-rules.json) into the session-start brief
+# and calls chamber_corrections.handback_guard (the E3 resurrection guard)
+# before the ingest bridge — so the deny-by-default import-closure gate
+# requires all four staged, plus the two committed data documents the
+# shipped modules read. All stdlib-only over the staged chamber_projections /
+# pty_manager seams; per-project writes stay in .anchor/chamber/.
+chamber_preload.py
+chamber_refine.py
+chamber_rebrief.py
+chamber_corrections.py
+chamber/standing-rules.json
+chamber/rebrief-channel-audit.json
 
 # ── Re-architecture 2026-07 C3 event-log spine (W12) ───────────────────────
 # Stdlib-only: journal (the per-project append-only JSONL event journal — the

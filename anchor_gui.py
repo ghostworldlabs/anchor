@@ -10783,6 +10783,114 @@ def handle_ecgberht_sweep_bind(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 409)
 
 
+def handle_ecgberht_refine_state(handler, path, body):
+    """GET /api/ecgberht/refine_state — the REFINE-THE-PLAN overlay state
+    (steward-chamber W11, C7).
+
+    Read-only: the refineable plan sections (id + section-scoped hash +
+    text), the open draft for a section when ``?section=`` is asked, and
+    the server-rendered overlay html (``chamber_refine.
+    render_refine_overlay_html`` — the drawn §overlays dock, every slot
+    escaped, F5). Talk stays DRAFT — nothing here writes; the ledger
+    writes only on the hash-bound confirm. Token-authed."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_refine
+    sections = chamber_refine.plan_sections(folder)
+    out = dict(sections)
+    section = (q.get("section", [""])[0] or "").strip()
+    if section:
+        out["draft"] = chamber_refine.current_draft(folder, section)
+    out["html"] = chamber_refine.render_refine_overlay_html(
+        {"messages": [], "summary": None})
+    handler._send_json(out, 200 if sections.get("ok") else 500)
+
+
+def handle_ecgberht_refine_confirm(handler, path, body):
+    """POST /api/ecgberht/refine_confirm — the SECTION-SCOPED HASH-BOUND
+    plan write (steward-chamber W11, C7 — the mockup's law: 'the ledger
+    writes only on Confirm the plan').
+
+    ``{project_id, section_id, bound_hash, new_text}`` applies IFF the
+    bound section hash still matches — unrelated activity elsewhere never
+    invalidates the confirm; a genuine same-section conflict answers 409
+    with the drawn 'plan moved' card WITH diff (draft preserved, html
+    included). ``{action: 'draft'}`` opens/replaces the talk-draft;
+    ``{action: 'discard'}`` drops it — neither touches the plan.
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_refine_routes_w11.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_refine
+    action = str(b.get("action", "confirm") or "confirm").strip()
+    section_id = str(b.get("section_id", "") or "").strip()
+    if not section_id:
+        handler._send_json({"ok": False, "error": "section_id required"}, 400)
+        return
+    if action == "draft":
+        out = chamber_refine.open_draft(folder, section_id,
+                                        b.get("draft_text") or b.get("text"))
+        handler._send_json(out, 200 if out.get("ok") else 400)
+        return
+    if action == "discard":
+        out = chamber_refine.discard_draft(folder, section_id)
+        handler._send_json(out, 200 if out.get("ok") else 500)
+        return
+    out = chamber_refine.confirm_refine(
+        folder, section_id, str(b.get("bound_hash", "") or ""),
+        b.get("new_text") or b.get("text"))
+    if out.get("error") == chamber_refine.ERROR_PLAN_MOVED:
+        out["html"] = chamber_refine.render_plan_moved_card_html(
+            out.get("card") or {})
+        handler._send_json(out, 409)
+        return
+    handler._send_json(out, 200 if out.get("ok") else 400)
+
+
+def handle_ecgberht_rebrief(handler, path, body):
+    """POST /api/ecgberht/rebrief — mid-flight RE-BRIEF of the running
+    commission in the audited LIVE mode (steward-chamber W11, C7 — E7).
+
+    ``{project_id, session_id, text, step_id?}`` delivers ONE paced write
+    onto the LIVE session's stdin (the wired paced-PTY channel — never a
+    relaunch) and mints the acknowledgment receipt on the step. During an
+    active sweep the re-brief is REFUSED-AND-QUEUED behind the sweep's
+    card binding with the named finding (409) — never interleaved. A
+    dead/unknown session answers the honest named refusal (409).
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_refine_routes_w11.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    sid = str(b.get("session_id", "") or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    import chamber_rebrief
+    out = chamber_rebrief.rebrief(folder, sid, b.get("text"),
+                                  step_id=b.get("step_id"))
+    if out.get("ok"):
+        handler._send_json(out, 200)
+        return
+    handler._send_json(
+        out, 409 if (out.get("queued")
+                     or out.get("error") == chamber_rebrief.ERROR_SESSION_NOT_LIVE)
+        else 400)
+
+
 def handle_ecgberht_speak(handler, path, body):
     """POST /api/ecgberht/speak — compile saybox talk (closed acts only)."""
     pid = str(body.get("project_id", "") or "").strip()
@@ -18290,6 +18398,15 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_gate_resolve": handle_ecgberht_gate_resolve,
     "handle_ecgberht_gate_skip": handle_ecgberht_gate_skip,
     "handle_ecgberht_sweep_bind": handle_ecgberht_sweep_bind,
+    # (steward-chamber W11) REFINE overlay + mid-flight re-brief — each
+    # registered WITH its route row (the stand_up 404 lesson): the read-only
+    # overlay state, the section-scoped hash-bound confirm (the ONE plan
+    # write; 'plan moved' card WITH diff on genuine conflict), and the E7
+    # live re-brief write (receipt on the step, no relaunch, queued behind
+    # an active sweep with the named finding).
+    "handle_ecgberht_refine_state": handle_ecgberht_refine_state,
+    "handle_ecgberht_refine_confirm": handle_ecgberht_refine_confirm,
+    "handle_ecgberht_rebrief": handle_ecgberht_rebrief,
     "handle_ecgberht_speak": handle_ecgberht_speak,
     # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
     # route table, but never registered here — so _strangler_dispatch took its
@@ -19586,11 +19703,27 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # so an undeclared POST is still default-denied while a future reviewed
         # open POST would be honored (rearch W8: post-middleware consults the
         # route-table auth policy).
-        _post_route = _routes.match("POST", urlparse(self.path).path)
+        _path_only = urlparse(self.path).path
+        _post_route = _routes.match("POST", _path_only)
         _post_open = (_post_route is not None
                       and _post_route.auth == _routes.AUTH_OPEN)
         if not _post_open and not _paths.auth_ok(provided):
             self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
+        # Auth-cookie bootstrap (steward-chamber W11). The login/logout mint
+        # is part of the AUTH MIDDLEWARE layer, not the dispatch surface: it
+        # runs here — after the token check above, before the strangler seam —
+        # so a post-auth dispatch shim (the chamber F6 harness swaps
+        # _strangler_dispatch for a marker responder) can never swallow the
+        # Set-Cookie handshake. The rows stay declared/migrated in
+        # route_table.py and _strangler_dispatch still resolves them when
+        # called directly.
+        if _path_only == "/api/auth/login":
+            handle_auth_login(self, self.path, body)
+            return
+        if _path_only == "/api/auth/logout":
+            handle_auth_logout(self, self.path, body)
             return
 
         # Strangler dispatch (rearch W7 / C2): consult the declarative route
@@ -19609,7 +19742,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # dispatch — and with auth OFF the query is empty, which is why the
         # suites never saw it. Handlers still receive the FULL URI (query
         # included) — _strangler_dispatch passes ``self.path`` to the handler.
-        if self._strangler_dispatch("POST", urlparse(self.path).path, body):
+        if self._strangler_dispatch("POST", _path_only, body):
             return
             
         # /api/doctor/run removed (doctor V3 wave 1). The V2 handler spawned a

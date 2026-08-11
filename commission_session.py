@@ -334,6 +334,20 @@ def confirm_and_launch(
             "current state; approved by John):\n" + str(directive).strip() + "\n\n")
     brief = (load_preamble or "") + directive_block + build_brief(proposal, skill=skill)
 
+    # (steward-chamber W11, E6) Standing-preferences PRELOAD: the feedback
+    # ledger + global standing rules fold DETERMINISTICALLY into the talk
+    # instruction at session start, and the projection listing EXACTLY the
+    # loaded entries persists to the chamber sidecar
+    # (chamber_preload.preload_into_instruction; verify_preload is the
+    # mechanical diff — a missing entry is a diffable failure).
+    try:
+        import chamber_preload as _cpl
+        brief = _cpl.preload_into_instruction(folder, brief)["instruction"]
+    except Exception:
+        # A preload hiccup never strands a launch; the projection sidecar's
+        # absence is itself the honest record that nothing was loaded.
+        pass
+
     def _launch(**kwargs):
         return _ce.launch_commission_in_session(
             start_session_fn=start_session_fn, **kwargs)
@@ -532,6 +546,33 @@ def finish_run(folder, project_id, record, result, *,
         "watch_count": int(record.get("watch_count", 0)) + 1,
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+
+    # (steward-chamber W11, E3) THE RESURRECTION GUARD on the W2-proven
+    # handback seam: BEFORE the ingest bridge reaches Ecgberht
+    # engine/handback-ingest.mjs :: ingestHandback /
+    # ingestValidatedHandbackBody, every predicate-bearing correction is
+    # re-asserted against the artifact it names. A regression BLOCKS the
+    # handback with the named finding; the unassertable remainder rides the
+    # report DEMOTED. Fails CLOSED on an unreadable corrections store; a
+    # project with zero corrections passes trivially (honest zero report).
+    try:
+        import chamber_corrections as _ccx
+        guard = _ccx.handback_guard(folder)
+    except Exception as exc:
+        guard = {"ok": False, "blocked": True,
+                 "finding": "E3-CORRECTION-REGRESSED-HANDBACK-BLOCKED",
+                 "error": "guard-crashed", "message": str(exc)[:200]}
+    if guard.get("blocked"):
+        updated["handback_blocked"] = guard
+        updated["ingest_error"] = guard.get("finding")
+        updated["report"] = {
+            "say": "Handback BLOCKED (%s): %s"
+                   % (guard.get("finding"),
+                      guard.get("message") or "correction regression"),
+        }
+        _atomic_write_json(_run_record_path(folder, session_id), updated)
+        return {"ok": False, "record": updated, "blocked": guard,
+                "ingest": None}
 
     ingest = run_bridge("ingest-run", {
         "project": str(folder),

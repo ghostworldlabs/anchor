@@ -54,6 +54,14 @@
       ]
     },
     {
+      "module": "chamber_refine",
+      "wave_of_record": "W11",
+      "functions": [
+        { "name": "render_refine_overlay_html", "placeholders": 12, "slots": "steward label · message who/text rows · draft summary · confirm/keep/discard button labels · overlay title/subtitle" },
+        { "name": "render_plan_moved_card_html", "placeholders": 8, "slots": "finding id · card title · prose · unified-diff rows (text only) · re-apply/take-new button labels" }
+      ]
+    },
+    {
       "module": "chamber_gates",
       "wave_of_record": "W10",
       "functions": [
@@ -67,7 +75,8 @@
     "registered": [
       { "marker": "wrap.innerHTML = j.html", "why": "the seal slice mount (shadow-root path) - server-escaped verbatim-mockup markup from GET /api/ecgberht/seal_open; every slot value escaped server-side" },
       { "marker": "slice.innerHTML = j.html", "why": "the seal slice mount (light-DOM fallback path) - the same server-escaped render" },
-      { "marker": "ov.innerHTML = j.html", "why": "the W9 STATUS overlay mount - server-escaped verbatim-overlays markup from GET /api/ecgberht/status_overlay" }
+      { "marker": "ov.innerHTML = j.html", "why": "the W9 STATUS overlay mount - server-escaped verbatim-overlays markup from GET /api/ecgberht/status_overlay" },
+      { "marker": "rov.innerHTML = j.html", "why": "the W11 REFINE overlay mount - server-escaped verbatim-overlays markup (incl. the 'plan moved' card) from GET /api/ecgberht/refine_state and the 409 plan-moved response of POST /api/ecgberht/refine_confirm" }
     ],
     "note": "Every OTHER DOM write in the chamber region (the injection-clock pulse update, the deliverable-landing live push, button arming) uses textContent / setAttribute / createTextNode exclusively; hrefs re-validate through _ecgSealHrefAllowed before any navigation."
   }
