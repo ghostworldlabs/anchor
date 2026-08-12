@@ -26,7 +26,7 @@ John gate).
 
 Row notes:
 
-* **E1** — no leg of the E1 stack is in the tree (parser ABSENT / ratification ABSENT / turn hook ABSENT / W8 test ABSENT) — see chamber/E1-ENFORCEMENT-REPORT.md
+* **E1** — the E1 stack is incomplete in the tree (parser landed / ratification landed / turn hook ABSENT / W8 test ABSENT) — see chamber/E1-ENFORCEMENT-REPORT.md
 * **E2** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect
 * **E3** — re-run end-to-end by the W12 suite
 * **E4** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect

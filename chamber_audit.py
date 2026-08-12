@@ -107,7 +107,7 @@ def criteria_rows() -> list:
                       "DOM test",
         "status": "instrument-missing",
         "finding": FINDING_PLAN_DEFECT,
-        "note": "no leg of the E1 stack is in the tree (parser %s / "
+        "note": "the E1 stack is incomplete in the tree (parser %s / "
                 "ratification %s / turn hook %s / W8 test %s) — see "
                 "chamber/E1-ENFORCEMENT-REPORT.md"
                 % tuple("landed" if v else "ABSENT" for v in (
