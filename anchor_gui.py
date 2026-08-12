@@ -11127,13 +11127,52 @@ def handle_ecgberht_converse(handler, path, body):
     if _ecgberht_reject_oversized(handler, text):
         return
     args = ["--project", folder, "--converse", text]
+    # steward-e1 W2 (E1): the turn-completion hook's bound payload rides the
+    # W2-proven converse seam — the deterministic question ids + the F7
+    # ratification state, computed by the committed Anchor owner
+    # (chamber_e1_hook / chamber_e1_bound), never re-derived by the engine.
+    args.extend(["--e1", json.dumps(_e1_bound_payload(text))])
     packed = _ecgberht_pack_turns(b.get("turns"))
     if packed:
         args.extend(["--turns", json.dumps(packed)])
     if (b.get("who") or "").strip():
         args.extend(["--who", (b.get("who") or "").strip()])
     out = _ecgberht_bridge(args, timeout=ECGBERHT_CONVERSE_TIMEOUT_S)
+    out = _e1_enforce_turn_close(text, out)
     handler._send_json(out, 200 if out.get("ok") else 502)
+
+
+def _e1_bound_payload(utterance):
+    """The ``--e1`` payload for one steward turn (steward-e1 W2). A hook
+    failure NEVER silently disarms enforcement: the fallback payload fails
+    CLOSED by name (E1-F7-ARTIFACT-MISSING), never permissive."""
+    try:
+        import chamber_e1_hook as _e1h
+        return _e1h.bound_payload_for_turn(utterance)
+    except Exception as exc:
+        return {"schema_version": 1, "enforceable": False,
+                "finding": "E1-F7-ARTIFACT-MISSING",
+                "reason": "the bound payload could not be computed (%s) — "
+                          "fail closed by name, never silently open" % exc}
+
+
+def _e1_enforce_turn_close(utterance, out):
+    """The BRIDGE-BOUNDARY leg of the E1 seam (steward-e1 W2): re-evaluate
+    the returned turn and block a close the engine leg let through. A hook
+    error attaches a NAMED unenforceable verdict — loud, never silent."""
+    try:
+        import chamber_e1_hook as _e1h
+        return _e1h.enforce_bridge_result(utterance, out)
+    except Exception as exc:
+        if isinstance(out, dict) and out.get("lane") == "converse":
+            out.setdefault("turn_close", {
+                "decision": "unenforceable", "enforced": False,
+                "finding": "E1-F7-ARTIFACT-MISSING",
+                "reason": "the turn-completion hook errored at the bridge "
+                          "boundary (%s) — named, never silently open"
+                          % exc,
+                "unanswered": [], "answered": []})
+        return out
 
 
 def handle_ecgberht_high_seat_say(handler, path, body):
@@ -11162,10 +11201,15 @@ def handle_ecgberht_high_seat_say(handler, path, body):
                                        "open a project's Seal instead."}, 502)
         return
     args = ["--project", folder, "--converse", "PORTFOLIO: " + text]
+    # steward-e1 W2 (E1): the High Seat talks through the SAME converse seam,
+    # so the same turn-completion hook rides it — computed over the exact
+    # utterance the engine sees (the PORTFOLIO-prefixed text).
+    args.extend(["--e1", json.dumps(_e1_bound_payload("PORTFOLIO: " + text))])
     packed = _ecgberht_pack_turns(b.get("turns"))
     if packed:
         args.extend(["--turns", json.dumps(packed)])
     out = _ecgberht_bridge(args, timeout=ECGBERHT_CONVERSE_TIMEOUT_S)
+    out = _e1_enforce_turn_close("PORTFOLIO: " + text, out)
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 

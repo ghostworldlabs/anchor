@@ -14,7 +14,7 @@ John gate).
 
 | Row | Home | Named instrument | W12 status |
 |-----|------|------------------|------------|
-| E1 | W8 | W8 joint negative-path test + telemetry-injection DOM test | **instrument-missing** |
+| E1 | W8 | W8 joint negative-path test | **reverified** |
 | E2 | W10 | enqueue-gate negative-path test on the W2 seam (chamber_gates.enqueue_guard) | **reverified-in-W12** |
 | E3 | W11 | tests/test_chamber_corrections_w11.py (handback-block + coverage report) | **reverified** |
 | E4 | W10 | template fixture suite (chamber_directive.template_findings) | **reverified-in-W12** |
@@ -26,7 +26,7 @@ John gate).
 
 Row notes:
 
-* **E1** — the E1 stack is incomplete in the tree (parser landed / ratification landed / turn hook ABSENT / W8 test ABSENT) — see chamber/E1-ENFORCEMENT-REPORT.md
+* **E1** — stack present
 * **E2** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect
 * **E3** — re-run end-to-end by the W12 suite
 * **E4** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect
@@ -94,7 +94,10 @@ the W12 close (see the enforcement reports).
 The assembled system's landed enforcement (E3/E5-machinery/E6/E7/
 E9, F3/F4/F5, the projections substrate, the M1 paint bounds) is
 re-verified green at its seams, and the three interaction cases
-block with their named findings. E1 and the ease count are NOT
-enforced/instrumented — plan defects for John, published in the
-enforcement reports. Tiles stand: parity is resolved but UNSIGNED
-(three rows await John's ruling at the signing gate).
+block with their named findings. The E1 instrument stack is
+landed (the steward-e1 re-execution; enforcement arms at
+John's F7 signature and fails CLOSED by name until then); the
+ease count is NOT instrumented — a plan defect for John,
+published in the enforcement reports. Tiles stand: parity is
+resolved but UNSIGNED (three rows await John's ruling at the
+signing gate).

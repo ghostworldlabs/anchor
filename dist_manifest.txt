@@ -211,6 +211,19 @@ chamber_eta.py
 # document (chamber/dom-slot-inventory.json) stays repo-side with it.
 chamber_deliverable.py
 chamber_status_overlay.py
+# Steward E1 2026-08 (steward-e1 W2): anchor_gui.py's converse / high_seat_say
+# handlers import chamber_e1_hook (the turn-completion hook: the --e1 bound
+# payload + the bridge-boundary enforce/block + the drawn blocked-turn
+# render) at runtime, and chamber_e1_hook imports chamber_e1_bound (the
+# committed deterministic question parse + typed answer-reference schema +
+# the fail-closed F7 ratification reader) at module scope — the deny-by-
+# default import-closure gate requires both staged. Both stdlib-only, zero
+# model/network/PTY. chamber/E1-BOUND-RATIFICATION.md is the F7 artifact the
+# hook reads at runtime: absent it fails CLOSED by name (never permissive),
+# so it ships so a fresh install carries the bound John ratifies.
+chamber_e1_bound.py
+chamber_e1_hook.py
+chamber/E1-BOUND-RATIFICATION.md
 # Steward chamber 2026-08 (W10): anchor_gui.py's gate_queue / gate_resolve /
 # gate_skip / sweep_bind handlers import chamber_gates (the serialized FIFO
 # decision-gate queue + the E2 enqueue guard + the two-tier containment-checked
