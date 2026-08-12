@@ -172,3 +172,5 @@ W4 executing (11m). JOHN GATE PRESENTED: W1 batched mockup-amendment (9 AG rows 
 [14:24] W12 execute completed ~14:17 (35m, no kill); gate t+6m — distro region passing (manifest updated in-wave). Verdict ~14:40.
 [14:34] W12 gate t+16m, mid-suite, clean. Verdict ~14:41.
 [14:44] W12 gate GREEN (exit 0, 1135/1135) on the real build. Review t+1m — this is the review that found 4 blockers against the EMPTY wave; now it reads actual work.
+[14:54] === RUN END === W12 GREEN + committed 921e452 (22 files; review 2 reviewers 0 blockers). PROJECT DONE: all 12 waves GREEN via orchestrator gate. Two John gates now open: TILE-RETIREMENT-GATE.md (3 decisions, UNSIGNED -> tiles stand) and EASE-CLOSE-REPORT.md (count UNAVAILABLE by name — W3/W8 ease legs never landed; E1 stack absent). Audit report: chamber/W12-AUDIT-REPORT.md.
+[15:04] Relay cadence STOOD DOWN — the standing rule ran 'through the end of the run (wave 12)' and the run ended 14:46. Cron cdb956c6 cancelled. Journal 0082 updated with the W12 usage-limit spin + its lesson (agent-launch-failure must be a loud verdict, not an empty-but-blessable step). Awaiting John's two rulings; re-arm the cadence on his word.

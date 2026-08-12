@@ -59,3 +59,20 @@ the tile code (checked in CI), and the bottom tiles keep rendering. Signing
 records **Signed by:** John with the date on the first line block above,
 flips `signed_by_john` in the inventory, and records a `john_ruling` on each
 pending row — only then does `retirement_allowed` answer true.
+
+## John's rulings (recorded as given, 2026-08-11)
+
+| Decision | Ruling | Effect |
+|---|---|---|
+| 1. full-transcript-log-link | **AMENDMENT ORDERED** | Draw a transcript link onto the rail runcard's links row and route it through the W1 batched amendment gate; John re-signs and the new markup hash is re-pinned for C9. The row becomes `equivalent` ONLY when that lands — until then it still blocks retirement and the tile stands. Recorded in `chamber/tile-affordance-inventory.json` as `john_ruling: amendment-ordered`. |
+| 2. rearm-watch | **TILE CONTROL KEPT** | Excluded from retirement. The audit disproved W9's equivalence claim (resolving a gate card does not invoke `commission_session.rearm_watch`), so the tile's 'Hand it back / Keep watching' control is the only re-arm surface and survives the sweep. It may retire only after a wired queue-card re-arm lands through the amendment gate and verifies at its seam. Recorded as `john_ruling: excluded-from-retirement`. |
+| 3. dismiss-finished-tile | **DEFERRED — John inspects first** | John wants to see the chamber's project archive/put-away path in the live UI before signing this loss. Scope clarified at the signing: this row is ONLY the per-run `x` hide in the runs strip (an in-memory browser flag that does not survive a reload) — NOT project archival, which lives in `rnd_registry.py` (archive/retire/future/reactivate, RETAINED-not-deleted, C7) and is untouched by this plan. Recorded as `john_ruling: deferred-pending-inspection`. |
+
+All three rows are now ruled or deferred, but decision 3 is DEFERRED rather than
+signed, so the gate stays UNSIGNED and `chamber_retirement.retirement_allowed`
+continues to refuse by name. No tile code has been deleted.
+
+**Blocking John's inspection:** the live `anchor` service is running PRE-CHAMBER
+code (probed 2026-08-11: `/api/ecgberht/status_overlay` -> 404 while
+`/api/rnd/projects` -> 200). The chamber cannot be seen until the service is
+restarted onto this branch's code, which needs an elevated restart John runs.
