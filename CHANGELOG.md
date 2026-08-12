@@ -1,5 +1,56 @@
 # Changelog
 
+## v1.2.1 — the steward chamber (2026-08-12)
+
+The v1.2 line: a rebuild of how the steward talks to you inside a project.
+Twelve waves, all GREEN on the orchestrator gate (1135/1135), merged at
+`3dbc21c`. Planned by Crucible, built by Foreman, from the 4-stage steward
+assessment in `C:\dev\Ecgberht\planning\steward-assessment-2026-08-08`.
+
+Numbering note: `v1.2.0` was already spent on an earlier line-close commit
+(`120ddd0`, 2026-08-04), so the chamber release takes 1.2.1. A published
+version number is never reused.
+
+### The three defects this closes
+- **D1 — status was fragmented across four surfaces.** There is now ONE flow
+  surface: the M1 rail, with a STATUS overlay carrying the latest status table
+  and the remaining steps with median ETAs.
+- **D2 — talk turns took 60-160s.** The chamber renders DETERMINISTIC-FIRST:
+  it opens in under 2 seconds from projections, and the model is called only
+  when you actually speak. Enforced by a `<2s` CI budget at >=2x-real fixture
+  sizes plus a zero-model-call network/process trace.
+- **D3 — no declared pipeline.** Typed edges, a versioned manifest schema with
+  a lint, artifact contracts, and a declared deliverable per effort.
+
+### Enforcement that landed (engine-enforced, re-verified at its seam)
+- **E2** — worktree sweep before re-commissioning, with the enqueue guard.
+- **E3** — resurrection-regression diffs against the correction ledger.
+- **E5** — serialized gate queue, head-only.
+- **E6** — preference preload.
+- **E7** — mid-flight re-brief per audited mode, no relaunch.
+- **E9** — layered verification; collapsed-stage manifest-lint refusal.
+- **F3** deliverable-run execution bounds (shell:false, code-owned verb
+  allow-list, symlink/junction-resolved containment, labeled inert fallback),
+  **F4** sweep containment, **F5** DOM injection law over a registered slot
+  inventory with a growth rule, **F6** CSRF-class assertions on state-changing
+  surfaces with a caller-class threat split.
+
+### Known gaps — stated plainly, not buried
+- **E1 is NOT engine-enforced.** A steward turn can still close on an
+  unanswered direct question. W8 changed no chamber source: the bound parser,
+  the F7 ratification artifact, the turn-completion hook and the joint
+  negative-path test are all absent. Convention is the only cover. Full
+  evidence in `chamber/E1-ENFORCEMENT-REPORT.md`. Being closed in the next
+  release.
+- **The ease count is UNAVAILABLE by name.** No classifier of record was ever
+  registered, so the 5->0 same-ruler re-score cannot run.
+  `chamber/EASE-CLOSE-REPORT.md` refuses to fabricate a number.
+- **Tile retirement has NOT executed.** `chamber/TILE-RETIREMENT-GATE.md` is
+  unsigned and `chamber_retirement.retirement_allowed` refuses by name, so the
+  bottom run tiles all still render. No tile code was deleted.
+- Five test files cited in wave reports do not exist in the tree. Named in
+  `chamber/W12-AUDIT-REPORT.md` as plan defects.
+
 ## v1.1.3 — share-fix (2026-08-01)
 
 The recovery release for the broken 1.1.x collaborator distribution
