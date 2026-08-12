@@ -10529,6 +10529,368 @@ def handle_ecgberht_chamber(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def handle_ecgberht_seal_open(handler, path, body):
+    """GET /api/ecgberht/seal_open — the W6 painted vertical-slice M1 open
+    (steward-chamber C1).
+
+    DETERMINISTIC-FIRST: the response derives from the W4/W5 sidecar
+    projections + the ledger tail alone (``chamber_open.seal_open_view``,
+    bounded reads: snapshot tail-read + the 200-read run-record backstop) and
+    is rendered as the verbatim-mockup slice (``render_seal_slice_html``,
+    every slot value escaped) — ZERO model calls, ZERO child processes (this
+    handler never touches the Node bridge), ZERO writes. A fresh deploy
+    (sidecar absent / schema-stale) answers the DRAWN degraded-rail state
+    (AG-DEGRADED-RAIL) carrying the explicit W5 cold-open rebuild affordance
+    — never an inline rebuild on the open path. The W6 CI suite
+    (tests/test_chamber_seal_ci_w6.py) asserts the spawn/network trace, the
+    <2s budget, and the C9 DOM/class diff on every chamber change.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    # W7: the FULL M1 rail (chamber_rail — typed edges, rulebook states,
+    # pulse ⏱ seed, guarded ETA medians) over the same bounded W6 open; the
+    # response also carries the SIGNED mockup's verbatim CSS for the
+    # style-isolated (shadow-root) mount. Still zero model calls, zero child
+    # processes (never touches the Node bridge), zero writes.
+    import chamber_rail
+    try:
+        view = chamber_rail.seal_rail_view(folder, project_id=pid)
+        stw = _steward_ui()
+        html_out = chamber_rail.render_seal_rail_html(
+            view, steward={"label": stw.get("label") or "Ecgberht"})
+        css_out = chamber_rail.mockup_css()
+    except Exception as exc:  # honest failure — never a blank or a guess
+        handler._send_json({"ok": False, "error": "seal_open_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json({"ok": True, "view": view, "html": html_out,
+                        "css": css_out}, 200)
+
+
+def handle_ecgberht_status_overlay(handler, path, body):
+    """GET /api/ecgberht/status_overlay — the W9 STATUS overlay, exactly as
+    drawn (steward-chamber C2/C9).
+
+    John's "most recent status update + what's left and how long": the
+    latest captured ⏱ status table (or the honest pre-emission / idle face)
+    plus the remaining rail steps with their n>=3 median ETAs, rendered
+    server-side as the verbatim §overlays structure
+    (``chamber_status_overlay.render_status_overlay_html`` over the same
+    bounded ``chamber_rail.seal_rail_view`` read the Seal open uses). Pure
+    read — ZERO model calls, ZERO child processes (never the Node bridge),
+    ZERO writes; every slot value escaped (F5); token-authed like every
+    chamber read (401 before substance).
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_rail
+    import chamber_status_overlay
+    try:
+        view = chamber_rail.seal_rail_view(folder, project_id=pid)
+        html_out = chamber_status_overlay.render_status_overlay_html(view)
+        ov = chamber_status_overlay.overlay_view(view)
+    except Exception as exc:  # honest failure — never a blank or a guess
+        handler._send_json({"ok": False, "error": "status_overlay_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json({"ok": True, "html": html_out,
+                        "table_state": ov.get("table_state"),
+                        "degraded": ov.get("degraded")}, 200)
+
+
+def handle_ecgberht_deliverable_state(handler, path, body):
+    """GET /api/ecgberht/deliverable_state — the W9 injection-clock read
+    (steward-chamber C2, F3).
+
+    The SAFE deliverable projection the open chamber polls on the injection
+    clock to flip the ◇ box live the moment the ENGINE-FED landing exists on
+    disk — no reopen, never model-remembered
+    (``chamber_deliverable.deliverable_state``: manifest + disk + the W4
+    landing projection are the only sources). Read-only; relative paths
+    only; argv/cwd never serialize; zero model calls; zero spawns.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_deliverable
+    try:
+        out = chamber_deliverable.deliverable_state(folder, project_id=pid)
+    except Exception as exc:  # honest failure — never a guess
+        handler._send_json({"ok": False, "error": "deliverable_state_failed",
+                            "message": str(exc)}, 500)
+        return
+    handler._send_json(out, 200)
+
+
+def handle_ecgberht_deliverable_action(handler, path, body):
+    """POST /api/ecgberht/deliverable_action — invoke THE registry action
+    for the project's declared deliverable (steward-chamber W9, C10 — F3).
+
+    The ONE chamber execution path, F3-bounded end to end: the action is
+    re-resolved server-side from the validated manifest at invoke time
+    (never trusted from the client — the request carries only the project
+    id), so the spawn — when one is armed at all — is ``shell:false`` with a
+    LIST argv built from the CODE-OWNED verb allow-list's fixed prefix plus
+    the symlink/junction-resolved CONTAINED output path, cwd pinned to the
+    project folder. Anything else — unknown type, disallowed verb, hostile
+    path content, an uncontained resolution, not-landed — answers the
+    LABELED inert state with its NAMED reason and executes NOTHING (409).
+    An armed ``open-report`` action answers its internal href and spawns
+    nothing. Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_close_ci_w9.py).
+    """
+    pid = str(body.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_deliverable
+    try:
+        action = chamber_deliverable.action_for_project(folder, project_id=pid)
+        result = chamber_deliverable.invoke_action(action)
+    except Exception as exc:  # honest failure — never a guess, never a spawn
+        handler._send_json({"ok": False, "error": "deliverable_action_failed",
+                            "message": str(exc)}, 500)
+        return
+    if not result.get("ok"):
+        # The labeled inert state: named reason + user-visible label,
+        # nothing executed. 409 — the affordance is honestly not armed.
+        result.setdefault("error", "deliverable_action_inert")
+        handler._send_json(result, 409)
+        return
+    handler._send_json(result, 200)
+
+
+def handle_ecgberht_gate_queue(handler, path, body):
+    """GET /api/ecgberht/gate_queue — the serialized decision-gate queue as
+    VISIBLE STATE (steward-chamber W10, E5).
+
+    Head-only by law: the response carries every gate's id/kind/status (the
+    queue is inspectable) but card CONTENT only for the HEAD, and the
+    server-rendered ``html`` paints exactly one prose card
+    (``chamber_gates.render_gate_queue_html`` — every slot escaped, F5;
+    swept paths are text, never markup). Pure read — no model, no spawn,
+    no write; token-authed like every chamber read."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_gates
+    state = chamber_gates.queue_state(folder)
+    out = dict(state)
+    out["html"] = chamber_gates.render_gate_queue_html(state)
+    handler._send_json(out, 200 if state.get("ok") else 500)
+
+
+def handle_ecgberht_gate_resolve(handler, path, body):
+    """POST /api/ecgberht/gate_resolve — resolve the HEAD decision gate
+    (steward-chamber W10, E5).
+
+    The serialization law lives server-side: only the queue HEAD may
+    resolve; a non-head gate_id is refused by name (409) and releases
+    nothing. Resolving releases the next card, returned as ``released``.
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_gate_routes_w10.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    gate_id = str(b.get("gate_id", "") or "").strip()
+    if not gate_id:
+        handler._send_json({"ok": False, "error": "gate_id required"}, 400)
+        return
+    import chamber_gates
+    out = chamber_gates.resolve_gate(folder, gate_id,
+                                     resolution=b.get("resolution"))
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
+def handle_ecgberht_gate_skip(handler, path, body):
+    """POST /api/ecgberht/gate_skip — skip the HEAD decision gate
+    (steward-chamber W10, E5; same head-only serialization law as resolve).
+    Token-authed + F6; row in chamber/routes-inventory.json."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    gate_id = str(b.get("gate_id", "") or "").strip()
+    if not gate_id:
+        handler._send_json({"ok": False, "error": "gate_id required"}, 400)
+        return
+    import chamber_gates
+    out = chamber_gates.skip_gate(folder, gate_id)
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
+def handle_ecgberht_sweep_bind(handler, path, body):
+    """POST /api/ecgberht/sweep_bind — run the two-tier containment-checked
+    worktree sweep for a died/quiet/timeout run and BIND its card into the
+    decision-gate queue (steward-chamber W10, C5/E2/F4).
+
+    The state-machine transition that releases the E2 enqueue gate: tier 1
+    lands declared-deliverable-glob matches onto the step, tier 2 lists the
+    worktree's unclaimed changes BY PATH ONLY (symlink- and
+    junction-resolved containment both directions; nothing is executed),
+    and the card takes the queue HEAD — a held gate is re-queued behind it,
+    never dropped. Campaign state auto-commits after the bind (V3 landing
+    class: sweep landing). Token-authed + F6; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_gate_routes_w10.py."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    sid = str(b.get("session_id", "") or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    import chamber_gates
+    import commission_session as _cs
+    record = _cs.load_run_record(folder, sid)
+    if record is None:
+        # An honest sweep still binds for a record that vanished: the death
+        # row is what blocks E2, and only a bound card may release it.
+        record = {"session_id": sid}
+    try:
+        swept = chamber_gates.run_sweep(folder, record)
+        out = chamber_gates.bind_sweep_card(folder, swept, session_id=sid)
+    except Exception as exc:  # honest failure — never a half-bound queue
+        handler._send_json({"ok": False, "error": "sweep_bind_failed",
+                            "message": str(exc)}, 500)
+        return
+    out["sweep"] = (swept.get("sweep") if isinstance(swept, dict) else None)
+    handler._send_json(out, 200 if out.get("ok") else 409)
+
+
+def handle_ecgberht_refine_state(handler, path, body):
+    """GET /api/ecgberht/refine_state — the REFINE-THE-PLAN overlay state
+    (steward-chamber W11, C7).
+
+    Read-only: the refineable plan sections (id + section-scoped hash +
+    text), the open draft for a section when ``?section=`` is asked, and
+    the server-rendered overlay html (``chamber_refine.
+    render_refine_overlay_html`` — the drawn §overlays dock, every slot
+    escaped, F5). Talk stays DRAFT — nothing here writes; the ledger
+    writes only on the hash-bound confirm. Token-authed."""
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("project_id", [""])[0] or q.get("pid", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_refine
+    sections = chamber_refine.plan_sections(folder)
+    out = dict(sections)
+    section = (q.get("section", [""])[0] or "").strip()
+    if section:
+        out["draft"] = chamber_refine.current_draft(folder, section)
+    out["html"] = chamber_refine.render_refine_overlay_html(
+        {"messages": [], "summary": None})
+    handler._send_json(out, 200 if sections.get("ok") else 500)
+
+
+def handle_ecgberht_refine_confirm(handler, path, body):
+    """POST /api/ecgberht/refine_confirm — the SECTION-SCOPED HASH-BOUND
+    plan write (steward-chamber W11, C7 — the mockup's law: 'the ledger
+    writes only on Confirm the plan').
+
+    ``{project_id, section_id, bound_hash, new_text}`` applies IFF the
+    bound section hash still matches — unrelated activity elsewhere never
+    invalidates the confirm; a genuine same-section conflict answers 409
+    with the drawn 'plan moved' card WITH diff (draft preserved, html
+    included). ``{action: 'draft'}`` opens/replaces the talk-draft;
+    ``{action: 'discard'}`` drops it — neither touches the plan.
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_refine_routes_w11.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    import chamber_refine
+    action = str(b.get("action", "confirm") or "confirm").strip()
+    section_id = str(b.get("section_id", "") or "").strip()
+    if not section_id:
+        handler._send_json({"ok": False, "error": "section_id required"}, 400)
+        return
+    if action == "draft":
+        out = chamber_refine.open_draft(folder, section_id,
+                                        b.get("draft_text") or b.get("text"))
+        handler._send_json(out, 200 if out.get("ok") else 400)
+        return
+    if action == "discard":
+        out = chamber_refine.discard_draft(folder, section_id)
+        handler._send_json(out, 200 if out.get("ok") else 500)
+        return
+    out = chamber_refine.confirm_refine(
+        folder, section_id, str(b.get("bound_hash", "") or ""),
+        b.get("new_text") or b.get("text"))
+    if out.get("error") == chamber_refine.ERROR_PLAN_MOVED:
+        out["html"] = chamber_refine.render_plan_moved_card_html(
+            out.get("card") or {})
+        handler._send_json(out, 409)
+        return
+    handler._send_json(out, 200 if out.get("ok") else 400)
+
+
+def handle_ecgberht_rebrief(handler, path, body):
+    """POST /api/ecgberht/rebrief — mid-flight RE-BRIEF of the running
+    commission in the audited LIVE mode (steward-chamber W11, C7 — E7).
+
+    ``{project_id, session_id, text, step_id?}`` delivers ONE paced write
+    onto the LIVE session's stdin (the wired paced-PTY channel — never a
+    relaunch) and mints the acknowledgment receipt on the step. During an
+    active sweep the re-brief is REFUSED-AND-QUEUED behind the sweep's
+    card binding with the named finding (409) — never interleaved. A
+    dead/unknown session answers the honest named refusal (409).
+    Token-authed + F6 (POST-only mutator; row in
+    chamber/routes-inventory.json; red-to-green in
+    tests/test_chamber_refine_routes_w11.py)."""
+    b = body or {}
+    pid = str(b.get("project_id", "") or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    sid = str(b.get("session_id", "") or "").strip()
+    if not sid:
+        handler._send_json({"ok": False, "error": "session_id required"}, 400)
+        return
+    import chamber_rebrief
+    out = chamber_rebrief.rebrief(folder, sid, b.get("text"),
+                                  step_id=b.get("step_id"))
+    if out.get("ok"):
+        handler._send_json(out, 200)
+        return
+    handler._send_json(
+        out, 409 if (out.get("queued")
+                     or out.get("error") == chamber_rebrief.ERROR_SESSION_NOT_LIVE)
+        else 400)
+
+
 def handle_ecgberht_speak(handler, path, body):
     """POST /api/ecgberht/speak — compile saybox talk (closed acts only)."""
     pid = str(body.get("project_id", "") or "").strip()
@@ -11007,44 +11369,21 @@ def handle_ecgberht_step_note(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
-_ANSI_RE = None
-
-
 def _strip_terminal_noise(s):
     """Strip ANSI/OSC control sequences + CRs so a live PTY tail reads as
-    text in the pulse tile. Stdlib re only; never raises."""
-    global _ANSI_RE
-    try:
-        if _ANSI_RE is None:
-            import re as _re
-            _ANSI_RE = _re.compile(
-                r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"
-                r"|\x1b[@-_]|[\x00-\x08\x0b\x0c\x0e-\x1a\x1c-\x1f]")
-        return _ANSI_RE.sub("", str(s)).replace("\r", "")
-    except Exception:
-        return str(s)
+    text in the pulse tile. (steward-chamber W7: the implementation moved
+    into the run_pulse data core — ``chamber_pulse.strip_terminal_noise`` —
+    this delegate keeps the historical symbol for existing callers/tests.)"""
+    import chamber_pulse as _cp2
+    return _cp2.strip_terminal_noise(s)
 
 
 def _read_face_north_star(folder):
     """The '## North star' blockquote from the project's ECGBERHT.md face —
-    a display line for the pulse tile. Read-only, best-effort, never raises."""
-    try:
-        text = (Path(folder) / "ECGBERHT.md").read_text(
-            encoding="utf-8", errors="replace")
-        lines, grab = [], False
-        for ln in text.splitlines():
-            if ln.strip().lower().startswith("## north star"):
-                grab = True
-                continue
-            if grab:
-                if ln.startswith("#") or (lines and not ln.strip()):
-                    break
-                if ln.lstrip().startswith(">"):
-                    lines.append(ln.lstrip()[1:].strip())
-        star = " ".join(x for x in lines if x).replace("**", "")
-        return star or None
-    except Exception:
-        return None
+    a display line for the pulse tile. (steward-chamber W7: implementation
+    moved into ``chamber_pulse.read_face_north_star``; delegate kept.)"""
+    import chamber_pulse as _cp2
+    return _cp2.read_face_north_star(folder)
 
 
 def handle_ecgberht_run_pulse(handler, path, body):
@@ -11054,8 +11393,14 @@ def handle_ecgberht_run_pulse(handler, path, body):
     natural way"). Read-only: the run record (skill · step · directive · age)
     + the campaign's North star + the session's RECENT output (the skills'
     own ⏱ status blocks ride in it). Cursor-incremental like the terminals.
+
+    steward-chamber W7 (wire-homing row run_pulse, C12): this owner symbol
+    REMAINS the tile endpoint — the payload production is SPLIT into the
+    data core ``chamber_pulse.pulse_payload`` (parity proven against the
+    committed pulse-stream replay fixtures BEFORE anything was deleted; the
+    chamber's running-step ⏱ slot is the second consumer of the same core).
+    The HTTP contract here is unchanged.
     """
-    import commission_session as _cs
     q = parse_qs(urlparse(handler.path).query)
     pid = (q.get("project_id", [""])[0] or "").strip()
     sid = (q.get("session_id", [""])[0] or "").strip()
@@ -11070,65 +11415,11 @@ def handle_ecgberht_run_pulse(handler, path, body):
     if not sid:
         handler._send_json({"ok": False, "error": "session_id required"}, 400)
         return
-    rec = _cs.load_run_record(folder, sid)
-    if not rec:
+    import chamber_pulse as _cp2
+    out = _cp2.pulse_payload(folder, sid, cursor)
+    if out is None:
         handler._send_json({"ok": False, "error": "unknown_run"}, 404)
         return
-    out = {
-        "ok": True,
-        "session_id": sid,
-        "skill": rec.get("skill"),
-        "step_id": rec.get("step_id"),
-        "outcome": rec.get("outcome"),
-        "at": rec.get("at"),
-        "directive": rec.get("directive"),
-        "auto_chain": rec.get("auto_chain"),
-        "north_star": _read_face_north_star(folder),
-    }
-    def _latest_status_block(text):
-        """The skills' own ⏱/[HH:MM] 10-minute status table, when one rode
-        the output — John's #1 want on the pulse. Last occurrence wins."""
-        try:
-            import re as _re
-            hits = [m.start() for m in
-                    _re.finditer(r"⏱|^\[\d{2}:\d{2}\]", text, _re.M)]
-            if not hits:
-                return None
-            return text[hits[-1]:hits[-1] + 700].strip() or None
-        except Exception:
-            return None
-
-    # Live tail while running; the banked tail once it stopped. The ⏱ status
-    # scan reads the WHOLE retained buffer — a status table emitted between
-    # polls must be CAUGHT, not missed because the fresh chunk lacked one
-    # (2026-08-07, John: "you have to catch the status and store it").
-    full_text = ""
-    try:
-        import terminal_session as _ts
-        r = _ts.read_since(sid, cursor)
-        chunk = (r or {}).get("chunk") or ""
-        try:
-            full = _ts.read_since(sid, 0)
-            full_text = _strip_terminal_noise((full or {}).get("chunk") or "")
-        except Exception:
-            full_text = ""
-        if not chunk and cursor == 0 and rec.get("transcript_tail"):
-            # A parked/dead session reads EMPTY, not an exception (live-found
-            # 2026-08-07 after the warm drain) — the banked tail is the truth.
-            out["tail"] = _strip_terminal_noise(rec["transcript_tail"])[-4000:]
-            out["live"] = False
-        else:
-            out["tail"] = _strip_terminal_noise(chunk)[-4000:]
-            out["live"] = True
-        out["cursor"] = (r or {}).get("cursor", cursor)
-    except Exception:
-        out["tail"] = _strip_terminal_noise(rec.get("transcript_tail") or "")[-4000:]
-        out["cursor"] = cursor
-        out["live"] = False
-    out["latest_status"] = _latest_status_block(full_text) \
-        or _latest_status_block(out.get("tail") or "") \
-        or _latest_status_block(
-            _strip_terminal_noise(rec.get("transcript_tail") or ""))
     handler._send_json(out, 200)
 
 
@@ -18089,6 +18380,33 @@ _MIGRATED_HANDLERS = {
     "handle_friction_list": handle_friction_list,
     "handle_journal_friction": handle_journal_friction,
     "handle_ecgberht_chamber": handle_ecgberht_chamber,
+    # (steward-chamber W6) The deterministic-first painted M1 slice open —
+    # registered WITH its route row (the stand_up 404 lesson below).
+    "handle_ecgberht_seal_open": handle_ecgberht_seal_open,
+    # (steward-chamber W9) STATUS overlay + F3 deliverable action registry —
+    # each registered WITH its route row (same lesson): the overlay read, the
+    # injection-clock deliverable read, and the ONE deliverable-action
+    # mutator (row + red-to-green in chamber/routes-inventory.json).
+    "handle_ecgberht_status_overlay": handle_ecgberht_status_overlay,
+    "handle_ecgberht_deliverable_state": handle_ecgberht_deliverable_state,
+    "handle_ecgberht_deliverable_action": handle_ecgberht_deliverable_action,
+    # (steward-chamber W10) Serialized decision-gate queue (E5) + the E2
+    # sweep-card binding — each registered WITH its route row (the stand_up
+    # 404 lesson): the head-only queue read, the resolve/skip mutators, and
+    # the died→sweep bind that releases the E2 enqueue gate.
+    "handle_ecgberht_gate_queue": handle_ecgberht_gate_queue,
+    "handle_ecgberht_gate_resolve": handle_ecgberht_gate_resolve,
+    "handle_ecgberht_gate_skip": handle_ecgberht_gate_skip,
+    "handle_ecgberht_sweep_bind": handle_ecgberht_sweep_bind,
+    # (steward-chamber W11) REFINE overlay + mid-flight re-brief — each
+    # registered WITH its route row (the stand_up 404 lesson): the read-only
+    # overlay state, the section-scoped hash-bound confirm (the ONE plan
+    # write; 'plan moved' card WITH diff on genuine conflict), and the E7
+    # live re-brief write (receipt on the step, no relaunch, queued behind
+    # an active sweep with the named finding).
+    "handle_ecgberht_refine_state": handle_ecgberht_refine_state,
+    "handle_ecgberht_refine_confirm": handle_ecgberht_refine_confirm,
+    "handle_ecgberht_rebrief": handle_ecgberht_rebrief,
     "handle_ecgberht_speak": handle_ecgberht_speak,
     # (2026-07-30 FIX) stand_up was DEFINED and declared migrated=True in the
     # route table, but never registered here — so _strangler_dispatch took its
@@ -19385,11 +19703,27 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # so an undeclared POST is still default-denied while a future reviewed
         # open POST would be honored (rearch W8: post-middleware consults the
         # route-table auth policy).
-        _post_route = _routes.match("POST", urlparse(self.path).path)
+        _path_only = urlparse(self.path).path
+        _post_route = _routes.match("POST", _path_only)
         _post_open = (_post_route is not None
                       and _post_route.auth == _routes.AUTH_OPEN)
         if not _post_open and not _paths.auth_ok(provided):
             self._send_json({"ok": False, "error": "unauthorized"}, 401)
+            return
+
+        # Auth-cookie bootstrap (steward-chamber W11). The login/logout mint
+        # is part of the AUTH MIDDLEWARE layer, not the dispatch surface: it
+        # runs here — after the token check above, before the strangler seam —
+        # so a post-auth dispatch shim (the chamber F6 harness swaps
+        # _strangler_dispatch for a marker responder) can never swallow the
+        # Set-Cookie handshake. The rows stay declared/migrated in
+        # route_table.py and _strangler_dispatch still resolves them when
+        # called directly.
+        if _path_only == "/api/auth/login":
+            handle_auth_login(self, self.path, body)
+            return
+        if _path_only == "/api/auth/logout":
+            handle_auth_logout(self, self.path, body)
             return
 
         # Strangler dispatch (rearch W7 / C2): consult the declarative route
@@ -19408,7 +19742,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
         # dispatch — and with auth OFF the query is empty, which is why the
         # suites never saw it. Handlers still receive the FULL URI (query
         # included) — _strangler_dispatch passes ``self.path`` to the handler.
-        if self._strangler_dispatch("POST", urlparse(self.path).path, body):
+        if self._strangler_dispatch("POST", _path_only, body):
             return
             
         # /api/doctor/run removed (doctor V3 wave 1). The V2 handler spawned a

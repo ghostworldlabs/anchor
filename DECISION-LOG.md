@@ -114,3 +114,23 @@ in trio `foreman/journal/0095` and `Ecgberht/journal/0074`.
    SC6's HALT (`count 1 < 2`) was the system working. The correct response was one real
    commission of a second skill; the response taken was a second stand-in. Ask "what
    would make this true?", never "what would make this pass?".
+
+## 2026-08-10 — W1 batched mockup-amendment gate SIGNED (steward-chamber build)
+John approved ALL TEN undrawn states as batched (chat, ~05:41), drawer drawn
+NOW (row 9 not deferred). Full record: chamber/MOCKUP-AMENDMENT-GATE.md.
+Signed post-amendment hash of mockups.html (the C9 DOM-diff pin):
+sha256 = 4a7f7953852b5563fd10e073f7cab8c1ac7930390d0743726b54aebc31aeedde
+Every later mockup-verbatim claim pins to that hash; deviations only via the
+amendment gate. NS-hard collision rule unaffected.
+
+## 2026-08-10 — W6 first painted open MEASURED (steward-chamber build)
+
+First open of the painted M1 vertical-slice Seal, measured in a real browser
+(Chromium via Playwright) on machine **Puter**: performance-mark delta
+'seal-open' -> 'seal-painted' = **35 ms** (bound: <2000 ms).
+Campaign: **mba-teaching-ai** — a copy of the largest real campaign ledger from the W5
+fixture record (32 events / 0.70 MB / 6 run records), cold-open rebuilt, then
+painted from ledger/run-record/reflection/roadmap projections alone — the healthy rail.
+Zero model calls / zero child processes on the open are CI-asserted on every
+chamber change (tests/test_chamber_seal_ci_w6.py); this measured entry is
+recorded by tests/test_chamber_first_paint_w6.py.

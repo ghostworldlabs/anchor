@@ -262,6 +262,32 @@ def confirm_and_launch(
     if not proposal or not isinstance(proposal, dict):
         return {"ok": False, "error": "proposal_required"}
 
+    # W4 commission-time manifest lint (steward-chamber plan, F2): a NEW
+    # scaffold (born under the manifest convention) without a valid sidecar
+    # manifest is a HARD refusal before anything is confirmed or launched;
+    # a campaign predating the manifest routes to the W5 brownfield dual
+    # path (route "brownfield-w5") and proceeds.
+    import chamber_manifest as _cm
+    manifest_lint = _cm.commission_time_lint(folder)
+    if not manifest_lint.get("ok"):
+        return {"ok": False, "error": manifest_lint.get("error"),
+                "message": manifest_lint.get("message"),
+                "manifest_lint": manifest_lint}
+
+    # W10 E2 enqueue gate (steward-chamber, C5 — ENGINE-ENFORCED on THIS
+    # seam, the W2-proven leg b): while the campaign carries a death whose
+    # containment-checked sweep card is not yet BOUND into the decision-gate
+    # queue, a re-commission is REFUSED with the named finding — before the
+    # engine confirm, before any spend. The guard fails CLOSED on an
+    # unreadable gate store (a safety gate never guesses).
+    import chamber_gates as _cgates
+    e2 = _cgates.enqueue_guard(folder)
+    if not e2.get("ok"):
+        return {"ok": False, "error": e2.get("error"),
+                "finding": e2.get("finding"),
+                "message": e2.get("message"),
+                "blocking_deaths": e2.get("blocking_deaths")}
+
     confirmed = run_bridge("confirm", {
         "project": str(folder),
         "proposal": proposal,
@@ -307,6 +333,20 @@ def confirm_and_launch(
             "COMMISSION DIRECTIVE (composed by the steward from the campaign's "
             "current state; approved by John):\n" + str(directive).strip() + "\n\n")
     brief = (load_preamble or "") + directive_block + build_brief(proposal, skill=skill)
+
+    # (steward-chamber W11, E6) Standing-preferences PRELOAD: the feedback
+    # ledger + global standing rules fold DETERMINISTICALLY into the talk
+    # instruction at session start, and the projection listing EXACTLY the
+    # loaded entries persists to the chamber sidecar
+    # (chamber_preload.preload_into_instruction; verify_preload is the
+    # mechanical diff — a missing entry is a diffable failure).
+    try:
+        import chamber_preload as _cpl
+        brief = _cpl.preload_into_instruction(folder, brief)["instruction"]
+    except Exception:
+        # A preload hiccup never strands a launch; the projection sidecar's
+        # absence is itself the honest record that nothing was loaded.
+        pass
 
     def _launch(**kwargs):
         return _ce.launch_commission_in_session(
@@ -364,6 +404,21 @@ def confirm_and_launch(
         **(record_extra or {}),
     }
     _atomic_write_json(_run_record_path(folder, session_id), record)
+
+    # W4 chamber sidecar: the commission_start event-time projection, plus the
+    # manifest hash keyed to the commission id from the run record's EXISTING
+    # receipt fields (route "manifest" only). Best-effort — a sidecar hiccup
+    # never blocks a launch John just confirmed; the projections are
+    # rebuildable derived data (W5 cold-open rebuild).
+    try:
+        import chamber_projections as _cproj
+        _cproj.record_commission_start(
+            folder, commission_id, session_id=session_id,
+            step_id=step_id, skill=skill, lane=lane)
+        if manifest_lint.get("route") == _cm.ROUTE_MANIFEST:
+            _cm.record_manifest_hash(folder, record)
+    except Exception:
+        pass
 
     watching = False
     if watch:
@@ -492,6 +547,33 @@ def finish_run(folder, project_id, record, result, *,
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
 
+    # (steward-chamber W11, E3) THE RESURRECTION GUARD on the W2-proven
+    # handback seam: BEFORE the ingest bridge reaches Ecgberht
+    # engine/handback-ingest.mjs :: ingestHandback /
+    # ingestValidatedHandbackBody, every predicate-bearing correction is
+    # re-asserted against the artifact it names. A regression BLOCKS the
+    # handback with the named finding; the unassertable remainder rides the
+    # report DEMOTED. Fails CLOSED on an unreadable corrections store; a
+    # project with zero corrections passes trivially (honest zero report).
+    try:
+        import chamber_corrections as _ccx
+        guard = _ccx.handback_guard(folder)
+    except Exception as exc:
+        guard = {"ok": False, "blocked": True,
+                 "finding": "E3-CORRECTION-REGRESSED-HANDBACK-BLOCKED",
+                 "error": "guard-crashed", "message": str(exc)[:200]}
+    if guard.get("blocked"):
+        updated["handback_blocked"] = guard
+        updated["ingest_error"] = guard.get("finding")
+        updated["report"] = {
+            "say": "Handback BLOCKED (%s): %s"
+                   % (guard.get("finding"),
+                      guard.get("message") or "correction regression"),
+        }
+        _atomic_write_json(_run_record_path(folder, session_id), updated)
+        return {"ok": False, "record": updated, "blocked": guard,
+                "ingest": None}
+
     ingest = run_bridge("ingest-run", {
         "project": str(folder),
         "project_id": project_id,
@@ -541,6 +623,46 @@ def finish_run(folder, project_id, record, result, *,
         read_fn=read_fn, write_fn=write_fn, runner_kwargs=runner_kwargs)
     if updated["auto_continue"] is not None:
         _atomic_write_json(_run_record_path(folder, session_id), updated)
+
+    # W5 brief precompute (steward chamber): the reflection just landed, so
+    # precompute the situation brief into the chamber sidecar NOW — the next
+    # Seal open paints it with zero model calls (E8: steward-plane sidecar
+    # only; roadmap/receipts/reflection stores untouched). Best-effort by
+    # contract — a projector hiccup never blocks a run finishing; the W5
+    # cold-open rebuild is the cure. Runs BEFORE the campaign commit so the
+    # sidecar rides the same bank.
+    try:
+        import chamber_reconcile as _chamber_reconcile
+        _chamber_reconcile.on_reflection_landing(folder)
+    except Exception:
+        pass
+
+    # W9 deliverable landing (steward chamber, C2 — ENGINE-FED, never
+    # model-remembered): the run just stopped, so if the manifest-declared
+    # output now exists CONTAINED on disk, record the W4 deliverable_landing
+    # projection NOW — the open chamber's injection-clock poll flips the ◇
+    # box live with no reopen. Idempotent per output path; best-effort by
+    # the same contract as the brief precompute above (a sidecar hiccup
+    # never blocks a run finishing).
+    try:
+        import chamber_deliverable as _chamber_deliverable
+        _chamber_deliverable.record_landing_if_present(folder, updated)
+    except Exception:
+        pass
+
+    # W10 died→sweep-card state machine (steward-chamber, C5/E2): a run that
+    # ended died/quiet/timeout registers SWEEP-PENDING now — from here the
+    # E2 gate in confirm_and_launch blocks any re-commission until the
+    # containment-checked sweep card is bound into the queue, and a HELD
+    # gate is never dropped (the transition never touches the queue head).
+    # Best-effort by the same sidecar contract as the hooks above; the E2
+    # refusal itself is enforced at the confirm_and_launch seam.
+    try:
+        if result.get("outcome") in ("died", "quiet", "timeout"):
+            import chamber_gates as _cgates
+            _cgates.on_run_death(folder, updated)
+    except Exception:
+        pass
 
     # A finished run changed campaign state (record, attention, log) — bank it.
     commit_campaign_state(

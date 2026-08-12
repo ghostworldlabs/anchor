@@ -24,6 +24,7 @@
 - [x] Follow up on Box.com account for jcl12@psu.edu — Priority: 1 — energy: med — [commercial] — Due: 2026-07-15
 - [x] Get nextgen-np emails sorted for Sam and Matt. — Priority: 1 — energy: med — [commercial]
 - [ ] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
+- [ ] Look at the chamber's project archive/put-away path, then rule on tile decision 3 (dismiss-finished-tile) — Priority: 1 — energy: med — [commercial] — Notes: Steward-chamber W12 signing. BLOCKED FIRST: live anchor service runs pre-chamber code (status_overlay 404) - needs elevated warm restart: powershell -ExecutionPolicy Bypass -File .\restart_anchor.ps1 . Branch foreman/steward-chamber has the build. Then open a project window, check how you put a finished project away and get back to it. Gate doc: chamber/TILE-RETIREMENT-GATE.md. Two other rows already ruled (transcript link = amendment ordered; rearm-watch = tile kept).
 
 
 ## Nexia Impact / Axmra Capital

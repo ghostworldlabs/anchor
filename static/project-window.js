@@ -6820,6 +6820,9 @@ function _ecgStatusCls(status) {
 function closeEcgberhtSeal() {
   var dock = document.getElementById('ecgSealDock');
   if (dock) dock.remove();  // close changes nothing in the ledger
+  try { _ecgSealStopPulsePoll(); } catch (e) { /* poll not armed */ }
+  var slice = document.getElementById('ecgSealSlice');
+  if (slice) slice.remove();  // the W6 painted slice closes the same way — read-only
   var tile = document.getElementById('tile-ecgseal');
   if (tile) tile.open = false;
 }
@@ -7959,6 +7962,10 @@ function _ecgRenderStandUp(host, su) {
 }
 
 function openEcgberhtSeal() {
+  /* (steward-chamber W6) 'seal-open' marks the Seal click — the C1 paint
+     budget ('seal-open' → 'seal-painted' < 2000ms) starts HERE, before any
+     fetch or layout work. */
+  try { performance.mark('seal-open'); } catch (e) { /* marks unsupported */ }
   /* The chamber lives in ONE expandable tile (2026-07-30): the seal
      button expands it (same pattern as the main dashboard tiles). */
   var tile = document.getElementById('tile-ecgseal');
@@ -7967,16 +7974,375 @@ function openEcgberhtSeal() {
   ecgSealMountInline();
 }
 
+/* F5-CHAMBER-DOM-BEGIN — chamber DOM injection law (steward-chamber W9, C10).
+   Every DOM write inside this region obeys F5: agent-influenced strings
+   enter ONLY via textContent / attribute-safe setters, link targets validate
+   against the fixed internal prefixes (_ecgSealHrefAllowed), and the ONLY
+   sanctioned markup-injection sinks are the REGISTERED ones carrying
+   server-escaped chamber renders — see chamber/dom-slot-inventory.json
+   (owner chamber_dom_law.py). Adding a raw markup sink inside this region
+   without registering it there FAILS CI (the growth rule,
+   chamber_dom_law.js_sink_problems). */
+/* ── steward-chamber W6: the deterministic-first painted M1 slice ──────────
+   The Seal paints in <2s from the W4/W5 sidecar projections through
+   GET /api/ecgberht/seal_open (chamber_open.py — zero model calls, zero
+   child processes, zero writes; server-rendered verbatim-mockup markup with
+   every slot value escaped). The legacy bridge chamber still hydrates
+   afterward and the slice yields to it — the slice is the C1 instant-paint
+   proof, not a retirement of the interactive chamber (tiles/affordances
+   retire only on signed parity, W12). A fresh deploy paints the DRAWN
+   degraded-rail state whose [Rebuild projections] affordance carries the W5
+   cold-open command — the open path itself never rebuilds. */
+function _ecgSealDropSlice() {
+  _ecgSealStopPulsePoll();
+  var s = document.getElementById('ecgSealSlice');
+  if (s) s.remove();
+}
+
+/* (steward-chamber W7) run_pulse re-homed into the running step: the painted
+   rail's ⏱ card seeds from the banked record server-side, then this poll —
+   the CHAMBER consumer of the same run_pulse data core the tiles consume —
+   refreshes the latest ⏱ status block in place. Read-only GETs.
+   (steward-chamber W9) The same interval IS the injection clock for the
+   deliverable-landing live push: each tick also reads the SAFE
+   /api/ecgberht/deliverable_state projection and flips the ◇ box live IN
+   PLACE the moment the ENGINE-FED landing exists (no reopen, never
+   model-remembered — manifest + disk + the W4 landing projection are the
+   only sources). The clock stops when the run leaves 'running' AND the
+   deliverable question is settled (landed-applied or none declared), or
+   when the slice closes. */
+var _ecgPulseTimer = null;
+function _ecgSealStopPulsePoll() {
+  if (_ecgPulseTimer) { clearInterval(_ecgPulseTimer); _ecgPulseTimer = null; }
+}
+
+/* F5 link-scheme law: a chamber link may target ONLY the fixed internal
+   read routes. Everything else — javascript:, data:, absolute/protocol-
+   relative URLs, an agent-invented path — never becomes a navigation. */
+function _ecgSealHrefAllowed(href) {
+  return typeof href === 'string' &&
+    (href.indexOf('/artifact/') === 0 || href.indexOf('/report/') === 0 ||
+     href.indexOf('/summary/') === 0);
+}
+
+/* The ◇ box goes LIVE (mockups §deliv S1): rebuild the deliv box body from
+   the SAFE armed-action projection via textContent / setAttribute ONLY (F5
+   — no markup path exists for the description or any server string here).
+   Idempotent per landing (data-deliv-live guards re-entry). */
+function _ecgSealApplyDeliverable(root, st) {
+  if (!st || !st.ok || !st.declared) return false;
+  var box = root.querySelector('.deliv');
+  if (!box) return false;
+  if (box.getAttribute('data-deliv-live')) return true;
+  var a = st.action || {};
+  if (a.state !== 'armed') return false;
+  box.textContent = '';
+  var lab = document.createElement('div');
+  lab.className = 'lab';
+  lab.textContent = 'Deliverable';
+  box.appendChild(lab);
+  box.appendChild(document.createTextNode(
+    (st.description || 'declared deliverable') + ' — landed ✓'));
+  var row = document.createElement('div');
+  row.style.marginTop = '6px'; row.style.display = 'flex'; row.style.gap = '6px';
+  if (a.kind === 'href' && a.href && _ecgSealHrefAllowed(a.href)) {
+    var openB = document.createElement('button');
+    openB.className = 'btn gold';
+    openB.textContent = a.label || 'open ▸';
+    openB.setAttribute('data-deliv-href', a.href);
+    row.appendChild(openB);
+  } else if (a.kind === 'spawn') {
+    var runB = document.createElement('button');
+    runB.className = 'btn gold';
+    runB.textContent = a.label || 'open ▸';
+    runB.setAttribute('data-deliv-action', '1');
+    row.appendChild(runB);
+  }
+  var whereB = document.createElement('button');
+  whereB.className = 'btn';
+  whereB.textContent = 'where it lands';
+  whereB.title = a.output_rel || '';
+  row.appendChild(whereB);
+  box.appendChild(row);
+  box.setAttribute('data-deliv-live', '1');
+  return true;
+}
+
+function _ecgSealStartPulsePoll(root, view) {
+  _ecgSealStopPulsePoll();
+  var live = view && view.live_run;
+  var sid = live && live.session_id;
+  var dv = view && view.deliverable;
+  // The deliverable leg runs while a declared deliverable is not yet live
+  // in the box (landed-at-open renders live server-side — nothing to push).
+  var wantDeliv = !!(dv && dv.declared && !(dv.action && dv.action.landed));
+  if (!sid && !wantDeliv) return;
+  var state = { run: !!sid, deliv: wantDeliv };
+  _ecgPulseTimer = setInterval(function () {
+    if (!document.getElementById('ecgSealSlice')) { _ecgSealStopPulsePoll(); return; }
+    if (state.run) {
+      fetch('/api/ecgberht/run_pulse?project_id=' + encodeURIComponent(PROJECT_ID) +
+            '&session_id=' + encodeURIComponent(sid) + _tokenQ())
+        .then(function (r) { return r.json(); })
+        .then(function (p) {
+          if (!p || !p.ok) return;
+          var card = root.querySelector('.fstep.run .runcard');
+          if (card && p.latest_status) {
+            var tt = card.querySelector('.ttable');
+            if (tt) {
+              var eta = card.getAttribute('data-eta-line');
+              tt.textContent = p.latest_status + (eta ? '\n' + eta : '');
+            }
+            card.classList.remove('warm');  // a captured block ends the drawn pre-emission face
+          }
+          if (p.outcome && p.outcome !== 'running') {
+            state.run = false;  // the deliverable leg may still be waiting on the landing
+            if (!state.deliv) _ecgSealStopPulsePoll();
+          }
+        })
+        .catch(function () { /* a missed poll is silent — next tick retries */ });
+    }
+    if (state.deliv) {
+      fetch('/api/ecgberht/deliverable_state?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || !d.ok) return;
+          if (!d.declared) { state.deliv = false; }
+          else if (_ecgSealApplyDeliverable(root, d)) { state.deliv = false; }
+          if (!state.run && !state.deliv) _ecgSealStopPulsePoll();
+        })
+        .catch(function () { /* a missed poll is silent — next tick retries */ });
+    }
+    if (!state.run && !state.deliv) _ecgSealStopPulsePoll();
+  }, 15000);
+}
+
+/* (steward-chamber W9) The STATUS overlay, exactly as drawn (§overlays left
+   frame): server-rendered from the same bounded read as the Seal open (zero
+   model calls, zero spawns), toggled from [status ▸] / re-click, closed by
+   its ×, a click on the backdrop, or Esc. */
+function _ecgSealOpenStatusOverlay(root) {
+  var old = root.querySelector('#ecgStatusOverlay');
+  if (old) { old.remove(); return; }
+  fetch('/api/ecgberht/status_overlay?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.ok || !j.html) return;
+      if (root.querySelector('#ecgStatusOverlay')) return;
+      var ov = document.createElement('div');
+      ov.id = 'ecgStatusOverlay';
+      ov.innerHTML = j.html;  // server-escaped verbatim-mockup markup (registered F5 sink)
+      root.appendChild(ov);
+      var page = ov.querySelector('.page');
+      if (page) {
+        page.addEventListener('click', function (e2) {
+          if (e2.target === page) ov.remove();  // click outside the dock closes
+        });
+      }
+      var onEsc = function (e3) {
+        if (e3.key === 'Escape') { ov.remove(); document.removeEventListener('keydown', onEsc); }
+      };
+      document.addEventListener('keydown', onEsc);
+    })
+    .catch(function () { /* the overlay simply does not open — never a guess */ });
+}
+
+/* (steward-chamber W11) The REFINE-THE-PLAN overlay, exactly as drawn
+   (§overlays right frame): server-rendered talk-to-edit dock. Talk stays
+   DRAFT — the plan writes ONLY through POST /api/ecgberht/refine_confirm,
+   the section-scoped hash-bound confirm; a genuine same-section conflict
+   answers 409 with the drawn 'plan moved' card WITH diff (server-escaped),
+   painted in place of the dock body. Toggled from [Refine the plan],
+   closed by its ×, the backdrop, or Esc. */
+function _ecgSealOpenRefineOverlay(root) {
+  var old = root.querySelector('#ecgRefineOverlay');
+  if (old) { old.remove(); return; }
+  fetch('/api/ecgberht/refine_state?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.ok || !j.html) return;
+      if (root.querySelector('#ecgRefineOverlay')) return;
+      var rov = document.createElement('div');
+      rov.id = 'ecgRefineOverlay';
+      rov.innerHTML = j.html;  // server-escaped verbatim-mockup markup (registered F5 sink)
+      root.appendChild(rov);
+      var page = rov.querySelector('.page');
+      if (page) {
+        page.addEventListener('click', function (e2) {
+          if (e2.target === page) rov.remove();  // click outside the dock closes
+        });
+      }
+      var onEsc = function (e3) {
+        if (e3.key === 'Escape') { rov.remove(); document.removeEventListener('keydown', onEsc); }
+      };
+      document.addEventListener('keydown', onEsc);
+    })
+    .catch(function () { /* the overlay simply does not open — never a guess */ });
+}
+
+/* The refine-confirm write path: section id + bound hash ride the overlay's
+   armed dataset (set by the draft flow); the server re-checks the hash —
+   this client NEVER decides a conflict. On 409 the server's drawn 'plan
+   moved' card (WITH diff) replaces the dock body via the registered sink. */
+function _ecgRefineConfirm(root, rov) {
+  var sec = rov.getAttribute('data-refine-section') || '';
+  var bound = rov.getAttribute('data-refine-hash') || '';
+  var text = rov.getAttribute('data-refine-text') || '';
+  if (!sec) { rov.remove(); return; }
+  _postJson('/api/ecgberht/refine_confirm',
+    { project_id: PROJECT_ID, section_id: sec, bound_hash: bound, new_text: text })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (j && j.ok) { rov.remove(); return; }
+      if (j && j.html) {
+        rov.innerHTML = j.html;  // the drawn 'plan moved' card (registered F5 sink)
+      }
+    })
+    .catch(function () { /* the confirm did not land — the draft is preserved server-side */ });
+}
+
+function _ecgSealPaintSlice(host) {
+  if (document.getElementById('ecgSealSlice')) return;
+  fetch('/api/ecgberht/seal_open?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      if (!j || !j.ok || !j.html) return;               // honest: no slice — the legacy path still paints
+      if (document.getElementById('ecgSealDock')) return; // legacy chamber already hydrated
+      if (document.getElementById('ecgSealSlice')) return;
+      var slice = document.createElement('div');
+      slice.id = 'ecgSealSlice';
+      /* (W7) STYLE-ISOLATED mount: the server ships the SIGNED mockup's
+         verbatim CSS (hash-pinned extraction — chamber_rail.mockup_css) and
+         the markup mounts inside a shadow root carrying exactly that
+         stylesheet, so page styles cannot bleed in and the mockup CSS
+         applies verbatim. Anchor's tokens inherit through the host (custom
+         properties cross the shadow boundary). When the pin cannot serve
+         the CSS the mount falls back to the light DOM + the page's scoped
+         W6 stylesheet — honest degraded styling, never a silent restyle. */
+      var root = slice;
+      if (j.css && slice.attachShadow) {
+        try { root = slice.attachShadow({ mode: 'open' }); } catch (e) { root = slice; }
+      }
+      if (root !== slice) {
+        var st = document.createElement('style');
+        st.textContent = j.css;
+        root.appendChild(st);
+        var wrap = document.createElement('div');
+        wrap.innerHTML = j.html;  // server-escaped verbatim-mockup markup
+        while (wrap.firstChild) root.appendChild(wrap.firstChild);
+      } else {
+        slice.innerHTML = j.html; // server-escaped verbatim-mockup markup
+      }
+      root.addEventListener('click', function (ev) {
+        var t = ev.target;
+        if (!t || !t.getAttribute) return;
+        if (t.getAttribute('data-seal-close') != null) {
+          closeEcgberhtSeal();  // the slice's × — read-only, writes nothing
+          return;
+        }
+        var sid = t.getAttribute('data-open-session');
+        if (sid) {
+          ev.preventDefault();
+          if (typeof openPanel === 'function') openPanel(sid);  // session ▸ — the actual terminal
+          return;
+        }
+        if (t.getAttribute('data-status-overlay') != null) {
+          ev.preventDefault();
+          _ecgSealOpenStatusOverlay(root);  // W9: the drawn STATUS overlay — never a raw jump
+          return;
+        }
+        if (t.getAttribute('data-overlay-close') != null) {
+          ev.preventDefault();
+          var ovl = root.querySelector('#ecgStatusOverlay');
+          if (ovl) ovl.remove();
+          var rvl = root.querySelector('#ecgRefineOverlay');
+          if (rvl) rvl.remove();
+          return;
+        }
+        if (t.getAttribute('data-refine-overlay') != null) {
+          ev.preventDefault();
+          _ecgSealOpenRefineOverlay(root);  // W11: the drawn REFINE overlay — talk stays draft
+          return;
+        }
+        if (t.getAttribute('data-refine-confirm') != null) {
+          ev.preventDefault();
+          var rcv = root.querySelector('#ecgRefineOverlay');
+          if (rcv) _ecgRefineConfirm(root, rcv);  // hash-bound: the server decides
+          return;
+        }
+        if (t.getAttribute('data-refine-keep') != null) {
+          ev.preventDefault();  // keep refining — the dock stays open, nothing writes
+          return;
+        }
+        if (t.getAttribute('data-refine-discard') != null) {
+          ev.preventDefault();
+          var rdv = root.querySelector('#ecgRefineOverlay');
+          var rsec = rdv ? (rdv.getAttribute('data-refine-section') || '') : '';
+          if (rsec) {
+            _postJson('/api/ecgberht/refine_confirm',
+              { project_id: PROJECT_ID, action: 'discard', section_id: rsec })
+              .catch(function () { /* draft discard is best-effort */ });
+          }
+          if (rdv) rdv.remove();
+          return;
+        }
+        var dh = t.getAttribute('data-deliv-href');
+        if (dh) {
+          ev.preventDefault();
+          // F5: the href was server-built for a fixed internal route and is
+          // re-validated here before it can ever become a navigation.
+          if (_ecgSealHrefAllowed(dh)) window.open(dh + _tokenQ(), '_blank');
+          return;
+        }
+        if (t.getAttribute('data-deliv-action') != null) {
+          ev.preventDefault();
+          t.disabled = true;
+          // The action re-resolves SERVER-side under the F3 bounds; the
+          // request carries only the project id — never a path or verb.
+          _postJson('/api/ecgberht/deliverable_action', { project_id: PROJECT_ID })
+            .then(function (r) { return r.json(); })
+            .then(function (k) {
+              t.disabled = false;
+              t.textContent = (k && k.ok) ? 'opened ✓'
+                : ((k && k.label) || 'action inert');
+            })
+            .catch(function () { t.disabled = false; });
+          return;
+        }
+      });
+      host.appendChild(slice);
+      _ecgSealStartPulsePoll(root, j.view);
+      /* 'seal-painted' lands on the FIRST FULL-FRAME COMMIT after the slice
+         mounts (double rAF = the painted frame), per the plan's mark law.
+         The measured delta rides window.ECG_SEAL_PAINT_MS for CI/sign-off. */
+      requestAnimationFrame(function () { requestAnimationFrame(function () {
+        try {
+          performance.mark('seal-painted');
+          var m = performance.measure('seal-open-to-paint', 'seal-open', 'seal-painted');
+          if (m && m.duration != null) {
+            window.ECG_SEAL_PAINT_MS = m.duration;
+          } else {
+            var es = performance.getEntriesByName('seal-open-to-paint');
+            window.ECG_SEAL_PAINT_MS = es.length ? es[es.length - 1].duration : null;
+          }
+        } catch (e) { /* marks unsupported — never break the paint */ }
+      }); });
+    })
+    .catch(function () { /* deterministic paint unavailable — legacy path continues */ });
+}
+
 function ecgSealMountInline() {
   var host = document.getElementById('ecgSealHost');
   if (!host) return;
   if (document.getElementById('ecgSealDock')) return;
+  _ecgSealPaintSlice(host);  // W6 deterministic-first paint; never blocks the hydrate below
   fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
     .then(function (r) { return r.json(); })
     .then(function (j) {
       if (j && j.ok && j.mode === 'stand_up' && j.stand_up) {
         // TW7 Screen 4 — empty project: stand-up conversation, never an
         // invented chamber over a steward that does not exist.
+        _ecgSealDropSlice();
         _ecgRenderStandUp(host, j.stand_up);
         return;
       }
@@ -7999,6 +8365,8 @@ function ecgSealMountInline() {
         return;
       }
       _ecgRenderChamber(host, j);
+      _ecgSealDropSlice();  // the interactive chamber has hydrated — the W6 slice yields
     })
     .catch(function () { /* leave the dashboard untouched */ });
 }
+/* F5-CHAMBER-DOM-END — chamber DOM injection law region (steward-chamber W9). */

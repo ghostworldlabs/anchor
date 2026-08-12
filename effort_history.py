@@ -155,7 +155,12 @@ def _save_index(folder_path, project_id: str, lane: str, order: list) -> None:
         f.write(json.dumps(list(order), indent=2))
         f.flush()
         os.fsync(f.fileno())
-    tmp.replace(p)
+    # The final rename goes through the shared bounded retry: on Windows,
+    # os.replace raises a transient PermissionError (WinError 5) while a
+    # concurrent lock-free reader (_load_index runs outside WRITE_LOCK)
+    # briefly holds index.json open — the same sharing-violation race class
+    # already tolerated by paths.atomic_write_text and job_runner._write_record.
+    _paths._replace_with_retry(str(tmp), str(p))
 
 
 # ── Effort pointer-record CRUD (append/version — never delete; D5) ──────────

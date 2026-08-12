@@ -421,6 +421,13 @@ _GENERIC_ENTROPY_RE = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}(?![A-Za-
 _DOTTED_CHAIN_RE = re.compile(
     r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)+")
 
+# A bare SCREAMING_SNAKE identifier (``TEST_TOKEN``) as an UNQUOTED assign
+# value (``token=TEST_TOKEN`` in a call/kwarg) is a code READ of a named
+# constant — the identifier form of the dotted-chain rule. The shape requires
+# an underscore (constant-name form), and the caller additionally gates on a
+# NON-high-entropy value, so an all-caps pasted secret still trips.
+_CONST_IDENT_RE = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+
 
 def _is_code_expression_value(val: str) -> bool:
     """True when an assign-pattern "value" is code, not a secret literal:
@@ -533,10 +540,13 @@ def _scan_text(rel: str, text: str):
         if val.lower() in _PLACEHOLDER_VALUES:
             continue
         # An unquoted "value" that is an attribute path (``self.token``,
-        # ``cls.auth_token``, ``panel.token``, ``process.env.X``) or a call
-        # expression is a code READ of a runtime value, never a secret
-        # literal — the rule exists to catch pasted literals.
+        # ``cls.auth_token``, ``panel.token``, ``process.env.X``), a call
+        # expression, or a bare SCREAMING_SNAKE constant name is a code READ
+        # of a runtime value, never a secret literal — the rule exists to
+        # catch pasted literals.
         if val.startswith(("self.", "cls.")) or _is_code_expression_value(val):
+            continue
+        if _CONST_IDENT_RE.fullmatch(val) and not _looks_high_entropy(val):
             continue
         if _vendored and not _looks_high_entropy(val):
             continue
@@ -747,6 +757,14 @@ _OPTIONAL_FIRST_PARTY = {
         "ships. journal.py's write-tripwire pairing degrades to a no-op "
         "without it (documented best-effort import), and the healthcheck's "
         "journal-parity rebuild walk skip-warns when it is absent"
+    ),
+    "chamber_mockup_diff": (
+        "test-only signed-mockup hash pin/diff (steward-chamber W6/W7) — "
+        "never ships: its data document (the signed mockups.html) lives under "
+        "planning/, which the manifest excludes. Its one product consumer, "
+        "chamber_rail.mockup_css, imports it lazily inside try/except and "
+        "degrades to the scoped W6 stylesheet when it is absent (honest "
+        "degraded styling; the C9 CI diff gate owns the pin)"
     ),
 }
 
