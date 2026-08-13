@@ -1,5 +1,61 @@
 # Changelog
 
+## v1.2.2 — E1 engine-enforced (2026-08-13)
+
+The steward can no longer walk away from a question you asked it.
+
+v1.2.1 shipped with E1 as a stated criterion and no implementation — the
+CHANGELOG said so plainly. This closes it. Two waves, both GREEN on the
+orchestrator gate, both adversarially reviewed by **Grok** with zero agreed
+blockers (the chamber build reviewed single-family; this is the first real
+cross-family review on this project).
+
+### What E1 now means in code
+- **`chamber_e1_bound.py`** — the deterministic, model-free question parser.
+  A direct question is a terminal-'?' sentence, an explicit `asks[]` entry,
+  or one of five committed imperative prefixes with no question mark:
+  `confirm …` · `tell me …` · `let me know …` · `did you …` ·
+  `can/could/would/will you …` (leading fillers stripped first). Each
+  question gets a deterministic id, discharged only by a typed
+  answer-reference.
+- **`chamber/E1-BOUND-RATIFICATION.md`** — bound v1, **ratified by John
+  2026-08-13**. The bound is a line the user drew, not one the model
+  inferred; E1's own "zero model involvement" clause requires that. Five
+  KNOWN-MISS forms (garble that destroys the anchor verb, prosody-only
+  questions, mid-sentence third-person asks, indirect "I was wondering…")
+  are signed as agreed out-of-bound losses — named, never silent. Widening
+  the bound requires a v2 signature; it can never widen itself.
+- **`chamber_e1_hook.py`** + the Ecgberht engine leg
+  (`enforceTurnCompletion`, `enforce_bridge_result`) — the turn-completion
+  hook on the W2-proven converse seam. A turn carrying an unanswered
+  ratified question id is structurally blocked with a named finding.
+- **Fails CLOSED, always.** An absent, altered, version-mismatched or
+  unsigned bound yields `E1-BOUND-UNRATIFIED` / `E1-F7-ARTIFACT-MISSING` and
+  refuses to enforce. An unenforceable bound never degrades to permissive.
+- **The refusal has a drawn face** (`AG-BLOCKED-TURN`), so a block never
+  reads as a hung steward — the V5 law, "the cure must not look like the
+  disease." Batched with the runcard transcript link into one signature;
+  C9 re-pinned `4a7f7953…` → `fe77d058…`.
+
+The W12 audit's E1 row moves **instrument-missing → reverified**. Test
+counts grew rather than merely holding: engine 1135 → 1146, pytest
+3173 → 3197.
+
+### Still open — carried forward honestly
+- **The ease count remains UNAVAILABLE by name.** Same missing-wave origin
+  as E1, but a separate criterion (C8); no classifier of record exists, so
+  the 5→0 re-score cannot run and `chamber/EASE-CLOSE-REPORT.md` refuses to
+  invent one.
+- **Tile retirement has still not executed.** The gate stays UNSIGNED and
+  `dismiss-finished-tile` stays deferred; no tile code deleted. The
+  transcript-link row is now resolved `equivalent`.
+- **A Foreman defect found by this build.** An execute agent SIGKILLed at
+  the per-call timeout, having written nothing, was logged
+  `execute complete` and advanced to a gate that would have returned GREEN
+  on an empty wave. The post-W12 guard only catches agents that die at
+  launch (0 tools, sub-2s); the predicate that matters is `ok:false`. Not
+  fixed here — Foreman is a separate tool.
+
 ## v1.2.1 — the steward chamber (2026-08-12)
 
 The v1.2 line: a rebuild of how the steward talks to you inside a project.
