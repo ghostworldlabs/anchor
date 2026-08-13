@@ -1,6 +1,6 @@
-# W2 batched mockup-amendment gate (steward-e1) — UNSIGNED
+# W2 batched mockup-amendment gate (steward-e1)
 
-**Signed by:** (awaiting John — ONE signature covers both rows below)
+**Signed by:** John — 2026-08-13
 **Prepared:** steward-e1 W2 (2026-08-12)
 **Gate code:** `chamber_e1_hook.py :: amendment_gate_state` — the fail-closed
 signature reader (absent or unsigned ⇒ the drawn blocked-turn state is never

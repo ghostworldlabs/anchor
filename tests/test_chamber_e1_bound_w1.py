@@ -180,24 +180,59 @@ def test_answer_reference_defects_are_each_named():
 
 # ── The F7 ratification artifact (prepared, complete, UNSIGNED) ─────────────
 
-def test_ratification_artifact_is_prepared_complete_and_unsigned():
+def test_ratification_artifact_is_prepared_complete_and_coherent():
+    # W1 shipped this artifact UNSIGNED and halted for John; he ratified
+    # bound v1 as drawn on 2026-08-13. Signed-ness is therefore JOHN'S
+    # state, not an invariant of the file — asserting it stays False would
+    # encode "never ratified" as a law. What IS invariant: the record is
+    # prepared, carries the current bound version, disposes of EVERY
+    # fixture row, and its signed/finding pair is coherent in BOTH
+    # directions. The flip itself (and fail-closed on absent/half-signed)
+    # is proven on temp copies by the next test.
     state = e1.ratification_state()
     assert state["prepared"] is True
-    assert state["signed"] is False, \
-        "the wave ends AT the ratification HALT — the artifact ships " \
-        "UNSIGNED; John's signature is recorded on disk, not in chat"
-    assert state["finding"] == e1.FINDING_UNRATIFIED
+    if state["signed"]:
+        assert "finding" not in state, \
+            "a signed record carries no unratified finding"
+    else:
+        assert state["finding"] == e1.FINDING_UNRATIFIED
     assert state["bound_version"] == e1.BOUND_VERSION
     # Every fixture row has a disposition — none silent.
     row_ids = {r["id"] for r in _rows()}
     assert set(state["dispositions"]) == row_ids
 
 
-def test_signature_flip_is_recognized_and_absence_fails_closed(tmp_path):
+def _unsigned_base() -> str:
+    """The committed artifact rewound to its UNSIGNED shape.
+
+    The cases below used to be built by mutating the committed text on the
+    assumption it was unsigned. John ratified bound v1 on 2026-08-13, so
+    that assumption is now false and the fixtures it built were silently
+    degenerate (every case came out signed). Deriving an explicit unsigned
+    base makes all four cases hold whichever way the live record sits.
+    """
     text = e1.RATIFICATION_PATH.read_text(encoding="utf-8")
-    signed_text = text.replace(
+    text = re.sub(r"^\*\*Signed by:\*\*.*$",
+                  "**Signed by:** (awaiting John — E1 bound ratification, F7)",
+                  text, count=1, flags=re.MULTILINE)
+    head, nl, rest = text.partition("\n")
+    if " — UNSIGNED" not in head:
+        head += " — UNSIGNED"
+    return head + nl + rest
+
+
+def test_signature_flip_is_recognized_and_absence_fails_closed(tmp_path):
+    base = _unsigned_base()
+    # The UNSIGNED base itself fails closed by name.
+    u = tmp_path / "unsigned.md"
+    u.write_text(base, encoding="utf-8")
+    ustate = e1.ratification_state(path=u)
+    assert ustate["prepared"] is True and ustate["signed"] is False
+    assert ustate["finding"] == e1.FINDING_UNRATIFIED
+    # A fully signed record (signature line AND headline) is recognized.
+    signed_text = base.replace(
         "**Signed by:** (awaiting John — E1 bound ratification, F7)",
-        "**Signed by:** John — 2026-08-12").replace(" — UNSIGNED", "", 1)
+        "**Signed by:** John — 2026-08-13").replace(" — UNSIGNED", "", 1)
     p = tmp_path / "E1-BOUND-RATIFICATION.md"
     p.write_text(signed_text, encoding="utf-8")
     state = e1.ratification_state(path=p)
@@ -205,9 +240,9 @@ def test_signature_flip_is_recognized_and_absence_fails_closed(tmp_path):
     # A HALF-signed record (line signed, headline still UNSIGNED) is
     # unsigned — fails closed, mirroring the tile-gate convention.
     half = tmp_path / "half.md"
-    half.write_text(text.replace(
+    half.write_text(base.replace(
         "**Signed by:** (awaiting John — E1 bound ratification, F7)",
-        "**Signed by:** John — 2026-08-12"), encoding="utf-8")
+        "**Signed by:** John — 2026-08-13"), encoding="utf-8")
     assert e1.ratification_state(path=half)["signed"] is False
     # An absent artifact is a NAMED refusal, never permissive.
     gone = e1.ratification_state(path=tmp_path / "absent.md")

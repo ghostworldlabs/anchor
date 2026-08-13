@@ -46,7 +46,7 @@ Row notes:
 
 ## C9–C12 re-checks
 
-* **C9** (hash-pinned DOM diffs): GREEN — hash pin HOLDS: signed 4a7f7953852b… vs live 4a7f7953852b…
+* **C9** (hash-pinned DOM diffs): GREEN — hash pin HOLDS: signed fe77d058f19a… vs live fe77d058f19a…
 * **C10** (F3 escape + F5 hostile-string + F6 red-to-green): GREEN — F5 slot-registered hostile-string suite present and re-run (test_chamber_dom_law_w9); W11 mutator red-to-green present (test_chamber_refine_routes_w11); the W9 F3 escape/hostile-argv suite and the W3 full-inventory red-to-green file are ghosts (tests/test_chamber_red_to_green_w3.py, tests/test_chamber_close_ci_w9.py) — the W12 release bundle exercises the F3 bounds, the F4 containment, the diff guard and the coverage rule at their seams (named reconciliation)
 * **C11** (tile retirement on signed parity): GREEN — parity map green; 3 row(s) pending John's ruling (full-transcript-log-link, dismiss-finished-tile, rearm-watch); UNSIGNED -> tiles stand, retirement refused by name (W12-TILE-ROWS-UNRESOLVED)
 * **C12** (wire-homing registry symbol-check + characterization parity): GREEN — symbol-check GREEN (all 10 rows resolve; the check itself lands in W12 — the registry declared it active from W1 but no module implemented it before this wave, recorded reconciliation). W7's committed pulse replay oracle: NOT FOUND in tests/fixtures/chamber — the run_pulse characterization oracle the registry cites is absent (named gap)

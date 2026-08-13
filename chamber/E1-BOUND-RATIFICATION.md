@@ -1,6 +1,6 @@
-# F7 — E1 bound ratification (NS amendment) — UNSIGNED
+# F7 — E1 bound ratification (NS amendment)
 
-**Signed by:** (awaiting John — E1 bound ratification, F7)
+**Signed by:** John — 2026-08-13
 **Prepared:** steward-e1 W1 (2026-08-12)
 **Bound version:** 1
 **Fixture set of record:** `tests/fixtures/chamber/e1-bound-fixtures.json` (schema v1, owner `chamber_e1_bound.py`)
