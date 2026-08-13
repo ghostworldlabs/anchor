@@ -37,6 +37,7 @@ sys.path.insert(0, str(ANCHOR))
 
 import chamber_deliverable as cdeliv  # noqa: E402
 import chamber_dom_law as cdl  # noqa: E402
+import chamber_e1_hook as ce1h  # noqa: E402  (steward-e1 W2: blocked turn)
 import chamber_gates as cgates  # noqa: E402  (W10 row: gate-queue render)
 import chamber_open as copen  # noqa: E402
 import chamber_rail as crail  # noqa: E402
@@ -250,6 +251,9 @@ def _hostile_rail_view(p):
         "brief": {"stand": {"text": p}},
         "live_run": {"skill": p, "step_id": "s2", "at": p, "session_id": p},
         "pulse_slot": {"status_block": p, "session_id": p},
+        # steward-e1 W2: a hostile project id must paint inert through the
+        # runcard's transcript ▸ link slots too.
+        "project_id": p,
         "eta": {
             "campaign": {"state": "no-history", "label": p},
             "per_step": {
@@ -351,6 +355,15 @@ def _drive_gate_queue(p):
     ]
 
 
+def _drive_blocked_turn(p):
+    # (steward-e1 W2) The V5 blocked-turn refusal's agent-influenced slots:
+    # the steward label, the named finding, and each unanswered question's
+    # text + deterministic id — every one must paint inert.
+    return [ce1h.render_blocked_turn(
+        {"finding": p, "unanswered": [{"question_id": p, "text": p}]},
+        steward_name=p)]
+
+
 def _drive_refine(p):
     # (steward-chamber W11) The REFINE overlay's agent-influenced slots:
     # message who/text, steward label, draft summary, and the 'plan moved'
@@ -400,6 +413,7 @@ HOSTILE_FIXTURES = {
     "chamber_gates.render_gate_queue_html": _drive_gate_queue,
     "chamber_refine.render_refine_overlay_html": _drive_refine,
     "chamber_refine.render_plan_moved_card_html": _drive_refine,
+    "chamber_e1_hook.render_blocked_turn": _drive_blocked_turn,
 }
 
 

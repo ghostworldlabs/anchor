@@ -8,8 +8,15 @@
 ## The signed post-amendment markup hash (C9 pin)
 
 ```
-sha256(mockups.html) = 4a7f7953852b5563fd10e073f7cab8c1ac7930390d0743726b54aebc31aeedde
+sha256(mockups.html) = fe77d058f19a10b2735333c6ddcfcfa4cf811d471d1c3ed7a8fbf398b0ef82e1
 ```
+
+**Re-pinned 2026-08-13** on John's signature of the W2 batched amendment
+(`chamber/MOCKUP-AMENDMENT-GATE-W2.md`), which drew two further rows into
+`#amendments`: `AG-BLOCKED-TURN` (the V5 E1 refusal state) and
+`AG-RUNCARD-TRANSCRIPT-LINK` (tile-retirement decision 1, as he ordered
+2026-08-11). Prior pin, superseded — the W1 ten-row batch:
+`4a7f7953852b5563fd10e073f7cab8c1ac7930390d0743726b54aebc31aeedde`.
 
 Per the plan (W1 deliverables + C9): every later mockup-verbatim claim and every C9
 DOM diff pins to THIS hash. No wave may claim mockup-verbatim against any other

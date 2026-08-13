@@ -91,6 +91,16 @@ def e1_instrument_scan(root: Path | None = None,
                           if p.is_file() and re.search(
                               r"(e1[-_]bound|ratif)", p.name, re.IGNORECASE)]
 
+    # John's F7 signature, read through the bound's own fail-closed reader
+    # (steward-e1 W1). Absent module or artifact -> unsigned, never
+    # permissive.
+    ratification_signed = False
+    try:
+        import chamber_e1_bound as _e1b
+        ratification_signed = bool(_e1b.ratification_state().get("signed"))
+    except Exception:
+        ratification_signed = False
+
     hook_present = False
     conv = ecg / "engine" / "steward-conversation.mjs"
     if conv.is_file():
@@ -108,6 +118,7 @@ def e1_instrument_scan(root: Path | None = None,
         "bound_parser_landed": parser_present,
         "ratification_artifact_files": ratification_files,
         "ratification_artifact_landed": bool(ratification_files),
+        "ratification_signed": ratification_signed,
         "turn_completion_hook_landed": hook_present,
         "w8_negative_path_test_files": w8_tests,
         "w8_negative_path_test_landed": bool(w8_tests),
@@ -170,6 +181,8 @@ def build_e1_report(root: Path | None = None,
         "| F7 ratification artifact (John's bound) | %s |"
         % ("YES: " + ", ".join(scan["ratification_artifact_files"])
            if scan["ratification_artifact_landed"] else "NO"),
+        "| F7 ratification SIGNED by John | %s |"
+        % ("YES" if scan["ratification_signed"] else "NO"),
         "| W8 steward turn-completion hook (engine seam) | %s |"
         % ("YES" if scan["turn_completion_hook_landed"] else "NO"),
         "| W8 joint negative-path test | %s |"
@@ -177,14 +190,101 @@ def build_e1_report(root: Path | None = None,
            if scan["w8_negative_path_test_landed"] else "NO"),
         "",
     ]
-    if scan["stack_complete"]:
+    if scan["stack_complete"] and scan["ratification_signed"]:
+        # steward-e1 W2, post-signature: the RATIFIED bound is the
+        # enforcement bound — its agreed out-of-bound misses enumerate
+        # from the signed F7 disposition table (never re-guessed here).
+        try:
+            import chamber_e1_bound as _e1b
+            dispositions = _e1b.ratification_state().get("dispositions", {})
+        except Exception:
+            dispositions = {}
+        misses = sorted(rid for rid, label in dispositions.items()
+                        if label == "KNOWN-MISS")
         lines += [
-            "## Enforcement bound",
+            "## Enforcement bound — RATIFIED and ENGINE-ENFORCED",
             "",
-            "The full E1 stack is present. This report must be REGENERATED",
-            "against the ratified parse to enumerate the agreed out-of-bound",
-            "misses (V1: every fixture form is either in-bound or a",
-            "John-signed known miss — no silent out-of-bound).",
+            "All four legs are present and John's F7 signature is on disk:",
+            "the turn-completion hook structurally blocks a steward turn",
+            "from closing while a ratified direct question id lacks a typed",
+            "answer-reference (finding E1-TURN-CLOSE-BLOCKED). The agreed",
+            "out-of-bound misses of the ratified parse, from the signed F7",
+            "disposition table:",
+            "",
+        ]
+        lines += ["* `%s`" % rid for rid in misses] \
+            or ["(none recorded — regenerate after verifying the artifact)"]
+        lines += [
+            "",
+            "The telemetry half (the ⏱ table + campaign footer injecting on",
+            "the telemetry clock from the re-homed run_pulse emitter, zero",
+            "model involvement) is proven at its seam by the same W8 suite",
+            "with a zero-model-call trace.",
+        ]
+    elif scan["stack_complete"]:
+        # steward-e1 W2 state: all four instrument legs are in the tree;
+        # John's F7 signature is not yet on disk — enforcement is ARMED but
+        # fails CLOSED by name until the signature exists.
+        lines += [
+            "## Enforcement bound — LANDED, ARMED AT THE SIGNATURE",
+            "",
+            "All four instrument legs are present (scan above): the",
+            "deterministic bound parser, the F7 ratification artifact, the",
+            "steward turn-completion hook on the W2-proven converse seam",
+            "(both legs: the engine's enforceTurnCompletion and the",
+            "bridge-boundary enforce_bridge_result), and the joint",
+            "negative-path test. The bound is NOT yet ratified — John's",
+            "signature is not on disk — so the hook fails CLOSED by name",
+            "(E1-BOUND-UNRATIFIED / E1-F7-ARTIFACT-MISSING): every",
+            "turn-close verdict carries the named finding, no turn is",
+            "blocked against an unsigned bound, and an unenforceable bound",
+            "never degrades to permissive (never silently open).",
+            "",
+            "**Consequence, stated plainly:** the machinery that",
+            "structurally blocks a steward turn from closing on an",
+            "unanswered ratified question is in the tree and proven at its",
+            "seam; it ENFORCES only once chamber/E1-BOUND-RATIFICATION.md",
+            "carries John's signature. The telemetry half (the ⏱ table +",
+            "campaign footer injecting on the telemetry clock from the",
+            "re-homed run_pulse emitter, zero model involvement) is proven",
+            "at its seam by the same W8 suite with a zero-model-call trace.",
+            "",
+            "**Disposition:** John's F7 signature arms enforcement; the",
+            "agreed out-of-bound misses then become this report's",
+            "enforcement bound (regenerate on signing). The V5 blocked-turn",
+            "drawn state + the ordered transcript-link row await his ONE",
+            "batched signature in chamber/MOCKUP-AMENDMENT-GATE-W2.md; the",
+            "C9 re-pin follows that signature, never precedes it.",
+        ]
+    elif scan["bound_parser_landed"] and scan["ratification_artifact_landed"]:
+        # steward-e1 W1 state: the parser + F7 artifact are in the tree,
+        # the signature and the Wave-2 enforcement legs are not.
+        lines += [
+            "## Enforcement bound — HONESTLY VACUOUS",
+            "",
+            "There are ZERO agreed out-of-bound misses because there is NO",
+            "ratified parse YET: the steward-e1 W1 legs are in the tree",
+            "(the deterministic bound parser + the F7 ratification",
+            "artifact, prepared UNSIGNED), but John's signature is not on",
+            "disk and the Wave-2 enforcement legs (the steward",
+            "turn-completion hook, the joint negative-path test) are",
+            "absent (scan above). W10's traceability note recorded the",
+            "original all-absent gap; the W12 audit named it a plan defect",
+            "for John; steward-e1 is the funded re-execution of exactly",
+            "that defect.",
+            "",
+            "**Consequence, stated plainly:** E1 is NOT engine-enforced in",
+            "the assembled system. A steward turn CAN close on an",
+            "unanswered direct question today. Convention (the seat",
+            "prompt's one-question rule) is the only cover until Wave 2",
+            "wires the RATIFIED bound structural.",
+            "",
+            "**Disposition:** Wave 1 ends AT the F7 ratification HALT by",
+            "design — the bound is in front of John in",
+            "chamber/E1-BOUND-RATIFICATION.md. Wave 2 may enforce ONLY a",
+            "bound that record carries SIGNED; unsigned or absent, the",
+            "turn-completion hook fails CLOSED by name",
+            "(E1-BOUND-UNRATIFIED / E1-F7-ARTIFACT-MISSING).",
         ]
     else:
         lines += [

@@ -9,29 +9,28 @@ involvement.
 
 | Leg (home wave) | Present in tree |
 |-----------------|-----------------|
-| W3 pre-registered E1 bound parser | NO |
-| F7 ratification artifact (John's bound) | NO |
-| W8 steward turn-completion hook (engine seam) | NO |
-| W8 joint negative-path test | NO |
+| W3 pre-registered E1 bound parser | YES |
+| F7 ratification artifact (John's bound) | YES: E1-BOUND-RATIFICATION.md |
+| F7 ratification SIGNED by John | YES |
+| W8 steward turn-completion hook (engine seam) | YES |
+| W8 joint negative-path test | YES: test_chamber_e1_enforcement_w8.py |
 
-## Enforcement bound — HONESTLY VACUOUS
+## Enforcement bound — RATIFIED and ENGINE-ENFORCED
 
-There are ZERO agreed out-of-bound misses because there is NO
-ratified parse: the E1 instrument stack never landed. W10's
-traceability note recorded the gap first (chamber/
-traceability-matrix.json :: w3_note); the W12 audit re-verified
-it mechanically (scan above). The F7 ratification HALT never
-fired because the parser it ratifies does not exist.
+All four legs are present and John's F7 signature is on disk:
+the turn-completion hook structurally blocks a steward turn
+from closing while a ratified direct question id lacks a typed
+answer-reference (finding E1-TURN-CLOSE-BLOCKED). The agreed
+out-of-bound misses of the ratified parse, from the signed F7
+disposition table:
 
-**Consequence, stated plainly:** E1 is NOT engine-enforced in
-the assembled system. A steward turn CAN close on an unanswered
-direct question today. Convention (the seat prompt's
-one-question rule) is the only cover — exactly the failure
-class the master plan's Enforcement-Honesty table warns about.
+* `garbled-mishear-confirm`
+* `garbled-split-confirm`
+* `indirect-wondering`
+* `intonation-only-question`
+* `midsentence-ask`
 
-**Disposition:** plan defect, routed to John with the W12
-close (chamber/W12-AUDIT-REPORT.md carries the named finding).
-Building the stack now would first-exercise a criterion in the
-close-out wave, which the plan itself defines as a defect —
-the decision (fund an E1 wave / re-scope E1 / accept the loss)
-is John's, not this audit's.
+The telemetry half (the ⏱ table + campaign footer injecting on
+the telemetry clock from the re-homed run_pulse emitter, zero
+model involvement) is proven at its seam by the same W8 suite
+with a zero-model-call trace.

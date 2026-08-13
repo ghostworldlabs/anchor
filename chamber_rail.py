@@ -130,6 +130,10 @@ def seal_rail_view(folder, project_id=None) -> dict:
     ``/artifact/`` href; argv/cwd never ride the view."""
     view = copen.seal_open_view(folder)
     view["rail_schema"] = SCHEMA
+    # SAFE by construction (it is the id already in the window's URL): lets
+    # the runcard's transcript ▸ link target the traversal-safe /artifact
+    # route (steward-e1 W2 — tile-retirement decision 1's ordered row).
+    view["project_id"] = str(project_id) if project_id else None
     if view.get("degraded"):
         return view  # the drawn degraded paint carries no rail enrichment
 
@@ -290,15 +294,29 @@ def _runcard_html(view: dict, step: dict, eta_row: dict | None) -> str:
         if eta_line:
             ttable += "\n" + eta_line
         sid = slot.get("session_id") or run.get("session_id") or ""
+        # transcript ▸ (steward-e1 W2 — the ORDERED tile-retirement decision-1
+        # row, batched through the W2 amendment gate): the durable transcript
+        # via the traversal-safe /artifact route. The href rides
+        # data-deliv-href (validated at click against the F5 internal
+        # prefixes; the token joins there). Omitted when the id is unknown —
+        # omission is a drawn variant, never a broken link.
+        transcript = ""
+        if sid and view.get("project_id"):
+            transcript = (
+                '<a href="#" data-deliv-href="%s">transcript ▸</a>'
+                % _esc("/artifact/%s?path=%s"
+                       % (view["project_id"],
+                          "general/%s-transcript.md" % sid)))
         return (
             '<div class="runcard" data-eta-line="%s">'
             '<div class="ttable">%s</div>'
             '<div class="links">'
             '<a href="#" data-status-overlay="1">status ▸</a>'
             '<a href="#" data-open-session="%s">session ▸</a>'
+            '%s'
             '</div>'
             '</div>'
-        ) % (_esc(eta_line), _esc(ttable), _esc(sid))
+        ) % (_esc(eta_line), _esc(ttable), _esc(sid), transcript)
     started = run.get("at") or slot.get("started_at") or "unknown time"
     ttable = ("⏱ warming up — started %s\nno status emitted yet · first ⏱ "
               "update lands within 10m" % started)

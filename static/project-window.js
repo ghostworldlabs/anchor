@@ -7175,6 +7175,32 @@ function _ecgOfferRaise(convo, j, retryText) {
    still compile deterministically; only genuine talk reaches the seat). Provenance
    recall stays on /speak because it answers from the record with a source chip, which
    is a different and honest capability. */
+/* (steward-e1 W2, E1 + V5) The DRAWN blocked-turn refusal in the talk
+   column: the engine refused to close the steward's turn because a ratified
+   direct question id from John lacks a typed answer-reference. Its own
+   state — named finding + the unanswered question(s) — never an ambiguous
+   silence. textContent-only builders (F5). */
+function _ecgRenderBlockedTurn(convo, blocked) {
+  var msg = _ecgEl('div', 'ecg-msg steward blocked');
+  msg.appendChild(_ecgEl('div', 'who', '⛔ ' + _ecgStwLabel() + ' — turn blocked'));
+  msg.appendChild(_ecgEl('div', 'bfind',
+    (blocked.finding || 'E1-TURN-CLOSE-BLOCKED')
+    + ' · a direct question from John lacks a typed answer-reference'));
+  var qs = blocked.unanswered || [];
+  for (var i = 0; i < qs.length; i++) {
+    var q = qs[i] || {};
+    var row = _ecgEl('div', 'bq', '“' + (q.text || '') + '” ');
+    row.appendChild(_ecgEl('span', 'bqid', q.question_id || ''));
+    msg.appendChild(row);
+  }
+  msg.appendChild(_ecgEl('div', 'bnote',
+    blocked.message || ('The engine refused to close this turn — the E1 '
+      + 'refusal state, drawn distinct from “are you working”.')));
+  convo.appendChild(msg);
+  _ecgScrollToLatest(convo);
+  return msg;
+}
+
 function _ecgConverse(convo, text, isRetry, failText) {
   // failText (shark F4): the note flow saves DURABLY before talking — its
   // failure copy must never claim "nothing was saved" about a saved note.
@@ -7209,6 +7235,15 @@ function _ecgConverse(convo, text, isRetry, failText) {
     }
     if (j.lane === 'act' && j.compiled) {
       _ecgHandleAct(convo, j.compiled, text);
+      return;
+    }
+    if (j.turn_blocked && j.blocked) {
+      // (steward-e1 W2, E1 + V5) THE DRAWN BLOCKED-TURN STATE: the engine
+      // structurally refused to close the turn on an unanswered ratified
+      // question. Painted as its OWN state (AG-BLOCKED-TURN) so the cure
+      // never looks like the disease ("are you working"). textContent-only
+      // (F5) — the finding, the question text and its id are all data.
+      _ecgRenderBlockedTurn(convo, j.blocked);
       return;
     }
     _ecgRenderStewardTurn(convo, j);
@@ -8094,6 +8129,24 @@ function _ecgSealStartPulsePoll(root, view) {
               tt.textContent = p.latest_status + (eta ? '\n' + eta : '');
             }
             card.classList.remove('warm');  // a captured block ends the drawn pre-emission face
+          }
+          /* (steward-e1 W2, E1) THE CAMPAIGN FOOTER injects on the SAME
+             telemetry clock as the ⏱ table — from the re-homed run_pulse
+             emitter's record fields, ZERO model involvement. The W7 wave
+             injected only the ttable; the footer used to update only at
+             open. Rebuilt textContent-only (F5) to the drawn structure
+             (span.livedot inside div.livestatus). */
+          var ls = root.querySelector('.livestatus');
+          if (ls && p.outcome === 'running') {
+            ls.textContent = '';
+            ls.classList.remove('idle');
+            var ldot = document.createElement('span');
+            ldot.className = 'livedot';
+            ldot.textContent = '⏱';
+            ls.appendChild(ldot);
+            ls.appendChild(document.createTextNode(
+              ' ' + (p.skill || 'a run') + ' running on '
+              + (p.step_id || 'a step') + ' · since ' + (p.at || 'unknown time')));
           }
           if (p.outcome && p.outcome !== 'running') {
             state.run = false;  // the deliverable leg may still be waiting on the landing

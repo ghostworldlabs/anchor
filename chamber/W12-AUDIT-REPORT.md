@@ -14,7 +14,7 @@ John gate).
 
 | Row | Home | Named instrument | W12 status |
 |-----|------|------------------|------------|
-| E1 | W8 | W8 joint negative-path test + telemetry-injection DOM test | **instrument-missing** |
+| E1 | W8 | W8 joint negative-path test | **reverified** |
 | E2 | W10 | enqueue-gate negative-path test on the W2 seam (chamber_gates.enqueue_guard) | **reverified-in-W12** |
 | E3 | W11 | tests/test_chamber_corrections_w11.py (handback-block + coverage report) | **reverified** |
 | E4 | W10 | template fixture suite (chamber_directive.template_findings) | **reverified-in-W12** |
@@ -26,7 +26,7 @@ John gate).
 
 Row notes:
 
-* **E1** — no leg of the E1 stack is in the tree (parser ABSENT / ratification ABSENT / turn hook ABSENT / W8 test ABSENT) — see chamber/E1-ENFORCEMENT-REPORT.md
+* **E1** — stack present
 * **E2** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect
 * **E3** — re-run end-to-end by the W12 suite
 * **E4** — machinery landed in W10 (chamber_gates/chamber_directive) and the W12 suite re-blocks the refusals at the seams; the wave's own cited instrument(s) are absent from the tree: tests/test_chamber_directive_w10.py, tests/test_chamber_gate_queue_w10.py, tests/test_chamber_gate_routes_w10.py — first exercised in W12, the named plan defect
@@ -46,7 +46,7 @@ Row notes:
 
 ## C9–C12 re-checks
 
-* **C9** (hash-pinned DOM diffs): GREEN — hash pin HOLDS: signed 4a7f7953852b… vs live 4a7f7953852b…
+* **C9** (hash-pinned DOM diffs): GREEN — hash pin HOLDS: signed fe77d058f19a… vs live fe77d058f19a…
 * **C10** (F3 escape + F5 hostile-string + F6 red-to-green): GREEN — F5 slot-registered hostile-string suite present and re-run (test_chamber_dom_law_w9); W11 mutator red-to-green present (test_chamber_refine_routes_w11); the W9 F3 escape/hostile-argv suite and the W3 full-inventory red-to-green file are ghosts (tests/test_chamber_red_to_green_w3.py, tests/test_chamber_close_ci_w9.py) — the W12 release bundle exercises the F3 bounds, the F4 containment, the diff guard and the coverage rule at their seams (named reconciliation)
 * **C11** (tile retirement on signed parity): GREEN — parity map green; 3 row(s) pending John's ruling (full-transcript-log-link, dismiss-finished-tile, rearm-watch); UNSIGNED -> tiles stand, retirement refused by name (W12-TILE-ROWS-UNRESOLVED)
 * **C12** (wire-homing registry symbol-check + characterization parity): GREEN — symbol-check GREEN (all 10 rows resolve; the check itself lands in W12 — the registry declared it active from W1 but no module implemented it before this wave, recorded reconciliation). W7's committed pulse replay oracle: NOT FOUND in tests/fixtures/chamber — the run_pulse characterization oracle the registry cites is absent (named gap)
@@ -94,7 +94,10 @@ the W12 close (see the enforcement reports).
 The assembled system's landed enforcement (E3/E5-machinery/E6/E7/
 E9, F3/F4/F5, the projections substrate, the M1 paint bounds) is
 re-verified green at its seams, and the three interaction cases
-block with their named findings. E1 and the ease count are NOT
-enforced/instrumented — plan defects for John, published in the
-enforcement reports. Tiles stand: parity is resolved but UNSIGNED
-(three rows await John's ruling at the signing gate).
+block with their named findings. The E1 instrument stack is
+landed (the steward-e1 re-execution; enforcement arms at
+John's F7 signature and fails CLOSED by name until then); the
+ease count is NOT instrumented — a plan defect for John,
+published in the enforcement reports. Tiles stand: parity is
+resolved but UNSIGNED (three rows await John's ruling at the
+signing gate).

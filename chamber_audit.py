@@ -107,7 +107,7 @@ def criteria_rows() -> list:
                       "DOM test",
         "status": "instrument-missing",
         "finding": FINDING_PLAN_DEFECT,
-        "note": "no leg of the E1 stack is in the tree (parser %s / "
+        "note": "the E1 stack is incomplete in the tree (parser %s / "
                 "ratification %s / turn hook %s / W8 test %s) — see "
                 "chamber/E1-ENFORCEMENT-REPORT.md"
                 % tuple("landed" if v else "ABSENT" for v in (
@@ -434,16 +434,38 @@ def build_report() -> str:
         "  not this close.",
         "* `tests/test_gandalf_agentic.py` — multi-minute stalls under",
         "  stubs; stands excluded by budget, named in the banner.",
+    ]
+    # The E1 clause is SCAN-DERIVED (steward-e1 W2): once the funded
+    # re-execution lands the instrument stack, the verdict must stop
+    # claiming it absent — and must not claim it enforced before John's
+    # F7 signature arms it.
+    e1_landed = any(r["id"] == "E1" and r["status"] == "reverified"
+                    for r in rows)
+    if e1_landed:
+        verdict_tail = [
+            "block with their named findings. The E1 instrument stack is",
+            "landed (the steward-e1 re-execution; enforcement arms at",
+            "John's F7 signature and fails CLOSED by name until then); the",
+            "ease count is NOT instrumented — a plan defect for John,",
+            "published in the enforcement reports. Tiles stand: parity is",
+            "resolved but UNSIGNED (three rows await John's ruling at the",
+            "signing gate).",
+        ]
+    else:
+        verdict_tail = [
+            "block with their named findings. E1 and the ease count are NOT",
+            "enforced/instrumented — plan defects for John, published in the",
+            "enforcement reports. Tiles stand: parity is resolved but UNSIGNED",
+            "(three rows await John's ruling at the signing gate).",
+        ]
+    lines += [
         "",
         "## Verdict",
         "",
         "The assembled system's landed enforcement (E3/E5-machinery/E6/E7/",
         "E9, F3/F4/F5, the projections substrate, the M1 paint bounds) is",
         "re-verified green at its seams, and the three interaction cases",
-        "block with their named findings. E1 and the ease count are NOT",
-        "enforced/instrumented — plan defects for John, published in the",
-        "enforcement reports. Tiles stand: parity is resolved but UNSIGNED",
-        "(three rows await John's ruling at the signing gate).",
+    ] + verdict_tail + [
         "",
     ]
     return "\n".join(lines)

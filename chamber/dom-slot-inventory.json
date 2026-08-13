@@ -32,7 +32,7 @@
         { "name": "_skillch_html", "placeholders": 5, "slots": "skill name · eta label/basis" },
         { "name": "_yield_html", "placeholders": 3, "slots": "yield text · report link href" },
         { "name": "_edge_html", "placeholders": 1, "slots": "typed-edge rides-in artifacts" },
-        { "name": "_runcard_html", "placeholders": 7, "slots": "captured status block · eta line · session id" },
+        { "name": "_runcard_html", "placeholders": 12, "slots": "captured status block · eta line · session id · transcript /artifact href (steward-e1 W2, tile-retirement decision-1 row)" },
         { "name": "_fstep_html", "placeholders": 9, "slots": "step name · skill chip · composed body" },
         { "name": "_progress_html", "placeholders": 11, "slots": "progress counts · run-now line · campaign eta label" },
         { "name": "_flow_html", "placeholders": 2, "slots": "composed steps + deliv fragments" },
@@ -66,6 +66,13 @@
       "wave_of_record": "W10",
       "functions": [
         { "name": "render_gate_queue_html", "placeholders": 8, "slots": "store error · empty-queue depth line · card prose lines (incl. swept paths, text only) · head gate id · kind class/label · depth line" }
+      ]
+    },
+    {
+      "module": "chamber_e1_hook",
+      "wave_of_record": "steward-e1 W2",
+      "functions": [
+        { "name": "render_blocked_turn", "placeholders": 5, "slots": "steward label · named finding · unanswered question text + deterministic id rows" }
       ]
     }
   ],
