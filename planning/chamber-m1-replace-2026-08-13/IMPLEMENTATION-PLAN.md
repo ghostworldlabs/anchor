@@ -1,146 +1,150 @@
-# Replace the v0 chamber with M1 — Implementation Plan (Foreman-ready)
-# Three waves. The deletion is the point; the parity proof is what makes it safe.
+# Make M1 survive, wire talk, delete v0 — Implementation Plan (Foreman-ready)
+# REVISION 3 (2026-08-13) — the scope John corrected.
+#
+# Revisions 1 and 2 were wrong twice: they treated the OLD chamber as the
+# specification (a parity map that would have dragged v0's design into M1 one
+# signature at a time), and they assumed M1 needed building. M1 IS BUILT AND
+# WIRED. Verified in the live tree: the slice's shadow-root delegation already
+# handles the × close, `data-open-session`, the STATUS overlay, the REFINE
+# overlay (open/confirm/keep/discard), the deliverable href + action, and
+# `_ecgSealStartPulsePoll` already drives the status table, live-status line and
+# the deliverable box. W6-W11's work is all there.
+#
+# M1's drawn design is the SPECIFICATION. v0 is not a requirements document —
+# John did not like how it worked, and it is the thing being removed.
 
 test-command: node scripts/run-all-tests.mjs
 
-**North Star:** The M1 chamber is the surface on screen at steady state, carrying
-every affordance v0 carried or a John-signed named loss — and **v0 is deleted from
-the tree**, enforced by CI. Success is not "M1 renders"; M1 already renders. Success
-is **M1 survives hydration and v0 no longer exists**.
+**North Star:** The M1 chamber is what John sees, works the way it was drawn, and v0
+is gone. Not "M1 renders" — it already renders. **M1 SURVIVES and v0 no longer exists.**
 
-**Acceptance oracle:** a steady-state DOM test — open the Seal, let hydration
-complete, then assert the M1 slice is present and carries the M1 schema AND
-`ecgSealDock` is absent. That test must go RED on today's tree in Wave 1 (proving it
-detects the live defect) before any wave is allowed to turn it green.
+**What is actually broken (verified, not inferred):**
+1. `ecgSealMountInline` paints M1, then hydrates v0 and calls `_ecgSealDropSlice()`,
+   removing M1 from the document — on all three branches (chamber success,
+   `mode === 'stand_up'`, and the error path, which mints a dock WITHOUT dropping so
+   both surfaces can coexist).
+2. The drawn say box — `<input placeholder="Talk to Jarvis…">` plus its "Say it"
+   button — carries no `data-*` hook, so the slice's delegation cannot reach it.
+   **This is the ONLY unwired affordance in M1.**
+3. v0 is still in the tree.
 
-**Anti-goals:** no new UI beyond the signed mockup; no engine-spine changes; no tile
-retirement (that gate stays UNSIGNED); no change to E1 enforcement.
+**What needed no work at all:** empty/unbuilt projects. `seal_open` already returns a
+drawn `AG-DEGRADED-RAIL` face (all 13 of John's unbuilt projects served exactly that
+this morning), so v0's stand-up screen has no successor to build — it simply dies.
 
----
+**Not in scope, by John's ruling:** preserving v0 affordances. Anything v0 does that
+M1 does not draw is GONE — the 600ms `_ecgConverse` on open (which is the D2 clunk
+the campaign existed to kill, and violates M1's zero-model-call-until-you-speak law),
+the old goal-bar buttons, the seat pill, Escape-to-close, `_ecgRenderBlockedTurn`'s v0
+chrome. No parity map, no signature-per-affordance.
 
-## Wave 1 — Parity inventory + the steady-state kill gate (must go RED)
-
-**Intent:** Establish what v0 actually does and land the instrument that proves the
-defect, before anything is moved or deleted. This is the wave that makes the other
-two safe. Serves the North Star's oracle.
-
-**Deliverables:** Chamber-affordance inventory as versioned machine-readable data
-(`chamber/chamber-affordance-inventory.json`, schema_version + named owner file),
-one row per affordance rendered by `_ecgRenderChamber` (7788–7899) **and** per
-affordance that binds to its DOM elsewhere in the file — the say box
-(`.ecg-saybox`, `ecgSayInput`, `_ecgSayLine`), the conversation column
-(`.ecg-convo-col`), Refine, commission-propose, the goal row, the titlebar, the
-run block, the footer stamp — each carrying: v0 source marker (grep-verifiable
-symbol + line), the M1 drawn target (mockup element/class from §M1 or §overlays),
-and a resolution of `equivalent` / `gap` / `proposed-loss`; **STEADY-STATE KILL
-GATE** (`tests/test_chamber_steady_state_w1.py`): render the project window, run
-the mount path to completion including hydration, then assert (a) `#ecgSealSlice`
-present, (b) it carries the M1 schema marker, (c) **`#ecgSealDock` absent** — and
-this wave lands it RED against the current tree with the failure named
-`M1-SLICE-DROPPED-BY-V0-HYDRATE`, then marks it xfail-with-reason so the wave can
-close green while the defect stands (the xfail is REMOVED in Wave 3 — a wave may
-not both prove and cure a defect); a CI grep-guard that fails if
-`_ecgSealDropSlice` gains any new call site; `chamber/CHAMBER-PARITY-GATE.md` — the
-John gate carrying every `gap` and `proposed-loss` row for signature, prepared
-UNSIGNED, with a fail-closed reader (`parity_state`) mirroring
-`chamber_e1_bound.ratification_state`.
-
-**done-when:** Every v0 affordance has an inventory row with a grep-resolvable
-source marker and a named M1 target or gap; the steady-state test exists, is RED
-against today's tree for the named reason, and is xfail-pinned to that reason; the
-parity gate doc is prepared UNSIGNED and its reader fails closed.
-
-- **Given** the current tree, **when** the steady-state test runs unpinned, **then** it FAILS with `M1-SLICE-DROPPED-BY-V0-HYDRATE` — a test that passes here is not testing the right thing and is a wave defect
-- **Given** the inventory, **when** the CI symbol-check runs, **then** every row's v0 source marker grep-resolves in its owner file and every `equivalent` row's M1 target resolves in the pinned mockup
-- **Given** an affordance in `_ecgRenderChamber` with no inventory row, **when** CI runs, **then** it fails by name — the inventory is complete by construction, not by inspection
-
-**HALT — JOHN GATE (chamber parity).** Present the `gap` and `proposed-loss` rows as
-prose, one decision at a time, recommendation before the question. Wave 2 may
-re-home only against a SIGNED parity map; Wave 3 may delete only against one.
+**Deferred, not dropped:** the drawn say box is a one-line `<input>`; John's old one
+grew as he typed (built after dictation hid his words). Swapping `input`→`textarea`
+breaks the C9 signature and needs a mockup amendment. Ruling: **wire the drawn input
+now; amend only if the dictation problem recurs in use.**
 
 ---
 
-## Wave 2 — Re-home every affordance onto the M1 slice; v0 stops mounting
+## Wave 1 — Stop the delete, wire talk
 
-**Depends on:** Wave 1 — Parity inventory + the steady-state kill gate
+**Intent:** Make M1 the surface that remains, and give it the one affordance it is
+missing. After this wave John opens the Seal and sees the chamber that was designed
+for him, and can talk to it.
 
-**Intent:** Move interactivity onto M1's drawn structure inside the shadow root, and
-stop dropping the slice. v0 remains in the tree but is no longer mounted, so M1 is
-proven to stand alone before anything is deleted. Serves C12 (re-home, never
-reimplement).
+**Deliverables:** `_ecgSealDropSlice()` removed from **all three** call sites — the
+chamber-success path, the `mode === 'stand_up'` branch, and the error path; `ecgSealMountInline`
+no longer mounts `_ecgRenderChamber`, `_ecgRenderStandUp`, or the error-path dock (the
+painted slice stays up and already carries an honest drawn face for the unbuilt and
+degraded cases) — the functions remain in the tree; deletion is Wave 2. **Say box
+wired:** `data-say-input` / `data-say-send` emitted server-side onto the drawn input and
+button (`chamber_open._render_convo`) — ATTRIBUTES ONLY, because the C9 signature is
+`(tag, sorted-classes)`, so the hash pin holds and no amendment is needed — and handled in
+the slice's existing shadow-root delegation (click on send, Enter on the input) posting to
+the EXISTING `/api/ecgberht/converse`; the reply paints into the drawn `.msgs` using
+**mockup classes** (`.msg.steward`, `.msg.john`), never `.ecg-msg` — page CSS does not
+cross the shadow boundary, so v0's painter classes would render invisible inside the
+slice. **E1 stays enforced AND becomes visible:** `/api/ecgberht/converse` already carries
+the server-side turn-completion hook, so enforcement is unchanged; the refusal must paint
+in the slice with the signed `AG-BLOCKED-TURN` shape (`.msg.steward.blocked`) and the wave
+asserts it is VISIBLE — an engine-green E1 whose refusal never appears is a FAILURE of this
+wave, not a pass. **The survival test** (`tests/test_chamber_m1_survives_w1.py`, Playwright,
+**REQUIRED — no `pytest.importorskip`**): open the Seal, wait for BOTH `seal_open` and
+`/api/ecgberht/chamber` to settle, pierce `slice.shadowRoot`, assert the M1 skeleton is
+still in the document. It may **NOT** `route.abort()` the chamber route —
+`tests/test_chamber_first_paint_w6.py` aborts `**/api/ecgberht/chamber?*`, and that abort
+is how this defect stayed green for twelve waves; a CI rule fails any chamber paint test
+that aborts a successor-hydrate route. C9 must still pass unchanged (the pin holds).
+AUTH-ON header on every new `tests/test_chamber_*.py`.
 
-**Deliverables:** Every `equivalent` row from the SIGNED parity map re-homed onto its
-M1 drawn element — bound inside the slice's shadow root (`shadowRoot.querySelector`,
-retargeted events), never by re-authoring markup: the mockup markup is the pin and
-must stay verbatim; say-box path re-homed whole (input, submit, the paced-PTY write
-path, E1's turn-completion hook seam — E1 must remain engine-enforced and its suite
-green); Refine / commission-propose / goal row / run block / footer stamp re-homed
-per their rows; **`_ecgSealDropSlice()` removed from the hydrate path** and its
-`_ecgSealStopPulsePoll` lifecycle re-pointed to slice close; `_ecgRenderChamber` no
-longer invoked from `ecgSealMountInline` (call site removed; the function still
-exists — deletion is Wave 3) with the error-path dock replaced by an M1-drawn
-honest-failure state from §amendments (never a bare v0 fallback: a fallback to the
-replaced surface is the defect recurring); the steady-state test UNPINNED for
-assertions (a) and (b) — the slice survives and carries the M1 schema — with (c)
-still xfail because v0 symbols remain until Wave 3; auth-ON + F6 red-to-green for
-any re-homed mutator with its routes-inventory row.
+**done-when:** Opening the Seal leaves M1 on screen after hydration on every branch; the
+say box sends and the reply paints in mockup classes; the E1 refusal is asserted visible;
+the survival test passes and the abort-ban rule is active; C9 and the full gate are green.
 
-**done-when:** Opening the Seal leaves the M1 slice on screen at steady state
-carrying the say box and every signed-equivalent affordance; `_ecgSealDropSlice` has
-no hydrate call site; `_ecgRenderChamber` has no caller; the E1 suite and the full
-gate stay green.
-
-- **Given** the Seal opened and hydration complete, **when** the DOM is inspected, **then** `#ecgSealSlice` is present and carries the M1 schema marker
-- **Given** the say box inside the slice, **when** John types and submits, **then** the message travels the EXISTING paced-PTY write path and E1's turn-completion hook still blocks a close on an unanswered ratified question
-- **Given** the chamber endpoint failing or returning no chamber, **when** the mount path runs, **then** the honest-failure state is an M1-drawn state — never `_ecgRenderChamber`
-- **Given** the slice markup after re-homing, **when** the C9 DOM diff runs, **then** it still matches the pinned hash — re-homing binds behavior, it does not edit drawn markup
-
----
-
-## Wave 3 — Delete v0. Replace means replace.
-
-**Depends on:** Wave 2 — Re-home every affordance onto the M1 slice
-
-**Intent:** Remove the replaced surface from the tree and make its return a CI
-failure. This is the wave the whole plan exists for. Serves the new law.
-
-**Deliverables:** `_ecgRenderChamber` DELETED, together with every symbol that
-existed only to serve it — `.ecg-dock` / `.ecg-convo-col` / `.ecg-saybox` CSS in
-`static/project-window.css` where not reused by M1, `_ecgSealDropSlice` itself, and
-any v0-only helper the inventory marks as unreferenced after Wave 2; the
-`/api/ecgberht/chamber` route retired or reduced to whatever M1 genuinely consumes,
-with its routes-inventory row updated (deny-by-default: if M1 does not consume it,
-it goes); the steady-state test FULLY unpinned — assertion (c) `#ecgSealDock` absent
-now passes and the xfail marker is gone (a leftover xfail is a wave defect); **a CI
-REPLACEMENT GUARD** (`tests/test_chamber_v0_is_gone_w3.py`): the v0 symbols
-(`_ecgRenderChamber`, `ecgSealDock`, `ecgberht-seal-chamber-v0`) must not appear in
-product source — failing BY NAME if any returns, so a future wave cannot
-re-introduce the replaced surface; `chamber/chamber-affordance-inventory.json` rows
-flipped to `retired` with the signature reference; `chamber/CHAMBER-PARITY-GATE.md`
-recording John's signature and the deletion date; distro manifest updated for any
-removed file.
-
-**done-when:** `_ecgRenderChamber` and the v0 schema exist nowhere in product source,
-the replacement guard fails by name if they return, the steady-state test passes
-fully unpinned, and the full gate is green with the E1 suite intact.
-
-- **Given** product source after this wave, **when** the replacement guard greps for the v0 symbols, **then** none are found and the guard passes; **when** any is re-introduced, **then** CI fails naming the symbol
-- **Given** the steady-state test, **when** it runs with no xfail markers, **then** all three assertions pass
-- **Given** the parity map, **when** the wave closes, **then** every row is `equivalent`-and-re-homed or a John-signed loss, and none is silently dropped
+- **Given** the Seal opened and hydration complete, **when** the DOM is inspected, **then** the M1 skeleton is still present inside `slice.shadowRoot` — on the chamber-success, stand-up and error branches alike
+- **Given** John types in the drawn say box and sends, **when** the turn runs, **then** it posts to `/api/ecgberht/converse` and the reply paints into `.msgs` with `.msg.steward`
+- **Given** a turn that E1 blocks, **when** the refusal paints, **then** it carries `.msg.steward.blocked` and is VISIBLE in the slice — engine-green alone does not satisfy this row
+- **Given** the slice markup, **when** C9 diffs it, **then** it still matches the pinned hash — `data-*` hooks do not change a `(tag, classes)` signature
 
 ---
 
-## Standing rules for all three waves
+## Wave 2 — Delete v0, in both trees
 
-- **The deletion never precedes the proof.** Wave 3 may not run until Wave 1's parity
-  map is SIGNED and Wave 2 has M1 standing alone.
-- **A fallback to the replaced surface is the defect recurring.** No wave may keep v0
-  alive "just in case" — that is precisely how this happened.
-- **Re-home, never re-author.** The slice's markup is hash-pinned to the signed
-  mockup. Behavior binds to drawn elements; drawn elements do not get rewritten.
-- **A wave may not both prove and cure a defect** (the W12 lesson): Wave 1 lands the
-  failing instrument, later waves turn it green.
-- **agent-launch-failure and ok:false are loud halts** (foreman journal 0102), and
-  this is a cross-repo-shaped surface — launch with `--call-timeout-min 45`.
-- Hermetic tests, auth-ON tags, stdlib only, manifest in-wave, gate scope includes
-  the distro/ship family.
+**Depends on:** Wave 1 — Stop the delete, wire talk
+
+**Intent:** Remove the replaced surface and make its return a named CI failure. This is
+the wave the original campaign never wrote.
+
+**Deliverables:** `_ecgRenderChamber`, `_ecgRenderStandUp`, `_ecgSealDropSlice`, the
+error-path dock and the v0-only CSS (`.ecg-dock` / `.ecg-convo-col` / `.ecg-saybox` /
+`.ecg-goalbar` / `.ecg-rail` / `.ecg-footer` where M1 does not reuse them) DELETED, along
+with the v0-only helpers left unreferenced by Wave 1 (`_ecgRefreshRail` if it has no
+caller, `_ECG_OPENED_DRIVE`, `_ecgGrowingInput`, the v0 message painters). **The Ecgberht
+sibling rewritten IN THIS WAVE** — `test/w11-seal-chamber.test.mjs` pins
+`function _ecgRenderChamber`, the chamber route, `chamber.footer_stamp` and the v0 CSS
+classes, and `test/w14-standup-canaries.test.mjs` pins `_ecgRenderStandUp`;
+`scripts/run-all-tests.mjs` runs that lane, so deleting without rewriting these reds this
+plan's own gate. **Replacement guard** (`tests/test_chamber_v0_is_gone_w2.py`) greps
+**BOTH trees** — the JS symbols in Anchor product source AND
+`SEAL_CHAMBER_SCHEMA_ID = 'ecgberht-seal-chamber-v0'` in
+`C:\dev\Ecgberht\engine\seal-chamber.mjs` — failing BY NAME and BY TREE on any return.
+The guard is NOT load-bearing on its own: a future `getElementById('ecgSealSlice').remove()`
+or `host.innerHTML = ''` evades a name grep, so **Wave 1's survival test is the real
+recurrence instrument** and must stay required and non-skipping. `/api/ecgberht/chamber`
+is **KEPT as a data API** — `speak` / `converse` / `commission_*` compile against that
+view-model; only the v0 RENDERER dies, not the engine VM — with its routes-inventory row
+updated. `tests/test_steward_goal_authon_2026_07_30.py` waits on `#ecgStandUpGoal` /
+`#ecgGoalBar` / `#ecgConvo` / `#ecgSayInput` and is not in the deselect list: retarget it
+onto the slice or record it on the TEST-DEBT-REGISTER and deselect — as a done-when, not
+an afterthought. Distro manifest updated for any removed file.
+
+**done-when:** v0 exists in neither tree; the guard passes and fails by name on any
+return; the survival test still passes; the Ecgberht lane is green on rewritten pins; the
+full gate is green with E1 intact.
+
+- **Given** product source in both repos, **when** the guard runs, **then** no v0 symbol or schema id is found; **when** any is re-introduced, **then** CI fails naming the symbol and the tree
+- **Given** a future change that removes the slice by any means, **when** the gate runs, **then** the survival test fails — the survival test, not the name grep, is what makes the law hold
+- **Given** the chamber route after this wave, **when** `speak` / `converse` / `commission_*` run, **then** they still resolve — only the renderer was deleted
+
+---
+
+## After Wave 2 — the human-eyes gate (not a Foreman wave)
+
+**John opens the steward and confirms it changed.** Not a test result — his eyes. Every
+automated gate on this surface has been green while it was broken: twelve waves, a signed
+mockup, a hash-pinned DOM diff and a cross-family adversarial review with zero objections,
+all green while the surface was being deleted on every open. The only instrument that ever
+caught it was John looking. The campaign is not done until he has.
+
+## Standing rules
+
+- **Replace means replace.** No wave keeps v0 alive as a fallback; a fallback to the
+  replaced surface is this defect recurring.
+- **M1's drawn design is the spec.** v0 affordances are not entitled to survive.
+- **Re-home, never re-author.** Behavior binds to drawn elements via `data-*`; drawn
+  markup is hash-pinned and does not get rewritten.
+- **Engine-green is not proof of a drawn surface.** Any criterion with a visual half needs
+  an assertion that the pixels exist.
+- **ok:false / timeout-killed / a wave that wrote nothing are LOUD halts** (foreman 0102).
+  Launch `run-live.mjs` directly with `--call-timeout-min 45` — this is cross-repo.
+- Hermetic tests, AUTH-ON tags, stdlib only, manifest in-wave, gate scope includes
+  distro/ship.
