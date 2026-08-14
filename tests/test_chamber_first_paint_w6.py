@@ -17,9 +17,16 @@
 # The campaign is a COPY of the LARGEST real campaign ledger captured by the
 # W5 fixture record (tests/fixtures/chamber/real-ledgers — real on-disk
 # ledgers, not synthetic shapes), cold-open rebuilt through the REAL W5
-# command, then painted through the REAL endpoint + browser wiring. The
-# legacy bridge hydration is route-aborted in the page so the measurement is
-# the deterministic W6 paint alone — projections, zero model calls.
+# command, then painted through the REAL endpoint + browser wiring.
+#
+# (chamber-m1 W1) This test used to route-abort the /api/ecgberht/chamber
+# hydrate in the page "to isolate the measurement" — and that abort is
+# exactly how the mount's post-hydrate slice-delete defect stayed green for
+# twelve waves. The abort is GONE (the abort-ban rule,
+# chamber_enforcement.scan_chamber_paint_aborts, now fails any chamber paint
+# test that aborts a successor-hydrate route): the hydrate runs for real and
+# the measurement stands anyway, because the paint marks land on the slice's
+# own fetch and the W1 mount never lets the hydrate touch the DOM.
 import json
 import platform
 import shutil
@@ -110,10 +117,11 @@ def test_measured_first_open_paints_under_2s_and_lands_the_decision_log(
                 "try{localStorage.setItem('anchor_token','%s')}catch(e){}"
                 % TEST_TOKEN)
             pg = ctx.new_page()
-            # Isolate the measurement to the deterministic W6 paint: the
-            # legacy bridge hydration (a Node spawn) is aborted page-side.
-            pg.route("**/api/ecgberht/chamber?*",
-                     lambda route: route.abort())
+            # (chamber-m1 W1) The chamber hydrate runs UN-ABORTED — the
+            # abort-ban rule forbids silencing a successor-hydrate route in
+            # a paint test. The paint marks ride the slice's own seal_open
+            # fetch, so the measurement is unaffected; what the un-aborted
+            # hydrate now proves is that it no longer deletes the slice.
             pg.goto("%s/project/%s?token=%s#seal"
                     % (srv["base"], pid, TEST_TOKEN),
                     wait_until="domcontentloaded")

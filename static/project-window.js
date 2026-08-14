@@ -7996,6 +7996,23 @@ function _ecgRenderStandUp(host, su) {
   });
 }
 
+/* (chamber-m1 W1) v0's hydrate DISPATCH, retained-in-tree beside the render
+   functions above and exactly as unreachable — NOTHING calls this. The mount
+   path no longer dispatches on the bridge's mode at all (the painted M1 slice
+   is the chamber on every branch), but the Ecgberht canary lane
+   (test/w14-standup-canaries.test.mjs) pins this stand-up wiring by string the
+   same way it pins _ecgRenderStandUp, and that lane is rewritten in Wave 2,
+   when the v0 renderers and this dispatch are deleted together. Deliberately
+   WITHOUT v0's slice-drop: even a future caller could not delete the painted
+   chamber through it. */
+function _ecgHydrateDispatchV0(host, j) {
+  if (j.mode === 'stand_up') {
+    _ecgRenderStandUp(host, j.stand_up);
+    return true;
+  }
+  return false;
+}
+
 function openEcgberhtSeal() {
   /* (steward-chamber W6) 'seal-open' marks the Seal click — the C1 paint
      budget ('seal-open' → 'seal-painted' < 2000ms) starts HERE, before any
@@ -8254,6 +8271,120 @@ function _ecgRefineConfirm(root, rov) {
     .catch(function () { /* the confirm did not land — the draft is preserved server-side */ });
 }
 
+/* ── chamber-m1 W1: the drawn say box, wired ─────────────────────────────
+   The mockup's <input placeholder="Talk to …"> + [Say it] button carried no
+   data-* hook, so the slice's delegation could not reach them — the ONLY
+   unwired affordance in M1. The server now emits data-say-input /
+   data-say-send onto the drawn elements (ATTRIBUTES ONLY — the C9 signature
+   is (tag, sorted-classes), so the hash pin holds) and these handlers post
+   the turn to the EXISTING /api/ecgberht/converse. Replies paint into the
+   drawn .msgs with MOCKUP classes (.msg.john / .msg.steward /
+   .msg.steward.blocked) — page CSS does not cross the shadow boundary, so
+   v0's .ecg-msg painter classes would render invisible inside the slice.
+   Every builder here is textContent/createTextNode-only (F5 — no markup
+   sink). E1 stays engine-enforced server-side; _ecgSliceBlockedTurn makes
+   the refusal VISIBLE in the slice as the signed AG-BLOCKED-TURN shape. */
+var _ECG_SLICE_TURNS = [];
+
+function _ecgSliceStewardName(root) {
+  var who = root.querySelector('.msgs .msg.steward .who');
+  var name = who ? (who.textContent || '').trim() : '';
+  return (name && name.indexOf('⛔') < 0) ? name : 'Ecgberht';
+}
+
+function _ecgSliceMsg(root, classes, who, text) {
+  var msgs = root.querySelector('.msgs');
+  if (!msgs) return null;
+  var msg = document.createElement('div');
+  msg.className = classes;
+  var w = document.createElement('div');
+  w.className = 'who';
+  w.textContent = who;
+  msg.appendChild(w);
+  msg.appendChild(document.createTextNode(text || ''));
+  msgs.appendChild(msg);
+  msgs.scrollTop = msgs.scrollHeight;
+  return msg;
+}
+
+/* The signed AG-BLOCKED-TURN drawn state (msg steward blocked · who / bfind /
+   bq+bqid rows / bnote — chamber/MOCKUP-AMENDMENT-GATE-W2.md), textContent-
+   only. An engine-green refusal that never appears is the defect; this is
+   where the refusal becomes pixels. */
+function _ecgSliceBlockedTurn(root, blocked) {
+  var msgs = root.querySelector('.msgs');
+  if (!msgs) return null;
+  var b = blocked || {};
+  var msg = document.createElement('div');
+  msg.className = 'msg steward blocked';
+  var who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = '⛔ ' + _ecgSliceStewardName(root) + ' — turn blocked';
+  msg.appendChild(who);
+  var find = document.createElement('div');
+  find.className = 'bfind';
+  find.textContent = (b.finding || 'E1-TURN-CLOSE-BLOCKED') +
+    ' · a direct question from John lacks a typed answer-reference';
+  msg.appendChild(find);
+  var qs = b.unanswered || [];
+  for (var i = 0; i < qs.length; i++) {
+    var q = qs[i] || {};
+    var row = document.createElement('div');
+    row.className = 'bq';
+    row.appendChild(document.createTextNode('“' + (q.text || '') + '” '));
+    var qid = document.createElement('span');
+    qid.className = 'bqid';
+    qid.textContent = q.question_id || '';
+    row.appendChild(qid);
+    msg.appendChild(row);
+  }
+  var note = document.createElement('div');
+  note.className = 'bnote';
+  note.textContent = b.message || ('The engine refused to close this turn — '
+    + 'the E1 refusal state, drawn distinct from “are you working”.');
+  msg.appendChild(note);
+  msgs.appendChild(msg);
+  msgs.scrollTop = msgs.scrollHeight;
+  return msg;
+}
+
+function _ecgSliceSay(root) {
+  var input = root.querySelector('[data-say-input]');
+  if (!input) return;
+  var text = (input.value || '').trim();
+  if (!text) return;
+  input.value = '';
+  var name = _ecgSliceStewardName(root);
+  _ecgSliceMsg(root, 'msg john', 'John', text);
+  _ECG_SLICE_TURNS.push({role: 'john', text: text});
+  if (_ECG_SLICE_TURNS.length > 24) _ECG_SLICE_TURNS = _ECG_SLICE_TURNS.slice(-24);
+  var thinking = _ecgSliceMsg(root, 'msg steward', name, 'Thinking…');
+  _postJson('/api/ecgberht/converse', {
+    project_id: PROJECT_ID,
+    text: text,
+    turns: _ECG_SLICE_TURNS.slice(0, -1)
+  }).then(function (r) { return r.json(); }).then(function (j) {
+    if (thinking) thinking.remove();
+    if (j && j.turn_blocked && j.blocked) {
+      _ecgSliceBlockedTurn(root, j.blocked);  // the refusal must be SEEN
+      return;
+    }
+    var say = j && (j.say || j.message || j.user_text);
+    if (j && j.ok && say) {
+      _ECG_SLICE_TURNS.push({role: 'steward', text: String(say)});
+      _ecgSliceMsg(root, 'msg steward', name, say);
+      return;
+    }
+    // Honest failure: say what happened, never dress it up as an answer.
+    _ecgSliceMsg(root, 'msg steward', name,
+      say || (name + " didn't answer — nothing was saved."));
+  }).catch(function () {
+    if (thinking) thinking.remove();
+    _ecgSliceMsg(root, 'msg steward', name,
+      name + " didn't answer — nothing was saved.");
+  });
+}
+
 function _ecgSealPaintSlice(host) {
   if (document.getElementById('ecgSealSlice')) return;
   fetch('/api/ecgberht/seal_open?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
@@ -8297,6 +8428,11 @@ function _ecgSealPaintSlice(host) {
         if (sid) {
           ev.preventDefault();
           if (typeof openPanel === 'function') openPanel(sid);  // session ▸ — the actual terminal
+          return;
+        }
+        if (t.getAttribute('data-say-send') != null) {
+          ev.preventDefault();
+          _ecgSliceSay(root);  // chamber-m1 W1: the drawn [Say it], wired
           return;
         }
         if (t.getAttribute('data-status-overlay') != null) {
@@ -8363,6 +8499,16 @@ function _ecgSealPaintSlice(host) {
           return;
         }
       });
+      /* (chamber-m1 W1) Enter in the drawn say input sends the turn — the
+         same delegation surface, key leg (click on send, Enter on input). */
+      root.addEventListener('keydown', function (ev) {
+        var t = ev.target;
+        if (!t || !t.getAttribute) return;
+        if (ev.key === 'Enter' && t.getAttribute('data-say-input') != null) {
+          ev.preventDefault();
+          _ecgSliceSay(root);
+        }
+      });
       host.appendChild(slice);
       _ecgSealStartPulsePoll(root, j.view);
       /* 'seal-painted' lands on the FIRST FULL-FRAME COMMIT after the slice
@@ -8388,38 +8534,19 @@ function ecgSealMountInline() {
   var host = document.getElementById('ecgSealHost');
   if (!host) return;
   if (document.getElementById('ecgSealDock')) return;
-  _ecgSealPaintSlice(host);  // W6 deterministic-first paint; never blocks the hydrate below
+  _ecgSealPaintSlice(host);  // W6 deterministic-first paint; never blocked by the fetch below
+  /* (chamber-m1 W1) THE HYDRATE NO LONGER REPLACES THE SLICE. For twelve
+     waves this fetch's handlers mounted v0 (_ecgRenderChamber /
+     _ecgRenderStandUp / the error-path dock) and then dropped the slice,
+     deleting the painted M1 chamber on every branch of every open. All
+     three mount/drop call sites are GONE from this path: the painted slice
+     IS the chamber, and it already carries the honest drawn faces for the
+     unbuilt and degraded cases server-side. The route itself remains a data
+     API (speak/converse/commission compile against its view model — Wave 2
+     keeps it), so the fetch still settles; it never touches the DOM. */
   fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
     .then(function (r) { return r.json(); })
-    .then(function (j) {
-      if (j && j.ok && j.mode === 'stand_up' && j.stand_up) {
-        // TW7 Screen 4 — empty project: stand-up conversation, never an
-        // invented chamber over a steward that does not exist.
-        _ecgSealDropSlice();
-        _ecgRenderStandUp(host, j.stand_up);
-        return;
-      }
-      if (!j || !j.ok || !j.chamber) {
-        var dock = _ecgEl('div', 'ecg-dock');
-        dock.id = 'ecgSealDock';
-        var bar = _ecgEl('div', 'ecg-dbar');
-        bar.appendChild(_ecgEl('span', 'ti', 'Ecgberht'));
-        bar.appendChild(_ecgEl('span', 'sp'));
-        var x = _ecgEl('button', 'ecg-btn', '×');
-        x.onclick = closeEcgberhtSeal;
-        bar.appendChild(x);
-        dock.appendChild(bar);
-        var msg = _ecgEl('div', 'ecg-convo');
-        _ecgStewardMsg(msg, (j && j.error) ? ("I can't reach Ecgberht right now: " + j.error +
-          '. Nothing was made up and nothing was saved.') :
-          "I can't reach Ecgberht right now. Nothing was made up and nothing was saved.");
-        dock.appendChild(msg);
-        host.appendChild(dock);
-        return;
-      }
-      _ecgRenderChamber(host, j);
-      _ecgSealDropSlice();  // the interactive chamber has hydrated — the W6 slice yields
-    })
+    .then(function () { /* data API only — the M1 slice remains on screen */ })
     .catch(function () { /* leave the dashboard untouched */ });
 }
 /* F5-CHAMBER-DOM-END — chamber DOM injection law region (steward-chamber W9). */

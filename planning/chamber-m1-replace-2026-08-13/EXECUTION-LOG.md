@@ -7,3 +7,4 @@ Plan revision 3 — the scope John corrected after rejecting the v0 parity map.
 Seats: Fable 5 on execute/fix, Grok on review/judge (cross-family).
 
 (Foreman appends per-wave entries here.)
+- 2026-08-14T03:55:35.875Z — Wave 1/2 GREEN — Stop the delete, wire talk (gate exit 0 · tests 1146 pass 1146 fail 0 · iter 2; appended by orchestrator on GO)

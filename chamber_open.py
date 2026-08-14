@@ -642,10 +642,14 @@ def _render_convo(view: dict, steward: dict | None) -> str:
         '<div class="msg steward"><div class="who">%s</div>%s</div>'
         '</div>'
         '%s'
+        # chamber-m1 W1: data-say-input / data-say-send are the delegation
+        # hooks for the drawn say box — ATTRIBUTES ONLY. The C9 signature is
+        # (tag, sorted-classes), so the signed mockup hash pin holds and no
+        # amendment is needed.
         '<div class="saybox">'
-        '<input placeholder="Talk to %s — it answers in seconds, runs stay '
-        'in the flow rail…" />'
-        '<button class="btn gold">Say it</button>'
+        '<input data-say-input placeholder="Talk to %s — it answers in '
+        'seconds, runs stay in the flow rail…" />'
+        '<button class="btn gold" data-say-send>Say it</button>'
         '</div>'
         '</div>'
     ) % (_esc(name), _esc(_brief_prose(view, name)), livestatus, _esc(name))

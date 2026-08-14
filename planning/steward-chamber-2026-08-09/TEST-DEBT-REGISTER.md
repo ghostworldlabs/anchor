@@ -72,3 +72,40 @@ W1's ground-truth audit, NOT at W12:
   test_lanes_concurrency::test_ac2_same_project_second_build_refused_research_concurrent ·
   test_sharefix_v113::test_spawn_anchor_server_wires_token_and_summary_optout ·
   test_supervisor_w15::TestRestartMidJob::test_readopts_same_job_advancing_tail_cancellable.
+
+## chamber-m1 W1 (2026-08-13): v0 steward Playwright suite retired with v0
+
+Plan: `planning/chamber-m1-replace-2026-08-13/` rev3, John's ruling — *"M1
+exactly as drawn, no v0 rescue"*; a test asserting a v0 behaviour is one more
+v0 artifact to retire, never a reason to preserve it. W1 stops
+`ecgSealMountInline` from mounting the v0 renderer, so the v0 ids
+(`#ecgStandUpGoal`, `#ecgGoalBar`, `#ecgSayInput`, `#ecgConvo`,
+`#ecgScaffoldPin`) never render and the 7 UI tests of
+`tests/test_steward_goal_authon_2026_07_30.py` red structurally. Deselected
+BY TEST in `scripts/run-all-tests.mjs`; the file's two auth-endpoint tests
+(`test_every_mutating_steward_endpoint_answers_with_auth_on`,
+`test_read_endpoints_answer_with_the_query_token_with_auth_on`) do not touch
+the v0 DOM and STAY LIVE. W2 deletes v0 in both trees and retires these
+tests with it. Per-test disposition:
+
+- test_set_a_goal_in_the_browser_with_auth_on — the v0 stand-up goal screen.
+  No M1 successor BY DESIGN: an unbuilt project serves the drawn
+  AG-DEGRADED-RAIL ("v0's stand-up screen has no successor to build — it
+  simply dies").
+- test_chamber_buttons_are_wired_not_decorative ·
+  test_refine_it_prefills_the_say_line_and_sends_nothing ·
+  test_still_the_goal_speaks_and_the_steward_answers — the v0 goal-bar
+  buttons, ruled out of scope ("the old goal-bar buttons" are not preserved).
+  M1's REFINE overlay has its own W11 suite.
+- test_say_line_grows_with_dictated_text_and_enter_sends — the growing
+  textarea John explicitly retired ("retire v0's growing-textarea behaviour
+  and its test with the rest of v0"); M1's drawn say box is a one-line
+  input. Enter-sends survives in M1 and is asserted by
+  tests/test_chamber_m1_survives_w1.py (the E1 Enter leg).
+- test_describing_the_project_starts_a_conversation_not_a_refusal ·
+  test_confirming_the_conversation_writes_the_steps — the taped v0
+  conversation/scaffold-pin chrome. The TALK behaviour survives in M1
+  (say box → /api/ecgberht/converse → drawn `.msgs`, asserted by
+  tests/test_chamber_m1_survives_w1.py); the engine verbs stay a data API
+  (W2 keeps the chamber route). A pinned-scaffold M1 equivalent would be a
+  future M1 amendment argued on its own merits, never a v0 rescue.

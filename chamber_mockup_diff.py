@@ -88,9 +88,22 @@ def signed_hash(gate_record_path=None) -> str:
 
 
 def mockup_path(root=None) -> Path:
-    """The signed mockups.html inside the Ecgberht sibling."""
-    root = Path(root) if root else _enf.ecgberht_root()
-    return root.joinpath(*MOCKUP_REL)
+    """The signed mockups.html inside the Ecgberht sibling.
+
+    An explicit ``root`` is taken verbatim (the tamper/absence tests pin
+    that). With no root, the env-resolved sibling is preferred — but a
+    hermetic ``ECGBERHT_ROOT`` override that does not CARRY the signed file
+    (a stub bridge root) falls back to the sibling checkout beside this
+    tree. The C9 pin is the HASH against the Anchor-side gate record, never
+    the path, so resolution can never admit an unsigned mockup.
+    """
+    if root:
+        return Path(root).joinpath(*MOCKUP_REL)
+    p = _enf.ecgberht_root().joinpath(*MOCKUP_REL)
+    if p.exists():
+        return p
+    q = (ANCHOR_ROOT.parent / "Ecgberht").joinpath(*MOCKUP_REL)
+    return q if q.exists() else p
 
 
 def load_signed_mockup(root=None, gate_record_path=None) -> str:

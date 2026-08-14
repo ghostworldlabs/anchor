@@ -91,6 +91,17 @@ W1's, because W1 is what stops the mount. Retarget each test onto the slice wher
 behaviour survives in M1, or record it on the TEST-DEBT-REGISTER and deselect it where the
 behaviour is intentionally gone — a done-when of this wave, never an afterthought.
 
+**The Ecgberht stand-up canary is handled HERE too** (folded 2026-08-13 after the iter-1
+gate — the SAME scheduling error as the goal-authon file, made twice: shark 1 named both
+by filename, I folded both, and filed both a wave late).
+`C:\dev\Ecgberht\test\w14-standup-canaries.test.mjs:626` asserts the mount path still
+contains `j.mode === 'stand_up'`; W1 removes that branch, so the canary reds in W1, and
+`scripts/run-all-tests.mjs` runs the Ecgberht lane. **This wave is AUTHORIZED to edit that
+sibling test file** — retarget the canary onto M1's honest drawn empty state
+(`seal_open` already serves `AG-DEGRADED-RAIL` for unbuilt projects, which is the
+successor to v0 stand-up), or record it on the TEST-DEBT-REGISTER and retire it with v0.
+This paragraph is the plan line a test-immutability halt should cite.
+
 **Known harness bug to fix in the same pass:** the wave's own
 `test_say_hooks_ride_the_served_render_and_the_c9_pin_holds` calls
 `chamber_mockup_diff.slice_spec()` with `root=None`, which resolves the signed mockup under
@@ -115,6 +126,16 @@ retargeted or explicitly deselected with a debt-register row; C9 and the full ga
 
 **Intent:** Remove the replaced surface and make its return a named CI failure. This is
 the wave the original campaign never wrote.
+
+**MUST DIE BY NAME IN THIS WAVE — `_ecgHydrateDispatchV0`.** W1's fix loop created it: an
+unreachable copy of v0's `j.mode === 'stand_up'` dispatch, kept solely so the Ecgberht
+canary's string-grep passes. It is honestly documented and harmless (nothing calls it, and
+it deliberately omits the slice-drop), but it is a criterion satisfied by a STRING rather
+than by the surface — the exact pattern that let C9 pass on a deleted element for twelve
+waves. It exists only because the plan authorized the canary rewrite one minute after the
+fix agent read the plan. W2 deletes it AND rewrites the canary onto M1's drawn
+`AG-DEGRADED-RAIL` empty state; the replacement guard greps for `_ecgHydrateDispatchV0`
+too. Retiring a v0 test by keeping v0 source alive is not retirement.
 
 **Deliverables:** `_ecgRenderChamber`, `_ecgRenderStandUp`, `_ecgSealDropSlice`, the
 error-path dock and the v0-only CSS (`.ecg-dock` / `.ecg-convo-col` / `.ecg-saybox` /

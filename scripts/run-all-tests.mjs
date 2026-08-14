@@ -113,6 +113,21 @@ const EXCLUDE_ARGS = [
   '--deselect=tests/test_lanes_concurrency.py::test_ac2_same_project_second_build_refused_research_concurrent',
   '--deselect=tests/test_sharefix_v113.py::test_spawn_anchor_server_wires_token_and_summary_optout',
   '--deselect=tests/test_supervisor_w15.py::TestRestartMidJob::test_readopts_same_job_advancing_tail_cancellable',
+  // ── v0 steward surface retired by chamber-m1 W1 (plan rev3, John's ruling
+  //    2026-08-13: "M1 exactly as drawn, no v0 rescue"). ecgSealMountInline no
+  //    longer mounts _ecgRenderStandUp/_ecgRenderChamber, so the v0 ids these
+  //    tests wait on (#ecgStandUpGoal, #ecgGoalBar, #ecgSayInput, #ecgConvo,
+  //    #ecgScaffoldPin) never render. The file's two auth-endpoint tests stay
+  //    live. M1 talk/E1 coverage: tests/test_chamber_m1_survives_w1.py.
+  //    Register: planning/steward-chamber-2026-08-09/TEST-DEBT-REGISTER.md
+  //    § "chamber-m1 W1". W2 deletes v0 and retires these with it.
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_set_a_goal_in_the_browser_with_auth_on',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_chamber_buttons_are_wired_not_decorative',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_refine_it_prefills_the_say_line_and_sends_nothing',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_still_the_goal_speaks_and_the_steward_answers',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_say_line_grows_with_dictated_text_and_enter_sends',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_describing_the_project_starts_a_conversation_not_a_refusal',
+  '--deselect=tests/test_steward_goal_authon_2026_07_30.py::test_confirming_the_conversation_writes_the_steps',
 ];
 console.log('=== anchor-pytest EXCLUSIONS (pre-existing reds / gate-hostile; W12 revisits):');
 EXCLUDE_ARGS.forEach((f) => console.log(`===   ${f}`));

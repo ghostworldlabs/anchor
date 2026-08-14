@@ -327,6 +327,63 @@ def scan_new_surface_tests(tests_dir: Path | None = None) -> list:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# The successor-hydrate abort ban (chamber-m1 W1)
+# ═════════════════════════════════════════════════════════════════════════════
+
+#: Routes whose page-side settle is part of what a chamber PAINT test proves.
+#: For twelve waves ``tests/test_chamber_first_paint_w6.py`` aborted the
+#: chamber hydrate route in the browser — and that abort is exactly how the
+#: mount's post-hydrate ``_ecgSealDropSlice()`` defect stayed green while the
+#: painted M1 surface was being deleted on every real open. A paint test that
+#: silences a successor-hydrate route is not testing the surface John sees.
+HYDRATE_ROUTES = ("/api/ecgberht/chamber",)
+
+#: Characters of context scanned after each browser route-interception
+#: registration (generous enough for a multi-line handler lambda).
+_ABORT_SCAN_WINDOW = 400
+
+
+def scan_chamber_paint_aborts(tests_dir: Path | None = None) -> list:
+    """The abort-ban CI rule (chamber-m1 W1). Returns ``[{file, problem}]``
+    (empty == green).
+
+    Mechanically: in every ``tests/test_chamber_*.py`` file, each browser
+    route-interception registration (a ``.route(`` call — Playwright page or
+    context) is scanned in a bounded window; a registration that targets a
+    successor-hydrate route (:data:`HYDRATE_ROUTES`) AND aborts it fails BY
+    NAME. Fulfil/continue interceptions and aborts of unrelated routes are
+    not the defect and pass untouched.
+    """
+    tests_dir = Path(tests_dir) if tests_dir else ANCHOR_ROOT / "tests"
+    # Needles assembled by concatenation (the same convention the auth-ON
+    # coverage suite uses) so a scanned test file quoting this rule's DOCS
+    # is never confused with a live interception in this module's own text.
+    reg = "." + "route("
+    kill = "abort"
+    violations = []
+    for f in sorted(tests_dir.glob(NEW_SURFACE_TEST_GLOB)):
+        text = f.read_text(encoding="utf-8", errors="replace")
+        start = 0
+        while True:
+            i = text.find(reg, start)
+            if i < 0:
+                break
+            window = text[i:i + _ABORT_SCAN_WINDOW]
+            hit = next((r for r in HYDRATE_ROUTES if r in window), None)
+            if hit is not None and kill in window:
+                violations.append({
+                    "file": f.name,
+                    "problem": "chamber paint test aborts the successor-"
+                               "hydrate route %s — the abort that kept the "
+                               "slice-delete defect green for twelve waves; "
+                               "let the hydrate run and assert M1 survives "
+                               "it" % hit})
+                break  # one named violation per file is enough
+            start = i + len(reg)
+    return violations
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # HTTP probe plumbing (stdlib; loopback only)
 # ═════════════════════════════════════════════════════════════════════════════
 
