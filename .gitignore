@@ -86,6 +86,9 @@ bridge_test*.txt
 .anchor/worktrees/
 .anchor/projects/*/discovery.json
 .anchor/projects/*/**/jobs/
+# The chamber's derived projection substrate (chamber_coldopen.cold_open_rebuild
+# regenerates it from the run records; brief/projections/manifest + their locks).
+.anchor/chamber/
 .anchor/reaper_receipts.jsonl
 .anchor/usage_ledger/
 # rearch W12 (C3): the per-project append-only event journal — runtime,
