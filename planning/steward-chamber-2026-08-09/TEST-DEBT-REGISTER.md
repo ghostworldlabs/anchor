@@ -109,3 +109,53 @@ tests with it. Per-test disposition:
   tests/test_chamber_m1_survives_w1.py); the engine verbs stay a data API
   (W2 keeps the chamber route). A pinned-scaffold M1 equivalent would be a
   future M1 amendment argued on its own merits, never a v0 rescue.
+
+## chamber-m1 W2 — the sibling pins retargeted when v0 was deleted (2026-08-14)
+
+W2 deleted the v0 renderers (`_ecgRenderChamber`, `_ecgRenderStandUp`,
+`_ecgSealDropSlice`) and W1's stopgap `_ecgHydrateDispatchV0` from live Anchor.
+Three Ecgberht-side assertions pinned those symbols. Per John's ruling —
+*"M1 exactly as drawn, no v0 rescue"* — none was treated as a reason to keep
+v0 alive; each was retargeted onto what actually survives, or retired with its
+reason stated in the file itself.
+
+- `test/w14-standup-canaries.test.mjs` · *mount S4-E1* — **INVERTED.** Was:
+  the v0 stand-up dock exists in Anchor's overlay. Now: it is GONE, the mount
+  paints the M1 slice, and the drawn successor (`AG-DEGRADED-RAIL`, server
+  rendered by `chamber_open.py`, carrying the explicit rebuild affordance) is
+  pinned instead. v0's stand-up screen has no M1 successor **by design** — an
+  unbuilt project serves the degraded rail. The stand_up ENGINE verb is
+  untouched and still pinned by the endpoint canary beside it.
+  *This is the assertion that caused W1's fix loop to mint an unreachable
+  `_ecgHydrateDispatchV0` purely so a string grep would pass; inverting it
+  removes the pressure that produced the fudge.*
+- `test/w14-standup-canaries.test.mjs` · *mount S4-E3* — **RETARGETED.** The
+  thin-evidence beat is an engine behaviour and is untouched, asserted where
+  it lives (`buildThinEvidenceBeat` + the bridge-payload row in the same
+  file). What died is the v0 CLIENT painter. The mount row now pins the
+  carriage — the beat still reaches Anchor over the kept
+  `/api/ecgberht/chamber` data API — instead of demanding a deleted renderer.
+- `test/w11-seal-chamber.test.mjs` · *mount: overlay renderer … Screen 1
+  order* — **v0 render-order rows RETIRED**, wiring rows kept. They compared
+  `indexOf` positions inside `_ecgRenderChamber`; M1's element order is now
+  the hash-pinned signed mockup diffed by C9 (`chamber_mockup_diff`), a
+  strictly stronger instrument. Note this file reads **Anchor-dev**, a v1.1
+  mirror last synced 2026-07-26, so these rows were green against a tree the
+  live design had left behind.
+
+**Standing debt (not this campaign's to close):** `C:\dev\Anchor-dev` is
+unsynced from the v1.2 chamber line. Two w11 rows still assert the v0 dock CSS
+there and are *correct about that mirror today*; they must red when Anchor-dev
+is synced, and that red is the reminder to retarget them onto M1's shadow-root
+styles — not a regression. Called out in-file at both sites.
+
+**Guard:** `tests/test_chamber_v0_is_gone_w2.py` fails BY NAME and BY TREE on
+any return, in Anchor product source and in the Ecgberht sibling. It
+distinguishes a *demand* that a v0 symbol exist (a positive `includes` /
+`indexOf` / regex pin) from an *assertion of its absence*, which is what the
+retargeted canaries now do on nearly every line. It also proves it read a real
+Ecgberht checkout before claiming an absence — the draft version greped the
+Anchor tree for a symbol that lives in Ecgberht and would have passed forever.
+The guard is a name grep and therefore NOT the load-bearing instrument:
+`tests/test_chamber_m1_survives_w1.py` opens a real browser and is what makes
+the law hold.

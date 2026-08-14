@@ -54,25 +54,16 @@
 /* ── Ecgberht Seal chamber (wireframes v2.1 Screen 1) — docked overlay over the project view ── */
 .ecg-seal-btn{display:inline-flex;align-items:center;gap:5px}
 .ecg-seal-ico{width:14px;height:14px;border-radius:50%;object-fit:cover;display:inline-block;vertical-align:middle}
-.ecg-dock{position:relative;width:auto;margin:12px 18px 4px;background:var(--surface);border:1px solid var(--border);border-top:2px solid #c9a227;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
-.ecg-dock .ecg-dbar{display:flex;align-items:center;gap:12px;padding:9px 16px;border-bottom:1px solid var(--border);background:var(--surface2);flex:0 0 auto}
-.ecg-dock .ecg-dbar .ti{font-weight:600}.ecg-dock .ecg-dbar .ti small{color:var(--text-dim);font-weight:400}
-.ecg-dock .ecg-dbar .sp{flex:1}
-.ecg-dock .ecg-seat-pill{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid #c9a227;color:#c9a227;background:transparent;cursor:pointer}
-.ecg-dock .ecg-stamp{font-size:11px;color:var(--text-dim);font-family:ui-monospace,Consolas,monospace}
-.ecg-goalbar{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:rgba(201,162,39,.06)}
-.ecg-goalbar .g{flex:1}.ecg-goalbar .lab{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)}
-.ecg-goalbar .txt{font-size:13px}
+/* (chamber-m1 W2) The v0 chamber dock CSS — the dock, goal-bar, conversation
+   column, roadmap rail, say box and footer classes — is DELETED with the v0
+   renderers; the M1 slice ships its own signed-mockup styles into its shadow
+   root (plus the #ecgSealSlice fallback block below). Classes still emitted
+   by surviving non-chamber surfaces (.ecg-btn, .ecg-msg, the ledger, pulse
+   and step-detail families) remain. */
 .ecg-btn{font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer}
 .ecg-btn.gold{border-color:#c9a227;color:#c9a227}
 .ecg-chamber{display:flex;gap:0;min-height:260px}
-.ecg-convo-col{flex:1;min-width:0;display:flex;flex-direction:column}
 .ecg-livestatus{padding:5px 16px;font-size:11.5px;color:#34a853;border-top:1px dashed var(--border);font-family:ui-monospace,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ecg-convo-col .ecg-saybox{border-top:1px solid var(--border)}
-.ecg-convo-col .ecg-run-fold{padding:6px 16px 0}
-.ecg-rail{flex:0 0 270px;border-right:1px solid var(--border);padding:12px 14px;overflow:auto}
-.ecg-rail h3{font-size:11px;margin:0 0 8px;letter-spacing:.06em;text-transform:uppercase}
-.ecg-rail h3 .house{color:var(--text-dim);font-weight:400;text-transform:none;letter-spacing:0}
 .ecg-step{display:flex;gap:8px;font-size:12px;padding:4px 0;align-items:baseline}
 .ecg-step .m{width:14px;flex:0 0 14px;text-align:center}
 .ecg-step small{display:block;color:var(--text-dim);font-size:10px}
@@ -134,16 +125,6 @@
 .ecg-run-ledger .lrow.dead .dot{color:#e05b4f}
 .ecg-run-ledger .lreport{margin:2px 0 8px 25px;padding:8px 11px;border-left:2px solid #d4af37;background:rgba(212,175,55,.06);border-radius:6px;font-size:12.8px;line-height:1.5}
 .ecg-run-ledger .lrec{margin-top:5px;color:var(--text-dim)}
-/* Run state INSIDE the scaffolding bullet: the step's own marker fills. */
-.ecg-rail .ecg-step .m.mrun.run{color:#34a853;animation:ecgpulse 1.6s ease-in-out infinite}
-.ecg-rail .ecg-step .m.mrun.ask{color:#e0a437;animation:ecgpulse 1.2s ease-in-out infinite}
-.ecg-rail .ecg-step .m.mrun.done{color:#d4af37}
-.ecg-rail .ecg-step .m.mrun.stale{color:#9a8a4a}
-.ecg-rail .ecg-step .m.mrun.dead{color:#e05b4f}
-.ecg-rail .ecg-step.has-run{cursor:pointer}
-.ecg-rail .ecg-step.has-run:hover{background:rgba(212,175,55,.07);border-radius:6px}
-.ecg-rail .ecg-step .steptext{cursor:pointer}
-.ecg-rail .ecg-step .steptext:hover{text-decoration:underline dotted}
 /* (2026-08-07) Step detail unfold + the thinking steward's surfaces. */
 .ecg-stepdetail{margin:2px 0 8px 20px;padding:8px 11px;border-left:2px solid var(--border);background:var(--surface2);border-radius:6px;font-size:12.3px;line-height:1.5}
 .ecg-stepdetail .sd-done{color:var(--text-dim);margin-bottom:5px}
@@ -192,16 +173,6 @@
 .ecg-directive .dvh{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px}
 .ecg-directive .dvt{font-size:12.8px;line-height:1.5}
 .ecg-chip{display:inline-block;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;margin-top:6px;cursor:pointer;background:var(--surface)}
-.ecg-saybox{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);align-items:flex-end}
-.ecg-saybox input,.ecg-saybox textarea{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px}
-/* (2026-07-31) The say line is a GROWING textarea, not a one-line input. John
-   dictates whole paragraphs into it ("it didn't show everything I was typing
-   ... the window didn't grow as I spoke"); a single-line input scrolled the
-   text out of sight, so he could not read back what he had just said. It
-   starts one row tall and grows with the content up to ~40% of the viewport,
-   then scrolls. Enter sends; Shift+Enter is a newline. */
-.ecg-saybox textarea{resize:vertical;overflow-y:auto;max-height:40vh;min-height:34px;line-height:1.45;font-family:inherit}
-.ecg-footer{padding:6px 16px 10px;font-size:10px;color:var(--text-dim);text-align:center;font-family:ui-monospace,Consolas,monospace}
 
 /* ── iPad / touch dictation target (2026-07-26 hardening, P0.3) ─────────────
    xterm hides its helper textarea at 0x0, opacity:0, left:-9999em, z-index:-5.

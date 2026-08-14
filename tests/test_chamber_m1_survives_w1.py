@@ -305,9 +305,9 @@ def test_say_hooks_ride_the_served_render_and_the_c9_pin_holds(tmp_path):
     assert cmd.verify_slice_render(html, spec, mode="healthy") == []
 
 
-# ── the mount: no drop, no v0 mount — and the F5 region grew no sink ─────────
+# ── the mount: no drop, no v0 mount — and v0 itself is DELETED (W2) ──────────
 
-def test_mount_never_drops_the_slice_or_mounts_v0_and_functions_remain():
+def test_mount_never_drops_the_slice_and_v0_is_deleted():
     js = (ANCHOR / "static" / "project-window.js").read_text(
         encoding="utf-8", errors="replace")
     mount = js[js.index("function ecgSealMountInline()"):]
@@ -317,15 +317,19 @@ def test_mount_never_drops_the_slice_or_mounts_v0_and_functions_remain():
     assert "_ecgRenderStandUp(" not in mount
     assert "ecg-dock" not in mount, "the error-path dock is minted again"
     assert "_ecgSealPaintSlice(host)" in mount
-    # The hydrate still settles (Wave 2 keeps the route as a data API).
+    # The hydrate still settles (the route is KEPT as a data API — W2).
     assert "/api/ecgberht/chamber?project_id=" in mount
-    # Zero call sites anywhere; the functions REMAIN in the tree — their
-    # deletion is Wave 2's, not this wave's.
-    assert js.count("_ecgSealDropSlice(") == 1, \
-        "a _ecgSealDropSlice call site came back (only the definition may remain)"
-    assert "function _ecgSealDropSlice" in js
-    assert "function _ecgRenderChamber" in js
-    assert "function _ecgRenderStandUp" in js
+    # (chamber-m1 W2) v0 is DELETED from the tree — no definition and no
+    # call site anywhere in the file, the W1 "functions remain" state
+    # inverted exactly as the frozen plan scheduled. The by-name/by-tree
+    # recurrence grep lives in tests/test_chamber_v0_is_gone_w2.py; THIS
+    # file's Playwright survival test above stays the real recurrence
+    # instrument (a name grep cannot see a future slice.remove() — only
+    # the surviving pixels can).
+    assert "_ecgSealDropSlice" not in js
+    assert "_ecgRenderChamber" not in js
+    assert "_ecgRenderStandUp" not in js
+    assert "_ecgHydrateDispatchV0" not in js
     # The say wiring is delegation on the slice, textContent-only (F5): the
     # sentinel-bounded sink scan must still be green after this wave's code.
     assert "_ecgSliceSay(root)" in js

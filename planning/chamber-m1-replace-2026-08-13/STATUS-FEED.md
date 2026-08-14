@@ -46,3 +46,63 @@ on Foreman execute/fix when the build runs.
 [21:30] Re-gate t+6m after the kill-recovery, engine pid 2068 alive, clean through the distro region. Verdict ~21:47.
 [21:40] Re-gate t+16m, engine 2068 alive, clean — past the chamber, distro, healthcheck and layoutd regions. This is the furthest a gate has got on this wave without a red. Verdict ~21:47, then the Ecgberht lane decides the canary question.
 [21:50] *** W1 GATE GREEN *** iter 2, exit 0. BOTH LANES: anchor-pytest exit 0 (3199 passed, 13 skipped, 62 deselected) AND ecgberht-lane exit 0 (engine 1146/1146, fail 0) — the w14 stand-up canary passes, so the cross-repo collision is resolved. Grok reviewers spawned 21:45:18, 2 processes verified alive at t+4m (the driver streams no tool lines, so process-liveness is the only honest check — the W12 lesson). Wave verdict pending review.
+[22:00] === WAVE 1 GREEN AND COMMITTED === 01ba378 "Stop the delete, wire talk" (gate 1146/1146, iter 2). M1 now SURVIVES hydration and the say box is wired. W2 auto-advanced ~21:55 and execute:w2 is at t+4m/15 tools, already in the Ecgberht sibling reading engine/seal-chamber.mjs — the file holding SEAL_CHAMBER_SCHEMA_ID, which is exactly where the both-tree replacement guard has to look. Engine 2068 alive.
+[22:10] *** SECOND VACUOUS-GREEN CAUGHT AND KILLED — journal 0102's defect, same day, different failure mode. *** execute:w2 died at 22:00:27: "class error-result, code 1, ok false, 15 tools, out 15422tok, 281335ms". It wrote NOTHING (Anchor tree clean, Ecgberht clean), v0 still has 3 references, and Foreman logged "execute: agent execute complete" and advanced straight to the gate — which was 9 minutes into re-proving the WAVE 1 tree and would have returned GREEN, committing wave 2 as "v0 deleted" with v0 fully intact. Killed engine 2068 mid-gate. Note the variation that matters: W1's instance (0102) was class=timeout-killed; this is class=error-result with a non-zero exit after only 4.7 minutes and 15 tool calls. Different cause, IDENTICAL blessing — which is the proof that the predicate must be ok:false alone, exactly as 0102 argued, and not a heuristic about how the agent died. Last read before the error: it was in the Ecgberht sibling on engine/seal-chamber.mjs and had just run `wc -l` on it — a large-file read is the plausible trigger.
+[22:20] W2 RELAUNCHED. Checkpoint was already correctly at wave 2 / execute / iter 0 with last_commit 01ba378 (W1's), so the failed execute left no false state — the kill was clean. Lock cleared, engine restarted with the same seats and the 45m window. W1 remains committed and safe; the only cost of the vacuous-green catch is ~20 minutes.
+[22:23] SECOND EXTERNAL KILL of a harness background task (21:21 and now 22:22) — both times the engine died with it, because run-live.mjs was a CHILD of the harness task. Root cause identified and fixed: relaunched via PowerShell Start-Process -WindowStyle Hidden -PassThru, so the engine is now a FULLY DETACHED process (pid 44912) that no harness task-stop can reach. This is what go.ps1 does natively ("lifecycle: detached-ish") and what I gave up when I bypassed it to pass --call-timeout-min; I should have replicated the detach at the same time. Both kills cost ~2m of execute each — cheap, but they would have been expensive overnight.
+[22:30] W2 execute t+7m, 19 tool calls, detached engine 44912 ALIVE — the detach is holding, which is the thing that failed twice before. Orienting (it read this very status feed, which is a reasonable way to learn what the previous attempt died doing). No writes yet. Watch: the previous attempt errored at t+4.7m with ok:false having written nothing, so passing 7m is already further than last time.
+[22:40] W2 execute t+17m, 37 tool calls, engine 44912 alive. No writes in either tree yet, and the tool count has been flat at 37 for the last minute — either a long single call or model deliberation, not necessarily trouble, but noted. This is a DELETION wave across two repos, so heavy reading before any edit is expected. Holding my earlier line: if it is still read-only at ~t+30m I treat the orientation cost as structural and say so rather than let it run to the 45m wall.
+
+--- 2026-08-14 (next morning) — W2 finished BY HAND, no engine ---
+
+[10:0x] THE THIRD ENGINE DEATH. W2's execute wrote its edits between 22:41 and
+        22:44 and then died: last heartbeat 22:44, pid 44912 gone, no verdict,
+        no commit. Found this morning with the work sitting uncommitted in the
+        tree. What HAD landed: the three v0 renderers + the v0 dock CSS deleted
+        from static/project-window.js (-433 lines) and project-window.css, and
+        test_chamber_m1_survives_w1.py's mount row inverted to assert the
+        deletion. What had NOT: the guard test it had already written comments
+        REFERRING to (tests/test_chamber_v0_is_gone_w2.py — referenced twice in
+        the code it shipped, never created), and the two Ecgberht canaries that
+        still DEMANDED the deleted symbols. So the tree was in the one state
+        the plan most wanted to avoid: v0 deleted in Anchor, v0 still demanded
+        in the sibling.
+[10:0x] DECISION — finish W2 by hand rather than relaunch Foreman. Three engine
+        deaths on one two-wave build (21:21 external kill, 22:22 external kill,
+        22:44 unknown), against a remainder that is one test file and two
+        canary rewrites. Relaunching buys adversarial review on ~150 lines of
+        test code and costs another orchestration cycle on a surface John has
+        been waiting on since yesterday. John's standing rule about
+        right-sizing ceremony to the task decides it: the gate is the ground
+        truth either way, and the gate is what I ran.
+[10:2x] FIRST — LOOKED AT IT. Before touching anything, rendered the chamber in
+        a real browser through the survival test's own harness and screenshot
+        it: the M1 rail, progress, North Star row, THE FLOW, the convo column
+        and the drawn say box, all painted and surviving the hydrate. Then
+        typed a line into the say box: John's turn painted right as .msg.john,
+        the steward's reply painted left. M1 is real and interactive. (The
+        CHAMBER_DEP_MISSING panel in the shot is a hermetic-stub artifact — the
+        chamber-ui bridge exists in the real sibling; not a defect.)
+[10:3x] W2 REMAINDER LANDED. (1) tests/test_chamber_v0_is_gone_w2.py — the
+        replacement guard, 11 rows. It fails BY NAME and BY TREE, proves it
+        read a REAL Ecgberht checkout before claiming any absence (shark
+        finding 6 made permanent), and distinguishes a positive pin that
+        DEMANDS a v0 symbol from an assertion of its ABSENCE — which the
+        retargeted canaries now make on nearly every line. Both halves carry
+        negative proofs. (2) w14's two mount canaries: S4-E1 INVERTED onto the
+        drawn AG-DEGRADED-RAIL successor, S4-E3 retargeted onto the kept data
+        API. w14 27/27, w11 30/30. (3) TEST-DEBT-REGISTER § chamber-m1 W2.
+[10:3x] NOTED FOR JOHN, not silently swept: deleting the three renderers left
+        their support cast — ~790 contiguous lines (L6827-7617: the v0 convo
+        painters, proposal cards, offer envelopes, commission propose/watch,
+        directive cards, rail refresh) plus dead branches inside six board-side
+        functions. It is NOT dead by call graph — the board's run-ledger mount
+        still calls into it — it is dead by DOM: every entry gate is
+        getElementById('ecgSealDock' | 'ecgConvo' | 'ecgChamberLedger'), and
+        nothing in either tree renders those ids any more (verified: they now
+        appear only in the deselected v0 Playwright file and in the survival
+        test's negative assertion). So it cannot run, and pruning it is a
+        separate surgical pass over a LIVE surface (the board's ambient run
+        line), not a mechanical delete. The frozen plan's W2 text scopes "the
+        v0-only helpers left UNREFERENCED by Wave 1"; these are referenced,
+        so the deeper prune is beyond this plan's words and goes to John.

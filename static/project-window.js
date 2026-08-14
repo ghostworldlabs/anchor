@@ -6798,9 +6798,6 @@ document.addEventListener('click', function() {
    Engine receipts keep engine vocabulary — livery is display-only. */
 function _ecgStw() { return (window.ANCHOR_STEWARD || {}); }
 function _ecgStwLabel() { return _ecgStw().label || 'Ecgberht'; }
-function _ecgStwSealSrc() {
-  return _ecgStw().seal_src || '/vendor/brand/ecgberht-project-seal.jpg';
-}
 
 
 function _ecgEl(tag, cls, text) {
@@ -7612,406 +7609,11 @@ function _ecgRenderRunReport(convo, run) {
   _ecgScrollToLatest(convo);
 }
 
-function _ecgSpeak(convo, text) {
-  // (2026-08-06) NO MAGIC WORDS. A Go card is up and John says go — that IS
-  // the click. "go", "run it", "yes go", "start it", "run gandalf" all press
-  // the pending button instead of taking a model round-trip that re-proposes
-  // the card he is literally answering.
-  if (_ECG_PENDING_GO && document.body.contains(_ECG_PENDING_GO) &&
-      !_ECG_PENDING_GO.disabled &&
-      /^(ok[,.! ]*)?(yes[,.! ]*)?(let'?s go|go ahead|go for it|go|run( it| \w+)?|start( it)?|do it|launch( it)?)[.! ]*$/i
-        .test(String(text).trim())) {
-    _ecgJohnMsg(convo, text);
-    _ecgNoteTurn('john', text);
-    _ECG_PENDING_GO.click();
-    return;
-  }
-  var recall = /\bremind me\b|\bwhy did we\b/i.test(text);
-  if (!recall) { _ecgConverse(convo, text); return; }
-  _ecgJohnMsg(convo, text);
-  var body = {project_id: PROJECT_ID, kind: 'recall', text: text};
-  // (2026-07-30 FIX) via _postJson so the token rides the X-Anchor-Token HEADER
-  // (+ X-Anchor-Build). The do_POST middleware never reads ?token= — a
-  // query-only POST 401s, and the global fetch wrapper turns that 401 into a
-  // token prompt, so the saybox kept re-asking for a token the window already
-  // had. NO ?token= query on a POST: the exact-match route row is compared
-  // against the path, so a query string used to miss the row entirely and
-  // answer 404 "Unknown endpoint".
-  _postJson('/api/ecgberht/speak', body
-  ).then(function (r) { return r.json(); }).then(function (j) {
-    if (!j || !j.ok) {
-      _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
-      return;
-    }
-    if (j.mode === 'recall') {
-      var rec = j.recall || {};
-      var m = _ecgStewardMsg(convo, rec.unknown
-        ? rec.voice
-        : String(rec.answer && rec.answer.value != null ? rec.answer.value : rec.answer) + ' — ' + rec.voice);
-      if (rec.chip) {
-        var chip = _ecgEl('div', 'ecg-chip', rec.chip.label);
-        chip.title = 'provenance: ' + rec.chip.opens;
-        m.appendChild(chip);
-      }
-      // TW7 S4-E3 — thin evidence: honest unknown + a CONSTRUCTIVE offer
-      // (commission a fresh look), never padded into a fake answer.
-      if (rec.unknown && j.thin_evidence && j.thin_evidence.offer) {
-        var offer = j.thin_evidence.offer;
-        var act = _ecgEl('div', 'act');
-        var ob = _ecgEl('button', 'ecg-btn', offer.label);
-        ob.title = offer.compiles_to;
-        ob.onclick = function () {
-          var say = document.getElementById('ecgSayInput');
-          if (say) {
-            say.value = 'commission a fresh look: ' + (j.thin_evidence.question || '');
-            say.focus();
-          }
-        };
-        act.appendChild(ob);
-        m.appendChild(act);
-      }
-      return;
-    }
-    // Only recall reaches /speak now — everything else routes to /converse, where
-    // the ENGINE decides act-vs-talk. If a non-recall payload somehow lands here,
-    // say so rather than rendering a half-understood answer.
-    _ecgStewardMsg(convo, _ecgStwLabel() + " couldn't answer that from the record.");
-  }).catch(function () {
-    _ecgStewardMsg(convo, _ecgStwLabel() + " didn't answer — nothing was saved.");
-  });
-}
-
-/* (2026-07-31) The chamber's buttons were LABELS ONLY — the goal bar's
-   [Still the goal] / [Refine it] and the opening message's two actions were
-   appended with no onclick, so clicking them did nothing at all. John: "when I
-   try to click the refine button nothing would happen".
-
-   Every one of those buttons already declares a closed ACT in the engine view
-   model (still_the_goal · refine_goal · carry_on · show_detail), and
-   /api/ecgberht/speak already compiles free-form talk into exactly those acts.
-   So a button SAYS its canonical utterance through the existing
-   talk → compile → receipt path; it never invents a private side channel.
-
-   The utterance is keyed off the ACT ID, not the label: the engine's carry_on
-   pattern is /^carry on\b/ and the label is "Fine — carry on", which would not
-   compile. refine_goal is the one act that needs an ARGUMENT (the new goal
-   text), so its button prefills the say line and hands John the cursor — the
-   same affordance the thin-evidence offer button already uses. */
-var _ECG_ACT_SAY = {
-  still_the_goal: 'Still the goal',
-  carry_on: 'Carry on',
-  show_detail: 'Show me the detail'
-};
-//: Acts that need the user to finish the sentence → prefill, never auto-send.
-var _ECG_ACT_PREFILL = {
-  refine_goal: 'Refine goal to '
-};
 
 function _ecgSayLine() { return document.getElementById('ecgSayInput'); }
 
-/* (2026-07-31) A GROWING say line. John dictates whole paragraphs into the
-   chamber — "it didn't show everything I was typing ... the window didn't grow
-   as I spoke" — and a one-line <input> scrolled his own words out of sight, so
-   he could not read back what he had just said before sending it.
 
-   _ecgGrowingInput builds a <textarea> that starts one row tall and grows with
-   its content (capped by the CSS max-height, then it scrolls). ENTER SENDS,
-   Shift+Enter makes a newline — dictation software emits plain newlines, which
-   would otherwise fire a send mid-thought.
 
-   ``onSend`` receives the trimmed text and must return true when it consumed
-   it (the box is then cleared). */
-function _ecgAutoGrow(el) {
-  if (!el) return;
-  el.style.height = 'auto';
-  el.style.height = Math.max(el.scrollHeight, 34) + 'px';
-}
-
-function _ecgGrowingInput(id, placeholder, onSend) {
-  var ta = document.createElement('textarea');
-  ta.id = id;
-  ta.rows = 1;
-  ta.placeholder = placeholder || '';
-  ta.setAttribute('aria-multiline', 'true');
-  ta.oninput = function () { _ecgAutoGrow(ta); };
-  ta.onkeydown = function (e) {
-    if (e.key !== 'Enter' || e.shiftKey) return;
-    e.preventDefault();
-    var text = (ta.value || '').trim();
-    if (!text) return;
-    if (onSend(text) !== false) { ta.value = ''; _ecgAutoGrow(ta); }
-  };
-  return ta;
-}
-
-/* The engine returns the North Star as the raw Face slice — a markdown
-   blockquote plus the section's trailing rule, e.g. "> Ship the thing.\n\n\n---".
-   The goal bar renders it as TEXT, so those markers showed up verbatim on the
-   dashboard. Strip the decoration for DISPLAY only; the stored Face is
-   untouched, and a goal that is genuinely empty stays honestly empty. */
-function _ecgGoalText(raw) {
-  var s = String(raw == null ? '' : raw);
-  s = s.replace(/^\s*(?:-{3,}|_{3,})\s*$/gm, '');   // horizontal rules
-  s = s.replace(/^[ \t]*>[ \t]?/gm, '');            // blockquote markers
-  return s.replace(/\s+/g, ' ').trim();
-}
-
-// Wire ONE chamber action button to its declared act. Unknown acts fall back to
-// speaking the label — the compiler answers with an honest refuse-with-proposal
-// rather than the button silently doing nothing.
-function _ecgWireAct(btn, action) {
-  if (!btn || !action) return btn;
-  var act = action.act || '';
-  btn.onclick = function () {
-    var convo = document.getElementById('ecgConvo');
-    var pre = _ECG_ACT_PREFILL[act];
-    if (pre) {
-      var say = _ecgSayLine();
-      if (say) {
-        say.value = pre;
-        say.focus();
-        try { say.setSelectionRange(say.value.length, say.value.length); } catch (e) {}
-      }
-      if (convo) {
-        _ecgStewardMsg(convo, 'Say the new goal in your own words — I have '
-          + 'started the line for you. Nothing changes until you send it.');
-      }
-      return;
-    }
-    if (!convo) return;
-    _ecgSpeak(convo, _ECG_ACT_SAY[act] || action.label || '');
-  };
-  if (act) btn.title = 'compiles to: ' + act;
-  return btn;
-}
-
-function _ecgRenderChamber(host, vm) {
-  var chamber = vm.chamber;
-  var dock = _ecgEl('div', 'ecg-dock');
-  dock.id = 'ecgSealDock';
-
-  // S1-E1 — titlebar: seal icon · steward-of title · seat pill · quiet stamp
-  var bar = _ecgEl('div', 'ecg-dbar');
-  var ico = _ecgEl('img', 'ecg-seal-ico');
-  ico.src = _ecgStwSealSrc();
-  ico.alt = '';
-  ico.onerror = function () { this.style.display = 'none'; };
-  bar.appendChild(ico);
-  var ti = _ecgEl('span', 'ti', _ecgStwLabel() + ' ');
-  ti.appendChild(_ecgEl('small', null, '· ' + chamber.titlebar.title.replace(/^Ecgberht · /, '')));
-  bar.appendChild(ti);
-  var pill = _ecgEl('button', 'ecg-seat-pill', chamber.titlebar.seat_switcher.pill);
-  pill.title = 'which model Ecgberht is using — set in Anchor model preferences';
-  bar.appendChild(pill);
-  bar.appendChild(_ecgEl('span', 'sp'));
-  bar.appendChild(_ecgEl('span', 'ecg-stamp', chamber.titlebar.stamp));
-  var closeBtn = _ecgEl('button', 'ecg-btn', '×');
-  closeBtn.title = 'Close (nothing is saved by closing)';
-  closeBtn.onclick = closeEcgberhtSeal;
-  bar.appendChild(closeBtn);
-  dock.appendChild(bar);
-
-  // S1-E2 — goal bar FIRST: North Star + [Still the goal] [Refine it]
-  var goal = _ecgEl('div', 'ecg-goalbar');
-  goal.id = 'ecgGoalBar';
-  var g = _ecgEl('div', 'g');
-  g.appendChild(_ecgEl('div', 'lab', chamber.goal_bar.label));
-  g.appendChild(_ecgEl('div', 'txt', _ecgGoalText(chamber.goal_bar.goal)));
-  goal.appendChild(g);
-  var gacts = chamber.goal_bar.actions || [];
-  for (var gi = 0; gi < gacts.length; gi++) {
-    goal.appendChild(_ecgWireAct(
-      _ecgEl('button', 'ecg-btn' + (gacts[gi].primary ? ' gold' : ''),
-             gacts[gi].label), gacts[gi]));
-  }
-  dock.appendChild(goal);
-
-  // S1-E3/E4 — Roadmap rail + run block · S1-E5 — conversation main region.
-  // (2026-08-07, John) The conversation lives in its own COLUMN: run fold on
-  // top, the dialog, and the say box DIRECTLY under the last message — never
-  // at the far bottom of the dock.
-  var body = _ecgEl('div', 'ecg-chamber');
-  body.appendChild(_ecgRenderRail(chamber.roadmap_rail, chamber.run_block));
-  var col = _ecgEl('div', 'ecg-convo-col');
-  var convo = _ecgEl('div', 'ecg-convo');
-  convo.id = 'ecgConvo';
-  var opening = chamber.conversation.opening;
-  var omsg = _ecgStewardMsg(convo, opening.text);
-  // The opening actions are wired the same way as the goal bar (they were
-  // label-only too). Built after the message so the buttons can be wired.
-  var oacts = opening.actions || [];
-  if (oacts.length) {
-    var obox = _ecgEl('div', 'act');
-    for (var oi = 0; oi < oacts.length; oi++) {
-      obox.appendChild(_ecgWireAct(
-        _ecgEl('button', 'ecg-btn', oacts[oi].label), oacts[oi]));
-    }
-    omsg.appendChild(obox);
-  }
-  col.appendChild(convo);
-
-  // S1-E9 — saybox INSIDE the conversation column, right under the dialog.
-  var say = _ecgEl('div', 'ecg-saybox');
-  var input = _ecgGrowingInput('ecgSayInput',
-    chamber.conversation.saybox.placeholder,
-    function (text) { _ecgSpeak(convo, text); return true; });
-  say.appendChild(input);
-  var speak = _ecgEl('button', 'ecg-btn gold', chamber.conversation.saybox.action);
-  speak.onclick = function () {
-    if (!input.value.trim()) return;
-    _ecgSpeak(convo, input.value.trim());
-    input.value = '';
-    _ecgAutoGrow(input);   // collapse the grown box back to one row
-  };
-  say.appendChild(speak);
-  col.appendChild(say);
-  body.appendChild(col);
-  dock.appendChild(body);
-  var footer = chamber.footer_stamp +
-    (vm.parity && vm.parity.agrees ? ' · CLI parity: status agrees' : '');
-  dock.appendChild(_ecgEl('div', 'ecg-footer', footer));
-
-  host.appendChild(dock);
-  // (2026-08-06) A commission may already be out (or just stopped) when the
-  // chamber opens — start the run poll so its report lands here unprompted.
-  try { _ecgWatchCommissionRuns(convo); } catch (e) {}
-  // (2026-08-07, John) THE STEWARD DRIVES. Opening the chamber is the cue:
-  // it says where the campaign stands, what is running and what that run is
-  // doing, and the next concrete move — then pushes it (compose-first card
-  // when the next move is a run). Once per page load; his reply continues
-  // the same conversation.
-  if (!window._ECG_OPENED_DRIVE) {
-    window._ECG_OPENED_DRIVE = true;
-    setTimeout(function () {
-      try {
-        _ecgConverse(convo,
-          'Open the chamber: in a few short lines, where does this campaign ' +
-          'stand — what finished and what it changed, what is running RIGHT ' +
-          'NOW and what it is doing, and the ONE next concrete move. Then ' +
-          'drive it: if the next move is a run, compose its brief.',
-          true);
-      } catch (e) {}
-    }, 600);
-  }
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
-  });
-}
-
-/* TW7 S4-E1 — new-ground chamber (wireframes v2.1 Screen 4). An empty
-   project (no Face, no Strip) opens the stand-up conversation: the steward
-   asks for the goal IN JOHN'S WORDS and invents nothing. Face+Strip are
-   created on [Set the goal with me] confirm ONLY; [Not now] exits clean —
-   zero writes either way until that confirm. */
-function _ecgRenderStandUp(host, su) {
-  var dock = _ecgEl('div', 'ecg-dock');
-  dock.id = 'ecgSealDock';
-
-  var bar = _ecgEl('div', 'ecg-dbar');
-  var ico = _ecgEl('img', 'ecg-seal-ico');
-  ico.src = _ecgStwSealSrc();
-  ico.alt = '';
-  ico.onerror = function () { this.style.display = 'none'; };
-  bar.appendChild(ico);
-  var ti = _ecgEl('span', 'ti', _ecgStwLabel() + ' ');
-  ti.appendChild(_ecgEl('small', null, '· nothing set up here yet'));
-  bar.appendChild(ti);
-  bar.appendChild(_ecgEl('span', 'sp'));
-  var closeBtn = _ecgEl('button', 'ecg-btn', '×');
-  closeBtn.title = 'Close (nothing is saved by closing)';
-  closeBtn.onclick = closeEcgberhtSeal;
-  bar.appendChild(closeBtn);
-  dock.appendChild(bar);
-
-  var convo = _ecgEl('div', 'ecg-convo');
-  convo.id = 'ecgConvo';
-
-  var goalRow = _ecgEl('div', 'ecg-saybox');
-  // A GROWING box here too — the stand-up goal is dictated in whole sentences,
-  // and a one-line input hid everything past the first few words.
-  var goalInput = _ecgGrowingInput('ecgStandUpGoal', su.goal_prompt,
-                                   function () { confirm(); return false; });
-
-  var confirm = function () {
-    var goal = goalInput.value.trim();
-    if (!goal) {
-      // The steward never fills this in — an empty goal is a refusal.
-      _ecgStewardMsg(convo, "I won't invent a goal for you — say what this " +
-        'project is for, in your own words, and I will set it up.');
-      goalInput.focus();
-      return;
-    }
-    // (2026-07-30 FIX) via _postJson — the token MUST ride the X-Anchor-Token
-    // header on a POST (the middleware never reads ?token=), and the URL must
-    // carry NO query (the exact-match route row is compared against the path,
-    // so ?token= missed the row and answered 404 "Unknown endpoint"). Between
-    // them, those two faults meant entering a goal here could never work with
-    // auth ON — first a token re-prompt, then "Couldn't do that".
-    _postJson('/api/ecgberht/stand_up',
-              {project_id: PROJECT_ID, north_star: goal, who: 'john'}
-    ).then(function (r) { return r.json(); }).then(function (out) {
-      if (out && out.ok) {
-        _ecgStewardMsg(convo, (out.voice || 'Set up.') +
-          ' Created: ' + (out.created || []).join(' + ') + ' — saved.', [
-          {label: 'Open it', onclick: function () {
-            closeEcgberhtSeal();
-            openEcgberhtSeal();
-          } }
-        ]);
-        goalRow.style.display = 'none';
-      } else {
-        _ecgStewardMsg(convo, "Couldn't do that: " +
-          ((out && (out.message || out.error)) || 'no response') +
-          ' — nothing was created.');
-      }
-    }).catch(function () {
-      _ecgStewardMsg(convo, "Ecgberht didn't answer — nothing was created.");
-    });
-  };
-
-  // Steward speaks first — Screen 4 stand-up voice, two actions only.
-  _ecgStewardMsg(convo, su.voice, [
-    {label: su.actions[0].label, onclick: function () { goalInput.focus(); } },
-    {label: su.actions[1].label, onclick: function () {
-      // Not now → exit clean: no Face, no Strip, no invented goal.
-      closeEcgberhtSeal();
-    } }
-  ]);
-  dock.appendChild(convo);
-
-  goalRow.appendChild(goalInput);
-  var setBtn = _ecgEl('button', 'ecg-btn gold', 'Set the goal');
-  setBtn.onclick = confirm;
-  // Enter/Shift+Enter is owned by _ecgGrowingInput (Enter confirms, Shift+Enter
-  // is a newline) — do NOT re-bind onkeydown here or the newline is lost.
-  goalRow.appendChild(setBtn);
-  dock.appendChild(goalRow);
-
-  dock.appendChild(_ecgEl('div', 'ecg-footer',
-    'nothing is created until you confirm · your words become the North Star'));
-
-  host.appendChild(dock);
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { closeEcgberhtSeal(); document.removeEventListener('keydown', esc); }
-  });
-}
-
-/* (chamber-m1 W1) v0's hydrate DISPATCH, retained-in-tree beside the render
-   functions above and exactly as unreachable — NOTHING calls this. The mount
-   path no longer dispatches on the bridge's mode at all (the painted M1 slice
-   is the chamber on every branch), but the Ecgberht canary lane
-   (test/w14-standup-canaries.test.mjs) pins this stand-up wiring by string the
-   same way it pins _ecgRenderStandUp, and that lane is rewritten in Wave 2,
-   when the v0 renderers and this dispatch are deleted together. Deliberately
-   WITHOUT v0's slice-drop: even a future caller could not delete the painted
-   chamber through it. */
-function _ecgHydrateDispatchV0(host, j) {
-  if (j.mode === 'stand_up') {
-    _ecgRenderStandUp(host, j.stand_up);
-    return true;
-  }
-  return false;
-}
 
 function openEcgberhtSeal() {
   /* (steward-chamber W6) 'seal-open' marks the Seal click — the C1 paint
@@ -8039,17 +7641,13 @@ function openEcgberhtSeal() {
    The Seal paints in <2s from the W4/W5 sidecar projections through
    GET /api/ecgberht/seal_open (chamber_open.py — zero model calls, zero
    child processes, zero writes; server-rendered verbatim-mockup markup with
-   every slot value escaped). The legacy bridge chamber still hydrates
-   afterward and the slice yields to it — the slice is the C1 instant-paint
-   proof, not a retirement of the interactive chamber (tiles/affordances
-   retire only on signed parity, W12). A fresh deploy paints the DRAWN
-   degraded-rail state whose [Rebuild projections] affordance carries the W5
-   cold-open command — the open path itself never rebuilds. */
-function _ecgSealDropSlice() {
-  _ecgSealStopPulsePoll();
-  var s = document.getElementById('ecgSealSlice');
-  if (s) s.remove();
-}
+   every slot value escaped). (chamber-m1 W2) The slice IS the chamber on
+   every branch: the v0 dock renderers and the slice-drop are DELETED from
+   the tree — guarded by name in tests/test_chamber_v0_is_gone_w2.py — and
+   the successor hydrate is a data API that never touches the DOM. A fresh
+   deploy paints the DRAWN degraded-rail state whose [Rebuild projections]
+   affordance carries the W5 cold-open command — the open path itself never
+   rebuilds. */
 
 /* (steward-chamber W7) run_pulse re-homed into the running step: the painted
    rail's ⏱ card seeds from the banked record server-side, then this poll —
@@ -8536,14 +8134,15 @@ function ecgSealMountInline() {
   if (document.getElementById('ecgSealDock')) return;
   _ecgSealPaintSlice(host);  // W6 deterministic-first paint; never blocked by the fetch below
   /* (chamber-m1 W1) THE HYDRATE NO LONGER REPLACES THE SLICE. For twelve
-     waves this fetch's handlers mounted v0 (_ecgRenderChamber /
-     _ecgRenderStandUp / the error-path dock) and then dropped the slice,
-     deleting the painted M1 chamber on every branch of every open. All
-     three mount/drop call sites are GONE from this path: the painted slice
-     IS the chamber, and it already carries the honest drawn faces for the
-     unbuilt and degraded cases server-side. The route itself remains a data
-     API (speak/converse/commission compile against its view model — Wave 2
-     keeps it), so the fetch still settles; it never touches the DOM. */
+     waves this fetch's handlers mounted the v0 dock renderers and then
+     dropped the slice, deleting the painted M1 chamber on every branch of
+     every open. All three mount/drop call sites are GONE from this path —
+     and (chamber-m1 W2) the v0 renderers themselves are DELETED from the
+     tree, guarded by name in tests/test_chamber_v0_is_gone_w2.py. The
+     painted slice IS the chamber, and it already carries the honest drawn
+     faces for the unbuilt and degraded cases server-side. The route itself
+     remains a data API (speak/converse/commission compile against its view
+     model), so the fetch still settles; it never touches the DOM. */
   fetch('/api/ecgberht/chamber?project_id=' + encodeURIComponent(PROJECT_ID) + _tokenQ())
     .then(function (r) { return r.json(); })
     .then(function () { /* data API only — the M1 slice remains on screen */ })
