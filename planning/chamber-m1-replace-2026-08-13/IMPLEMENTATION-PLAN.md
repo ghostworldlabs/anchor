@@ -38,10 +38,16 @@ the campaign existed to kill, and violates M1's zero-model-call-until-you-speak 
 the old goal-bar buttons, the seat pill, Escape-to-close, `_ecgRenderBlockedTurn`'s v0
 chrome. No parity map, no signature-per-affordance.
 
-**Deferred, not dropped:** the drawn say box is a one-line `<input>`; John's old one
-grew as he typed (built after dictation hid his words). Swapping `input`→`textarea`
-breaks the C9 signature and needs a mockup amendment. Ruling: **wire the drawn input
-now; amend only if the dictation problem recurs in use.**
+**RULED by John 2026-08-13 — M1 EXACTLY AS DRAWN.** The drawn say box is a one-line
+`<input>`; v0's grew as he typed. Wire the drawn input; **retire v0's growing-textarea
+behaviour and its test with the rest of v0.** No mockup amendment, no C9 re-pin.
+
+His words: *"All I want is the M1 that was built earlier. I don't want any of the other
+materials that were created to try and salvage/keep the old gui."* A test asserting a v0
+behaviour is not a reason to preserve that behaviour — it is one more v0 artifact to
+retire. If dictation proves a problem in real use, that is a future M1 amendment argued
+on its own merits, never a v0 rescue. **Any wave that finds itself preserving a v0
+affordance because something asserts it has made this mistake again.**
 
 ---
 
@@ -76,9 +82,25 @@ is how this defect stayed green for twelve waves; a CI rule fails any chamber pa
 that aborts a successor-hydrate route. C9 must still pass unchanged (the pin holds).
 AUTH-ON header on every new `tests/test_chamber_*.py`.
 
+**The v0 Playwright suite is handled HERE, not in Wave 2** (folded 2026-08-13 after the
+iter-0 gate: 7 of its 8 failures were this file, exactly as shark 1 predicted by name).
+`tests/test_steward_goal_authon_2026_07_30.py` waits on `#ecgStandUpGoal` / `#ecgGoalBar` /
+`#ecgConvo` / `#ecgSayInput` and is NOT in `run-all-tests.mjs`'s deselect list — so the
+moment THIS wave stops mounting v0, those ids vanish and the suite reds. The collision is
+W1's, because W1 is what stops the mount. Retarget each test onto the slice where the
+behaviour survives in M1, or record it on the TEST-DEBT-REGISTER and deselect it where the
+behaviour is intentionally gone — a done-when of this wave, never an afterthought.
+
+**Known harness bug to fix in the same pass:** the wave's own
+`test_say_hooks_ride_the_served_render_and_the_c9_pin_holds` calls
+`chamber_mockup_diff.slice_spec()` with `root=None`, which resolves the signed mockup under
+the Ecgberht sibling and raises `MockupPinError` in the gate's hermetic environment. Resolve
+the mockup the way the sibling C9 tests do.
+
 **done-when:** Opening the Seal leaves M1 on screen after hydration on every branch; the
 say box sends and the reply paints in mockup classes; the E1 refusal is asserted visible;
-the survival test passes and the abort-ban rule is active; C9 and the full gate are green.
+the survival test passes and the abort-ban rule is active; every v0 Playwright test is
+retargeted or explicitly deselected with a debt-register row; C9 and the full gate are green.
 
 - **Given** the Seal opened and hydration complete, **when** the DOM is inspected, **then** the M1 skeleton is still present inside `slice.shadowRoot` — on the chamber-success, stand-up and error branches alike
 - **Given** John types in the drawn say box and sends, **when** the turn runs, **then** it posts to `/api/ecgberht/converse` and the reply paints into `.msgs` with `.msg.steward`
