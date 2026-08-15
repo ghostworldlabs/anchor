@@ -10,13 +10,17 @@ collaborator's machine the way they behave on the author's.
 Every vendored `SKILL.md` defers its run contract — the **LOCKED 10-minute
 status-table format**, the Heavy-vs-regular tiers, the invocation discipline —
 to `AGENTS.md`. Neither the author's user-global copy nor the Skill Foundry
-copy is in the bundle. Worse, the no-personal-data scan rewrote
-`C:\dev\Skill Foundry\AGENTS.md` into the literal token `<path> Foundry\AGENTS.md`
-in **ten staged files**: the scrub protected the author's privacy and converted
-a diagnosable absolute path into a string that resolves nowhere. The artifact
+copy is in the bundle. Worse, the no-personal-data scan rewrote the author's
+absolute Skill Foundry path into a placeholder token in **ten staged files**:
+the scrub protected the author's privacy and, in doing so, converted a
+diagnosable absolute path into a string that resolves nowhere. The artifact
 linked; the symbol was missing. Collaborators got skills whose most visible
 behavior — reporting progress every ten minutes in a fixed format — was
 undefined.
+
+(This paragraph cannot quote the broken string itself: the new gate below
+correctly refuses to ship any file containing it, and it caught this changelog
+on the first build after it was written.)
 
 - **`AGENTS.md` now ships**, emitted into the staged root at build time (source
   under `planning/`, which the manifest excludes — deliberately *not* at the
