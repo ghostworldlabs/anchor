@@ -142,6 +142,12 @@ _DENY_DIR_COMPONENTS_BY_SKILL = {
     "ecgberht": {
         "e4-skill-plan", "e9-e10-crucible", "ideation", "research",
         "artifacts", "drafts", "mockups", "prior-art",
+        # The steward's OWN live runtime state (attention.json). Harmless-
+        # looking — no project names — but it is the author's cell, so a
+        # stranger's fresh install would open already showing someone else's
+        # "needs_you / commission_awaiting_confirm" from 2026-08-03. A steward
+        # must start with an empty attention cell, not an inherited one.
+        ".ecgberht",
     },
 }
 
