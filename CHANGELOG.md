@@ -1,5 +1,84 @@
 # Changelog
 
+## v1.2.3 — the skills arrive with their run contract (2026-08-15)
+
+The v1.2 line built cleanly and was never published. This release fixes what
+the built bundle was quietly getting wrong, so the skills behave on a
+collaborator's machine the way they behave on the author's.
+
+### The bundle shipped its skills without their governance
+Every vendored `SKILL.md` defers its run contract — the **LOCKED 10-minute
+status-table format**, the Heavy-vs-regular tiers, the invocation discipline —
+to `AGENTS.md`. Neither the author's user-global copy nor the Skill Foundry
+copy is in the bundle. Worse, the no-personal-data scan rewrote
+`C:\dev\Skill Foundry\AGENTS.md` into the literal token `<path> Foundry\AGENTS.md`
+in **ten staged files**: the scrub protected the author's privacy and converted
+a diagnosable absolute path into a string that resolves nowhere. The artifact
+linked; the symbol was missing. Collaborators got skills whose most visible
+behavior — reporting progress every ten minutes in a fixed format — was
+undefined.
+
+- **`AGENTS.md` now ships**, emitted into the staged root at build time (source
+  under `planning/`, which the manifest excludes — deliberately *not* at the
+  author repo root, where an `AGENTS.md` would hijack the
+  AGENTS.md-is-canonical convention). It carries the locked status table
+  verbatim, the launch pattern that makes the cadence actually fire
+  (background launch + armed wake-up), the tier definitions, and an honest
+  note that seat assignment resolves from Anchor's registry — so **Package A**
+  installs, which have no registry, are told to expect `cross_model:false`
+  rather than silently getting single-family verification.
+- **The 12 `SKILL.md` files were repointed** at the bundled copy (trio
+  `eb7c34e`, Skill Foundry `12d643b`) with no absolute path left for the scrub
+  to mangle.
+- **`AUTONOMOUS-MODE.md` ships** — how to run the skills unattended, what each
+  capability is for, what stays denied, and a plain no-warranty statement.
+  It documents editing the collaborator's **own** user-level settings: a
+  settings file arriving inside a cloned repo is restricted from granting
+  itself permissions, and that restriction is correct.
+
+### New fail-closed gate: scrub residue
+The PII scan rewrites author paths to `<path>`; where the reference had a file
+target, that rewrite leaves a pointer to nothing — which is exactly how the
+above shipped invisibly. The new gate audits the PII scan's own output.
+Narrow by design: a general "does every referenced doc exist" check was
+refuted cross-family (staged prose legitimately names unstaged files like
+`DASHBOARD.md` and `MASTER-PLAN.md`, so its false-positive rate would get it
+switched off). Measured against the real v1.2.2 tree: **10 hits, 1 distinct
+pattern, 0 false positives**, and it fires when the defect is planted back.
+
+### Two stamps that disagreed
+- **`VERSION` said 1.2.2 while `pyproject.toml` said 1.1.3.** The G3 sandbox
+  gate could not catch it because it hard-coded the literal `"1.1.3"` instead
+  of asserting the two stamps *agree* — so it would have failed on every line
+  after 1.1.3 for a reason unrelated to product health. De-pinned to the real
+  invariant. Both stamps now read 1.2.3.
+- **`doctor.py` called a correctly-built package broken.** Its
+  `OPTIONAL_ABSENT` was a hand-maintained duplicate of the builder's
+  `_OPTIONAL_FIRST_PARTY`, frozen at `{update_transaction, tools}`; the builder
+  grew the steward-chamber declarations and doctor never did, so a good install
+  printed *"Module 'chamber_mockup_diff' is MISSING — this install is
+  INCOMPLETE"*. Doctor is the **first** thing the consumer `CLAUDE.md` tells a
+  collaborator to run, so the one free deterministic check was telling every
+  new user their install was broken. Same root cause as the v1.1.x
+  two-builders incident: one list must win, and it is the one the fail-closed
+  gate enforces. Found only because the acceptance suites had never been run
+  against the v1.2 line.
+
+### Evidence
+Build from a clean worktree of committed HEAD: **B 1052 files / A 602, all
+gates clean**. Stranger sandbox **10/10**. Pull dry run against a simulated
+collaborator install **7/7** (1056 files). Distro/doctor/share suites **111
+passed**. 13 new gates in `tests/test_share_v123.py`.
+
+### Still open — carried forward honestly
+- **The Ecgberht steward is still not in the bundle.** Its host contracts ship
+  (the `chamber_*` modules); the skill does not. Cross-family review confirmed
+  the engine is cleanly separable from the author's campaign record —
+  `rank.mjs` scores Strip projections only, `loadDispatchTable()` falls back to
+  `BUILTIN_CELLS`, `prior-art/` and `ideation/` have no engine load paths — so
+  the split is real work, not a blocker. Deferred to v1.3.
+- The ease count and tile retirement remain open by name from v1.2.1.
+
 ## v1.2.2 — E1 engine-enforced (2026-08-13)
 
 The steward can no longer walk away from a question you asked it.
