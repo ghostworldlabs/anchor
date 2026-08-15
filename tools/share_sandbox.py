@@ -143,9 +143,13 @@ def main(argv=None) -> int:
 
     # ── G3: version stamps agree ────────────────────────────────────────────
     try:
+        # The invariant is AGREEMENT between the two stamps, not equality with a
+        # frozen release number. Pinning the literal (was "1.1.3") made this gate
+        # fail on every subsequent line for a reason unrelated to product health,
+        # and masked the real v1.2 desync (VERSION 1.2.2 vs pyproject 1.1.3).
         v_file = (staging / "VERSION").read_text(encoding="utf-8").strip()
         py_toml = (staging / "pyproject.toml").read_text(encoding="utf-8")
-        ok = v_file == "1.1.3" and ('version = "%s"' % v_file) in py_toml
+        ok = bool(v_file) and ('version = "%s"' % v_file) in py_toml
         gate("G3 version alignment", ok,
              "VERSION=%s pyproject-match=%s" % (v_file, ok))
     except Exception as exc:

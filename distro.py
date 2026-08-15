@@ -194,6 +194,35 @@ class ImportClosureError(Exception):
         )
 
 
+class ScrubResidueError(Exception):
+    """A staged file carries a SCRUBBED path token still followed by a file
+    target — i.e. a reference the PII scrub relocated to nowhere.
+
+    THE v1.2 CLASS: every vendored ``SKILL.md`` deferred its run contract to
+    ``C:\\dev\\Skill Foundry\\AGENTS.md``. The no-personal-data scan correctly
+    rewrote the author path to the ``<path>`` token and, in doing so, converted
+    a diagnosable absolute path into an unresolvable string — ten staged files
+    shipped pointing at ``<path> Foundry\\AGENTS.md``, so the LOCKED 10-minute
+    status-table format was undefined on every collaborator machine while all
+    gates stayed green. The artifact linked; the symbol was missing.
+
+    Deliberately NARROW. A general "does every referenced doc exist" gate was
+    refuted cross-family: staged prose legitimately names unstaged files
+    (DASHBOARD.md, MASTER-PLAN.md, friction-intake-*.md), so its false-positive
+    rate would force an unmanageable optional-list and the gate would be turned
+    off. This one fires ONLY on the scrub-residue shape — measured against the
+    real v1.2.2 tree: 10 hits, 1 distinct pattern, 0 false positives.
+    """
+
+    def __init__(self, hits):
+        self.hits = list(hits)
+        lines = [f"  {rel}: {cat}: {snip}" for (rel, cat, snip) in self.hits]
+        super().__init__(
+            "scrub-residue gate FAILED — staged file(s) point at a SCRUBBED "
+            "path that resolves to nothing:\n" + "\n".join(lines)
+        )
+
+
 # ── Manifest (deny-by-default allowlist) ─────────────────────────────────────
 
 def load_manifest(manifest_path: Path | None = None) -> list[str]:
@@ -769,6 +798,48 @@ _OPTIONAL_FIRST_PARTY = {
 }
 
 
+#: The scrub-residue shape: a ``<path>`` token the no-personal-data scan left
+#: behind, still followed (within a short window) by a path-shaped file target.
+#: A bare ``<path>`` is fine — SOURCES.md uses it as a deliberate provenance
+#: placeholder with no target. It is the token PLUS a target that proves a real
+#: reference was relocated to nowhere.
+_SCRUB_RESIDUE_RE = re.compile(
+    r"<path>[^\s]{0,40}[ \t]?[A-Za-z0-9_.-]{0,40}[\\/][A-Za-z0-9_.-]+"
+    r"\.(?:md|json|mjs|py|txt|ps1|cmd)"
+)
+
+#: Text extensions worth scanning. Binary/vendored assets are out of scope.
+_SCRUB_SCAN_SUFFIXES = (".md", ".txt", ".json", ".py", ".mjs", ".js", ".ps1", ".cmd")
+
+
+def scan_scrub_residue(files):
+    """Find staged files pointing at a SCRUBBED path. Empty list == clean.
+
+    Returns ``(rel, "scrub-residue", detail)`` hits, mirroring the other
+    scanners. See :class:`ScrubResidueError` for why this is narrow by design.
+    """
+    hits = []
+    for rel, abspath in files:
+        rel_norm = str(rel).replace("\\", "/")
+        if not rel_norm.lower().endswith(_SCRUB_SCAN_SUFFIXES):
+            continue
+        try:
+            text = Path(abspath).read_text(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue
+        seen = set()
+        for m in _SCRUB_RESIDUE_RE.finditer(text):
+            frag = m.group(0)
+            if frag in seen:
+                continue
+            seen.add(frag)
+            hits.append((
+                rel_norm, "scrub-residue",
+                "reference relocated to nowhere by the PII scrub: %r" % frag,
+            ))
+    return hits
+
+
 def scan_import_closure(files, root: Path | None = None, extra_optional=()):
     """Static import-closure over the staged set. Empty list == closed.
 
@@ -1053,6 +1124,46 @@ def emit_claude_md(staging: Path) -> Path:
     return p
 
 
+# The collaborator-facing run contract + autonomy guide. SOURCE lives under
+# ``planning/share-v1.2/`` (which the manifest excludes) and is EMITTED to the
+# staged root at build time — deliberately NOT kept at the author repo root,
+# where an ``AGENTS.md`` would hijack the AGENTS.md-is-canonical convention and
+# be read as this project's own instructions rather than as shipped product.
+#
+# WHY THESE SHIP (2026-08): every vendored SKILL.md defers its run contract to
+# "user-global AGENTS.md" and to the Skill Foundry AGENTS.md — neither of which
+# is in the bundle. Ten staged files carried a scrubbed ``<path> Foundry\\AGENTS.md``
+# pointing at nothing, so the LOCKED 10-minute status-table format (the single
+# most visible skill behavior) was undefined on every collaborator machine.
+_EMITTED_DOCS = (
+    ("AGENTS.md", "planning/share-v1.2/AGENTS.md"),
+    ("AUTONOMOUS-MODE.md", "planning/share-v1.2/AUTONOMOUS-MODE.md"),
+)
+
+
+def emit_share_docs(staging: Path, root: Path | None = None) -> list:
+    """Emit the collaborator run-contract docs into staging.
+
+    Returns ``[(rel, path), ...]`` for the content scanners, mirroring the
+    README/CLAUDE.md emitters. Fail-closed: a missing source raises rather than
+    silently shipping a bundle whose SKILL.md pointers dangle.
+    """
+    root = Path(root) if root else REPO_ROOT
+    out = []
+    for rel, src_rel in _EMITTED_DOCS:
+        src = root / src_rel
+        if not src.is_file():
+            raise FileNotFoundError(
+                "share doc source missing: %s (every vendored SKILL.md points at "
+                "AGENTS.md; shipping without it re-creates the dangling-pointer "
+                "defect)" % src_rel
+            )
+        p = Path(staging) / rel
+        p.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        out.append((rel, p))
+    return out
+
+
 # ── Build ────────────────────────────────────────────────────────────────────
 
 def build_distro(root: Path | None = None,
@@ -1162,6 +1273,7 @@ def build_distro(root: Path | None = None,
     # generated at build time, never copied from the author tree (the author's
     # own CLAUDE.md is deliberately NOT on the manifest and never ships).
     claude_md_path = emit_claude_md(output_dir) if emit_readme_file else None
+    share_docs = emit_share_docs(output_dir, root=root) if emit_readme_file else []
 
     # Scan the staged set (NOT the source tree) — what we'd actually ship. The
     # import scan derives first-party module names from the SOURCE ``root`` being
@@ -1171,6 +1283,7 @@ def build_distro(root: Path | None = None,
         scan_pairs.append(("README.md", readme_path))
     if claude_md_path is not None:
         scan_pairs.append(("CLAUDE.md", claude_md_path))
+    scan_pairs.extend(share_docs)
     hits = scan_paths(scan_pairs, root=root)
     if hits:
         if cleanup_on_fail:
@@ -1188,6 +1301,16 @@ def build_distro(root: Path | None = None,
         if cleanup_on_fail:
             shutil.rmtree(output_dir, ignore_errors=True)
         raise ImportClosureError(closure_hits)
+
+    # SCRUB-RESIDUE GATE (v1.2): the no-personal-data scan rewrites author paths
+    # to a ``<path>`` token. Where the reference had a FILE TARGET, that rewrite
+    # leaves a pointer to nothing — the v1.2 dangling-AGENTS.md class. Runs
+    # AFTER the PII scan by construction: it audits that scan's own output.
+    residue_hits = scan_scrub_residue(scan_pairs)
+    if residue_hits:
+        if cleanup_on_fail:
+            shutil.rmtree(output_dir, ignore_errors=True)
+        raise ScrubResidueError(residue_hits)
 
     # STARTUP GATE: everything above reads file CONTENT, which structurally
     # cannot detect a file that is simply ABSENT from the manifest. Load the
