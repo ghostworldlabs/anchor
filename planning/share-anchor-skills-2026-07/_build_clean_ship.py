@@ -48,6 +48,8 @@ os.environ.setdefault("ANCHOR_TRIO_DIR", r"C:\dev\trio")
 os.environ.setdefault("ANCHOR_FOUNDRY_DIR", r"C:\dev\Skill Foundry")
 # Gandalf lives under Foundry on this host (not a separate git root).
 os.environ.setdefault("ANCHOR_GANDALF_DIR", r"C:\dev\Skill Foundry")
+# The Ecgberht steward is its own git root; the repo root IS the skill.
+os.environ.setdefault("ANCHOR_ECGBERHT_DIR", r"C:\dev\Ecgberht")
 
 # Package A cold-start subset (same onboard shell; no Anchor service/desktop
 # gate). Everything here is ALSO on dist_manifest.txt — this list only picks
