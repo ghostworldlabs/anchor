@@ -1273,7 +1273,14 @@ def build_distro(root: Path | None = None,
     # generated at build time, never copied from the author tree (the author's
     # own CLAUDE.md is deliberately NOT on the manifest and never ships).
     claude_md_path = emit_claude_md(output_dir) if emit_readme_file else None
-    share_docs = emit_share_docs(output_dir, root=root) if emit_readme_file else []
+    # Gated on ``vendor_skills_`` for the same reason the vendor tree is: a
+    # custom test tree must not be forced to carry the product's doc sources.
+    # The coupling is semantic, not incidental — these docs exist to satisfy the
+    # VENDORED skills' governance pointers, so a build with no vendored skills
+    # has nothing to point at. Every real product build vendors, so the
+    # fail-closed guarantee is intact where it matters.
+    share_docs = (emit_share_docs(output_dir, root=root)
+                  if (emit_readme_file and vendor_skills_) else [])
 
     # Scan the staged set (NOT the source tree) — what we'd actually ship. The
     # import scan derives first-party module names from the SOURCE ``root`` being
