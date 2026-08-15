@@ -119,6 +119,11 @@ def main(argv=None) -> int:
     os.environ.setdefault("ANCHOR_TRIO_DIR", r"C:\dev\trio")
     os.environ.setdefault("ANCHOR_FOUNDRY_DIR", r"C:\dev\Skill Foundry")
     os.environ.setdefault("ANCHOR_GANDALF_DIR", r"C:\dev\Skill Foundry")
+    # v1.2.3: the Ecgberht steward is its own git root (repo root IS the
+    # skill). Without this the sandbox silently exercises a 13-skill bundle
+    # while the real builder ships 14 — an acceptance suite that does not test
+    # what ships.
+    os.environ.setdefault("ANCHOR_ECGBERHT_DIR", r"C:\dev\Ecgberht")
 
     # ── G1: build via the ONE blessed builder (all gates fail-closed) ───────
     try:
