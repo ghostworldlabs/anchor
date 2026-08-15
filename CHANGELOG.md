@@ -74,14 +74,45 @@ gates clean**. Stranger sandbox **10/10**. Pull dry run against a simulated
 collaborator install **7/7** (1056 files). Distro/doctor/share suites **111
 passed**. 13 new gates in `tests/test_share_v123.py`.
 
+### The Ecgberht steward now ships — engine only
+Anchor had been shipping the steward's **host contracts** (the `chamber_*`
+modules) while the skill itself stayed on the author machine, so collaborators
+got steward-shaped Anchor surface with nothing behind it. The bundle now
+carries **14 skills**, not 13.
+
+What does *not* ship is the point. The steward is a campaign-memory skill and
+most of its ~970 files are the author's own portfolio record. The generic
+denylist already dropped 487 (`planning` / `test` / `journal` / `.foreman`);
+the remainder carry names too generic to deny globally — a future skill may
+legitimately ship a `research/` or `drafts/` directory as product — so
+`_is_denied` / `_apply_denylist` now take an optional skill name and apply
+**scoped** denials. `ECGBERHT.md` at the steward's root is the author's
+portfolio memory and is denied by name; per-project copies mint from
+`templates/`, which ships. The steward's own `.ecgberht/attention.json` is
+denied too: it is live author state, and a stranger's fresh install must not
+open already showing someone else's pending "needs you".
+
+Result: **257 files, not 970.** Verified by leak probe — no private project
+names, no campaign record, no inherited runtime state.
+
+Safe because cross-family review confirmed the engine reads none of it at
+runtime: `rank.mjs` scores Strip projections only, `loadDispatchTable()` falls
+back to `BUILTIN_CELLS`, `prior-art/` and `ideation/` have no engine or bin
+load path, and `listJournalEntries()` is an optional per-project scan returning
+`present:false`.
+
+The sandbox harness gained the steward's source env — without it the suite
+silently exercised a 13-skill bundle while the builder shipped 14, an
+acceptance suite not testing what ships.
+
 ### Still open — carried forward honestly
-- **The Ecgberht steward is still not in the bundle.** Its host contracts ship
-  (the `chamber_*` modules); the skill does not. Cross-family review confirmed
-  the engine is cleanly separable from the author's campaign record —
-  `rank.mjs` scores Strip projections only, `loadDispatchTable()` falls back to
-  `BUILTIN_CELLS`, `prior-art/` and `ideation/` have no engine load paths — so
-  the split is real work, not a blocker. Deferred to v1.3.
 - The ease count and tile retirement remain open by name from v1.2.1.
+- The Gandalf read that drove this release ran its **synthesis seat on Opus 5,
+  not Fable** (a tier-break against that skill's declared TOP tier). Its
+  refuter seat was genuinely cross-family (Gemini 3.1 Pro High), and every
+  material conclusion here was subsequently confirmed by execution — the
+  builds, the suites, and the leak probe — rather than resting on model
+  judgment.
 
 ## v1.2.2 — E1 engine-enforced (2026-08-13)
 

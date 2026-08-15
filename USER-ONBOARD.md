@@ -11,7 +11,7 @@ This is the short path for collaborators. Plain ASCII for mail and terminals.
 - **Package B — Anchor + skills**: the full product. A local R&D dashboard
   (runs on your machine at `http://localhost:8777`, nothing leaves your
   computer) that drives projects, tasks, and AI research/plan/build sessions,
-  plus 13 bundled skills for Claude Code. **Pick this to try Anchor.**
+  plus 14 bundled skills for Claude Code. **Pick this to try Anchor.**
 - **Package A — skills only**: just the skills, registered for your coding
   agent. No server, no dashboard.
 
