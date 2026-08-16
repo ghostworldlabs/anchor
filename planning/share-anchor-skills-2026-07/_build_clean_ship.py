@@ -68,6 +68,7 @@ _PACKAGE_A_FILES = (
     # (B gets them via distro.emit_share_docs; A composes from B's tree).
     "AGENTS.md",
     "AUTONOMOUS-MODE.md",
+    "ELEGANCE.md",
     "share_contracts.py",
     "share_governance.py",
     "share_home_config.py",
