@@ -79,7 +79,7 @@ def test_scrub_residue_skips_non_text(tmp_path):
 def test_emit_share_docs_writes_both(tmp_path):
     out = distro.emit_share_docs(tmp_path, root=REPO)
     names = sorted(rel for rel, _p in out)
-    assert names == ["AGENTS.md", "AUTONOMOUS-MODE.md"]
+    assert names == ["AGENTS.md", "AUTONOMOUS-MODE.md", "ELEGANCE.md"]
     for _rel, p in out:
         assert p.is_file() and p.stat().st_size > 0
 

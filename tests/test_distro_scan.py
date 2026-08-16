@@ -96,7 +96,7 @@ def test_build_stages_only_selected_files(tmp_path):
     # v1.1.3 thin consumer CLAUDE.md, and the v1.2.3 collaborator run contract
     # AGENTS.md + AUTONOMOUS-MODE.md) is in the manifest selection.
     selected = set(report["files"])
-    emitted = {"README.md", "CLAUDE.md", "AGENTS.md", "AUTONOMOUS-MODE.md"}
+    emitted = {"README.md", "CLAUDE.md", "AGENTS.md", "AUTONOMOUS-MODE.md", "ELEGANCE.md"}
     assert staged - emitted == selected
 
     # And data files are absent on disk.
