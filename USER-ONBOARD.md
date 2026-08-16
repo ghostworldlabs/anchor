@@ -154,10 +154,20 @@ run for an hour while you are away, since a single wave touches dozens of files
 and runs your test suite several times.
 
 `AUTONOMOUS-MODE.md` gives the exact settings block, what each capability is
-for, and what stays blocked. **It has you edit your own user-level settings
-file, not one we ship** — an agent deliberately restricts what a settings file
+for, and what stays blocked. **The change lands in your own user-level config,
+not a file we ship** — an agent deliberately restricts what a settings file
 arriving inside a cloned repository may authorize, which is a good rule we are
-not going to work around.
+not going to work around. After reading it, one command installs both the
+agent-level best-practice rules and (optionally) the autonomy settings,
+reversibly, into your own config:
+
+```text
+python share_agent_rules.py install --settings
+```
+
+(`install` alone = rules only; `remove` undoes the rules block; `status`
+shows what is installed. Your pre-merge settings are kept at
+`settings.json.anchor-orig`.)
 
 Read the risk section there before you turn it on. It is a real grant of
 authority on your machine, and it is the same one the author runs with.

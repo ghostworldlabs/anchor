@@ -61,6 +61,13 @@ _PACKAGE_A_FILES = (
     "onboard.py",
     "onboard_bootstrap.py",
     "share_onboard.py",
+    "share_agent_rules.py",
+    # v1.2.3: the collaborator run contract. Every vendored SKILL.md points at
+    # `AGENTS.md`; Package A ships the same skills, so omitting these here
+    # would re-create the dangling-pointer defect for skills-only installs
+    # (B gets them via distro.emit_share_docs; A composes from B's tree).
+    "AGENTS.md",
+    "AUTONOMOUS-MODE.md",
     "share_contracts.py",
     "share_governance.py",
     "share_home_config.py",

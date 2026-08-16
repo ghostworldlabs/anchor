@@ -16,11 +16,8 @@ the point.
 
 ## How to turn it on
 
-**Edit your own user-level settings file.** Not a file in this repo — yours:
-
-```text
-%USERPROFILE%\.claude\settings.json
-```
+**The change goes in your own user-level config.** Not a file in this repo —
+yours, under `%USERPROFILE%\.claude\`.
 
 > **Why yours and not one we ship.** Agents deliberately restrict what a
 > settings file arriving *inside a cloned repository* is allowed to grant —
@@ -29,7 +26,34 @@ the point.
 > around it. A permission you grant in your own user-level file is unambiguous,
 > and it is the only path we can promise actually works.
 
-Merge this into that file (keep any keys you already have):
+### Option 1 — one command (recommended)
+
+From the package root, after reading this file:
+
+```text
+python share_agent_rules.py install --settings
+```
+
+This does two things, both to YOUR files, both reversible:
+
+1. **Rules** — appends one clearly-fenced block to
+   `%USERPROFILE%\.claude\CLAUDE.md` telling your agent to follow this
+   install's `AGENTS.md` (the 10-minute status table, the background-launch
+   pattern, no sub-agent shell spawns, honest degradation).
+2. **Settings** — merges the block below into
+   `%USERPROFILE%\.claude\settings.json`. It **never overwrites a value you
+   already set** — it only fills absent keys and adds missing list entries —
+   and your pre-merge file is kept at `settings.json.anchor-orig`.
+
+Want the rules without the autonomy grant? Drop the flag:
+`python share_agent_rules.py install`. Undo the rules block any time with
+`python share_agent_rules.py remove`; check state with
+`python share_agent_rules.py status`.
+
+### Option 2 — by hand
+
+Merge this into `%USERPROFILE%\.claude\settings.json` (keep any keys you
+already have):
 
 ```json
 {

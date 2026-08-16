@@ -314,6 +314,7 @@ onboard_bootstrap.py
 launch_anchor_dashboard.py
 USER-ONBOARD.md
 verify_freeze_manifest.py
+share_agent_rules.py
 share_capability_matrix.py
 share_ci_ship_gate.py
 share_contracts.py

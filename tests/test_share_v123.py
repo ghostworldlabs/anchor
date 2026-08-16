@@ -15,6 +15,7 @@ distro's no-personal-data scan.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,88 @@ def test_doctor_keeps_the_historical_fallback():
 
 def test_doctor_reports_no_missing_modules_on_this_tree():
     assert doctor_mod.find_missing_modules() == {}
+
+
+# ── 5. the agent-rules opt-in (share_agent_rules) ───────────────────────────
+
+import share_agent_rules as sar  # noqa: E402
+
+
+def test_rules_install_is_idempotent_and_reversible(tmp_path):
+    """Re-install replaces the ONE fenced block (a moved install root heals);
+    remove restores the user's file exactly."""
+    md = sar.user_claude_md(tmp_path)
+    md.parent.mkdir(parents=True)
+    original = "# my own global rules\n\nkeep me intact\n"
+    md.write_text(original, encoding="utf-8")
+
+    r1 = sar.install_rules(tmp_path, root=tmp_path / "install-a")
+    assert r1["action"] == "appended"
+    r2 = sar.install_rules(tmp_path, root=tmp_path / "install-b")
+    assert r2["action"] == "replaced"
+    text = md.read_text(encoding="utf-8")
+    assert text.count(sar.RULES_BEGIN) == 1          # one block, not stacked
+    assert "install-b" in text and "install-a" not in text
+    assert "keep me intact" in text                  # user content untouched
+
+    assert sar.remove_rules(tmp_path)["action"] == "removed"
+    assert md.read_text(encoding="utf-8") == original
+
+
+def test_settings_merge_never_overwrites_the_users_choices(tmp_path):
+    """Fill-only for scalars, union for lists, first-backup-wins."""
+    sj = sar.user_settings_json(tmp_path)
+    sj.parent.mkdir(parents=True)
+    sj.write_text(json.dumps({
+        "permissions": {"defaultMode": "plan", "allow": ["Bash"],
+                        "deny": ["Read(**/.env)"]},
+        "model": "opus",
+    }), encoding="utf-8")
+
+    rep = sar.merge_settings(tmp_path)
+    assert rep["ok"]
+    doc = json.loads(sj.read_text(encoding="utf-8"))
+    assert doc["permissions"]["defaultMode"] == "plan"   # user's value WINS
+    assert doc["model"] == "opus"                        # untouched
+    assert doc["permissions"]["allow"].count("Bash") == 1  # union, no dupes
+    assert "WebSearch" in doc["permissions"]["allow"]
+    assert "Read(**/.ssh/**)" in doc["permissions"]["deny"]
+    assert doc["skipAutoPermissionPrompt"] is True
+
+    backup = sj.with_name(sar.SETTINGS_BACKUP_NAME)
+    assert json.loads(backup.read_text(encoding="utf-8"))["model"] == "opus"
+    sar.merge_settings(tmp_path)  # second run must NOT clobber the original
+    assert "skipAutoPermissionPrompt" not in json.loads(
+        backup.read_text(encoding="utf-8"))
+
+
+def test_settings_merge_refuses_unparseable_without_writing(tmp_path):
+    sj = sar.user_settings_json(tmp_path)
+    sj.parent.mkdir(parents=True)
+    sj.write_text("{not json", encoding="utf-8")
+    rep = sar.merge_settings(tmp_path)
+    assert not rep["ok"]
+    assert sj.read_text(encoding="utf-8") == "{not json"   # nothing written
+
+
+def test_autonomy_patch_matches_the_documented_block():
+    """The doc's JSON block and the code's patch must not drift — the exact
+    two-sources-of-truth class that bit doctor/builder in this release."""
+    doc = (REPO / "planning" / "share-v1.2" / "AUTONOMOUS-MODE.md").read_text(
+        encoding="utf-8")
+    fenced = doc.split("```json", 1)[1].split("```", 1)[0]
+    documented = json.loads(fenced)
+    patch = sar.autonomy_patch()
+    assert set(documented["permissions"]["allow"]) == set(
+        patch["permissions"]["allow"])
+    assert set(documented["permissions"]["deny"]) == set(
+        patch["permissions"]["deny"])
+    assert documented["permissions"]["defaultMode"] == \
+        patch["permissions"]["defaultMode"]
+    assert documented["skipAutoPermissionPrompt"] == \
+        patch["skipAutoPermissionPrompt"]
+
+
+def test_agent_rules_module_is_on_the_manifest():
+    manifest = (REPO / "dist_manifest.txt").read_text(encoding="utf-8")
+    assert "share_agent_rules.py" in manifest.splitlines()
