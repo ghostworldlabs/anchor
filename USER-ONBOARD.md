@@ -1,4 +1,4 @@
-# Install guide — Anchor + skills (v1.2.3, Package A / B)
+# Install guide — Anchor + skills (v1.2.4, Package A / B)
 
 **All rights reserved.** Not open source. Use by author permission only.
 
@@ -202,7 +202,7 @@ This exact loop is what produced the v1.1.3 fixes.
 
 ---
 
-## Known limits of v1.2.3 (honest)
+## Known limits of v1.2.4 (honest)
 
 - **No auto-start:** run the launcher (or click the icon) again after a
   reboot.

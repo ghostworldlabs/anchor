@@ -1,6 +1,6 @@
-# Paste-ready collaborator note — SKILLS ONLY (v1.2.3)
+# Paste-ready collaborator note — SKILLS ONLY (v1.2.4)
 
-> Send after the v1.2.3 tag is published to `anchor-plus-skills` (until then
+> Send after the v1.2.4 tag is published to `anchor-plus-skills` (until then
 > the clone URL serves v1.1.3). This note deliberately does not mention the
 > dashboard — the full-product note (`SHARE-NOTE.md`) is for later, once the
 > updated Anchor has been tested.

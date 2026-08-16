@@ -1,5 +1,59 @@
 # Changelog
 
+## v1.2.4 — the elegance cycle: every skill sleeps, the engines stop lying about dead time (2026-08-15)
+
+A portfolio-wide sleep cycle over all 14 bundled skills, commissioned as
+"make these elegant, no rabbit holes, robust enough that scientists at any
+frontier lab would want them."
+
+### ELEGANCE.md Part II ships — what elegance IS, and the Rabbit-Catcher
+A researched, adversarially-vetted operational definition of elegance
+(three evidence sweeps, 38 rung-marked ledger items; four live cross-family
+governed rounds, new-blocker trajectory 3→1→1→0, stopped on the first
+genuinely-dry round per the Elegance Law's own rule 5). With it: the
+**Rabbit-Catcher** — a bounded per-element test battery (RC-1..7 + the RC-G
+guard clause) the steering seat runs at plan approval and on new mid-run
+elements. Needs must be INDEPENDENT of their proposer (no self-authored
+justification records); malleability work is never cut as "unused
+capability"; guards are judged by hazards, not recorded failures; verdicts
+are KEEP / HOLD-with-expiry / CUT-logged. Every SKILL.md carries the
+definition inline; `ELEGANCE.md` ships at the bundle root (emitted like
+AGENTS.md — pointed-at rule files must ship).
+
+### The engines stop blessing dead agents
+- **Foreman**: an agent whose transport reports `ok:false` is now a loud
+  `[taxonomy:agent-died]` HALT — never "execute complete". The recorded
+  failure: a 20-minute, 60-tool-call execute SIGKILLed at the per-call cap
+  with ZERO bytes written was blessed and advanced to a gate that would have
+  gone GREEN on the previous wave's tree. `go.ps1` now exposes
+  `-CallTimeoutMin` (the default 20 killed a healthy 43-minute wave).
+- **Crucible**: the first genuinely-dry held round now goes to the USER (the
+  convergence authority) instead of paying a second identical round — the
+  engine now obeys the Elegance rule its own SKILL.md carries.
+- **Steward**: `launch_failure` joins the closed run-outcome set — a session
+  dead before its greeting, with nothing written, raises "fix the engine
+  first", never "the session ended" (a blind relaunch bought the same death
+  three times, ~80 minutes, zero product). Plus the READ-BEFORE-PLAN law:
+  the steward opens its own campaign record before planning anything.
+- **researchPrime**: the plan-gate CLI's TTY-only trap and the agy field laws
+  (label-form models, fenced-JSON replies, absolute paths, `'yes'/'no'` enum)
+  are documented where the operator reads them.
+
+### The sleep cycle's own rails repaired
+LESSONS.md created for 4 skills that had none; jumper's 24 journal entries get
+their first promotions; gandalf's post-08-04 backlog promoted; NORTH-STAR.md
+promoted from in-code charters for legal-beagle and financial-analyst (marked
+as promotions — nothing newly authored); run-capture rails restored ×4;
+journal ids now law: max(NNNN)+1 over the whole directory. Standing rules
+promoted into foreman/crucible SKILL.md from ten journals. financial-analyst's
+SKILL.md mojibake (24 sequences) repaired.
+
+### Named cuts (per the law: shown, not silent)
+The full stall-detection ladder (the enabling idle-watchdog exists but no
+driver pumps heartbeats yet — turning it on would kill healthy long calls;
+deferred with the prerequisite named), cross-repo dirty-sibling checks, and
+the steward wall-clock ledger.
+
 ## v1.2.3 — the skills arrive with their run contract (2026-08-15)
 
 The v1.2 line built cleanly and was never published. This release fixes what

@@ -1,11 +1,11 @@
-# Paste-ready collaborator note — v1.2.3
+# Paste-ready collaborator note — v1.2.4
 
-> Send after the v1.2.3 tag is published to `anchor-plus-skills` (until then
+> Send after the v1.2.4 tag is published to `anchor-plus-skills` (until then
 > the clone URL serves v1.1.3 and the rules command below does not exist).
 
 ---
 
-Subject: Anchor + the skill suite, v1.2.3 — 15 minutes to a working install
+Subject: Anchor + the skill suite, v1.2.4 — 15 minutes to a working install
 
 Hi [name],
 

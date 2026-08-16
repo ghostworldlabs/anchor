@@ -1138,6 +1138,11 @@ def emit_claude_md(staging: Path) -> Path:
 _EMITTED_DOCS = (
     ("AGENTS.md", "planning/share-v1.2/AGENTS.md"),
     ("AUTONOMOUS-MODE.md", "planning/share-v1.2/AUTONOMOUS-MODE.md"),
+    # v1.2.4: the Elegance Law + the researchPrime-vetted Rabbit-Catcher
+    # battery (Part II). Every vendored SKILL.md carries the binding block
+    # inline AND points at ELEGANCE.md Part II for the full battery — the
+    # pointer must resolve in the bundle (the dangling-AGENTS.md lesson).
+    ("ELEGANCE.md", "planning/share-v1.2/ELEGANCE.md"),
 )
 
 
