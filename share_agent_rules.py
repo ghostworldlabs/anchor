@@ -219,18 +219,27 @@ def status(home: Path | None = None) -> dict:
     rules = md.is_file() and RULES_BEGIN in md.read_text(encoding="utf-8")
     sj = user_settings_json(home)
     settings_present = False
+    default_mode = None
     if sj.is_file():
         try:
             doc = json.loads(sj.read_text(encoding="utf-8") or "{}")
             perms = doc.get("permissions") or {}
+            allow = perms.get("allow") or []
+            default_mode = perms.get("defaultMode")
+            # Present == what the merge GUARANTEES. defaultMode is deliberately
+            # NOT part of this predicate: the merge is fill-only, so a user's
+            # own mode (e.g. "plan") wins — demanding "auto" here would tell
+            # that user the profile is absent forever. Their mode is reported
+            # separately instead.
             settings_present = (
                 doc.get("skipAutoPermissionPrompt") is True
-                and perms.get("defaultMode") == "auto"
-                and "Bash" in (perms.get("allow") or []))
+                and all(e in allow
+                        for e in autonomy_patch()["permissions"]["allow"]))
         except ValueError:
             pass
     return {"rules_installed": bool(rules),
             "autonomy_settings_present": settings_present,
+            "default_mode": default_mode,
             "claude_md": str(md), "settings_json": str(sj)}
 
 
