@@ -39,6 +39,14 @@ on the first build after it was written.)
   It documents editing the collaborator's **own** user-level settings: a
   settings file arriving inside a cloned repo is restricted from granting
   itself permissions, and that restriction is correct.
+- **`share_agent_rules.py` ships** — the one-command opt-in that makes the
+  above real: `python share_agent_rules.py install --settings` writes the
+  agent-level rules block into the collaborator's own `~/.claude/CLAUDE.md`
+  and merges the autonomy profile into their own `settings.json` — fill-only
+  (a value the user already set always wins), first-backup-wins
+  (`settings.json.anchor-orig`), fully reversible (`remove`, `status`).
+  Package A carries `AGENTS.md`/`AUTONOMOUS-MODE.md` too — without them the
+  skills-only install would have re-created the dangling-pointer defect.
 
 ### New fail-closed gate: scrub residue
 The PII scan rewrites author paths to `<path>`; where the reference had a file
