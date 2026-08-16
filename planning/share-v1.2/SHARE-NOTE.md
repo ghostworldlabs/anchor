@@ -41,4 +41,11 @@ undoes it.
 If anything breaks: `python doctor.py` (free, no AI calls) and send me what
 it prints. Upgrading later is just `git pull`.
 
+**Just want the skills, not the dashboard?** Same clone, same onboard — then
+stop. Skip the launcher line entirely: onboard has already registered all 14
+skills for Claude Code (check `%USERPROFILE%\.claude\skills`), and the
+dashboard never runs unless you start it. The optional rules command applies
+either way, and is what makes long skill runs report the 10-minute status
+table instead of stalling on prompts.
+
 — John
