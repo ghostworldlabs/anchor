@@ -122,7 +122,7 @@ failure happened *under* full ceremony and was caught only by the user's own eye
 > live cross-family adversarial rounds (3 independent Gemini reviewer seats
 > per round; live Judge + Synthesizer; engine tally trajectory 3→1→1→0 new
 > blockers; stopped on the first genuinely-dry round per rule 5 above).
-> Full run record: C:\dev\plans\2026-08-elegance-v2\rp-run\.
+> Full run record retained on the author host (the governed-round inputs,
 p-run\.
 >
 > Part I above is the LAW (how much ceremony, what gets shown, what gets
