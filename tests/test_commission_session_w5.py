@@ -292,6 +292,38 @@ def test_runner_watch_only_dead_session_is_died():
     assert result["outcome"] == cr.RUN_DIED
 
 
+def test_runner_prelaunch_death_is_launch_failure_not_died():
+    """0082: dead before the greeting, zero output, work turn never sent, seconds
+    of life = the ENGINE failed at launch — a distinct loud outcome, because the
+    cure ('fix the engine CLI/auth first') differs from died's ('see what the
+    session was doing'). Three blind relaunch cycles burned ~80 min on W11."""
+    def read_dead(sid, cursor):
+        return {"text": "", "next": 0, "status": "dead"}
+    result = cr.run_commissioned_session(
+        "s", "x", read_fn=read_dead, write_fn=lambda *a: None,
+        poll_seconds=0, max_seconds=5, sleep_fn=lambda s: None,
+    )
+    assert result["outcome"] == cr.RUN_LAUNCH_FAILURE
+    assert result["sent_work_turn"] is False
+
+
+def test_runner_death_after_output_stays_died():
+    """A session that SAID something before dying is 'died', never launch_failure
+    — the discriminator is zero transcript + unsent work turn, not just speed."""
+    calls = {"n": 0}
+    def read_then_die(sid, cursor):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"text": "✓ crucible loaded — what would you like to do?",
+                    "next": 10, "status": "alive"}
+        return {"text": "", "next": 10, "status": "dead"}
+    result = cr.run_commissioned_session(
+        "s", "do the work", read_fn=read_then_die, write_fn=lambda *a: None,
+        poll_seconds=0, max_seconds=5, sleep_fn=lambda s: None,
+    )
+    assert result["outcome"] == cr.RUN_DIED
+
+
 # ── Listings stay SAFE ──────────────────────────────────────────────────────
 
 def test_list_runs_is_safe_and_newest_first(tmp_path, bridge_env):

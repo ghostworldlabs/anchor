@@ -32,6 +32,16 @@ RUN_PRODUCED = "produced"    # the skill finished and left something behind
 RUN_QUIET = "quiet"          # no output for a long stretch — say so honestly
 RUN_DIED = "died"            # the PTY exited
 RUN_TIMEOUT = "timeout"      # wall-clock bound hit while still working
+#: 0082 (steward-chamber wall-clock accounting): a session that exits BEFORE the
+#: greeting ever appears — no output, work turn never sent, seconds of life — is
+#: an ENGINE-LAUNCH failure (usage limits, broken CLI), not a session that "died
+#: working". The distinction is load-bearing: relaunching a launch failure pays
+#: for the identical death again (three cycles, ~80 min, zero product on W11/W12),
+#: so the raise must say "fix the engine first", never "the session ended early".
+RUN_LAUNCH_FAILURE = "launch_failure"
+#: Under this many seconds of life with zero transcript, a dead PTY is a launch
+#: failure. Generous vs 0082's observed 858ms–1.2s deaths; far under any real load.
+LAUNCH_FAILURE_MAX_SECONDS = 10
 
 #: Default bounds. A real plan run is minutes, not seconds.
 DEFAULT_POLL_SECONDS = 10
@@ -196,6 +206,13 @@ def run_commissioned_session(
             last_new_output = clock()
 
         if chunk.get("status") == "dead":
+            # 0082: dead before the work ever started, with nothing said and
+            # only seconds of life = the ENGINE failed at launch. Distinct,
+            # loud, and raised as "fix the engine", never "session ended".
+            if (not sent and not transcript.strip()
+                    and (clock() - started) <= LAUNCH_FAILURE_MAX_SECONDS):
+                return _result(RUN_LAUNCH_FAILURE, transcript, started,
+                               clock(), sent)
             return _result(RUN_DIED, transcript, started, clock(), sent)
 
         # THE SECOND TURN. The seed only loads the skill and greets; the work
