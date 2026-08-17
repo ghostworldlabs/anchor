@@ -46,6 +46,7 @@ Two honest notes:
   correct behavior.
 
 If anything misbehaves: "python doctor.py" (free, no AI calls) and send me
-what it prints. Upgrading later is just "git pull".
+what it prints. Upgrading later: "git pull", then re-run onboard.cmd once (it is
+idempotent, and registers any new skills the release added).
 
 -- John

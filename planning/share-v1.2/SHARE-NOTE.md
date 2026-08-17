@@ -39,7 +39,8 @@ already made, keeps a backup, and `python share_agent_rules.py remove`
 undoes it.
 
 If anything breaks: `python doctor.py` (free, no AI calls) and send me what
-it prints. Upgrading later is just `git pull`.
+it prints. Upgrading later: `git pull`, then re-run `.\onboard.cmd` once (idempotent;
+registers any new skills the release added).
 
 **Just want the skills, not the dashboard?** Same clone, same onboard — then
 stop. Skip the launcher line entirely: onboard has already registered all 14
