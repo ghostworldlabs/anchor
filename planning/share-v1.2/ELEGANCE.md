@@ -364,3 +364,11 @@ on disk — never in the sentence carrying the ask.
 **5. End with a question he can answer in one word.** Every ask closes with a
 plain question ("Approve?", "Batch 2?", "Pursue or drop?"). If he cannot
 answer it in one word, the ask is not finished being written.
+
+**6. Every question carries a recommendation.** State what you would choose,
+one line of why, and — when the choice genuinely has them — a couple of
+alternatives. Then leave the door open for a typed answer: the options are a
+convenience, never a cage ("or tell me something else"). A question without a
+recommendation outsources the thinking to the person who hired the thinker.
+(John, 2026-08-16: "pretty standard format — it tends to work pretty good
+for me.")
