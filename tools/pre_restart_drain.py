@@ -165,8 +165,46 @@ def drain(project_id=None, dry_run=False, summary_timeout=None) -> dict:
             entry["parked"] = False
             entry["error"] = f"{type(e).__name__}: {e}"
         drained.append(entry)
+
+    # ── Cockpit steward engines (2026-08-25; REWIRED same day after review) ──
+    # The cockpit engines are long-lived `claude` processes owned by the RUNNING
+    # SERVICE — this drain is a separate process, so an in-process registry read
+    # is a structural no-op (first version's defect: it always saw an empty
+    # ENGINES and reported [] — indistinguishable from "none live"). The drain
+    # now asks THE SERVICE to park its own engines via POST /api/steward/drain-all
+    # and reports each failure class BY NAME — never a vacuous empty.
+    cockpit = {"mode": "http", "parked": [], "idle": [], "errors": [], "note": None}
+    if dry_run:
+        cockpit["note"] = "dry-run: service drain-all not called"
+    else:
+        import json as _json
+        import os as _os
+        import urllib.request as _rq
+        import urllib.error as _er
+        url = _os.environ.get("ANCHOR_URL", "http://127.0.0.1:8777") + "/api/steward/drain-all"
+        req = _rq.Request(url, data=b"{}", method="POST",
+                          headers={"Content-Type": "application/json"})
+        tok = _os.environ.get("ANCHOR_TOKEN", "")
+        if tok:
+            req.add_header("X-Anchor-Token", tok)
+        try:
+            with _rq.urlopen(req, timeout=30) as resp:
+                body = _json.loads(resp.read().decode("utf-8"))
+                cockpit.update({k: body.get(k, cockpit[k]) for k in ("parked", "idle", "errors")})
+        except _er.HTTPError as e:
+            if e.code == 401:
+                cockpit["note"] = ("cockpit engines NOT parked: the service requires "
+                                   "X-Anchor-Token and ANCHOR_TOKEN is not in this shell's "
+                                   "env — export it (or park from the dashboard) before "
+                                   "restarting, or steward turns die mid-flight and lean on --resume")
+            else:
+                cockpit["note"] = f"cockpit drain HTTP {e.code}: engines NOT parked"
+        except Exception as e:
+            cockpit["note"] = (f"service unreachable ({type(e).__name__}) — nothing to park "
+                               f"(service already down) OR wrong ANCHOR_URL")
+
     return {"ok": True, "dry_run": bool(dry_run), "count": len(drained),
-            "drained": drained}
+            "drained": drained, "cockpit": cockpit}
 
 
 def main(argv=None):  # pragma: no cover - thin CLI shim

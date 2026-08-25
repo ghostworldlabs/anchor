@@ -6,7 +6,7 @@
         "rel": "DECISION-LOG.md",
         "kind": "plan-doc",
         "title": "Decision Log: Scaled Gandalf Architecture",
-        "mtime": 1785756482.335842,
+        "mtime": 1786498093.5188804,
         "lane": "planning"
       },
       {
@@ -84,6 +84,13 @@
         "kind": "plan-doc",
         "title": "Anchor Calendar v1 — MASTER PLAN",
         "mtime": 1784924341.4677713,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/chamber-m1-replace-2026-08-13/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Make M1 survive, wire talk, delete v0 — Implementation Plan (Foreman-ready)",
+        "mtime": 1786736888.9809144,
         "lane": "planning"
       },
       {
@@ -451,6 +458,27 @@
         "lane": "planning"
       },
       {
+        "rel": "planning/steward-chamber-2026-08-09/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Crucible-planned project — Implementation Plan (Foreman-ready)",
+        "mtime": 1786306428.7229753,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/steward-chamber-2026-08-09/MASTER-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Master Plan — LOCKED 2026-08-09 by John (\"lock plus hardening fold\")",
+        "mtime": 1786306428.7431014,
+        "lane": "planning"
+      },
+      {
+        "rel": "planning/steward-e1-2026-08-12/IMPLEMENTATION-PLAN.md",
+        "kind": "plan-doc",
+        "title": "Steward E1 — Implementation Plan (Foreman-ready)",
+        "mtime": 1786558806.1363065,
+        "lane": "planning"
+      },
+      {
         "rel": "planning/steward-lifecycle-2026-07-31/MASTER-PLAN-v2.md",
         "kind": "plan-doc",
         "title": "MASTER PLAN v2 — Anchor steward: campaign orchestration by conversation",
@@ -547,14 +575,14 @@
         "rel": "foreman-checkpoint.json",
         "kind": "foreman-checkpoint",
         "title": "foreman-checkpoint",
-        "mtime": 1784914924.9450643,
+        "mtime": 1786681385.7016428,
         "lane": "build"
       },
       {
         "rel": "foreman.config.json",
         "kind": "foreman-config",
         "title": "foreman.config",
-        "mtime": 1784924341.232383,
+        "mtime": 1786665700.325433,
         "lane": "build"
       },
       {
@@ -625,6 +653,13 @@
         "kind": "foreman-config",
         "title": "foreman.config",
         "mtime": 1784924341.4692965,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/chamber-m1-replace-2026-08-13/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Execution log — make M1 survive, wire talk, delete v0 (Foreman)",
+        "mtime": 1786736888.9799144,
         "lane": "build"
       },
       {
@@ -831,6 +866,20 @@
         "lane": "build"
       },
       {
+        "rel": "planning/steward-chamber-2026-08-09/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Execution log — steward chamber rebuild (Foreman)",
+        "mtime": 1786498093.5533867,
+        "lane": "build"
+      },
+      {
+        "rel": "planning/steward-e1-2026-08-12/EXECUTION-LOG.md",
+        "kind": "execlog",
+        "title": "Execution log — steward E1 enforcement (Foreman)",
+        "mtime": 1786639808.765001,
+        "lane": "build"
+      },
+      {
         "rel": "planning/steward-lifecycle-2026-07-31/handoff/EXECUTION-LOG.md",
         "kind": "execlog",
         "title": "EXECUTION LOG — Ecgberht steward campaign orchestration",
@@ -893,7 +942,7 @@
         "rel": "SAVED_FOR_LATER.md",
         "kind": "idea-doc",
         "title": "Saved for Later",
-        "mtime": 1786014050.0344021,
+        "mtime": 1786791684.089463,
         "lane": "grass"
       },
       {
@@ -989,15 +1038,15 @@
   ],
   "counts": {
     "research": 0,
-    "planning": 73,
-    "build": 53,
+    "planning": 77,
+    "build": 56,
     "deliverables": 0,
     "grass": 3,
     "gandalf": 0,
     "docs": 12,
-    "total": 141
+    "total": 148
   },
-  "generated_at": 1786037900.0035772,
+  "generated_at": 1786797258.2966444,
   "root": "C:\\dev\\Anchor",
   "truncated": true,
   "stage_links": [
