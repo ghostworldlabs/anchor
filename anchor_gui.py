@@ -19113,6 +19113,26 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if proot is None:
                     self._send_json({"ok": False, "error": "unknown project"}, code=404); return
                 obj, code = _scr.api_post(proot, verb, body or {})
+            # Deliverable file streaming (2026-08-25): the routes layer returns a
+            # {__file__, __ctype__} marker (containment already enforced there);
+            # everything else stays JSON.
+            if code == 200 and isinstance(obj, dict) and "__file__" in obj:
+                try:
+                    with open(obj["__file__"], "rb") as fh:
+                        raw = fh.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", obj.get("__ctype__", "application/octet-stream"))
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.send_header("Content-Disposition",
+                                     'inline; filename="%s"' % os.path.basename(obj["__file__"]).replace('"', ''))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", str(len(raw)))
+                    self.end_headers()
+                    self.wfile.write(raw)
+                except Exception as exc:
+                    if not _is_benign_disconnect(exc):
+                        self._send_json({"error": "deliverable read failed: " + str(exc)}, code=500)
+                return
             self._send_json(obj, code=code)
         except Exception as exc:
             if _is_benign_disconnect(exc):

@@ -366,6 +366,29 @@ def _usage_rollup(cdir):
 
 
 def handle_get(cdir, verb, qs):
+    if verb == "deliverables":
+        # 2026-08-25 (John's ask; campaign journal 0010 "where is the thing I paid
+        # for?"): the effort's DELIVERABLES.md register, parsed disk-true — the ONE
+        # source the tile, the map links, and the steward's own answer all read.
+        return campaign.read_deliverables(cdir), 200
+    if verb == "deliverable-file":
+        # Serve ONE deliverable's bytes, HARD-CONTAINED to the effort dir (realpath
+        # prefix check — ../ or symlink escapes 404; active content served inert).
+        rel = str(qs.get("path", ""))
+        creal = os.path.realpath(str(cdir))
+        real = os.path.realpath(str(Path(cdir) / rel))
+        if not (real == creal or real.startswith(creal + os.sep)) \
+                or not os.path.isfile(real):
+            return {"error": "not an openable deliverable (outside this effort or missing)"}, 404
+        if os.path.getsize(real) > 50 * 1024 * 1024:
+            return {"error": "file too large to serve inline (50MB cap)"}, 413
+        ext = Path(real).suffix.lower()
+        ctype = {
+            ".pdf": "application/pdf",
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".json": "application/json; charset=utf-8",
+        }.get(ext, "text/plain; charset=utf-8")  # md/csv/html/svg served INERT as text
+        return {"__file__": real, "__ctype__": ctype}, 200
     if verb == "efforts":
         return _efforts(cdir), 200
     if verb == "map":

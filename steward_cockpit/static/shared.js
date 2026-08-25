@@ -110,6 +110,13 @@ const Proto = (() => {
     b.appendChild(body);
     s.appendChild(b);
     pin(s, stick);
+    // Deliverables tile stays pinned FIRST in the pane (2026-08-25, John's ask),
+    // and its register refreshes on the same cadence as the status it sits above.
+    try {
+      const dt = s.querySelector(".blk.deliv");
+      if (dt && s.firstChild !== dt) s.insertBefore(dt, s.firstChild);
+      renderDeliverablesTile();
+    } catch (e) { /* no-op */ }
     // Render receipt (2026-08-25; COALESCED same day after review): the status is
     // now ON JOHN'S SCREEN — tell the engine so delivery is a receipt, not a hope
     // (wakeup-delivery lesson). poll() replays the whole event buffer on open, so
@@ -123,6 +130,71 @@ const Proto = (() => {
         catch (e) { /* no-op */ }
       }, 800);
     } catch (e) { /* no-op */ }
+  }
+
+  /* ---------- deliverables (2026-08-25, John's ask — journal 0010) ----------
+     ONE source: the effort's DELIVERABLES.md register (the steward's own
+     convention). Surfaced twice: a folded tile pinned at the very TOP of the
+     status pane, and links inside the goal/map expansion. Openable entries
+     stream through the contained /api/deliverable-file route; entries pointing
+     outside the effort render as text, never links. */
+  let _delivBusy = false;
+  async function renderDeliverablesTile() {
+    if (_delivBusy) return;
+    _delivBusy = true;
+    let d = null;
+    try { d = await (await fetch(api("/api/deliverables"))).json(); }
+    catch (e) { _delivBusy = false; return; }
+    _delivBusy = false;
+    const items = (d && d.items) || [];
+    // — the pane tile —
+    const s = paneEl();
+    if (s) {
+      let tile = s.querySelector(".blk.deliv");
+      const wasOpen = tile ? !tile.classList.contains("folded") : false;
+      if (!tile) {
+        tile = el("div", "blk steward deliv folded");
+        s.insertBefore(tile, s.firstChild);
+      } else tile.textContent = "";
+      if (wasOpen) tile.classList.remove("folded");
+      const who = el("div", "who", "📦 DELIVERABLES (" + items.length + ") — the things worth opening");
+      who.style.cursor = "pointer";
+      who.onclick = () => tile.classList.toggle("folded");
+      tile.appendChild(who);
+      const body = el("div", "body");
+      if (!d || !d.exists) {
+        body.appendChild(el("div", "snow", "No DELIVERABLES.md yet — the steward starts the register when the first human-facing artifact lands."));
+      } else if (!items.length) {
+        body.appendChild(el("div", "snow", "(register is empty)"));
+      }
+      items.forEach((it) => body.appendChild(delivRow(it)));
+      tile.appendChild(body);
+      if (s.firstChild !== tile) s.insertBefore(tile, s.firstChild);
+    }
+    // — the goal/map links —
+    const slot = $("[data-deliverables]");
+    if (slot) {
+      slot.textContent = "";
+      if (items.length) {
+        slot.appendChild(el("div", "glabel", "Deliverables"));
+        items.forEach((it) => slot.appendChild(delivRow(it)));
+      }
+    }
+  }
+  function delivRow(it) {
+    const row = el("div", "snow drow");
+    if (it.openable && it.path) {
+      const a = document.createElement("a");
+      a.textContent = it.what;
+      a.href = api("/api/deliverable-file") + "&path=" + encodeURIComponent(it.path);
+      a.target = "_blank";
+      a.rel = "noopener";
+      row.appendChild(a);
+    } else {
+      row.appendChild(document.createTextNode(it.what + (it.path ? " — " + it.path : "")));
+    }
+    if (it.date) row.appendChild(document.createTextNode(" · " + it.date));
+    return row;
   }
 
   /* ---------- events ---------- */
@@ -483,6 +555,8 @@ const Proto = (() => {
       try { renderStatus(await (await fetch(api("/api/status"))).json()); }
       catch (e) {}
     }
+    // deliverables surface on open (tile + goal/map links) — John's ask 2026-08-25
+    try { renderDeliverablesTile(); } catch (e) {}
     wireComposer();
     wireChrome();
     poll();

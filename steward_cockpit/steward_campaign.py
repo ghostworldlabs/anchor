@@ -306,10 +306,70 @@ def compose_status(campaign_dir: str, engine_state=None):
         "next": (m["heartbeat"]["next_recommended"] or "").strip(),
         "attention": m["attention"]["state"],
     }
-    return {"at": time.strftime("%Y-%m-%d %H:%M"),
-            "effort": m["name"],
-            "now": now_lines,
-            "plan": plan}
+    out = {"at": time.strftime("%Y-%m-%d %H:%M"),
+           "effort": m["name"],
+           "now": now_lines,
+           "plan": plan}
+    # Deliverables count rides the universal status shape (2026-08-25, John's ask —
+    # journal 0010: "where is the thing I paid for?"). Count only; the list itself
+    # is the deliverables verb / tile.
+    try:
+        out["deliverables_count"] = len(read_deliverables(campaign_dir)["items"])
+    except Exception:
+        out["deliverables_count"] = 0
+    return out
+
+
+def read_deliverables(campaign_dir: str):
+    """Parse ``<cdir>/DELIVERABLES.md`` — THE campaign deliverables register (the
+    steward's OWN convention, campaign journal 0010: one table row per thing a
+    human would open; standing rule = a step producing a human-facing artifact is
+    not done until listed here). Disk-true, zero-model, one source of truth — the
+    cockpit never keeps a second registry.
+
+    Returns ``{"exists": bool, "items": [{"what", "where_text", "path", "date",
+    "openable"}]}``. ``path`` is the first backticked span of the Where cell,
+    resolved against the campaign dir; ``openable`` is True ONLY when the resolved
+    real path stays INSIDE the campaign dir (containment — entries pointing
+    outside, e.g. ``../…``, render as text, never as links)."""
+    f = Path(campaign_dir) / "DELIVERABLES.md"
+    if not f.is_file():
+        return {"exists": False, "items": []}
+    try:
+        cdir_real = os.path.realpath(str(campaign_dir))
+        items = []
+        for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            s = line.strip()
+            if not (s.startswith("|") and s.endswith("|")):
+                continue
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) < 3 or set(cells[0]) <= {"-", " ", ":"} \
+               or cells[0].lower() == "what":
+                continue
+            what, where_text, date = cells[0], cells[1], cells[2]
+            path_rel, openable = None, False
+            m_bt = re.search(r"`([^`]+)`", where_text)
+            if m_bt:
+                cand = m_bt.group(1).strip()
+                try:
+                    real = os.path.realpath(str(Path(campaign_dir) / cand))
+                    if (real == cdir_real
+                            or real.startswith(cdir_real + os.sep)) \
+                            and os.path.isfile(real):
+                        path_rel = os.path.relpath(real, cdir_real)
+                        openable = True
+                    else:
+                        path_rel = cand
+                except OSError:
+                    path_rel = cand
+            items.append({"what": re.sub(r"\*\*", "", what),
+                          "where_text": where_text,
+                          "path": path_rel,
+                          "date": date,
+                          "openable": openable})
+        return {"exists": True, "items": items}
+    except Exception:
+        return {"exists": True, "items": []}
 
 
 def read_history(campaign_dir: str, tail: int = TAIL_TURNS):

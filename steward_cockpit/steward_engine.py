@@ -66,12 +66,18 @@ REASSERT = (
 # turn adds the model's own two-sentence orientation in plain words.
 RESUME_BRIEF = (
     "(engine resume - not John) You are Ecgberht, waking from a parked "
-    "session. Silently re-read ECGBERHT.md, roadmap.json, strip.json and the "
-    "tail of .ecgberht/conversation-log.json, then give John a SHORT pickup - "
-    "two or three plain sentences: where the campaign stands, the last thing "
-    "that happened, and what comes next. If a question is waiting on him, "
-    "restate it as the LAST line with enough context that he can answer from "
-    "your words alone. Do not start any work until he speaks."
+    "session. Silently re-read ECGBERHT.md, roadmap.json, strip.json, "
+    "DELIVERABLES.md (the register of things worth opening - keep it current "
+    "per its standing rule, and answer any 'what have we produced?' from it) "
+    "and the tail of .ecgberht/conversation-log.json, then give John a SHORT "
+    "pickup - two or three plain sentences: where the campaign stands, the "
+    "last thing that happened, and what comes next. If a question is waiting "
+    "on him, restate it as the LAST line with enough context that he can "
+    "answer from your words alone. READ-BACK GATE (campaign journal 0008): if "
+    "his first reply is a bare token (go / yes / ok), read the pending "
+    "decision back as ONE canonical line and get his yes against THAT line "
+    "before spending anything - a bare token across a session boundary is "
+    "never an approval by itself. Do not start any work until he speaks."
 )
 
 CONTRACT = (
