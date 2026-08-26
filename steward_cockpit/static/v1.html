@@ -73,6 +73,11 @@
       </div>
       <div class="platest" data-latest></div>
       <div class="pmsgs" data-msgs></div>
+      <!-- Deliverables live ABOVE the scrollport, not inside it (2026-08-26):
+           sticky-inside-the-scroller kept them visible but painted over the
+           status blocks as they scrolled under, and left a sliver of content
+           showing above the pinned tile. Their own slot can never overlap. -->
+      <div class="pdeliv" data-delivmount></div>
       <div class="pscroll"></div>
       <div class="pfiles">
         <h2>Files produced</h2>
@@ -86,8 +91,22 @@
 <script>
 Proto.init({ statusPane: true });
 const app = document.querySelector(".app");
+// The status pane carries the deliverables and the 10-minute status — the two
+// things John asked to be top of mind — so it opens by DEFAULT (2026-08-26:
+// pinning the tile achieved nothing while the whole pane started collapsed).
+// His choice wins after that, and is remembered.
+try {
+  if (localStorage.getItem("steward_status_pane") !== "shut")
+    app.classList.add("statusopen");
+} catch (e) { app.classList.add("statusopen"); }
 document.querySelectorAll("[data-statustoggle],[data-statustoggle2]").forEach(b =>
-  b.onclick = () => app.classList.toggle("statusopen"));
+  b.onclick = () => {
+    app.classList.toggle("statusopen");
+    try {
+      localStorage.setItem("steward_status_pane",
+        app.classList.contains("statusopen") ? "open" : "shut");
+    } catch (e) { /* no-op */ }
+  });
 const t2 = document.querySelector("[data-railtoggle2]");
 if (t2) t2.onclick = () => app.classList.toggle("railhide");
 // slide the open status pane wider/narrower by its left grip

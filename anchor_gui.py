@@ -1190,7 +1190,7 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
                                  scaffold=True)
         log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
         try:
-            discover_and_adopt(entry["id"])
+            discover_and_adopt(entry["id"], auto_read=False)
         except Exception:
             pass
         return {"entry": entry, "folder_created": True,
@@ -1223,19 +1223,35 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
             entry["state"] = _rnd.STATE_PATH_MISSING
         existing = _rnd.group_by_folder().get(str(folder), [])
         log_change(f"R&D: registered project '{name}' at {folder} (id {entry['id']})")
-        # Brownfield: instantly discover + adopt any pre-existing trio artifacts
-        # so the tile/Kanban/home panel populate from disk on register.
+        # Brownfield discover/adopt runs in the BACKGROUND (2026-08-26). It used
+        # to run inline, inside WRITE_LOCK, and it fires the first-scan Gandalf
+        # read — on a large folder (the reported case: 270GB / 25k files) the
+        # POST never got a response, so the dashboard never reloaded, so John
+        # clicked "Create" again and registered a DUPLICATE. Registration is the
+        # only thing the click is waiting for; everything after it is discovery.
         if exists:
-            try:
-                discover_and_adopt(entry["id"])
-            except Exception:
-                pass
+            def _adopt_bg(pid=entry["id"]):
+                try:
+                    discover_and_adopt(pid, auto_read=False)
+                except Exception:
+                    pass
+            # Backgrounded in the SERVER; inline under the same flag the rest
+            # of the proactive machinery uses, so the test suite stays
+            # deterministic (a daemon thread writing project state mid-suite
+            # made a neighbouring summary-cache assertion flap).
+            if _PROACTIVE_SUMMARY_ENABLED:
+                try:
+                    threading.Thread(target=_adopt_bg, daemon=True).start()
+                except Exception:
+                    _adopt_bg()
+            else:
+                _adopt_bg()
         return {"entry": entry, "path_exists": exists,
                 "siblings_in_folder": [e for e in existing
                                        if e["id"] != entry["id"]]}
 
 
-def discover_and_adopt(project_id: str) -> dict:
+def discover_and_adopt(project_id: str, auto_read: bool = True) -> dict:
     """One brownfield pipeline: scan -> adopt -> reconcile -> write marker.
 
     Called from register (``add_project`` wiring), open (``GET /project/<id>``),
@@ -1288,7 +1304,11 @@ def discover_and_adopt(project_id: str) -> dict:
     # read. first-run-ONLY (check-and-set BEFORE scheduling — no TOCTOU) + gated
     # by _PROACTIVE_SUMMARY_ENABLED (off in tests) + background daemon. Never
     # blocks the rescan/render path.
-    _trigger_gandalf_first_scan(folder, project_id)
+    # auto_read=False from REGISTRATION (2026-08-26): "create this project" is
+    # not "read my whole codebase with a dozen models". Opening the project or
+    # pressing Rescan still fires it — those are acts John chose.
+    if auto_read:
+        _trigger_gandalf_first_scan(folder, project_id)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
             "sibling_adopt": sibling, "marker": marker}
 
@@ -1613,7 +1633,7 @@ def _gandalf_runner_env():
 
 
 def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False,
-                     tier="standard"):
+                     tier="standard", preclaimed=False):
     """Schedule a Gandalf run in a daemon thread WITHOUT blocking the caller.
 
     Mirrors ``_trigger_project_summary``: snapshots the runner-seam env at
@@ -1643,14 +1663,18 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False,
     if first_scan and not _PROACTIVE_SUMMARY_ENABLED:
         return False
     # In-flight guard: at most one scheduled-but-unfinished run per project.
-    with _GANDALF_INFLIGHT_GUARD:
-        if project_id in _GANDALF_INFLIGHT:
-            rec = _GANDALF_INFLIGHT[project_id]
-            if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
-                _GANDALF_INFLIGHT.pop(project_id, None)
-            else:
-                return False
-        _GANDALF_INFLIGHT[project_id] = {"status": "Starting...", "ts": time.time()}
+    # ``preclaimed`` means the first-scan hook already took this slot under the
+    # global cap's lock — re-checking here would see its own claim and refuse.
+    if not preclaimed:
+        with _GANDALF_INFLIGHT_GUARD:
+            if project_id in _GANDALF_INFLIGHT:
+                rec = _GANDALF_INFLIGHT[project_id]
+                if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
+                    _GANDALF_INFLIGHT.pop(project_id, None)
+                else:
+                    return False
+            _GANDALF_INFLIGHT[project_id] = {"status": "Starting...",
+                                             "ts": time.time()}
 
     runner_env = _gandalf_runner_env()
 
@@ -1686,30 +1710,57 @@ def _trigger_gandalf(folder_path, project_id, *, manual=False, first_scan=False,
 def _trigger_gandalf_first_scan(folder_path, project_id):
     """First-scan hook (register/open/rescan). First-run-ONLY, no TOCTOU.
 
-    Check-and-set under a per-project lock BEFORE scheduling: if a prior Gandalf
-    run already exists OR a first-scan run is already in-flight, do nothing.
-    Otherwise schedule exactly one. Gated by ``_PROACTIVE_SUMMARY_ENABLED`` (off
-    in tests) so a bare register/open never spawns a model job. Never raises.
+    Claim-and-hold under ONE lock: expire stale claims, refuse if ANY other
+    project's automatic read is in flight, refuse if this project's already is,
+    else claim the slot. Every early exit after the claim releases it.
+
+    The global cap is the 2026-08-26 fix: the guard used to be per-project, so
+    three registrations in a row started three whole-tree map-reduces at once —
+    each fanning out to ~12 parallel model jobs. That saturated the machine, the
+    create POST couldn't get a response out, and "+ New project" looked broken
+    (which produced the extra clicks that produced the extra swarms). One
+    automatic read at a time, machine-wide; a MANUAL run is never gated by this.
+
+    Gated by ``_PROACTIVE_SUMMARY_ENABLED`` (off in tests) so a bare
+    register/open never spawns a model job. Never raises.
     """
     if not _PROACTIVE_SUMMARY_ENABLED:
         return False
+    with _GANDALF_INFLIGHT_GUARD:
+        for pid, rec in list(_GANDALF_INFLIGHT.items()):
+            # a wedged run whose finally never ran must not suppress every
+            # other project's read until the server restarts
+            if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
+                _GANDALF_INFLIGHT.pop(pid, None)
+                continue
+            if pid != project_id:
+                log_change(
+                    f"R&D: deferred the automatic first-scan read for "
+                    f"{project_id} — another project's read is still running "
+                    f"(one at a time keeps the machine usable); the project "
+                    f"window's Gandalf button runs it on demand")
+            return False
+        _GANDALF_INFLIGHT[project_id] = {"status": "Starting...",
+                                         "ts": time.time()}
+
+    def _release():
+        with _GANDALF_INFLIGHT_GUARD:
+            _GANDALF_INFLIGHT.pop(project_id, None)
+
     lk = _gandalf_firstscan_lock(project_id)
     with lk:
         try:
             if _gandalf.list_runs(folder_path, project_id):
+                _release()
                 return False  # a prior run exists — not a first scan
         except Exception:
+            _release()
             return False
-        # check-and-set the in-flight set under the SAME first-scan lock so two
-        # concurrent rescans can't both pass the prior-run check and schedule.
-        with _GANDALF_INFLIGHT_GUARD:
-            if project_id in _GANDALF_INFLIGHT:
-                rec = _GANDALF_INFLIGHT[project_id]
-                if isinstance(rec, dict) and time.time() - rec.get("ts", 0) > 1800:
-                    _GANDALF_INFLIGHT.pop(project_id, None)
-                else:
-                    return False
-        return _trigger_gandalf(folder_path, project_id, first_scan=True)
+        ok = _trigger_gandalf(folder_path, project_id, first_scan=True,
+                              preclaimed=True)
+        if not ok:
+            _release()
+        return ok
 
 
 def _reconcile_gandalf_boot_runs() -> int:
@@ -10309,6 +10360,31 @@ def handle_new_project(handler, path, body):
     mode = body.get("mode", "existing")
     name = body.get("name", "")
     priority = body.get("priority", 2)
+    # Same name + same folder, already registered → hand back the EXISTING
+    # project instead of minting a twin (2026-08-26: a slow first registration
+    # left the page unreloaded, so a second click produced a duplicate that
+    # looked exactly like the first). Only an exact match short-circuits;
+    # deliberate 1-folder:N-projects still works via a different name.
+    _dup_folder = str(body.get("folder_path", "") or "").strip()
+    if mode in ("existing", "auto") and _dup_folder and name:
+        try:
+            # ACTIVE projects only: group_by_folder includes archived/future/
+            # RETIRED by default, so matching them would hand back a retired
+            # entry forever and make re-registering that name impossible.
+            for _e in _rnd.group_by_folder().get(
+                    str(Path(_dup_folder).expanduser()), []):
+                if _rnd._effective_state(_e) != _rnd.STATE_ACTIVE:
+                    continue
+                if (_e.get("name") or "").strip().lower() == name.strip().lower():
+                    handler._send_json({
+                        "ok": True, "entry": _e, "already_registered": True,
+                        "message": f"'{name}' is already registered for that "
+                                   f"folder — it is on your dashboard "
+                                   f"already, not created twice.",
+                    })
+                    return
+        except Exception:
+            pass   # never block a registration on the duplicate check
     # (2026-08-07, John — High Seat "+ New project") mode 'auto': one folder
     # path decides. Existing folder → brownfield register (discover/adopt +
     # first-scan Gandalf fire inside); missing → create it under its parent.
