@@ -185,13 +185,32 @@ const Proto = (() => {
     const row = el("div", "snow drow");
     if (it.openable && it.path) {
       const a = document.createElement("a");
-      a.textContent = it.what;
-      a.href = api("/api/deliverable-file") + "&path=" + encodeURIComponent(it.path);
-      a.target = "_blank";
-      a.rel = "noopener";
+      a.textContent = "• " + it.what;
+      // 2026-08-26 (John: "I click on them and the page had nothing"): a raw
+      // <a href> NAVIGATES — it never passes through the fetch shim, so the
+      // old api() URL arrived with no /api/steward/ prefix, no pid and no
+      // token → a blank page. Build the FULL authed URL ourselves, and send
+      // text docs (.md/.txt/.csv/.json/.log) through the report VIEWER so
+      // they render human-readable instead of as raw bytes.
+      const dirRel = it.dir !== undefined ? it.dir : DIR;
+      const isText = /\.(md|txt|csv|json|log)$/i.test(it.path);
+      if (isText) {
+        a.href = "#";
+        a.onclick = (ev) => { ev.preventDefault();
+          window.open("/report?dir=" + encodeURIComponent(dirRel) +
+                      "&path=" + encodeURIComponent(it.path)); };
+      } else {
+        a.href = "/api/steward/deliverable-file?pid=" +
+          encodeURIComponent(window.STEWARD_PID || "") +
+          "&dir=" + encodeURIComponent(dirRel) +
+          "&path=" + encodeURIComponent(it.path) +
+          (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+        a.target = "_blank";
+        a.rel = "noopener";
+      }
       row.appendChild(a);
     } else {
-      row.appendChild(document.createTextNode(it.what + (it.path ? " — " + it.path : "")));
+      row.appendChild(document.createTextNode("• " + it.what + (it.path ? " — " + it.path : "")));
     }
     if (it.date) row.appendChild(document.createTextNode(" · " + it.date));
     return row;

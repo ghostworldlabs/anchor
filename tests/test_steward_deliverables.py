@@ -122,6 +122,74 @@ class DeliverablesTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertIn("__file__", d)
 
+    def test_api_get_register_all_unions_effort_registers(self):
+        # 2026-08-26 (John): the project-wide list is the UNION of the
+        # per-effort curated registers — never raw session files. Items carry
+        # effort name + dir rel so the client can build contained open links.
+        second = os.path.join(self.tmp, "second")
+        os.makedirs(second)
+        Path(second, "ECGBERHT.md").write_text("# face", encoding="utf-8")
+        Path(second, "DELIVERABLES.md").write_text(
+            "| What | Where | Date |\n|---|---|---|\n"
+            "| **Second report** | `notes.md` | 2026-08-26 |\n",
+            encoding="utf-8")
+        Path(second, "notes.md").write_text("hi", encoding="utf-8")
+        d, code = routes.api_get(self.tmp, "register-all", {"dir": ""})
+        self.assertEqual(code, 200)
+        self.assertEqual(len(d["items"]), 5)  # 4 from effort + 1 from second
+        by_dir = {i["dir"] for i in d["items"]}
+        self.assertEqual(by_dir, {"effort", "second"})
+        for i in d["items"]:
+            self.assertIn("effort", i)
+            self.assertIn("what", i)
+
+
+class SoftStartTest(unittest.TestCase):
+    """SOFT START (John, 2026-08-26): opening a parked effort page must wake
+    the steward and land the pickup — after a service restart the dialog was
+    EMPTY because nothing called wake() on open. Fake-engine seam."""
+
+    def setUp(self):
+        from steward_cockpit import steward_engine as eng_mod
+        self.tmp = tempfile.mkdtemp(prefix="steward-soft-")
+        self.cdir = os.path.join(self.tmp, "effort")
+        os.makedirs(self.cdir)
+        Path(self.cdir, "ECGBERHT.md").write_text("# face", encoding="utf-8")
+        self._old_state = eng_mod.STATE_FILE
+        eng_mod.STATE_FILE = Path(self.tmp) / "state.json"
+        self._old_fake = routes.CONFIG.get("fake")
+        routes.CONFIG["fake"] = True
+
+    def tearDown(self):
+        from steward_cockpit import steward_engine as eng_mod
+        for key in [k for k in routes.ENGINES if k.startswith(self.cdir)]:
+            try:
+                routes.ENGINES[key].stop()
+            except Exception:
+                pass
+            routes.ENGINES.pop(key, None)
+        eng_mod.STATE_FILE = self._old_state
+        routes.CONFIG["fake"] = self._old_fake
+
+    def test_open_poll_wakes_parked_session_with_pickup(self):
+        from steward_cockpit import steward_engine as eng_mod
+        cdir = routes._effort_dir(self.tmp, "effort")
+        eng_mod._update_state(cdir, {"session_id": "fake-parked-1"})
+        d, code = routes.api_get(
+            self.tmp, "events", {"dir": "effort", "since": "0"})
+        self.assertEqual(code, 200)
+        texts = " | ".join(e.get("text", "") for e in d["events"])
+        self.assertIn("resuming the last session", texts,
+                      "open poll must auto-wake a PARKED steward session")
+
+    def test_open_poll_never_spawns_for_fresh_effort(self):
+        # no stored session -> a mere page view must not start a model session
+        cdir = routes._effort_dir(self.tmp, "effort")
+        routes.api_get(self.tmp, "events", {"dir": "effort", "since": "0"})
+        eng = routes.ENGINES.get(cdir)
+        self.assertTrue(eng is None or not eng.alive(),
+                        "fresh effort must stay asleep on open")
+
 
 if __name__ == "__main__":
     unittest.main()
