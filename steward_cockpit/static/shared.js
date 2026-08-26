@@ -314,6 +314,7 @@ const Proto = (() => {
       else if (!st.alive) txt = "nothing running — asleep; your message wakes it";
       else if (st.busy) txt = "actively running" +
         (busySince ? " — " + Math.round((Date.now() - busySince) / 1000) + "s" : "");
+      else if (st.working_bg) txt = "working in the background — commissioned run in flight, nothing needed from you";
       else txt = "awake — waiting on you";
       stx.textContent = txt;
     }

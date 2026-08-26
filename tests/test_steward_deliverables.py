@@ -39,6 +39,9 @@ class DeliverablesTest(unittest.TestCase):
         Path(self.cdir, "deliverables", "report.pdf").write_bytes(b"%PDF-1.4 fake")
         Path(self.cdir, "journal", "0001-notes.md").write_text("notes", encoding="utf-8")
         Path(self.tmp, "outside.csv").write_text("a,b", encoding="utf-8")
+        # the effort must be DISCOVERABLE for the api_get dispatch tests —
+        # discovery keys on ECGBERHT.md (one-level rule)
+        Path(self.cdir, "ECGBERHT.md").write_text("# effort face", encoding="utf-8")
 
     def test_parse_register(self):
         d = campaign.read_deliverables(self.cdir)
@@ -81,6 +84,43 @@ class DeliverablesTest(unittest.TestCase):
     def test_status_carries_count(self):
         s = campaign.compose_status(self.cdir)
         self.assertEqual(s.get("deliverables_count"), 4)
+
+    # ── DISPATCH-layer pins (2026-08-25) ─────────────────────────────────────
+    # The original bug: every test above pinned handle_get, but api_get routed
+    # "deliverables" as a PROJECT verb — the register read the project root and
+    # returned exists:false on John's screen while this whole file stayed
+    # green. These tests call the layer the page actually hits.
+
+    def test_api_get_register_is_effort_level(self):
+        d, code = routes.api_get(self.tmp, "deliverables", {"dir": "effort"})
+        self.assertEqual(code, 200)
+        self.assertTrue(d["exists"], "register must resolve the EFFORT dir, "
+                        "never the project root")
+        self.assertEqual(len(d["items"]), 4)
+
+    def test_api_get_register_unknown_effort_404(self):
+        _d, code = routes.api_get(self.tmp, "deliverables", {"dir": "nope"})
+        self.assertEqual(code, 404)
+
+    def test_api_get_session_files_is_project_level(self):
+        from steward_cockpit import steward_engine as eng
+        old = eng.STATE_FILE
+        eng.STATE_FILE = Path(self.tmp) / "state.json"
+        try:
+            d, code = routes.api_get(self.tmp, "session-files", {})
+        finally:
+            eng.STATE_FILE = old
+        self.assertEqual(code, 200)
+        # the legacy cockpit-tab shape: files work sessions wrote
+        self.assertIn("deliverables", d)
+        self.assertIsInstance(d["deliverables"], list)
+
+    def test_api_get_deliverable_file_dispatch(self):
+        d, code = routes.api_get(
+            self.tmp, "deliverable-file",
+            {"dir": "effort", "path": "deliverables/report.pdf"})
+        self.assertEqual(code, 200)
+        self.assertIn("__file__", d)
 
 
 if __name__ == "__main__":

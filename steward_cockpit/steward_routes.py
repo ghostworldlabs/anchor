@@ -201,8 +201,15 @@ def _effort_dir(proot, rel):
 
 
 # project-level verbs read the whole project; effort-level verbs read one effort
+# (2026-08-25 fix: "deliverables" was BOTH here and an effort-level handler —
+# the project routing won, so the register tile read the project ROOT and the
+# legacy session-files tab got shadowed by the register handler. Two surfaces,
+# one collision, both blank on John's screen while every unit test passed,
+# because the tests pinned handle_get and never this dispatch. The register
+# verb "deliverables" is effort-level; the legacy files-produced view is now
+# its own project verb "session-files".)
 _PROJECT_VERBS = {"efforts", "grass", "boneyard", "skills", "gandalf",
-                  "deliverables", "new_effort", "boneyard_restore"}
+                  "session-files", "new_effort", "boneyard_restore"}
 
 
 def api_get(proot, verb, qs):
@@ -421,7 +428,9 @@ def handle_get(cdir, verb, qs):
         return {"terms": _terms_view(cdir)}, 200
     if verb == "gandalf":
         return {"runs": _gandalf_runs(cdir)}, 200
-    if verb == "deliverables":
+    if verb == "session-files":
+        # legacy project-level view: files WORK SESSIONS wrote (engine state),
+        # distinct from the curated effort register above
         return {"deliverables": _deliverables(cdir)}, 200
     if verb == "files":
         return _files(cdir, qs.get("sub", ""), qs.get("q", "").strip().lower())

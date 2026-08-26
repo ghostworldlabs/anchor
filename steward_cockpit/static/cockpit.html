@@ -718,7 +718,9 @@ setInterval(loadShelves, 20000);
 
 /* ---------- deliverables ---------- */
 async function loadDeliv() {
-  const j = await (await fetch("/api/deliverables?dir=")).json();
+  /* 2026-08-25: this tab's verb is now "session-files" (files work sessions
+     wrote) — "deliverables" is the effort's curated DELIVERABLES.md register */
+  const j = await (await fetch("/api/session-files?dir=")).json();
   const list = document.querySelector("[data-delivlist]");
   list.textContent = "";
   (j.deliverables || []).forEach(dv => {
