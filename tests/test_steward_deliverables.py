@@ -26,6 +26,7 @@ REGISTER = """# Deliverables — the things worth opening
 | **Working notes** — journal entry | `journal/0001-notes.md` | 2026-08-25 |
 | **Outside file** — lives above the effort | `../outside.csv` (repo root) | 2026-07 |
 | **Missing file** — listed but not on disk | `reports/ghost.md` | 2026-08 |
+| **Stepped notes** — carries the optional Step column | `journal/0001-notes.md` | 2026-08-26 | 2 |
 """
 
 
@@ -46,7 +47,10 @@ class DeliverablesTest(unittest.TestCase):
     def test_parse_register(self):
         d = campaign.read_deliverables(self.cdir)
         self.assertTrue(d["exists"])
-        self.assertEqual(len(d["items"]), 4)
+        self.assertEqual(len(d["items"]), 5)
+        by_step = {i["what"].split(" — ")[0]: i["step"] for i in d["items"]}
+        self.assertEqual(by_step["Stepped notes"], "2")
+        self.assertEqual(by_step["The report"], "")
         by = {i["what"].split(" — ")[0]: i for i in d["items"]}
         self.assertTrue(by["The report"]["openable"])
         self.assertTrue(by["Working notes"]["openable"])
@@ -83,7 +87,7 @@ class DeliverablesTest(unittest.TestCase):
 
     def test_status_carries_count(self):
         s = campaign.compose_status(self.cdir)
-        self.assertEqual(s.get("deliverables_count"), 4)
+        self.assertEqual(s.get("deliverables_count"), 5)
 
     # ── DISPATCH-layer pins (2026-08-25) ─────────────────────────────────────
     # The original bug: every test above pinned handle_get, but api_get routed
@@ -96,7 +100,7 @@ class DeliverablesTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertTrue(d["exists"], "register must resolve the EFFORT dir, "
                         "never the project root")
-        self.assertEqual(len(d["items"]), 4)
+        self.assertEqual(len(d["items"]), 5)
 
     def test_api_get_register_unknown_effort_404(self):
         _d, code = routes.api_get(self.tmp, "deliverables", {"dir": "nope"})
@@ -136,7 +140,7 @@ class DeliverablesTest(unittest.TestCase):
         Path(second, "notes.md").write_text("hi", encoding="utf-8")
         d, code = routes.api_get(self.tmp, "register-all", {"dir": ""})
         self.assertEqual(code, 200)
-        self.assertEqual(len(d["items"]), 5)  # 4 from effort + 1 from second
+        self.assertEqual(len(d["items"]), 6)  # 5 from effort + 1 from second
         by_dir = {i["dir"] for i in d["items"]}
         self.assertEqual(by_dir, {"effort", "second"})
         for i in d["items"]:
