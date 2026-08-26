@@ -16,6 +16,11 @@ page hits — now has dispatch-layer tests standing guard.
   the page's auth plumbing (no project id, no token → an empty page). Links
   are now built fully authed; text artifacts open in the rendered report
   viewer, PDFs inline, other binaries stream through the contained route.
+- **Stale guard test**: `test_reaper_single_source` had been red since the
+  July ship-prep refactor — it counted a call the refactor legitimately
+  removed (the zombie-terminal brief now classifies straight through the
+  shared snapshot, the stricter form of the same rule). The rule it guards
+  was never broken; the counter is corrected and explained in place.
 - **Honest state line**: the header said "awake — waiting on you" while a
   commissioned background run worked. The engine state now carries the
   attention flag and the header says so; the steward's standing brief orders
