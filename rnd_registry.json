@@ -190,5 +190,17 @@
     "remote_url": "",
     "auto_push": false,
     "group": "Teaching"
+  },
+  {
+    "id": "1a208b3a0df34075907482cee96e55f3",
+    "name": "Data Compression",
+    "folder_path": "C:\\dev\\Data Compression",
+    "priority": 2,
+    "state": "active",
+    "notes": "",
+    "blurb": "",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Math"
   }
 ]
