@@ -166,6 +166,33 @@ class ClientContractTest(unittest.TestCase):
     def test_no_filler_detail_line(self):
         self.assertNotIn("details to be added", self.js)
 
+    def test_status_is_the_dominant_region(self):
+        # 2026-08-27: deliverables + files were uncollapsible blocks that
+        # squeezed the status to a sliver. Only the status grows, and it keeps
+        # a floor no side section can take.
+        self.assertIn(".rightcol .pscroll { flex: 1 1 auto; min-height: 0;",
+                      self.css)
+        # a hard floor would push the files section past the bottom of an
+        # overflow:hidden column, where it cannot be scrolled to
+        self.assertNotIn("min-height: 42vh", self.css)
+        self.assertIn(".pfiles.psect { flex: none; }", self.css)
+        self.assertIn(".pdeliv { flex: none;", self.css)
+
+    def test_both_side_sections_collapse_on_click(self):
+        v1 = (REPO / "steward_cockpit" / "static" / "v1.html").read_text(
+            encoding="utf-8")
+        self.assertIn("data-filestoggle", v1)
+        self.assertIn("psect folded", v1, "files start CLOSED")
+        self.assertIn(".pfiles.psect.folded .flist { display: none; }", self.css)
+        self.assertIn(".pdeliv .blk.deliv.folded .body { max-height: 0;", self.css)
+        # each remembers his choice
+        self.assertIn("steward_files_open", self.js)
+        self.assertIn("steward_deliv_open", self.js)
+
+    def test_folded_deliverables_still_summarise(self):
+        self.assertIn("newest: ", self.js,
+                      "a closed tile must still say what is in it")
+
 
 if __name__ == "__main__":
     unittest.main()

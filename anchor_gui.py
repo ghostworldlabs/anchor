@@ -1230,11 +1230,23 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
         # clicked "Create" again and registered a DUPLICATE. Registration is the
         # only thing the click is waiting for; everything after it is discovery.
         if exists:
+            # Announce BEFORE the thread starts, so the card carries the
+            # message from the first render after the page reloads.
+            set_project_setup_status(
+                entry["id"], "Setting up the project — reading what is here…")
+
             def _adopt_bg(pid=entry["id"]):
                 try:
-                    discover_and_adopt(pid, auto_read=False)
+                    # auto_read is back ON for registration (John, 2026-08-27:
+                    # he wants the read, he wanted to be TOLD about it). What
+                    # made this dangerous was never the read itself — it was
+                    # three unannounced swarms at once; the machine-wide
+                    # one-at-a-time cap is what fixed that.
+                    discover_and_adopt(pid, auto_read=True)
                 except Exception:
                     pass
+                finally:
+                    set_project_setup_status(pid, None)
             # Backgrounded in the SERVER; inline under the same flag the rest
             # of the proactive machinery uses, so the test suite stays
             # deterministic (a daemon thread writing project state mid-suite
@@ -1603,6 +1615,37 @@ _GANDALF_LOCKS_GUARD = threading.Lock()
 _GANDALF_FIRSTSCAN_LOCKS = {}
 _GANDALF_INFLIGHT_GUARD = threading.Lock()
 _GANDALF_INFLIGHT = {}
+
+#: Projects whose post-registration setup (brownfield adopt, then the honest
+#: first read) is still running. Surfaced on the dashboard card through the
+#: SAME bulk poll the Gandalf badge uses, so a freshly created project is
+#: never a silent blank tile — the failure that made "+ New project" look
+#: broken and produced duplicate clicks (2026-08-27).
+_PROJECT_SETUP = {}
+_PROJECT_SETUP_GUARD = threading.Lock()
+
+
+def set_project_setup_status(project_id, status):
+    """Set (or clear, with a falsy status) a project's setup message."""
+    with _PROJECT_SETUP_GUARD:
+        if status:
+            _PROJECT_SETUP[project_id] = {"status": str(status),
+                                          "ts": time.time()}
+        else:
+            _PROJECT_SETUP.pop(project_id, None)
+
+
+def project_setup_statuses():
+    """Live setup messages, dropping anything older than the 30-min sweep."""
+    now = time.time()
+    out = {}
+    with _PROJECT_SETUP_GUARD:
+        for pid, rec in list(_PROJECT_SETUP.items()):
+            if now - rec.get("ts", 0) > 1800:
+                _PROJECT_SETUP.pop(pid, None)
+                continue
+            out[pid] = rec.get("status") or ""
+    return {k: v for k, v in out.items() if v}
 
 
 def _gandalf_firstscan_lock(project_id):
@@ -16634,6 +16677,17 @@ def handle_move_project(handler, path, body):
         handler._send_json({"ok": False,
                          "error": "move requires confirm:true",
                          "reason": "confirm-required"}, 400)
+    elif pid in project_setup_statuses():
+        # A fresh project is still being read/adopted IN this folder; moving
+        # the directory out from under that write is how you get a half-moved
+        # tree (2026-08-27 — setup now runs in the background, so this window
+        # is real). Re-labelling the group (set_group) is unaffected: it never
+        # touches disk.
+        handler._send_json({"ok": False,
+                            "error": "this project is still being set up — "
+                                     "wait for that to finish, then move it "
+                                     "(re-labelling its folder works now)",
+                            "reason": "setup-in-flight"}, 409)
     else:
         try:
             out = _pmove.move_to_group(pid, group)
@@ -17255,6 +17309,11 @@ def handle_gandalf_status_all(handler, path, body):
                 st = rec
             if st:
                 statuses[_pid] = st
+    # A project still being set up reports that instead — it is the honest
+    # answer to "what is this blank new tile doing?", and it precedes the
+    # Gandalf status the same run will report a moment later.
+    for _pid, _msg in project_setup_statuses().items():
+        statuses[_pid] = _msg
     handler._send_json({"ok": True, "statuses": statuses})
 
 

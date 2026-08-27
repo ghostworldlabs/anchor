@@ -7,8 +7,9 @@ so he clicked again, and registered a duplicate. Twice. Causes:
 1. Registering fired the first-scan Gandalf read — a whole-tree map-reduce
    fanning out to ~12 parallel model jobs — and the in-flight guard was PER
    PROJECT, so each extra click started another swarm and the machine (and
-   with it the HTTP response) ground to a halt. Creating a project is not a
-   request to read the whole codebase with a dozen models.
+   with it the HTTP response) ground to a halt. (2026-08-27: the read itself
+   is wanted and is back ON; what is capped is CONCURRENCY — one automatic
+   read machine-wide — and it now announces itself on the card.)
 2. Brownfield discover/adopt ran inline inside WRITE_LOCK, on the path the
    click was waiting on.
 
@@ -41,8 +42,8 @@ class _Handler:
         self.sent, self.code = obj, code
 
 
-class RegisterDoesNotSwarmTest(unittest.TestCase):
-    """Registering must not schedule the automatic whole-tree read."""
+class RegisterSchedulesOneAnnouncedReadTest(unittest.TestCase):
+    """Registering schedules ONE announced read — never a pile of swarms."""
 
     def setUp(self):
         self.calls = []
@@ -54,20 +55,24 @@ class RegisterDoesNotSwarmTest(unittest.TestCase):
         g._trigger_gandalf_first_scan = self._real
         g._PROACTIVE_SUMMARY_ENABLED = self._enabled
 
-    def test_register_does_not_schedule_the_read(self):
+    def test_register_schedules_the_read_but_announces_it(self):
+        """2026-08-27: John WANTS the read on creation — it produced a real
+        verdict. What made it dangerous was never the read, it was three
+        unannounced swarms at once. It is back on, off the request path, capped
+        to one at a time machine-wide, and it says so on the card."""
         tmp = tempfile.mkdtemp(prefix="anchor-reg-")
         entry = None
         try:
             res = g.select_existing_project("Reg Test", tmp, priority=3)
             entry = res["entry"]
-            self.assertEqual(self.calls, [],
-                             "creating a project must not fire a model swarm")
+            self.assertEqual(len(self.calls), 1,
+                             "registration schedules exactly one read")
         finally:
             if entry:
                 _rnd.remove_project(entry["id"])
 
-    def test_open_and_rescan_still_read(self):
-        """Only registration opts out — an act John chose still reads."""
+    def test_open_and_rescan_also_read(self):
+        """Opening/rescanning reads too — the same single-read path."""
         tmp = tempfile.mkdtemp(prefix="anchor-open-")
         entry = _rnd.add_project("Open Test", tmp, priority=3, scaffold=True)
         try:

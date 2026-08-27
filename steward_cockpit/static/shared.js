@@ -147,6 +147,10 @@ const Proto = (() => {
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
   let _delivItems = [], _lastMap = null;
+  let _delivOpen = (() => {
+    try { return localStorage.getItem("steward_deliv_open") === "1"; }
+    catch (e) { return false; }
+  })();
   function stepDeliverables(stepName, idx1) {
     return _delivItems.filter((it) => {
       const s = (it.step || "").trim();
@@ -252,15 +256,29 @@ const Proto = (() => {
     const s = $("[data-delivmount]") || paneEl();
     if (s) {
       let tile = s.querySelector(".blk.deliv");
-      const wasOpen = tile ? !tile.classList.contains("folded") : false;
+      // starts CLOSED so the status keeps the room; his choice then sticks
+      const wasOpen = tile ? !tile.classList.contains("folded")
+                           : (_delivOpen === true);
       if (!tile) {
         tile = el("div", "blk steward deliv folded");
         s.insertBefore(tile, s.firstChild);
       } else tile.textContent = "";
       if (wasOpen) tile.classList.remove("folded");
-      const who = el("div", "who", "📦 DELIVERABLES (" + items.length + ") — the things worth opening");
+      // one-line summary in the header, so a folded tile still tells him what
+      // is in there (John, 2026-08-27: "deliverables on top with a little
+      // summary above that")
+      const newest = items.length
+        ? (items[0].what || "").split(" — ")[0].trim() : "";
+      const who = el("div", "who",
+        "📦 DELIVERABLES (" + items.length + ")" +
+        (newest ? " — newest: " + newest : " — nothing registered yet"));
       who.style.cursor = "pointer";
-      who.onclick = () => tile.classList.toggle("folded");
+      who.onclick = () => {
+        tile.classList.toggle("folded");
+        _delivOpen = !tile.classList.contains("folded");
+        try { localStorage.setItem("steward_deliv_open",
+                                   _delivOpen ? "1" : "0"); } catch (e) {}
+      };
       tile.appendChild(who);
       const body = el("div", "body");
       if (!d || !d.exists) {
@@ -541,6 +559,23 @@ const Proto = (() => {
   function renderFiles(files) {
     const list = $("[data-flist]");
     if (!list) return;
+    const cnt = $("[data-filecount]");
+    if (cnt) cnt.textContent = "(" + files.length + ")";
+    const head = $("[data-filestoggle]"), sect = $("[data-filesect]");
+    if (head && sect && !head._wired) {
+      head._wired = true;
+      try {
+        if (localStorage.getItem("steward_files_open") === "1")
+          sect.classList.remove("folded");
+      } catch (e) { /* no-op */ }
+      head.onclick = () => {
+        sect.classList.toggle("folded");
+        try {
+          localStorage.setItem("steward_files_open",
+            sect.classList.contains("folded") ? "0" : "1");
+        } catch (e) { /* no-op */ }
+      };
+    }
     list.textContent = "";
     files.slice().reverse().forEach(f => {
       const row = el("div", "frow");

@@ -73,14 +73,17 @@
       </div>
       <div class="platest" data-latest></div>
       <div class="pmsgs" data-msgs></div>
-      <!-- Deliverables live ABOVE the scrollport, not inside it (2026-08-26):
-           sticky-inside-the-scroller kept them visible but painted over the
-           status blocks as they scrolled under, and left a sliver of content
-           showing above the pinned tile. Their own slot can never overlap. -->
+      <!-- Pane order + sizing (2026-08-27, John): deliverables on top with a
+           one-line summary, THE STATUS DOMINANT in the middle, files at the
+           bottom. Deliverables and files are collapsible tiles that start
+           CLOSED — click the header to open, click again to close — so the
+           status keeps the room unless he asks for one of them. Only the
+           status section grows (flex:1); the tiles are flex:none and capped
+           even when open, so neither can squeeze the status to nothing. -->
       <div class="pdeliv" data-delivmount></div>
       <div class="pscroll"></div>
-      <div class="pfiles">
-        <h2>Files produced</h2>
+      <div class="pfiles psect folded" data-filesect>
+        <h2 data-filestoggle>Files produced <span class="pcount" data-filecount></span></h2>
         <div class="flist" data-flist></div>
       </div>
     </div>
