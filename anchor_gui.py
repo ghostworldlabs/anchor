@@ -1189,10 +1189,15 @@ def create_new_folder_project(name: str, parent_path, priority: int = 2,
         entry = _rnd.add_project(name, str(folder), priority=priority,
                                  scaffold=True)
         log_change(f"R&D: created project '{name}' at {folder} (id {entry['id']})")
+        set_project_setup_status(entry["id"], "Setting up the project…")
         try:
-            discover_and_adopt(entry["id"], auto_read=False)
+            discover_and_adopt(entry["id"], auto_read=True)
         except Exception:
             pass
+        finally:
+            if str(project_setup_statuses().get(entry["id"], "")).startswith(
+                    "Setting up"):
+                set_project_setup_status(entry["id"], None)
         return {"entry": entry, "folder_created": True,
                 "git_initialized": git_done}
 
@@ -1246,7 +1251,11 @@ def select_existing_project(name: str, folder_path, priority: int = 2) -> dict:
                 except Exception:
                     pass
                 finally:
-                    set_project_setup_status(pid, None)
+                    # clear only OUR "setting up" message: a deferral notice
+                    # written during the read scheduling must survive
+                    if str(project_setup_statuses().get(pid, "")).startswith(
+                            "Setting up"):
+                        set_project_setup_status(pid, None)
             # Backgrounded in the SERVER; inline under the same flag the rest
             # of the proactive machinery uses, so the test suite stays
             # deterministic (a daemon thread writing project state mid-suite
@@ -1316,9 +1325,11 @@ def discover_and_adopt(project_id: str, auto_read: bool = True) -> dict:
     # read. first-run-ONLY (check-and-set BEFORE scheduling — no TOCTOU) + gated
     # by _PROACTIVE_SUMMARY_ENABLED (off in tests) + background daemon. Never
     # blocks the rescan/render path.
-    # auto_read=False from REGISTRATION (2026-08-26): "create this project" is
-    # not "read my whole codebase with a dozen models". Opening the project or
-    # pressing Rescan still fires it — those are acts John chose.
+    # auto_read is a seam, not a policy: registration passes True again as of
+    # 2026-08-27 (John wants the read — it produced a real verdict), and what
+    # keeps it safe is the machine-wide one-at-a-time cap inside the trigger,
+    # not skipping the read. Kept as a parameter so a caller that genuinely
+    # must not spend a read can still say so.
     if auto_read:
         _trigger_gandalf_first_scan(folder, project_id)
     return {"ok": True, "scanned": dict(scan.counts), "adopt": adopt,
@@ -1635,6 +1646,17 @@ def set_project_setup_status(project_id, status):
             _PROJECT_SETUP.pop(project_id, None)
 
 
+def _gandalf_inflight_ids():
+    """Projects with a Gandalf read in flight.
+
+    A read is up to a dozen jobs walking the tree for minutes, and it is NOT a
+    managed session — so ``project_move.has_live_sessions`` does not see it and
+    nothing else would stop a ``shutil.move`` out from under it.
+    """
+    with _GANDALF_INFLIGHT_GUARD:
+        return set(_GANDALF_INFLIGHT)
+
+
 def project_setup_statuses():
     """Live setup messages, dropping anything older than the 30-min sweep."""
     now = time.time()
@@ -1782,6 +1804,14 @@ def _trigger_gandalf_first_scan(folder_path, project_id):
                     f"{project_id} — another project's read is still running "
                     f"(one at a time keeps the machine usable); the project "
                     f"window's Gandalf button runs it on demand")
+                # SAY it on the card. Without this the setup message clears
+                # when the read is merely SCHEDULED, so projects 2 and 3 of a
+                # rapid triple-create went silently blank again — the very
+                # failure the setup status exists to prevent.
+                set_project_setup_status(
+                    project_id,
+                    "Read deferred — another project's read is running; "
+                    "use the Gandalf button when you want it")
             return False
         _GANDALF_INFLIGHT[project_id] = {"status": "Starting...",
                                          "ts": time.time()}
@@ -2643,6 +2673,11 @@ def render_project_tile_html(entry: dict) -> str:
         f'<span class="rnd-grip" aria-hidden="true" '
         f'title="Drag into a folder">&#8942;&#8942;</span>'
         f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
+        # setup / read status slot (2026-08-27): the bulk badge poll writes
+        # here, so a freshly created project says what it is doing instead of
+        # sitting blank — the silence that produced duplicate "Create" clicks
+        f'<span class="gandalf-card-status" hidden aria-live="polite">'
+        f'<span class="gcs-spin"></span><span class="gcs-text"></span></span>'
         f'<img class="rnd-seal-ico" src="{_steward_seal_icon_src()}" alt="" '
         f'onerror="this.style.display=\'none\'" />'
         f'<span class="rnd-name">{name}</span>'
@@ -8896,7 +8931,8 @@ function _gandalfCardTokenQ() {{
 }}
 function _gandalfCardApply(statuses) {{
     var any = false;
-    var cards = document.querySelectorAll('.card[data-project-id]');
+    // both tile kinds: the PROJECTS.md .card AND the R&D .rnd-row
+    var cards = document.querySelectorAll('[data-project-id]');
     for (var i = 0; i < cards.length; i++) {{
         var card = cards[i];
         var pid = card.getAttribute('data-project-id');
@@ -8906,9 +8942,14 @@ function _gandalfCardApply(statuses) {{
                  ? statuses[pid] : null;
         if (st) {{
             any = true;
+            // a setup message is already a sentence; only a raw Gandalf
+            // status needs the prefix
+            var label = (st.indexOf('Setting up') === 0
+                         || st.indexOf('Read deferred') === 0)
+                        ? st : 'Gandalf: ' + st;
             var txt = badge.querySelector('.gcs-text');
-            if (txt) txt.textContent = 'Gandalf: ' + st;
-            badge.title = 'Gandalf: ' + st;
+            if (txt) txt.textContent = label;
+            badge.title = label;
             badge.hidden = false;
         }} else {{
             badge.hidden = true;
@@ -8920,7 +8961,7 @@ function _gandalfCardApply(statuses) {{
 }}
 function _gandalfCardTick() {{
     if (document.visibilityState !== 'visible'
-        || !document.querySelector('.card[data-project-id]')) {{
+        || !document.querySelector('[data-project-id]')) {{
         _gandalfCardStop();
         return;
     }}
@@ -8936,7 +8977,7 @@ function _gandalfCardTick() {{
 function _gandalfCardStart() {{
     if (_gandalfCardTimer) return;        // already polling — don't stack intervals
     if (document.visibilityState !== 'visible'
-        || !document.querySelector('.card[data-project-id]')) return;
+        || !document.querySelector('[data-project-id]')) return;
     _gandalfCardTick();                   // immediate first paint
     _gandalfCardTimer = setInterval(_gandalfCardTick, 1000);
 }}
@@ -8948,7 +8989,7 @@ function _gandalfCardStop() {{
 function _gandalfCardProbeTick() {{
     if (_gandalfCardTimer) return;        // already active
     if (document.visibilityState !== 'visible'
-        || !document.querySelector('.card[data-project-id]')) return;
+        || !document.querySelector('[data-project-id]')) return;
     fetch('/api/rnd/gandalf_status_all' + _gandalfCardTokenQ(), {{cache: 'no-store'}})
       .then(function (r) {{ return r.ok ? r.json() : null; }})
       .then(function (d) {{
@@ -16677,7 +16718,7 @@ def handle_move_project(handler, path, body):
         handler._send_json({"ok": False,
                          "error": "move requires confirm:true",
                          "reason": "confirm-required"}, 400)
-    elif pid in project_setup_statuses():
+    elif pid in project_setup_statuses() or pid in _gandalf_inflight_ids():
         # A fresh project is still being read/adopted IN this folder; moving
         # the directory out from under that write is how you get a half-moved
         # tree (2026-08-27 — setup now runs in the background, so this window

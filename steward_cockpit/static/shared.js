@@ -267,8 +267,14 @@ const Proto = (() => {
       // one-line summary in the header, so a folded tile still tells him what
       // is in there (John, 2026-08-27: "deliverables on top with a little
       // summary above that")
-      const newest = items.length
-        ? (items[0].what || "").split(" — ")[0].trim() : "";
+      // "newest" must BE the newest: the register is parsed in file order and
+      // its own convention (newest-first) is a convention, not a guarantee —
+      // labelling items[0] as newest silently lied whenever a steward
+      // appended. Pick by date, fall back to file order.
+      const byDate = items.slice().sort((a, b) =>
+        String(b.date || "").localeCompare(String(a.date || "")));
+      const newest = byDate.length
+        ? (byDate[0].what || "").split(" — ")[0].trim() : "";
       const who = el("div", "who",
         "📦 DELIVERABLES (" + items.length + ")" +
         (newest ? " — newest: " + newest : " — nothing registered yet"));

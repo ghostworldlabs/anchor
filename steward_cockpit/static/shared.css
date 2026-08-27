@@ -262,7 +262,9 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
     overflow: hidden; opacity: .55; cursor: pointer; }
 /* Files: a COLLAPSIBLE tile pinned to the bottom (2026-08-27). It used to be
    an always-open 26vh block that ate the status pane's room. */
-.pfiles.psect { flex: none; }
+/* the .flist cap below is the real one — leaving the outer max-height too
+   produced two nested scrollbars on any window under ~1069px (2026-08-27) */
+.pfiles.psect { flex: none; max-height: none; overflow: visible; }
 .pfiles.psect h2 { cursor: pointer; user-select: none; }
 .pfiles.psect h2:hover { color: var(--text); }
 .pfiles.psect h2::before { content: "▾ "; color: var(--faint); }

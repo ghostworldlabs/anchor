@@ -168,14 +168,14 @@ class ClientContractTest(unittest.TestCase):
 
     def test_status_is_the_dominant_region(self):
         # 2026-08-27: deliverables + files were uncollapsible blocks that
-        # squeezed the status to a sliver. Only the status grows, and it keeps
-        # a floor no side section can take.
+        # squeezed the status to a sliver. Only the status grows — and it must
+        # still be ABLE to shrink, or the bottom section clips out of reach.
         self.assertIn(".rightcol .pscroll { flex: 1 1 auto; min-height: 0;",
                       self.css)
         # a hard floor would push the files section past the bottom of an
         # overflow:hidden column, where it cannot be scrolled to
         self.assertNotIn("min-height: 42vh", self.css)
-        self.assertIn(".pfiles.psect { flex: none; }", self.css)
+        self.assertIn(".pfiles.psect { flex: none;", self.css)
         self.assertIn(".pdeliv { flex: none;", self.css)
 
     def test_both_side_sections_collapse_on_click(self):
