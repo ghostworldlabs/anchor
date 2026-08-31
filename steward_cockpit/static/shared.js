@@ -11,7 +11,7 @@ const Proto = (() => {
   const TERM = PARAMS.get("term") || "";
   const EMBED = PARAMS.get("embed") === "1";
   let seq = 0, stamp = "", busySince = null, currentBlock = null,
-      opts = {}, map = null, lastState = null;
+      opts = {}, map = null, lastState = null, latestStatusId = "";
 
   const $ = (s) => document.querySelector(s);
   const el = (tag, cls, text) => {
@@ -90,6 +90,11 @@ const Proto = (() => {
   function renderStatus(stat) {
     const s = paneEl();
     if (!s || !stat) return;
+    const statusId = String(stat.status_id || "");
+    // The fresh status painted on open must not be replaced by an older
+    // status event replayed from the engine buffer.
+    if (statusId && latestStatusId && statusId <= latestStatusId) return;
+    if (statusId) latestStatusId = statusId;
     const stick = atBottom(s);
     // only the newest status stays expanded (same fold rule as tick turns)
     s.querySelectorAll(".blk.steward:not(.folded)").forEach(old => {
@@ -107,6 +112,9 @@ const Proto = (() => {
     if (p.waiting_on_you)
       body.appendChild(el("div", "splan sflag", "waiting on you: " + p.waiting_on_you));
     if (p.next) body.appendChild(el("div", "splan", "next: " + p.next));
+    if (p.goal_reread === false)
+      body.appendChild(el("div", "splan sflag", "goal not re-read since last close"));
+    (stat.map || []).forEach(l => body.appendChild(el("div", "splan", "map: " + l)));
     b.appendChild(body);
     s.appendChild(b);
     pin(s, stick);
@@ -200,7 +208,10 @@ const Proto = (() => {
       // the full string width — the rail then grows a horizontal scrollbar
       // instead of ellipsizing the blue line
       wrap.style.minWidth = "0";
-      wrap.appendChild(el("div", "", st.name));
+      const title = el("div", "");
+      if (st.part) title.appendChild(el("span", "wpkind", st.part));
+      title.appendChild(document.createTextNode(st.name));
+      wrap.appendChild(title);
       const parts = [];
       // live feedback rides the map: the active step says what is
       // happening now; waiting steps say what they wait on
@@ -520,7 +531,8 @@ const Proto = (() => {
     const spend = $("[data-spend]");
     if (spend) spend.textContent = st.alive
       ? ("session $" + (st.spend_usd || 0).toFixed(2) + " · " + st.turns + " turns")
-      : (GENERAL ? "" : "steward asleep");
+      : (GENERAL ? "" : "steward asleep" +
+         (st.queued ? " · " + st.queued + " held" : ""));
     const wake = $("[data-wake]");
     if (wake) wake.textContent = st.alive ? "Sleep" : "Wake";
     const drive = $("[data-drive]");
@@ -540,6 +552,8 @@ const Proto = (() => {
     if (stx) {
       let txt;
       if (st.light === "red") txt = "stuck or broken — needs a look";
+      else if (!st.alive && st.queued) txt = st.queued +
+        " held message(s) — waking the steward for delivery";
       else if (!st.alive) txt = "nothing running — asleep; your message wakes it";
       else if (st.busy) txt = "actively running" +
         (busySince ? " — " + Math.round((Date.now() - busySince) / 1000) + "s" : "");
@@ -594,6 +608,53 @@ const Proto = (() => {
     if (!files.length) list.appendChild(el("div", "frow", "(none yet)"));
   }
 
+  /* ---------- work-product overlay (tile on the plan rail) ---------- */
+  function closeWorkMap() {
+    const ov = $("[data-wpmap]");
+    if (ov) ov.hidden = true;
+  }
+  function openWorkMap() {
+    const ov = $("[data-wpmap]");
+    if (ov) ov.hidden = false;
+  }
+  let _plates = [];
+  let _plateId = "";
+  function paintWorkMap(map) {
+    const plate = (map && map.plate) || null;
+    _plates = plate ? [plate] : [];
+    _plateId = plate ? (plate.deliverableId || plate.title || "") : "";
+    const sum = $("[data-wpsum]");
+    if (sum) sum.textContent = plate
+      ? ((plate.title || "plate") + " — click to open")
+      : "no plate yet";
+    const title = $("[data-wptitle]");
+    if (title) title.textContent = (plate && plate.title) || "No plate yet";
+    const gline = $("[data-wpgoal]");
+    if (gline) gline.textContent = (plate && plate.subtitle) || "";
+    const hint = $("[data-wphint]");
+    if (hint) hint.textContent = plate
+      ? "Parts of the thing you will open. Hollow = a reserved hole, not a chore. Click a part."
+      : "No authored plate for this effort yet.";
+    const body = $("[data-wpbody]");
+    if (!body || !globalThis.DeliverablePlate) return;
+    const atlas = $("[data-wpatlas]");
+    if (atlas) atlas.hidden = true;
+    DeliverablePlate.paintPlate(body, plate);
+  }
+  function wireWorkMap() {
+    const tile = $("[data-wptile]");
+    const ov = $("[data-wpmap]");
+    if (tile) tile.onclick = () => openWorkMap();
+    const x = $("[data-wpclose]");
+    if (x) x.onclick = () => closeWorkMap();
+    if (ov) ov.addEventListener("click", (ev) => {
+      if (ev.target === ov) closeWorkMap();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeWorkMap();
+    });
+  }
+
   /* ---------- the map ---------- */
   async function loadMap() {
     const r = await fetch(api("/api/map"));
@@ -635,6 +696,7 @@ const Proto = (() => {
     if (prog) prog.textContent = map.steps_done + " of " + map.steps_total + " steps done";
     _lastMap = map;
     paintStepsList(map);
+    try { paintWorkMap(map); } catch (e) { /* overlay optional */ }
     const wait = $("[data-wait]");
     if (wait) wait.textContent = map.heartbeat.human_wait || "(nothing)";
     const grass = $("[data-grass]");
@@ -723,7 +785,7 @@ const Proto = (() => {
     const app = $(".app");
     if (mini) mini.onclick = () => {
       if (EMBED) parent.postMessage({ proto: "min" }, "*");  // inside the cockpit
-      else location.href = "/";                              // standalone: High Seat
+      else location.href = "/";                              // standalone: dashboard (not the High Seat overlay)
     };
     const railT = $("[data-railtoggle]");
     if (railT && app) railT.onclick = () => app.classList.toggle("railhide");
@@ -766,8 +828,13 @@ const Proto = (() => {
     opts = o || {};
     if (opts.stewardLabel) opts._labelSet = true;
     applyTheme();
-    await loadMap();
-    if (!opts.skipHistory) await loadHistory();
+    try { await loadMap(); } catch (e) {
+      const p = $("[data-progress]");
+      if (p) p.textContent = "map failed: " + ((e && e.message) || "could not load");
+    }
+    if (!opts.skipHistory) {
+      try { await loadHistory(); } catch (e) { /* no-op */ }
+    }
     if (opts.statusPane) {
       // paint the pane's status of record immediately (composed fresh,
       // zero-model) so it never opens empty waiting for the next cadence
@@ -778,6 +845,7 @@ const Proto = (() => {
     try { renderDeliverablesTile(); } catch (e) {}
     wireComposer();
     wireChrome();
+    try { wireWorkMap(); } catch (e) {}
     poll();
     stampPoll();
     setInterval(() => updateState(null), 1000); // busy clock repaint
