@@ -3055,7 +3055,9 @@ def cancel(job_id: str) -> dict:
             # finalizer's handle-detach decision.
             live._cancel_requested = True
     if identity == "gone":
-        return _commit_cancelled(job_id, rec, "already-gone")
+        return _commit_cancelled(
+            job_id, rec,
+            "no-process-recorded" if pid is None else "already-gone")
     if identity != "owned-running":
         return _update_record(
             job_id,
@@ -3171,8 +3173,15 @@ def _direct_process_dead(pid, live=None, timeout=3.0) -> bool:
 
 def _cancel_identity_state(record, live=None) -> str:
     """Classify cancellation authority as owned-running, gone, or unsafe."""
+    raw_pid = (record or {}).get("pid")
+    if raw_pid is None:
+        # No process identity was ever recorded. Launch stamps the real pid in
+        # the SAME write as the running record (see the launch path), so a
+        # pid-less non-terminal record can only be a job that never got a
+        # child: nothing to kill, no recycled-PID risk, cancel is honest.
+        return "gone"
     try:
-        pid = int((record or {}).get("pid"))
+        pid = int(raw_pid)
     except (TypeError, ValueError):
         return "unsafe"
     if pid <= 0:

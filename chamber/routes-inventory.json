@@ -912,6 +912,33 @@
       "POST /api/ecgberht/step_note"
      ],
      "note": "Appends John's note to the step findings ledger."
+    },
+    {
+     "verb": "kickoff-show",
+     "symbol": "showKickoff",
+     "caller_class": "bridge-cli",
+     "state_changing": false,
+     "exposed_via": [],
+     "note": "Reads the open + confirmed kickoff proposal for a project (Gate 5 kickoff synthesis v0); read-only. No Anchor route yet — the Gate 5 cockpit canary exposes it.",
+     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
+    },
+    {
+     "verb": "kickoff-confirm",
+     "symbol": "confirmKickoff",
+     "caller_class": "bridge-cli",
+     "state_changing": true,
+     "exposed_via": [],
+     "note": "Hash-bound, idempotent human confirmation of ONE reviewed kickoff proposal; appends the confirmed event to the lineage (stale hash refuses). No Anchor route yet — Gate 5 canary.",
+     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
+    },
+    {
+     "verb": "kickoff-replay",
+     "symbol": "replayKickoff",
+     "caller_class": "bridge-cli",
+     "state_changing": true,
+     "exposed_via": [],
+     "note": "Re-projects the CONFIRMED kickoff into the Face (intent projection) from the lineage; writes the projection, never the lineage. No Anchor route yet — Gate 5 canary.",
+     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
     }
    ]
   },

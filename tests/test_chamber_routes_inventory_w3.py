@@ -83,6 +83,13 @@ def test_bridge_verbs_carry_state_changing_truth():
             if not verb["state_changing"]:
                 continue
             exposed = verb.get("exposed_via") or []
+            if not exposed and verb.get("not_exposed"):
+                # A DECLARED exception: a bridge mutator no Anchor handler
+                # invokes yet (zero network exposure). The diff guard still
+                # forces its row to exist; the declaration must say why, and
+                # the exposing effort must replace it with exposed_via rows.
+                assert len(str(verb["not_exposed"])) > 40, verb["verb"]
+                continue
             assert exposed, "state-changing verb %r names no exposing route" \
                 % verb["verb"]
             for ref in exposed:
