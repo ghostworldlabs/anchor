@@ -1,5 +1,62 @@
 # Changelog
 
+## v1.2.8 — ChatGPT joins as the fourth family, and the cockpit becomes the front door (2026-08-31)
+
+Built by a ChatGPT/Codex controller over four waves, then finished under a
+Claude Fable completion run: the blocker it could not clear was a compiler
+bug in the in-progress kickoff work (ids silently renamed), not fixture
+drift; the prepared three-reviewer adversarial review then ran and its
+findings were repaired. Committed on `release/v1.2.8`, fast-forwarded onto
+master, then the full 4,000-test net was run on master before this entry.
+
+### Four roles, one honest capability matrix
+- The home page exposes **Terminal · Coder · Reviewer · Judge**, driven by
+  one API capability schema so server and browser tell the same truth.
+- **ChatGPT is a Coder** when the Codex CLI is installed — a sandboxed,
+  Job-Object-contained, receipt-honest transport (`codex_adapter.py`) that
+  records the *requested* model and effort (Sol, Ultra) and never invents the
+  served model.
+- **Terminal says "bridge pending"** rather than launching a bare Codex PTY;
+  a saved `default_cli=chatgpt` is refused until the bridge lands (a persisted
+  value used to brick every terminal open).
+- **Reviewer/Judge stay fail-closed for ChatGPT** — request configuration is
+  not attestation of the served family. Judge follows `review_family`.
+
+### The cockpit is the project page
+Plain `/project/<id>` — the dashboard included — opens the AI cockpit;
+`?classic=1` remains the explicit escape to the slim window. Calendar and
+Email appear as two honestly empty synthetic surfaces with a local-only
+guided-setup preview; no network, provider, credential, or storage path.
+
+### Truth fixes surfaced by the review and the full net
+- A saved model preference can no longer silently revert: `save_settings`
+  re-reads after writing and flags `mirror_out_of_sync`.
+- An engine resolution that would have run an unsandboxed bare `codex`
+  raises instead.
+- An imported (brownfield) effort's cost reads **unknown**, never a
+  fabricated `$0.00`.
+- Cancelling a job record that never got a child process now commits an
+  honest `cancelled` (verification `no-process-recorded`) with its journal
+  event, instead of leaving the job "running" forever; recycled-PID
+  protection is unchanged.
+- The living routes inventory carries rows for the three new Ecgberht
+  kickoff verbs; the two mutators declare that no Anchor handler invokes
+  them yet — the Gate 5 canary must replace that declaration with routes.
+
+### Known red, carried honestly
+The full net on master: **3,871 passed · 112 failed · 15 skipped**, of
+which 106 are the pre-existing 08-29 set (project-window/steward cutover
+debt awaiting the author's acceptance pass, chamber routes-inventory
+guards red since v1.2.7, Playwright flows, foundry GUI journeys) — 4 of
+those now pass — and one order-dependent test
+(`test_session_summary_endpoint_generating_fallback`) passes in isolation.
+Nothing was deselected.
+
+### Not in this release
+The ChatGPT Steward-cockpit bridge (F1B), Doctor and Zombie Hunter ChatGPT
+certification, and the conversational kickoff synthesis (Gate 5) follow as
+their own Foundry cycles. `_mockups/dashboard-v2` stays untracked.
+
 ## v1.2.7 — the cockpit gets quiet, the plan gets tidy, and work announces itself (2026-08-27)
 
 Three days of the author using the deliverables surface and the steward
