@@ -56,7 +56,9 @@ def test_view_renders_flat_rows_no_folder_header(env, tmp_path):
     assert view.count('data-project-id="') == 3
     # v9: ungrouped projects live under a single "Ungrouped" collapsible folder
     # (NOT a per-on-disk-folder header — three distinct folders, but one group).
-    assert 'class="rnd-folder"' in view
+    # 2026-09-01 (John): folders render CLOSED by default — the server stamps the
+    # collapsed state so the Projects tile never fans out every project on open.
+    assert 'class="rnd-folder rnd-collapsed"' in view
     assert "rnd-folder-head" in view
     assert "Ungrouped" in view
     # Exactly ONE folder (Ungrouped) — distinct on-disk dirs do NOT split groups.

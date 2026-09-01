@@ -2838,13 +2838,18 @@ def _render_group_folders(groups: dict) -> str:
                       if fpath else '')
         drop_hint = ('<span class="rnd-fdrop-hint">drop here to remove '
                      'from a folder</span>' if is_ungrouped else '')
+        # (2026-09-01, John) Folders open CLOSED by default — opening the Projects
+        # tile used to fan out every project in every folder. The server renders
+        # the collapsed state (no flash of expanded rows before JS runs); the JS
+        # re-opens only the folders John opened last time (localStorage, see
+        # rndToggleFolder / the restore loop keyed on RND_FOLDER_LS).
         folders.append(
-            f'<div class="rnd-folder" data-group="{name_attr}" '
+            f'<div class="rnd-folder rnd-collapsed" data-group="{name_attr}" '
             f'data-ungrouped="{"1" if is_ungrouped else "0"}">'
             f'<div class="rnd-folder-head" '
             f'onclick="rndToggleFolder(this)" role="button" tabindex="0" '
             f'title="Collapse / expand folder">'
-            f'<span class="rnd-tw" aria-hidden="true">▾</span>'
+            f'<span class="rnd-tw" aria-hidden="true">▸</span>'
             f'<span class="rnd-fname">{name_esc}</span>'
             f'<span class="rnd-fcount">({len(entries)})</span>'
             f'{path_block}'
@@ -9780,15 +9785,17 @@ function rndBlurb(pid) {{
 // ── v9 Wave 3 — project FOLDERS (group field; collapsible; drag-to-group) ──
 // Organization only — NOTHING moves on disk this wave (that's Wave 4). Dragging
 // a row into a folder header just sets the project's `group` via set_group.
-var RND_FOLDER_LS = 'anchor_rnd_folder_collapsed';
-function _rndCollapsedSet() {{
+// (2026-09-01, John) Folders are CLOSED by default; localStorage remembers the
+// folders he OPENED (new key — the old "collapsed" set is simply orphaned).
+var RND_FOLDER_LS = 'anchor_rnd_folder_open';
+function _rndCollapsedSet() {{  // name kept for the callers; it is now the OPEN set
     try {{ return JSON.parse(localStorage.getItem(RND_FOLDER_LS) || '[]') || []; }}
     catch (e) {{ return []; }}
 }}
 function _rndSaveCollapsed(arr) {{
     try {{ localStorage.setItem(RND_FOLDER_LS, JSON.stringify(arr || [])); }} catch (e) {{}}
 }}
-// Collapse / expand one folder, persisting the state by group name.
+// Collapse / expand one folder, persisting the OPEN state by group name.
 function rndToggleFolder(headEl) {{
     var folder = headEl && headEl.closest ? headEl.closest('.rnd-folder') : null;
     if (!folder) return;
@@ -9798,8 +9805,8 @@ function rndToggleFolder(headEl) {{
     var g = folder.getAttribute('data-group') || '';
     var set = _rndCollapsedSet();
     var i = set.indexOf(g);
-    if (collapsed && i < 0) set.push(g);
-    else if (!collapsed && i >= 0) set.splice(i, 1);
+    if (!collapsed && i < 0) set.push(g);
+    else if (collapsed && i >= 0) set.splice(i, 1);
     _rndSaveCollapsed(set);
 }}
 // "+ New folder" — name a group and assign the FIRST ungrouped project to it,
@@ -9989,17 +9996,16 @@ function rndFolderInit() {{
                 }});
             }})(rows[i]);
         }}
-        // Drop targets + restore collapse state.
+        // Drop targets + restore OPEN state (default: every folder closed).
         var folders = list.querySelectorAll('.rnd-folder');
-        var collapsed = _rndCollapsedSet();
+        var opened = _rndCollapsedSet();
         for (var j = 0; j < folders.length; j++) {{
             _rndWireFolderDrop(folders[j]);
             var g = folders[j].getAttribute('data-group') || '';
-            if (collapsed.indexOf(g) >= 0) {{
-                folders[j].classList.add('rnd-collapsed');
-                var tw = folders[j].querySelector('.rnd-tw');
-                if (tw) tw.textContent = '\\u25B8';  // ▸
-            }}
+            var isOpen = opened.indexOf(g) >= 0;
+            folders[j].classList.toggle('rnd-collapsed', !isOpen);
+            var tw = folders[j].querySelector('.rnd-tw');
+            if (tw) tw.textContent = isOpen ? '\\u25BE' : '\\u25B8';  // ▾ / ▸
         }}
         // Re-surface any pending (empty, not-yet-populated) folders from a prior
         // "+ New folder" that has no project yet.
