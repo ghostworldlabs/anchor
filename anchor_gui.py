@@ -12276,6 +12276,26 @@ def handle_ecgberht_step_detail(handler, path, body):
     handler._send_json(out, 200 if out.get("ok") else 502)
 
 
+def handle_ecgberht_kickoff_show(handler, path, body):
+    """GET /api/ecgberht/kickoff_show?pid=&effort= — read-only kickoff view.
+
+    Gate 5 W8: the cockpit's ONLY kickoff exposure. The effort rel resolves
+    through the steward cockpit's existing _effort_dir guard (unknown effort
+    refused before any read); the answer is the Wave 7 pass-through reader's
+    read-model row. No bridge spawn, no mutation path — confirm/replay stay
+    conversational / bridge-CLI verbs with zero network exposure.
+    """
+    q = parse_qs(urlparse(handler.path).query)
+    pid = (q.get("pid", [""])[0] or q.get("project_id", [""])[0] or "").strip()
+    folder, err, status = _ecgberht_project_folder(pid)
+    if err is not None:
+        handler._send_json(err, status)
+        return
+    from steward_cockpit.kickoff_show_route import kickoff_show
+    out, code = kickoff_show(folder, q.get("effort", [""])[0])
+    handler._send_json(out, code)
+
+
 def handle_ecgberht_step_note(handler, path, body):
     """POST /api/ecgberht/step_note — John adds detail from the rail panel.
 
@@ -19429,6 +19449,7 @@ _MIGRATED_HANDLERS = {
     "handle_ecgberht_commission_watch": handle_ecgberht_commission_watch,
     "handle_ecgberht_commission_runs": handle_ecgberht_commission_runs,
     "handle_ecgberht_step_detail": handle_ecgberht_step_detail,
+    "handle_ecgberht_kickoff_show": handle_ecgberht_kickoff_show,
     "handle_ecgberht_step_note": handle_ecgberht_step_note,
     "handle_ecgberht_refresh": handle_ecgberht_refresh,
     "handle_ecgberht_efforts": handle_ecgberht_efforts,

@@ -283,6 +283,11 @@ steward_cockpit/steward_engine.py
 steward_cockpit/steward_routes.py
 steward_cockpit/steward_campaign.py
 steward_cockpit/fake_claude.py
+# Gate 5 kickoff-synthesis canary (W7 reader + W8 cockpit GET route): the
+# pass-through reader over Ecgberht's projection.json and the read-model
+# kickoff_show endpoint substance. Stdlib-only, read-only by construction.
+steward_cockpit/kickoff_reader.py
+steward_cockpit/kickoff_show_route.py
 steward_cockpit/static/cockpit.html
 steward_cockpit/static/v1.html
 steward_cockpit/static/v3.html

@@ -918,9 +918,10 @@
      "symbol": "showKickoff",
      "caller_class": "bridge-cli",
      "state_changing": false,
-     "exposed_via": [],
-     "note": "Reads the open + confirmed kickoff proposal for a project (Gate 5 kickoff synthesis v0); read-only. No Anchor route yet — the Gate 5 cockpit canary exposes it.",
-     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
+     "exposed_via": [
+      "GET /api/ecgberht/kickoff_show"
+     ],
+     "note": "Reads the open + confirmed kickoff proposal for a project (Gate 5 kickoff synthesis v0); read-only. Exposed by the Gate 5 W8 cockpit canary as the ONLY kickoff HTTP surface: a read-model GET over the engine-owned projection, resolved through the steward cockpit's _effort_dir guard (unknown effort refused). Endpoint tests: tests/test_kickoff_cockpit_w8.py."
     },
     {
      "verb": "kickoff-confirm",
@@ -928,8 +929,13 @@
      "caller_class": "bridge-cli",
      "state_changing": true,
      "exposed_via": [],
-     "note": "Hash-bound, idempotent human confirmation of ONE reviewed kickoff proposal; appends the confirmed event to the lineage (stale hash refuses). No Anchor route yet — Gate 5 canary.",
-     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
+     "conversational_cli": {
+      "declaration": "conversational/bridge-cli",
+      "cli": "node scripts/seal-chamber-bridge.mjs --project <path> --kickoff-confirm <json>",
+      "proven_by": "tests/test_kickoff_cockpit_w8.py",
+      "why": "Confirmation is the ONE human seam of the kickoff lineage and stays conversational (steward dialogue) or bridge-CLI by design: the Gate 5 North Star exposes kickoff VIEWING only in the cockpit, so no Anchor route exists and network exposure is ZERO (empty exposed_via is the exposure truth). A hermetic bridge-CLI test drives this verb end-to-end against a real lineage."
+     },
+     "note": "Hash-bound, idempotent human confirmation of ONE reviewed kickoff proposal; appends the confirmed event to the lineage (stale hash refuses). Deliberately NOT an HTTP surface (Gate 5 W8)."
     },
     {
      "verb": "kickoff-replay",
@@ -937,8 +943,13 @@
      "caller_class": "bridge-cli",
      "state_changing": true,
      "exposed_via": [],
-     "note": "Re-projects the CONFIRMED kickoff into the Face (intent projection) from the lineage; writes the projection, never the lineage. No Anchor route yet — Gate 5 canary.",
-     "not_exposed": "Not invoked by any Anchor handler as of 2026-08-31 (bridge-CLI only; zero network exposure). The Gate 5 kickoff-synthesis cockpit canary exposes it and MUST replace this field with exposed_via rows."
+     "conversational_cli": {
+      "declaration": "conversational/bridge-cli",
+      "cli": "node scripts/seal-chamber-bridge.mjs --project <path> --kickoff-replay <json>",
+      "proven_by": "tests/test_kickoff_cockpit_w8.py",
+      "why": "Replay re-derives projections from the confirmed lineage after a projection crash - a repair verb driven conversationally or by the bridge CLI, never by the network: the Gate 5 North Star exposes kickoff VIEWING only in the cockpit, so no Anchor route exists and network exposure is ZERO (empty exposed_via is the exposure truth). A hermetic bridge-CLI test drives this verb end-to-end against a real lineage."
+     },
+     "note": "Re-projects the CONFIRMED kickoff into the Face (intent projection) from the lineage; writes the projection, never the lineage. Deliberately NOT an HTTP surface (Gate 5 W8)."
     }
    ]
   },
