@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.2.9 — the steward's kickoff becomes the work product; the cockpit sheds what it never needed (2026-09-02)
+
+Gate 5 of the ChatGPT-foundation effort, built by Foreman in Ecgberht (nine waves,
+final gate 1240/1240) with the thin Anchor canary landing here. John's look on
+2026-09-02: "looks good for Gate 5."
+
+### Kickoff synthesis, visible in the cockpit
+- `steward_cockpit/kickoff_reader.py` — a PASS-THROUGH reader of Ecgberht's
+  `.ecgberht/kickoff/projection.json` (never derives a second truth); a
+  Node-writes/Python-reads golden test pins the byte contract.
+- `GET /api/ecgberht/kickoff_show?pid=&effort=` (`steward_cockpit/kickoff_show_route.py`)
+  — read-only; the routes inventory now names real exposure for all three kickoff
+  verbs (`kickoff-confirm` / `kickoff-replay` are conversational via the bridge CLI,
+  proven by hermetic bridge tests; no `not_exposed` rows remain).
+- The effort view's Goal bar paints the confirmed kickoff — the engine's rendered
+  prose through the one markdown renderer — or an open draft marked "not applied";
+  the confirmed outcome becomes the one-line brief. Closed by default, compact.
+  (The build shipped reader + route with no UI call; a real-browser check caught it.)
+- Restart canary (`tests/test_kickoff_canary_w9.py`) + look staging
+  (`Ecgberht/scripts/kickoff-look-staging.mjs`) — five synthetic efforts, one
+  corrected once, one left open.
+
+### Subtraction, at John's word
+- The synthetic Calendar/Email surfaces and their setup dialog are REMOVED from the
+  per-project cockpit ("we don't want email and calendar in the AI Cockpit").
+- Project folders on the home page open CLOSED; the ones you open are remembered.
+
+### Truth fixes
+- Cancelling a job record that never got a child process commits an honest
+  `cancelled` (already in v1.2.8's ledger; retained).
+- Known red unchanged from v1.2.8 (the 08-29 set); the Gate 5 files added 20 tests, all green.
+
 ## v1.2.8 — ChatGPT joins as the fourth family, and the cockpit becomes the front door (2026-08-31)
 
 Built by a ChatGPT/Codex controller over four waves, then finished under a
