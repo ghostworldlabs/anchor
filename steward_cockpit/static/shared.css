@@ -243,6 +243,11 @@ a { color: var(--steward); text-decoration: none; }
                   font-size: 14px; color: var(--dim); white-space: pre-wrap; }
 .goalbar.open .gfull { display: block; }
 .goalbar.open .gcaret { transform: rotate(90deg); }
+/* Gate 5 kickoff block: the confirmed kickoff paints FIRST in the goal (display precedence);
+   an open draft is one muted "not applied" line; absent when there is no kickoff. */
+.gfull .gkick:empty { display: none; }
+.gfull .gkick.confirmed { margin: 0 0 12px; padding: 0 0 10px; border-bottom: 1px solid var(--line, #2a2f3d); color: var(--text, inherit); }
+.gfull .gkick.draft { margin: 0 0 12px; padding: 6px 10px; border: 1px dashed var(--faint, #666); border-radius: 6px; color: var(--dim); }
 
 .leftcol { display: flex; flex-direction: column; min-height: 0;
            border-right: 1px solid var(--line); background: var(--panel); }

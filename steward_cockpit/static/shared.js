@@ -28,6 +28,55 @@ const Proto = (() => {
     body: JSON.stringify(Object.assign(
       { dir: DIR, general: GENERAL, term: TERM || undefined }, body)) });
 
+  /* ---------- kickoff (Gate 5 canary, 2026-09-01) ----------
+     The confirmed kickoff is the goal's AUTHORITATIVE form (confirmed intent has
+     display precedence; the tag-derived map is fallback only), so it paints FIRST
+     inside the Goal bar. The prose comes from the engine's projection (rendered
+     from the hashed record — never composed here); an open draft paints as one
+     plain "not applied" line; anything else paints nothing. XHR on purpose: the
+     client shim rewrites fetch('/api/…') to /api/steward/, and this route is
+     Anchor's own GET /api/ecgberht/kickoff_show. Read-only; never throws. */
+  function paintKickoff(briefEl) {
+    const box = $("[data-kickoff]");
+    if (!box) return;
+    const pid = PARAMS.get("pid") || "";
+    if (!pid || !DIR) { box.textContent = ""; return; }
+    let tok = "";
+    try { tok = localStorage.getItem("anchor_token") || ""; } catch (e) { tok = ""; }
+    const url = "/api/ecgberht/kickoff_show?pid=" + encodeURIComponent(pid) +
+      "&effort=" + encodeURIComponent(DIR) + (tok ? "&token=" + encodeURIComponent(tok) : "");
+    const x = new XMLHttpRequest();
+    x.open("GET", url, true);
+    x.onreadystatechange = () => {
+      if (x.readyState !== 4) return;
+      let j = null;
+      try { j = JSON.parse(x.responseText || "null"); } catch (e) { j = null; }
+      box.className = "gkick";
+      box.textContent = "";
+      if (!j) return;
+      // a kickoff exists → the goal bar opens on its own, so the 30-second test
+      // sees the bundle without a click (the bar still folds on click as before)
+      const bar = $("[data-goalbar]");
+      const show = () => { if (bar) bar.classList.add("open"); };
+      if (j.ok && j.state === "confirmed" && typeof j.rendered === "string" && j.rendered.trim()) {
+        box.classList.add("confirmed");
+        show();
+        renderRich(box, j.rendered);
+        // the brief line shows the confirmed outcome — the goal in the steward's own words
+        if (briefEl) {
+          const m = j.rendered.match(/^Outcome:\s*(.+)$/m);
+          if (m && m[1]) briefEl.textContent = m[1].trim();
+        }
+      } else if (j.state === "open" && j.open_draft && j.open_draft.applied === false) {
+        box.classList.add("draft");
+        show();
+        box.textContent = "Kickoff draft v" + (j.open_draft.version || "?") +
+          " — not applied: " + (j.open_draft.goal || "(no goal in the draft)");
+      }
+    };
+    try { x.send(); } catch (e) { /* offline: paint nothing */ }
+  }
+
   /* ---------- markdown (ONE renderer for the whole package) ----------
      md.js (mdRender) is THE renderer now — the elegance audit's cut of the
      duplicate renderRich/buildTable/renderInline trio. Pages load md.js
@@ -673,6 +722,7 @@ const Proto = (() => {
     if (gb) gb.textContent = map.goal_brief || "(no goal recorded)";
     const gf = $("[data-goalfull]");
     if (gf) renderRich(gf, map.goal_md || "(no goal recorded)");
+    paintKickoff(gb);
     const gh = $("[data-goalhist]");
     if (gh && map.history) {
       const d = map.history.days || 0;
