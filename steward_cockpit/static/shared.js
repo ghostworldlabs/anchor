@@ -54,13 +54,11 @@ const Proto = (() => {
       box.className = "gkick";
       box.textContent = "";
       if (!j) return;
-      // a kickoff exists → the goal bar opens on its own, so the 30-second test
-      // sees the bundle without a click (the bar still folds on click as before)
-      const bar = $("[data-goalbar]");
-      const show = () => { if (bar) bar.classList.add("open"); };
+      // (2026-09-02, John: "the goal section at top is really, really big") — the bar
+      // stays CLOSED; the confirmed outcome becomes the one-line brief, and the full
+      // bundle is one click away, compact. Nothing auto-opens.
       if (j.ok && j.state === "confirmed" && typeof j.rendered === "string" && j.rendered.trim()) {
         box.classList.add("confirmed");
-        show();
         renderRich(box, j.rendered);
         // the brief line shows the confirmed outcome — the goal in the steward's own words
         if (briefEl) {
@@ -69,7 +67,7 @@ const Proto = (() => {
         }
       } else if (j.state === "open" && j.open_draft && j.open_draft.applied === false) {
         box.classList.add("draft");
-        show();
+        if (briefEl && j.open_draft.goal) briefEl.textContent = "draft, not applied — " + j.open_draft.goal;
         box.textContent = "Kickoff draft v" + (j.open_draft.version || "?") +
           " — not applied: " + (j.open_draft.goal || "(no goal in the draft)");
       }

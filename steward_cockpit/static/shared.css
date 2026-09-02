@@ -246,8 +246,12 @@ a { color: var(--steward); text-decoration: none; }
 /* Gate 5 kickoff block: the confirmed kickoff paints FIRST in the goal (display precedence);
    an open draft is one muted "not applied" line; absent when there is no kickoff. */
 .gfull .gkick:empty { display: none; }
-.gfull .gkick.confirmed { margin: 0 0 12px; padding: 0 0 10px; border-bottom: 1px solid var(--line, #2a2f3d); color: var(--text, inherit); }
-.gfull .gkick.draft { margin: 0 0 12px; padding: 6px 10px; border: 1px dashed var(--faint, #666); border-radius: 6px; color: var(--dim); }
+/* compact on purpose (John, 2026-09-02): normal whitespace inside the pre-wrap goal box, tight lines */
+.gfull .gkick { white-space: normal; line-height: 1.35; font-size: 13.5px; }
+.gfull .gkick p, .gfull .gkick ul, .gfull .gkick ol { margin: 2px 0; }
+.gfull .gkick h1, .gfull .gkick h2, .gfull .gkick h3 { font-size: 13px; margin: 0 0 4px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint, #888); }
+.gfull .gkick.confirmed { margin: 0 0 10px; padding: 0 0 8px; border-bottom: 1px solid var(--line, #2a2f3d); color: var(--text, inherit); }
+.gfull .gkick.draft { margin: 0 0 10px; padding: 4px 8px; border: 1px dashed var(--faint, #666); border-radius: 6px; color: var(--dim); }
 
 .leftcol { display: flex; flex-direction: column; min-height: 0;
            border-right: 1px solid var(--line); background: var(--panel); }

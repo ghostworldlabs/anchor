@@ -187,32 +187,6 @@
   .conflict .dlg p { color: var(--dim); font-size: 13px; margin-bottom: 8px; }
   .conflict .dlg .same { color: var(--steward); font-size: 12.5px; margin-bottom: 10px; }
   .conflict .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  .connection-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
-                     gap: 16px; }
-  .connection-grid .ctile { min-width: 0; }
-  .empty-connection { min-height: 128px; display: flex; flex-direction: column;
-                      align-items: flex-start; justify-content: center; gap: 9px;
-                      color: var(--dim); font-size: 13px; }
-  .empty-connection strong { color: var(--text); font-size: 14px; }
-  .empty-connection p { margin: 0; max-width: 38em; }
-  .empty-connection button { margin-top: 2px; }
-  .setup-modal[hidden] { display: none; }
-  .setup-modal { position: fixed; inset: 0; z-index: 90; display: flex;
-                 align-items: center; justify-content: center; padding: 20px;
-                 background: rgba(4, 8, 15, .72); }
-  .setup-dialog { position: relative; width: min(500px, 100%); background: var(--panel);
-                  border: 1px solid var(--line); border-radius: 14px;
-                  box-shadow: 0 18px 60px rgba(0,0,0,.45); padding: 22px; }
-  .setup-dialog h2 { margin: 0 38px 7px 0; font-size: 19px; }
-  .setup-dialog > p { margin: 0 0 16px; color: var(--dim); font-size: 13px;
-                      line-height: 1.5; }
-  .setup-close { position: absolute; right: 14px; top: 13px; padding: 3px 9px;
-                 font-size: 18px; line-height: 1; }
-  .provider-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .provider-actions button { min-height: 50px; font-weight: 600; }
-  .setup-notice { min-height: 20px; margin: 14px 0 0; color: var(--steward);
-                  font-size: 12.5px; }
-  body.setup-open { overflow: hidden; }
   .dside .box h3 { display: flex; align-items: center; gap: 8px;
                    font-size: 11px; text-transform: uppercase;
                    letter-spacing: 1.2px; color: var(--faint);
@@ -224,9 +198,6 @@
   .dside .brow .bl { flex: 1; overflow: hidden; text-overflow: ellipsis;
                      white-space: nowrap; }
   .dside .brow button { padding: 0 7px; font-size: 11.5px; }
-  @media (max-width: 720px) {
-    .connection-grid, .provider-actions { grid-template-columns: 1fr; }
-  }
 </style>
 </head>
 <body>
@@ -276,37 +247,9 @@
       themselves saved and restart where they left off.</div></div>
   </div>
 
-  <!-- BEGIN SYNTHETIC CONNECTION SURFACES -->
-  <div class="connection-grid" data-connection-surfaces data-demo-only>
-    <section class="ctile open" data-tile-calendar data-synthetic-state="empty">
-      <div class="thead">
-        <span class="tname">Calendar</span>
-        <span class="tsum">Empty demo &middot; not connected</span>
-      </div>
-      <div class="tbody">
-        <div class="empty-connection" data-calendar-empty>
-          <strong>No calendar events</strong>
-          <p>This prototype starts empty and does not read a calendar.</p>
-          <button type="button" data-connect-open>Set up calendar</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="ctile open" data-tile-email data-synthetic-state="empty">
-      <div class="thead">
-        <span class="tname">Email</span>
-        <span class="tsum">Empty demo &middot; not connected</span>
-      </div>
-      <div class="tbody">
-        <div class="empty-connection" data-email-empty>
-          <strong>No email messages</strong>
-          <p>This prototype starts empty and does not read a mailbox.</p>
-          <button type="button" data-connect-open>Set up email</button>
-        </div>
-      </div>
-    </section>
-  </div>
-  <!-- END SYNTHETIC CONNECTION SURFACES -->
+  <!-- (2026-09-02, John) the synthetic Calendar/Email surfaces from the v1.2.8 Codex waves
+       were REMOVED from the per-project cockpit: "I don't think that we want email and
+       calendar in the AI Cockpit." Connectors, if ever, belong to the main dashboard. -->
 
   <div class="ctile" data-tile-deliv>
     <div class="thead"><span class="tname">◇ Deliverables</span>
@@ -344,22 +287,6 @@
       <button data-conflict-skip>Skip</button>
       <button data-conflict-keep>Keep both</button>
     </div>
-  </div>
-</div>
-
-<div class="setup-modal" data-setup-dialog hidden>
-  <div class="setup-dialog" role="dialog" aria-modal="true"
-       aria-labelledby="connection-setup-title">
-    <button type="button" class="setup-close" data-setup-close
-            aria-label="Close setup">&times;</button>
-    <h2 id="connection-setup-title">Connect mail &amp; calendar</h2>
-    <p>Choose a provider to preview the guided setup. This demo does not start
-       sign-in, read an account, or save connection details.</p>
-    <div class="provider-actions">
-      <button type="button" data-connect-provider="gmail">Connect Gmail</button>
-      <button type="button" data-connect-provider="outlook">Connect Outlook</button>
-    </div>
-    <div class="setup-notice" data-setup-notice aria-live="polite"></div>
   </div>
 </div>
 
@@ -415,7 +342,6 @@
 <script src="/static/md.js"></script>
 <script src="/static/plate.js"></script>
 <script src="/static/tidy-idy-run.js"></script>
-<script src="/static/connections-demo.js"></script>
 <script>
 "use strict";
 try { document.body.dataset.theme = localStorage.getItem("protoTheme") || "slate"; } catch (e) {}

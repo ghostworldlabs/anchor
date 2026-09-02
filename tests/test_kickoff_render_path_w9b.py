@@ -36,8 +36,10 @@ def test_client_paints_the_kickoff_from_anchors_route_not_from_its_own_compositi
     assert "not applied" in js
     # XHR on purpose: the client shim rewrites fetch('/api/...') to /api/steward/
     assert "new XMLHttpRequest()" in js
-    # the goal bar opens by itself when a kickoff exists (the 30-second test needs no click)
-    assert 'bar.classList.add("open")' in js
+    # (2026-09-02, John) the goal bar must NOT auto-open — the outcome rides the one-line brief;
+    # the full bundle is one click away
+    assert 'bar.classList.add("open")' not in js
+    assert "draft, not applied — " in js
     # never composes prose from record fields — no goal/parts/plan template strings here
     assert "Outcome:" not in js.split("function paintKickoff")[1].split("/* ---------- markdown")[0].replace("/^Outcome:", "")
 
