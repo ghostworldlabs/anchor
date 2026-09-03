@@ -32,6 +32,12 @@ final gate 1240/1240) with the thin Anchor canary landing here. John's look on
   `cancelled` (already in v1.2.8's ledger; retained).
 - Known red unchanged from v1.2.8 (the 08-29 set); the Gate 5 files added 20 tests, all green.
 
+### Still open, by name (not in this release)
+- ChatGPT as the steward's terminal (F1B) — the UI refuses `default_cli=chatgpt` with a reason.
+- Anchor Doctor and Zombie Hunter with ChatGPT — suites green, **not certified** (no Codex canary exists).
+- Codex as Foreman's build seat — parked (Windows sandbox fixed in trio; Codex declines Claude-tool-shaped execute prompts).
+- The stale-server repair script verifies inside the ~60 s startup window ("STILL STALE" while the new build is still starting) — wait for `/api/version` instead.
+
 ## v1.2.8 — ChatGPT joins as the fourth family, and the cockpit becomes the front door (2026-08-31)
 
 Built by a ChatGPT/Codex controller over four waves, then finished under a
