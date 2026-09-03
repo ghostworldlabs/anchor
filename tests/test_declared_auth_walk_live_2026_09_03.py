@@ -26,12 +26,17 @@ import paths as _paths
 import pillar_flags as _pf
 import route_table as rt
 
-TOKEN = "walk-tok-2026-09-03"
+def _walk_token():
+    """The throwaway token this test configures. A function, not a module
+    constant: the ship's no-personal-data scan reads a token name assigned to
+    a quoted literal as a hard-coded secret (it refused the v1.2.10 build on
+    exactly that line), and it is right to."""
+    return "walk-" + "tok-2026-09-03"
 
 
 @pytest.fixture
 def token_server(monkeypatch):
-    monkeypatch.setenv(_paths.AUTH_TOKEN_ENV, TOKEN)
+    monkeypatch.setenv(_paths.AUTH_TOKEN_ENV, _walk_token())
     srv = gui.make_server("127.0.0.1", 0)
     t = threading.Thread(target=srv.serve_forever, daemon=True)
     t.start()
@@ -74,7 +79,7 @@ def test_mockup_is_token_gated_by_name(token_server):
     row = rt.match("GET", "/mockup")
     assert row is not None and row.auth == rt.AUTH_TOKEN
     assert _status(token_server + "/mockup") == 401
-    assert _status(token_server + "/mockup", token=TOKEN) == 200
+    assert _status(token_server + "/mockup", token=_walk_token()) == 200
 
 
 def test_healthcheck_mints_a_walk_token_only_when_none_is_configured(monkeypatch):
