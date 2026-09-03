@@ -113,3 +113,21 @@ class StatusWindowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EffortTileGravestoneTest(unittest.TestCase):
+    """(2026-09-03, John) every effort tile ends in a gravestone that retires the
+    effort to the boneyard; the boneyard's way back is 'resurrect'."""
+
+    def test_gravestone_on_every_effort_tile_and_resurrect(self):
+        s = (STATIC / "cockpit.html").read_text(encoding="utf-8")
+        blk = s.split("j.efforts.forEach(e => {")[1].split("r.onclick = () => openEffort(e.rel);")[0]
+        self.assertIn('el("span", "ebone", "🪦")', blk)
+        self.assertIn('fetch("/api/boneyard_move"', blk)
+        self.assertIn("JSON.stringify({ dir: e.rel })", blk)
+        self.assertIn("confirm(", blk)                      # one honest confirm, nothing deleted
+        self.assertIn("if (e.rel) {", blk)                  # the project root cannot be retired
+        yard = s.split("/* ---------- seal tile: effort boneyard ---------- */")[1]
+        self.assertIn('el("button", "mini", "resurrect")', yard)
+        self.assertIn('fetch("/api/boneyard_restore"', yard)
+        self.assertIn(".efrow .ebone {", s)
