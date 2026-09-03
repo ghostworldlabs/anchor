@@ -102,6 +102,20 @@ class HomeR3Test(unittest.TestCase):
         self.assertNotIn("Click to expand", h)
         self.assertNotIn("Click to collapse", h)
 
+    def test_chrome_per_johns_look(self):
+        h = self.html
+        # the Doctor chip sits with Update / Zombie Hunter / Skill Foundry
+        i_upd, i_doc, i_zh = h.index("&#8635; Update"), h.index('id="doctorChip"'), h.index("Zombie Hunter")
+        self.assertLess(i_upd, i_doc)
+        self.assertLess(i_doc, i_zh)
+        # the Steward pick rides the Terminal / Coder / Reviewer / Judge line
+        prefs = h[h.index("id='modelPrefs'"): h.index("id='mpStatus'")]
+        self.assertIn("id='stewardPick'", prefs)
+        self.assertEqual(h.count("id='stewardPick'"), 1)
+        # tiles remember being open across the reload a task action triggers
+        self.assertIn("anchor_tiles_open", h)
+        self.assertIn("function _wireTileMemory()", h)
+
     def test_nothing_is_lost(self):
         h = self.html
         self.assertIn("showView('inbox')", h)

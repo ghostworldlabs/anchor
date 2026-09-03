@@ -5762,7 +5762,7 @@ def _model_capability_fields() -> dict:
     }
 
 
-def render_model_prefs_controls() -> str:
+def render_model_prefs_controls(extra_html: str = "") -> str:
     """Compact Terminal / Coder / Reviewer / Judge selects for the home header.
 
     Loads current prefs via GET ``/api/settings`` (token from localStorage, same
@@ -5824,7 +5824,8 @@ def render_model_prefs_controls() -> str:
     )
     sel_style = (
         "background:var(--surface);color:var(--text);border:1px solid var(--border);"
-        "border-radius:6px;padding:2px 6px;font-size:11px;cursor:pointer"
+        "border-radius:6px;padding:2px 6px;font-size:11px;cursor:pointer;"
+        "max-width:132px"  # five picks on ONE line (Terminal · Coder · Reviewer · Judge · Steward)
     )
     lab_style = "display:inline-flex;align-items:center;gap:4px;white-space:nowrap"
     html = (
@@ -5847,6 +5848,7 @@ def render_model_prefs_controls() -> str:
         "data-linked-role='reviewer' aria-describedby='mpCapability' "
         "style=\"%s\">%s</select>"
         "</label>"
+        "%s"
         "<span id='mpStatus' style=\"font-size:10px;opacity:.7\"></span>"
         "<span id='mpCapability' role='status' style=\"font-size:10px;opacity:.72\" "
         "title='Judge follows Reviewer; disabled choices explain transport limits'>%s</span>"
@@ -5854,7 +5856,8 @@ def render_model_prefs_controls() -> str:
     ) % (style, lab_style, sel_style, _opts(dcli, "terminal"),
          lab_style, sel_style, _opts(ccode, "coder"),
          lab_style, sel_style, _opts(rcode, "reviewer"),
-         lab_style, sel_style, _opts(rcode, "judge"), capability_summary)
+         lab_style, sel_style, _opts(rcode, "judge"), extra_html or "",
+         capability_summary)
 
     # Self-contained script: load prefs on DOMContentLoaded; POST on change.
     # Uses X-Anchor-Token for POST and ?token= for GET (dashboard convention).
@@ -8610,6 +8613,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         <div style="display:flex;align-items:center;gap:8px">
           <h2>Dashboard</h2>
           <button class="btn btn-sm" onclick="refresh()" style="font-size:11px;padding:4px 10px;background:var(--accent)">&#8635; Update</button>
+          <button class="btn btn-sm" id="doctorChip" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Anchor Doctor — what the last health run found, and Resolve all">&#10010; Anchor Doctor</button>
           <button class="btn btn-sm" onclick="window.open('/api/rnd/zombie_hunter_report' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Zombie Hunter Radar"><img src="/vendor/brand/zombie-hunter-radar.jpg" style="width:14px;height:14px;border-radius:2px;" alt="" /> Zombie Hunter</button>
           <button class="btn btn-sm" onclick="window.open('/foundry','_blank')" style="font-size:11px;padding:4px 10px;background:var(--surface2);border:1px solid var(--accent);color:var(--text);display:inline-flex;align-items:center;gap:4px;" title="Skill Foundry — library, knowledge graph, sleep runs"><img src="/vendor/brand/skill-foundry-icon.jpg?v={BUILD_ID}" style="width:14px;height:14px;border-radius:2px;" alt="" /> Skill Foundry</button>
           <!-- Ecgberht High Seat moved out of this button row (2026-07-27): it is
@@ -8631,9 +8635,10 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          {render_model_prefs_controls()}
-          {render_steward_control()}
-          <button class="btn btn-sm" onclick="window.open('/doctor' + (_anchorToken() ? ('?token=' + encodeURIComponent(_anchorToken())) : ''), '_blank')" style="font-size:12px;padding:4px 10px;background:#131828;border:1px solid #10b981;color:#10b981;font-weight:600;border-radius:6px;cursor:pointer;" title="Anchor Doctor Diagnostic">&#10010; Anchor Doctor</button>
+          <!-- r3 chrome (John, 2026-09-03): the Steward pick rides the
+               Terminal / Coder / Reviewer / Judge line; the Doctor chip sits
+               with Update / Zombie Hunter / Skill Foundry above. -->
+          {render_model_prefs_controls(extra_html=render_steward_control())}
         </div>
       </div>
 
@@ -9418,6 +9423,28 @@ function r3RaiseRows(n) {{
         }}
     }}
 }}
+// (2026-09-03, John: "when I mark a task as done, do not suddenly close the
+// task window") Every task action reloads the page and <details> tiles start
+// closed, so the tile he was working in vanished. A tile he opened now stays
+// open across reloads (per browser, like the project folders).
+const TILE_OPEN_LS = 'anchor_tiles_open';
+function _tilesOpen() {{
+    try {{ return new Set(JSON.parse(localStorage.getItem(TILE_OPEN_LS) || '[]')); }}
+    catch (e) {{ return new Set(); }}
+}}
+function _wireTileMemory() {{
+    const open = _tilesOpen();
+    document.querySelectorAll('details.dash-tile[id]').forEach(d => {{
+        if (open.has(d.id) && !d.open) d.open = true;
+        d.addEventListener('toggle', () => {{
+            const s = _tilesOpen();
+            if (d.open) s.add(d.id); else s.delete(d.id);
+            try {{ localStorage.setItem(TILE_OPEN_LS, JSON.stringify(Array.from(s))); }} catch (e) {{}}
+        }});
+    }});
+}}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _wireTileMemory);
+else _wireTileMemory();
 function r3Open(id) {{
     // r3 rail → open the named tile and bring it into view (the rail never
     // navigates away from the dashboard for an in-page target).
@@ -15806,7 +15833,13 @@ def handle_doctor_session_start(handler, path, body):
     # truthy string such as "false" must not silently turn Diagnose into write.
     resolve = body.get("resolve") is True
     try:
-        if resolve and issue:
+        if resolve and issue and issue.get("all") is True:
+            # (2026-09-03, John) RESOLVE ALL: the seed built by
+            # /api/doctor/resolve_all already lists every open issue and the
+            # live re-probe receipt — it goes in whole (bounded).
+            seed = str(issue.get("message") or "")[:2400] or \
+                "ANCHOR DOCTOR - RESOLVE ALL OPEN ISSUES NOW"
+        elif resolve and issue:
             # (2026-08-07, John) RESOLVE mode: no plan, no wandering diagnose
             # — a SHORT execution brief (short also mangles less on the PTY
             # paste path, bug 0080). The session launches with the normal
@@ -15963,7 +15996,21 @@ def _doctor_stats():
         # has — the newest report's Issues, parsed deterministically — so
         # opening the page answers "what's wrong?" instantly, no model run.
         "issues": _doctor_latest_issues(newest_body or ""),
+        "autofixes": _doctor_latest_section(newest_body or "", "Auto-fixes applied"),
     }
+
+
+def _doctor_latest_section(body, heading):
+    """The newest report's '- ' lines under '## <heading>' — never raises."""
+    try:
+        m = re.search(r"^## %s[^\n]*\n+(.*?)(?=^## |\Z)" % re.escape(heading),
+                      body, re.S | re.M)
+        if not m:
+            return []
+        return [ln.strip()[2:].strip() for ln in m.group(1).splitlines()
+                if ln.strip().startswith("- ")]
+    except Exception:
+        return []
 
 
 def _doctor_latest_issues(body):
@@ -16061,6 +16108,93 @@ def _doctor_hc_cmd():
         import shlex
         return shlex.split(raw, posix=(os.name != "nt"))
     return [sys.executable, str(ANCHOR_DIR / "anchor_healthcheck.py")]
+
+
+def _doctor_live_probe(path, timeout=4.0):
+    """GET one path on the LIVE server. ``ok`` means the server ANSWERED (any
+    HTTP status — 401 on a token route is still an answer); a connection
+    error or timeout is the only failure. Read-only."""
+    import urllib.request
+    import urllib.error
+    t0 = time.time()
+    url = "http://127.0.0.1:%d%s" % (_doctor_live_port(), path)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, method="GET"),
+                                    timeout=timeout) as r:
+            code = r.getcode()
+    except urllib.error.HTTPError as exc:
+        code = exc.code
+    except Exception as exc:
+        return {"path": path, "ok": False, "code": None,
+                "error": type(exc).__name__, "ms": int((time.time() - t0) * 1000)}
+    return {"path": path, "ok": True, "code": code,
+            "ms": int((time.time() - t0) * 1000)}
+
+
+def _doctor_live_port():
+    """The port THIS server listens on (the live one the probe should hit)."""
+    try:
+        return int(os.environ.get("ANCHOR_PORT") or 0) or 8777
+    except Exception:
+        return 8777
+
+
+def handle_doctor_resolve_all(handler, path, body):
+    """POST /api/doctor/resolve_all — one click for every open issue (John,
+    2026-09-03). Token-authed by the middleware.
+
+    1. explain the newest report's issues in plain words (doctor_plain);
+    2. re-probe the LIVE server for the GET paths the issues name;
+    3. decide: ``rerun`` (every issue was the self-test failing to reach its
+       target and the live server answers) → start the background health
+       re-run so the report and the banner say what is true now; ``session``
+       → hand back ONE all-issues RESOLVE seed the page starts a doctor
+       session with; ``nothing`` → no open issues.
+    No model runs here; the receipt is real numbers or absent.
+    """
+    import doctor_plain as _dp
+    s = _doctor_stats()
+    explained = _dp.explain_all(s.get("issues") or [], s.get("autofixes") or [])
+    probe = [_doctor_live_probe(p) for p in _dp.probe_targets(explained)] if explained else []
+    decision = _dp.decide(explained, probe)
+    out = {"ok": True, "decision": decision, "issues": explained, "probe": probe}
+    if decision == "rerun":
+        out["rerun"] = _doctor_start_healthcheck_run()
+    elif decision == "session":
+        out["seed_issue"] = {
+            "issueId": "resolve-all", "component": "all", "all": True,
+            "message": _dp.resolve_all_seed(explained, probe, decision),
+            "suggestedChecks": [],
+        }
+    handler._send_json(out)
+
+
+def _doctor_start_healthcheck_run():
+    """Start the background health re-run (the same launch the Diagnostics
+    button uses); returns a small receipt dict. Idempotent while live."""
+    import subprocess
+    with _DOCTOR_HC_LOCK:
+        proc = _DOCTOR_HC.get("proc")
+        if proc is not None and proc.poll() is None:
+            return {"ok": True, "already_running": True}
+        log_path = _doctor_hc_log_path()
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            fh = open(log_path, "wb")
+        except OSError as exc:
+            return {"ok": False, "error": "cannot open run log: %s" % exc}
+        try:
+            proc = subprocess.Popen(
+                _doctor_hc_cmd(), stdout=fh, stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL, cwd=str(_paths.data_dir()),
+                creationflags=_paths.NO_WINDOW)
+        except OSError as exc:
+            fh.close()
+            return {"ok": False, "error": "failed to launch: %s" % exc}
+        _DOCTOR_HC["proc"] = proc
+        _DOCTOR_HC["fh"] = fh
+        _DOCTOR_HC["started_at"] = time.time()
+        return {"ok": True, "pid": proc.pid, "log": str(log_path)}
 
 
 def handle_doctor_healthcheck_run(handler, path, body):
@@ -16376,6 +16510,35 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // newest health report. "Resolve this" seeds the doctor session with the
   // one issue — no full re-run, no blank agentic wandering.
   var DOCTOR_ISSUES = __ISSUES_JSON__;
+  // (2026-09-03, John) Resolve all: one click for every open issue. The
+  // server re-probes the live server and decides — a re-run when nothing is
+  // wrong (the banner clears when the report is clean), else ONE doctor
+  // session seeded with all the issues + the probe receipt, and RUN.
+  window.resolveAll = function () {
+    var btn = document.getElementById('resolveAllBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Probing…'; }
+    fetch('/api/doctor/resolve_all', { method: 'POST', headers: hdrs(), body: JSON.stringify(token ? { token: token } : {}) })
+      .then(function (r) { return r.json(); })
+      .then(function (p) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Resolve all'; }
+        if (!p || !p.ok) { term.write('[doctor] Resolve all failed: ' + ((p && p.error) || 'unknown') + '\r\n'); return; }
+        (p.probe || []).forEach(function (q) {
+          term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
+        });
+        if (p.decision === 'rerun') {
+          term.write('[doctor] Every issue was the 5 AM self-test failing to reach its target, and the live server answers now. '
+            + 'Re-running the health check so the report says so; the red banner clears when it is clean.\r\n');
+          if (btn) btn.textContent = 'Re-running…';
+        } else if (p.decision === 'session' && p.seed_issue) {
+          term.write('[doctor] ' + (p.issues || []).length + ' issue(s) need work - starting ONE doctor session for all of them.\r\n');
+          BANNER_ISSUE = p.seed_issue;
+          window.runDiagnose({ fromBanner: true, resolve: true });
+        } else {
+          term.write('[doctor] Nothing open to resolve.\r\n');
+        }
+      })
+      .catch(function (e) { if (btn) { btn.disabled = false; btn.textContent = 'Resolve all'; } term.write('[doctor] Resolve all failed: ' + e + '\r\n'); });
+  };
   window.resolveIssue = function (i) {
     var it = DOCTOR_ISSUES[i];
     if (!it) return;
@@ -16665,23 +16828,43 @@ def _doctor_issues_block_html(s):
     issues = s.get("issues") or []
     if not issues:
         return ""
+    # (2026-09-03, John) plain words first — a title and one sentence of
+    # meaning — with the raw report line behind a disclosure, never lost.
+    import doctor_plain as _dp
+    explained = _dp.explain_all(issues, s.get("autofixes") or [])
     rows = []
-    for i, it in enumerate(issues):
-        comp = html_lib.escape(it.get("component") or "health")
-        detail = html_lib.escape((it.get("detail") or "")[:220])
+    for i, ex in enumerate(explained):
+        title = html_lib.escape(ex.get("title") or "issue")
+        meaning = html_lib.escape(ex.get("meaning") or "")
+        raw = html_lib.escape(ex.get("raw") or "")
         rows.append(
             '<div class="issue-row" style="display:flex;gap:10px;align-items:'
-            'flex-start;margin:6px 0;font-size:13px;line-height:1.45">'
-            f'<div style="flex:1"><b>[{comp}]</b> {detail}</div>'
+            'flex-start;margin:8px 0;font-size:13px;line-height:1.45">'
+            f'<div style="flex:1"><b>{title}</b>'
+            f'<div style="color:#b7bcc7;margin-top:2px">{meaning}</div>'
+            '<details style="margin-top:3px"><summary style="cursor:pointer;'
+            'font-size:11.5px;color:#8b8f9a">what the check said</summary>'
+            f'<div style="font-size:11.5px;color:#8b8f9a;white-space:pre-wrap;'
+            f'word-break:break-word;margin-top:3px">{raw}</div></details></div>'
             f'<button class="btn" onclick="resolveIssue({i})" '
             'style="flex:none">Resolve this</button></div>')
+    n = len(explained)
     return (
         '<div class="card panel" style="border-color:#b45309">'
-        '<h3 style="color:#e0a437">Found by the last health run</h3>'
+        '<div style="display:flex;align-items:center;gap:10px">'
+        '<h3 style="color:#e0a437;margin:0;flex:1">Found by the last health run'
+        f' <span style="color:#8b8f9a;font-weight:400">({n})</span></h3>'
+        '<button class="btn" id="resolveAllBtn" onclick="resolveAll()" '
+        'style="flex:none;background:#b45309;border-color:#b45309" '
+        'title="Re-probe the live server now; if all is well, re-run the check '
+        'so the banner clears; otherwise one doctor session takes every issue">'
+        'Resolve all</button></div>'
         + "".join(rows)
         + '<div class="hint">Parsed from the newest report — no model was '
-          'run to show this. "Resolve this" opens the doctor session '
-          'seeded with the one issue.</div></div>')
+          'run to show this. "Resolve all" re-probes the live server, then '
+          'either re-runs the check (nothing was wrong) or opens ONE doctor '
+          'session for every issue and runs it. "Resolve this" takes one '
+          'issue and runs it.</div></div>')
 
 
 def handle_term_input2(handler, path, body):
@@ -19714,6 +19897,7 @@ _MIGRATED_HANDLERS = {
     "handle_reactivate_project": handle_reactivate_project,
     "handle_set_notes": handle_set_notes,
     "handle_restart": handle_restart,
+    "handle_doctor_resolve_all": handle_doctor_resolve_all,
     "handle_settings_get": handle_settings_get,
     "handle_settings_post": handle_settings_post,
     "handle_set_blurb": handle_set_blurb,
@@ -21342,6 +21526,13 @@ class _QuietDisconnectMixin:
     defects are never hidden.
     """
 
+    # Accept backlog (``listen(N)``). socketserver's default is 5 — and Windows
+    # answers the 6th pending connection with RST (WinError 10061 "actively
+    # refused") whenever the accept loop lags a burst: a browser opening 6+
+    # parallel asset/SSE/WS connections behind a GIL-heavy render. 64 keeps a
+    # burst queued for the accept loop instead of refusing it.
+    request_queue_size = 64
+
     def handle_error(self, request, client_address):
         exc = sys.exc_info()[1]
         if _is_benign_disconnect(exc):
@@ -21404,8 +21595,18 @@ class _QuietThreadingHTTPServer(_QuietDisconnectMixin, ThreadingHTTPServer):
     daemon_threads = True
 
 
-def make_server(host="127.0.0.1", port=8777):
+def make_server(host="127.0.0.1", port=8777, activate=True):
     """Construct + bind the threading HTTP server.
+
+    ``activate=False`` BINDS the port — so the single-instance guard below
+    fires exactly as before (a duplicate's bind still fails) — but does NOT
+    ``listen()`` yet. The caller runs its boot work, then calls
+    ``server.server_activate()`` right before ``serve_forever()``. Until then a
+    client's connect is never accepted or queued — POSIX refuses it, Windows
+    drops the SYN to a bound-but-unlistened port — instead of sitting in a
+    backlog nobody is draining, so "the port accepts connections" means "the
+    server is serving". ``main()`` uses this; tests / the health check keep the
+    default bind+listen construction.
 
     Two distinct bind-failure modes are reconciled here (D4/Wave 2 + Wave 3
     single-instance guard):
@@ -21431,6 +21632,19 @@ def make_server(host="127.0.0.1", port=8777):
     else:
         # Ephemeral port=0 (tests / health check) → unchanged default behavior.
         server_cls = _QuietThreadingHTTPServer
+    if not activate:
+        def _bind_only():
+            # Mirror socketserver's own constructor: bind, and on ANY failure
+            # release the socket before re-raising (bind_with_retry classifies
+            # the OSError — EADDRINUSE → the clean single-instance exit).
+            srv = server_cls((host, port), AnchorHandler, bind_and_activate=False)
+            try:
+                srv.server_bind()
+            except BaseException:
+                srv.server_close()
+                raise
+            return srv
+        return _paths.bind_with_retry(_bind_only)
     return _paths.bind_with_retry(
         lambda: server_cls((host, port), AnchorHandler)
     )
@@ -21501,8 +21715,12 @@ def main():
             pass
         sys.exit(1)
 
+    _boot_t0 = time.time()
     try:
-        server = make_server(bind_host, port)
+        # BIND now (the single-instance guard must fire before any boot work
+        # touches shared state) but LISTEN only after the boot reconcile below
+        # — see the readiness note above ``server.server_activate()``.
+        server = make_server(bind_host, port, activate=False)
     except OSError as exc:
         # Single-instance guard: another healthy Anchor already owns this port.
         # Do NOT retry-forever or fight for the port — exit cleanly so the
@@ -21809,6 +22027,20 @@ def main():
                          int(_ts_auto._autosave_interval()))
     except Exception as e:
         _logger.error(f"session autosave daemon start failed: {e}")
+
+    # READINESS: the port was BOUND at the top of main (single-instance guard)
+    # but NOT listening while the boot reconcile above ran — so a connect in
+    # that window is refused (POSIX) / dropped (Windows) rather than queued
+    # into a backlog nobody drains. (Before this, the port listened from t≈0.5s while the boot
+    # reconcile could run 80s+ under 5 AM load: the health check's probes hung
+    # 20s each, filled the 5-slot backlog, and every later connect got WinError
+    # 10061 until serve_forever finally started — the "0/7 endpoints" red banner.)
+    # listen() now: "accepts connections" == "serving".
+    server.server_activate()
+    _boot_dt = time.time() - _boot_t0
+    _logger.info("Server ready — accepting connections on %s (boot reconcile %.1fs)",
+                 url, _boot_dt)
+    print(f"  Ready — accepting connections (boot reconcile {_boot_dt:.1f}s).")
 
     try:
         server.serve_forever()

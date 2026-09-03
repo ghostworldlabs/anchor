@@ -414,6 +414,9 @@ ROUTES = [
        handler="handle_doctor_healthcheck_tail", migrated=True),
     # Launch the background diagnostics run (mutating → default-deny token;
     # idempotent: a second POST while one is live attaches, never stacks).
+    # (2026-09-03) Resolve all: live re-probe -> re-run or one all-issues session
+    _r("POST", "/api/doctor/resolve_all", AUTH_TOKEN,
+       handler="handle_doctor_resolve_all", migrated=True),
     _r("POST", "/api/doctor/healthcheck_run", AUTH_TOKEN,
        handler="handle_doctor_healthcheck_run", migrated=True),
 

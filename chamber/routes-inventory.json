@@ -223,6 +223,12 @@
   },
   {
    "method": "POST",
+   "pattern": "/api/doctor/resolve_all",
+   "match": "exact",
+   "auth": "token"
+  },
+  {
+   "method": "POST",
    "pattern": "/api/doctor/healthcheck_run",
    "match": "exact",
    "auth": "token"
