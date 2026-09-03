@@ -99,9 +99,15 @@ into the project cockpit as placeholders (v1.2.8), where he rejected them on
   row tokenless against an in-process server and demands 401 — the healthcheck's
   walk, in the test net, independent of the night's environment.
 
+### The design contract is versioned
+- `_mockups/dashboard-v2` (prototype r3) is tracked as a SCRUBBED copy — every
+  real name, account and task replaced with generic sample text; the author's
+  originals stay beside it git-ignored — with reference renders (default, Tip of
+  the Hat open, phone) and a README marking every element live / projected /
+  sample / future, as the 08-29 addendum's P0 asked. Never in the bundle.
+- The home's red banner speaks plainly: what a click does, nothing about seeds.
+
 ### Still open, by name
-- `_mockups/dashboard-v2` is still untracked (personal sample content); the
-  08-29 addendum's P0 asks for a scrubbed, versioned copy.
 - The r3 Doctor rule is half built: Resolve all re-probes live, but opening
   Doctor on a red banner still starts from a seeded brief rather than probing
   first, and the receipt in English is not built.

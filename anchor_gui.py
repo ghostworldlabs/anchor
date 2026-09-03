@@ -7281,9 +7281,12 @@ def generate_html(projects, tasks, inbox):
                     _hb_issue,
                     title="Health check found issues",
                     body=(
+                        # Plain words on the home (r3: "Click: Doctor runs
+                        # itself"): what a click does, nothing about seeds
+                        # or markdown paths.
                         f'on {html_lib.escape(str(report_date))}. '
-                        f'Click to open Doctor and diagnose this issue '
-                        f'(seeded context — not a static markdown path).'
+                        f'Click: Doctor opens with this issue already read; '
+                        f'Resolve all is one click there.'
                     ),
                     style_kind="health",
                 )
