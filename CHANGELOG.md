@@ -49,11 +49,62 @@ into the project cockpit as placeholders (v1.2.8), where he rejected them on
   fresh server up. Refuses (409) when unsupervised, so it can never leave Anchor
   down. `/api/shutdown` stays removed and there is no UI button.
 
+### Doctor, per John's look (2026-09-03)
+- Issues read in plain words: a title, one sentence, and the raw check text
+  behind "what the check said" (`doctor_plain.py`).
+- **Resolve all** (`POST /api/doctor/resolve_all`): a live re-probe first — when
+  the only failure is the 5 AM self-test failing to reach its own throwaway copy
+  and the live service answers, the check is simply re-run; otherwise ONE doctor
+  session is opened for every issue. Resolve and Resolve all RUN the brief
+  (a settled Enter after the paste); Diagnose stays hands-off.
+- The Doctor chip sits with Update / Hunter / Foundry; the Steward pick sits on
+  the Terminal · Coder · Reviewer · Judge line; open tiles survive the reload a
+  task action triggers ("do not suddenly close the task window").
+
+### Gravestones, and a boneyard that cannot fail
+- Every effort tile in the cockpit ends in a gravestone → the effort boneyard
+  (archived, never deleted); a resting effort offers **resurrect**, which
+  repaints the tiles at once. Every project row under the steward's seal ends
+  in a gravestone → the Archive view (kept).
+- Retiring an effort whose folder Windows holds open (a deck in PowerPoint, an
+  Explorer window, a terminal) no longer fails with "there was an error
+  archiving": after brief rename retries it retires IN PLACE via a marker,
+  leaves the live list and rests in the boneyard all the same; resurrect
+  removes the marker.
+
+### The 5 AM red, root-caused (an Anchor Doctor session, launched from Resolve all)
+- On 13 of the 18 nights before the fix the health check reported
+  `[HTTP endpoints] 0/7 … timed out (20.0s) … WinError 10061`. Reproduced: the
+  server bound AND listened its port ~0.5 s into boot, then ran the boot
+  reconcile (registry PID probes, worktree reap, daemons — 80 s+ under 5 AM
+  load) BEFORE `serve_forever`; every connect in that window queued into a
+  5-slot backlog nobody drained, hung 20 s, and once the backlog was full
+  Windows refused every further connect.
+- Fix: bind early (the single-instance guard is a bind-time property) but
+  `listen()` only when ready — a connect during boot is refused, never queued —
+  with the backlog raised to 64; the health check waits for a REAL HTTP answer
+  (`GET /api/version` → 200), red only after 180 s, a timing WARN over 30 s;
+  `restart_anchor.ps1` waits 180 s for LISTENING. Pinned by
+  `tests/test_boot_readiness.py`.
+
+### The auth walk asserts what it declares
+- `GET /mockup` was declared token-authed since 08-15 but served by a legacy
+  branch that never checked — found the moment the walk ran with a token
+  configured (a Resolve-all rerun inside the live service). Gated now.
+- The nightly walk had been skipping every token row ("38 rows walked,
+  token=unset") because the 5 AM task carries no `ANCHOR_TOKEN`; the health
+  check now mints a per-run token when none is configured (the report says
+  "minted", never the value), so all 220 rows are asserted every night.
+- `tests/test_declared_auth_walk_live_2026_09_03.py` walks every declared token
+  row tokenless against an in-process server and demands 401 — the healthcheck's
+  walk, in the test net, independent of the night's environment.
+
 ### Still open, by name
 - `_mockups/dashboard-v2` is still untracked (personal sample content); the
   08-29 addendum's P0 asks for a scrubbed, versioned copy.
-- The r3 Doctor behaviors (auto-diagnose on open, receipt in English) are not
-  built; the health banner still opens Doctor seeded.
+- The r3 Doctor rule is half built: Resolve all re-probes live, but opening
+  Doctor on a red banner still starts from a seeded brief rather than probing
+  first, and the receipt in English is not built.
 - Everything in the v1.2.9 list (F1B, Doctor/Zombie Hunter ChatGPT
   certification, Codex as a Foreman seat).
 
