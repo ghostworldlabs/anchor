@@ -810,23 +810,81 @@ def read_grass(root_dir: str):
     return out
 
 
+#: An effort retired IN PLACE (2026-09-03): Windows refuses to rename a folder
+#: while anything inside it is open (a deck in PowerPoint, an Explorer window,
+#: a terminal's cwd) — WinError 5/32. Rather than fail, the effort stays where
+#: it is and carries this marker; it leaves the live list and joins the
+#: boneyard list exactly like a moved one. Resurrecting removes the marker.
+RETIRED_MARKER = ".ecgberht/retired.json"
+
+
+def retired_marker_path(effort_dir: str) -> Path:
+    return Path(effort_dir) / RETIRED_MARKER
+
+
+def is_retired_in_place(effort_dir: str) -> bool:
+    try:
+        return retired_marker_path(effort_dir).is_file()
+    except OSError:
+        return False
+
+
+def retire_in_place(effort_dir: str, why: str = "") -> dict:
+    """Write the in-place retirement marker. Returns the record written."""
+    f = retired_marker_path(effort_dir)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    rec = {"retired": time.strftime("%Y-%m-%d %H:%M"), "in_place": True,
+           "why": why or "files in the effort were open when it was retired"}
+    f.write_text(json.dumps(rec, indent=2) + "\n", encoding="utf-8")
+    return rec
+
+
+def resurrect_in_place(effort_dir: str) -> bool:
+    """Remove the marker; True if one was there."""
+    f = retired_marker_path(effort_dir)
+    if not f.is_file():
+        return False
+    f.unlink()
+    return True
+
+
 def list_boneyard(root_dir: str):
-    """Efforts resting in <root>/_boneyard, newest burial first."""
-    yard = Path(root_dir) / BONEYARD_DIRNAME
+    """Efforts resting in <root>/_boneyard PLUS efforts retired in place
+    (marker), newest burial first."""
+    root = Path(root_dir)
+    yard = root / BONEYARD_DIRNAME
     out = []
-    if not yard.is_dir():
-        return out
-    for p in sorted(yard.iterdir()):
-        if not (p / "ECGBERHT.md").is_file():
-            continue
+
+    def _row(p, when, in_place):
         m = read_map(str(p))
-        try:
-            when = time.strftime("%Y-%m-%d", time.localtime(p.stat().st_mtime))
-        except OSError:
-            when = ""
         out.append({"name": p.name, "goal_brief": m["goal_brief"],
                     "steps_done": m["steps_done"],
-                    "steps_total": m["steps_total"], "boneyarded": when})
+                    "steps_total": m["steps_total"], "boneyarded": when,
+                    "in_place": in_place})
+
+    if yard.is_dir():
+        for p in sorted(yard.iterdir()):
+            if not (p / "ECGBERHT.md").is_file():
+                continue
+            try:
+                when = time.strftime("%Y-%m-%d", time.localtime(p.stat().st_mtime))
+            except OSError:
+                when = ""
+            _row(p, when, False)
+    try:
+        subs = sorted(p for p in root.iterdir()
+                      if p.is_dir() and not p.name.startswith((".", "_")))
+    except OSError:
+        subs = []
+    for p in subs:
+        if not (p / "ECGBERHT.md").is_file() or not is_retired_in_place(str(p)):
+            continue
+        try:
+            rec = json.loads(retired_marker_path(str(p)).read_text(encoding="utf-8"))
+            when = str(rec.get("retired") or "")[:10]
+        except Exception:
+            when = ""
+        _row(p, when, True)
     out.sort(key=lambda x: x["boneyarded"], reverse=True)
     return out
 
@@ -848,6 +906,8 @@ def discover_efforts(root_dir: str):
         pass
     for p in candidates:
         if (p / "ECGBERHT.md").is_file():
+            if p != root and is_retired_in_place(str(p)):
+                continue  # resting in place — it is in the boneyard list
             efforts.append({
                 "rel": "" if p == root else p.name,
                 "name": root.name if p == root else p.name,

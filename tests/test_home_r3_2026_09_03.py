@@ -116,6 +116,20 @@ class HomeR3Test(unittest.TestCase):
         self.assertIn("anchor_tiles_open", h)
         self.assertIn("function _wireTileMemory()", h)
 
+    def test_gravestone_at_the_end_of_every_project_row(self):
+        # (2026-09-03, John) each project row under the steward's seal ends in
+        # a gravestone → the Archive view (kept); a resting row offers resurrect
+        import anchor_gui
+        row = anchor_gui.render_project_tile_html({"id": "p1", "name": "Alpha", "state": "active",
+                                                   "folder_path": "C:/x", "group": ""})
+        self.assertIn('class="rnd-mini rnd-grave"', row)
+        self.assertIn("rndArchive('p1')", row)
+        self.assertLess(row.index("rnd-grave"), row.index("rnd-kebab-btn"))   # at the END, before the kebab
+        rest = anchor_gui.render_project_tile_html({"id": "p2", "name": "Beta", "state": "archived",
+                                                    "folder_path": "C:/y", "group": ""})
+        self.assertIn(">resurrect</button>", rest)
+        self.assertIn("rndReactivate('p2')", rest)
+
     def test_nothing_is_lost(self):
         h = self.html
         self.assertIn("showView('inbox')", h)

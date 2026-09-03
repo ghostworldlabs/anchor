@@ -822,7 +822,8 @@ function renderEbones() {
   rows.forEach(b => {
     const r = el("div", "brow expand");
     r.appendChild(el("div", "bl", "🪦 " + b.name + " · " + b.boneyarded +
-      " · " + b.steps_done + "/" + b.steps_total));
+      " · " + b.steps_done + "/" + b.steps_total +
+      (b.in_place ? " · resting in place (a file in it was open)" : "")));
     const sum = el("div", "bsum", b.goal_brief || "(no goal recorded)");
     const rb = el("button", "mini", "resurrect");
     rb.style.marginTop = "6px";

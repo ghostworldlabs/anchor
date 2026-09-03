@@ -131,3 +131,50 @@ class EffortTileGravestoneTest(unittest.TestCase):
         self.assertIn('el("button", "mini", "resurrect")', yard)
         self.assertIn('fetch("/api/boneyard_restore"', yard)
         self.assertIn(".efrow .ebone {", s)
+
+
+class RetireInPlaceTest(unittest.TestCase):
+    """(2026-09-03, John: "there was an error archiving") Windows refuses to
+    rename a folder with an open file inside; the effort then retires IN PLACE
+    (marker) and rests in the boneyard all the same; resurrect removes it."""
+
+    def _project(self):
+        root = tempfile.mkdtemp(prefix="steward-yard-")
+        eff = Path(root, "deck effort")
+        eff.mkdir()
+        (eff / "ECGBERHT.md").write_text("# deck effort\n\nGoal: a deck.\n", encoding="utf-8")
+        return root, eff
+
+    def test_move_falls_back_to_the_marker_and_the_lists_agree(self):
+        root, eff = self._project()
+        from unittest import mock
+        live_before = [e["rel"] for e in campaign.discover_efforts(root)]
+        self.assertIn("deck effort", live_before)
+        with mock.patch.object(Path, "rename", side_effect=OSError(5, "Access is denied")), \
+             mock.patch.object(routes.time, "sleep", lambda s: None), \
+             mock.patch.object(routes, "_effort_dir", lambda proot, rel: str(eff)), \
+             mock.patch.object(routes, "ENGINES", {}):
+            out, code = routes.api_post(root, "boneyard_move", {"dir": "deck effort"})
+        self.assertEqual(code, 200, out)
+        self.assertTrue(out["ok"] and out["in_place"])
+        self.assertTrue(campaign.is_retired_in_place(str(eff)))
+        self.assertNotIn("deck effort", [e["rel"] for e in campaign.discover_efforts(root)])
+        yard = campaign.list_boneyard(root)
+        self.assertEqual([(b["name"], b["in_place"]) for b in yard], [("deck effort", True)])
+        # resurrect: the marker goes, the effort is live again
+        out, code = routes.api_post(root, "boneyard_restore", {"name": "deck effort"})
+        self.assertEqual(code, 200, out)
+        self.assertTrue(out["in_place"])
+        self.assertFalse(campaign.is_retired_in_place(str(eff)))
+        self.assertIn("deck effort", [e["rel"] for e in campaign.discover_efforts(root)])
+        self.assertEqual(campaign.list_boneyard(root), [])
+
+    def test_a_free_folder_still_moves(self):
+        root, eff = self._project()
+        from unittest import mock
+        with mock.patch.object(routes, "_effort_dir", lambda proot, rel: str(eff)), \
+             mock.patch.object(routes, "ENGINES", {}):
+            out, code = routes.api_post(root, "boneyard_move", {"dir": "deck effort"})
+        self.assertEqual((code, out["ok"], out["in_place"]), (200, True, False))
+        self.assertTrue(Path(root, campaign.BONEYARD_DIRNAME, "deck effort", "ECGBERHT.md").is_file())
+        self.assertEqual([b["in_place"] for b in campaign.list_boneyard(root)], [False])

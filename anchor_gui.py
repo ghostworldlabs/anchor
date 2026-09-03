@@ -2683,6 +2683,18 @@ def render_project_tile_html(entry: dict) -> str:
             f'<button class="rnd-mini" onclick="rndBlurb(\'{pid}\')" title="Edit blurb (what this project is)">Blurb</button>'
             f'<button class="rnd-mini" onclick="rndNotes(\'{pid}\')" title="Edit notes">Notes</button>'
         )
+    # (2026-09-03, John) the gravestone at the END of every project row under
+    # the steward's seal: an active project retires to the Archive view (kept,
+    # reviewable — nothing deleted); a resting one offers the way back.
+    if is_active:
+        grave = (f'<button class="rnd-mini rnd-grave" '
+                 f'onclick="event.stopPropagation();rndArchive(\'{pid}\')" '
+                 f'title="Retire this project to the archive (boneyard) — reactivate any time">'
+                 f'&#129702;</button>')
+    else:
+        grave = (f'<button class="rnd-mini rnd-accent rnd-grave" '
+                 f'onclick="event.stopPropagation();rndReactivate(\'{pid}\')" '
+                 f'title="Resurrect: make this project active again">resurrect</button>')
     # Kebab menu holds all lifecycle controls so the row stays thin. The row
     # itself (click anywhere not on the kebab) opens the project window.
     kebab = (
@@ -2725,6 +2737,7 @@ def render_project_tile_html(entry: dict) -> str:
         f'{steward_block}'
         f'<span class="rnd-row-counts">{status}</span>'
         f'{rollup_block}'
+        f'{grave}'
         f'{kebab}'
         f'</div>'
     )
@@ -8558,6 +8571,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
 .rnd-rows-rolltog b {{ font-size: 10px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-dim); font-weight: 600; cursor: pointer; }}
 .rnd-rows-rolltog b.on {{ background: rgba(108,156,252,.15); color: var(--accent); border-color: var(--accent); }}
 .rnd-kebab {{ flex: 0 0 auto; position: relative; }}
+.rnd-grave {{ flex: 0 0 auto; opacity: .55; padding: 1px 6px; }}
+.rnd-grave:hover {{ opacity: 1; }}
 .rnd-kebab-btn {{ background: transparent; border: 1px solid transparent; color: var(--text-dim); font-size: 16px; line-height: 1; padding: 2px 7px; border-radius: 6px; cursor: pointer; }}
 .rnd-kebab-btn:hover {{ border-color: var(--border); color: var(--text); }}
 .rnd-kebab-menu {{ display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 30; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; flex-direction: column; gap: 4px; min-width: 120px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }}
@@ -10002,7 +10017,7 @@ function openProjectWindow(pid) {{
     }}
 }}
 function rndSetPriority(pid, pr) {{ apiCall('/api/rnd/set_priority', {{id: pid, priority: pr}}); }}
-function rndArchive(pid) {{ if (confirm('Archive this project? It moves to the Archive view (kept, reviewable).')) apiCall('/api/rnd/archive_project', {{id: pid}}); }}
+function rndArchive(pid) {{ if (confirm('Retire this project to the archive (boneyard)? It is kept and reviewable — resurrect it any time from the R&D Archive.')) apiCall('/api/rnd/archive_project', {{id: pid}}); }}
 function rndRetire(pid) {{ if (confirm('Retire/cancel this project? It moves to the Archive view as retired.')) apiCall('/api/rnd/retire_project', {{id: pid}}); }}
 function rndReactivate(pid) {{ apiCall('/api/rnd/reactivate_project', {{id: pid}}); }}
 function rndRescan(pid) {{ apiCall('/api/rnd/rescan', {{id: pid}}); }}
