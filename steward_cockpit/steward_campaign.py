@@ -651,6 +651,25 @@ def compose_status(campaign_dir: str, engine_state=None):
     return out
 
 
+def read_last_status(campaign_dir: str):
+    """The last 10-minute status the engine PERSISTED for this effort
+    (``<cdir>/.ecgberht/status-summary.json``), marked ``stale: True`` — or
+    None when there is no record or it is unreadable. Read-only; the shape is
+    exactly what :func:`compose_status` produced when it was written, so the
+    pane paints it with the same code. Its ``at`` is the record's own stamp."""
+    try:
+        f = Path(campaign_dir) / ".ecgberht" / "status-summary.json"
+        if not f.is_file():
+            return None
+        d = json.loads(f.read_text(encoding="utf-8"))
+        if not isinstance(d, dict) or not d.get("at"):
+            return None
+        d["stale"] = True
+        return d
+    except Exception:
+        return None
+
+
 def read_deliverables(campaign_dir: str):
     """Parse ``<cdir>/DELIVERABLES.md`` — THE campaign deliverables register (the
     steward's OWN convention, campaign journal 0010: one table row per thing a

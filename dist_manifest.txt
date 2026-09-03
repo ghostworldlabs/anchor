@@ -474,5 +474,6 @@ tests/test_*.py
 tests/fixtures/fake_stream.jsonl
 tests/fixtures/gate_stream.jsonl
 
+tests/test_cockpit_status_window_2026_09_03.py
 tests/test_home_attention_2026_09_03.py
 tests/test_home_r3_2026_09_03.py

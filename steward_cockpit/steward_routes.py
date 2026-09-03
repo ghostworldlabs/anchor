@@ -438,8 +438,15 @@ def handle_get(cdir, verb, qs):
     if verb == "status":
         # the deterministic two-part 10-minute status, composed FRESH
         # (zero-model) — the same shape the engine's cadence persists to
-        # .ecgberht/status-summary.json; the pane paints it on open
+        # .ecgberht/status-summary.json; the pane paints it on open.
+        # (2026-09-03, John): an effort with NO live engine shows its LAST
+        # recorded update, stamped, rather than a fresh "nothing running" —
+        # ``stale: true`` tells the pane it is looking at the record.
         eng = ENGINES.get(cdir)
+        if eng is None:
+            last = campaign.read_last_status(cdir)
+            if last is not None:
+                return last, 200
         return campaign.compose_status(
             cdir, eng.state() if eng else None), 200
     if verb == "grass":
