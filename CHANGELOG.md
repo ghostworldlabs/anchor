@@ -1,5 +1,62 @@
 # Changelog
 
+## v1.2.10 — the home becomes the r3 prototype; the status pane becomes a window; restarts stop needing hands (2026-09-03)
+
+John, 2026-09-03: "there was an updated (prototype) for the main dashboard and it
+looks like it never made it into the current version … those tabs were supposed
+to be on the main dashboard. That is a big error." He was right. The r3 home
+(`_mockups/dashboard-v2`, 2026-08-27/28) was praised by the 08-29 review as the
+design contract and then never scheduled; only its Calendar/Email tiles moved,
+into the project cockpit as placeholders (v1.2.8), where he rejected them on
+09-02 — and they were deleted instead of moved. This release closes that.
+
+### The home is the r3 prototype
+- The steward owns the left rail: the move today · due today · coming up ·
+  projects (open / running / need you / folders) · workbench. The old
+  Views / Domains / Domain-balance nav is gone; Inbox, the domain filters and
+  the R&D archive live one click away inside the Tasks and Projects tiles.
+- The steward tile opens with ranked **Needs attention** rows — `home_attention.py`,
+  a deterministic v0 (health check → a session waiting on you → overdue →
+  due today → failed in 7 days); every row says which rule raised it; the
+  steward's own raise queue joins from the badge poll. No hidden score.
+- Tiles in r3 order: Steward · Tasks · Projects · Workbench · **Calendar** ·
+  **Email** · Grasscatcher. Calendar and Email are HOME tiles in an honest
+  not-connected state — nothing is sample data, no account is named, and the
+  one action says "Set up — not yet available" (no connector exists yet; the
+  08-29 email/calendar research says how one must be built).
+- The cuts the prototype made: the stats row, the Completed/Cancelled/Saved
+  header buttons (now counts on the Tasks line), "Click to expand".
+- Pinned by `tests/test_home_r3_2026_09_03.py`; the rearch census re-pinned to
+  ground truth (51) with its artifacts refreshed.
+
+### The cockpit's status pane, per John's look
+- The status is its **own window** below the deliverables tile — it shrinks
+  when the tile opens; nothing slides under it — and its header carries the
+  time of the last update.
+- The 10-minute update renders in John's locked table format (Summary · Effort ·
+  Doing · Status · Tests · Blocker · Procs · Journal · ETA · To do), every row
+  present, an honest dash where the engine has no fact.
+- An effort with no live engine shows its **last recorded update**, stamped
+  and marked as the record, instead of a fresh "nothing running".
+- Deliverables are one line each → click for the description → **Open ↗** in a
+  new window (the same two-stage line the plan's steps already had).
+- The top bar's line is the one-line status of record for the steward run; the
+  goal is one click away inside it.
+
+### Restarts stop needing elevated hands
+- `POST /api/restart` (token-authed): honored only when the process runs under
+  nssm (AppExit=Restart), it answers, drains warm, exits 0 and nssm brings the
+  fresh server up. Refuses (409) when unsupervised, so it can never leave Anchor
+  down. `/api/shutdown` stays removed and there is no UI button.
+
+### Still open, by name
+- `_mockups/dashboard-v2` is still untracked (personal sample content); the
+  08-29 addendum's P0 asks for a scrubbed, versioned copy.
+- The r3 Doctor behaviors (auto-diagnose on open, receipt in English) are not
+  built; the health banner still opens Doctor seeded.
+- Everything in the v1.2.9 list (F1B, Doctor/Zombie Hunter ChatGPT
+  certification, Codex as a Foreman seat).
+
 ## v1.2.9 — the steward's kickoff becomes the work product; the cockpit sheds what it never needed (2026-09-02)
 
 Gate 5 of the ChatGPT-foundation effort, built by Foreman in Ecgberht (nine waves,
