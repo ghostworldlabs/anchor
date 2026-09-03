@@ -222,6 +222,12 @@
    "auth": "token"
   },
   {
+   "method": "GET",
+   "pattern": "/api/doctor/probe",
+   "match": "exact",
+   "auth": "token"
+  },
+  {
    "method": "POST",
    "pattern": "/api/doctor/resolve_all",
    "match": "exact",

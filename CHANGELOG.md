@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased (after v1.2.10)
+
+### Doctor probes first (the r3 Doctor rule)
+- A red banner is already a diagnosis on disk. Opening Doctor now READS the
+  newest report, says its issues in plain words, PROBES the live server for
+  the paths they name, and decides by itself: when every issue was the 5 AM
+  self-test failing to reach its own throwaway copy while the live server
+  answers, it re-runs the health check itself (no model, no cost) and the
+  banner clears when the report is clean; anything still real is named and
+  waits for your click. `GET /api/doctor/probe` (token, read-only) carries
+  the decision; Resolve all shares the same probe. The cut the scorecard
+  named — the required Diagnose click when a health issue already exists —
+  is made. Pinned by `tests/test_doctor_probe_on_open_2026_09_03.py`.
+- The home banner says what a click does: "Doctor reads it, probes the live
+  server, and re-runs the check itself when the failure is gone."
+
 ## v1.2.10 — the home becomes the r3 prototype; the status pane becomes a window; restarts stop needing hands (2026-09-03)
 
 John, 2026-09-03: "there was an updated (prototype) for the main dashboard and it

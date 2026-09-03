@@ -33,7 +33,7 @@ beside it as `*.personal.*`, git-ignored by this folder's `.gitignore`. Nothing 
 | Calendar / Email tiles | **future** (connector) — the honest not-connected zero state is **live** | home; research in `plans/2026-08-29-anchor-email-calendar-research` |
 | Calendar week/month view, add-event form, mail flow-by-source | **sample** | prototype only |
 | Doctor: Resolve all with a live re-probe; issues in plain words | **live** | `POST /api/doctor/resolve_all`, `doctor_plain.py` |
-| Doctor: runs itself on open with a red banner; receipt in English | **projected** | not built (CHANGELOG v1.2.10 "still open") |
+| Doctor: reads the report, probes the live server and re-runs the check itself on open; receipt in plain words in the Doctor terminal | **live** | `GET /api/doctor/probe`, the /doctor page (after v1.2.10) |
 | Hunter census of every runner class; arming | **future** | Zombie Hunter is live as a session/PTY census; not armed (2026-07-05 read) |
 | Foundry skill cards | **projected** | the Skill Foundry page exists; the card view does not |
 | "Not as important" 7-day demotion feedback | **future** | not built |
