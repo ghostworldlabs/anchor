@@ -66,10 +66,12 @@ Write-Host "`n==> 2/3 Restarting 'anchor'" -ForegroundColor Cyan
 $deadline = (Get-Date).AddSeconds(10)
 while ((Get-PortOwners).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 400 }
 & $Nssm start anchor 2>&1 | ForEach-Object { "    $_" }
-$deadline = (Get-Date).AddSeconds(20)
+# The port shows LISTENING only once the server's boot reconcile is done (it
+# binds at once but listen()s when ready) — under load that has taken 80s+.
+$deadline = (Get-Date).AddSeconds(180)
 while ((Get-PortOwners).Count -eq 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
 if ((Get-PortOwners).Count -eq 0) {
-  Write-Host "[FAIL] Service did not bind $Port within 20s." -ForegroundColor Red
+  Write-Host "[FAIL] Service did not become ready (listening) on $Port within 180s." -ForegroundColor Red
   Write-Host "RESULT: RESTART FAILED" -ForegroundColor Red; exit 1
 }
 Write-Host ("[ok] anchor is listening on {0} (PID {1})." -f $Port, ((Get-PortOwners) -join ',')) -ForegroundColor Green

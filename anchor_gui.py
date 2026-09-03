@@ -21262,6 +21262,14 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # — back up into the local web page so I can actually see it to
                 # compare." The signed M1 drawing, served next to the real
                 # thing. Read-only, no slots, no state.
+                # (2026-09-03) The route row declares AUTH_TOKEN and the
+                # chamber's link carries the token — but this legacy branch
+                # never checked it, so a tokenless GET served the drawing.
+                # Found by the declared-route auth walk the moment it ran
+                # with a token configured (the 5 AM run never had one).
+                if not self._term_token_ok():
+                    self._send_json({"ok": False, "error": "unauthorized"}, 401)
+                    return
                 _mk = Path(r"C:\dev\Ecgberht\planning"
                            r"\steward-assessment-2026-08-08\mockups.html")
                 if _mk.is_file():
