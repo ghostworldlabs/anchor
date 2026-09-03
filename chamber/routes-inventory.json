@@ -391,6 +391,12 @@
   },
   {
    "method": "POST",
+   "pattern": "/api/restart",
+   "match": "exact",
+   "auth": "token"
+  },
+  {
+   "method": "POST",
    "pattern": "/api/rnd/set_blurb",
    "match": "exact",
    "auth": "token"

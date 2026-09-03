@@ -7097,10 +7097,6 @@ def restore_task(task_text, from_archive="saved"):
 
 # ── HTML Dashboard Generation ─────────────────────────────────────────
 
-# ANCHOR[rearch]: GENERATE_HTML — structural anchor (W1); keep UNIQUE, keep
-# directly above the def. The anchor-freshness gate (tools/anchors.py)
-# re-locates this before every extraction wave — no line numbers anywhere.
-
 # ── r3 home (2026-09-03) ──────────────────────────────────────────────────────
 # The home page follows the dashboard-v2 prototype (r3, 2026-08-27/28;
 # _mockups/dashboard-v2 + SCORECARD.md): "open Anchor in the morning, see what
@@ -7232,6 +7228,10 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
     return {"rail": rail_html, "attention": att_html, "attention_count": att_count,
             "calendar": cal_html, "email": mail_html}
 
+
+# ANCHOR[rearch]: GENERATE_HTML — structural anchor (W1); keep UNIQUE, keep
+# directly above the def. The anchor-freshness gate (tools/anchors.py)
+# re-locates this before every extraction wave — no line numbers anywhere.
 
 def generate_html(projects, tasks, inbox):
     """Generate a full standalone HTML dashboard matching the original Anchor style."""
@@ -7792,16 +7792,16 @@ def generate_html(projects, tasks, inbox):
         _r3 = {"rail": '<div class="rail-card"><div class="rquiet">rail unavailable</div></div>',
                "attention": "", "attention_count": "talk below",
                "calendar": "", "email": ""}
-    r3_rail, r3_attention = _r3["rail"], _r3["attention"]
-    r3_attention_count, r3_calendar, r3_email = _r3["attention_count"], _r3["calendar"], _r3["email"]
+    r3_rail_html, r3_attention_html = _r3["rail"], _r3["attention"]
+    r3_attention_count, r3_calendar_html, r3_email_html = _r3["attention_count"], _r3["calendar"], _r3["email"]
     # Inside the Tasks tile: the views the r3 rail no longer lists (Inbox +
     # domain filters) stay one click away; the Projects tile keeps the archive.
-    tasks_tile_links = (
+    tasks_tile_links_html = (
         '<a class="tlink" href="#" onclick="event.preventDefault();showView(\'inbox\')">'
         '&#9993; Inbox <b>%d</b></a>' % len(inbox))
     for _d in domain_order:
         if _d in domain_counts or any(p["domain"] == _d for p in projects):
-            tasks_tile_links += (
+            tasks_tile_links_html += (
                 '<a class="tlink" href="#" onclick="event.preventDefault();showView(\'%s\')">'
                 '<span class="dot" style="background:%s"></span>%s <b>%d</b></a>' % (
                     _d, domain_css_colors.get(_d, 'var(--text-dim)'),
@@ -8582,7 +8582,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
       <div class="rail-back" style="display:none" data-railback>
         <a href="#" onclick="event.preventDefault();showView('dashboard')">&#8592; Dashboard</a>
       </div>
-      {r3_rail}
+      {r3_rail_html}
     </div>
   </nav>
 
@@ -8660,7 +8660,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
                   style="font-size:11px;padding:3px 9px;font-weight:500">&#8599; Dock</button>
           <span class="tile-hint"></span>
         </summary>
-        <div class="tile-body">{r3_attention}<div class="ecg-hs-inline" id="ecgHighSeatInline"></div></div>
+        <div class="tile-body">{r3_attention_html}<div class="ecg-hs-inline" id="ecgHighSeatInline"></div></div>
       </details>
 
 
@@ -8676,7 +8676,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </summary>
         <div class="tile-body">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-            <div class="tile-links">{tasks_tile_links}</div>
+            <div class="tile-links">{tasks_tile_links_html}</div>
             <button class="btn btn-sm" onclick="toggleAddTask()">+ Add Task</button>
           </div>
           <div class="add-task-bar" id="addTaskBar" style="display:none;flex-wrap:wrap">
@@ -8755,8 +8755,8 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
         </div>
       </details>
 
-      {r3_calendar}
-      {r3_email}
+      {r3_calendar_html}
+      {r3_email_html}
       {grass_tile_html}
     </div>
 
@@ -11161,6 +11161,73 @@ def handle_set_notes(handler, path, body):
                             "entry": _rnd.set_notes(pid, body.get("notes", ""))})
     except KeyError:
         handler._send_json({"ok": False, "error": "Not found"}, 404)
+
+
+def _supervisor_parent_name():
+    """Name of this process's parent executable (Windows), '' if unknown.
+
+    Used to prove we run UNDER nssm (AppExit=Restart) before /api/restart is
+    honored — exiting an unsupervised server would just leave it down."""
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x1000, False, os.getppid())  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = wintypes.DWORD(1024)
+            if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                return os.path.basename(buf.value).lower()
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return ""
+    return ""
+
+
+def handle_restart(handler, path, body):
+    """POST /api/restart — restart the SUPERVISED server onto the code on disk.
+
+    Token-authed by the route row. This is NOT the removed /api/shutdown: it
+    only works when the process runs under nssm (whose AppExit=Restart brings
+    a fresh server up within seconds), so it can never leave Anchor down. It
+    exists so a redeploy needs no elevated hands (2026-09-03: an unelevated
+    session cannot stop the service's process — access denied). Sequence:
+    answer → run the warm pre-restart drain (best-effort, fail-open, the same
+    one restart_anchor.ps1 runs) → exit 0 → nssm restarts. Refuses (409) when
+    unsupervised; ``force`` overrides that for a caller who has its own
+    supervisor. Answers with the build it is leaving so the caller can poll
+    /api/version for a different one.
+    """
+    parent = _supervisor_parent_name()
+    supervised = parent.startswith("nssm")
+    if not supervised and not body.get("force"):
+        handler._send_json({"ok": False, "error": "not_supervised",
+                            "parent": parent or "unknown", "build": BUILD_ID,
+                            "message": "Not running under nssm — an exit would leave "
+                                       "the server down. Restart it by hand."}, 409)
+        return
+    handler._send_json({"ok": True, "restarting": True, "leaving_build": BUILD_ID,
+                        "parent": parent or "unknown"})
+
+    def _go():
+        time.sleep(0.5)  # let the response flush
+        try:
+            from tools import pre_restart_drain as _drain
+            _drain.drain(summary_timeout=20)
+        except Exception:
+            pass  # fail-open, exactly like restart_anchor.ps1
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os._exit(0)
+
+    threading.Thread(target=_go, name="anchor-restart", daemon=True).start()
 
 
 def handle_settings_get(handler, path, body):
@@ -19646,6 +19713,7 @@ _MIGRATED_HANDLERS = {
     "handle_retire_project": handle_retire_project,
     "handle_reactivate_project": handle_reactivate_project,
     "handle_set_notes": handle_set_notes,
+    "handle_restart": handle_restart,
     "handle_settings_get": handle_settings_get,
     "handle_settings_post": handle_settings_post,
     "handle_set_blurb": handle_set_blurb,

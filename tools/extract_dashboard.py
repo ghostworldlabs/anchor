@@ -59,7 +59,11 @@ RENDER_FUNCTIONS = ("generate_html", "render_project_window_html")
 # 47 as of 2026-07-30: the v1.2 freelance layout/language pass (db70e86)
 # removed one markup-emitting interpolation; re-pinned to census ground
 # truth during the steward-livery hardening (was 48).
-MARKUP_AMENDMENT_COUNT = 47
+# 51 as of 2026-09-03: the r3 home — the steward's rail replaced the
+# Views/Domains/Domain-balance nav (nav_items, balance_rows gone) and added
+# the rail, the needs-attention rows, the Calendar/Email tiles and the
+# Tasks-tile links (all *_html). Re-pinned to census ground truth (51).
+MARKUP_AMENDMENT_COUNT = 51
 
 MAP_JSON_NAME = "EXTRACTION-MAP.json"
 MAP_MD_NAME = "EXTRACTION-MAP.md"
