@@ -716,7 +716,7 @@ def read_deliverables(campaign_dir: str):
                     if (real == cdir_real
                             or real.startswith(cdir_real + os.sep)) \
                             and os.path.isfile(real):
-                        path_rel = os.path.relpath(real, cdir_real)
+                        path_rel = os.path.relpath(real, cdir_real).replace(os.sep, "/")
                         openable = True
                     else:
                         path_rel = cand

@@ -117,7 +117,7 @@ class OfficePreviewTest(unittest.TestCase):
         slides = op.pptx_slides(data)
         self.assertEqual(slides[0]["title"], "Artificial Intelligence")
         self.assertEqual(slides[0]["body"], ["A very quick introduction"])
-        self.assertEqual(slides[0]["notes"], "say this slowly")
+        self.assertEqual(slides[0]["notes"], "")            # this fixture ships no notes part
         html = op.render_preview(pptx_bytes(), "Lecture 1 AI Supplement v2.pptx", "/dl")
         self.assertIn("Slide 1", html)
         self.assertIn("<h2>AI Supplement</h2>", html)
