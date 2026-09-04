@@ -193,6 +193,15 @@ class DeliverableRouteTest(unittest.TestCase):
         self.assertFalse(items[1]["openable"])            # containment still holds
         self.assertFalse(items[2]["openable"])            # prose is not a path
 
+    def test_the_steward_reader_typesets_math_with_the_vendored_katex(self):
+        page = (REPO / "steward_cockpit" / "static" / "report.html").read_text(encoding="utf-8")
+        self.assertIn('href="/vendor/katex/katex.min.css"', page)
+        self.assertIn('src="/vendor/katex/auto-render.min.js"', page)
+        self.assertIn("typesetMath(body);", page)
+        self.assertIn("ignoredTags", page)                 # code blocks stay code
+        for asset in ("katex.min.css", "katex.min.js", "auto-render.min.js"):
+            self.assertTrue((REPO / "vendor" / "katex" / asset).is_file(), asset)
+
     def test_cockpit_opens_office_in_the_preview_and_the_sender_honors_disposition(self):
         js = (REPO / "steward_cockpit" / "static" / "cockpit.html").read_text(encoding="utf-8")
         self.assertIn("const isOffice = /\\.(docx|pptx|xlsx)$/i.test(it.path);", js)
