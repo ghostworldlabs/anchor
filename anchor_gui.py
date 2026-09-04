@@ -1597,10 +1597,18 @@ def _ensure_zh_node_server(wait_s=10.0):
         try:
             if os.path.exists(_ZH_NODE_SERVER_PATH):
                 creationflags = 0x08000000 if sys.platform.startswith("win") else 0
+                # (2026-09-04) the hunter's engine picker reads the dashboard's
+                # families (ANCHOR_DEFAULT_CLI / CODING_FAMILY / REVIEW_FAMILY) —
+                # hand it the same prefs env every spawned seat gets.
+                try:
+                    _zh_env = {**os.environ, **_aset.export_env_overrides()}
+                except Exception:
+                    _zh_env = None
                 subprocess.Popen(
                     ["node", _ZH_NODE_SERVER_PATH],
                     creationflags=creationflags,
                     cwd=os.path.dirname(_ZH_NODE_SERVER_PATH),
+                    env=_zh_env,
                 )
                 _logger.info("ensure_zh_node: launched server.js on port %s", _ZH_NODE_PORT)
             else:

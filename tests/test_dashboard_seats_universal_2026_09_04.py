@@ -91,6 +91,18 @@ class EngineToggleTest(unittest.TestCase):
         self.assertIn("not detected", gem["health"])
 
 
+class HunterSpawnTest(unittest.TestCase):
+    def test_the_hunter_gui_is_spawned_with_the_dashboard_prefs_env(self):
+        src = (REPO / "anchor_gui.py").read_text(encoding="utf-8")
+        i = src.index('["node", _ZH_NODE_SERVER_PATH]')
+        block = src[i - 600:i + 400]
+        self.assertIn("_aset.export_env_overrides()", block)
+        self.assertIn("env=_zh_env", block)
+        import anchor_settings
+        keys = set(anchor_settings.export_env_overrides())
+        self.assertTrue({"ANCHOR_DEFAULT_CLI", "CODING_FAMILY", "REVIEW_FAMILY"} <= keys)
+
+
 class BadgeTest(unittest.TestCase):
     def test_badge_says_what_the_dashboard_selected(self):
         html = anchor_gui.render_model_flex_badge(
