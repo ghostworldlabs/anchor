@@ -20271,6 +20271,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # Deliverable file streaming (2026-08-25): the routes layer returns a
             # {__file__, __ctype__} marker (containment already enforced there);
             # everything else stays JSON.
+            if code == 200 and isinstance(obj, dict) and "__html__" in obj:
+                # (2026-09-04) a rendered preview page (Office deliverables)
+                self._send_html(obj["__html__"])
+                return
             if code == 200 and isinstance(obj, dict) and "__file__" in obj:
                 try:
                     with open(obj["__file__"], "rb") as fh:
@@ -20279,7 +20283,8 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.send_header("Content-Type", obj.get("__ctype__", "application/octet-stream"))
                     self.send_header("X-Content-Type-Options", "nosniff")
                     self.send_header("Content-Disposition",
-                                     'inline; filename="%s"' % os.path.basename(obj["__file__"]).replace('"', ''))
+                                     '%s; filename="%s"' % (obj.get("__disposition__") or "inline",
+                                                            os.path.basename(obj["__file__"]).replace('"', '')))
                     self.send_header("Cache-Control", "no-store")
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
