@@ -5515,7 +5515,7 @@ def _parked_worktree_stamp() -> str:
         return ""
 
 
-def render_model_flex_badge(env=None) -> str:
+def render_model_flex_badge(env=None, families=None) -> str:
     """Header badge surfacing the host's model-flex posture (Wave 8, #10).
 
     Reads the host-capability profile (``lanes.detect_host_profile``) and shows,
@@ -5530,13 +5530,28 @@ def render_model_flex_badge(env=None) -> str:
     """
     prof = _lanes.detect_host_profile(env)
     has_c, has_g = bool(prof.get("claude")), bool(prof.get("gemini"))
-    if has_c and has_g:
+    # (2026-09-04, John) the badge says what the DASHBOARD selected — the seats every
+    # skill uses — never what happens to be installed.
+    try:
+        fams = families if isinstance(families, dict) else _lanes.selected_families(env)
+    except Exception:
+        fams = {"coding": "claude", "review": "claude", "default_cli": "claude", "selected": {"claude"}}
+    gemini_selected = "gemini" in (fams.get("selected") or set())
+    if has_c and has_g and gemini_selected:
         label = "&#9670; Claude driver &middot; &#10022; Gemini swarm %s" % (
             html_lib.escape(_lanes.SWARM_RATIO))
-        title = ("Both subscriptions: Claude drives every lane; Gemini runs the "
-                 "skill-layer %s swarm (agy-dispatch). Never cross-called." %
+        title = ("Both subscriptions and gemini selected on the dashboard: Claude drives every "
+                 "lane; Gemini runs the skill-layer %s swarm (agy-dispatch). Never cross-called." %
                  _lanes.SWARM_RATIO)
         cls = "mflex-both"
+    elif has_c and (fams.get("coding") != "claude" or fams.get("review") != "claude"):
+        label = "&#9670; Coder %s &middot; Reviewer %s" % (
+            html_lib.escape(str(fams.get("coding", "claude")).capitalize()),
+            html_lib.escape(str(fams.get("review", "claude")).capitalize()))
+        title = ("Seats as selected on the dashboard: coding family %s, review family %s "
+                 "(terminal %s). Every skill reads these; nothing else is spawned." % (
+                     fams.get("coding"), fams.get("review"), fams.get("default_cli")))
+        cls = "mflex-claude"
     elif has_c:
         label = "&#9670; Claude only"
         title = ("Claude-only host: Claude drives every lane; no agy/Gemini "
@@ -14833,17 +14848,38 @@ def _w8_engine_toggle(profile=None, prefs=None, last_used=None):
             profile = _lanes.detect_host_profile()
         except Exception:
             profile = {"claude": False, "gemini": False, "grok": False, "chatgpt": False}
-    prefs = prefs or {}
+    prefs = dict(prefs or {})
+    # (2026-09-04, John) an engine is offered only when it is installed AND the
+    # dashboard selects its family (Terminal / Coder / Reviewer) — an installed
+    # CLI whose subscription was dropped must not appear as a live choice.
+    if not prefs.get("_selected"):
+        try:
+            fams = _lanes.selected_families()
+            prefs.setdefault("default_cli", fams["default_cli"])
+            prefs.setdefault("coding_family", fams["coding"])
+            prefs.setdefault("review_family", fams["review"])
+            prefs["_selected"] = set(fams["selected"])
+        except Exception:
+            prefs["_selected"] = {"claude"}
+    selected = {_w8_normalize_engine(x) for x in prefs["_selected"] if x}
+    selected.discard(None)
     engines = []
     for eid in _W8_ENGINE_IDS:
         available = bool(profile.get(eid))
+        chosen = eid in selected
         transport = {
             "claude": ("claude", "claude"),
             "gemini": ("agy", "agy"),
             "grok": ("grok-cli", "grok.exe -p"),
             "chatgpt": ("chatgpt-cli", "codex exec"),
         }[eid]
-        health = "healthy" if available else "unavailable (subscription CLI not detected)"
+        if not available:
+            health = "unavailable (subscription CLI not detected)"
+        elif not chosen:
+            health = "installed, but not selected on the dashboard (Terminal / Coder / Reviewer)"
+        else:
+            health = "healthy"
+        enabled = available and chosen
         engines.append({
             "id": eid,
             "label": eid.capitalize() if eid != "gemini" else "Gemini",
@@ -14851,8 +14887,9 @@ def _w8_engine_toggle(profile=None, prefs=None, last_used=None):
             "spawn": transport[1],
             "subscriptionCli": True,
             "available": available,
-            "enabled": available,
-            "disabled": not available,
+            "selected": chosen,
+            "enabled": enabled,
+            "disabled": not enabled,
             "health": health,
             "firstPromptBudgetMs": _W8_FIRST_PROMPT_BUDGET_MS,
         })
@@ -14862,10 +14899,15 @@ def _w8_engine_toggle(profile=None, prefs=None, last_used=None):
     if last and last in healthy:
         default = last
     else:
+        # (2026-09-04) a picker starts a TERMINAL, so the dashboard's Terminal role
+        # (default_cli) wins; the Coder family is the fallback.
         family = _w8_normalize_engine(
-            prefs.get("coding_family") or prefs.get("default_cli"))
+            prefs.get("default_cli") or prefs.get("coding_family"))
+        alt = _w8_normalize_engine(prefs.get("coding_family"))
         if family and family in healthy:
             default = family
+        elif alt and alt in healthy:
+            default = alt
         elif healthy:
             default = healthy[0]
     return {
@@ -19460,6 +19502,124 @@ def handle_usage_ledger(handler, path, body):
     handler._send_json({"ok": True, "usage": usage})
 
 
+def _reconcile_sessions_tick(pid=None):
+    """Reconcile the registry against the LIVE PTY set and run every advance that
+    depends on it (restart recovery, reconcile->auto-advance, in-session stage
+    progress, summarize-on-finish). Best-effort, fully guarded, idempotent.
+
+    (2026-09-04, John: "the session should continue running in the background ...
+    we should not be tied to whether a particular device is up and has an Anchor
+    webpage active") This used to run ONLY inside the project window's session-list
+    poll, so a planning session that finished while no browser was open did not
+    advance until someone opened the page. The server now ticks it itself
+    (``_start_reconcile_ticker``); the poll still calls it for immediacy.
+    """
+    with _RECONCILE_TICK_LOCK:
+        # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
+        # project-window refresh/poll path. Before listing, reconcile the
+        # registry against the LIVE PTY set: a managed planning session
+        # whose process is gone is re-statused DONE and (idempotently)
+        # auto-advanced to ONE linked build — so a planning session that
+        # DIED (not just an explicit hard-kill) advances on the next
+        # refresh. Idempotent on parent_session_id → repeated polls are
+        # no-ops. Best-effort + fully guarded: an error here NEVER breaks
+        # the (read-only) session list response. live_session_ids MUST be
+        # passed (the function default treats NO session as live, which
+        # would wrongly mark live ones stale).
+        try:
+            live = list(_termsess._pty.live_sessions())
+            # v12 Wave 8 — restart recovery MUST run BEFORE reconcile
+            # (Reviewer W8-R2-01): reconcile_and_advance blanket-marks every
+            # RUNNING-but-PTY-gone session DONE (no effort exemption), and
+            # recover only acts on RUNNING records — so recover has to claim
+            # an ``effort_managed`` effort whose PTY is gone FIRST (persist
+            # its active stage's worktree docs [no reap], mark the stage entry
+            # 'interrupted' [≠ done/failed], re-status IDLE so it is honestly
+            # not-running + reopenable; NEVER auto-spawns/advances) — otherwise
+            # reconcile would mark it DONE and its uncommitted docs would be
+            # LOST. Once recover sets it IDLE, the reconcile pass below leaves
+            # it alone (it only re-statuses RUNNING-but-gone). Best-effort +
+            # fully guarded: an error here NEVER breaks the read-only list.
+            try:
+                _termsess.recover_interrupted_efforts(
+                    live_session_ids=live)
+            except Exception:
+                pass
+            _rec_out = _termsess.reconcile_and_advance(
+                live_session_ids=live)
+            # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
+            # use the legacy reconcile→auto_advance_planning_to_build mint
+            # (which is gated off for it anyway). Instead, on the SAME
+            # refresh poll, run the on-disk-only ``detect_stage_progress``
+            # over the project's LIVE efforts — it auto-advances IN-SESSION
+            # on a committed plan-set / build signal (ZERO PTY bytes,
+            # idempotent, mints nothing). Legacy sessions stay on the
+            # reconcile_and_advance path above. Best-effort + fully guarded
+            # (never breaks the read-only session-list response).
+            try:
+                for _er in _termsess.list_sessions(
+                        project_id=pid or None):
+                    if not isinstance(_er, dict):
+                        continue
+                    if not _er.get("effort_managed"):
+                        continue
+                    if _er.get("status") != _termsess._reg.STATUS_RUNNING:
+                        continue
+                    try:
+                        _termsess.detect_stage_progress(
+                            _er.get("session_id"),
+                            project_id=_er.get("project_id") or None)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # v7 Wave 2: any session newly re-statused DONE by the
+            # reconcile-dead path gets a background session-summary
+            # scheduled (best-effort, non-blocking, idempotent — a cached
+            # one is skipped, so repeated polls don't re-run the model).
+            # Never breaks the read-only session-list response.
+            try:
+                marked = ((_rec_out or {}).get("reconcile", {})
+                          or {}).get("marked", []) or []
+                for _sid in marked:
+                    _r = _termsess.get_session(_sid)
+                    if _r is None:
+                        continue
+                    _trigger_session_summary_on_finish(
+                        _r.get("project_id"), _r.get("lane"), _sid)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+_RECONCILE_TICK_LOCK = threading.Lock()
+_RECONCILE_TICK_DEFAULT_S = 60
+
+
+def _start_reconcile_ticker(interval_s=None):
+    """Daemon thread: ``_reconcile_sessions_tick()`` every ``interval_s`` (env
+    ``ANCHOR_RECONCILE_TICK_S``, default 60; ``0`` disables). Never raises."""
+    try:
+        interval = int(os.environ.get("ANCHOR_RECONCILE_TICK_S", "") or (interval_s or _RECONCILE_TICK_DEFAULT_S))
+    except (TypeError, ValueError):
+        interval = _RECONCILE_TICK_DEFAULT_S
+    if interval <= 0:
+        return None
+
+    def _run():
+        while True:
+            time.sleep(interval)
+            try:
+                _reconcile_sessions_tick(None)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_run, name="anchor-reconcile-tick", daemon=True)
+    t.start()
+    return t
+
+
 def handle_term_sessions(handler, path, body):
     # Read-only: managed terminal sessions for a project — the
     # repopulate-from-registry hook the cockpit tiles row paints from
@@ -19476,82 +19636,7 @@ def handle_term_sessions(handler, path, body):
     # chain. Still SAFE: worktree_path / branch are NEVER included.
     q = parse_qs(urlparse(handler.path).query)
     pid = (q.get("project_id", [""])[0] or "").strip()
-    # v6 Wave 9 (polish 3): wire the reconcile→auto-advance into the
-    # project-window refresh/poll path. Before listing, reconcile the
-    # registry against the LIVE PTY set: a managed planning session
-    # whose process is gone is re-statused DONE and (idempotently)
-    # auto-advanced to ONE linked build — so a planning session that
-    # DIED (not just an explicit hard-kill) advances on the next
-    # refresh. Idempotent on parent_session_id → repeated polls are
-    # no-ops. Best-effort + fully guarded: an error here NEVER breaks
-    # the (read-only) session list response. live_session_ids MUST be
-    # passed (the function default treats NO session as live, which
-    # would wrongly mark live ones stale).
-    try:
-        live = list(_termsess._pty.live_sessions())
-        # v12 Wave 8 — restart recovery MUST run BEFORE reconcile
-        # (Reviewer W8-R2-01): reconcile_and_advance blanket-marks every
-        # RUNNING-but-PTY-gone session DONE (no effort exemption), and
-        # recover only acts on RUNNING records — so recover has to claim
-        # an ``effort_managed`` effort whose PTY is gone FIRST (persist
-        # its active stage's worktree docs [no reap], mark the stage entry
-        # 'interrupted' [≠ done/failed], re-status IDLE so it is honestly
-        # not-running + reopenable; NEVER auto-spawns/advances) — otherwise
-        # reconcile would mark it DONE and its uncommitted docs would be
-        # LOST. Once recover sets it IDLE, the reconcile pass below leaves
-        # it alone (it only re-statuses RUNNING-but-gone). Best-effort +
-        # fully guarded: an error here NEVER breaks the read-only list.
-        try:
-            _termsess.recover_interrupted_efforts(
-                live_session_ids=live)
-        except Exception:
-            pass
-        _rec_out = _termsess.reconcile_and_advance(
-            live_session_ids=live)
-        # v12 Wave 7 — REWIRE: an ``effort_managed`` effort does NOT
-        # use the legacy reconcile→auto_advance_planning_to_build mint
-        # (which is gated off for it anyway). Instead, on the SAME
-        # refresh poll, run the on-disk-only ``detect_stage_progress``
-        # over the project's LIVE efforts — it auto-advances IN-SESSION
-        # on a committed plan-set / build signal (ZERO PTY bytes,
-        # idempotent, mints nothing). Legacy sessions stay on the
-        # reconcile_and_advance path above. Best-effort + fully guarded
-        # (never breaks the read-only session-list response).
-        try:
-            for _er in _termsess.list_sessions(
-                    project_id=pid or None):
-                if not isinstance(_er, dict):
-                    continue
-                if not _er.get("effort_managed"):
-                    continue
-                if _er.get("status") != _termsess._reg.STATUS_RUNNING:
-                    continue
-                try:
-                    _termsess.detect_stage_progress(
-                        _er.get("session_id"),
-                        project_id=_er.get("project_id") or None)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        # v7 Wave 2: any session newly re-statused DONE by the
-        # reconcile-dead path gets a background session-summary
-        # scheduled (best-effort, non-blocking, idempotent — a cached
-        # one is skipped, so repeated polls don't re-run the model).
-        # Never breaks the read-only session-list response.
-        try:
-            marked = ((_rec_out or {}).get("reconcile", {})
-                      or {}).get("marked", []) or []
-            for _sid in marked:
-                _r = _termsess.get_session(_sid)
-                if _r is None:
-                    continue
-                _trigger_session_summary_on_finish(
-                    _r.get("project_id"), _r.get("lane"), _sid)
-        except Exception:
-            pass
-    except Exception:
-        pass
+    _reconcile_sessions_tick(pid)
     try:
         recs = _termsess.list_sessions(project_id=pid or None)
     except Exception:
@@ -22117,6 +22202,11 @@ def main():
         # never loses more than one interval of work and is warm-restartable. One
         # main-process-owned daemon; spawns no subprocess (no console popups).
         import terminal_session as _ts_auto
+        # (2026-09-04) sessions advance in the background, not only under a browser poll
+        try:
+            _start_reconcile_ticker()
+        except Exception:
+            pass
         if _ts_auto.start_autosave_daemon():
             _logger.info("session autosave heartbeat started (interval %ss)",
                          int(_ts_auto._autosave_interval()))
