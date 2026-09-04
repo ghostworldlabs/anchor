@@ -309,10 +309,19 @@ class Engine:
         # park/crash cannot drop what he already typed (2026-08-27).
         self.queue = list(stored_entry.get("pending_queue") or [])
         self.session_id = None
-        self.spend = 0.0
-        self.tokens = 0
-        self.secs = 0.0
-        self.turns = 0
+        # (2026-09-04, John) "the total spend tokens, time and $ resets every time I
+        # reconnect with Anchor" — the counters started at zero on every engine
+        # (re)creation and the turn-end write then REPLACED the durable usage with
+        # the smaller in-memory total. Seed them from the record so the totals
+        # carry the entire history of the effort.
+        _u = stored_entry.get("usage") or {}
+        try:
+            self.spend = float(_u.get("spend") or 0.0)
+            self.tokens = int(_u.get("tokens") or 0)
+            self.secs = float(_u.get("secs") or 0.0)
+            self.turns = int(_u.get("turns") or 0)
+        except (TypeError, ValueError):
+            self.spend, self.tokens, self.secs, self.turns = 0.0, 0, 0.0, 0
         self.last_output = 0.0
         self.last_tick = 0.0
         self.last_status = 0.0      # deterministic status cadence (separate

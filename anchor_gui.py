@@ -208,22 +208,69 @@ _CACHE_BUST_JS_TEMPLATE = """
         ks.forEach(function (k) { try { caches.delete(k); } catch (e) {} });
       }).catch(function () {});
     }
+    // (2026-09-04, John) "the cockpit refreshed on its own ... and cleared the
+    // dialogue while I was typing" — that was THIS reload, fired by a redeploy.
+    // Two rules now: (1) never reload while a text field has focus or holds
+    // unsent text — wait for the next check; (2) before any reload, stash every
+    // draft (textareas + text inputs) in sessionStorage and put it back after.
+    var DRAFT_KEY = 'anchor_drafts:' + location.pathname;
+    function draftFields() {
+      var out = [];
+      var els = document.querySelectorAll('textarea, input[type=text], input[type=search], input:not([type])');
+      for (var i = 0; i < els.length; i++) out.push(els[i]);
+      return out;
+    }
+    function fieldKey(el, i) {
+      return (el.getAttribute('data-say') != null ? 'data-say' : (el.id || el.name || '')) + '#' + i;
+    }
+    function typing() {
+      var a = document.activeElement;
+      if (a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && (a.value || '').length) return true;
+      var els = draftFields();
+      for (var i = 0; i < els.length; i++) if ((els[i].value || '').trim().length) return true;
+      return false;
+    }
+    function stashDrafts() {
+      try {
+        var els = draftFields(), d = [];
+        for (var i = 0; i < els.length; i++) if ((els[i].value || '').length) d.push({ k: fieldKey(els[i], i), v: els[i].value });
+        if (d.length) sessionStorage.setItem(DRAFT_KEY, JSON.stringify(d)); else sessionStorage.removeItem(DRAFT_KEY);
+      } catch (e) {}
+    }
+    function restoreDrafts() {
+      try {
+        var raw = sessionStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        sessionStorage.removeItem(DRAFT_KEY);
+        var d = JSON.parse(raw), els = draftFields(), byKey = {};
+        for (var i = 0; i < els.length; i++) byKey[fieldKey(els[i], i)] = els[i];
+        for (var j = 0; j < d.length; j++) {
+          var el = byKey[d[j].k];
+          if (el && !(el.value || '').length) { el.value = d[j].v; try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {} }
+        }
+      } catch (e) {}
+    }
     function checkVersion() {
       fetch('/api/version', { cache: 'no-store' })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           var v = d && d.version;
           if (!v || v === window.__ANCHOR_BUILD__) return;
+          if (typing()) return; // his words outrank a redeploy; try again next check
           // Loop guard: never reload more than once per server version.
           var key = 'anchor_reloaded_for';
           try {
             if (sessionStorage.getItem(key) === String(v)) return;
             sessionStorage.setItem(key, String(v));
           } catch (e) {}
+          stashDrafts();
           location.replace(location.pathname + '?v=' + encodeURIComponent(v));
         })
         .catch(function () {});
     }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreDrafts);
+    else restoreDrafts();
+    setTimeout(restoreDrafts, 1500); // pages that build their fields after load
     checkVersion();
     setInterval(checkVersion, 30000);
   } catch (e) {}
@@ -1440,6 +1487,28 @@ def _zh_node_is_up(timeout=1.0):
         return False
 
 
+def _zh_node_is_stale(timeout=1.0):
+    """True when the running hunter GUI was started from an OLDER server.js than
+    the one on disk (2026-09-04): the process outlives service restarts and
+    keeps the code + environment it was born with, so a picker rule or a prefs
+    env change never reached it until someone killed it by hand. The hunter
+    reports ``server_mtime`` in /api/state; a hunter that reports none is an
+    old build and therefore stale."""
+    import json as _json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{_zh_node_base()}/api/state", timeout=timeout) as r:
+            st = _json.loads(r.read().decode("utf-8", "replace") or "{}")
+    except Exception:
+        return False  # not up / unreadable — the caller's liveness logic decides
+    try:
+        reported = float(st.get("server_mtime") or 0)
+        on_disk = os.path.getmtime(_ZH_NODE_SERVER_PATH) * 1000.0
+    except Exception:
+        return False
+    return reported <= 0 or (on_disk - reported) > 2000.0
+
+
 def _zh_node_port_listening():
     """True if something accepts TCP on the ZH port (may still be wedged)."""
     try:
@@ -1561,12 +1630,18 @@ def _ensure_zh_node_server(wait_s=10.0):
     blocking freeze-capability probe on the old Node build).
     """
     import subprocess
-    if _zh_node_is_up(timeout=0.8):
+    if _zh_node_is_up(timeout=0.8) and not _zh_node_is_stale(timeout=0.8):
         return True
     with _zh_node_start_lock:
         if _zh_node_is_up(timeout=0.8):
-            _zh_node_breaker_reset()
-            return True
+            if not _zh_node_is_stale(timeout=0.8):
+                _zh_node_breaker_reset()
+                return True
+            # (2026-09-04) a live but STALE hunter: retire it and fall through to
+            # the spawn below (it comes back on the current server.js + prefs env).
+            _logger.warning("ensure_zh_node: hunter GUI runs an older server.js than on disk — recycling")
+            _zh_node_kill_listener()
+            time.sleep(0.4)
         # CIRCUIT BREAKER (2026-07-26 hardening, P0.6). This recycle loop had no
         # backoff and no give-up: logs/errors.log shows 74 cycles of
         # "listening but /api/state dead -> killed wedged listener -> launched
