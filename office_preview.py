@@ -136,6 +136,11 @@ def pptx_slides(data: bytes) -> list:
             for sp in slide.iter("{%s}sp" % _NS["p"]):
                 ph = sp.find("p:nvSpPr/p:nvPr/p:ph", _NS)
                 ptype = (ph.get("type") or "body") if ph is not None else ""
+                # Slide numbers, dates and footers are chrome, not content.
+                if ptype in ("sldNum", "dt", "ftr"):
+                    continue
+                nv = sp.find("p:nvSpPr/p:cNvPr", _NS)
+                shape_name = (nv.get("name") or "").strip().lower() if nv is not None else ""
                 paras = []
                 for para in sp.iter("{%s}p" % _NS["a"]):
                     t = "".join(x.text or "" for x in para.iter("{%s}t" % _NS["a"])).strip()
@@ -143,7 +148,10 @@ def pptx_slides(data: bytes) -> list:
                         paras.append(t)
                 if not paras:
                     continue
-                if ptype in ("title", "ctrTitle") and not title:
+                # A slide built without placeholders (a designed title slide)
+                # still names its title shape "Title N" — honor that.
+                is_title = ptype in ("title", "ctrTitle") or (ph is None and shape_name.startswith("title"))
+                if is_title and not title:
                     title = " ".join(paras)
                 else:
                     body.extend(paras)

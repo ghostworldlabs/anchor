@@ -103,6 +103,20 @@ class OfficePreviewTest(unittest.TestCase):
         slides = op.pptx_slides(pptx_bytes())
         self.assertEqual([s["title"] for s in slides], ["AI Supplement", "Second"])
         self.assertEqual(slides[0]["body"], ["why agents", "what changes"])
+        self.assertNotIn("2", slides[1]["body"])          # the slide-number placeholder is chrome
+
+    def test_a_designed_slide_without_placeholders_still_finds_its_title(self):
+        # John's real deck: slide 1 has no <p:ph> at all, only shapes named "Title 1" / "Content Placeholder".
+        pres = ('<p:presentation xmlns:p="%s" xmlns:r="%s"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>' % (P, R))
+        rels = '<Relationships xmlns="%s"><Relationship Id="rId1" Target="slides/slide1.xml"/></Relationships>' % REL
+        sp = lambda name, text: ('<p:sp><p:nvSpPr><p:cNvPr id="1" name="%s"/><p:nvPr/></p:nvSpPr><p:txBody>'
+                                 '<a:p><a:r><a:t>%s</a:t></a:r></a:p></p:txBody></p:sp>' % (name, text))
+        slide = ('<p:sld xmlns:p="%s" xmlns:a="%s"><p:cSld><p:spTree>%s%s</p:spTree></p:cSld></p:sld>'
+                 % (P, A, sp("Title 1", "Artificial Intelligence"), sp("Content Placeholder 13", "A very quick introduction")))
+        data = _zip({"ppt/presentation.xml": pres, "ppt/_rels/presentation.xml.rels": rels, "ppt/slides/slide1.xml": slide})
+        slides = op.pptx_slides(data)
+        self.assertEqual(slides[0]["title"], "Artificial Intelligence")
+        self.assertEqual(slides[0]["body"], ["A very quick introduction"])
         self.assertEqual(slides[0]["notes"], "say this slowly")
         html = op.render_preview(pptx_bytes(), "Lecture 1 AI Supplement v2.pptx", "/dl")
         self.assertIn("Slide 1", html)
@@ -159,6 +173,25 @@ class DeliverableRouteTest(unittest.TestCase):
         # containment still holds
         obj, code = sr.handle_get(str(d), "deliverable-file", {"path": "../deck.pptx"})
         self.assertEqual(code, 404)
+
+    def test_a_register_row_without_backticks_still_opens(self):
+        # The Fractal Orthogonal Basis register (written by a steward session) lists
+        # "report/DRAFT-v1.md" with no backticks; the cockpit showed path=null.
+        import tempfile
+        from steward_cockpit import steward_campaign as sc
+        d = Path(tempfile.mkdtemp(prefix="anchor-reg-"))
+        (d / "report").mkdir()
+        (d / "report" / "DRAFT-v1.md").write_text("# draft\n", encoding="utf-8")
+        (d / "DELIVERABLES.md").write_text(
+            "# Deliverables\n\n| What | Where | Date | Step |\n|------|-------|------|------|\n"
+            "| Draft v1 of the research report | report/DRAFT-v1.md | 2026-09-04 | formalize |\n"
+            "| Something outside | ../elsewhere.md | 2026-09-04 | x |\n"
+            "| Prose only | see the email thread | 2026-09-04 | x |\n", encoding="utf-8")
+        items = sc.read_deliverables(str(d))["items"]
+        self.assertEqual(items[0]["path"], "report/DRAFT-v1.md")
+        self.assertTrue(items[0]["openable"])
+        self.assertFalse(items[1]["openable"])            # containment still holds
+        self.assertFalse(items[2]["openable"])            # prose is not a path
 
     def test_cockpit_opens_office_in_the_preview_and_the_sender_honors_disposition(self):
         js = (REPO / "steward_cockpit" / "static" / "cockpit.html").read_text(encoding="utf-8")
