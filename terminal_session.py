@@ -395,12 +395,10 @@ def _check_engine_allowed(lane, backend):
     if not isinstance(backend, str) or backend not in VALID_BACKENDS:
         raise TerminalSessionError(
             "unknown backend %r (expected claude|gemini|grok|chatgpt)" % (backend,))
-    if backend == _reg.BACKEND_CHATGPT:
-        raise TerminalSessionError(
-            "chatgpt-gated-bridge-pending: ChatGPT is visible as a saved "
-            "preference, but interactive terminal start/switch requires the "
-            "persistent Codex exec/resume cockpit bridge; no PTY was started"
-        )
+    # (John, 2026-09-05) ChatGPT runs the Codex TUI in the cockpit PTY exactly as
+    # Claude and Grok do; the "bridge pending" gate that closed this seat is gone
+    # (planning/chatgpt-terminal-2026-09-05). Codex has no launch-time session
+    # pin, so its usage segment stays honestly unmeasured (RULED Option C).
     if _lanes is not None:
         try:
             _lanes.check_engine_allowed(lane, backend)
@@ -517,10 +515,9 @@ def _resolve_engine_cmd(engine: str) -> str:
         home_codex = Path.home() / ".codex" / "bin" / "codex.exe"
         if home_codex.is_file():
             return str(home_codex)
-        # No bare-name fallback here: a bare `codex` spawn would carry none of the
-        # adapter's sandbox/target/provenance controls. _check_engine_allowed gates
-        # this engine off earlier today; if that gate is ever lifted, an absent
-        # binary must still fail closed rather than open an unsandboxed seat.
+        # No bare-name fallback here: the terminal seat is OPEN (2026-09-05), so an
+        # absent binary must fail closed rather than let a bare `codex` resolve to
+        # nothing and open an unsandboxed seat by accident.
         raise TerminalSessionError(
             "chatgpt-terminal-binary-missing: no codex executable found; "
             "the ChatGPT terminal seat stays closed")
@@ -838,7 +835,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # that later switches to claude (and finalizes MEASURED on the claude segment)
     # is then still honestly flagged 'partial (gemini segment unmeasured)', never a
     # complete-looking Claude-only number. Best-effort; never breaks the launch.
-    if backend == _reg.BACKEND_GEMINI:
+    if backend in (_reg.BACKEND_GEMINI, _reg.BACKEND_CHATGPT):
         try:
             record = _reg.update_session(sid, usage_gemini_segment=True)
         except Exception:
@@ -950,6 +947,9 @@ DOCTOR_POSTURE_WRITE_ENABLED = "write-enabled"
 DOCTOR_READONLY_CLI_ARGS = {
     _reg.BACKEND_CLAUDE: ("--permission-mode", "plan"),
     _reg.BACKEND_GEMINI: ("--approval-mode", "plan"),
+    # (2026-09-05) codex: the sandbox flag overrides the user's global config
+    # (John's sets danger-full-access), so a Doctor on ChatGPT can never mutate.
+    _reg.BACKEND_CHATGPT: ("-s", "read-only"),
 }
 
 # Serialize match-or-start so simultaneous Doctor requests cannot both observe

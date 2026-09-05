@@ -81,10 +81,12 @@ def test_save_rejects_invalid(settings_env):
     s = settings_env["mod"]
     with pytest.raises(ValueError):
         s.save_settings(default_cli="not-a-cli")
-    # A valid coding family is still not a valid default terminal CLI until the
-    # ChatGPT terminal bridge lands (a persisted value bricks every terminal open).
+    # (2026-09-05) ChatGPT drives the terminal: a saved default persists.
+    s.save_settings(default_cli="chatgpt")
+    assert s.load_settings()["default_cli"] == "chatgpt"
+    s.save_settings(default_cli="grok")   # back to the fixture default for the checks below
     with pytest.raises(ValueError, match="default_cli"):
-        s.save_settings(default_cli="chatgpt")
+        s.save_settings(default_cli="not-a-cli")
     with pytest.raises(ValueError):
         s.save_settings(coding_family="not-a-family")
     # (2026-09-05) ChatGPT IS a valid review family now (model stamped unattested)

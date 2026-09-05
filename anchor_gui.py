@@ -5810,9 +5810,10 @@ def model_role_capabilities(profile=None) -> dict:
     """Return honest dashboard availability for each visible agentic role.
 
     This reports transport truth without creating another setting.  Codex can
-    drive coding/orchestration when its subscription CLI is present.  Its
-    interactive terminal bridge is unfinished, and reviewer/judge stay
-    fail-closed because current receipts do not attest the served model.
+    drive coding/orchestration when its subscription CLI is present; since
+    2026-09-05 it also drives the interactive terminal (the Codex TUI in the
+    cockpit PTY) and the reviewer/judge seats, whose verdicts carry a
+    model-unattested stamp because the Codex receipts name no served model.
     """
     if profile is None:
         try:
@@ -5836,11 +5837,14 @@ def model_role_capabilities(profile=None) -> dict:
                 "%s subscription CLI is not detected on this host." % label
             )
             if family == "chatgpt" and present and role == "terminal":
-                selectable = False
-                status = "bridge_pending"
+                # (John, 2026-09-05) the Codex TUI runs in the cockpit terminal;
+                # the user's own Codex config governs approvals and sandbox there
+                # (the Doctor forces read-only); usage stays honestly unmeasured.
+                status = "ready"
                 reason = (
-                    "Interactive ChatGPT terminal is not ready: the persistent "
-                    "Codex exec/resume bridge is still pending, so no seat starts."
+                    "ChatGPT terminal: the Codex TUI runs in the cockpit "
+                    "terminal; your Codex config's approval and sandbox settings "
+                    "apply (the Doctor forces read-only); usage is unmeasured."
                 )
             elif family == "chatgpt" and present and role == "coder":
                 status = "available_unattested"
@@ -5940,8 +5944,8 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
 
     chatgpt_ready = capabilities["roles"]["coder"]["families"]["chatgpt"]["available"]
     capability_summary = (
-        "ChatGPT: coder ready &middot; reviewer and judge ready (model unattested, "
-        "stamped) &middot; terminal bridge pending"
+        "ChatGPT: terminal, coder, reviewer and judge ready (reviewer/judge "
+        "model unattested, stamped)"
         if chatgpt_ready else "ChatGPT unavailable on this host"
     )
 
@@ -6044,7 +6048,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
     var chat = caps.roles.coder && caps.roles.coder.families.chatgpt;
     if (note && chat) {
       note.textContent = chat.available
-        ? 'ChatGPT: coder ready · reviewer and judge ready (model unattested, stamped) · terminal bridge pending'
+        ? 'ChatGPT: terminal, coder, reviewer and judge ready (reviewer/judge model unattested, stamped)'
         : 'ChatGPT unavailable on this host';
     }
   }
