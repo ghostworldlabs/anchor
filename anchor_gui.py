@@ -2638,16 +2638,29 @@ def _steward_status_tile_line(entry: dict) -> str:
         return ""
     now_lines = [str(x).strip() for x in (data.get("now") or []) if str(x).strip()]
     plan = data.get("plan") or {}
+    # (2026-09-04, John) the row says what is RUNNING (looked through the
+    # steward to the commissioned skill), the current slice, and its ETA.
+    run = data.get("running") or {}
+    sl = data.get("slice") or {}
     bits = []
-    if now_lines:
+    if str(run.get("label") or "").strip():
+        bits.append(str(run["label"]).strip())
+    elif now_lines:
         bits.append(now_lines[0])
-    step = str(plan.get("step") or "").strip()
-    if step and step != "(no active step)":
-        bits.append("step %s/%s · %s" % (plan.get("steps_done", 0),
-                                         plan.get("steps_total", 0), step))
+    if str(sl.get("name") or "").strip():
+        bits.append("slice %s/%s · %s" % (sl.get("n", "?"), sl.get("total", "?"),
+                                          str(sl["name"]).strip()))
+    else:
+        step = str(plan.get("step") or "").strip()
+        if step and step != "(no active step)":
+            bits.append("step %s/%s · %s" % (plan.get("steps_done", 0),
+                                             plan.get("steps_total", 0), step))
     wait = str(plan.get("waiting_on_you") or "").strip()
     if wait:
         bits.append("waiting on you: " + wait)
+    eta = str(data.get("eta") or "").strip()
+    if eta:
+        bits.append("ETA " + eta)
     if not bits:
         return ""
     return ("⏱ %s · %s" % (str(data.get("at", ""))[-5:],

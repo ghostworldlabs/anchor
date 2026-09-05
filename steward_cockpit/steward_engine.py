@@ -141,7 +141,16 @@ CONTRACT = (
     "Star and append a goal_flip event {verdict: reaffirmed|rewritten, goal_from, "
     "goal_to, step_id, receipt}; if rewritten, update the Face. Then recommend "
     "whether to move on; he decides. The cockpit Work product tile is the "
-    "living map of the deliverable — same steps as the plan."
+    "living map of the deliverable — same steps as the plan. "
+    "(14) PLANS FORWARD (John, 2026-09-04): whenever a plan for going forward "
+    "exists or arrives (a researchPrime plan, a Crucible master or "
+    "implementation plan, your own PLAN.md), it lives in TWO places at once: a "
+    "row in DELIVERABLES.md (so it is a clickable link in the work flow and the "
+    "status pane; plan documents named PLAN / MASTER-PLAN / IMPLEMENTATION-PLAN "
+    "/ NORTH-STAR appear there on their own) AND a short bullet summary said by "
+    "you in the dialogue - three to six bullets, each two-four bold lead words "
+    "then the point, ending with the one decision it needs from him if any. "
+    "Never a plan he has to go hunting for."
 )
 
 STAND_UP_NEW = (
@@ -173,6 +182,30 @@ TICK = (
 
 
 _STATE_LOCK = threading.RLock()
+
+
+def result_error_text(ev):
+    """The text of an error result event (``is_error`` or an error subtype),
+    clipped; "" for a clean result. The model's own words, never a guess."""
+    if not isinstance(ev, dict):
+        return ""
+    sub = str(ev.get("subtype") or "")
+    is_err = bool(ev.get("is_error")) or (sub.startswith("error") and sub != "")
+    if not is_err:
+        return ""
+    txt = ev.get("result")
+    if not isinstance(txt, str) or not txt.strip():
+        txt = " ".join(str(x) for x in (ev.get("errors") or []) if x) or sub or "error"
+    txt = " ".join(str(txt).split())
+    return txt if len(txt) <= 240 else txt[:239].rsplit(" ", 1)[0] + "\u2026"
+
+
+def _campaign_limit(text):
+    try:
+        from steward_cockpit import steward_campaign as campaign
+        return campaign.classify_model_limit(text)
+    except Exception:
+        return ""
 
 
 def _load_state():
@@ -829,7 +862,9 @@ class Engine:
             return   # superseded: do not touch shared state (broken/busy/etc)
         if code not in (0, None):
             self.broken = True
-        self._emit({"t": "sys", "text": f"steward session ended (exit {code})"})
+        why = getattr(self, "_model_limit", "") or ""
+        self._emit({"t": "sys", "text": f"steward session ended (exit {code})"
+                    + (" \u2014 " + why if why else "")})
         # the subprocess died unexpectedly - hand back any queued message the
         # user was promised, rather than orphaning it (same as stop())
         with self._lock:
@@ -884,6 +919,24 @@ class Engine:
         elif t == "result":
             if proc is not self.proc:
                 return   # re-check: a newer process must own this result
+            # (2026-09-04, John) a model session limit is TOLD, never swallowed:
+            # an error result is said in the pane with its text, a limit raises
+            # the flag so the High Seat says "need you" with the reason.
+            err_text = result_error_text(ev)
+            if err_text:
+                limit = _campaign_limit(err_text)
+                self._model_limit = ("model session limit: " + err_text) if limit else ""
+                self._emit({"t": "sys", "text": ("MODEL LIMIT: " if limit else
+                                                 "the steward's turn ended in an error: ")
+                            + err_text})
+                if limit:
+                    try:
+                        from steward_cockpit import steward_campaign as campaign
+                        campaign.write_attention(
+                            self.dir, "needs_you", self._model_limit,
+                            failure_code="MODEL_LIMIT")
+                    except Exception:
+                        pass
             cost = ev.get("total_cost_usd") or 0
             usage = ev.get("usage") or {}
             self.tokens += (usage.get("input_tokens", 0)
@@ -1066,6 +1119,17 @@ class Engine:
                             "text": "status compose failed: "
                                     + type(exc).__name__})
                 return False
+            # (2026-09-04, John) a commissioned run that STOPPED — a model
+            # session limit above all — must reach him, never just stop: flip a
+            # flag still saying "working" to needs_you with the run's reason,
+            # so the High Seat and the rail say "need you", and say it once here.
+            try:
+                flipped = campaign.raise_halt_attention(self.dir, status)
+                if flipped:
+                    self._emit({"t": "sys", "text": "STOPPED: " + flipped["reason"]})
+                    status = campaign.compose_status(self.dir, self.state())
+            except Exception:
+                pass
 
             persisted = False
             tmp = None
