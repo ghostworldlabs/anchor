@@ -23,7 +23,9 @@ import paths as _paths
 
 VALID_CLIS = frozenset({"claude", "gemini", "grok", "chatgpt"})
 VALID_FAMILIES = VALID_CLIS
-VALID_REVIEW_FAMILIES = frozenset({"claude", "gemini", "grok"})
+# (John, 2026-09-05) ChatGPT reviews and judges: the Codex transport attests the
+# family, not the served model, so its verdicts carry a model-unattested stamp.
+VALID_REVIEW_FAMILIES = frozenset({"claude", "gemini", "grok", "chatgpt"})
 # ChatGPT cannot drive the interactive terminal yet (persistent bridge pending —
 # see model_role_capabilities "bridge_pending"), so it is not a valid DEFAULT
 # terminal CLI: a persisted/forged/mirror-written "chatgpt" here would make every
