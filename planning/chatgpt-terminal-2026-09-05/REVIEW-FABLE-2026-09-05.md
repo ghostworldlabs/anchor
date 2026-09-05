@@ -104,3 +104,28 @@ all folded before the build:
 - **MINOR (taken):** two stale comments retitled; the release-note history left as history.
 - Rabbit holes it confirmed closed: `--cd` (the PTY already starts in the worktree), `-s workspace-write` (his own
   shell posture), the argv table, the usage-schema array, a "chatgpt → [cmd]" branch that would be a comment.
+
+## 6. Outcome (2026-09-05, same day)
+
+- **Built as one wave** (commits aa7aa98, 23468ac, 2baeb03): the gate deleted, settings and truth tables
+  widened, the Doctor fence, Option-C accounting, tests rewritten. Gate + terminal-session net: 326 green.
+- **The on-screen proof produced three datums the stub could not** (each fixed with the smallest change, none
+  with a table or a new schema):
+  1. the browser attach "timeout" was my Playwright flow (the page keeps its token in localStorage) — not the seat;
+  2. the Codex TUI opened on its own "Update available" menu and swallowed the stdin seed → launch with
+     `-c check_for_update_on_startup=false`, and the lane seed rides Codex's positional PROMPT (the Gemini `-i`
+     pattern) at start and switch;
+  3. Codex asks its one-time per-repository trust question on a project's first ChatGPT terminal → left to the
+     user (Enter = Yes; Anchor never auto-trusts); the seed survives it and the page then reads
+     "✓ researchPrime loaded — what would you like to do?" with the worktree as cwd (`chatgpt_terminal_proof3.png`).
+- **A latent defect found by the same proof:** three sites inferred "this engine pins a session id" from argv
+  length; the Codex argv now carries flags and a prompt, so a chatgpt→claude switch lost its Option-C stamp.
+  `_engine_pins_session(backend)` decides by backend now.
+- **HOLDs closed by datum:** `--no-alt-screen` not needed (the TUI renders in xterm.js as is); `--cd` not needed
+  (cwd is the worktree, read off the page); `-s workspace-write` not added (the user's own Codex posture).
+- **Grok reviewed the diff too** (GROK-REVIEW-DIFF-2026-09-05.md: "with fixes" → the Doctor fence asserted on the
+  spawn, the stale comments retired, and its three on-screen checks are exactly what the proof showed).
+- **Time:** review + cut ~35 min, build + gate ~25 min, proof and its three fixes ~50 min, ship gate ~20 min.
+  The five-wave Crucible/Foreman path would have spent that on ceremony before the first datum.
+- **Crucible's Stage 2 for the record:** its Grok Sharks BLOCKED its own five-wave decomposition (3 blockers);
+  the artifacts stay under stage1/, stage2/, handoff/ as the record of what the ceremony produced.
