@@ -5849,12 +5849,14 @@ def model_role_capabilities(profile=None) -> dict:
                     "with Ultra requested; served-model identity is not attested."
                 )
             elif family == "chatgpt" and present and role in ("reviewer", "judge"):
-                selectable = False
-                status = "verification_unattested"
+                # (John, 2026-09-05) ChatGPT reviews and judges. The Codex transport
+                # attests the FAMILY (the binary) but not the served model, so every
+                # verdict carries a model-unattested stamp — accepted, never blind.
+                status = "available_unattested_review"
                 reason = (
-                    "ChatGPT verification is unavailable: the current Codex "
-                    "transport does not attest the served model, so this seat "
-                    "fails closed."
+                    "ChatGPT can review and judge: the Codex transport attests "
+                    "the family but not the served model, so its verdicts carry a "
+                    "model-unattested stamp (accepted on John's word, 2026-09-05)."
                 )
             families[family] = {
                 "label": label,
@@ -5917,6 +5919,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
                 suffix = {
                     "bridge_pending": "terminal bridge pending",
                     "available_unattested": "coder ready",
+                    "available_unattested_review": "reviewer ready (model unattested)",
                     "verification_unattested": "verification unavailable",
                     "unavailable": "unavailable",
                 }.get(cap["status"], cap["status"])
@@ -5937,8 +5940,8 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
 
     chatgpt_ready = capabilities["roles"]["coder"]["families"]["chatgpt"]["available"]
     capability_summary = (
-        "ChatGPT: coder ready &middot; terminal bridge pending &middot; "
-        "verification unavailable"
+        "ChatGPT: coder ready &middot; reviewer and judge ready (model unattested, "
+        "stamped) &middot; terminal bridge pending"
         if chatgpt_ready else "ChatGPT unavailable on this host"
     )
 
@@ -6008,6 +6011,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
       var suffix = {
         bridge_pending: 'terminal bridge pending',
         available_unattested: 'coder ready',
+        available_unattested_review: 'reviewer ready (model unattested)',
         verification_unattested: 'verification unavailable',
         unavailable: 'unavailable'
       }[cap.status] || cap.status;
@@ -6040,7 +6044,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
     var chat = caps.roles.coder && caps.roles.coder.families.chatgpt;
     if (note && chat) {
       note.textContent = chat.available
-        ? 'ChatGPT: coder ready · terminal bridge pending · verification unavailable'
+        ? 'ChatGPT: coder ready · reviewer and judge ready (model unattested, stamped) · terminal bridge pending'
         : 'ChatGPT unavailable on this host';
     }
   }

@@ -78,10 +78,11 @@ def test_model_role_capability_matrix_is_honest_by_role(stack):
     assert roles["coder"]["families"]["chatgpt"]["status"] == "available_unattested"
     assert roles["coder"]["families"]["chatgpt"]["selectable"] is True
     for role in ("reviewer", "judge"):
+        # (John, 2026-09-05) ChatGPT reviews and judges; the model stays unattested, stamped.
         chatgpt = roles[role]["families"]["chatgpt"]
-        assert chatgpt["status"] == "verification_unattested"
-        assert chatgpt["selectable"] is False
-        assert "fails closed" in chatgpt["reason"]
+        assert chatgpt["status"] == "available_unattested_review"
+        assert chatgpt["selectable"] is True
+        assert "model-unattested stamp" in chatgpt["reason"]
     assert roles["judge"]["setting"] == "review_family"
     assert caps["judge_follows"] == "reviewer"
 
@@ -98,10 +99,10 @@ def test_main_dashboard_offers_four_honest_chatgpt_role_controls(stack):
     assert controls.count("<option value='chatgpt'") == 4
     assert controls.count("ChatGPT &mdash; terminal bridge pending") == 1
     assert controls.count("ChatGPT &mdash; coder ready") == 1
-    assert controls.count("ChatGPT &mdash; verification unavailable") == 2
+    assert controls.count("ChatGPT &mdash; reviewer ready (model unattested)") == 2
     assert len(re.findall(
         r"<option value='chatgpt'[^>]* disabled>ChatGPT", controls,
-    )) == 3
+    )) == 1     # only the terminal seat stays disabled (bridge pending)
     assert "review_family: ['mpReview', 'mpJudge']" in controls
     assert "data-linked-role='reviewer'" in controls
 
@@ -171,8 +172,9 @@ def test_browser_role_controls_disable_honestly_and_link_judge(stack, monkeypatc
 
         assert option_disabled("#mpDefaultCli option[value=chatgpt]") is True
         assert option_disabled("#mpCoding option[value=chatgpt]") is False
-        assert option_disabled("#mpReview option[value=chatgpt]") is True
-        assert option_disabled("#mpJudge option[value=chatgpt]") is True
+        # (John, 2026-09-05) ChatGPT reviews and judges — enabled, model stamped unattested
+        assert option_disabled("#mpReview option[value=chatgpt]") is False
+        assert option_disabled("#mpJudge option[value=chatgpt]") is False
 
         page.select_option("#mpJudge", "grok")
         page.wait_for_function(
