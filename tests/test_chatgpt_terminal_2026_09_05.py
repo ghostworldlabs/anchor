@@ -70,17 +70,22 @@ def test_a_terminal_opens_on_chatgpt_seeded_once(env):
     sid = rec["session_id"]
     assert rec["status"] == reg.STATUS_RUNNING
     assert rec["backend"] == "chatgpt"
-    assert rec["seeded"] is True and rec["seed_text"]      # the lane skill seed, written exactly once
+    assert rec["seeded"] is True and rec["seed_text"]      # the lane skill seed, delivered exactly once
     assert sid in env["pty"].live_sessions()
+    # (seen on the page 2026-09-05) the seed rides Codex's positional PROMPT, not stdin
+    cmd = env["pty"]._LIVE[sid].cmd
+    assert cmd[-1] == rec["seed_text"].strip()
+    assert "check_for_update_on_startup=false" in cmd
     # honest accounting: a Codex session's segment is unmeasured (RULED Option C)
     assert reg.get_session(sid)["usage_gemini_segment"] is True
     out = ts.read_since(sid, 0)
     assert out["status"] == "running"
 
 
-def test_launch_argv_has_no_session_pin_for_codex(env):
+def test_launch_argv_has_no_session_pin_and_no_update_menu_for_codex(env):
     ts = env["ts"]
-    assert ts._engine_launch_argv("codex", "chatgpt", "0000-uuid") == ["codex"]
+    assert ts._engine_launch_argv("codex", "chatgpt", "0000-uuid") == [
+        "codex", "-c", "check_for_update_on_startup=false"]
 
 
 def test_switch_to_and_from_chatgpt_leaves_no_orphan_pty(env):
@@ -90,6 +95,7 @@ def test_switch_to_and_from_chatgpt_leaves_no_orphan_pty(env):
     swapped = ts.switch_engine(sid, "chatgpt")
     assert (swapped.get("backend") or reg.get_session(sid)["backend"]) == "chatgpt"
     assert len(env["pty"].live_sessions()) == 1, "the swap reaps the old PTY"
+    assert "check_for_update_on_startup=false" in env["pty"]._LIVE[sid].cmd
     back = ts.switch_engine(sid, "claude")
     assert (back.get("backend") or reg.get_session(sid)["backend"]) == "claude"
     assert len(env["pty"].live_sessions()) == 1
@@ -130,3 +136,6 @@ def test_doctor_diagnose_on_chatgpt_gets_the_read_only_fence_and_grok_still_refu
     else:
         assert rec["backend"] == "chatgpt"
         assert reused is False
+        # the fence is on the SPAWN, not just in the table (Grok's diff review)
+        cmd = env["pty"]._LIVE[rec["session_id"]].cmd
+        assert cmd.count("-s") == 1 and cmd[cmd.index("-s") + 1] == "read-only", cmd

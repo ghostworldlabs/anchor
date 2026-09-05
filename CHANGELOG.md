@@ -31,6 +31,12 @@ needs to inform the user, not just stop."
 - The pane (`shared.js renderStatus`), the top bar line and the dashboard row
   (`_steward_status_tile_line`) all read the new shape: running · slice · ETA.
 
+### Grok and ChatGPT are reviewer seats (John 2026-09-05)
+- A verification seat proves its FAMILY; an unattested served MODEL is accepted and
+  stamped (trio drivers). Grok attests through JSON output; ChatGPT's verdicts carry
+  `model_attested:false`. The Reviewer/Judge pickers offer ChatGPT (`available_unattested_review`);
+  `VALID_REVIEW_FAMILIES` includes it.
+
 ### A stopped model is told, never just stopped
 - A commissioned run that ENDED is said as **STOPPED** with its own reason (the
   status log's `HALT/STOP reason` / Blocker row); a **model session / usage
@@ -54,6 +60,35 @@ needs to inform the user, not just stop."
 ### Enter sends
 - In the project steward's box, Enter = Send; Shift+Enter keeps a newline;
   dictation (Win+H) never presses Enter, so the Send button stays its path.
+
+### ChatGPT is a first-class Terminal engine (the last role; one wave, John 2026-09-05)
+- The cockpit terminal opens on the **Codex TUI** exactly as it does on Claude and Grok:
+  the `chatgpt-gated-bridge-pending` guard in `terminal_session._check_engine_allowed` is
+  gone, `VALID_DEFAULT_CLIS` widened so a saved `default_cli=chatgpt` persists, the
+  Terminal picker and capability note say **ready**, and the engine toggle switches a live
+  session to and from ChatGPT in the same worktree.
+- **Seen on the page, then fixed:** the Codex TUI opened on its own "Update available"
+  menu and dropped the lane seed typed into stdin — so a ChatGPT terminal now launches with
+  `-c check_for_update_on_startup=false` and receives the lane seed as Codex's positional
+  prompt (the Gemini `-i` pattern), at start and at switch. No launch-argument table, no
+  seed-timing machinery, no `--cd` (the PTY already starts in the worktree), no
+  `--no-alt-screen` (the TUI renders in xterm.js as is).
+- **Doctor on ChatGPT is read-only by construction:** `DOCTOR_READONLY_CLI_ARGS[chatgpt] =
+  ("-s", "read-only")` overrides a `danger-full-access` Codex config; proven on the stub
+  child's argv. Grok still has no Doctor contract and stays refused.
+- **Honest accounting (RULED Option C):** a Codex session's segment is unmeasured like
+  Gemini's — stamped at start and at switch; the rollup badge reads
+  `partial (unmeasured engine segment)`, never a fabricated number.
+- The job-layer / legacy-REPL ChatGPT net (`select_engine_plan`, `rnd_terminal`, the
+  `test_chatgpt_lane_routing` pins) is deliberately untouched — that is the parked
+  ChatGPT-steward (F1B) surface, its own cycle.
+- Process record: Crucible's seven-element, four-phase plan was cut to one wave by the
+  Rabbit-Catcher (`planning/chatgpt-terminal-2026-09-05/REVIEW-FABLE-2026-09-05.md`),
+  adversarially reviewed by Grok before the build and again on the diff; Foreman was not
+  used for a one-wave change (trio journals crucible 0094, foreman 0110).
+- Tests: `test_chatgpt_terminal_2026_09_05.py` (stub PTY: start, seed-on-argv, switch,
+  Doctor fence on the spawn, live-spawn refusal, rollup); terminal pins in
+  `test_backend_chatgpt.py`, `test_anchor_settings.py`, `test_settings_api.py` rewritten.
 
 ### Notes
 - `planning/deliverable-runner-2026-09-04/NOTE.md`: the design note for running

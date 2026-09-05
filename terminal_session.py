@@ -544,6 +544,14 @@ _GROK_SESSION_ID_FLAG_ENV = "ANCHOR_GROK_SESSION_ID_FLAG"
 _DEFAULT_GROK_SESSION_ID_FLAG = "-s"
 
 
+def _engine_pins_session(backend):
+    """True when the backend accepts a launch-time session-id pin (claude, grok).
+    Gemini and Codex do not — their segments stay honestly unmeasured (Option C).
+    Decided by backend, never by argv length (the Codex argv carries flags and the
+    seed prompt, which are not a pin — seen 2026-09-05)."""
+    return backend in (_reg.BACKEND_CLAUDE, _reg.BACKEND_GROK)
+
+
 def _engine_launch_argv(cmd, backend, engine_uuid):
     """Build the PTY launch argv, injecting a session-id pin when the backend supports it.
 
@@ -557,6 +565,10 @@ def _engine_launch_argv(cmd, backend, engine_uuid):
     the argv list.
     """
     argv = [cmd]
+    if backend == getattr(_reg, "BACKEND_CHATGPT", "chatgpt"):
+        # (2026-09-05, seen on the page) the Codex TUI opens on its own "Update
+        # available" menu and swallows the first input; no session pin exists.
+        return [cmd, "-c", "check_for_update_on_startup=false"]
     if not engine_uuid:
         return argv
     if backend == _reg.BACKEND_CLAUDE:
@@ -722,7 +734,7 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # ``uncorrelated``.
     engine_uuid = _new_engine_session_id()
     launch_argv = _engine_launch_argv(cmd, backend, engine_uuid)
-    stored_engine_uuid = engine_uuid if (len(launch_argv) > 1) else ""
+    stored_engine_uuid = engine_uuid if _engine_pins_session(backend) else ""
 
     # Doctor V3 W2: caller-supplied extra engine flags (e.g. the doctor
     # session's read-only ``--permission-mode plan``). Appended AFTER the
@@ -738,6 +750,11 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # processes it safely instead of dropping stdin.
     if backend == _reg.BACKEND_GEMINI and seed_text:
         launch_argv.extend(["-i", seed_text.strip()])
+        seed_text_to_write = None
+    # (2026-09-05, seen on the page) the Codex TUI drops a stdin burst typed before
+    # its composer is ready; its positional PROMPT is the deterministic first turn.
+    if backend == getattr(_reg, "BACKEND_CHATGPT", "chatgpt") and seed_text:
+        launch_argv.append(seed_text.strip())
         seed_text_to_write = None
 
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
@@ -1029,8 +1046,8 @@ def start_doctor_session(seed_context=None, backend=None, resolve=False):
         extra = []
     else:
         # Fail closed. Presence in this table means the exact argv contract is
-        # covered by a behavioral test. Grok and partial Codex/ChatGPT support
-        # deliberately have no guessed safety flags here.
+        # covered by a behavioral test (claude, gemini, and since 2026-09-05
+        # chatgpt: `-s read-only`). Grok deliberately has no guessed flag here.
         readonly_contract = DOCTOR_READONLY_CLI_ARGS.get(backend)
         if not readonly_contract:
             raise TerminalSessionError(
@@ -1501,8 +1518,7 @@ def switch_engine(session_id, engine, seed_context=None):
     prior_seed_text = record.get("seed_text", "") or ""
 
     # Policy precedes every session prerequisite. In particular, ChatGPT must
-    # always return the F1B bridge-pending refusal and never fall through to a
-    # bare PTY or a misleading missing-worktree error.
+    # (2026-09-05) ChatGPT switches like any engine; the F1B gate is gone.
     _check_engine_allowed(lane, engine)
 
     if not worktree_path:
@@ -1544,7 +1560,7 @@ def switch_engine(session_id, engine, seed_context=None):
     # session accumulates BOTH uuids; finalize sums A + B, counted once.
     engine_uuid_b = _new_engine_session_id()
     relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid_b)
-    stored_engine_uuid_b = engine_uuid_b if (len(relaunch_argv) > 1) else ""
+    stored_engine_uuid_b = engine_uuid_b if _engine_pins_session(engine) else ""
 
     # 1b) Resolve the lane seed ONCE before launch, folding in the W7 handoff context.
     seed_text = seed_for_lane(
@@ -1556,6 +1572,9 @@ def switch_engine(session_id, engine, seed_context=None):
     # processes it safely instead of dropping stdin.
     if engine == _reg.BACKEND_GEMINI and seed_text:
         relaunch_argv.extend(["-i", seed_text.strip()])
+        seed_text_to_write = None
+    if engine == getattr(_reg, "BACKEND_CHATGPT", "chatgpt") and seed_text:
+        relaunch_argv.append(seed_text.strip())     # Codex positional PROMPT (see start_session)
         seed_text_to_write = None
 
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
@@ -1690,7 +1709,7 @@ def resume_parked_session(session_id):
     # distinct, correlatable segment (finalize sums over all segments, once).
     engine_uuid = _new_engine_session_id()
     relaunch_argv = _engine_launch_argv(cmd, engine, engine_uuid)
-    stored_engine_uuid = engine_uuid if (len(relaunch_argv) > 1) else ""
+    stored_engine_uuid = engine_uuid if _engine_pins_session(engine) else ""
 
     # Reap any stale PTY child (tolerate already-dead), then relaunch in-tree.
     try:

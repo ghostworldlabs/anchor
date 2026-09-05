@@ -5921,7 +5921,6 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
             shown = lab
             if val == "chatgpt":
                 suffix = {
-                    "bridge_pending": "terminal bridge pending",
                     "available_unattested": "coder ready",
                     "available_unattested_review": "reviewer ready (model unattested)",
                     "verification_unattested": "verification unavailable",
@@ -6013,7 +6012,6 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
     if (!cap) return base;
     if (base === 'ChatGPT') {
       var suffix = {
-        bridge_pending: 'terminal bridge pending',
         available_unattested: 'coder ready',
         available_unattested_review: 'reviewer ready (model unattested)',
         verification_unattested: 'verification unavailable',
