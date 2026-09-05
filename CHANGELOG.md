@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.12 — the status says what is running and what the slice needs; a stopped model is told; Enter sends (2026-09-04, unreleased)
+## v1.2.12 — the status says what is running and what the slice needs; a stopped model is told; Enter sends; Grok and ChatGPT review; ChatGPT drives the terminal (2026-09-05)
 
 John's evening after v1.2.11, in his words: the status window's "what's next" was
 "way too long", "what is running is always the steward", the ETA should be "the
@@ -73,6 +73,10 @@ needs to inform the user, not just stop."
   prompt (the Gemini `-i` pattern), at start and at switch. No launch-argument table, no
   seed-timing machinery, no `--cd` (the PTY already starts in the worktree), no
   `--no-alt-screen` (the TUI renders in xterm.js as is).
+- **Seen on the page, kept as is:** the first ChatGPT terminal on a project shows Codex's own
+  one-time per-repository trust question; Enter answers Yes and the lane seed then runs as the
+  first turn ("✓ researchPrime loaded — what would you like to do?" was read off the page). Anchor
+  does not auto-trust on the user's behalf.
 - **Doctor on ChatGPT is read-only by construction:** `DOCTOR_READONLY_CLI_ARGS[chatgpt] =
   ("-s", "read-only")` overrides a `danger-full-access` Codex config; proven on the stub
   child's argv. Grok still has no Doctor contract and stays refused.

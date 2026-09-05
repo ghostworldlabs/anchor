@@ -5844,7 +5844,9 @@ def model_role_capabilities(profile=None) -> dict:
                 reason = (
                     "ChatGPT terminal: the Codex TUI runs in the cockpit "
                     "terminal; your Codex config's approval and sandbox settings "
-                    "apply (the Doctor forces read-only); usage is unmeasured."
+                    "apply (the Doctor forces read-only); usage is unmeasured. "
+                    "The first ChatGPT terminal on a project asks Codex's "
+                    "one-time trust question - press Enter for Yes."
                 )
             elif family == "chatgpt" and present and role == "coder":
                 status = "available_unattested"
