@@ -300,8 +300,11 @@ const Proto = (() => {
     // the detail already carries the full description above; the link itself
     // just says what it does (2026-09-03)
     const lnk = detail.querySelector(".drow a");
+    // a route row is labelled by the document it opens (report.md), never the
+    // whole route string (2026-09-05, seen on the page)
+    const routeName = (r) => { try { const m = /[?&]path=([^&]+)/.exec(r); const seg = decodeURIComponent(m ? m[1] : r).split("/").filter(Boolean); return seg[seg.length - 1] || r; } catch (e) { return r; } };
     if (lnk) lnk.textContent = "Open ↗" +
-      (it.path ? "  " + it.path : (it.route ? "  " + it.route : ""));
+      (it.path ? "  " + it.path : (it.route ? "  " + routeName(it.route) : ""));
     const key = (it.dir || "") + "|" + (it.path || it.what || "");
     if (_openDelivs.has(key)) row.classList.add("open");
     line.onclick = (ev) => {
