@@ -2137,6 +2137,15 @@ def _trigger_session_summary_on_finish(project_id, lane, session_id):
     try:
         if not project_id or not lane or not session_id:
             return
+        # reports-links W3: a SHELL runner session has no model transcript to
+        # summarize — the summarize-on-finish hook no-ops for it.
+        try:
+            _rec = _sessreg.get_session(session_id)
+        except Exception:
+            _rec = None
+        if _rec is not None and (_rec.get("backend") or "") == \
+                getattr(_sessreg, "BACKEND_SHELL", "shell"):
+            return
         proj = _rnd.get_project(project_id)
         if proj is None:
             return
@@ -14869,6 +14878,69 @@ def handle_term_start(handler, path, body):
                 handler._send_json(resp)
 
 
+def handle_run_deliverable_terminal(handler, path, body):
+    # reports-links W3 — the Run ▶ link behind a register row's `run:` marker.
+    # Token-gated by the route row + the do_POST middleware (401 BEFORE any
+    # substance). This is an ALLOWLIST, not an exec API: the ONLY command it
+    # will stage is one that byte-for-byte equals a parsed row's run string in
+    # THAT dir's register, re-read NOW from disk (steward_campaign.
+    # discover_efforts + read_deliverables — exactly what register-all serves).
+    # A near-miss is refused 400 WITHOUT echoing the rejected string (no
+    # reflection surface). cwd derives from the MATCHED row — its effort dir
+    # when the row is effort-level, else the project folder — never from the
+    # caller. The command is STAGED UNSENT on a 'shell'-backend session (the
+    # user's own shell; Enter runs it), and the response is the SAFE projection
+    # (never worktree_path/branch).
+    pid = (body.get("project_id", "") or body.get("pid", "") or "").strip()
+    dir_rel = body.get("dir", "")
+    dir_rel = dir_rel.strip() if isinstance(dir_rel, str) else None
+    command = body.get("command", "")
+    if not pid or dir_rel is None or not isinstance(command, str) or not command:
+        handler._send_json({"ok": False,
+                            "error": "project_id, dir and command required"}, 400)
+        return
+    # Containment: a '..'-bearing (or absolute / drive-qualified) dir can never
+    # address a register outside the project tree.
+    _norm = dir_rel.replace("\\", "/")
+    if ".." in _norm.split("/") or _norm.startswith("/") or ":" in _norm:
+        handler._send_json({"ok": False, "error": "invalid dir"}, 400)
+        return
+    proj = _rnd.get_project(pid)
+    if proj is None:
+        handler._send_json({"ok": False, "error": "Unknown project"}, 404)
+        return
+    folder = proj.get("folder_path", "")
+    from steward_cockpit import steward_campaign as _campaign
+    matched = None
+    match_dir = None
+    for e in _campaign.discover_efforts(folder):
+        if (e.get("rel") or "") != dir_rel:
+            continue
+        edir = str(Path(folder) / e["rel"]) if e["rel"] else str(folder)
+        for it in _campaign.read_deliverables(edir).get("items", []):
+            run = it.get("run")
+            if isinstance(run, str) and run == command:
+                matched, match_dir = it, edir
+                break
+        break  # effort rels are unique; the named dir's register was checked
+    if matched is None:
+        # No echo of the rejected string — the refusal carries nothing of it.
+        handler._send_json({
+            "ok": False,
+            "error": "command is not a registered run for that dir"}, 400)
+        return
+    try:
+        rec = _termsess.start_session(
+            pid, "general",
+            backend=getattr(_sessreg, "BACKEND_SHELL", "shell"),
+            label=(matched.get("what") or "run"),
+            paste_prompt=command, cwd=match_dir)
+    except _termsess.TerminalSessionError as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 400)
+        return
+    handler._send_json({"ok": True, "session": _safe_session_projection(rec)})
+
+
 def _zombie_scan_and_skill_briefing():
     """Whole-computer scan (the System-Wide Sentinel classifier on :48484) plus a
     distilled zombie-hunter awareness block, so the investigator agent reasons
@@ -20308,6 +20380,7 @@ _MIGRATED_HANDLERS = {
     "handle_term_discover": handle_term_discover,
     "handle_term_adopt": handle_term_adopt,
     "handle_term_start": handle_term_start,
+    "handle_run_deliverable_terminal": handle_run_deliverable_terminal,
     "handle_zombie_terminal_start": handle_zombie_terminal_start,
     "handle_zh_engines": handle_zh_engines,
     "handle_doctor_session_start": handle_doctor_session_start,
