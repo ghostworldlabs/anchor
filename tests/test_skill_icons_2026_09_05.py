@@ -28,6 +28,13 @@ def test_report_page_carries_the_producing_skills_mark_once():
     assert rv.skill_from_path("gandalf/run-1788653387045/report.md") == "gandalf"
     assert rv.skill_from_path(".anchor/projects/x/research/job-1/report.md") == "researchPrime"
     assert rv.skill_from_path("reports/ECON588.md") is None
+    # reports that already exist: the file name or the first heading names the skill
+    assert rv.skill_from_path("ideation/ROUND2-JUMPER-CHECK.md") == "jumper"
+    assert rv.skill_from_path("notes/read.md", "# Gandalf executive summary
+
+- x") == "gandalf"
+    assert rv.skill_from_path("notes/plain.md", "# Week 1
+") is None
 
 
 def test_the_client_map_and_the_four_surfaces_are_wired():

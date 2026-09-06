@@ -21536,7 +21536,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                             md_text = data.decode("utf-8", "replace")
                             title = Path(rel).name or "Report"
                             # (2026-09-05, John) the producing skill's mark tops the page
-                            self._send_html(_rv.reader_html(md_text, title, skill=_rv.skill_from_path(rel)))
+                            self._send_html(_rv.reader_html(md_text, title, skill=_rv.skill_from_path(rel, md_text)))
                         except Exception:
                             self._send_bytes(data, ctype)
                     elif want_view and ext in (".docx", ".pptx", ".xlsx"):

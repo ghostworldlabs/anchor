@@ -292,6 +292,7 @@ const Proto = (() => {
     const row = el("div", "sdrow");
     const one = (it.what || "").split(" — ")[0].trim() || it.what || "(untitled)";
     const line = el("div", "sdone", "▸ " + one);
+    try { const im = window.SkillIcons && window.SkillIcons.img(one, 14); if (im) line.insertBefore(im, line.firstChild); } catch (e) { /* no-op */ }
     const detail = el("div", "sddetail");
     const full = el("div", "", it.what || "");
     detail.appendChild(full);
@@ -473,6 +474,7 @@ const Proto = (() => {
       const a = document.createElement("a");
       // labelled by the document it opens, never the whole route (2026-09-05)
       a.textContent = "• " + (it.what || routeName(it.route));
+      try { const im = window.SkillIcons && window.SkillIcons.img(it.what || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
       a.href = routeHref(it.route);
       a.target = "_blank";
       a.rel = "noopener";
@@ -480,6 +482,7 @@ const Proto = (() => {
     } else if (it.openable && it.path) {
       const a = document.createElement("a");
       a.textContent = "• " + it.what;
+      try { const im = window.SkillIcons && window.SkillIcons.img(it.what || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
       // 2026-08-26 (John: "I click on them and the page had nothing"): a raw
       // <a href> NAVIGATES — it never passes through the fetch shim, so the
       // old api() URL arrived with no /api/steward/ prefix, no pid and no

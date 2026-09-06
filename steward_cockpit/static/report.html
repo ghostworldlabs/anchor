@@ -75,8 +75,18 @@ const dir = qp.get("dir") || "", path = qp.get("path") || "";
 document.querySelector("[data-path]").textContent = path.split("/").pop() || path;
 document.querySelector("[data-path]").title = path;
 // (2026-09-05, John) the producing skill's mark tops the report
-try { const sk = window.SkillIcons && window.SkillIcons.fromPath(path); const im = sk && window.SkillIcons.img(sk, 22);
-  if (im) document.querySelector("[data-path]").insertBefore(im, document.querySelector("[data-path]").firstChild); } catch (e) {}
+// the mark comes from the path, else from the file name and the first heading once the text is in
+function markReport(text) {
+  try {
+    const head = document.querySelector("[data-path]");
+    if (!window.SkillIcons || head.querySelector("img.skico")) return;
+    const h1 = ((text || "").match(/^#\s+(.*)$/m) || [])[1] || "";
+    const sk = window.SkillIcons.fromPath(path) || (window.SkillIcons.entryFor((path.split("/").pop() || "") + " " + h1) || {}).name;
+    const im = sk && window.SkillIcons.img(sk, 22);
+    if (im) head.insertBefore(im, head.firstChild);
+  } catch (e) {}
+}
+markReport("");
 fetch("/api/filetext?dir=" + encodeURIComponent(dir) + "&path=" + encodeURIComponent(path))
   .then(r => r.json())
   .then(j => {
@@ -84,6 +94,7 @@ fetch("/api/filetext?dir=" + encodeURIComponent(dir) + "&path=" + encodeURICompo
     const body = document.querySelector("[data-body]");
     mdRender(body, j.text);
     typesetMath(body);
+    markReport(j.text);
     const h = (j.text.match(/^#\s+(.*)$/m) || [])[1];
     if (h) document.title = h.replace(/[*`]/g, "");
   })

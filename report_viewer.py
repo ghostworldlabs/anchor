@@ -175,15 +175,30 @@ LANE_SKILL_NAMES = {"research": "researchPrime", "plan": "Crucible", "planning":
                     "build": "Foreman"}
 
 
-def skill_from_path(rel: str):
-    """Which skill produced a document, from its path (gandalf/run-…/report.md → Gandalf)."""
+def skill_from_path(rel: str, text: str = None):
+    """Which skill produced a document: from its path (gandalf/run-…/report.md → Gandalf),
+    else from its file name and first heading (reports that already exist rarely sit under a
+    skill-named path — "# Gandalf executive summary", ROUND2-JUMPER-CHECK.md)."""
     p = str(rel or "").replace("\\", "/").lower()
     segs = [s for s in p.split("/") if s]
-    for s in segs:
+    for s in segs[:-1]:
         if s in SKILL_ICON_FILES:
             return s
         if s in LANE_SKILL_NAMES:
             return LANE_SKILL_NAMES[s]
+    head = ""
+    if text:
+        for line in str(text).splitlines()[:40]:
+            if line.lstrip().startswith("#"):
+                head = line.lower()
+                break
+    hay = (segs[-1] if segs else "") + " " + head
+    hay = hay.replace("_", "-").replace(" ", "-")
+    for key in SKILL_ICON_FILES:
+        if key in hay:
+            return key
+    if "research-prime" in hay or "researchprime" in hay:
+        return "researchprime"
     return None
 
 
