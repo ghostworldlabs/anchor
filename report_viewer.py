@@ -162,8 +162,47 @@ def markdown_to_html(md_text: str) -> str:
 
 # ── Reader HTML (vendored KaTeX, no network) ────────────────────────────────
 
+# (2026-09-05, John) the skill that made a report shows its mark at the top of the page.
+SKILL_ICON_FILES = {
+    "researchprime": "research-prime-icon.jpg", "crucible": "crucible-icon.svg",
+    "foreman": "foreman-icon.svg", "gandalf": "gandalf-icon.jpg", "jumper": "jumper-icon.jpg",
+    "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
+    "financial-analyst": "financial-analyst-icon.jpg",
+    "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
+    "zombie-hunter": "zombie-hunter-radar.jpg", "ecgberht": "ecgberht-project-seal.jpg",
+}
+LANE_SKILL_NAMES = {"research": "researchPrime", "plan": "Crucible", "planning": "Crucible",
+                    "build": "Foreman"}
+
+
+def skill_from_path(rel: str):
+    """Which skill produced a document, from its path (gandalf/run-…/report.md → Gandalf)."""
+    p = str(rel or "").replace("\\", "/").lower()
+    segs = [s for s in p.split("/") if s]
+    for s in segs:
+        if s in SKILL_ICON_FILES:
+            return s
+        if s in LANE_SKILL_NAMES:
+            return LANE_SKILL_NAMES[s]
+    return None
+
+
+def skill_icon_html(skill) -> str:
+    """One brand mark + the skill name, or '' when no skill is known."""
+    key = str(skill or "").strip().lower()
+    fn = SKILL_ICON_FILES.get(key)
+    if not fn:
+        return ""
+    label = html.escape(str(skill))
+    return ("<div class=\"skill-mark\" style=\"display:flex;align-items:center;gap:10px;"
+            "margin:0 0 18px;color:#9aa4b8;font-size:14px\">"
+            "<img src=\"/vendor/brand/" + fn + "\" alt=\"" + label + "\" title=\"" + label + "\" "
+            "style=\"width:34px;height:34px;border-radius:8px;object-fit:cover\">"
+            "<span>a " + label + " report</span></div>\n")
+
+
 def reader_html(md_text: str, title: str = "Report",
-                katex_url_prefix: str = KATEX_URL_PREFIX) -> str:
+                katex_url_prefix: str = KATEX_URL_PREFIX, skill=None) -> str:
     """Build the full Reader HTML page for a markdown report.
 
     The page LINKS the vendored KaTeX assets (``<katex_url_prefix>/katex.min.css``
@@ -195,7 +234,7 @@ def reader_html(md_text: str, title: str = "Report",
         "  pre{background:#1b1f2a;padding:14px;border-radius:8px;overflow:auto}\n"
         "  pre code{background:none;padding:0}\n"
         "</style>\n</head>\n<body>\n"
-        "<article class=\"anchor-reader\">\n" + body + "\n</article>\n"
+        "<article class=\"anchor-reader\">\n" + skill_icon_html(skill) + body + "\n</article>\n"
         "<script defer src=\"" + js_src + "\"></script>\n"
         "<script defer src=\"" + autorender_src + "\"></script>\n"
         "<script>\n"
@@ -239,7 +278,8 @@ def render_effort(folder_path, project_id: str, lane: str,
                 "body": data, "path": art["pdf_path"]}
     if art["mode"] == MODE_READER:
         md_text = Path(art["md_path"]).read_text(encoding="utf-8")
-        page = reader_html(md_text, title or f"{lane} report")
+        page = reader_html(md_text, title or f"{lane} report",
+                           skill=LANE_SKILL_NAMES.get(str(lane or "").lower()))
         return {"mode": MODE_READER,
                 "content_type": "text/html; charset=utf-8",
                 "body": page, "path": art["md_path"]}

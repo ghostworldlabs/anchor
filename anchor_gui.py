@@ -2599,9 +2599,18 @@ def _render_activity_reflection_html(refl: dict) -> str:
         color = html_lib.escape(latest.get("color") or "grey")
         age = html_lib.escape(latest.get("age") or "")
         age_txt = f' · {age}' if age else ""
+        # (2026-09-05, John) the lane's skill mark rides the project list line
+        _lane_icon = {"research": "research-prime-icon.jpg", "plan": "crucible-icon.svg",
+                      "planning": "crucible-icon.svg", "build": "foreman-icon.svg",
+                      "gandalf": "gandalf-icon.jpg"}.get((stage or lane).lower(), "")
+        if not _lane_icon and "gandalf" in (latest.get("label") or "").lower():
+            _lane_icon = "gandalf-icon.jpg"
+        lane_mark = (f'<img class="skico" src="/vendor/brand/{_lane_icon}" alt="" '
+                     f'style="width:16px;height:16px;border-radius:4px;object-fit:cover;'
+                     f'vertical-align:-3px;margin-right:4px">' if _lane_icon else "")
         parts.append(
             f'<span class="rnd-act-latest">latest: '
-            f'<span class="rnd-act-lane">{lane_lbl}</span> · '
+            f'{lane_mark}<span class="rnd-act-lane">{lane_lbl}</span> · '
             f'<span class="rnd-act-title">{title}</span> '
             f'<span class="rnd-act-status rnd-act-{color}">'
             f'({status})</span>{age_txt}</span>'
@@ -21519,13 +21528,38 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     # consumer keeps its current raw behavior. Non-markdown is
                     # always raw, even with render=1.
                     want_render = (q.get("render", [""])[0] or "").strip()
+                    want_view = (q.get("view", [""])[0] or "").strip() in ("1", "true")
+                    want_download = (q.get("download", [""])[0] or "").strip() in ("1", "true")
+                    ext = Path(rel).suffix.lower()
                     if want_render and "markdown" in (ctype or ""):
                         try:
                             md_text = data.decode("utf-8", "replace")
                             title = Path(rel).name or "Report"
-                            self._send_html(_rv.reader_html(md_text, title))
+                            # (2026-09-05, John) the producing skill's mark tops the page
+                            self._send_html(_rv.reader_html(md_text, title, skill=_rv.skill_from_path(rel)))
                         except Exception:
                             self._send_bytes(data, ctype)
+                    elif want_view and ext in (".docx", ".pptx", ".xlsx"):
+                        # (2026-09-05, John) Word / PowerPoint / Excel open as the same
+                        # readable preview page the cockpit uses, with a download
+                        # that hands the file to the native app.
+                        try:
+                            import office_preview as _op
+                            dl = self.path.replace("view=1", "download=1")
+                            self._send_html(_op.render_preview(data, Path(rel).name, dl))
+                        except Exception:
+                            self._send_bytes(data, ctype)
+                    elif want_download:
+                        try:
+                            self.send_response(200)
+                            self.send_header("Content-Type", ctype or "application/octet-stream")
+                            self.send_header("Content-Disposition",
+                                             "attachment; filename=\"%s\"" % Path(rel).name.replace('"', ""))
+                            self.send_header("Content-Length", str(len(data)))
+                            self.end_headers()
+                            self.wfile.write(data)
+                        except Exception:
+                            pass
                     else:
                         self._send_bytes(data, ctype)
             # /zombie_terminal migrated to route_table (handle_zombie_terminal) — served by the strangler above.

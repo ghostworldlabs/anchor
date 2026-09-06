@@ -46,6 +46,7 @@
     <span style="margin-left:auto"><a href="#" onclick="window.close();return false">close</a></span></div>
   <div class="repbody" data-body>loading…</div>
 </div>
+<script src="/static/skill-icons.js"></script>
 <script src="/static/md.js"></script>
 <script>
 try { document.body.dataset.theme = localStorage.getItem("protoTheme") || "slate"; } catch (e) {}
@@ -71,7 +72,11 @@ function typesetMath(el, tries) {
 }
 const qp = new URLSearchParams(location.search);
 const dir = qp.get("dir") || "", path = qp.get("path") || "";
-document.querySelector("[data-path]").textContent = path;
+document.querySelector("[data-path]").textContent = path.split("/").pop() || path;
+document.querySelector("[data-path]").title = path;
+// (2026-09-05, John) the producing skill's mark tops the report
+try { const sk = window.SkillIcons && window.SkillIcons.fromPath(path); const im = sk && window.SkillIcons.img(sk, 22);
+  if (im) document.querySelector("[data-path]").insertBefore(im, document.querySelector("[data-path]").firstChild); } catch (e) {}
 fetch("/api/filetext?dir=" + encodeURIComponent(dir) + "&path=" + encodeURIComponent(path))
   .then(r => r.json())
   .then(j => {

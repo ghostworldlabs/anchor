@@ -302,7 +302,6 @@ const Proto = (() => {
     const lnk = detail.querySelector(".drow a");
     // a route row is labelled by the document it opens (report.md), never the
     // whole route string (2026-09-05, seen on the page)
-    const routeName = (r) => { try { const m = /[?&]path=([^&]+)/.exec(r); const seg = decodeURIComponent(m ? m[1] : r).split("/").filter(Boolean); return seg[seg.length - 1] || r; } catch (e) { return r; } };
     if (lnk) lnk.textContent = "Open ↗" +
       (it.path ? "  " + it.path : (it.route ? "  " + routeName(it.route) : ""));
     const key = (it.dir || "") + "|" + (it.path || it.what || "");
@@ -337,6 +336,11 @@ const Proto = (() => {
       wrap.style.minWidth = "0";
       const title = el("div", "");
       if (st.part) title.appendChild(el("span", "wpkind", st.part));
+      // (2026-09-05, John) a step that names a skill carries its mark
+      try {
+        const _sk = window.SkillIcons && window.SkillIcons.img((st.commissioned_as || "") + " " + st.name, 16);
+        if (_sk) title.appendChild(_sk);
+      } catch (e) { /* no-op */ }
       title.appendChild(document.createTextNode(st.name));
       wrap.appendChild(title);
       const parts = [];
@@ -446,6 +450,19 @@ const Proto = (() => {
       }
     }
   }
+  // (2026-09-05, John) a route opens rendered: markdown through the Reader,
+  // Word / PowerPoint / Excel as a preview page; the page token rides along.
+  function routeHref(route) {
+    const r = String(route || "");
+    const sep = r.indexOf("?") >= 0 ? "&" : "?";
+    const md = /\.(md|markdown)(&|$)/i.test(r), office = /\.(docx|pptx|xlsx)(&|$)/i.test(r);
+    return r + (md ? sep + "render=1" : office ? sep + "view=1" : "") +
+      (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
+  }
+  function routeName(r) {
+    try { const m = /[?&]path=([^&]+)/.exec(r); const seg = decodeURIComponent(m ? m[1] : r).split("/").filter(Boolean); return seg[seg.length - 1] || r; }
+    catch (e) { return r; }
+  }
   function delivRow(it) {
     const row = el("div", "snow drow");
     if (it.route) {
@@ -454,11 +471,9 @@ const Proto = (() => {
       // and fall through to the text branch. Opens in a new window with the
       // page token appended, same mechanism as the deliverable-file link.
       const a = document.createElement("a");
-      a.textContent = "Open ↗ " + it.route;
-      a.href = it.route + (window.STEWARD_TOKEN
-        ? (it.route.indexOf("?") >= 0 ? "&" : "?") +
-          "token=" + encodeURIComponent(window.STEWARD_TOKEN)
-        : "");
+      // labelled by the document it opens, never the whole route (2026-09-05)
+      a.textContent = "• " + (it.what || routeName(it.route));
+      a.href = routeHref(it.route);
       a.target = "_blank";
       a.rel = "noopener";
       row.appendChild(a);
@@ -483,6 +498,7 @@ const Proto = (() => {
           encodeURIComponent(window.STEWARD_PID || "") +
           "&dir=" + encodeURIComponent(dirRel) +
           "&path=" + encodeURIComponent(it.path) +
+          (/\.(docx|pptx|xlsx)$/i.test(it.path) ? "&view=1" : "") +
           (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "");
         a.target = "_blank";
         a.rel = "noopener";
@@ -719,7 +735,33 @@ const Proto = (() => {
   }
 
   /* ---------- files the steward touched ---------- */
+  let _lastFiles = [], _filesSort = "date";
+  function wireFileTools() {
+    const s = $("[data-fsearch]");
+    if (s && !s._wired) { s._wired = true; s.oninput = () => renderFiles(_lastFiles); }
+    const sortBtns = Array.from(document.querySelectorAll("[data-fsort]"));
+    sortBtns.forEach(b => {
+      if (b._wired) return; b._wired = true;
+      b.onclick = () => { _filesSort = b.getAttribute("data-fsort"); sortBtns.forEach(x => x.classList.toggle("on", x === b)); renderFiles(_lastFiles); };
+    });
+  }
+  // a produced file opens rendered in a new window when it lies inside this effort
+  function openProducedFile(f) {
+    const root = (_lastMap && _lastMap.dir) || "";
+    const norm = (x) => String(x || "").replace(/\\/g, "/");
+    const fn = norm(f), rn = norm(root).replace(/\/$/, "");
+    if (rn && fn.toLowerCase().indexOf(rn.toLowerCase() + "/") === 0) {
+      const rel = fn.slice(rn.length + 1);
+      if (/\.(md|txt|csv|json|log)$/i.test(rel)) { window.open("/report?dir=" + encodeURIComponent(DIR) + "&path=" + encodeURIComponent(rel)); return; }
+      window.open("/api/steward/deliverable-file?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(DIR) +
+        "&path=" + encodeURIComponent(rel) + (/\.(docx|pptx|xlsx)$/i.test(rel) ? "&view=1" : "") +
+        (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : ""));
+      return;
+    }
+    post("/api/open", { path: f });   // outside the effort: the app opens it, said in the row
+  }
   function renderFiles(files) {
+    wireFileTools();
     const list = $("[data-flist]");
     if (!list) return;
     const cnt = $("[data-filecount]");
@@ -739,16 +781,31 @@ const Proto = (() => {
         } catch (e) { /* no-op */ }
       };
     }
+    // (2026-09-05, John) files are searchable, sortable (name / type / date order
+    // as produced) and OPEN IN A NEW WINDOW rendered; "app" opens them on this
+    // computer as before.
+    _lastFiles = files.slice();
+    const q = (($("[data-fsearch]") || {}).value || "").trim().toLowerCase();
+    const sort = _filesSort;
+    let rows = files.map((f, i) => ({ f, i, name: f.split(/[\\/]/).pop() }));
+    if (q) rows = rows.filter(r => r.name.toLowerCase().indexOf(q) >= 0);
+    if (sort === "name") rows.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    else if (sort === "type") rows.sort((a, b) => (a.name.split(".").pop() || "").toLowerCase().localeCompare((b.name.split(".").pop() || "").toLowerCase()) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+    else rows.sort((a, b) => b.i - a.i);   // "date": newest produced first
     list.textContent = "";
-    files.slice().reverse().forEach(f => {
+    rows.forEach(({ f, name }) => {
       const row = el("div", "frow");
-      row.appendChild(el("span", "fname", f.split(/[\\/]/).pop()));
-      const btn = el("button", "", "Open");
+      const a = document.createElement("a");
+      a.className = "fname"; a.textContent = name; a.href = "#";
+      a.onclick = (ev) => { ev.preventDefault(); openProducedFile(f); };
+      row.appendChild(a);
+      const btn = el("button", "", "app");
+      btn.title = "open on this computer";
       btn.onclick = () => post("/api/open", { path: f });
       row.appendChild(btn);
       list.appendChild(row);
     });
-    if (!files.length) list.appendChild(el("div", "frow", "(none yet)"));
+    if (!rows.length) list.appendChild(el("div", "frow", files.length ? "nothing matches" : "(none yet)"));
   }
 
   /* ---------- work-product overlay (tile on the plan rail) ---------- */
