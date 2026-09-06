@@ -30,11 +30,8 @@ def test_report_page_carries_the_producing_skills_mark_once():
     assert rv.skill_from_path("reports/ECON588.md") is None
     # reports that already exist: the file name or the first heading names the skill
     assert rv.skill_from_path("ideation/ROUND2-JUMPER-CHECK.md") == "jumper"
-    assert rv.skill_from_path("notes/read.md", "# Gandalf executive summary
-
-- x") == "gandalf"
-    assert rv.skill_from_path("notes/plain.md", "# Week 1
-") is None
+    assert rv.skill_from_path("notes/read.md", "# Gandalf executive summary\n\n- x") == "gandalf"
+    assert rv.skill_from_path("notes/plain.md", "# Week 1\n") is None
 
 
 def test_the_client_map_and_the_four_surfaces_are_wired():
@@ -52,7 +49,7 @@ def test_the_client_map_and_the_four_surfaces_are_wired():
     v1 = (ROOT / "steward_cockpit" / "static" / "v1.html").read_text(encoding="utf-8")
     assert '<script src="/static/skill-icons.js">' in v1
     gui = (ROOT / "anchor_gui.py").read_text(encoding="utf-8")
-    assert "skill=_rv.skill_from_path(rel)" in gui                    # the Anchor report page
+    assert "skill=_rv.skill_from_path(rel, md_text)" in gui           # the Anchor report page
     assert "lane_mark" in gui and "gandalf-icon.jpg" in gui           # the project list line
 
 
