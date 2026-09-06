@@ -150,7 +150,14 @@ CONTRACT = (
     "/ NORTH-STAR appear there on their own) AND a short bullet summary said by "
     "you in the dialogue - three to six bullets, each two-four bold lead words "
     "then the point, ending with the one decision it needs from him if any. "
-    "Never a plan he has to go hunting for."
+    "Never a plan he has to go hunting for. "
+    "(16) PLAN DRIFT (John, 2026-09-05): the plan he SEES is roadmap.json. When "
+    "he asks to add, remove or reorder elements, or a new North Star / plan "
+    "document arrives (yours or a skill's), roadmap.json changes in the SAME "
+    "turn - step_create / step_set events plus the projection - and you say in "
+    "one line what changed in the plan. A plan document alone is not the plan; "
+    "the cockpit appends a PLAN DRIFT line to his turns until the roadmap has "
+    "caught up."
 )
 
 STAND_UP_NEW = (
@@ -805,6 +812,11 @@ class Engine:
                     })
 
             self._emit({"t": "john" if human else "sys", "text": text})
+            # (2026-09-05, John: "the plan does not get updated") while the
+            # roadmap is behind the plan documents, his turn carries the drift
+            # line on the model's stdin - his displayed words stay his own.
+            if human and not self.general:
+                text = text + self._plan_drift_suffix()
             if self.busy:
                 self.queue.append(text)
                 if not self._persist_queue():
@@ -822,6 +834,14 @@ class Engine:
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}
+
+    def _plan_drift_suffix(self):
+        """The PLAN DRIFT line for this campaign dir, or ''. Never raises."""
+        try:
+            from steward_cockpit import steward_campaign as campaign
+            return campaign.plan_drift_suffix(self.dir)
+        except Exception:
+            return ""
 
     def _send_locked(self, text):
         """Caller holds self._lock. Returns True iff the write reached stdin."""

@@ -208,8 +208,14 @@ const Proto = (() => {
     if (p.goal_reread === false)
       body.appendChild(el("div", "splan sflag", "goal not re-read since last close"));
     b.appendChild(body);
+    // (2026-09-05, John) the NEWEST status is always prominent: it carries
+    // .latest, older blocks above it are folded to their time line, and the
+    // pane always brings the newest into view (a status pane is for now,
+    // not for reading history — history stays one click away).
+    s.querySelectorAll(".blk.status.latest").forEach(o => o.classList.remove("latest"));
+    b.classList.add("latest");
     s.appendChild(b);
-    pin(s, stick);
+    pin(s, true);
     // the window's header carries the time of the last update (idle projects
     // show their LAST update, stamped, not a fresh blank)
     const stamp = $("[data-statusstamp]");

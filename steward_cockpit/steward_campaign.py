@@ -215,6 +215,14 @@ def read_map(campaign_dir: str):
         goal_flips = [ev for ev in (roadmap.get("roadmap_events") or [])
                       if ev.get("kind") == "goal_flip"]
 
+    # (2026-09-05, John: "the plan does not get updated") a plan DOCUMENT with no
+    # roadmap behind it is not an empty plan: derive proposed steps from its
+    # headings so the outline is never blank, and say where they came from.
+    if not steps:
+        derived, src = _steps_from_plan_doc(root)
+        if derived:
+            steps = derived
+            gaps.append(f"plan outline derived from {src} - roadmap.json has no steps yet")
     done = sum(1 for s in steps if s["status"] == "done")
 
     # --- Strip: heartbeat ---
@@ -1361,3 +1369,93 @@ def map_stamp(campaign_dir: str):
         except OSError:
             stamp.append(0)
     return "-".join(map(str, stamp))
+
+
+# ---------------------------------------------------------------------------
+# Plan drift (John, 2026-09-05: "the plan does not get updated when there are
+# clear instructions to add elements, or if a new North Star is created and a
+# plan to go with it"). The plan John SEES is roadmap.json; a plan document is
+# not the plan until the steward folds it in. These are the mechanism: the
+# reader never shows an empty outline while a plan document exists, and every
+# human turn carries the drift line to the model until the roadmap catches up.
+# ---------------------------------------------------------------------------
+
+def _plan_docs(root: Path):
+    """Plan documents in the campaign dir (top level only), newest first."""
+    out = []
+    try:
+        for p in root.iterdir():
+            if p.is_file() and _PLAN_DOC_NAME.match(p.name):
+                out.append(p)
+    except OSError:
+        return []
+    out.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0, reverse=True)
+    return out
+
+
+def _steps_from_plan_doc(root: Path):
+    """Proposed steps from the newest plan document's ``## `` headings (skipping
+    front matter such as Goal / Success / Non-goals). Returns (steps, name)."""
+    docs = _plan_docs(root)
+    if not docs:
+        return [], ""
+    doc = docs[0]
+    try:
+        text = doc.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [], ""
+    skip = re.compile(r"^(goal|observable success|success criteria|non-goals?|risk|foresight|sources?|"
+                      r"the deliverable|elegance|adversary|property gates|hardening)", re.I)
+    steps = []
+    for line in text.splitlines():
+        m = re.match(r"^##\s+(.+?)\s*$", line)
+        if not m:
+            continue
+        name = re.sub(r"\s*\(.*?\)\s*$", "", m.group(1)).strip()
+        if not name or skip.match(name):
+            continue
+        n = len(steps) + 1
+        steps.append({
+            "id": f"d{n:02d}", "name": name, "status": "proposed", "done_when": "",
+            "waiting_on": None, "commissioned_as": None, "part": "", "gate": "",
+            "derived_from": doc.name,
+        })
+    return steps, doc.name
+
+
+def plan_drift(campaign_dir: str):
+    """Is the roadmap behind the plan documents? Pure, disk-true, never raises."""
+    root = Path(campaign_dir)
+    docs = _plan_docs(root)
+    if not docs:
+        return {"drift": False, "reason": "", "docs": []}
+    rm = root / "roadmap.json"
+    names = [p.name for p in docs]
+    try:
+        rm_m = rm.stat().st_mtime
+    except OSError:
+        return {"drift": True, "docs": names,
+                "reason": f"{names[0]} exists but roadmap.json has not been written"}
+    data, err = _read_json(rm)
+    proj = (data or {}).get("roadmap_projection") or []
+    if not proj:
+        return {"drift": True, "docs": names,
+                "reason": f"{names[0]} exists but roadmap.json has no steps"}
+    newer = [p.name for p in docs if p.stat().st_mtime > rm_m + 1]
+    if newer:
+        when = time.strftime("%H:%M", time.localtime(docs[0].stat().st_mtime))
+        return {"drift": True, "docs": names,
+                "reason": f"{newer[0]} changed at {when}, after roadmap.json"}
+    return {"drift": False, "reason": "", "docs": names}
+
+
+def plan_drift_suffix(campaign_dir: str) -> str:
+    """The line appended to a human turn on the model's stdin while the roadmap
+    is behind the plan. Empty when there is no drift."""
+    d = plan_drift(campaign_dir)
+    if not d.get("drift"):
+        return ""
+    return ("\n\n[cockpit, not John] PLAN DRIFT: " + d["reason"] + ". The plan John sees is "
+            "roadmap.json, not the document: fold the document (and anything he just asked to "
+            "add, remove or reorder) into roadmap.json in THIS turn - step_create / step_set "
+            "events plus the projection - then say in one line what changed in the plan.")
