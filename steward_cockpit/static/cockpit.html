@@ -893,9 +893,23 @@ async function loadDeliv() {
   list.textContent = "";
   items.forEach(it => {
     const row = el("div", "frow2");
-    const fn = el("span", "fn", "• " + it.what);
+    /* (2026-09-05) a contained Anchor route the parser classified
+       (classify_route) opens by ANCHOR — href = route + the page token,
+       target _blank, rel noopener, labelled with the deliverable's NAME —
+       the same way delivRow opens it. NEVER window.open for a route: the
+       page shim rewrites window.open("/report…") to /steward/report…,
+       which serve_page_doc 404s (wave-1 reviewer finding, 2026-09-05).
+       Hostile cells arrive route:null and stay text. */
+    const fn = el(it.route ? "a" : "span", "fn", "• " + it.what);
     fn.title = it.path || "";
-    if (it.openable && it.path) {
+    if (it.route) {
+      fn.href = it.route + (window.STEWARD_TOKEN
+        ? (it.route.indexOf("?") >= 0 ? "&" : "?") +
+          "token=" + encodeURIComponent(window.STEWARD_TOKEN)
+        : "");
+      fn.target = "_blank";
+      fn.rel = "noopener";
+    } else if (it.openable && it.path) {
       const isText = /\.(md|txt|csv|json|log)$/i.test(it.path);
       /* (2026-09-04, John) every deliverable opens well: text in the Reader;
          PDF / images inline; Word / PowerPoint / Excel as a text preview page

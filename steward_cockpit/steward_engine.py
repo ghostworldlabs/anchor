@@ -150,7 +150,15 @@ CONTRACT = (
     "/ NORTH-STAR appear there on their own) AND a short bullet summary said by "
     "you in the dialogue - three to six bullets, each two-four bold lead words "
     "then the point, ending with the one decision it needs from him if any. "
-    "Never a plan he has to go hunting for."
+    "Never a plan he has to go hunting for. "
+    "(15) THE DELIVERABLES REGISTER (standing rule, campaign journal 0010): a "
+    "step that produces a human-facing artifact is not done until it is a row "
+    "in DELIVERABLES.md - a pipe table | What | Where | Date | Step | (Step "
+    "optional per row). The Where cell is the open target - an in-effort path "
+    "in backticks, or a contained Anchor route (/report/... or /artifact/...) "
+    "- and may also carry run: <command> for a runnable deliverable; a row may "
+    "carry both. One register, never a second list; the cockpit renders "
+    "exactly what you write (the same contract read_deliverables parses)."
 )
 
 STAND_UP_NEW = (
@@ -324,6 +332,7 @@ class Engine:
         if general:
             self.cli = stored_entry.get("cli", "claude")
         self.proc = None
+        self._stdout_thread = None  # joined by stop() (state writes finish)
         self.events = []            # normalized, seq-stamped
         # a per-boot epoch so a client can tell its cached `since` is stale
         # after a restart / rebuild (else the transcript goes silent forever)
@@ -537,7 +546,13 @@ class Engine:
                 if not self.general:
                     self._emit_resume_pickup(entry)
                 return self._wake_locked(fresh=True, seed=seed)
-        threading.Thread(target=self._read_stdout, args=(proc,), daemon=True).start()
+        # kept on self so stop() can JOIN it: the reader's EOF handler writes
+        # the durable record, and an unjoined write can trail past stop() into
+        # whatever STATE_FILE points at by then (tests/healthcheck swap it —
+        # the 2026-09-05 proto-state residue finding)
+        self._stdout_thread = threading.Thread(
+            target=self._read_stdout, args=(proc,), daemon=True)
+        self._stdout_thread.start()
         threading.Thread(target=self._read_stderr, args=(proc,), daemon=True).start()
         threading.Thread(target=self._ticker, args=(proc,), daemon=True).start()
         # NOTE: the caller (wake) already holds self._lock, so every send here
@@ -644,6 +659,12 @@ class Engine:
                 proc.wait(timeout=10)
             except Exception:
                 self._kill_tree(proc)
+        # the reader thread's EOF handler persists state (_hold_queue, the
+        # turn-result usage): finish it BEFORE returning, so no state write
+        # trails a stop into a since-swapped STATE_FILE
+        t = getattr(self, "_stdout_thread", None)
+        if t is not None and t is not threading.current_thread():
+            t.join(timeout=5)
         # clear busy AND hand back the queue under one lock, so a straggling
         # turn-boundary can't re-set busy=True after we cleared it
         with self._lock:
