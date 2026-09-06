@@ -10219,6 +10219,15 @@ function _rndCollapsedSet() {{  // name kept for the callers; it is now the OPEN
 function _rndSaveCollapsed(arr) {{
     try {{ localStorage.setItem(RND_FOLDER_LS, JSON.stringify(arr || [])); }} catch (e) {{}}
 }}
+// (2026-09-05, John: "nothing happens") a drop that regroups reloads the page with
+// every folder closed by default - remember the DESTINATION folder open first, so
+// the moved row is the first thing on screen after the reload.
+function _rndOpenFolderNext(group) {{
+    var g = (group || '').trim();
+    if (!g) return;
+    var set = _rndCollapsedSet();
+    if (set.indexOf(g) < 0) {{ set.push(g); _rndSaveCollapsed(set); }}
+}}
 // Collapse / expand one folder, persisting the OPEN state by group name.
 function rndToggleFolder(headEl) {{
     var folder = headEl && headEl.closest ? headEl.closest('.rnd-folder') : null;
@@ -10328,6 +10337,7 @@ function _rndWireFolderDrop(folder) {{
 function rndMoveDialog(pid, group, folder) {{
     var ov = document.getElementById('rndMoveOverlay');
     if (!ov) {{  // dialog markup absent → fall back to the plain group path.
+        _rndOpenFolderNext(group);
         apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
         return;
     }}
@@ -10361,6 +10371,7 @@ function rndMoveCancel() {{
 // refusal (Anchor repo / live session) we surface a clear toast (no reload).
 function rndMoveConfirm(pid, group, onDisk) {{
     rndMoveCancel();
+    _rndOpenFolderNext(group);
     if (!onDisk) {{
         apiCall('/api/rnd/set_group', {{project_id: pid, group: group}});
         return;
