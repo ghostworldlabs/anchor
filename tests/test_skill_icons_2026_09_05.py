@@ -31,7 +31,7 @@ def test_report_page_carries_the_producing_skills_mark_once():
 
 
 def test_the_client_map_and_the_four_surfaces_are_wired():
-    js = (ROOT / "static" / "skill-icons.js").read_text(encoding="utf-8")
+    js = (ROOT / "steward_cockpit" / "static" / "skill-icons.js").read_text(encoding="utf-8")
     for name in routes.SKILLS:
         assert name.lower() in js.lower(), name
     assert "fromPath" in js and "decorate" in js

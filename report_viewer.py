@@ -193,7 +193,10 @@ def skill_icon_html(skill) -> str:
     fn = SKILL_ICON_FILES.get(key)
     if not fn:
         return ""
-    label = html.escape(str(skill))
+    # the canonical spelling, whatever case the path gave us
+    canon = {"researchprime": "researchPrime", "crucible": "Crucible", "foreman": "Foreman",
+             "gandalf": "Gandalf", "jumper": "Jumper", "ramanujan": "Ramanujan", "ecgberht": "Ecgberht"}
+    label = html.escape(canon.get(key, str(skill)))
     return ("<div class=\"skill-mark\" style=\"display:flex;align-items:center;gap:10px;"
             "margin:0 0 18px;color:#9aa4b8;font-size:14px\">"
             "<img src=\"/vendor/brand/" + fn + "\" alt=\"" + label + "\" title=\"" + label + "\" "
