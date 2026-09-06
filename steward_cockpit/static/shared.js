@@ -300,7 +300,8 @@ const Proto = (() => {
     // the detail already carries the full description above; the link itself
     // just says what it does (2026-09-03)
     const lnk = detail.querySelector(".drow a");
-    if (lnk) lnk.textContent = "Open ↗" + (it.path ? "  " + it.path : "");
+    if (lnk) lnk.textContent = "Open ↗" +
+      (it.path ? "  " + it.path : (it.route ? "  " + it.route : ""));
     const key = (it.dir || "") + "|" + (it.path || it.what || "");
     if (_openDelivs.has(key)) row.classList.add("open");
     line.onclick = (ev) => {
@@ -444,7 +445,21 @@ const Proto = (() => {
   }
   function delivRow(it) {
     const row = el("div", "snow drow");
-    if (it.openable && it.path) {
+    if (it.route) {
+      // (2026-09-05) a contained Anchor route (/report/…, /artifact/…) the
+      // parser CLASSIFIED (classify_route) — hostile cells arrive route:null
+      // and fall through to the text branch. Opens in a new window with the
+      // page token appended, same mechanism as the deliverable-file link.
+      const a = document.createElement("a");
+      a.textContent = "Open ↗ " + it.route;
+      a.href = it.route + (window.STEWARD_TOKEN
+        ? (it.route.indexOf("?") >= 0 ? "&" : "?") +
+          "token=" + encodeURIComponent(window.STEWARD_TOKEN)
+        : "");
+      a.target = "_blank";
+      a.rel = "noopener";
+      row.appendChild(a);
+    } else if (it.openable && it.path) {
       const a = document.createElement("a");
       a.textContent = "• " + it.what;
       // 2026-08-26 (John: "I click on them and the page had nothing"): a raw

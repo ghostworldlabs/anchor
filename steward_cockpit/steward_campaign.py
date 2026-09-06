@@ -1050,6 +1050,53 @@ def read_last_status(campaign_dir: str):
         return None
 
 
+def _safe_route_seg(seg: str) -> bool:
+    """The same safe class ``anchor_gui._unsafe_path_seg`` enforces (mirrored
+    here so this zero-import reader stays standalone): a non-empty segment with
+    no path separator and no parent-dir traversal."""
+    return bool(seg) and "/" not in seg and "\\" not in seg and ".." not in seg
+
+
+def classify_route(token: str):
+    """Classify a Where-cell token as a CONTAINED Anchor route — or None.
+
+    Only Anchor's own contained route grammars qualify, judged on the route's
+    OWN grammar (never a request-pid comparison — a cross-project register
+    link is a token-gated app route, not traversal):
+
+    - ``/report/<pid>/<lane>[/<job_id>]`` — every segment in the safe class
+      :func:`_safe_route_seg` (mirrors ``anchor_gui._unsafe_path_seg``);
+    - ``/artifact/<pid>?path=<rel>`` — ``rel`` relative, with no ``..`` /
+      absolute / drive / backslash segment and no second query key.
+
+    Any ``http(s)://``, protocol-relative ``//``, ``../`` or other
+    traversal-bearing token yields None (the row renders as text)."""
+    if not token or not isinstance(token, str):
+        return None
+    t = token.strip()
+    if t.startswith("/report/"):
+        if "?" in t:
+            return None
+        segs = t[len("/report/"):].split("/")
+        if len(segs) in (2, 3) and all(_safe_route_seg(s) for s in segs):
+            return t
+        return None
+    if t.startswith("/artifact/"):
+        pid, sep, query = t[len("/artifact/"):].partition("?")
+        if not sep or not _safe_route_seg(pid):
+            return None
+        if "&" in query or not query.startswith("path="):
+            return None
+        rel = query[len("path="):]
+        if not rel or rel.startswith("/") or "\\" in rel \
+                or re.match(r"^[A-Za-z]:", rel):
+            return None
+        if any(not seg or ".." in seg for seg in rel.split("/")):
+            return None
+        return t
+    return None
+
+
 def read_deliverables(campaign_dir: str):
     """Parse ``<cdir>/DELIVERABLES.md`` — THE campaign deliverables register (the
     steward's OWN convention, campaign journal 0010: one table row per thing a
@@ -1057,11 +1104,21 @@ def read_deliverables(campaign_dir: str):
     not done until listed here). Disk-true, zero-model, one source of truth — the
     cockpit never keeps a second registry.
 
-    Returns ``{"exists": bool, "items": [{"what", "where_text", "path", "date",
-    "openable"}]}``. ``path`` is the first backticked span of the Where cell,
-    resolved against the campaign dir; ``openable`` is True ONLY when the resolved
-    real path stays INSIDE the campaign dir (containment — entries pointing
-    outside, e.g. ``../…``, render as text, never as links)."""
+    THE HEADER CONTRACT (written down once, here): the register is a pipe table
+    ``| What | Where | Date | Step |`` — Step optional per row. The Where cell
+    carries the open target (a backticked or bare in-effort path, or a contained
+    Anchor route per :func:`classify_route`) and may ALSO carry a
+    ``run: <command>`` marker (backticked ``run: `<command>` `` form too); a row
+    may carry BOTH an open target and a run command.
+
+    Returns ``{"exists": bool, "items": [{"what", "where_text", "path", "route",
+    "run", "date", "step", "openable"}]}``. ``path`` is the first backticked span
+    of the Where cell, resolved against the campaign dir; ``openable`` is True
+    ONLY when the resolved real path stays INSIDE the campaign dir (containment —
+    entries pointing outside, e.g. ``../…``, render as text, never as links) OR
+    when the cell names a contained Anchor route (``route`` set, ``path`` None).
+    ``run`` is the exact command string after the ``run:`` marker — stored
+    verbatim, no shell parsing, no evaluation, never executed here."""
     f = Path(campaign_dir) / "DELIVERABLES.md"
     if not f.is_file():
         return {"exists": False, "items": _plan_doc_rows(campaign_dir, [])}
@@ -1077,34 +1134,55 @@ def read_deliverables(campaign_dir: str):
                or cells[0].lower() == "what":
                 continue
             what, where_text, date = cells[0], cells[1], cells[2]
-            path_rel, openable = None, False
-            m_bt = re.search(r"`([^`]+)`", where_text)
+            path_rel, openable, route, run_cmd = None, False, None, None
+            # (2026-09-05) a `run:` marker anywhere in the cell stores the
+            # EXACT command string — no shell parsing, no evaluation, never
+            # executed here. Backticked form matched first so a backticked
+            # command is never mistaken for the open-target span; the marker
+            # is removed from the cell before the open target is extracted.
+            cell = where_text
+            m_run = re.search(r"run:\s*(?:`([^`]+)`|(\S[^|]*))", where_text)
+            if m_run:
+                run_cmd = m_run.group(1) if m_run.group(1) is not None \
+                    else m_run.group(2).strip()
+                cell = (where_text[:m_run.start()]
+                        + where_text[m_run.end():]).strip()
+            m_bt = re.search(r"`([^`]+)`", cell)
             # (2026-09-04) a register row written without backticks (the
             # Fractal Orthogonal Basis effort: "report/DRAFT-v1.md") must still
             # open: fall back to the cell's first token that names a file.
             cand_plain = None
             if not m_bt:
-                for tok in where_text.replace(",", " ").split():
+                for tok in cell.replace(",", " ").split():
                     tok = tok.strip().strip("()[]")
                     if "/" in tok or "." in tok:
                         cand_plain = tok
                         break
             if m_bt or cand_plain:
                 cand = (m_bt.group(1).strip() if m_bt else cand_plain)
-                try:
-                    real = os.path.realpath(str(Path(campaign_dir) / cand))
-                    if (real == cdir_real
-                            or real.startswith(cdir_real + os.sep)) \
-                            and os.path.isfile(real):
-                        path_rel = os.path.relpath(real, cdir_real).replace(os.sep, "/")
-                        openable = True
-                    else:
+                if cand.startswith("/report/") or cand.startswith("/artifact/"):
+                    # (2026-09-05) a route-shaped token is judged by the
+                    # contained grammar ONLY — a hostile cell gets route None
+                    # and stays text; it never reaches the filesystem branch.
+                    route = classify_route(cand)
+                    openable = route is not None
+                else:
+                    try:
+                        real = os.path.realpath(str(Path(campaign_dir) / cand))
+                        if (real == cdir_real
+                                or real.startswith(cdir_real + os.sep)) \
+                                and os.path.isfile(real):
+                            path_rel = os.path.relpath(real, cdir_real).replace(os.sep, "/")
+                            openable = True
+                        else:
+                            path_rel = cand
+                    except OSError:
                         path_rel = cand
-                except OSError:
-                    path_rel = cand
             items.append({"what": re.sub(r"\*\*", "", what),
                           "where_text": where_text,
                           "path": path_rel,
+                          "route": route,
+                          "run": run_cmd,
                           "date": date,
                           # optional 4th column (John, 2026-08-26): which
                           # roadmap step produced it — a step NUMBER or a
@@ -1162,7 +1240,8 @@ def _plan_doc_rows(campaign_dir, listed, depth=2):
                 continue
             have.add(os.path.normcase(real))
             rows.append({"what": "Plan \u00b7 " + relp, "where_text": relp,
-                         "path": relp, "date": date, "step": "",
+                         "path": relp, "route": None, "run": None,
+                         "date": date, "step": "",
                          "openable": True, "auto": True})
 
     walk(root, 0)
