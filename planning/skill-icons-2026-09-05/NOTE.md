@@ -48,3 +48,13 @@ off the step TEXT (a mention of Gandalf / Jumper / researchPrime / Crucible / Fo
 Ramanujan / literature-review / zombie-hunter / tidy-idy / financial-analyst / legal-beagle), not only
 the `commissioned_as` field new steps carry; report tops key off the lane and the on-disk path, which
 every existing report already has. Existing projects therefore light up on the next page load.
+
+## Built the same evening (commits 5d0ff52, 4f88467)
+
+One client map `steward_cockpit/static/skill-icons.js` (the cockpit's shim serves only its own static dir —
+the first placement under `static/` 404ed on the page, found by the proof), one server map
+`steward_routes.SKILL_ICONS` (the skills verb carries icons), `report_viewer.skill_icon_html` on top of a report.
+Spots: plan outline steps, the workbench skill rail, the cockpit report page and the Anchor report page, the
+home project line. Proven on the live pages with Playwright (screenshots in the session scratchpad). Also in the
+same batch: links labelled by the document, rendered by type (md Reader / Office preview / PDF inline), file
+search + sort name/type/date, files open in a new window (the app button stays).
