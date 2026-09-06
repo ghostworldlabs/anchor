@@ -716,3 +716,324 @@ def test_finish_run_captures_docs_before_roles_for_live_session(
         if it["what"].startswith("researchPrime — "):
             assert it["openable"] is True, it
             assert it["step"] == "s2"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Wave 3 — the Run link: shell backend (staged unsent) · allowlisted endpoint ·
+# Run ▶ in the one renderer. ANCHOR_PTY_BACKEND=stub throughout — never a real
+# shell/engine spawn, never :8777.
+# ═════════════════════════════════════════════════════════════════════════════
+
+RUN_CMD = 'python -c "print(1)"'
+RUN_A = "python -c \"print('hi')\""
+RUN_B = "python -c \"print('bye')\""
+
+
+@pytest.fixture
+def shell_env(tmp_path, monkeypatch):
+    """Temp data dir + stub PTY + a plain (non-git) temp project folder — a
+    shell session creates NO worktree, so git is not needed. The global seed
+    override is deliberately SET to prove it can never leak into a shell
+    session (seeded must stay False, the buffer must never carry it)."""
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("ANCHOR_WORKTREE_BASE", str(tmp_path / "wt-base"))
+    monkeypatch.setenv("ANCHOR_PTY_BACKEND", "stub")
+    monkeypatch.setenv("ANCHOR_TERMINAL_SEED",
+                       "SEEDTEXT must never reach a shell")
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    for mod in ("paths", "job_runner", "pty_manager", "rnd_registry",
+                "session_registry", "worktrees", "lanes", "effort_history",
+                "sessions", "summarizer", "terminal_session"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import pty_manager
+    import rnd_registry
+    import session_registry
+    import terminal_session
+    proj = tmp_path / "proj"
+    eff = proj / "effort-a"
+    eff.mkdir(parents=True)
+    (eff / "ECGBERHT.md").write_text("# face", encoding="utf-8")
+    pid = rnd_registry.add_project("Run W3", str(proj), scaffold=False)["id"]
+    yield {"ts": terminal_session, "reg": session_registry,
+           "pty": pty_manager, "pid": pid, "proj": proj, "eff": eff}
+    try:
+        pty_manager._reset_live_table_for_tests()
+    except Exception:
+        pass
+
+
+def test_shell_session_stages_command_once_unsent_and_kill_reaps(shell_env):
+    """STUB GATE (W3 backend): a shell session runs IN the project tree (no
+    worktree), seeded False with NO seed text even under the global seed
+    override, and the paste flushes on the PTY's FIRST output bytes — landing
+    the command in the buffer exactly ONCE with no trailing newline, across two
+    attaches AND a restart-style re-read. term_kill reaps it exactly as any
+    general session."""
+    ts, reg, pty = shell_env["ts"], shell_env["reg"], shell_env["pty"]
+    assert "shell" in reg.VALID_BACKENDS
+    assert "shell" in ts.VALID_BACKENDS
+    rec = ts.start_session(shell_env["pid"], "general", backend="shell",
+                           paste_prompt=RUN_CMD)
+    sid = rec["session_id"]
+    assert rec["backend"] == "shell"
+    assert not rec.get("seeded")
+    assert not rec.get("seed_text")
+    # cwd defaulted to the REAL project tree — never a managed worktree
+    assert os.path.realpath(rec["worktree_path"]) == os.path.realpath(
+        str(shell_env["proj"]))
+    # before ANY output the paste stays pending (no prompt = nothing to land on)
+    first = ts.attach(sid)
+    assert RUN_CMD not in first["buffer"]
+    # the shell prompt appears (stub: first output bytes) → the next attach
+    # flushes ONCE, with no trailing newline (staged, NOT submitted)
+    pty.write(sid, "C:\\proj> ")
+    a1 = ts.attach(sid)
+    assert a1["buffer"].count(RUN_CMD) == 1
+    assert not a1["buffer"].endswith("\n") and not a1["buffer"].endswith("\r")
+    assert "SEEDTEXT" not in a1["buffer"]      # the seed override never leaked
+    a2 = ts.attach(sid)                        # second attach: no re-emit
+    assert a2["buffer"].count(RUN_CMD) == 1
+    # restart-style re-read: the durable record re-read from disk shows the
+    # paste claimed (flushed, cleared), and a fresh cursor-0 read holds the
+    # command exactly once
+    rec2 = reg.get_session(sid)
+    assert rec2["paste_flushed"] is True
+    assert not rec2.get("pending_paste")
+    r3 = ts.read_since(sid, 0)
+    assert (r3.get("text") or "").count(RUN_CMD) == 1
+    assert not (r3.get("text") or "").endswith("\n")
+    out = ts.kill(sid)
+    assert out["ok"] is True
+    assert sid not in pty.live_sessions()
+    assert reg.get_session(sid)["status"] == reg.STATUS_DONE
+
+
+def test_shell_session_three_hooks_noop(shell_env, monkeypatch):
+    """STUB GATE (W3 hooks): for a shell session the switch-handoff hook
+    no-ops (no summary generated, no PTY reaped, backend untouched), the
+    usage-capture hook no-ops on the kill end path, and summarize-on-finish
+    no-ops even with proactive summaries force-enabled."""
+    ts, reg, pty = shell_env["ts"], shell_env["reg"], shell_env["pty"]
+    rec = ts.start_session(shell_env["pid"], "general", backend="shell",
+                           paste_prompt=RUN_CMD)
+    sid = rec["session_id"]
+
+    # (1) switch-handoff: no summary capture, no reap, record untouched
+    handoff_calls = []
+    monkeypatch.setattr(
+        ts, "_switch_handoff_summary",
+        lambda *a, **k: handoff_calls.append(a) or "")
+    out = ts.switch_engine(sid, "claude")
+    assert out["backend"] == "shell"
+    assert handoff_calls == []
+    assert sid in pty.live_sessions()          # PTY still live — nothing reaped
+    assert reg.get_session(sid)["backend"] == "shell"
+    # and 'shell' is never a switch TARGET either (an engine REPL must not
+    # silently become a shell)
+    eng_before = reg.get_session(sid)
+    assert ts.switch_engine(sid, "shell")["backend"] == "shell"
+    assert reg.get_session(sid) == eng_before
+
+    # (2) usage-capture: the finalize seam never reaches the usage pipeline
+    usage_calls = []
+
+    class _FakeUsage:
+        def finalize_session_usage(self, *a, **k):
+            usage_calls.append(a)
+            return {"ok": True}
+
+        def snapshot_session_usage(self, *a, **k):
+            usage_calls.append(a)
+            return {"ok": True}
+
+    monkeypatch.setattr(ts, "_usage", _FakeUsage())
+
+    # (3) summarize-on-finish: no-ops for a shell session even when enabled
+    import anchor_gui as gui
+    monkeypatch.setattr(gui, "_PROACTIVE_SUMMARY_ENABLED", True)
+    summ_calls = []
+    monkeypatch.setattr(gui, "_trigger_session_summary",
+                        lambda *a, **k: summ_calls.append(a))
+    ts.kill(sid)
+    gui._trigger_session_summary_on_finish(shell_env["pid"], "general", sid)
+    assert usage_calls == []
+    assert summ_calls == []
+    # shell never becomes the project's default engine for the NEXT session
+    assert ts.last_engine_for_project(shell_env["pid"]) != "shell"
+
+
+def test_shell_session_live_tree_byte_identical_after_autosave_kill_close(
+        shell_env):
+    """STUB GATE (W3 amendment, 02:01 2026-09-06): a shell session's
+    worktree_path is the LIVE effort dir, NOT a managed disposable worktree —
+    autosave, suspend (the drain), graceful close and hard kill must each leave
+    a git-backed effort tree BYTE-IDENTICAL: no general/RESTART.md, no
+    <sid>-transcript.md, no commit into MAIN."""
+    import worktrees as wt
+    ts = shell_env["ts"]
+    proj, eff = shell_env["proj"], shell_env["eff"]
+    ok, _rc, _o, err = wt._git(proj, ["init"])
+    assert ok, "git unavailable — the byte-identity gate needs a repo: %s" % err
+    wt._git(proj, ["add", "-A"])
+    ok, _rc, _o, err = wt._git(
+        proj, ["-c", "user.email=t@t", "-c", "user.name=t",
+               "commit", "-m", "baseline"])
+    assert ok, err
+    head = wt._git(proj, ["rev-parse", "HEAD"])[2].strip()
+
+    def snap():
+        return {p.relative_to(proj).as_posix(): p.read_bytes()
+                for p in sorted(proj.rglob("*"))
+                if p.is_file() and ".git" not in p.parts}
+
+    baseline = snap()
+    assert baseline  # the committed ECGBERHT.md — a real tree, not an empty dir
+
+    # session 1: autosave heartbeat + drain-suspend + graceful close (the park)
+    rec = ts.start_session(shell_env["pid"], "general", backend="shell",
+                           paste_prompt=RUN_CMD, cwd=str(eff))
+    sid1 = rec["session_id"]
+    assert os.path.realpath(rec["worktree_path"]) == os.path.realpath(str(eff))
+    shell_env["pty"].write(sid1, "> ")
+    ts.attach(sid1)                      # flush the paste — PTY-only, no disk
+    out = ts.autosave_session(sid1)
+    assert out["persisted"] == []
+    assert snap() == baseline
+    assert ts.suspend_session(sid1) == ""
+    assert snap() == baseline
+    assert ts.close_session(sid1)["ok"] is True
+    assert snap() == baseline
+
+    # session 2: hard kill (term_kill reaps it exactly as any general session)
+    sid2 = ts.start_session(shell_env["pid"], "general", backend="shell",
+                            paste_prompt=RUN_CMD, cwd=str(eff))["session_id"]
+    assert ts.kill(sid2)["ok"] is True
+    assert snap() == baseline
+    # and no commit ever landed in MAIN
+    assert wt._git(proj, ["rev-parse", "HEAD"])[2].strip() == head
+
+
+def _post_json(url, payload, token=None):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=data, headers={"Content-Type": "application/json"})
+    if token:
+        req.add_header("X-Anchor-Token", token)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.getcode(), json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return e.code, {}
+
+
+def test_run_deliverable_terminal_endpoint_register_allowlist(tmp_path):
+    """STUB GATE (W3 endpoint): POST /api/rnd/run_deliverable_terminal — 401
+    unauthed BEFORE any register is read; a REGISTERED command with its row's
+    dir opens a shell session whose cwd comes from the ROW (effort A) with the
+    bytes staged once + unsent and a SAFE record (never worktree_path/branch);
+    a command one byte off / effort A's command with effort B's dir / a
+    '..'-bearing dir each 400 with NO spawn and NO echo of the rejected
+    string."""
+    from tests.chamber_harness import TEST_TOKEN, boot_server
+    srv = boot_server(tmp_path, token=TEST_TOKEN)
+    try:
+        import pty_manager
+        import rnd_registry
+        import session_registry
+        import terminal_session
+        folder = tmp_path / "proj"
+        effa = folder / "effort-a"
+        effb = folder / "effort-b"
+        effa.mkdir(parents=True)
+        effb.mkdir(parents=True)
+        (effa / "ECGBERHT.md").write_text("# face", encoding="utf-8")
+        (effb / "ECGBERHT.md").write_text("# face", encoding="utf-8")
+        _register(effa, [("runner", "run: %s" % RUN_A, "")])
+        _register(effb, [("other", "run: %s" % RUN_B, "")])
+        pid = rnd_registry.add_project("Run Endpoint W3", str(folder),
+                                       scaffold=False)["id"]
+        url = srv["base"] + "/api/rnd/run_deliverable_terminal"
+
+        # unauthed → 401 before substance, and nothing was spawned
+        code, _body = _post_json(
+            url, {"project_id": pid, "dir": "effort-a", "command": RUN_A})
+        assert code == 401
+        assert session_registry.list_sessions(project_id=pid) == []
+
+        # the registered command + its own row's dir → a shell session with
+        # cwd = effort A (from the ROW), bytes staged once, SAFE record
+        code, body = _post_json(
+            url, {"project_id": pid, "dir": "effort-a", "command": RUN_A},
+            token=TEST_TOKEN)
+        assert code == 200 and body["ok"] is True
+        sess = body["session"]
+        assert sess["backend"] == "shell"
+        assert "worktree_path" not in sess
+        assert "branch" not in sess
+        sid = sess["session_id"]
+        rec = session_registry.get_session(sid)
+        assert os.path.realpath(rec["worktree_path"]) == os.path.realpath(
+            str(effa))
+        child = pty_manager._LIVE.get(sid)
+        assert child is not None
+        assert os.path.realpath(str(child.cwd)) == os.path.realpath(str(effa))
+        pty_manager.write(sid, "> ")           # the prompt: first output bytes
+        out = terminal_session.attach(sid)
+        assert out["buffer"].count(RUN_A) == 1
+        assert not out["buffer"].endswith("\n")
+        assert session_registry.get_session(sid)["paste_flushed"] is True
+
+        live_before = set(pty_manager.live_sessions())
+        # one byte off → 400, no spawn, no echo of the rejected string
+        near = RUN_A[:-1]
+        code, body = _post_json(
+            url, {"project_id": pid, "dir": "effort-a", "command": near},
+            token=TEST_TOKEN)
+        assert code == 400
+        assert near not in json.dumps(body)
+        # effort A's registered command with effort B's dir → 400, no echo
+        code, body = _post_json(
+            url, {"project_id": pid, "dir": "effort-b", "command": RUN_A},
+            token=TEST_TOKEN)
+        assert code == 400
+        assert RUN_A not in json.dumps(body)
+        # a '..'-bearing dir → 400
+        code, body = _post_json(
+            url, {"project_id": pid, "dir": "../outside", "command": RUN_A},
+            token=TEST_TOKEN)
+        assert code == 400
+        assert set(pty_manager.live_sessions()) == live_before  # nothing spawned
+        terminal_session.kill(sid)
+    finally:
+        srv["stop"]()
+
+
+def test_run_button_gated_on_it_run_no_innerhtml_and_toggle_hidden():
+    """Source-level (jsdom-free): steward_cockpit/static/shared.js — delivRow's
+    Run ▶ branch is gated on it.run, carries the .drun class, POSTs the run
+    endpoint through the _postJson/token path, window.open()s the EXISTING
+    /zombie_terminal page (no new alias), and uses no innerHTML; and the
+    project window renders NO engine toggle for a 'shell' session."""
+    js = (STATIC / "shared.js").read_text(encoding="utf-8")
+    deliv = js.split("function delivRow(it)")[1].split("function actLabel")[0]
+    assert "if (it.run)" in deliv                 # gated on the run: marker
+    assert '"drun"' in deliv
+    assert "_postJson(" in deliv
+    assert "/api/rnd/run_deliverable_terminal" in deliv
+    assert "/zombie_terminal?session=" in deliv   # the EXISTING page, no alias
+    assert "window.open(" in deliv
+    assert "innerHTML" not in deliv
+    # the shared _postJson helper carries the page token (Bearer + X-Anchor-Token)
+    helper = js.split("function _postJson(")[1].split("function ")[0]
+    assert "X-Anchor-Token" in helper
+    assert "Authorization" in helper
+    # engine toggle hidden for shell sessions in the ONE panel-header builder
+    pw = (REPO / "static" / "project-window.js").read_text(encoding="utf-8")
+    assert "isLive && s.backend !== 'shell'" in pw

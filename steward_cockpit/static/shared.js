@@ -27,6 +27,20 @@ const Proto = (() => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(Object.assign(
       { dir: DIR, general: GENERAL, term: TERM || undefined }, body)) });
+  // reports-links W3: authed JSON POST to an ANCHOR route (not a steward verb —
+  // the page shim passes /api/rnd/ through unrewritten). Same token path the
+  // tidy-idy caller uses: Bearer + X-Anchor-Token from the page token.
+  function _postJson(url, payload) {
+    const headers = { "Content-Type": "application/json" };
+    let tok = window.STEWARD_TOKEN || "";
+    try { tok = tok || localStorage.getItem("anchor_token") || ""; } catch (e) {}
+    if (tok) {
+      headers["X-Anchor-Token"] = tok;
+      headers["Authorization"] = "Bearer " + tok;
+    }
+    return fetch(url, { method: "POST", headers: headers,
+                        body: JSON.stringify(payload) });
+  }
 
   /* ---------- kickoff (Gate 5 canary, 2026-09-01) ----------
      The confirmed kickoff is the goal's AUTHORITATIVE form (confirmed intent has
@@ -506,6 +520,35 @@ const Proto = (() => {
       row.appendChild(a);
     } else {
       row.appendChild(document.createTextNode("• " + it.what + (it.path ? " — " + it.path : "")));
+    }
+    // reports-links W3: a row carrying a run: command gets a 'Run ▶' control.
+    // It POSTs the register-allowlisted command to the run endpoint (the server
+    // re-reads the register and refuses anything else byte-for-byte), then
+    // opens the EXISTING standalone terminal page on the returned session —
+    // the command sits on the shell prompt UNSENT until the user presses
+    // Enter. textContent only, never raw markup injection.
+    if (it.run) {
+      const runDir = it.dir !== undefined ? it.dir : DIR;
+      const rbtn = document.createElement("a");
+      rbtn.className = "drun";
+      rbtn.textContent = " Run ▶";
+      rbtn.href = "#";
+      rbtn.title = "Open a terminal with this command staged (Enter runs it)";
+      rbtn.onclick = (ev) => {
+        ev.preventDefault();
+        _postJson("/api/rnd/run_deliverable_terminal", {
+          project_id: window.STEWARD_PID || "",
+          dir: runDir,
+          command: it.run,
+        }).then((r) => r.json()).then((j) => {
+          const sid = j && j.ok && j.session && j.session.session_id;
+          if (!sid) return;
+          window.open("/zombie_terminal?session=" + encodeURIComponent(sid) +
+            (window.STEWARD_TOKEN
+              ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : ""));
+        }).catch(() => {});
+      };
+      row.appendChild(rbtn);
     }
     if (it.date) row.appendChild(document.createTextNode(" · " + it.date));
     return row;
