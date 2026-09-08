@@ -916,7 +916,17 @@ def compose_status(campaign_dir: str, engine_state=None):
                    "source": ".ecgberht/attention.json", "age": ""}
         now_lines.append(run)
     if st.get("busy"):
-        line = "steward working"
+        # (2026-09-07, journals 0006/0111) a steward mid-turn cannot repaint the
+        # pane: say so, with the turn's start and the last status on record,
+        # instead of letting the previous status stand as if current.
+        line = "steward mid-turn"
+        ts0 = float(st.get("turn_started") or 0)
+        if ts0 > 0:
+            mins = int(max(0.0, time.time() - ts0) // 60)
+            line += " since " + time.strftime("%H:%M", time.localtime(ts0)) + " (" + str(mins) + " min)"
+        _last = read_last_status(campaign_dir)
+        if _last and _last.get("at"):
+            line += " \u00b7 last status " + str(_last["at"])[-5:]
         if st.get("queued"):
             line += " \u00b7 %d queued" % st["queued"]
         now_lines.append(line)
@@ -999,6 +1009,12 @@ def compose_status(campaign_dir: str, engine_state=None):
     }
     if not m.get("goal_reread", True):
         now_lines.append("goal not re-read since last close")
+    # (2026-09-07, journals 0026/0111) the effort line carries its AGE, and a line
+    # a day or more older than the newest work on disk is shouted, never kept quietly.
+    effort_line = effort_line_freshness(campaign_dir, m)
+    if effort_line.get("stale"):
+        now_lines.append("effort line as of " + effort_line["as_of"] + " \u2014 "
+                         + str(effort_line["behind_days"]) + " day(s) older than the newest work; the steward has not restamped it")
     if active and active.get("part") in ("slice", "rigor", "integrate", "harden") \
             and not active.get("gate") and active.get("commissioned_as"):
         now_lines.append("commissioned without a gate command")
@@ -1018,6 +1034,7 @@ def compose_status(campaign_dir: str, engine_state=None):
            "lookthrough": ({"source": look["source"], "age": look["age"],
                             "final": look["final"]} if look else None),
            "halt": halt,
+           "effort_line": effort_line,
            "plan": plan,
            "map": m.get("map") or [],
            "work_map": m.get("work_map") or [],
@@ -1030,6 +1047,46 @@ def compose_status(campaign_dir: str, engine_state=None):
     except Exception:
         out["deliverables_count"] = 0
     return out
+
+def effort_line_freshness(campaign_dir: str, m=None):
+    """The Strip's effort line with its age: ``as_of`` (the stamp's own
+    ``active_effort_as_of`` date, else strip.json's mtime), ``newest_work`` (the
+    newest of roadmap.json / DELIVERABLES.md / the journal), ``behind_days`` and
+    ``stale`` (a day or more behind). Disk-true, never raises."""
+    root = Path(campaign_dir)
+    out = {"text": "", "as_of": "", "newest_work": "", "behind_days": 0, "stale": False}
+    try:
+        strip, _err = _read_json(root / "strip.json")
+        strip = strip or {}
+        out["text"] = str(strip.get("active_effort") or "")
+        as_of = str(strip.get("active_effort_as_of") or "").strip()
+        if as_of:
+            as_of_t = time.mktime(time.strptime(as_of[:10], "%Y-%m-%d")) + 86399
+        else:
+            as_of_t = (root / "strip.json").stat().st_mtime
+            as_of = time.strftime("%Y-%m-%d", time.localtime(as_of_t))
+        out["as_of"] = as_of
+        newest = 0.0
+        for rel in ("roadmap.json", "DELIVERABLES.md"):
+            try:
+                newest = max(newest, (root / rel).stat().st_mtime)
+            except OSError:
+                pass
+        try:
+            for p in (root / "journal").iterdir():
+                if p.is_file():
+                    newest = max(newest, p.stat().st_mtime)
+        except OSError:
+            pass
+        if newest:
+            out["newest_work"] = time.strftime("%Y-%m-%d", time.localtime(newest))
+            behind = int(max(0.0, newest - as_of_t) // 86400)
+            out["behind_days"] = behind
+            out["stale"] = behind >= 1 and bool(out["text"])
+    except Exception:
+        pass
+    return out
+
 
 def read_last_status(campaign_dir: str):
     """The last 10-minute status the engine PERSISTED for this effort

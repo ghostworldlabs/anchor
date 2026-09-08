@@ -380,6 +380,7 @@ class Engine:
         self.auto_count = 0
         self.broken = False         # bad exit / failed delivery -> red light
         self.last_say = 0.0
+        self.turn_started = 0.0     # when the current model turn began (0 = idle)
         self.woke_at = 0.0
         self.john_msgs = 0          # ease-metric floor: his message count
         self.open_question = stored_entry.get("open_question", "")
@@ -442,6 +443,7 @@ class Engine:
         return {
             "alive": self.alive(),
             "busy": self.busy,
+            "turn_started": self.turn_started if self.busy else 0.0,
             # commissioned/background work in flight (the attention flag,
             # disk-true) — WITHOUT this the header pill said "waiting on
             # you" while a commissioned run worked (John, 2026-08-25)
@@ -836,9 +838,9 @@ class Engine:
             # (2026-09-05, John: "the plan does not get updated") while the
             # roadmap is behind the plan documents, his turn carries the drift
             # line on the model's stdin - his displayed words stay his own.
-            if human and not self.general:
-                text = text + self._plan_drift_suffix()
             if self.busy:
+                # queued RAW: the drift line is computed when this is delivered
+                # (a line computed now can be false by then — journal 0111)
                 self.queue.append(text)
                 if not self._persist_queue():
                     self.queue.pop()
@@ -851,7 +853,7 @@ class Engine:
                             "error": "could not durably queue your text"}
                 self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
                 return {"ok": True, "queued": True}
-            ok = self._send_locked(text)
+            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""))
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}
@@ -874,6 +876,7 @@ class Engine:
             proc.stdin.write(json.dumps(msg) + "\n")
             proc.stdin.flush()
             self.busy = True
+            self.turn_started = time.time()
             self.turn_text = ""
             return True
         except Exception as e:
@@ -1036,7 +1039,9 @@ class Engine:
                 # Human ingress always outranks automatic retries/drive.
                 if self.queue:
                     queued = self.queue[0]
-                    if self._send_locked(queued):
+                    # the drift line is computed NOW, at delivery (journal 0111)
+                    suffix = "" if self.general else self._plan_drift_suffix()
+                    if self._send_locked(queued + suffix):
                         self.queue.pop(0)
                     if not self._persist_queue():
                         self.broken = True
