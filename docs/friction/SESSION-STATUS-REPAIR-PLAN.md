@@ -84,3 +84,8 @@ The main line should contain one plain sentence identifying the concrete output 
 Acceptance requires a user to answer from the visible cockpit alone: Is work running? Which output? What can I open now? What arrives next and when? Is there a question for me? Exercise real work, worker death, quiet completion and a genuine waiting question. The working state must stay green for observed foreground and background activity, then change immediately when the last owned work finishes.
 
 Immediate campaign correction is implemented: separate active deck rows, no false human wait, fresh activity stamps and linked existing artifacts. The general Anchor code and visual design changes remain proposed. The previous status-repair approval question is withdrawn; it must not delay the already-authorized decks.
+
+
+## September8 implementation receipt
+
+John explicitly approved repair. Live workflow links and sandboxed demo comparisons are repaired and browser-verified; the client supports stable step IDs, clearer work status and a completion refresh. Server publication/focus/evidence changes pass isolated behavioral checks and await safe server activation. Automatic receipt producers, owner renewal, exact per-pane acknowledgements, North Star completion auditing and full lifecycle/two-interval acceptance remain open. The general friction report contains the evidence and activation boundary. This update supersedes earlier “proposed/no production change” wording for the completed client and campaign scope only.

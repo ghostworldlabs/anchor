@@ -60,3 +60,32 @@ The proposal defines implementation order and separate behavioral/browser proof.
 ### Additional September 8 observation
 
 John again could not identify current work, finished deliverables or the next delivery, and saw a misleading waiting state. The steward had let this status proposal displace the requested Lecture3/4 decks and asked an unnecessary implementation question. That question is withdrawn. Actual deck production resumed with separate roadmap rows and no human blocker. The repair plan now includes the plain green/amber/neutral state contract, a compact current/next/ready presentation and five questions the cockpit itself must answer. General production repair remains open; campaign file corrections are not represented as an engine fix. Session overhead is6.
+
+
+## September8 — steward/cockpit delivery repair, authorized and verified
+
+John asked why Lecture3/4 proposals and the sample-means demo were missing from the left workflow, explicitly approved repair, and repeated that the failure and repair must be analyzed in the steward interaction journal. The failure was not missing production: the proposal PDFs, both draft decks and HTML existed. The steward treated DELIVERABLES registration as delivery without checking the renderer. The renderer matched Step by name or number while new rows carried stable step IDs, silently omitting those artifacts.
+
+The immediate campaign compatibility repair uses current step names so an already-open client can show the links. The general client now also matches stable IDs and retains name/number compatibility; expansion state follows ID across renaming. Actual Chrome on the running service clicked the proposal PDF, Lecture3 PDF, Lecture4 PDF and HTML from their left-hand steps and verified successful opening.
+
+A second defect appeared only on that real path: the isolated HTML preview could run the demo, but its comparison links requested the authenticated server from an opaque origin and were refused with403. The demo now makes independent in-memory comparison pages, with n/population parameters in their fragments. Preview isolation and the cross-origin guard remain enforced. Actual Chrome now passes single sample, n change, automatic/pause, independent n30/n500 tabs and CSV export, with no page errors. This is why file-origin checks alone were insufficient.
+
+The client status line now uses plain working/question/idle wording with green/amber/neutral colors, preserving red for broken state; provider diagnostics are in its tooltip. It fetches a fresh status shortly after completion, covering older running servers that persist without broadcasting. The narrow client patch is installed and was verified on a newly opened live cockpit; no claim is made that every already-open tab has reloaded its JavaScript. The data-level link repair does not require that reload.
+
+Server-side completion publication, explicit current-step focus, null request semantics, source-bound local check/journal evidence and honest ETA are implemented in an isolated checkout. The focused result probe now emits exactly one newer status. Current root tests:89 backend regressions plus9 Chrome renderer checks and15 focus/evidence cases pass. These code tests do not prove server activation or two scheduled live intervals. The current Anchor process owns the active Codex conversation (ancestry verified), so restarting it now would interrupt the repair session. Server activation remains pending a safe restart. No new approval is required from John.
+
+Remaining general scope stays open: automatic check/journal receipt producers, verified owner renewal beyond the old lease, exact per-pane generation acknowledgements, completion-event North Star audit, and full lifecycle/two-interval acceptance. This is a verified usability repair plus a tested first server patch, not certification of that whole plan.
+
+Evidence in the MBA campaign: `.ecgberht/reports/workflow-links-live.json`, `workflow-links-live.png`, `sampling-demo-live-route.png`, and reproducible `check-live-workflow.py`. The isolated Anchor branch is `codex/status-workflow-20260908`. The campaign journal records observed failures, attempted checks, fixes and the activation boundary. The durable global rule now requires visible workflow links and actual viewer checks before a delivery claim. Session overhead is8.
+
+
+### Final first-patch verification — 2026-09-08T21:00:43.056271-06:00
+
+The focused and adjacent status/workflow suites finish174 passed. Two legacy status assertions were updated to the approved contract: missing evidence and unsupported ETA must be explicit, not blank or a guessed part-duration. A wider11-test dashboard group has7 failures and4 passes; all7 failures reproduce on the unchanged isolated baseline `1b1ed90`. They concern retired inline dashboard JS/CSS expectations and discovered-tile rendering, not the changed steward renderer. They are recorded in `anchor-dashboard-baseline.json`; no whole-application green claim is made.
+
+Repair code is committed in isolated branch `codex/status-workflow-20260908` as `9f62a5f`. Only narrow source diffs were applied to the live source tree, preserving unrelated existing edits. The client is served now; Python source is installed on disk and will activate on a safe server restart. The running server was not restarted because it owns this conversation. The status intake remains open for activation and the remaining general acceptance work.
+
+
+### Report opening correction — 2026-09-08T21:02:48.486459-06:00
+
+The final live-reader check found that the general report’s registered `.ecgberht/reports` path was rejected as “bad path”: the text-report reader intentionally excludes hidden path components. The proposals and demo checks were unaffected. The human-facing repair report and its existing plan are now published under the course planning folder and the single register points there. The reader guard remains intact. Both report copies and the campaign journal record this further steward/viewer contract mismatch.
