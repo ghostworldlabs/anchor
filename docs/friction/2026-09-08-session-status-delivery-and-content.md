@@ -49,3 +49,9 @@ Focused automated regressions should accompany the change, followed by real brow
 Campaign: `C:/dev/MBA Teaching AI`. Incident and ownership account: `.ecgberht/session-journal.md`; raw status and delivery records: `.ecgberht/status-summary.json` and `.ecgberht/delivery.json`. Campaign corrections were committed as `a17f115`; explicit forgetting and prevention as `fba2fb2`. The browser/numerical receipts remain under `BA 815/Fall 2026/build/review-september8/` and the associated scripts.
 
 Relevant installed source: `C:/dev/Anchor/steward_cockpit/steward_campaign.py`, `steward_engine.py`, and `static/shared.js`. The ten-minute timer is owned by the engine. Intake status stays open until a general fix is implemented and supported by the evidence above.
+
+## Follow-up analysis and solution
+
+The [concrete repair proposal](SESSION-STATUS-REPAIR-PLAN.md) now identifies four changes: immediate completion publication, explicit work focus and evidence, observed worker ownership, and exact-generation browser acknowledgements. A focused probe of the installed Engine result handler reproduced a stronger failure: saved state changed from working to idle, but zero status events were emitted after completion. The probe is in the campaign at `.ecgberht/reports/probe-session-status.py`; its `--require-fixed` check exits1 on the current defect. It launches no model or browser and is not evidence of a live-screen repair.
+
+The proposal defines implementation order and separate behavioral/browser proof. General implementation and deployment remain proposed; this intake is still open.
