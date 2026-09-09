@@ -72,4 +72,15 @@ Extend the existing Anchor suites `test_steward_decision_shape.py`, `test_cockpi
 
 I recommend this bounded Anchor repair: it removes dependence on model memory and fixes the reporting path John actually uses. Manual verification alone is immediately available but keeps imposing operator work. Fixing only the completion broadcast is smaller, but leaves incorrect focus, missing local evidence and background ownership unresolved.
 
-No production change or deployment has been made. The next decision is whether to implement this repair. The general friction record remains open until the selected scope is implemented and its corresponding real-session evidence is recorded.
+No production change or deployment has been made. John renewed the instruction to deliver the lecture drafts first; this supporting repair does not require a new question before course work continues. The general friction record remains open until the selected scope is implemented and its corresponding real-session evidence is recorded.
+
+
+## September 8 usability correction: make the state obvious
+
+John reports that the cockpit is too dense to identify what is ready, what is running or when the next deliverable will arrive. The technical defects above are compounded by ambiguous wording and a plan organized around broad course blocks. A green dot should mean observed current work, amber should mean an actual question requiring John, and a neutral dot should mean nothing is running. Expired evidence must say status is unconfirmed, with the last verified time; it must not silently become a request for John. Text must accompany color.
+
+The main line should contain one plain sentence identifying the concrete output in progress. Directly below, show the next expected deliverable and a grounded estimate, plus the most recently completed artifact as an openable link. Keep diagnostics, process counts and historical warnings behind details. Reuse roadmap steps as the product map; Lecture3, Lecture4 and the sample-means demo need distinct rows. This is a presentation simplification within the same repair, not another register.
+
+Acceptance requires a user to answer from the visible cockpit alone: Is work running? Which output? What can I open now? What arrives next and when? Is there a question for me? Exercise real work, worker death, quiet completion and a genuine waiting question. The working state must stay green for observed foreground and background activity, then change immediately when the last owned work finishes.
+
+Immediate campaign correction is implemented: separate active deck rows, no false human wait, fresh activity stamps and linked existing artifacts. The general Anchor code and visual design changes remain proposed. The previous status-repair approval question is withdrawn; it must not delay the already-authorized decks.

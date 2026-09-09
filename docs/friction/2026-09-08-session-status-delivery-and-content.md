@@ -55,3 +55,8 @@ Relevant installed source: `C:/dev/Anchor/steward_cockpit/steward_campaign.py`, 
 The [concrete repair proposal](SESSION-STATUS-REPAIR-PLAN.md) now identifies four changes: immediate completion publication, explicit work focus and evidence, observed worker ownership, and exact-generation browser acknowledgements. A focused probe of the installed Engine result handler reproduced a stronger failure: saved state changed from working to idle, but zero status events were emitted after completion. The probe is in the campaign at `.ecgberht/reports/probe-session-status.py`; its `--require-fixed` check exits1 on the current defect. It launches no model or browser and is not evidence of a live-screen repair.
 
 The proposal defines implementation order and separate behavioral/browser proof. General implementation and deployment remain proposed; this intake is still open.
+
+
+### Additional September 8 observation
+
+John again could not identify current work, finished deliverables or the next delivery, and saw a misleading waiting state. The steward had let this status proposal displace the requested Lecture3/4 decks and asked an unnecessary implementation question. That question is withdrawn. Actual deck production resumed with separate roadmap rows and no human blocker. The repair plan now includes the plain green/amber/neutral state contract, a compact current/next/ready presentation and five questions the cockpit itself must answer. General production repair remains open; campaign file corrections are not represented as an engine fix. Session overhead is6.
