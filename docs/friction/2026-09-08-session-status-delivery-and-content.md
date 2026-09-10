@@ -89,3 +89,19 @@ Repair code is committed in isolated branch `codex/status-workflow-20260908` as 
 ### Report opening correction — 2026-09-08T21:02:48.486459-06:00
 
 The final live-reader check found that the general report’s registered `.ecgberht/reports` path was rejected as “bad path”: the text-report reader intentionally excludes hidden path components. The proposals and demo checks were unaffected. The human-facing repair report and its existing plan are now published under the course planning folder and the single register points there. The reader guard remains intact. Both report copies and the campaign journal record this further steward/viewer contract mismatch.
+
+
+## September 9 — hierarchy campaign: feedback before close and simpler status
+
+John approved archiving Hierarchical AR Networks (source eb56abca-546b-4651-8bff-31c90c347948) and explicitly asked for workflow lessons. New canonical intake: `2026-09-09-02-research-ran-ahead-of-feedback-status-an` (open). The full original words are retained there; the campaign reading is `C:\dev\Mathematics Problems\Transformer Math\Hierarchical AR Networks\archive\LESSONS.pdf`.
+
+The failure is partly a workflow boundary: producing and independently reviewing an artifact was repeatedly treated as readiness for the next research step while John still needed the central architecture explained. Shared understanding must be a named result. The visible plan should keep the slice in feedback/revision until John accepts its close; downstream work remains waiting. Routine work inside the approved slice continues, and pickups preserve approvals. This must not become a new permission ritual.
+
+John reports the status as complicated and slow to reflect useful events. The campaign saved status at 18:28 showed check/journal evidence unavailable despite local receipts; this establishes a content gap, not a proven timer outage on every device. The requested front surface is simply current activity, last meaningful event with actual time, and a working way to open earlier updates. Details remain behind that summary. The existing register should expose one current START HERE artifact/collection and keep superseded material below it.
+
+Acceptance for the general improvement: deliver a draft in a real session and show feedback wait with no dependent job; revise it from feedback and update the same map/product; accept a close and advance only then. Exercise a local check and completion, two scheduled status intervals, clicking an earlier update, and provider pickup. Actual browser content and render acknowledgements must match the current slice and event times; no fabricated cost, ETA, check or delivery receipt. The current reference guide must open from its intended step and conversation.
+
+Applied here: canonical user-global workflow rules, latest-reading order, final-plan-before-projection save, reference preservation and explicit parking of unperformed work. Still open for Anchor: the general feedback-phase/status-history behavior and its full live acceptance. No new cockpit implementation or research campaign was commissioned by this archive.
+
+
+Archive lifecycle observation (20:21 local): retirement in place preserves `/artifact/...` report paths and joins the archive listing, but the existing active effort map/register routes return 404 `unknown effort`. The prior work page consequently shows an empty-map error. The archived reference guide and its internal links were verified as the reading entry point. A future archive/status improvement should provide a clear archived-reading state with its reference link, rather than the empty active-work page. This observation is recorded, not claimed repaired here. Final scoped local-check and journal receipts were also written into the campaign Strip; the deterministic composer reads their completed evidence correctly. That composer result is not a browser render acknowledgement.
