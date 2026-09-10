@@ -105,3 +105,8 @@ Applied here: canonical user-global workflow rules, latest-reading order, final-
 
 
 Archive lifecycle observation (20:21 local): retirement in place preserves `/artifact/...` report paths and joins the archive listing, but the existing active effort map/register routes return 404 `unknown effort`. The prior work page consequently shows an empty-map error. The archived reference guide and its internal links were verified as the reading entry point. A future archive/status improvement should provide a clear archived-reading state with its reference link, rather than the empty active-work page. This observation is recorded, not claimed repaired here. Final scoped local-check and journal receipts were also written into the campaign Strip; the deterministic composer reads their completed evidence correctly. That composer result is not a browser render acknowledgement.
+
+
+## September 9 live-work follow-up — 2026-09-09T20:32:35.107358-06:00
+
+The cafe revision continued with a supervised hidden owner and a live Jumper child. The first composed review finished at20:29:11 and the next model process began; the attention lease was being renewed. However, campaign delivery.json still recorded its last render acknowledgement at20:13:56 after a20:28 live workflow test. This does not establish why acknowledgement is absent, or prove a particular scheduler outage. It does establish that fresh scheduled-pane delivery is not verified. Keep the prior per-pane-generation acknowledgement and two-interval acceptance work open; file writes and successful document clicks are not substitutes. The teaching artifacts were delivered while this reporting limitation was recorded. No production server restart or additional Anchor repair is claimed.
