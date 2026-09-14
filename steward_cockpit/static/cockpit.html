@@ -885,14 +885,35 @@ setInterval(loadShelves, 20000);
 
 /* ---------- deliverables ---------- */
 async function loadDeliv() {
-  /* 2026-08-26 (John): this list is the UNION of every effort's curated
+  /* The list combines the root workbench register with every effort's curated
      DELIVERABLES.md register — the reports a human would open (Gandalf reads,
      researchPrime reports, the special PDFs) — NEVER raw session files;
      those are computer-facing and live in the workbench file explorer.
      Text docs open in the rendered report viewer; PDFs/binaries stream
      through the contained deliverable-file route. */
-  const j = await (await fetch("/api/register-all?dir=")).json();
-  const items = j.items || [];
+  const [j, terms] = await Promise.all([
+    fetch("/api/register-all?dir=").then(r => r.ok ? r.json() : null).catch(() => null),
+    fetch("/api/terms?dir=").then(r => r.ok ? r.json() : null).catch(() => null)
+  ]);
+  let items = j && j.items || [], rootUnavailable = terms === null;
+  const term = (terms && terms.terms || []).find(t => !t.archived && /^\d{1,6}$/.test(t.tid));
+  const key = it => it.route ? "route:" + it.route + "|" + (it.run || "")
+    : [it.dir || "", it.path || ""].filter(Boolean).join("/").replace(/\\/g, "/").toLowerCase()
+      + "|" + (it.run || "") + (it.path ? "" : "|" + it.what);
+  if (term) {
+    try {
+      const response = await fetch("/api/deliverables?dir=&general=1&term=" + encodeURIComponent(term.tid));
+      if (!response.ok) throw new Error("root register unavailable");
+      const root = await response.json();
+      if (root.error || !Array.isArray(root.items)) throw new Error("root register unavailable");
+      const existing = new Set(items.map(key)), seen = new Set();
+      const workbench = root.items.map(it => ({...it, dir: "", effort: "Project workbench"}))
+        .filter(it => !existing.has(key(it)));
+      items = [...workbench, ...items].filter(it => {
+        const k = key(it); if (seen.has(k)) return false; seen.add(k); return true;
+      });
+    } catch (e) { rootUnavailable = true; }
+  }
   const list = document.querySelector("[data-delivlist]");
   list.textContent = "";
   items.forEach(it => {
@@ -942,6 +963,8 @@ async function loadDeliv() {
   if (!items.length)
     list.appendChild(el("div", "frow2",
       "no deliverables registered yet — each effort's steward lists the things worth opening as they land"));
+  if (rootUnavailable) list.appendChild(el("div", "frow2", "Project workbench reports could not be read; reopen this list to retry."));
+  if (j === null) list.appendChild(el("div", "frow2", "Effort reports could not be read; reopen this list to retry."));
   document.querySelector("[data-delivsum]").textContent = items.length + " registered";
 }
 
