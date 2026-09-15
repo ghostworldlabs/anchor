@@ -515,6 +515,17 @@ class Engine:
         # or dead auth changes a pinned family.
         self._family_pinned = bool(stored_entry.get("cli"))
         self._stale_catalog_noted_at = 0.0
+        self._pinned_cli_missing = False
+        self._catalog_refresh_thread = None
+        # Wave 1.2: human-first, durable ingress. The resume brief rides on his
+        # next message instead of spending a turn; every send carries an
+        # explicit origin; a submitted human message stays durable until the
+        # broker acknowledges it with a native event.
+        self._resume_prefix = None
+        self._turn_origin = "human"
+        self._submitted = stored_entry.get("submitted") if isinstance(stored_entry.get("submitted"), dict) else None
+        self._interrupted = stored_entry.get("interrupted") if isinstance(stored_entry.get("interrupted"), dict) else None
+        self._thinking_noted_at = 0.0
         self._bridge_system_prompt = None
         self._last_submitted = ""
         self._turn_had_tools = False
@@ -851,7 +862,16 @@ class Engine:
             return self.cli, self.model_selection
         if not (self._family_pinned and target == self.cli and self.model_selection):
             return self._select_available_policy(settings, target)
+        if self._pinned_cli_missing:
+            return self._select_available_policy(settings, target, excluded=(self.cli,))
         try:
+            cached = model_policy.cached_selection(self.cli, settings=settings)
+            if cached is not None:
+                stale = cached.pop("stale", False)
+                if stale:
+                    # Wave 1.2: discovery runs off the request thread.
+                    self._refresh_catalog_async(settings)
+                return self.cli, cached
             return self.cli, model_policy.resolve(self.cli, settings=settings)
         except model_policy.PolicyUnavailable as exc:
             if exc.code == "cli_missing":
@@ -861,6 +881,27 @@ class Engine:
         except (ValueError, RuntimeError) as exc:
             self._note_stale_catalog(str(exc))
             return self.cli, self.model_selection
+
+    def _refresh_catalog_async(self, settings):
+        """Single-flight background discovery for the pinned family."""
+        import model_policy
+        thread = self._catalog_refresh_thread
+        if thread is not None and thread.is_alive():
+            return
+        family = self.cli
+
+        def _run():
+            try:
+                model_policy.resolve(family, settings=settings, force=True)
+            except model_policy.PolicyUnavailable as exc:
+                if exc.code == "cli_missing":
+                    self._pinned_cli_missing = True
+                self._note_stale_catalog(str(exc))
+            except (ValueError, RuntimeError) as exc:
+                self._note_stale_catalog(str(exc))
+        thread = threading.Thread(target=_run, name="steward-catalog-refresh", daemon=True)
+        self._catalog_refresh_thread = thread
+        thread.start()
 
     def _journal_routing(self, **event):
         entry = _read_state_entry(self.skey())
@@ -940,6 +981,12 @@ class Engine:
         with self._lock:
             if self.alive():
                 return True, "already awake"
+            from steward_cockpit import maintenance
+            if maintenance.is_active():
+                # Wave 1.6: nothing new starts behind the barrier; his words
+                # are queued durably by say() and delivered after activation.
+                self._emit({"t": "sys", "text": "maintenance in progress - the steward resumes after activation; your messages are kept"})
+                return False, "maintenance in progress"
             return self._wake_locked(fresh, seed)
 
     def _wake_locked(self, fresh, seed, *, send_initial=True,
@@ -1090,7 +1137,20 @@ class Engine:
             # deep campaign-memory discipline can't have drifted away).
             if not self.general:
                 self._emit_resume_pickup(entry)
-                initial_prompt = RESUME_BRIEF
+                # Wave 1.2: no autonomous resume turn. The brief rides on his
+                # next message (human-first); an interrupted turn is reconciled
+                # in the same breath.
+                prefix = RESUME_BRIEF
+                interrupted = entry.get("interrupted") if isinstance(entry.get("interrupted"), dict) else self._interrupted
+                if interrupted:
+                    when = time.strftime("%H:%M", time.localtime(interrupted.get("at") or time.time()))
+                    prefix += (f" INTERRUPTED TURN: your previous turn was ended at {when} "
+                               f"({interrupted.get('reason', 'stopped')}); its partial writes may be on disk. "
+                               "Verify before repeating any action; do not assume it completed.")
+                    self._interrupted = None
+                    _update_state(self.skey(), {"interrupted": None})
+                self._resume_prefix = prefix
+                self._reconcile_submitted_locked(entry)
         elif seed:
             initial_prompt = seed
         elif history_reference:
@@ -1115,7 +1175,7 @@ class Engine:
             else:
                 self._emit({"t": "sys", "text": "steward awake - standing up (reading the campaign record)"})
                 initial_prompt = STAND_UP
-        if send_initial and initial_prompt is not None and not self._send_locked(initial_prompt):
+        if send_initial and initial_prompt is not None and not self._send_locked(initial_prompt, origin="control"):
             self.broken = True
             self._emit({"t": "sys", "text":
                         "initial steward prompt was not delivered - session "
@@ -1128,6 +1188,11 @@ class Engine:
             self.proc = None
             self.busy = False
             return False, "initial prompt delivery failed"
+        if send_initial and initial_prompt is None and self.queue and not self.busy:
+            # Wave 1.2: a resumed steward with his words waiting delivers them
+            # now (with the resume brief riding along) — no turn boundary is
+            # coming to do it, because no resume turn was spent.
+            self._deliver_next_queued_locked()
         return True, "awake"
 
     def _emit_resume_pickup(self, entry):
@@ -1177,12 +1242,18 @@ class Engine:
         # gap): a steward's dirty tree is committed before it parks
         if not self.general and self.alive():
             self._commit_if_dirty("steward checkpoint on sleep")
-        proc = self.proc
-        if proc is not None and proc.poll() is None:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
+        # Wave 1.6: close stdin UNDER the ingress lock so a concurrent say()
+        # can never be mid-write when the pipe goes away ("delivery failed",
+        # broken=True); the wait itself stays outside the lock.
+        with self._lock:
+            proc = self.proc
+            closing = proc is not None and proc.poll() is None
+            if closing:
+                try:
+                    proc.stdin.close()
+                except Exception:
+                    pass
+        if closing:
             try:
                 proc.wait(timeout=10)
             except Exception:
@@ -1323,6 +1394,19 @@ class Engine:
         if not self.alive():
             ok, why = self.wake()
             if not ok:
+                from steward_cockpit import maintenance
+                if human and maintenance.is_active():
+                    # Wave 1.6: accepted durably, delivered after activation.
+                    with self._lock:
+                        if not self._record_conversation("john", text):
+                            return {"ok": False, "error": "your message was not accepted because durable conversation storage failed"}
+                        self.queue.append(text)
+                        if not self._persist_queue():
+                            self.queue.pop()
+                            return {"ok": False, "error": "could not durably queue your text"}
+                        self._emit({"t": "john", "text": text})
+                        self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
+                    return {"ok": True, "queued": True, "maintenance": True}
                 return {"ok": False, "error": why}
 
         # One ingress transaction: update the human/control state, append the
@@ -1414,9 +1498,20 @@ class Engine:
                                 "is healthy"})
                     return {"ok": False,
                             "error": "could not durably queue your text"}
+                if human and self._turn_origin != "human":
+                    # Wave 1.2: his words outrank a self-started turn (drive,
+                    # nudge, stand-up). The turn is ended, its outcome recorded
+                    # as uncertain, and his message goes next.
+                    self._emit({"t": "sys", "text": "your message arrived during a self-started turn - ending that turn; your message goes next"})
+                    self._interrupt_turn_locked("human message arrived during a self-started turn")
+                    ok, why = self._wake_locked(fresh=False, seed=None)
+                    if not ok:
+                        self._emit({"t": "sys", "text": "steward could not resume after the interruption: " + str(why) + "; your message is queued"})
+                    return {"ok": True, "queued": bool(self.queue), "interrupted": True}
                 self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
                 return {"ok": True, "queued": True}
-            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""))
+            ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""),
+                                   origin="human" if human else "control")
         if not ok:
             return {"ok": False, "error": "delivery failed - your text was not sent"}
         return {"ok": True, "queued": False}
@@ -1497,8 +1592,17 @@ class Engine:
             raise RuntimeError("Idle model refresh did not retain the native session.")
         return True
 
-    def _send_locked(self, text):
-        """Caller holds self._lock. Returns True iff the write reached stdin."""
+    def _send_locked(self, text, *, origin=None):
+        """Caller holds self._lock. Returns True iff the write reached stdin.
+
+        ``origin`` (Wave 1.2): "human" for John's words, "control" for engine
+        prompts. Explicit, never inferred from a leading "(" — the resume
+        prefix starts with one and must still be treated as his message.
+        """
+        if origin == "human" and self._resume_prefix:
+            text = (self._resume_prefix
+                    + "\n\nJOHN SAYS (give the short pickup first, then answer this):\n" + text)
+            self._resume_prefix = None
         if not (self.fake or os.environ.get("STEWARD_COCKPIT_FAKE")):
             try:
                 settings, target = self._desired_policy()
@@ -1543,7 +1647,10 @@ class Engine:
         # context through the lifecycle CLI; automatic fallback remains unknown.
         refinement_context = None
         refinement_producer_id = None
-        is_control = text in (TICK, REASSERT) or text.startswith("(")
+        if origin is None:
+            is_control = text in (TICK, REASSERT) or text.startswith("(")
+        else:
+            is_control = origin != "human"
         if not self.busy and not is_control and (Path(self.dir) / "roadmap.json").is_file():
             from steward_cockpit.producer_handoff import _handoff_id
             refinement_producer_id = uuid.uuid4().hex
@@ -1571,11 +1678,103 @@ class Engine:
             self.busy = True
             self.turn_started = time.time()
             self.turn_text = ""
+            self._turn_origin = "control" if is_control else "human"
+            if not is_control:
+                # Wave 1.2: durable until the broker's first native event acks
+                # it; reconciled on the next wake if the process dies first.
+                self._submitted = {"text": text[:4000], "at": time.time(),
+                                   "family": self.cli, "session_id": self.session_id}
+                _update_state(self.skey(), {"submitted": self._submitted})
             return True
         except Exception as e:
             self.broken = True
             self._emit({"t": "sys", "text": f"delivery failed: {e}"})
             return False
+
+    def _deliver_next_queued_locked(self):
+        """Deliver the head of the durable queue as John's words (drift line
+        computed NOW, at delivery — journal 0111). Caller holds self._lock."""
+        if not self.queue or self.busy:
+            return False
+        queued = self.queue[0]
+        suffix = "" if self.general else self._plan_drift_suffix()
+        if self._send_locked(queued + suffix, origin="human"):
+            self.queue.pop(0)
+        if not self._persist_queue():
+            self.broken = True
+            self._emit({"t": "sys", "text":
+                        "queue state could not be persisted after "
+                        "delivery - delivery is uncertain across "
+                        "a restart"})
+        return True
+
+    def _native_turn_seen(self, text, thread_id):
+        """Wave 1.2 reconciliation: True/False when the provider's own record
+        can answer whether ``text`` reached a native turn; None when it cannot
+        (no rollout for this family)."""
+        if self.cli != "chatgpt" or not thread_id or not text:
+            return None
+        try:
+            root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex")) / "sessions"
+            needle = json.dumps(text[:120], ensure_ascii=True)[1:-1]
+            for path in root.glob(f"*/*/*/rollout-*-{thread_id}.jsonl"):
+                with open(path, "rb") as fh:
+                    fh.seek(0, os.SEEK_END)
+                    size = fh.tell()
+                    fh.seek(max(0, size - 4_000_000))
+                    return needle.encode("utf-8") in fh.read()
+        except (OSError, ValueError):
+            return None
+        return None
+
+    def _reconcile_submitted_locked(self, entry):
+        """Wave 1.2: a human message written to a broker that died before any
+        native event is delivered exactly once — re-queued only when the
+        provider's record does not show it, marked when unverifiable."""
+        sub = entry.get("submitted") if isinstance(entry.get("submitted"), dict) else self._submitted
+        if not sub or not sub.get("text"):
+            self._submitted = None
+            return
+        seen = self._native_turn_seen(sub["text"], sub.get("session_id"))
+        if seen is True:
+            note = "was delivered before the interruption"
+        else:
+            marker = ("(possibly a repeat after a restart or interruption; if you already "
+                      "handled this, say so in one line and do nothing else) ")
+            if not any(q.endswith(sub["text"]) for q in self.queue):
+                self.queue.insert(0, marker + sub["text"])
+            note = ("was re-queued (the provider record does not show it)" if seen is False
+                    else "was re-queued (delivery could not be verified)")
+        self._emit({"t": "sys", "text": "a message submitted before the last interruption " + note})
+        self._submitted = None
+        _update_state(self.skey(), {"submitted": None, "pending_queue": list(self.queue)})
+
+    def _interrupt_turn_locked(self, reason):
+        """Wave 1.2/1.3: end the running turn. The exec protocol has no
+        retractable item boundary, so the outcome is recorded as uncertain;
+        partial writes stay on disk; the queue and the native thread are kept."""
+        proc = self.proc
+        if proc is None or proc.poll() is not None or not self.busy:
+            return {"ok": False, "error": "no running turn"}
+        origin = getattr(self, "_turn_origin", "human")
+        self._interrupted = {"at": time.time(), "reason": reason, "origin": origin,
+                             "text": (self._last_submitted or "")[:300]}
+        _update_state(self.skey(), {"interrupted": self._interrupted})
+        self._emit({"t": "sys", "text": f"turn interrupted ({reason}); partial work on disk is kept and the outcome is uncertain until the next turn reconciles it"})
+        try:
+            self._journal_routing(action="interrupted", family=self.cli, origin=origin,
+                                  message=f"turn interrupted: {reason} (origin {origin}); outcome uncertain")
+        except RuntimeError:
+            pass
+        self.proc = None   # the old reader must not touch shared state
+        self._kill_tree(proc)
+        self.busy = False
+        self._hold_queue("turn interrupted")
+        return {"ok": True}
+
+    def interrupt_turn(self, reason="stopped by John"):
+        with self._lock:
+            return self._interrupt_turn_locked(reason)
 
     def _send(self, text):
         with self._lock:
@@ -1867,6 +2066,18 @@ class Engine:
         if proc is not self.proc:
             return   # event from a superseded process - drop it entirely
         t = ev.get("type")
+        if self._submitted is not None and t in ("assistant", "stream_event", "result"):
+            # Wave 1.2 acknowledgement: a native event for this turn means the
+            # provider has the message; the durable copy is no longer needed.
+            if t == "result" and ev.get("is_error") and ev.get("replay_safe") is True:
+                # never submitted natively: give it back to the queue as-is
+                pending = self._submitted.get("text") or ""
+                if pending and pending not in self.queue:
+                    self.queue.insert(0, pending)
+                    self._persist_queue()
+                    self._emit({"t": "sys", "text": "the turn failed before your message reached the model; it is queued again"})
+            self._submitted = None
+            _update_state(self.skey(), {"submitted": None})
         if t == "system" and ev.get("subtype") == "init":
             if proc is not self.proc:
                 return
@@ -1934,9 +2145,14 @@ class Engine:
             if err_text:
                 limit = _campaign_limit(err_text)
                 self._model_limit = ("model session limit: " + err_text) if limit else ""
+                hint = ev.get("stderr_hint")
+                tail_text = ""
+                if isinstance(hint, dict) and hint.get("kinds"):
+                    tail_text = (" | native diagnostics: " + ", ".join(str(k) for k in hint["kinds"][:4])
+                                 + f" ({int(hint.get('lines') or 0)} lines, content withheld)")
                 self._emit({"t": "sys", "text": ("MODEL LIMIT: " if limit else
                                                  "the steward's turn ended in an error: ")
-                            + err_text})
+                            + err_text + tail_text})
                 if limit:
                     try:
                         from steward_cockpit import steward_campaign as campaign
@@ -2057,17 +2273,7 @@ class Engine:
                     self._hold_queue("model turn failed; no automatic replay")
                 # Human ingress always outranks automatic retries/drive.
                 elif self.queue:
-                    queued = self.queue[0]
-                    # the drift line is computed NOW, at delivery (journal 0111)
-                    suffix = "" if self.general else self._plan_drift_suffix()
-                    if self._send_locked(queued + suffix):
-                        self.queue.pop(0)
-                    if not self._persist_queue():
-                        self.broken = True
-                        self._emit({"t": "sys", "text":
-                                    "queue state could not be persisted after "
-                                    "delivery - delivery is uncertain across "
-                                    "a restart"})
+                    self._deliver_next_queued_locked()
                 elif (self._human_asked and not txt and not was_tick
                       and not self._answer_nudged and not self.general):
                     self._answer_nudged = True
@@ -2378,21 +2584,26 @@ class Engine:
             if (self.busy
                     and now - self.last_output > TICK_SECONDS
                     and now - self.last_tick > TICK_SECONDS):
-                # mid-turn: the CLI queues it; it lands at the turn boundary
+                # Wave 1.2: nothing is written into a busy broker any more.
+                # Every TICK/REASSERT envelope queued in the pipe became an
+                # extra full turn after the running one (Codex r2 F2) and
+                # delayed John's next message again. The cadence commit below
+                # still keys off last_tick; the role re-assert moves to the
+                # resume prefix (Wave 2.1).
                 self.last_tick = now
                 self._tick_count += 1
-                try:
-                    with self._lock:
-                        self._ticks_pending += 1
-                        self._send_locked(TICK)
-                        # periodic role re-assert (audit gap #1): roughly hourly,
-                        # remind the steward of its laws so a long compacting
-                        # session can't quietly drift out of role
-                        if not self.general and self._tick_count % 6 == 0:
-                            self._ticks_pending += 1
-                            self._send_locked(REASSERT)
-                except Exception:
-                    pass
+            # Wave 1.3: stuck is visible. No new kill — the bridge deadlines
+            # stay; this only tells John the turn is alive but quiet.
+            if self.busy:
+                quiet_since = max(self.last_output, self.turn_started)
+                if now - quiet_since >= 300 and now - self._thinking_noted_at >= 300:
+                    self._thinking_noted_at = now
+                    mins = int((now - quiet_since) // 60)
+                    self._emit({"t": "sys", "text":
+                                f"thinking {mins} min with no visible output - the turn is alive; "
+                                "Stop turn interrupts it (partial work is kept)"})
+            else:
+                self._thinking_noted_at = 0.0
             # commit-as-you-go IS a mechanism now: a dirty tree gets committed
             # on the cadence, independent of whether the model remembers
             if now - self.last_tick < 2:

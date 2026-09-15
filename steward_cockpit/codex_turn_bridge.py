@@ -20,6 +20,7 @@ import math
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -286,6 +287,28 @@ def build_argv(
 
 def _bounded_string(value: Any, limit: int = 2000) -> str:
     return value[:limit] if isinstance(value, str) else ""
+
+
+_STDERR_KINDS = (
+    ("auth", re.compile(r"(?i)\b(login|auth|unauthori[sz]ed|forbidden|401|403)\b")),
+    ("rate_limit", re.compile(r"(?i)\b(rate.?limit|quota|429|too many requests|usage limit)\b")),
+    ("network", re.compile(r"(?i)\b(timed? ?out|timeout|network|dns|econn\w*|unreachable|502|503|504)\b")),
+    ("sandbox", re.compile(r"(?i)\b(sandbox|permission|denied|blocked by policy|rejected)\b")),
+    ("panic", re.compile(r"(?i)\b(panic|traceback|unhandled|fatal)\b")),
+)
+
+
+def classify_stderr(lines: list[str]) -> dict[str, Any]:
+    """codex-discipline-2026-09-15 Wave 1.3: what KIND of diagnostics the
+    native process wrote, never their content. The pipe can carry login
+    links and credentials, and the transport contract (tests) forbids
+    forwarding it raw; John still learns whether a failed turn died on auth,
+    a rate limit, the network, the sandbox, or a crash."""
+    kinds: list[str] = []
+    for kind, pattern in _STDERR_KINDS:
+        if any(pattern.search(line) for line in lines):
+            kinds.append(kind)
+    return {"kinds": kinds or ["other"], "lines": len(lines)}
 
 
 def _error_message(event: dict[str, Any]) -> tuple[str, str]:
@@ -606,6 +629,7 @@ class Broker:
         self._system_prompt: str | None = None
         self._input_seen = False
         self._cleanup_errors: list[str] = []
+        self._stderr_tail: list[str] = []  # Wave 1.3: redacted, bounded, failed turns only
         self._usage_tracker_factory = usage_tracker_factory
         if usage_tracker_factory is None and popen_factory is subprocess.Popen and self.provider_label == "Codex":
             from steward_cockpit.codex_usage import CodexUsageTracker
@@ -678,6 +702,7 @@ class Broker:
         failure: str | None = None
         failure_code = "transport_error"
         self._cleanup_errors = []
+        self._stderr_tail = []
         watchdog = TurnWatchdog(self.turn_timeout_seconds, self.idle_timeout_seconds,
                                 clock=self._clock, provider_label=self.provider_label)
         started = self._clock()
@@ -810,7 +835,16 @@ class Broker:
                 if self.max_turn_bytes is not None and total_bytes > self.max_turn_bytes:
                     raise OutputLimitError(f"Anchor transport: {self.provider_label} turn output of {total_bytes} bytes exceeds the local size bound of {self.max_turn_bytes} bytes")
                 if name == "stderr":
-                    continue  # Count it, but never forward raw diagnostics/secrets.
+                    # Counted; never forwarded raw. Wave 1.3 keeps the last
+                    # lines in memory only to CLASSIFY a failed turn's cause.
+                    try:
+                        for line in data.decode("utf-8", errors="replace").splitlines():
+                            if line.strip():
+                                self._stderr_tail.append(line[:400])
+                                del self._stderr_tail[:-40]
+                    except Exception:
+                        pass
+                    continue
                 if event is None:
                     if self.max_event_bytes is not None and size > self.max_event_bytes:
                         raise OutputLimitError(f"Anchor transport: {self.provider_label} event output of at least {size} bytes exceeds the local size bound of {self.max_event_bytes} bytes")
@@ -889,6 +923,8 @@ class Broker:
             returncode, failure=failure, failure_code=failure_code, submitted=submitted,
         )
         assert result is not None
+        if result.get("is_error") and self._stderr_tail:
+            result["stderr_hint"] = classify_stderr(self._stderr_tail)
         poll_usage(force=True)
         if tracker is not None:
             result["usage_invocation_id"] = invocation_id

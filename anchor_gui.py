@@ -11630,21 +11630,29 @@ def handle_restart(handler, path, body):
         return
     handler._send_json({"ok": True, "restarting": True, "leaving_build": BUILD_ID,
                         "parent": parent or "unknown"})
+    threading.Thread(target=restart_now, args=("POST /api/restart",),
+                     name="anchor-restart", daemon=True).start()
 
-    def _go():
-        time.sleep(0.5)  # let the response flush
-        try:
-            from tools import pre_restart_drain as _drain
-            _drain.drain(summary_timeout=20)
-        except Exception:
-            pass  # fail-open, exactly like restart_anchor.ps1
-        try:
-            sys.stdout.flush()
-        except Exception:
-            pass
-        os._exit(0)
 
-    threading.Thread(target=_go, name="anchor-restart", daemon=True).start()
+def restart_now(reason="restart"):
+    """Drain warm and exit so the supervisor brings up the code on disk.
+    Shared by POST /api/restart and the maintenance barrier
+    (codex-discipline-2026-09-15 Wave 1.6). Caller has verified supervision."""
+    time.sleep(0.5)  # let any HTTP response flush
+    try:
+        logging.getLogger(__name__).info("restart_now: %s (leaving build %s)", reason, BUILD_ID)
+    except Exception:
+        pass
+    try:
+        from tools import pre_restart_drain as _drain
+        _drain.drain(summary_timeout=20)
+    except Exception:
+        pass  # fail-open, exactly like restart_anchor.ps1
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    os._exit(0)
 
 
 def handle_settings_get(handler, path, body):
@@ -22464,6 +22472,13 @@ def main():
     print(f"{'='*50}\n")
 
     _logger.info(f"Server started on {url}")
+    try:
+        # codex-discipline-2026-09-15 Wave 1.6: a fresh process is past the
+        # maintenance barrier by definition.
+        from steward_cockpit import maintenance as _mt
+        _mt.boot_clear()
+    except Exception:
+        pass
 
     if not no_browser:
         # Open browser after a short delay

@@ -1496,6 +1496,8 @@ const Proto = (() => {
       else if (!st.alive) txt = "nothing running — asleep; your message wakes it";
       else txt = "Nothing running — ready";
       const details = [];
+      const intr = $("[data-interrupt]");
+      if (intr) intr.hidden = !(st.alive && st.busy);
       if (st.cli) details.push(st.cli);
       const policy = st.model_policy;
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
@@ -1779,6 +1781,10 @@ const Proto = (() => {
       if (!j.ok) { ta.value = keep; grow(); }
     };
     if (send) send.onclick = submit;
+    // (codex-discipline-2026-09-15 Wave 1.2) Send is disabled in the markup
+    // and enabled only once its handler exists: a click in the load window
+    // used to produce neither a POST nor a record.
+    if (send) send.disabled = false;
     ta.addEventListener("keydown", (e) => {
       if (e.key !== "Enter" || e.isComposing) return;
       // (2026-09-04, John) Enter sends, the same as the Send button; Shift+Enter
@@ -1797,6 +1803,12 @@ const Proto = (() => {
     if (wake) wake.onclick = async () => {
       const alive = document.body.dataset.alive === "1";
       await post("/api/engine", { action: alive ? "stop" : "wake" });
+    };
+    const intr = $("[data-interrupt]");
+    if (intr) intr.onclick = async () => {
+      // Wave 1.3: Stop turn - ends the running turn (outcome recorded as
+      // uncertain, partial work kept); the queue and the thread survive.
+      await post("/api/engine", { action: "interrupt", reason: "stopped by John" });
     };
     const drive = $("[data-drive]");
     if (drive) drive.onclick = async () => {

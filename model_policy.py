@@ -282,6 +282,24 @@ def resolve(family, *, settings=None, force=False, env=None, discoverer=None):
     return result
 
 
+def cached_selection(family, *, settings=None, env=None):
+    """codex-discipline-2026-09-15 Wave 1.2: the last successful discovery for
+    ``family`` regardless of age (``stale`` says whether it is past the TTL),
+    or None when there has never been one. A pinned steward answers John from
+    this and refreshes discovery off the request thread; it never blocks a
+    send on a 25 s catalog probe."""
+    active_env = os.environ if env is None else env
+    with _LOCK:
+        cached = _MEMORY.get(_cache_identity(family, active_env))
+        if not cached:
+            return None
+        result = dict(cached)
+    result["requested_policy"] = dict(DEFAULT_POLICY)
+    result["settings_revision"] = (settings or {}).get("settings_revision", 0)
+    result["stale"] = time.time() - result.get("discovered_at", 0) >= CAPABILITY_TTL_SECONDS
+    return result
+
+
 def launch_args(selection, *, subagents=True):
     family, model, effort = selection["family"], selection["model"], selection["effort"]
     if (family not in FAMILIES or not isinstance(model, str)

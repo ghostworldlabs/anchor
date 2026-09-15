@@ -45,7 +45,8 @@
     <span class="prompt">john&gt;</span>
     <textarea data-say rows="1"
       placeholder="talk · /map shows the map · Ctrl+Enter sends"></textarea>
-    <button class="send" data-send>Send</button>
+    <button data-interrupt hidden title="end the running turn - partial work is kept, your queued words stay">Stop turn</button>
+    <button class="send" data-send disabled>Send</button>
   </div>
 </div>
 <script src="/static/md.js"></script>

@@ -53,7 +53,7 @@ class DecisionNudgeTest(unittest.TestCase):
         self.e.proc = self.proc
         self.sent = []
         # capture machine sends without touching a real stdin
-        self.e._send_locked = lambda text: (self.sent.append(text), True)[1]
+        self.e._send_locked = lambda text, **kw: (self.sent.append(text), True)[1]
 
     def tearDown(self):
         eng.STATE_FILE = self._old_state
@@ -435,7 +435,7 @@ class NeverLoseQueueTest(unittest.TestCase):
         with self.e._lock:
             self.e._persist_queue()
         sent = []
-        self.e._send_locked = lambda text: (sent.append(text), True)[1]
+        self.e._send_locked = lambda text, **kw: (sent.append(text), True)[1]
         self._finish_turn()
         self.assertEqual(sent, ["one"])
         self.assertEqual(self.e.queue, ["two"])
@@ -446,7 +446,7 @@ class NeverLoseQueueTest(unittest.TestCase):
         self.e.queue = ["do not lose this", "then this"]
         with self.e._lock:
             self.e._persist_queue()
-        self.e._send_locked = lambda _text: False
+        self.e._send_locked = lambda _text, **kw: False
         self._finish_turn()
         self.assertEqual(self.e.queue, ["do not lose this", "then this"])
         entry = eng._read_state_entry(self.e.skey())

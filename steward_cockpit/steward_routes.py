@@ -22,6 +22,7 @@ import json
 import os
 import re
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -304,7 +305,53 @@ def api_get(proot, verb, qs):
     return handle_get(cdir, verb, qs)
 
 
+def _busy_engine_keys():
+    with ENGINES_LOCK:
+        return [key for key, e in ENGINES.items() if e.alive() and e.busy]
+
+
+def _running_job_ids():
+    import job_runner as _jr
+    return [str(r.get("job_id") or "?") for r in _jr.list_records()
+            if r.get("status") == _jr.STATUS_RUNNING]
+
+
+def _restart_for_activation(reason):
+    gui = sys.modules.get("anchor_gui")
+    if gui is None or not hasattr(gui, "restart_now"):
+        raise RuntimeError("anchor_gui restart is unavailable in this process")
+    gui.restart_now("maintenance barrier: " + reason)
+
+
+def maintenance_post(body):
+    """codex-discipline-2026-09-15 Wave 1.6: POST /api/steward/maintenance
+    {op: begin|status|cancel, reason}. Begin arms the service-wide barrier:
+    accept input, start nothing new, drain every steward turn and delegated
+    job to its boundary, then restart onto the code on disk."""
+    from steward_cockpit import maintenance
+    op = str(body.get("op") or "status")
+    if op == "status":
+        return {"ok": True, **maintenance.status(),
+                "busy_engines": _busy_engine_keys(), "running_jobs": _running_job_ids()}, 200
+    if op == "cancel":
+        return {"ok": True, **maintenance.cancel("cancelled by request")}, 200
+    if op == "begin":
+        gui = sys.modules.get("anchor_gui")
+        supervised = bool(gui and getattr(gui, "_supervisor_parent_name", lambda: "")().startswith("nssm"))
+        if not supervised and not body.get("force"):
+            return {"ok": False, "error": "not_supervised",
+                    "message": "Not running under nssm - a drained exit would leave the server down."}, 409
+        state = maintenance.begin(str(body.get("reason") or "activation"),
+                                  busy_engines=_busy_engine_keys, running_jobs=_running_job_ids,
+                                  restart=_restart_for_activation)
+        return {"ok": True, **state, "busy_engines": _busy_engine_keys(),
+                "running_jobs": _running_job_ids()}, 200
+    return {"ok": False, "error": "unknown op"}, 400
+
+
 def api_post(proot, verb, body):
+    if verb == "maintenance":
+        return maintenance_post(body)
     if verb in ("new_effort", "boneyard_restore", "boneyard_move",
                 "rename_effort"):
         return _project_post(proot, verb, body)
@@ -916,8 +963,9 @@ def events(cdir, qs):
         entry = _read_state_entry(eng.skey())
         has_durable_work = (entry.get("session_id")
                             or entry.get("pending_queue"))
+        from steward_cockpit import maintenance
         if (getattr(eng, "_auto_wake_at", 0) + 60 < now
-                and has_durable_work):
+                and has_durable_work and not maintenance.is_active()):
             eng._auto_wake_at = now
             try:
                 eng.wake()
@@ -1300,6 +1348,9 @@ def handle_post(cdir, verb, body):
             eng.set_drive(action == "drive_on"); return {"ok": True, "drive": eng.drive}, 200
         if action == "switch":
             return eng.switch_cli(body.get("cli", "")), 200
+        if action == "interrupt":
+            # codex-discipline-2026-09-15 Wave 1.3: Stop turn (not park).
+            return eng.interrupt_turn(str(body.get("reason") or "stopped by John")[:120]), 200
         return {"ok": False, "error": "unknown action"}, 400
     if verb == "open":
         target = os.path.realpath(os.path.join(cdir, body.get("path", "")))
