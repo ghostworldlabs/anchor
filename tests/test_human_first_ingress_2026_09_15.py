@@ -387,6 +387,15 @@ def test_run_classifies_a_nonzero_exit_without_returning_stderr(monkeypatch):
     with pytest.raises(RuntimeError) as dead:
         model_policy._run(["codex", "debug", "models"], {})
     assert "subscription login required" in str(dead.value) and "token=abc" not in str(dead.value)
+    # Grok R3 P1: a transient body that merely NAMES the auth host is not a dead login
+    fake_run.stderr = "upstream error 503 while contacting https://auth.openai.com/device?code=ABC"
+    with pytest.raises(RuntimeError) as blip2:
+        model_policy._run(["codex", "debug", "models"], {})
+    assert "transient or unknown failure" in str(blip2.value)
+    fake_run.stderr = "HTTP 401 Unauthorized"
+    with pytest.raises(RuntimeError) as dead2:
+        model_policy._run(["codex", "debug", "models"], {})
+    assert "subscription login required" in str(dead2.value)
 
 
 def test_engine_stderr_is_classified_not_forwarded(engine):

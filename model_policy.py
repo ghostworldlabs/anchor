@@ -182,8 +182,11 @@ def _run(argv, env):
         # Provider stderr can contain credentials/login URLs. Never return it.
         # Classify it instead (Grok R2 N1): only an auth-shaped failure is a
         # dead login; any other nonzero exit is transient or unknown.
-        diagnostics = f"{completed.stderr or ''} {completed.stdout or ''}"
-        if re.search(r"(?i)\b(login|logged out|not logged in|auth\w*|unauthori[sz]ed|forbidden|401|403)\b", diagnostics):
+        # URLs are stripped first: a transient body can name auth.openai.com
+        # without meaning the login is dead (Grok R3 P1); the phrases below
+        # are the adapter's own auth pattern.
+        diagnostics = re.sub(r"https?://\S+", " ", f"{completed.stderr or ''} {completed.stdout or ''}")
+        if re.search(r"(?i)(not logged in|logged out|authentication|unauthori[sz]ed|forbidden|\b401\b|\b403\b)", diagnostics):
             raise RuntimeError(f"CLI discovery exited {completed.returncode}; subscription login required")
         raise RuntimeError(f"CLI discovery exited {completed.returncode}; transient or unknown failure")
     return completed.stdout
