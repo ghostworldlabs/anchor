@@ -268,7 +268,9 @@ def build_argv(
     if thread_id is not None:
         result.append("resume")
     result.extend(["--json", "--skip-git-repo-check"])
-    result.extend(launch_args({"family": "chatgpt", "model": model, "effort": effort}))
+    # subagents=False: with agents disabled below, the default_subagent_* pins
+    # would only be a second on-switch waiting to be flipped (Rabbit-Catcher).
+    result.extend(launch_args({"family": "chatgpt", "model": model, "effort": effort}, subagents=False))
     # Both exec and exec resume accept -c; resume does not accept --sandbox.
     result.extend([
         "-c", 'approval_policy="never"',

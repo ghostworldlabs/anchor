@@ -528,7 +528,6 @@ class Engine:
         self._turn_origin = "human"
         self._submitted = stored_entry.get("submitted") if isinstance(stored_entry.get("submitted"), dict) else None
         self._interrupted = stored_entry.get("interrupted") if isinstance(stored_entry.get("interrupted"), dict) else None
-        self._thinking_noted_at = 0.0
         self._bridge_system_prompt = None
         self._last_submitted = ""
         self._turn_had_tools = False
@@ -545,7 +544,6 @@ class Engine:
         # cleared only by a human message — keying it on the question STRING
         # looped, because the nudge's own re-ask rewords the question.
         self._decision_nudged = False
-        self._tick_count = 0        # for the periodic role re-assert
         self.cond = threading.Condition()
         self.busy = False
         # never-lose: restore undelivered words from the durable record so a
@@ -698,6 +696,10 @@ class Engine:
             "attention_reason": attention.get("reason", ""),
             "light": self.light(attention),
             "queued": len(self.queue),
+            # Wave 1.3: how long the running turn has been quiet (no text, no
+            # tool event); the busy chip retitles itself from minute 5.
+            "quiet_seconds": (int(time.time() - max(self.last_output, self.turn_started))
+                              if self.busy else 0),
             "session_id": self.session_id,
             "spend_usd": round(self.spend, 4) if self._usage_cost_complete() else None,
             "reported_spend_usd": round(self.spend, 4),
@@ -1749,44 +1751,20 @@ class Engine:
                         "a restart"})
         return True
 
-    def _native_turn_seen(self, text, thread_id):
-        """Wave 1.2 reconciliation: True/False when the provider's own record
-        can answer whether ``text`` reached a native turn; None when it cannot
-        (no rollout for this family)."""
-        if self.cli != "chatgpt" or not thread_id or not text:
-            return None
-        try:
-            root = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex")) / "sessions"
-            needle = json.dumps(text[:120], ensure_ascii=True)[1:-1]
-            for path in root.glob(f"*/*/*/rollout-*-{thread_id}.jsonl"):
-                with open(path, "rb") as fh:
-                    fh.seek(0, os.SEEK_END)
-                    size = fh.tell()
-                    fh.seek(max(0, size - 4_000_000))
-                    return needle.encode("utf-8") in fh.read()
-        except (OSError, ValueError):
-            return None
-        return None
-
     def _reconcile_submitted_locked(self, entry):
         """Wave 1.2: a human message written to a broker that died before any
-        native event is delivered exactly once — re-queued only when the
-        provider's record does not show it, marked when unverifiable."""
+        native event acknowledged it is re-queued with a repeat marker. Never
+        lost; a repeat is marked so the model does not act on it twice. (A
+        provider-record scan was cut as a second mechanism — Rabbit-Catcher.)"""
         sub = entry.get("submitted") if isinstance(entry.get("submitted"), dict) else self._submitted
         if not sub or not sub.get("text"):
             self._submitted = None
             return
-        seen = self._native_turn_seen(sub["text"], sub.get("session_id"))
-        if seen is True:
-            note = "was delivered before the interruption"
-        else:
-            marker = ("(possibly a repeat after a restart or interruption; if you already "
-                      "handled this, say so in one line and do nothing else) ")
-            if not any(q.endswith(sub["text"]) for q in self.queue):
-                self.queue.insert(0, marker + sub["text"])
-            note = ("was re-queued (the provider record does not show it)" if seen is False
-                    else "was re-queued (delivery could not be verified)")
-        self._emit({"t": "sys", "text": "a message submitted before the last interruption " + note})
+        marker = ("(possibly a repeat after a restart or interruption; if you already "
+                  "handled this, say so in one line and do nothing else) ")
+        if not any(q.endswith(sub["text"]) for q in self.queue):
+            self.queue.insert(0, marker + sub["text"])
+        self._emit({"t": "sys", "text": "a message submitted before the last interruption was re-queued with a repeat marker"})
         self._submitted = None
         _update_state(self.skey(), {"submitted": None, "pending_queue": list(self.queue)})
 
@@ -2654,19 +2632,6 @@ class Engine:
                 # still keys off last_tick; the role re-assert moves to the
                 # resume prefix (Wave 2.1).
                 self.last_tick = now
-                self._tick_count += 1
-            # Wave 1.3: stuck is visible. No new kill — the bridge deadlines
-            # stay; this only tells John the turn is alive but quiet.
-            if self.busy:
-                quiet_since = max(self.last_output, self.turn_started)
-                if now - quiet_since >= 300 and now - self._thinking_noted_at >= 300:
-                    self._thinking_noted_at = now
-                    mins = int((now - quiet_since) // 60)
-                    self._emit({"t": "sys", "text":
-                                f"thinking {mins} min with no visible output - the turn is alive; "
-                                "Stop turn interrupts it (partial work is kept)"})
-            else:
-                self._thinking_noted_at = 0.0
             # commit-as-you-go IS a mechanism now: a dirty tree gets committed
             # on the cadence, independent of whether the model remembers
             if now - self.last_tick < 2:

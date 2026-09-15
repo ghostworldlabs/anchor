@@ -217,8 +217,10 @@ def test_permission_mapping_and_explicit_main_and_subagent_policy(mode, sandbox)
     assert 'forced_login_method="chatgpt"' in argv
     assert 'approval_policy="never"' in argv
     assert 'model_reasoning_effort="ultra"' in argv
-    assert 'agents.default_subagent_model="future-frontier"' in argv
-    assert 'agents.default_subagent_reasoning_effort="ultra"' in argv
+    # codex-discipline Wave 1.5: agents are off, so the sub-agent pins are gone
+    assert 'agents.default_subagent_model="future-frontier"' not in argv
+    assert 'agents.default_subagent_reasoning_effort="ultra"' not in argv
+    assert "agents.enabled=false" in argv and "features.multi_agent=false" in argv
     assert "--ephemeral" not in argv and "--last" not in argv
 
 

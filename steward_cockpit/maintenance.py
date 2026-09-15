@@ -1,63 +1,31 @@
 """codex-discipline-2026-09-15 Wave 1.6 — the service-wide maintenance barrier.
 
-One durable state that lets Anchor activate new code without a forced kill:
-
-* John's messages keep being accepted into each steward's persisted queue;
-* no new steward wake, page-open wake, or delegated job launch starts;
-* every running steward turn and delegated job is allowed to reach its own
-  boundary; the barrier polls until nothing is in flight;
-* then, and only then, the supervised process restarts onto the code on disk
-  (the same drain-and-exit /api/restart performs), and the flag is cleared
-  by the fresh boot.
+One in-memory state on the existing restart path (``POST /api/restart``
+with ``drain: true``): John's messages keep being accepted into each
+steward's persisted queue; no new steward wake, page-open wake or job
+launch starts; running turns and jobs reach their own boundary; the watcher
+polls until nothing is in flight, then the supervised process restarts onto
+the code on disk (the same drain-and-exit a plain restart performs). A fresh
+process starts with the flag off by construction.
 
 Every activation this week waited hours because the only tools were "refuse
-while busy" and "kill after ten seconds". This is the third option.
-Stdlib only; the callers inject how to list engines, running jobs, and how
-to restart, so it is testable without a server.
+while busy" and "kill after ten seconds". This is the third option. Stdlib
+only; the probes and the restart are injected, so it is testable without a
+server.
 """
 from __future__ import annotations
 
-import json
-import os
 import threading
 import time
-from pathlib import Path
 from typing import Any, Callable
 
-HERE = Path(__file__).parent
-STATE_FILE = HERE / "maintenance-state.json"
 POLL_SECONDS = 5.0
-MAX_WAIT_SECONDS = 4 * 3600  # a barrier that never drains is reported, not silent
+MAX_WAIT_SECONDS = 4 * 3600  # needed because: a drain that never ends must become visible, not silent
 
 _LOCK = threading.Lock()
 _STATE: dict[str, Any] = {"active": False}
 _THREAD: threading.Thread | None = None
-_GENERATION = 0  # a superseded watcher (cancelled/cleared then re-armed) never writes again
-
-
-def _write(state: dict[str, Any]) -> None:
-    tmp = STATE_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
-    os.replace(tmp, STATE_FILE)
-
-
-def _load() -> dict[str, Any]:
-    try:
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {"active": False}
-    except (OSError, ValueError):
-        return {"active": False}
-
-
-def boot_clear(reason: str = "fresh boot") -> None:
-    """A fresh process is, by definition, past the barrier."""
-    with _LOCK:
-        state = _load()
-        if state.get("active"):
-            state.update({"active": False, "cleared_at": time.time(), "cleared_reason": reason})
-            _write(state)
-        _STATE.clear()
-        _STATE.update(state)
+_GENERATION = 0  # needed because: a cancel-then-begin inside one poll must not let the old watcher write
 
 
 def is_active() -> bool:
@@ -73,7 +41,6 @@ def status() -> dict[str, Any]:
 def cancel(reason: str = "cancelled") -> dict[str, Any]:
     with _LOCK:
         _STATE.update({"active": False, "cleared_at": time.time(), "cleared_reason": reason})
-        _write(_STATE)
         return dict(_STATE)
 
 
@@ -81,20 +48,18 @@ def begin(reason: str, *, busy_engines: Callable[[], list[str]],
           running_jobs: Callable[[], list[str]], restart: Callable[[str], Any],
           poll_seconds: float = POLL_SECONDS, max_wait: float = MAX_WAIT_SECONDS,
           clock: Callable[[], float] = time.time) -> dict[str, Any]:
-    """Arm the barrier and start the drain watcher. Idempotent while active."""
+    """Arm the barrier and start the drain watcher. Idempotent while a watcher
+    is alive; re-arms when the flag outlived a dead watcher."""
     global _THREAD, _GENERATION
     with _LOCK:
         if _STATE.get("active") and _THREAD is not None and _THREAD.is_alive():
             return dict(_STATE)
-        # active with a dead watcher (Grok R1): re-arm under a new generation
-        # so the flag can never outlive its drain thread
         _GENERATION += 1
         generation = _GENERATION
         _STATE.clear()
         _STATE.update({"active": True, "generation": generation, "reason": str(reason)[:200],
                        "requested_at": clock(), "waiting_on": [], "checks": 0,
                        "restart_called": False})
-        _write(_STATE)
 
     def _mine() -> bool:
         return bool(_STATE.get("active")) and _STATE.get("generation") == generation
@@ -121,19 +86,15 @@ def begin(reason: str, *, busy_engines: Callable[[], list[str]],
                     _STATE["restart_called"] = True
                     _STATE["drained_at"] = clock()
                 elif timed_out:
-                    _STATE["active"] = False
-                    _STATE["cleared_reason"] = "max wait exceeded; still busy"
-                    _STATE["cleared_at"] = clock()
-                _write(_STATE)
+                    _STATE.update({"active": False, "cleared_at": clock(),
+                                   "cleared_reason": "max wait exceeded; still busy"})
             if drained:
                 try:
                     restart(str(reason))
                 except Exception as exc:
                     with _LOCK:
-                        _STATE["active"] = False
-                        _STATE["cleared_reason"] = f"restart failed: {type(exc).__name__}"
-                        _STATE["cleared_at"] = clock()
-                        _write(_STATE)
+                        _STATE.update({"active": False, "cleared_at": clock(),
+                                       "cleared_reason": f"restart failed: {type(exc).__name__}"})
                 return
             if timed_out:
                 return
@@ -142,3 +103,26 @@ def begin(reason: str, *, busy_engines: Callable[[], list[str]],
     _THREAD = threading.Thread(target=_watch, name="anchor-maintenance-barrier", daemon=True)
     _THREAD.start()
     return status()
+
+
+def handle_op(body: dict[str, Any], *, busy_engines: Callable[[], list[str]],
+              running_jobs: Callable[[], list[str]], restart: Callable[[str], Any],
+              supervised: bool) -> tuple[dict[str, Any], int]:
+    """The ``POST /api/restart`` drain/status/cancel ops (pure; the HTTP
+    handler only forwards). ``{"drain": true}`` or ``{"op": "begin"}`` arms
+    the barrier; ``{"op": "status"}`` and ``{"op": "cancel"}`` do what they say."""
+    op = str(body.get("op") or ("begin" if body.get("drain") else "status"))
+    if op == "status":
+        return {"ok": True, **status(), "busy_engines": busy_engines(),
+                "running_jobs": running_jobs()}, 200
+    if op == "cancel":
+        return {"ok": True, **cancel("cancelled by request")}, 200
+    if op == "begin":
+        if not supervised and not body.get("force"):
+            return {"ok": False, "error": "not_supervised",
+                    "message": "Not running under nssm - a drained exit would leave the server down."}, 409
+        state = begin(str(body.get("reason") or "activation"), busy_engines=busy_engines,
+                      running_jobs=running_jobs, restart=restart)
+        return {"ok": True, **state, "busy_engines": busy_engines(),
+                "running_jobs": running_jobs()}, 200
+    return {"ok": False, "error": "unknown op"}, 400

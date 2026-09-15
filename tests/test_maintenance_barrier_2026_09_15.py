@@ -1,5 +1,5 @@
 """codex-discipline-2026-09-15 Wave 1.6 — the service-wide maintenance barrier
-(hermetic: injected probes, fast poll, tmp state)."""
+(hermetic: injected probes, fast poll, in-memory state)."""
 import sys
 import tempfile
 import time
@@ -12,12 +12,10 @@ sys.path.insert(0, str(REPO))
 
 from steward_cockpit import maintenance as mt  # noqa: E402
 from steward_cockpit import steward_engine as eng  # noqa: E402
-from steward_cockpit import steward_routes as routes  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def tmp_state(monkeypatch, tmp_path):
-    monkeypatch.setattr(mt, "STATE_FILE", tmp_path / "maintenance-state.json")
+def reset_state():
     mt.cancel("test reset")
     yield
     mt.cancel("test reset")
@@ -63,16 +61,12 @@ def test_barrier_gives_up_visibly_after_max_wait():
     assert "max wait" in mt.status()["cleared_reason"]
 
 
-def test_cancel_and_boot_clear():
+def test_cancel_clears_the_flag():
     mt.begin("x", busy_engines=lambda: ["b"], running_jobs=lambda: [],
              restart=lambda r: None, poll_seconds=0.02)
     assert mt.is_active()
     mt.cancel("operator")
     assert not mt.is_active() and mt.status()["cleared_reason"] == "operator"
-    mt.begin("y", busy_engines=lambda: ["b"], running_jobs=lambda: [],
-             restart=lambda r: None, poll_seconds=0.02)
-    mt.boot_clear()
-    assert not mt.is_active() and mt.status()["cleared_reason"] == "fresh boot"
 
 
 def test_probe_failure_never_counts_as_drained():
@@ -87,7 +81,34 @@ def test_probe_failure_never_counts_as_drained():
     assert mt.status()["waiting_on"] == ["probe-error:RuntimeError"]
 
 
-# ── engine behaviour behind the barrier ───────────────────────────────────
+def test_begin_rearms_a_dead_watcher():
+    mt.begin("first", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
+    mt._THREAD = None  # simulate a watcher that died
+    again = mt.begin("second", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
+    assert again["active"] is True and again["reason"] == "second"
+    assert _wait_until(lambda: mt.status().get("checks", 0) >= 1)
+
+
+def test_restart_ops_status_begin_and_cancel():
+    restarted = []
+    kw = dict(busy_engines=lambda: [], running_jobs=lambda: [], restart=lambda r: restarted.append(r))
+    status, code = mt.handle_op({"op": "status"}, supervised=False, **kw)
+    assert code == 200 and status["ok"] is True and status["active"] is False
+    refused, code = mt.handle_op({"drain": True}, supervised=False, **kw)
+    assert code == 409 and refused["error"] == "not_supervised"
+    mt.POLL_SECONDS, saved = 0.02, mt.POLL_SECONDS
+    try:
+        began, code = mt.handle_op({"drain": True, "reason": "test"}, supervised=True, **kw)
+    finally:
+        mt.POLL_SECONDS = saved
+    assert code == 200 and began["active"] is True
+    assert _wait_until(lambda: restarted == ["test"])
+    cancelled, code = mt.handle_op({"op": "cancel"}, supervised=True, **kw)
+    assert code == 200 and cancelled["active"] is False
+    assert mt.handle_op({"op": "nonsense"}, supervised=True, **kw)[1] == 400
+
+
+# ── engine and job launch behind the barrier ──────────────────────────────
 
 @pytest.fixture
 def engine(monkeypatch):
@@ -110,31 +131,6 @@ def test_say_queues_durably_behind_the_barrier(engine, monkeypatch):
     assert result == {"ok": True, "queued": True, "maintenance": True}
     assert engine.queue == ["keep this for after the restart"]
     assert eng._read_state_entry(engine.skey())["pending_queue"] == engine.queue
-
-
-def test_maintenance_route_status_begin_and_cancel(monkeypatch):
-    status, code = routes.maintenance_post({"op": "status"})
-    assert code == 200 and status["ok"] is True and status["active"] is False
-    refused, code = routes.maintenance_post({"op": "begin", "reason": "test"})
-    assert code == 409 and refused["error"] == "not_supervised"
-    restarted = []
-    monkeypatch.setattr(routes, "_restart_for_activation", lambda reason: restarted.append(reason))
-    monkeypatch.setattr(routes, "_busy_engine_keys", lambda: [])
-    monkeypatch.setattr(routes, "_running_job_ids", lambda: [])
-    monkeypatch.setattr(mt, "POLL_SECONDS", 0.02)
-    began, code = routes.maintenance_post({"op": "begin", "reason": "test", "force": True})
-    assert code == 200 and began["active"] is True
-    assert _wait_until(lambda: restarted == ["test"])
-    cancelled, code = routes.maintenance_post({"op": "cancel"})
-    assert code == 200 and cancelled["active"] is False
-
-
-def test_begin_rearms_a_dead_watcher():
-    mt.begin("first", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
-    gen = mt.status()["generation"]
-    mt._THREAD = None  # simulate a watcher that died
-    again = mt.begin("second", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
-    assert again["generation"] == gen + 1 and again["reason"] == "second"
 
 
 def test_no_job_of_any_kind_launches_behind_the_barrier(monkeypatch):

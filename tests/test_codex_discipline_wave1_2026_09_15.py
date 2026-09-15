@@ -85,31 +85,36 @@ def test_preflight_resolves_native_tie_with_bundled_priorities(tmp_path):
     assert result["ok"] is True, result
     assert result["selected_model"] == "new-astra"
     assert result["selected_effort"] == "ultra"
-    assert result["catalog_tie_break"] == "bundled"
     assert result["highest_effort_verified"] is True
     assert "parent_policy_trusted" not in result
 
 
-def test_preflight_trusts_parent_frozen_policy_when_child_view_is_ambiguous(tmp_path):
-    # Bundled probe unavailable -> the child cannot break the tie itself.
+def test_preflight_trusts_parent_frozen_policy_on_a_tied_catalog(tmp_path):
+    # Unfrozen with the bundled probe unavailable -> the child cannot break the tie.
     without_parent = ca.preflight_codex(
         "C:/fake/codex.exe", env={"CODEX_HOME": str(tmp_path)},
         run_impl=_runner(TIED_NATIVE, bundled_code=1), provenance_fn=PROVENANCE)
     assert without_parent["ok"] is False
     assert without_parent["status"] == "catalog_probe_failed"
 
+    # Frozen -> no second selection and no bundled probe at all; verify and launch.
+    calls = []
+    inner = _runner(TIED_NATIVE, bundled_code=1)
+    def counting(argv, **kw):
+        calls.append(argv)
+        return inner(argv, **kw)
     frozen = ca.preflight_codex(
         "C:/fake/codex.exe", model="new-astra", effort="ultra",
         env={"CODEX_HOME": str(tmp_path)},
-        run_impl=_runner(TIED_NATIVE, bundled_code=1), provenance_fn=PROVENANCE)
+        run_impl=counting, provenance_fn=PROVENANCE)
     assert frozen["ok"] is True, frozen
     assert frozen["selected_model"] == "new-astra"
     assert frozen["parent_policy_trusted"] is True
     assert frozen["model_policy"]["selection_evidence"] == "parent_frozen_policy"
     assert frozen["model_policy"]["model_attested"] is False
-    assert "ambiguous" in frozen["child_selection_error"]
     assert frozen["highest_effort_verified"] is True  # ultra is the model's top
     assert frozen["ultra_capability_verified"] is True
+    assert not any(argv[-1] == "--bundled" for argv in calls)
 
 
 def test_preflight_trusts_frozen_identity_when_child_winner_moved(tmp_path):
@@ -121,7 +126,6 @@ def test_preflight_trusts_frozen_identity_when_child_winner_moved(tmp_path):
     assert result["ok"] is True, result
     assert result["selected_model"] == "old-sol"
     assert result["parent_policy_trusted"] is True
-    assert result["latest_available"] == {"model": "new-astra", "effort": "ultra"}
 
 
 def test_preflight_still_refuses_a_frozen_identity_the_catalog_lacks(tmp_path):
@@ -152,21 +156,16 @@ def test_failed_job_reason_reaches_session_registry(reg):
     sid = rec["session_id"]
     assert reg.get_session(sid)["failure_reason"] == ""
 
-    jr._mirror_session_status(sid, jr.STATUS_FAILED,
-                              "catalog_probe_failed",
-                              "chatgpt: latest model ranking is ambiguous; refresh subscription capabilities")
+    jr._mirror_session_status(sid, jr.STATUS_FAILED, "catalog_probe_failed")
     after = reg.get_session(sid)
     assert after["status"] == reg.STATUS_FAILED
     assert after["failure_reason"] == "catalog_probe_failed"
-    assert after["failure_detail"].startswith("chatgpt: latest model ranking is ambiguous")
 
     # A successful job mirrors status only and never invents a reason.
     ok = reg.register_session("proj-1", "swarm", backend="chatgpt")
     jr._mirror_session_status(ok["session_id"], jr.STATUS_DONE)
     assert reg.get_session(ok["session_id"])["failure_reason"] == ""
 
-    # Bounded: an oversized detail is cut, never dropped.
-    jr._mirror_session_status(sid, jr.STATUS_FAILED, "x" * 500, "y" * 5000)
-    cut = reg.get_session(sid)
-    assert len(cut["failure_reason"]) == 120
-    assert len(cut["failure_detail"]) == 500
+    # Bounded: an oversized reason is cut, never dropped.
+    jr._mirror_session_status(sid, jr.STATUS_FAILED, "x" * 500)
+    assert len(reg.get_session(sid)["failure_reason"]) == 120

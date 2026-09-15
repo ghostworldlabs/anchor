@@ -3448,7 +3448,10 @@ def _registry_session_view(rec):
     elif status == _sessreg.STATUS_DONE:
         pill_cls, pill_lbl = "done", "done"
     elif status == _sessreg.STATUS_FAILED:
-        pill_cls, pill_lbl = "fail", "failed"
+        # codex-discipline-2026-09-15 Wave 1.4: the reason rides on the tile
+        # (mirrored from the job record; before this it was a bare "failed").
+        reason = str(rec.get("failure_reason") or "").strip()[:60]
+        pill_cls, pill_lbl = "fail", ("failed · " + reason if reason else "failed")
     elif status == _sessreg.STATUS_PARKED_WARM:
         # Wave 5: a parked-warm session is the reopenable grey tile the pre-split
         # STATUS_IDLE produced — keep the same "idle" pill so a migrated record
@@ -11622,6 +11625,18 @@ def handle_restart(handler, path, body):
     """
     parent = _supervisor_parent_name()
     supervised = parent.startswith("nssm")
+    if body.get("drain") or body.get("op"):
+        # codex-discipline-2026-09-15 Wave 1.6: the drained restart. Same
+        # endpoint, same auth, same exit path; the barrier only decides WHEN.
+        from steward_cockpit import maintenance as _mt
+        from steward_cockpit import steward_routes as _sr
+        obj, code = _mt.handle_op(
+            body, busy_engines=_sr._busy_engine_keys, running_jobs=_sr._running_job_ids,
+            restart=lambda reason: restart_now("maintenance barrier: " + reason),
+            supervised=supervised)
+        obj.setdefault("build", BUILD_ID)
+        handler._send_json(obj, code)
+        return
     if not supervised and not body.get("force"):
         handler._send_json({"ok": False, "error": "not_supervised",
                             "parent": parent or "unknown", "build": BUILD_ID,
@@ -22472,13 +22487,6 @@ def main():
     print(f"{'='*50}\n")
 
     _logger.info(f"Server started on {url}")
-    try:
-        # codex-discipline-2026-09-15 Wave 1.6: a fresh process is past the
-        # maintenance barrier by definition.
-        from steward_cockpit import maintenance as _mt
-        _mt.boot_clear()
-    except Exception:
-        pass
 
     if not no_browser:
         # Open browser after a short delay

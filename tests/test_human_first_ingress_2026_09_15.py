@@ -106,7 +106,7 @@ def test_error_before_submission_requeues_the_message(engine):
     assert e._submitted is None
 
 
-def test_reconcile_requeues_when_the_provider_record_cannot_confirm(engine):
+def test_reconcile_always_requeues_with_the_repeat_marker(engine):
     e = engine
     e.cli = "claude"
     entry = {"submitted": {"text": "finish chapter 2", "at": time.time(), "session_id": "abc"}}
@@ -114,34 +114,6 @@ def test_reconcile_requeues_when_the_provider_record_cannot_confirm(engine):
     assert len(e.queue) == 1 and e.queue[0].endswith("finish chapter 2")
     assert e.queue[0].startswith("(possibly a repeat")
     assert eng._read_state_entry(e.skey())["pending_queue"] == e.queue
-
-
-def test_reconcile_drops_a_message_the_codex_rollout_already_shows(engine, monkeypatch, tmp_path):
-    e = engine
-    e.cli = "chatgpt"
-    thread = "01a0aaaa-bbbb-7000-8000-000000000001"
-    day = tmp_path / ".codex" / "sessions" / "2026" / "09" / "15"
-    day.mkdir(parents=True)
-    rollout = day / f"rollout-2026-09-15T08-00-00-{thread}.jsonl"
-    rollout.write_text(json.dumps({"type": "event_msg", "payload": {"type": "user_message",
-                                                                     "message": "finish chapter 2 please"}}) + "\n",
-                       encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
-    e._reconcile_submitted_locked({"submitted": {"text": "finish chapter 2 please", "session_id": thread}})
-    assert e.queue == []
-    assert e._submitted is None
-
-
-def test_reconcile_requeues_when_the_codex_rollout_lacks_it(engine, monkeypatch, tmp_path):
-    e = engine
-    e.cli = "chatgpt"
-    thread = "01a0aaaa-bbbb-7000-8000-000000000002"
-    day = tmp_path / ".codex" / "sessions" / "2026" / "09" / "15"
-    day.mkdir(parents=True)
-    (day / f"rollout-2026-09-15T08-00-00-{thread}.jsonl").write_text('{"payload":{"message":"other"}}\n', encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
-    e._reconcile_submitted_locked({"submitted": {"text": "never delivered", "session_id": thread}})
-    assert len(e.queue) == 1 and e.queue[0].endswith("never delivered")
 
 
 # ── interruption ──────────────────────────────────────────────────────────
@@ -188,17 +160,6 @@ def test_human_message_during_his_own_turn_just_queues(engine, monkeypatch):
     result = e.say("second thought")
     assert result == {"ok": True, "queued": True}
     assert e.busy is True and e.queue == ["second thought"]
-
-
-def test_resume_wake_puts_interrupted_note_into_the_prefix(engine, monkeypatch):
-    e = engine
-    e._interrupted = {"at": time.time(), "reason": "stopped by John", "origin": "control", "text": "x"}
-    eng._update_state(e.skey(), {"interrupted": e._interrupted})
-    # exercise only the prefix construction path used by _wake_locked's resume branch
-    entry = eng._read_state_entry(e.skey())
-    prefix = eng.RESUME_BRIEF
-    interrupted = entry.get("interrupted")
-    assert interrupted and interrupted["reason"] == "stopped by John"
 
 
 # ── stderr tail ───────────────────────────────────────────────────────────
@@ -260,25 +221,14 @@ def test_pinned_selection_answers_from_a_stale_cache_and_refreshes_off_thread(en
 
 # ── Grok R1 findings (2026-09-15) ─────────────────────────────────────────
 
-def test_durable_copy_is_his_text_not_the_resume_wrapper(engine, monkeypatch, tmp_path):
-    """Grok R1 F1: the wrapper sits in every earlier resume turn of the same
-    thread; a prefixed durability identity would false-match the rollout."""
+def test_durable_copy_is_his_text_not_the_resume_wrapper(engine):
+    """Grok R1 F1: the durability identity is his words, never the wrapper."""
     e = engine
-    e.cli = "chatgpt"
-    thread = "01a0aaaa-bbbb-7000-8000-000000000003"
-    e.session_id = thread
     e._resume_prefix = eng.RESUME_BRIEF
     e._send_locked("finish chapter 2", origin="human")
     assert e._submitted["text"] == "finish chapter 2"
-    # a rollout that only holds an OLD resume turn must not count as delivery
-    day = tmp_path / ".codex" / "sessions" / "2026" / "09" / "15"
-    day.mkdir(parents=True)
-    (day / f"rollout-2026-09-15T07-00-00-{thread}.jsonl").write_text(
-        json.dumps({"payload": {"message": eng.RESUME_BRIEF[:200]}}) + "\n", encoding="utf-8")
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
     e._reconcile_submitted_locked({"submitted": dict(e._submitted)})
-    assert e.queue and e.queue[0].endswith("finish chapter 2")
-
+    assert e.queue and e.queue[0].endswith("finish chapter 2") and e.queue[0].startswith("(possibly a repeat")
 
 def test_ack_from_a_superseded_process_never_touches_the_newer_copy(engine):
     """Grok R1 F2/F6: the old reader passed the proc check, then say()

@@ -316,42 +316,7 @@ def _running_job_ids():
             if r.get("status") == _jr.STATUS_RUNNING]
 
 
-def _restart_for_activation(reason):
-    gui = sys.modules.get("anchor_gui")
-    if gui is None or not hasattr(gui, "restart_now"):
-        raise RuntimeError("anchor_gui restart is unavailable in this process")
-    gui.restart_now("maintenance barrier: " + reason)
-
-
-def maintenance_post(body):
-    """codex-discipline-2026-09-15 Wave 1.6: POST /api/steward/maintenance
-    {op: begin|status|cancel, reason}. Begin arms the service-wide barrier:
-    accept input, start nothing new, drain every steward turn and delegated
-    job to its boundary, then restart onto the code on disk."""
-    from steward_cockpit import maintenance
-    op = str(body.get("op") or "status")
-    if op == "status":
-        return {"ok": True, **maintenance.status(),
-                "busy_engines": _busy_engine_keys(), "running_jobs": _running_job_ids()}, 200
-    if op == "cancel":
-        return {"ok": True, **maintenance.cancel("cancelled by request")}, 200
-    if op == "begin":
-        gui = sys.modules.get("anchor_gui")
-        supervised = bool(gui and getattr(gui, "_supervisor_parent_name", lambda: "")().startswith("nssm"))
-        if not supervised and not body.get("force"):
-            return {"ok": False, "error": "not_supervised",
-                    "message": "Not running under nssm - a drained exit would leave the server down."}, 409
-        state = maintenance.begin(str(body.get("reason") or "activation"),
-                                  busy_engines=_busy_engine_keys, running_jobs=_running_job_ids,
-                                  restart=_restart_for_activation)
-        return {"ok": True, **state, "busy_engines": _busy_engine_keys(),
-                "running_jobs": _running_job_ids()}, 200
-    return {"ok": False, "error": "unknown op"}, 400
-
-
 def api_post(proot, verb, body):
-    if verb == "maintenance":
-        return maintenance_post(body)
     if verb in ("new_effort", "boneyard_restore", "boneyard_move",
                 "rename_effort"):
         return _project_post(proot, verb, body)

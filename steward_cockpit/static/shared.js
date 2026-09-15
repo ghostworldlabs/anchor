@@ -1376,8 +1376,10 @@ const Proto = (() => {
     const busy = $("[data-busy]");
     if (busy) {
       busy.textContent = st.busy
-        ? (busySince ? "thinking " + Math.round((Date.now() - busySince) / 1000) + "s"
-                     : "working...")
+        ? ((st.quiet_seconds || 0) >= 300
+            ? "thinking " + Math.round(st.quiet_seconds / 60) + " min, no output - Stop turn interrupts"
+            : (busySince ? "thinking " + Math.round((Date.now() - busySince) / 1000) + "s"
+                         : "working..."))
         : "";
     }
     const spend = $("[data-spend]");

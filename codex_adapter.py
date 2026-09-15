@@ -1142,58 +1142,46 @@ def preflight_codex(cmd: str, model=None, effort=None,
     # (model_policy.discover -> reconcile_codex_catalog). Before this the child
     # re-selected without the tie-break and every delegated job on a tied
     # catalog died here with "ranking is ambiguous" (125 failures, Sep 13-15).
-    bundled_raw = None
-    try:
-        bundled_run = _probe((
-            "-c", "model_providers={}",
-            "-c", 'model_provider="openai"',
-            "-c", "mcp_servers={}",
-            "-c", "apps={}",
-            "debug", "models", "--bundled",
-        ), 30)
-        if bundled_run.returncode == 0 and (bundled_run.stdout or "").strip():
-            bundled_raw = json.loads(bundled_run.stdout)
-    except (_PreflightProbeFailure, subprocess.TimeoutExpired, OSError,
-            ValueError, TypeError, json.JSONDecodeError):
-        bundled_raw = None  # a unique native ranking needs no tie-break
     from model_policy import (normalize_catalog, select_model, highest_effort,
                               PolicyUnavailable)
     from codex_catalog import reconcile_codex_catalog
+    frozen = isinstance(model, str) and bool(model) and isinstance(effort, str) and bool(effort)
+    bundled_raw = None
+    if not frozen:
+        # Only an UNFROZEN launch selects here; it mirrors the parent's
+        # tie-break with the same executable's bundled priorities.
+        try:
+            bundled_run = _probe((
+                "-c", "model_providers={}",
+                "-c", 'model_provider="openai"',
+                "-c", "mcp_servers={}",
+                "-c", "apps={}",
+                "debug", "models", "--bundled",
+            ), 30)
+            if bundled_run.returncode == 0 and (bundled_run.stdout or "").strip():
+                bundled_raw = json.loads(bundled_run.stdout)
+        except (_PreflightProbeFailure, subprocess.TimeoutExpired, OSError,
+                ValueError, TypeError, json.JSONDecodeError):
+            bundled_raw = None  # a unique native ranking needs no tie-break
     try:
         catalog = parse_model_catalog(catalog_run.stdout)
-        native_raw = json.loads(catalog_run.stdout)
-        reconciled = (reconcile_codex_catalog(native_raw, bundled_raw)
-                      if bundled_raw is not None else native_raw)
-        base["catalog_tie_break"] = ("bundled" if reconciled is not native_raw
-                                     else "none")
-        frozen = isinstance(model, str) and bool(model) and isinstance(effort, str) and bool(effort)
-        try:
-            policy = select_model("chatgpt", normalize_catalog("chatgpt", reconciled))
-        except PolicyUnavailable as exc:
-            if not frozen:
-                raise
-            # The parent already resolved this policy from the same catalog
-            # family and froze it on the job record; an ambiguous child view
-            # is not a reason to lose the seat. Recorded, never hidden.
-            policy = None
-            base["child_selection_error"] = str(exc)[:200]
-        if policy is not None and frozen and (model != policy["model"] or effort != policy["effort"]):
-            # The parent's frozen choice differs from the child's unique
-            # winner (a 300 s parent cache can trail a catalog move). Trust
-            # the frozen, still-available identity; the parent refreshes at
-            # its next idle turn. Recorded as not-latest, never as latest.
-            base["latest_available"] = {"model": policy["model"], "effort": policy["effort"]}
-            policy = None
-        if policy is not None:
-            model, effort = policy["model"], policy["effort"]
-            base.update(selected_model=model, selected_effort=effort,
-                        model_policy=policy, highest_effort_verified=True)
-        else:
+        if frozen:
+            # The parent already resolved and froze this identity from the same
+            # catalog family. The child verifies it is still advertised (the
+            # checks below) and launches: no second selection, no second probe.
             base.update(selected_model=model, selected_effort=effort,
                         model_policy={"family": "chatgpt", "model": model, "effort": effort,
                                       "selection_evidence": "parent_frozen_policy",
                                       "model_attested": False},
                         parent_policy_trusted=True)
+        else:
+            native_raw = json.loads(catalog_run.stdout)
+            reconciled = (reconcile_codex_catalog(native_raw, bundled_raw)
+                          if bundled_raw is not None else native_raw)
+            policy = select_model("chatgpt", normalize_catalog("chatgpt", reconciled))
+            model, effort = policy["model"], policy["effort"]
+            base.update(selected_model=model, selected_effort=effort,
+                        model_policy=policy, highest_effort_verified=True)
     except (ValueError, TypeError, json.JSONDecodeError, PolicyUnavailable) as exc:
         return dict(base, ok=False, status="catalog_probe_failed", error=str(exc)[:500])
     selected = next((entry for entry in catalog if entry.get("slug") == model), None)

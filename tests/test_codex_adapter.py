@@ -540,8 +540,7 @@ def test_preflight_attests_subscription_and_installed_ultra_without_shell(tmp_pa
     assert result["user_config_ignored"] is False
     assert result["executable_provenance_verified"] is True
     assert result["child_env_allowlist_verified"] is True
-    assert result["catalog_tie_break"] == "none"
-    assert len(calls) == 4  # version, login, native catalog, bundled catalog
+    assert len(calls) == 4  # version, login, native catalog, bundled catalog (unfrozen launch)
     for argv, kwargs in calls:
         assert kwargs["shell"] is False
         assert "OPENAI_API_KEY" not in kwargs["env"]

@@ -430,10 +430,9 @@ def _normalize(record: dict) -> dict:
         engine_session_uuids.insert(0, engine_session_uuid)
     usage_state = record.get("usage_state", "") or ""
     usage_reason = record.get("usage_reason", "") or ""
-    # codex-discipline-2026-09-15 Wave 1.4: bounded failure reason/detail
-    # mirrored from the job record (absent -> "").
+    # codex-discipline-2026-09-15 Wave 1.4: bounded failure reason mirrored
+    # from the job record (absent -> "").
     failure_reason = str(record.get("failure_reason", "") or "")[:120]
-    failure_detail = str(record.get("failure_detail", "") or "")[:500]
     # Honest Telemetry W5 (RULED Option C): a durable marker that this session
     # touched a Gemini/agy segment whose usage Anchor cannot capture. Set by
     # ``terminal_session.switch_engine`` whenever it switches TO an engine whose
@@ -528,7 +527,6 @@ def _normalize(record: dict) -> dict:
         "usage_reason": usage_reason,
         "usage_gemini_segment": usage_gemini_segment,
         "failure_reason": failure_reason,
-        "failure_detail": failure_detail,
         "doctor_mode": doctor_mode,
         "doctor_posture": doctor_posture,
         "model_policy": (dict(record["model_policy"])
@@ -907,7 +905,7 @@ def update_session(session_id: str, **fields) -> dict:
                # codex-discipline-2026-09-15 Wave 1.4: why a swarm job failed,
                # mirrored from the job record so tiles never show a bare
                # "failed".
-               "failure_reason", "failure_detail"}
+               "failure_reason"}
     with _paths.WRITE_LOCK:
         reg = load_sessions()
         if session_id not in reg:
