@@ -737,16 +737,16 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     settings_snapshot = None if command else _aset.get_launch_settings()
     backend = _require_backend((settings_snapshot or {}).get("coding_family", DEFAULT_BACKEND)
                                if backend is None else backend)
-    if not command:
-        # codex-discipline-2026-09-15 Wave 1.6: no new model job starts behind
-        # the maintenance barrier (running ones drain to their own boundary).
-        try:
-            from steward_cockpit import maintenance as _mt
-            barrier = _mt.is_active()
-        except Exception:
-            barrier = False
-        if barrier:
-            raise ValueError("maintenance-barrier: activation pending; no new seat was started")
+    # codex-discipline-2026-09-15 Wave 1.6: no new job of any kind starts
+    # behind the maintenance barrier (running ones drain to their own
+    # boundary; control-plane commands included — Grok R1).
+    try:
+        from steward_cockpit import maintenance as _mt
+        barrier = _mt.is_active()
+    except Exception:
+        barrier = False
+    if barrier:
+        raise ValueError("maintenance-barrier: activation pending; no new job was started")
     if backend == BACKEND_CHATGPT and lane not in CHATGPT_ONESHOT_LANES:
         # The lane is authoritative only at this public launch boundary. Command
         # resolution deliberately has no lane input and therefore must not infer

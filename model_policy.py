@@ -238,7 +238,10 @@ def discover(family, *, env=None, runner=_run):
             raise RuntimeError("agy capability discovery is not supported; configure a verified transport")
         return normalize_catalog(family, raw), command
     except (RuntimeError, ValueError, OSError, KeyError, TypeError, AttributeError) as error:
-        raise PolicyUnavailable(family, str(error)) from error
+        # codex-discipline-2026-09-15: a dead subscription login is a capacity
+        # loss (the ladder may walk), unlike a timeout or an ambiguous ranking.
+        code = "auth_required" if "check subscription login" in str(error) else "capability_unavailable"
+        raise PolicyUnavailable(family, str(error), code=code) from error
 
 
 def _cache_identity(family, env):

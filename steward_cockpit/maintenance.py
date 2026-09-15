@@ -84,8 +84,10 @@ def begin(reason: str, *, busy_engines: Callable[[], list[str]],
     """Arm the barrier and start the drain watcher. Idempotent while active."""
     global _THREAD, _GENERATION
     with _LOCK:
-        if _STATE.get("active"):
+        if _STATE.get("active") and _THREAD is not None and _THREAD.is_alive():
             return dict(_STATE)
+        # active with a dead watcher (Grok R1): re-arm under a new generation
+        # so the flag can never outlive its drain thread
         _GENERATION += 1
         generation = _GENERATION
         _STATE.clear()

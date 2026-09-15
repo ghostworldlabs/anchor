@@ -872,9 +872,12 @@ class Engine:
                     # Wave 1.2: discovery runs off the request thread.
                     self._refresh_catalog_async(settings)
                 return self.cli, cached
-            return self.cli, model_policy.resolve(self.cli, settings=settings)
+            # Cache miss (fresh process after an activation restart, Grok R1
+            # F4): answer from the last persisted selection, probe off-thread.
+            self._refresh_catalog_async(settings)
+            return self.cli, self.model_selection
         except model_policy.PolicyUnavailable as exc:
-            if exc.code == "cli_missing":
+            if exc.code in ("cli_missing", "auth_required"):
                 return self._select_available_policy(settings, target, excluded=(self.cli,))
             self._note_stale_catalog(str(exc))
             return self.cli, self.model_selection
@@ -894,7 +897,9 @@ class Engine:
             try:
                 model_policy.resolve(family, settings=settings, force=True)
             except model_policy.PolicyUnavailable as exc:
-                if exc.code == "cli_missing":
+                if exc.code in ("cli_missing", "auth_required"):
+                    # real capacity loss (Grok R1 F5): the next send walks the
+                    # ladder instead of pretending the family still answers
                     self._pinned_cli_missing = True
                 self._note_stale_catalog(str(exc))
             except (ValueError, RuntimeError) as exc:
@@ -991,6 +996,12 @@ class Engine:
 
     def _wake_locked(self, fresh, seed, *, send_initial=True,
                      expected_selection=None, expected_session_id=None):
+        from steward_cockpit import maintenance
+        if maintenance.is_active():
+            # Wave 1.6 (Grok R1 F3): every wake path, including the interrupt
+            # -> wake path inside say(), stops here; queued words survive.
+            self._emit({"t": "sys", "text": "maintenance in progress - the steward resumes after activation; your messages are kept"})
+            return False, "maintenance in progress"
         entry = _read_state_entry(self.skey())
         is_fake = self.fake or bool(os.environ.get("STEWARD_COCKPIT_FAKE"))
         history_reference = ""
@@ -1510,6 +1521,16 @@ class Engine:
                     return {"ok": True, "queued": bool(self.queue), "interrupted": True}
                 self._emit({"t": "sys", "text": "queued - the steward is mid-turn; it will be delivered next"})
                 return {"ok": True, "queued": True}
+            from steward_cockpit import maintenance
+            if human and maintenance.is_active():
+                # Wave 1.6 (Grok R1 F3): an alive, idle steward behind the
+                # barrier takes no new turn; his words wait durably.
+                self.queue.append(text)
+                if not self._persist_queue():
+                    self.queue.pop()
+                    return {"ok": False, "error": "could not durably queue your text"}
+                self._emit({"t": "sys", "text": "queued - maintenance in progress; delivered when the steward resumes"})
+                return {"ok": True, "queued": True, "maintenance": True}
             ok = self._send_locked(text + (self._plan_drift_suffix() if (human and not self.general) else ""),
                                    origin="human" if human else "control")
         if not ok:
@@ -1599,6 +1620,15 @@ class Engine:
         prompts. Explicit, never inferred from a leading "(" — the resume
         prefix starts with one and must still be treated as his message.
         """
+        from steward_cockpit import maintenance
+        if maintenance.is_active():
+            # Wave 1.6: nothing new is written to a steward behind the barrier.
+            # Human words are queued by say(); controls are simply not sent.
+            if time.time() - getattr(self, "_maintenance_noted_at", 0.0) > 60:
+                self._maintenance_noted_at = time.time()
+                self._emit({"t": "sys", "text": "maintenance in progress - nothing new is sent to the steward until activation"})
+            return False
+        human_text = text  # the durability identity: his words, never the wrapper
         if origin == "human" and self._resume_prefix:
             text = (self._resume_prefix
                     + "\n\nJOHN SAYS (give the short pickup first, then answer this):\n" + text)
@@ -1682,7 +1712,10 @@ class Engine:
             if not is_control:
                 # Wave 1.2: durable until the broker's first native event acks
                 # it; reconciled on the next wake if the process dies first.
-                self._submitted = {"text": text[:4000], "at": time.time(),
+                # Stored as HIS text (pre-prefix): the resume wrapper already
+                # sits in every earlier resume turn of the same thread and
+                # would false-match the rollout (Grok R1 F1).
+                self._submitted = {"text": human_text[:4000], "at": time.time(),
                                    "family": self.cli, "session_id": self.session_id}
                 _update_state(self.skey(), {"submitted": self._submitted})
             return True
@@ -1696,6 +1729,9 @@ class Engine:
         computed NOW, at delivery — journal 0111). Caller holds self._lock."""
         if not self.queue or self.busy:
             return False
+        from steward_cockpit import maintenance
+        if maintenance.is_active():
+            return False  # Wave 1.6: held until activation
         queued = self.queue[0]
         suffix = "" if self.general else self._plan_drift_suffix()
         if self._send_locked(queued + suffix, origin="human"):
@@ -1816,7 +1852,16 @@ class Engine:
                 tail.pop(0)
         if (proc is self.proc and tail
                 and proc.poll() not in (0, None)):
-            self._emit({"t": "sys", "text": "engine stderr: " + " | ".join(tail[-3:])})
+            # Wave 1.3 (Grok R1 F7): this pipe is the bridge's or the native
+            # CLI's own stderr — it can carry login URLs. Kinds only.
+            try:
+                from steward_cockpit.codex_turn_bridge import classify_stderr
+                hint = classify_stderr(tail)
+                text = ("engine stderr: " + ", ".join(hint["kinds"][:4])
+                        + f" ({hint['lines']} lines, content withheld)")
+            except Exception:
+                text = f"engine stderr: {len(tail)} lines (content withheld)"
+            self._emit({"t": "sys", "text": text})
 
     def _restore_usage_checkpoints(self, stored):
         stored = stored if isinstance(stored, dict) else {}
@@ -2062,14 +2107,16 @@ class Engine:
         return {"cost": cost, "duration": duration, "turn_tokens": turn_tokens,
                 "usage_persisted": saved, "accounted": not refused}
 
-    def _handle(self, ev, proc):
-        if proc is not self.proc:
-            return   # event from a superseded process - drop it entirely
-        t = ev.get("type")
-        if self._submitted is not None and t in ("assistant", "stream_event", "result"):
-            # Wave 1.2 acknowledgement: a native event for this turn means the
-            # provider has the message; the durable copy is no longer needed.
-            if t == "result" and ev.get("is_error") and ev.get("replay_safe") is True:
+    def _ack_submitted(self, proc, ev):
+        """Wave 1.2 acknowledgement: a native event for this turn means the
+        provider has the message; the durable copy is no longer needed.
+        Under the ingress lock with a proc re-check (Grok R1 F2/F6): an old
+        reader must never clear a NEWER turn's copy or touch the queue while
+        say() mutates it. Returns True when it acknowledged something."""
+        with self._lock:
+            if proc is not self.proc or self._submitted is None:
+                return False
+            if ev.get("type") == "result" and ev.get("is_error") and ev.get("replay_safe") is True:
                 # never submitted natively: give it back to the queue as-is
                 pending = self._submitted.get("text") or ""
                 if pending and pending not in self.queue:
@@ -2078,6 +2125,14 @@ class Engine:
                     self._emit({"t": "sys", "text": "the turn failed before your message reached the model; it is queued again"})
             self._submitted = None
             _update_state(self.skey(), {"submitted": None})
+            return True
+
+    def _handle(self, ev, proc):
+        if proc is not self.proc:
+            return   # event from a superseded process - drop it entirely
+        t = ev.get("type")
+        if self._submitted is not None and t in ("assistant", "stream_event", "result"):
+            self._ack_submitted(proc, ev)
         if t == "system" and ev.get("subtype") == "init":
             if proc is not self.proc:
                 return
@@ -2363,6 +2418,9 @@ class Engine:
         if (self.busy or self.queue or not self.drive or not self.alive()
                 or getattr(self, "_pending_refinement_handoffs", {})):
             return
+        from steward_cockpit import maintenance
+        if maintenance.is_active():
+            return  # Wave 1.6: no self-started turn behind the barrier
         if was_tick:
             return   # a cadence-tick turn is not a step - never counts as drive
         txt = (completed_text or "").strip()

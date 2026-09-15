@@ -256,3 +256,132 @@ def test_pinned_selection_answers_from_a_stale_cache_and_refreshes_off_thread(en
     assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra")
     assert "stale" not in selection
     assert refreshed == [{"settings_revision": 8}]
+
+
+# ── Grok R1 findings (2026-09-15) ─────────────────────────────────────────
+
+def test_durable_copy_is_his_text_not_the_resume_wrapper(engine, monkeypatch, tmp_path):
+    """Grok R1 F1: the wrapper sits in every earlier resume turn of the same
+    thread; a prefixed durability identity would false-match the rollout."""
+    e = engine
+    e.cli = "chatgpt"
+    thread = "01a0aaaa-bbbb-7000-8000-000000000003"
+    e.session_id = thread
+    e._resume_prefix = eng.RESUME_BRIEF
+    e._send_locked("finish chapter 2", origin="human")
+    assert e._submitted["text"] == "finish chapter 2"
+    # a rollout that only holds an OLD resume turn must not count as delivery
+    day = tmp_path / ".codex" / "sessions" / "2026" / "09" / "15"
+    day.mkdir(parents=True)
+    (day / f"rollout-2026-09-15T07-00-00-{thread}.jsonl").write_text(
+        json.dumps({"payload": {"message": eng.RESUME_BRIEF[:200]}}) + "\n", encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
+    e._reconcile_submitted_locked({"submitted": dict(e._submitted)})
+    assert e.queue and e.queue[0].endswith("finish chapter 2")
+
+
+def test_ack_from_a_superseded_process_never_touches_the_newer_copy(engine):
+    """Grok R1 F2/F6: the old reader passed the proc check, then say()
+    interrupted, woke a new process and submitted a new message."""
+    e = engine
+    old = e.proc
+    e._send_locked("first", origin="human")
+    new = _FakeProc()
+    e.proc = new
+    e._submitted = {"text": "second", "at": time.time(), "family": "claude", "session_id": None}
+    assert e._ack_submitted(old, {"type": "assistant", "message": {"content": []}}) is False
+    assert e._submitted["text"] == "second"
+    assert e._ack_submitted(new, {"type": "assistant", "message": {"content": []}}) is True
+    assert e._submitted is None
+
+
+def test_alive_idle_steward_behind_the_barrier_queues_instead_of_a_turn(engine, monkeypatch):
+    """Grok R1 F3 (2): say() on an alive, idle steward used to start a turn."""
+    from steward_cockpit import maintenance as mt
+    e = engine
+    monkeypatch.setattr(mt, "is_active", lambda: True)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    result = e.say("after the restart please")
+    assert result == {"ok": True, "queued": True, "maintenance": True}
+    assert e.queue == ["after the restart please"] and e.proc.stdin.written == []
+    assert e._deliver_next_queued_locked() is False and e.queue == ["after the restart please"]
+    assert e._wake_locked(False, None) == (False, "maintenance in progress")
+
+
+def test_interrupt_then_wake_path_respects_the_barrier(engine, monkeypatch):
+    """Grok R1 F3 (1): the interrupt -> _wake_locked path bypassed wake()'s guard."""
+    from steward_cockpit import maintenance as mt
+    e = engine
+    monkeypatch.setattr(e, "_kill_tree", lambda proc: None)
+    monkeypatch.setattr(e, "_journal_routing", lambda **ev: None)
+    monkeypatch.setattr(e, "_record_conversation", lambda who, text: True)
+    e._send_locked("(drive - not John) Continue.", origin="control")
+    monkeypatch.setattr(mt, "is_active", lambda: True)
+    result = e.say("stop that")
+    assert result["ok"] is True and result.get("interrupted") is True
+    assert e.proc is None and e.queue == ["stop that"]
+
+
+def test_no_drive_behind_the_barrier(engine, monkeypatch):
+    from steward_cockpit import maintenance as mt
+    e = engine
+    e.drive = True
+    monkeypatch.setattr(mt, "is_active", lambda: True)
+    monkeypatch.setattr(e, "_send_locked", lambda *a, **k: pytest.fail("drive must not send"))
+    e._maybe_drive_locked()
+
+
+def test_cache_miss_after_restart_answers_from_last_selection(engine, monkeypatch):
+    """Grok R1 F4: a fresh process has an empty catalog cache."""
+    e = engine
+    e.cli = "chatgpt"
+    e._family_pinned = True
+    e.model_selection = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra"}
+    monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: None)
+    monkeypatch.setattr(model_policy, "resolve", lambda *a, **k: pytest.fail("no probe on the request thread"))
+    refreshed = []
+    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: refreshed.append(settings))
+    target, selection = e._pinned_selection({"settings_revision": 8}, "chatgpt")
+    assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra") and refreshed
+
+
+def test_dead_login_walks_the_ladder(engine, monkeypatch):
+    """Grok R1 F5: a dead subscription login is a capacity loss, not a stale catalog."""
+    e = engine
+    e.cli = "chatgpt"
+    e._family_pinned = True
+    e.model_selection = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra"}
+    monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: None)
+
+    def dead(family, **_kw):
+        raise model_policy.PolicyUnavailable(family, "CLI discovery exited 1; check subscription login", code="auth_required")
+    # the async refresh is what discovers it; make it synchronous here
+    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: setattr(e, "_pinned_cli_missing", True))
+    seen = {}
+    monkeypatch.setattr(e, "_select_available_policy",
+                        lambda settings, target, excluded=(): seen.update(excluded=tuple(excluded)) or ("claude", {"family": "claude", "model": "best", "effort": "max"}))
+    e._pinned_selection({"settings_revision": 8}, "chatgpt")   # marks the family unavailable
+    target, _sel = e._pinned_selection({"settings_revision": 8}, "chatgpt")
+    assert target == "claude" and seen["excluded"] == ("chatgpt",)
+    # and discover() itself tags that failure
+    monkeypatch.setattr(model_policy.shutil, "which", lambda *a, **k: "C:/fake/codex.exe")
+    with pytest.raises(model_policy.PolicyUnavailable) as info:
+        model_policy.discover("chatgpt", env={"PATH": ""}, runner=lambda argv, env: (_ for _ in ()).throw(RuntimeError("CLI discovery exited 1; check subscription login")))
+    assert info.value.code == "auth_required"
+
+
+def test_engine_stderr_is_classified_not_forwarded(engine):
+    e = engine
+    seen = []
+    e._emit = lambda ev: seen.append(ev)
+
+    class _P:
+        stderr = ["Traceback (most recent call last):\n", "  login required https://x/y?token=abc\n"]
+        def poll(self):
+            return 1
+    p = _P()
+    e.proc = p
+    e._read_stderr(p)
+    text = [ev["text"] for ev in seen if ev.get("t") == "sys"][-1]
+    assert text.startswith("engine stderr: ") and "content withheld" in text and "token=abc" not in text
+    assert "auth" in text and "panic" in text

@@ -42,16 +42,16 @@ def test_barrier_waits_for_turns_and_jobs_then_restarts_once():
     assert _wait_until(lambda: mt.status().get("checks", 0) >= 2)
     assert restarts == []
     assert set(mt.status()["waiting_on"]) == {"steward:C:/x/Book 1", "job:job-1"}
+    # a second begin while the watcher is alive is idempotent
+    again = mt.begin("again", busy_engines=lambda: [], running_jobs=lambda: [],
+                     restart=lambda r: restarts.append(r), poll_seconds=0.02)
+    assert again["reason"] == "activate wave 1"
     busy["engines"].clear()
     assert _wait_until(lambda: mt.status().get("checks", 0) >= 4)
     assert restarts == []  # the job still holds it
     busy["jobs"].clear()
     assert _wait_until(lambda: restarts == ["activate wave 1"])
     assert mt.status()["restart_called"] is True
-    # a second begin while active is idempotent
-    again = mt.begin("again", busy_engines=lambda: [], running_jobs=lambda: [],
-                     restart=lambda r: restarts.append(r), poll_seconds=0.02)
-    assert again["reason"] == "activate wave 1"
 
 
 def test_barrier_gives_up_visibly_after_max_wait():
@@ -127,3 +127,20 @@ def test_maintenance_route_status_begin_and_cancel(monkeypatch):
     assert _wait_until(lambda: restarted == ["test"])
     cancelled, code = routes.maintenance_post({"op": "cancel"})
     assert code == 200 and cancelled["active"] is False
+
+
+def test_begin_rearms_a_dead_watcher():
+    mt.begin("first", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
+    gen = mt.status()["generation"]
+    mt._THREAD = None  # simulate a watcher that died
+    again = mt.begin("second", busy_engines=lambda: ["b"], running_jobs=lambda: [], restart=lambda r: None, poll_seconds=0.02)
+    assert again["generation"] == gen + 1 and again["reason"] == "second"
+
+
+def test_no_job_of_any_kind_launches_behind_the_barrier(monkeypatch):
+    import job_runner as jr
+    monkeypatch.setattr(mt, "is_active", lambda: True)
+    with pytest.raises(ValueError, match="maintenance-barrier"):
+        jr.launch("research", command=[sys.executable, "-c", "pass"])
+    with pytest.raises(ValueError, match="maintenance-barrier"):
+        jr.launch("research", backend="claude", prompt="x")

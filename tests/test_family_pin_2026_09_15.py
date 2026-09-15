@@ -96,12 +96,16 @@ def test_transient_catalog_failure_keeps_family_and_last_selection(campaign, mon
 
 
 def test_missing_cli_walks_the_ladder_without_the_missing_family(campaign, monkeypatch):
+    """Discovery runs off the request thread; a missing CLI found there makes
+    the NEXT send walk the ladder (the current send still answers)."""
     e = _launched_codex_engine(campaign)
     seen = {}
+    monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: None)
 
     def missing(family, **_kw):
         raise model_policy.PolicyUnavailable(family, "subscription CLI is not installed", code="cli_missing")
     monkeypatch.setattr(model_policy, "resolve", missing)
+    monkeypatch.setattr(e, "_journal_routing", lambda **event: None)
 
     def ladder(settings, target, excluded=()):
         seen["excluded"] = tuple(excluded)
@@ -109,16 +113,22 @@ def test_missing_cli_walks_the_ladder_without_the_missing_family(campaign, monke
     monkeypatch.setattr(e, "_select_available_policy", ladder)
 
     target, selection = e._pinned_selection(dict(SETTINGS), "chatgpt")
+    assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra")  # answered now
+    e._catalog_refresh_thread.join(5)
+    assert e._pinned_cli_missing is True
+    target, _selection = e._pinned_selection(dict(SETTINGS), "chatgpt")
     assert target == "claude"
     assert seen["excluded"] == ("chatgpt",)
 
 
 def test_healthy_probe_refreshes_the_selection_in_place(campaign, monkeypatch):
     e = _launched_codex_engine(campaign)
-    newer = dict(CODEX_SELECTION, model="gpt-7-nova")
-    monkeypatch.setattr(model_policy, "resolve", lambda family, **_kw: dict(newer))
+    newer = dict(CODEX_SELECTION, model="gpt-7-nova", stale=False)
+    monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: dict(newer))
+    monkeypatch.setattr(model_policy, "resolve", lambda *a, **k: pytest.fail("fresh cache needs no probe"))
     target, selection = e._pinned_selection(dict(SETTINGS), "chatgpt")
     assert (target, selection["model"]) == ("chatgpt", "gpt-7-nova")
+    assert "stale" not in selection
 
 
 def test_busy_turn_never_probes(campaign, monkeypatch):
