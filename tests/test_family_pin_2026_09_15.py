@@ -115,10 +115,19 @@ def test_missing_cli_walks_the_ladder_without_the_missing_family(campaign, monke
     target, selection = e._pinned_selection(dict(SETTINGS), "chatgpt")
     assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra")  # answered now
     e._catalog_refresh_thread.join(5)
-    assert e._pinned_cli_missing is True
+    assert e._pinned_unavailable_family == "chatgpt"
     target, _selection = e._pinned_selection(dict(SETTINGS), "chatgpt")
     assert target == "claude"
     assert seen["excluded"] == ("chatgpt",)
+    # Grok R2 N2: after the failover the flag is spent; the new family is
+    # never walked off by the old finding
+    e.cli = "claude"
+    e.model_selection = {"family": "claude", "model": "best", "effort": "max"}
+    seen.clear()
+    monkeypatch.setattr(model_policy, "cached_selection",
+                        lambda family, settings=None, env=None: dict(e.model_selection, stale=False))
+    target, _selection = e._pinned_selection(dict(SETTINGS), "claude")
+    assert target == "claude" and seen == {}
 
 
 def test_healthy_probe_refreshes_the_selection_in_place(campaign, monkeypatch):

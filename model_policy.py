@@ -180,7 +180,12 @@ def _run(argv, env):
         raise RuntimeError(f"CLI discovery {type(error).__name__}") from error
     if completed.returncode:
         # Provider stderr can contain credentials/login URLs. Never return it.
-        raise RuntimeError(f"CLI discovery exited {completed.returncode}; check subscription login")
+        # Classify it instead (Grok R2 N1): only an auth-shaped failure is a
+        # dead login; any other nonzero exit is transient or unknown.
+        diagnostics = f"{completed.stderr or ''} {completed.stdout or ''}"
+        if re.search(r"(?i)\b(login|logged out|not logged in|auth\w*|unauthori[sz]ed|forbidden|401|403)\b", diagnostics):
+            raise RuntimeError(f"CLI discovery exited {completed.returncode}; subscription login required")
+        raise RuntimeError(f"CLI discovery exited {completed.returncode}; transient or unknown failure")
     return completed.stdout
 
 
@@ -240,7 +245,7 @@ def discover(family, *, env=None, runner=_run):
     except (RuntimeError, ValueError, OSError, KeyError, TypeError, AttributeError) as error:
         # codex-discipline-2026-09-15: a dead subscription login is a capacity
         # loss (the ladder may walk), unlike a timeout or an ambiguous ranking.
-        code = "auth_required" if "check subscription login" in str(error) else "capability_unavailable"
+        code = "auth_required" if "subscription login required" in str(error) else "capability_unavailable"
         raise PolicyUnavailable(family, str(error), code=code) from error
 
 

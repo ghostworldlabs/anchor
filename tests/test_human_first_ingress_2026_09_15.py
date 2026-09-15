@@ -356,18 +356,37 @@ def test_dead_login_walks_the_ladder(engine, monkeypatch):
     def dead(family, **_kw):
         raise model_policy.PolicyUnavailable(family, "CLI discovery exited 1; check subscription login", code="auth_required")
     # the async refresh is what discovers it; make it synchronous here
-    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: setattr(e, "_pinned_cli_missing", True))
+    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: setattr(e, "_pinned_unavailable_family", "chatgpt"))
     seen = {}
     monkeypatch.setattr(e, "_select_available_policy",
                         lambda settings, target, excluded=(): seen.update(excluded=tuple(excluded)) or ("claude", {"family": "claude", "model": "best", "effort": "max"}))
     e._pinned_selection({"settings_revision": 8}, "chatgpt")   # marks the family unavailable
     target, _sel = e._pinned_selection({"settings_revision": 8}, "chatgpt")
     assert target == "claude" and seen["excluded"] == ("chatgpt",)
-    # and discover() itself tags that failure
+    # and discover() tags ONLY an auth-shaped failure (Grok R2 N1)
     monkeypatch.setattr(model_policy.shutil, "which", lambda *a, **k: "C:/fake/codex.exe")
     with pytest.raises(model_policy.PolicyUnavailable) as info:
-        model_policy.discover("chatgpt", env={"PATH": ""}, runner=lambda argv, env: (_ for _ in ()).throw(RuntimeError("CLI discovery exited 1; check subscription login")))
+        model_policy.discover("chatgpt", env={"PATH": ""}, runner=lambda argv, env: (_ for _ in ()).throw(RuntimeError("CLI discovery exited 1; subscription login required")))
     assert info.value.code == "auth_required"
+    with pytest.raises(model_policy.PolicyUnavailable) as info:
+        model_policy.discover("chatgpt", env={"PATH": ""}, runner=lambda argv, env: (_ for _ in ()).throw(RuntimeError("CLI discovery exited 1; transient or unknown failure")))
+    assert info.value.code == "capability_unavailable"
+
+
+def test_run_classifies_a_nonzero_exit_without_returning_stderr(monkeypatch):
+    """Grok R2 N1: a 502 blip is not a dead login; a login failure is."""
+    from types import SimpleNamespace
+    def fake_run(argv, **kwargs):
+        return SimpleNamespace(returncode=1, stdout="", stderr=fake_run.stderr)
+    monkeypatch.setattr(model_policy.subprocess, "run", fake_run)
+    fake_run.stderr = "error: 502 Bad Gateway from upstream https://api.openai.com/x"
+    with pytest.raises(RuntimeError) as blip:
+        model_policy._run(["codex", "debug", "models"], {})
+    assert "transient or unknown failure" in str(blip.value) and "openai.com" not in str(blip.value)
+    fake_run.stderr = "You are not logged in. Run `codex login` (token=abc)"
+    with pytest.raises(RuntimeError) as dead:
+        model_policy._run(["codex", "debug", "models"], {})
+    assert "subscription login required" in str(dead.value) and "token=abc" not in str(dead.value)
 
 
 def test_engine_stderr_is_classified_not_forwarded(engine):

@@ -515,7 +515,10 @@ class Engine:
         # or dead auth changes a pinned family.
         self._family_pinned = bool(stored_entry.get("cli"))
         self._stale_catalog_noted_at = 0.0
-        self._pinned_cli_missing = False
+        # the FAMILY the background probe found unavailable (missing CLI or
+        # dead login) — never a process-lifetime boolean that would walk the
+        # steward off the family it failed over TO (Grok R2 N2)
+        self._pinned_unavailable_family = None
         self._catalog_refresh_thread = None
         # Wave 1.2: human-first, durable ingress. The resume brief rides on his
         # next message instead of spending a turn; every send carries an
@@ -862,8 +865,10 @@ class Engine:
             return self.cli, self.model_selection
         if not (self._family_pinned and target == self.cli and self.model_selection):
             return self._select_available_policy(settings, target)
-        if self._pinned_cli_missing:
-            return self._select_available_policy(settings, target, excluded=(self.cli,))
+        if self._pinned_unavailable_family == self.cli:
+            failed = self.cli
+            self._pinned_unavailable_family = None  # one walk per finding
+            return self._select_available_policy(settings, target, excluded=(failed,))
         try:
             cached = model_policy.cached_selection(self.cli, settings=settings)
             if cached is not None:
@@ -900,7 +905,7 @@ class Engine:
                 if exc.code in ("cli_missing", "auth_required"):
                     # real capacity loss (Grok R1 F5): the next send walks the
                     # ladder instead of pretending the family still answers
-                    self._pinned_cli_missing = True
+                    self._pinned_unavailable_family = family
                 self._note_stale_catalog(str(exc))
             except (ValueError, RuntimeError) as exc:
                 self._note_stale_catalog(str(exc))
