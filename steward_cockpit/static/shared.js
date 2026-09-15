@@ -1500,6 +1500,8 @@ const Proto = (() => {
       const policy = st.model_policy;
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
       if (st.pending_switch) details.push("switch to " + st.pending_switch + " at the next safe turn boundary");
+      else if (st.family_pinned && st.selected_cli && st.cli && st.selected_cli !== st.cli)
+        details.push("dashboard default is " + st.selected_cli + "; this steward stays on " + st.cli + " (pinned; switch is explicit)");
       if (st.settings_error) txt += " · " + st.settings_error;
       stx.title = details.join(" · ");
       stx.title = [txt,stx.title].filter(Boolean).join(' · ');

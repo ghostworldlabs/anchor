@@ -272,6 +272,11 @@ def build_argv(
     result.extend([
         "-c", 'approval_policy="never"',
         "-c", f'sandbox_mode="{PERMISSIONS[permission_mode]}"',
+        # codex-discipline-2026-09-15 Wave 1.5: the steward never spawns its
+        # own sub-agents (45 native thread_spawns in three days ran outside
+        # Anchor's ledger); delegation goes through the skills it commissions.
+        "-c", "agents.enabled=false",
+        "-c", "features.multi_agent=false",
     ])
     if thread_id is not None:
         result.append(thread_id)

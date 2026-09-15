@@ -507,6 +507,9 @@ def test_preflight_attests_subscription_and_installed_ultra_without_shell(tmp_pa
             return _completed(stdout="Logged in using ChatGPT")
         if argv[-2:] == ["debug", "models"]:
             return _completed(stdout=_catalog())
+        if argv[-3:] == ["debug", "models", "--bundled"]:
+            # Wave 1.4 tie-break probe; a unique native ranking ignores it.
+            return _completed(stdout=_catalog())
         raise AssertionError(argv)
 
     result = ca.preflight_codex(
@@ -537,7 +540,8 @@ def test_preflight_attests_subscription_and_installed_ultra_without_shell(tmp_pa
     assert result["user_config_ignored"] is False
     assert result["executable_provenance_verified"] is True
     assert result["child_env_allowlist_verified"] is True
-    assert len(calls) == 3
+    assert result["catalog_tie_break"] == "none"
+    assert len(calls) == 4  # version, login, native catalog, bundled catalog
     for argv, kwargs in calls:
         assert kwargs["shell"] is False
         assert "OPENAI_API_KEY" not in kwargs["env"]
@@ -2357,6 +2361,8 @@ def test_preflight_production_path_jobs_all_three_local_probes(tmp_path):
             payload = b"codex-cli contained"
         elif argv[1:] == ["login", "status"]:
             payload = b"Logged in using ChatGPT"
+        elif argv[-3:] == ["debug", "models", "--bundled"]:
+            payload = _catalog().encode("utf-8")  # Wave 1.4 tie-break probe
         else:
             assert argv[-2:] == ["debug", "models"]
             payload = _catalog().encode("utf-8")
@@ -2372,7 +2378,7 @@ def test_preflight_production_path_jobs_all_three_local_probes(tmp_path):
             "signer_image_binding_verified": True,
         }, popen_impl=popen, platform_name="nt", windows_job_factory=Job)
     assert result["ok"] is True
-    assert result["preflight_probe_count"] == 3
+    assert result["preflight_probe_count"] == 4  # + the Wave 1.4 bundled tie-break probe
     assert result["preflight_containment_kind"] == "windows_job"
     assert result["preflight_complete_tree_containment"] is True
     assert result["preflight_no_inference_verified"] is True
@@ -2380,7 +2386,7 @@ def test_preflight_production_path_jobs_all_three_local_probes(tmp_path):
     assert result["preflight_output_limits_verified"] is True
     assert result["preflight_output_drain_verified"] is True
     assert result["preflight_root_exit_verified"] is True
-    assert all(job.closed for job in jobs) and len(jobs) == len(calls) == 3
+    assert all(job.closed for job in jobs) and len(jobs) == len(calls) == 4  # Wave 1.4: + bundled probe
 
 
 def test_preflight_timeout_proves_windows_job_root_and_pipe_cleanup(tmp_path):

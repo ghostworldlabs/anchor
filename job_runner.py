@@ -2466,7 +2466,7 @@ def _valid_chatgpt_failure_envelope(envelope, record,
     return True
 
 
-def _mirror_session_status(job_id, job_status) -> None:
+def _mirror_session_status(job_id, job_status, reason=None, detail=None) -> None:
     """Mirror a swarm job's terminal status onto its session record.
 
     Maps the job's terminal status to a session status and clears the session
@@ -2486,8 +2486,15 @@ def _mirror_session_status(job_id, job_status) -> None:
         STATUS_CANCELLED: _sr.STATUS_CANCELLED,
         STATUS_INTERRUPTED: _sr.STATUS_IDLE,
     }.get(job_status, _sr.STATUS_IDLE)
+    fields = {"status": target}
+    if reason:
+        # codex-discipline-2026-09-15 Wave 1.4: the reason used to stop at the
+        # job record, so the registry (and every tile built on it) showed a
+        # bare "failed". Bounded, same words as the job record.
+        fields["failure_reason"] = str(reason)[:120]
+        fields["failure_detail"] = str(detail or "")[:500]
     try:
-        _sr.update_session(job_id, status=target)
+        _sr.update_session(job_id, **fields)
     except KeyError:
         pass  # no swarm session registered for this job — nothing to mirror.
     except Exception:  # pragma: no cover - registry is best-effort
@@ -2617,7 +2624,9 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
             _write_record(rec)
     # Mirror the terminal status onto the swarm session (gandalf finally analog),
     # OUTSIDE the write lock the registry takes its own lock internally.
-    _mirror_session_status(job_id, final_status)
+    _mirror_session_status(job_id, final_status,
+                           rec.get("failure_reason") if final_status == STATUS_FAILED else None,
+                           rec.get("failure_detail") if final_status == STATUS_FAILED else None)
 
     # Followup Wave 3: BRIDGE the captured cost/tokens/duration onto the project
     # EFFORT pointer-record, so the per-project / per-effort rollups (which read
