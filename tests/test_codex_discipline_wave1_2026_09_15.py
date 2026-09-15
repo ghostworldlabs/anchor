@@ -2,8 +2,8 @@
 
 Items covered here: 1.4 (delegated preflight applies the parent's bundled
 tie-break, trusts a parent-frozen identity honestly, and the failure reason
-reaches the session registry) and 1.5 (the steward argv disables Codex's
-native sub-agents). No real CLI, no network, tmp-rooted registry.
+reaches the session registry) and 1.5 as corrected (sub-agents stay on and
+inherit the steward's policy). No real CLI, no network, tmp-rooted registry.
 """
 import importlib
 import json
@@ -59,19 +59,17 @@ def _runner(native, bundled=None, bundled_code=0):
     return fake_run
 
 
-# ── 1.5 ────────────────────────────────────────────────────────────────────
+# ── 1.5 (as corrected by John: sub-agents stay on, same policy, attributed) ──
 
-def test_steward_argv_disables_native_subagents_fresh_and_resume():
+def test_steward_argv_keeps_native_subagents_on_the_steward_policy():
     fresh = build_argv("codex", model="gpt-6-astra", effort="ultra",
                        permission_mode="bypassPermissions")
     resumed = build_argv("codex", model="gpt-6-astra", effort="ultra",
                          permission_mode="bypassPermissions", thread_id="thread-1")
     for argv in (fresh, resumed):
-        pairs = list(zip(argv, argv[1:]))
-        assert ("-c", "agents.enabled=false") in pairs
-        assert ("-c", "features.multi_agent=false") in pairs
-        # The sub-agent model/effort pins stay (harmless once agents are off)
-        # and the prompt still arrives on stdin.
+        assert "agents.enabled=false" not in argv and "features.multi_agent=false" not in argv
+        assert 'agents.default_subagent_model="gpt-6-astra"' in argv
+        assert 'agents.default_subagent_reasoning_effort="ultra"' in argv
         assert argv[-1] == "-"
     assert "resume" in resumed and "thread-1" in resumed
 

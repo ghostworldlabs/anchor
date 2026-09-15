@@ -268,18 +268,14 @@ def build_argv(
     if thread_id is not None:
         result.append("resume")
     result.extend(["--json", "--skip-git-repo-check"])
-    # subagents=False: with agents disabled below, the default_subagent_* pins
-    # would only be a second on-switch waiting to be flipped (Rabbit-Catcher).
-    result.extend(launch_args({"family": "chatgpt", "model": model, "effort": effort}, subagents=False))
+    # Sub-agents stay ON and inherit the steward's model/effort policy (John,
+    # 2026-09-15: every family may spawn sub-agents; the requirement is that
+    # each one is attributed back to its project and effort, not switched off).
+    result.extend(launch_args({"family": "chatgpt", "model": model, "effort": effort}))
     # Both exec and exec resume accept -c; resume does not accept --sandbox.
     result.extend([
         "-c", 'approval_policy="never"',
         "-c", f'sandbox_mode="{PERMISSIONS[permission_mode]}"',
-        # codex-discipline-2026-09-15 Wave 1.5: the steward never spawns its
-        # own sub-agents (45 native thread_spawns in three days ran outside
-        # Anchor's ledger); delegation goes through the skills it commissions.
-        "-c", "agents.enabled=false",
-        "-c", "features.multi_agent=false",
     ])
     if thread_id is not None:
         result.append(thread_id)
