@@ -215,6 +215,11 @@
     <span class="cptotal" style="flex-basis:100%; text-align:right" data-total></span>
   </div>
   <div class="cpgoal" data-goal></div>
+  <details data-other-usage style="margin:0 0 16px;font-size:13px;color:var(--dim)">
+    <summary>Other recorded runs</summary>
+    <p>Separate lane and terminal records may overlap cockpit history. These amounts are shown separately.</p>
+    <div data-other-usage-rows></div>
+  </details>
 
   <button type="button" class="wptile" data-wptile
           style="width:100%;margin-bottom:16px;text-align:left"
@@ -358,10 +363,44 @@ document.querySelector("[data-theme-toggle]").onclick = (ev) => {
 const el = (t, c, x) => { const n = document.createElement(t);
   if (c) n.className = c; if (x !== undefined) n.textContent = x; return n; };
 const LIGHTWORD = { green: "running", orange: "quiet", red: "needs a look" };
-const usageLine = (u) => "$" + (u.spend || 0).toFixed(2) + " · " +
-  Math.round((u.tokens || 0) / 1000) + "k tokens · " +
-  (u.secs >= 5400 ? ((u.secs / 3600).toFixed(1) + "h")
-                  : Math.round((u.secs || 0) / 60) + "m");
+const usageLine = (u) => {
+  const knownUsd = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
+  let costText = "cost unavailable";
+  const incomplete = u.cost_complete === false || (typeof u.unpriced_turns === "number" && u.unpriced_turns > 0);
+  const unpriced = Number.isInteger(u.unpriced_turns) && u.unpriced_turns > 0 ? u.unpriced_turns : 0;
+  const family = u.billing_family || "";
+  const subLabel = family === "mixed" ? "ChatGPT/Grok subscription"
+    : family === "grok" ? "Grok subscription"
+    : family === "chatgpt" || u.billing_mode === "subscription" ? "ChatGPT subscription" : "";
+  if (typeof u.cost_text === "string" && u.cost_text) {
+    costText = u.cost_text;
+  } else if (u.billing_mode === "subscription" && subLabel && unpriced > 0) {
+    const reported = knownUsd(u.reported_spend) ? u.reported_spend : knownUsd(u.spend) ? u.spend : null;
+    const turns = " (" + unpriced.toLocaleString() + " turn" + (unpriced === 1 ? "" : "s") + ")";
+    costText = (reported !== null && reported > 0)
+      ? "$" + reported.toFixed(2) + " previously reported · " + subLabel + turns
+      : subLabel + turns;
+  } else if (u.cost_status === "unavailable") {
+    costText = "cost unavailable";
+  } else if (incomplete) {
+    const reported = knownUsd(u.reported_spend) ? u.reported_spend : knownUsd(u.spend) ? u.spend : null;
+    // Incomplete zero-only rollups cannot distinguish a reported zero from
+    // wholly unpriced usage, so they must not imply a reported charge.
+    if (reported !== null && reported > 0) costText = "$" + reported.toFixed(2) + " reported + unpriced usage";
+  } else if ((u.cost_complete === true || u.cost_complete === undefined) && knownUsd(u.spend)) {
+    costText = "$" + u.spend.toFixed(2) + " reported";
+  }
+  const tokenStatus = u.token_status;
+  const tokenKnown = typeof u.tokens === "number" && Number.isFinite(u.tokens) && u.tokens >= 0 &&
+    tokenStatus !== "unavailable" && (u.tokens > 0 || tokenStatus === "reported" ||
+      (tokenStatus === "partial" && u.checkpoint_coverage && u.checkpoint_coverage.reported_invocations > 0));
+  const tokenText = tokenKnown
+    ? Math.round(u.tokens).toLocaleString() + " recorded tokens" + (tokenStatus === "partial" ? " (partial)" : "")
+    : "tokens unavailable";
+  return costText + " · " + tokenText + " · " +
+    (u.secs >= 5400 ? ((u.secs / 3600).toFixed(1) + "h")
+                    : Math.round((u.secs || 0) / 60) + "m");
+};
 
 /* ---------- header + seal ---------- */
 async function refresh() {
@@ -381,7 +420,32 @@ async function refresh() {
     b2.style.marginLeft = "6px";
     chips.appendChild(b1); chips.appendChild(b2);
     document.querySelector("[data-total]").textContent =
-      "all sessions: " + usageLine(j.usage.total);
+      "cockpit sessions: " + usageLine(j.usage.total);
+    const other = j.other_recorded_usage;
+    const otherRows = document.querySelector('[data-other-usage-rows]');
+    otherRows.replaceChildren();
+    if (!other || other.status === 'unavailable') {
+      otherRows.appendChild(el('p', '', 'Other run records are unavailable.'));
+    } else {
+      const records = Array.isArray(other.records) ? other.records : [];
+      if (other.status === 'partial') otherRows.appendChild(el('p', '', 'Some source records are unavailable or conflict; this list is incomplete.'));
+      document.querySelector('[data-other-usage] summary').textContent =
+        'Other recorded runs (' + records.length + ')';
+      if (!records.length) otherRows.appendChild(el('p', '', 'No separate run records found for this project registration.'));
+      for (const record of records) {
+        const tokens = Number.isInteger(record.tokens) && record.tokens >= 0
+          ? record.tokens.toLocaleString() + ' recorded tokens' : 'tokens unavailable';
+        const dollars = typeof record.saved_usd === 'number' && Number.isFinite(record.saved_usd)
+          ? '$' + record.saved_usd.toFixed(2) + ' saved' : 'dollars unavailable';
+        const coverage = record.cost_status === 'recorded' ? 'saved source amount' :
+          record.cost_status === 'partial' ? 'partial coverage' : 'coverage unverified';
+        const date = typeof record.created_at === 'number' && Number.isFinite(record.created_at)
+          ? ' (' + new Date(record.created_at * 1000).toLocaleDateString() + ')' : '';
+        const row = el('p', '', (record.title || record.lane || 'Recorded run') + date + ' · ' + tokens +
+          ' · ' + dollars + ' · ' + coverage + (record.conflict ? ' · conflicting source records' : ''));
+        otherRows.appendChild(row);
+      }
+    }
     const icon = document.querySelector("[data-sealicon]");
     if (j.seal_icon) { icon.src = "/brand/" + j.seal_icon; icon.style.display = ""; }
     document.querySelector("[data-sealtitle]").textContent =
@@ -565,17 +629,59 @@ function showTerm(tid) {
     t.classList.toggle("on", t.dataset.tid === tid));
 }
 let TSEARCH = "";
+let TERMINAL_OPENING = false, CREATED_TERMINAL_TID = "";
 async function loadTerms() {
   const j = await (await fetch("/api/terms?dir=")).json();
   const row = document.querySelector("[data-tabrow]");
+  let terminalError = document.querySelector("[data-terminal-error]");
+  if (!terminalError) {
+    terminalError = el("div", "terminal-error");
+    terminalError.dataset.terminalError = "";
+    terminalError.setAttribute("role", "alert");
+    terminalError.hidden = true;
+    row.parentNode.insertBefore(terminalError, row.nextSibling);
+  }
   row.textContent = "";
   const plus = el("button", "", "＋ Terminal");
+  plus.dataset.terminalCreate = "";
+  plus.disabled = TERMINAL_OPENING;
+  if (TERMINAL_OPENING) plus.textContent = "Opening…";
   plus.onclick = async () => {
-    const r = await fetch("/api/term_new", { method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dir: "" }) });
-    const jj = await r.json();
-    if (jj.ok) { await loadTerms(); showTerm(jj.tid); }
+    if (TERMINAL_OPENING) return;
+    TERMINAL_OPENING = true;
+    plus.disabled = true;
+    plus.textContent = "Opening…";
+    terminalError.textContent = "";
+    terminalError.hidden = true;
+    try {
+      if (!CREATED_TERMINAL_TID) {
+        const r = await fetch("/api/term_new", { method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dir: "" }) });
+        let jj;
+        try { jj = await r.json(); }
+        catch (_) { throw new Error(r.ok ? "The server returned an unreadable response." : "Request failed (" + r.status + ")."); }
+        if (!r.ok || !jj || jj.ok !== true) {
+          const detail = typeof jj?.error === "string" ? jj.error : typeof jj?.message === "string" ? jj.message : "Request failed (" + r.status + ").";
+          throw new Error(detail);
+        }
+        if (typeof jj.tid !== "string" || !jj.tid) throw new Error("The server did not return a terminal ID.");
+        CREATED_TERMINAL_TID = jj.tid;
+      }
+      await loadTerms();
+      await showTerm(CREATED_TERMINAL_TID);
+      CREATED_TERMINAL_TID = "";
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "The request could not finish.";
+      terminalError.textContent = (CREATED_TERMINAL_TID ? "The terminal was created, but its view could not open. " : "Could not open terminal. ") + detail + " Please try again.";
+      terminalError.hidden = false;
+    } finally {
+      TERMINAL_OPENING = false;
+      plus.disabled = false;
+      plus.textContent = "＋ Terminal";
+      const currentPlus = document.querySelector("[data-terminal-create]");
+      if (currentPlus) { currentPlus.disabled = false; currentPlus.textContent = "＋ Terminal"; }
+    }
   };
   row.appendChild(plus);
   const live = (j.terms || []).filter(t => !t.archived)
@@ -631,7 +737,7 @@ async function loadTerms() {
     const sum = el("div", "bsum",
       (t.last_text ? "Last it was doing:\n" + t.last_text
                    : "(no record of its last activity)") +
-      (t.usage && t.usage.spend ? "\n" + usageLine(t.usage) : ""));
+      (t.usage ? "\n" + usageLine(t.usage) : ""));
     const rb = el("button", "mini", "restore");
     rb.style.marginTop = "6px";
     rb.onclick = async (ev) => {
@@ -660,7 +766,7 @@ function showSummary(t) {
   inner.appendChild(el("div", "sname", t.label + " · " + t.cli));
   inner.appendChild(el("div", "smeta", "created " + t.created +
     (t.last_used ? " · last active " + t.last_used : "") +
-    (t.usage && t.usage.spend ? " · " + usageLine(t.usage) : "")));
+    (t.usage ? " · " + usageLine(t.usage) : "")));
   inner.appendChild(el("div", "stext",
     t.last_text ? "Last it was doing:\n\n" + t.last_text
                 : "(no record of its last activity)"));
@@ -918,6 +1024,11 @@ async function loadDeliv() {
   list.textContent = "";
   items.forEach(it => {
     const row = el("div", "frow2");
+    if (it.notebook_product && window.AnchorNotebooks) {
+      row.appendChild(window.AnchorNotebooks.render(it, it.dir || ""));
+      row.appendChild(el("span", "fm", (it.effort || "") + (it.date ? " · " + it.date : "")));
+      list.appendChild(row); return;
+    }
     /* (2026-09-05) a contained Anchor route the parser classified
        (classify_route) opens by ANCHOR — href = route + the page token,
        target _blank, rel noopener, labelled with the deliverable's NAME —
@@ -1010,6 +1121,10 @@ function renderFiles(q) {
   list.textContent = "";
   rows.forEach(f => {
     const row = el("div", "frow2");
+    if (f.notebook_product && window.AnchorNotebooks) {
+      row.appendChild(window.AnchorNotebooks.render(f, ""));
+      list.appendChild(row); return;
+    }
     // (2026-09-05, John) a file is a LINK that opens rendered in a new window
     // (text in the Reader, PDF inline, Office as a preview page); the small
     // "app" button still opens it on this computer.
@@ -1150,6 +1265,9 @@ document.querySelector("[data-upfile]").addEventListener("change", (ev) => {
   ev.target.value = "";
 });
 
+window.addEventListener("anchor-notebooks-changed", () => {
+  Promise.allSettled([loadDeliv(), loadFiles()]);
+});
 refresh();
 </script>
 </body></html>

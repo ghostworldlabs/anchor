@@ -67,10 +67,11 @@ a { color: var(--steward); text-decoration: none; }
 .steps li { display: flex; gap: 9px; padding: 5px 0; font-size: 13.5px;
             align-items: baseline; cursor: default; }
 .steps .mark { font-family: var(--mono); width: 15px; flex: none; }
-.steps li.done   { color: var(--dim); }  .steps li.done .mark { color: var(--ok); }
+.steps li.done   { color: var(--dim); }  .steps li.done .mark, .plan-mark.done { color: var(--ok); }
 .steps li.active .mark { color: var(--run); }
+.steps .mark.todo, .plan-mark.todo { color: #e8eaef; }
 .steps li.active { color: var(--text); font-weight: 600; }
-.steps li.waiting .mark { color: var(--flag); }
+.steps li.waiting .mark, .plan-mark.flag { color: var(--flag); }
 .steps li.planned, .steps li.proposed { color: var(--dim); }
 .steps li .why { display: none; font-weight: 400; color: var(--dim);
                  font-size: 12.5px; margin-top: 2px; }
@@ -303,8 +304,37 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
          flex: none; }
 .light.green { background: var(--ok); box-shadow: 0 0 7px var(--ok); }
 .light.orange { background: var(--warn); }
+.light.quiet { background: #8995a7; box-shadow: none; }
 .light.red { background: #e05f5f; box-shadow: 0 0 7px #e05f5f; }
-.leftcol { width: 300px; }
+.leftcol { width: var(--planw,300px); position:relative; }
+.plan-grip { position:absolute;right:0;top:0;bottom:0;width:6px;cursor:col-resize;touch-action:none;z-index:3; }
+.plan-grip:focus-visible { outline:2px solid var(--ok); }
+.nav-select { display:grid;gap:4px;margin-top:12px; }
+.nav-choice,.nav-child { display:block;width:100%;text-align:left;padding:8px;white-space:normal; }
+.nav-choice[aria-pressed=true] { border-color:var(--ok);background:#629aca22; }
+.nav-inspect { border-top:1px solid #ffffff25;margin-top:12px;padding-top:8px;min-width:0; }
+.nav-inspect h3 { margin:5px 0;font-size:15px; }
+.nav-accept,.nav-refine { font-size:11px;margin:4px 5px 2px 0; }
+.status-compact p { margin:7px 0;line-height:1.45;overflow-wrap:anywhere; }
+.status-compact strong { font-size:12px;opacity:.75; }
+.status-compact .stab { margin-top:2px; }
+.status-history { margin-top:10px; }
+.status-history>summary { cursor:pointer;font-size:12px;opacity:.8; }
+.blk.status.latest { position:relative; }
+.live-activity { margin-left:8px;font-weight:600;color:var(--dim); }
+.plan-mark { font-family:var(--mono);margin-right:2px; }
+.action-needed, .openq { overflow-wrap:anywhere; }
+.question-source { white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5; }
+.question-other { display:block;text-align:left;margin-top:10px;width:100%; }
+.pstatus:has(.status-compact)>.platest,.pstatus:has(.status-compact)>.pmsgs { display:none; }
+@media(max-width:849px) {
+  .app3 .leftcol,.app3.statusopen .rightcol { position:fixed;top:90px;bottom:0;z-index:6;
+    width:min(380px,calc(100vw - 48px));box-shadow:0 0 20px #0008; }
+  .app3 .leftcol { left:0; }
+  .app3.statusopen .rightcol { right:0; }
+  .app3 .bar { flex-wrap:wrap;gap:5px; }
+  .app3 .bar .chip { max-width:100%;overflow-wrap:anywhere; }
+}
 .rightcol { width: 0; border: none; overflow: hidden;
             background: var(--panel); display: flex; flex-direction: column;
             min-height: 0; }
@@ -327,12 +357,28 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .statustab:hover { color: var(--text); border-color: var(--dim); }
 .app.statusopen .statustab { display: none; }
 /* the pinned open question - an ask can never scroll away unanswered */
-.openq { display: none; padding: 9px 8%; font-size: 13.5px; cursor: pointer;
-         color: #f6c5c5; background: rgba(248,113,113,.10);
-         border-bottom: 1px solid rgba(248,113,113,.45); }
-.openq::before { content: "⚑ waiting on your answer:  "; color: var(--flag);
-                 font-weight: 600; }
-.openq.show { display: block; }
+.openq, .action-needed { display: none; position: relative; padding: 10px 12px; font-size: 13.5px;
+         cursor: pointer; color: #f6c5c5; background: rgba(248,113,113,.12);
+         border: 1px solid rgba(248,113,113,.45); border-radius: 8px; }
+.openq { border-radius: 0; border-left: none; border-right: none; }
+.openq.show, .action-needed.show { display: block; }
+.action-head { display: flex; flex-direction: column; gap: 4px; padding-right: 28px; }
+.action-head strong { color: var(--flag); font-size: 11px; letter-spacing: .08em;
+                      text-transform: uppercase; }
+.action-q { color: #f6c5c5; font-size: 14px; line-height: 1.4; }
+.action-close { display: none; position: absolute; top: 6px; right: 8px;
+                width: 24px; height: 24px; padding: 0; line-height: 22px;
+                font-size: 18px; color: #f6c5c5; background: transparent;
+                border: 0; border-radius: 4px; }
+.action-close:hover { color: var(--text); background: rgba(248,113,113,.25); }
+.openq.open .action-close, .action-needed.open .action-close { display: block; }
+.action-more { display: none; margin-top: 10px; padding-top: 10px;
+               border-top: 1px solid rgba(248,113,113,.35); }
+.openq.open, .action-needed.open { background: rgba(248,113,113,.16); }
+.openq.open .action-more, .action-needed.open .action-more { display: block; }
+.action-more button { margin: 8px 8px 0 0; }
+.action-accept { background: #24466e; border-color: #35577f; }
+.action-rec { margin: 6px 0; }
 .pmsgs { padding: 5px 14px 8px; font-size: 11.5px; color: var(--faint);
          border-bottom: 1px solid var(--line); }
 /* drag grip to slide the status pane wider/narrower */

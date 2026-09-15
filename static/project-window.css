@@ -328,3 +328,16 @@
   margin-left:auto;flex:none;color:var(--text,#e6e9f0);text-decoration:none;
   border:1px solid var(--warning,#fbbf24);border-radius:6px;padding:3px 11px;font-size:11.5px;
 }
+.deliverables-panel .naveyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);margin:2px 0 8px}
+.deliverables-panel .navempty{opacity:.75;padding:5px 0;font-size:12px;color:var(--text-dim)}
+.deliverables-panel .deliv-pin{padding:10px;margin:0 0 10px;border:1px solid rgba(103,156,192,.47);border-radius:6px;background:rgba(68,105,135,.1)}
+.deliverables-panel .deliv-stream{margin:5px 0;border-top:1px solid rgba(255,255,255,.12)}
+.deliverables-panel .deliv-stream>summary{cursor:pointer;padding:8px 3px;font-weight:600;list-style:none}
+.deliverables-panel .deliv-stream>summary::-webkit-details-marker{display:none}
+.deliverables-panel .deliv-stream-body{padding:0 0 6px 10px}
+.deliverables-panel .plan-mark{font-family:ui-monospace,Consolas,monospace;margin-right:4px}
+.deliverables-panel .plan-mark.done{color:var(--success)}
+.deliverables-panel .plan-mark.todo{color:#e8eaef}
+.deliverables-panel .plan-mark.flag{color:var(--danger)}
+.deliverables-panel .deliv-meta{font-size:11px;color:var(--text-dim);margin-left:8px}
+.deliverables-panel .deliv-cockpit{cursor:pointer}

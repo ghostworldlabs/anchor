@@ -77,6 +77,10 @@ THIRD_HOST_CMD_ENV = "ANCHOR_FINANCIAL_ANALYST_HOST_CMD"
 THIRD_SKILL = "financial-analyst"
 THIRD_SKILL_LINE_BUDGET = 25
 
+#: Env seam overriding chekhov's host command (the writing skill, W1 row —
+#: the session engine is launched as a cockpit job through this manifest).
+CHEKHOV_HOST_CMD_ENV = "ANCHOR_CHEKHOV_HOST_CMD"
+
 
 def _skills_root() -> Path:
     raw = (os.environ.get(SKILLS_ROOT_ENV) or "").strip() or DEFAULT_SKILLS_ROOT
@@ -189,8 +193,34 @@ def third_skill_wiring_lines() -> int:
     return len(inspect.getsource(third_skill_manifest).splitlines())
 
 
+def chekhov_manifest(skill_dir=None, host_cmd=None, **over):
+    """chekhov (the writing skill) — the W1 dispatch row, wired in PURE DATA.
+
+    One session engine behind ``bin/chekhov.mjs``; the cockpit launches a
+    writing session as a job through this manifest (RIDER 7). No executor,
+    no composition — the runner's default host path, the same marginal-cost
+    contract skill #3 proved."""
+    d = str(skill_dir) if skill_dir else str(_skills_root() / "chekhov")
+    cmd = host_cmd or (os.environ.get(CHEKHOV_HOST_CMD_ENV) or "").strip() \
+        or "node {skill_dir}/bin/chekhov.mjs"
+    m = {
+        "skill": "chekhov",
+        "skill_dir": d,
+        "op_kind": "run",
+        "host_cmd": cmd,
+        "output_contract": {"format": "text"},
+        "panel": {"title": "Chekhov", "icon": "🖋️"},
+        "journal": {"enabled": True},
+        "tier": "standard",
+        "capabilities": _base_caps(cmd),
+        "activation": {"trigger": "first_run"},
+    }
+    m.update(over)
+    return m
+
+
 def registry_manifests(overrides=None) -> list:
-    """The Wave-4 registry: gandalf + jumper + the 3rd skill, as pure data.
+    """The registry: gandalf + jumper + the 3rd skill + chekhov, as pure data.
 
     ``overrides`` maps a skill name to kwargs for its manifest builder (how
     the hermetic tests point every entry at temp skill dirs + stub hosts).
@@ -200,6 +230,7 @@ def registry_manifests(overrides=None) -> list:
         gandalf_manifest(**ov.get("gandalf", {})),
         jumper_manifest(**ov.get("jumper", {})),
         third_skill_manifest(**ov.get(THIRD_SKILL, {})),
+        chekhov_manifest(**ov.get("chekhov", {})),
     ]
 
 

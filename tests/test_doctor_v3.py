@@ -308,7 +308,7 @@ def test_doctor_session_start_stubbed_seeded_readonly(denv, monkeypatch):
     sid = sess["session_id"]
     assert sid
     assert sess["project_id"] == DOCTOR_PID
-    assert sess["backend"] == "claude"
+    assert sess["backend"] in ("claude", "gemini", "grok", "chatgpt")
     assert sess["status"] == denv["reg"].STATUS_RUNNING
     assert sess["mode"] == denv["ts"].DOCTOR_MODE_DIAGNOSE
     assert sess["posture"] == denv["ts"].DOCTOR_POSTURE_READ_ONLY
@@ -489,20 +489,40 @@ def test_doctor_engine_gemini_only_drives_on_gemini(denv, monkeypatch):
     assert child.cmd[child.cmd.index("--approval-mode") + 1] == "plan"
 
 
-def test_doctor_diagnose_unsupported_engine_fails_closed_before_pty(
-        denv, monkeypatch):
-    """Grok is selectable elsewhere, but Doctor must not guess a read-only
-    flag. An unsupported Diagnose contract refuses before any paid PTY starts."""
+def test_doctor_diagnose_on_grok_uses_plan_permission_mode(denv, monkeypatch):
+    """Grok Diagnose uses the documented ``--permission-mode plan`` contract."""
     monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "0")
     monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "0")
     monkeypatch.setenv("ANCHOR_GROK_AVAILABLE", "1")
     code, payload = _post(
         denv["gui"], "/api/doctor/session_start", {"backend": "grok"})
-    assert code == 400
-    assert payload["ok"] is False
-    assert "no explicitly tested read-only argv contract" in payload["error"]
-    assert _doctor_records(denv["reg"]) == []
-    assert denv["pty"].live_sessions() == []
+    assert code == 200 and payload["ok"] is True, payload
+    sess = payload["session"]
+    assert sess["backend"] == "grok"
+    assert sess["mode"] == denv["ts"].DOCTOR_MODE_DIAGNOSE
+    child = denv["pty"]._LIVE[sess["session_id"]]
+    assert "--permission-mode" in child.cmd
+    assert child.cmd[child.cmd.index("--permission-mode") + 1] == "plan"
+
+
+def test_doctor_resolve_on_grok_starts_the_brief_as_argv(denv, monkeypatch):
+    """Resolve all on Grok must not paste-and-wait: the brief is the first turn."""
+    monkeypatch.setenv("ANCHOR_CLAUDE_AVAILABLE", "0")
+    monkeypatch.setenv("ANCHOR_GEMINI_AVAILABLE", "0")
+    monkeypatch.setenv("ANCHOR_GROK_AVAILABLE", "1")
+    brief = "ANCHOR DOCTOR - RESOLVE ALL 1 OPEN ISSUES NOW"
+    code, payload = _post(
+        denv["gui"], "/api/doctor/session_start",
+        {"backend": "grok", "resolve": True,
+         "issue": {"all": True, "message": brief, "component": "all"}})
+    assert code == 200 and payload["ok"] is True, payload
+    sess = payload["session"]
+    assert sess["mode"] == denv["ts"].DOCTOR_MODE_RESOLVE
+    child = denv["pty"]._LIVE[sess["session_id"]]
+    assert child.cmd[-1] == brief
+    assert "--permission-mode" in child.cmd
+    assert child.cmd[child.cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--no-plan" in child.cmd
 
 
 def test_doctor_truthy_resolve_string_cannot_enable_write_posture(

@@ -23,6 +23,7 @@ Hermetic: temp data dir, stub PTY backend, the fake runner — NEVER ``:8777`` /
 real data / network / a live model. Pure render path (no spawn).
 """
 import importlib
+import json
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,33 @@ def test_full_window_render_has_collapsed_deliverables(gui, tmp_path):
     assert "<details open class='deliv-details'>" not in html, \
         "deliverables panel must not render expanded in the full window"
     assert "<details class='deliv-details'>" in html
+
+
+def test_deliverables_panel_groups_work_streams_like_the_cockpit(gui, tmp_path):
+    folder = tmp_path / "proj"
+    pid = _project(gui, folder)
+    (folder / "ECGBERHT.md").write_text("# Face\n\n## North Star\nA course.\n", encoding="utf-8")
+    (folder / "l3.pptx").write_bytes(b"PK\x03\x04")
+    (folder / "DELIVERABLES.md").write_text(
+        "| What | Where | Date | Step |\n| --- | --- | --- | --- |\n"
+        "| Lecture 3 slides | `l3.pptx` | 2026-09-11 | lecture3 |\n",
+        encoding="utf-8")
+    (folder / "roadmap.json").write_text(json.dumps({
+        "roadmap_projection": [{
+            "id": "lecture3", "name": "Lecture 3", "status": "active",
+            "navigation": {
+                "path": ["block1"], "role": "primary",
+                "groups": [{"id": "block1", "label": "Block 1", "order": 1}],
+            },
+        }],
+    }), encoding="utf-8")
+    panel = gui._render_layoutd_deliverables_panel(str(folder), pid)
+    assert "Current work and review" in panel
+    assert "Approved deliverables" in panel
+    assert "Block 1" in panel
+    assert "deliv-stream" in panel
+    assert "Lecture 3 slides" in panel
+    assert "openCockpitDeliverable" in panel
 
 
 # ── #8 — panel fills its column (CSS width:100%) + fit() on open ────────────

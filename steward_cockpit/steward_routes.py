@@ -56,7 +56,7 @@ CONFIG = {"steward": "Ecgberht", "fake": False, "permission_mode": "bypassPermis
 BONEYARD = campaign.BONEYARD_DIRNAME
 SKILLS = ["researchPrime", "Crucible", "Foreman", "Gandalf", "Jumper",
           "ramanujan", "legal-beagle", "financial-analyst",
-          "literature-review", "tidy-idy"]
+          "literature-review", "tidy-idy", "chekhov"]
 # (2026-09-05, John) every skill has a brand mark under /vendor/brand/; the cockpit
 # reaches it as /brand/<file>. The client twin is static/skill-icons.js.
 SKILL_ICONS = {
@@ -66,6 +66,7 @@ SKILL_ICONS = {
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
     "zombie-hunter": "zombie-hunter-radar.jpg", "Ecgberht": "ecgberht-project-seal.jpg",
+    "chekhov": "chekhov-icon.svg",
 }
 SKILL_ICON_FALLBACK = "gwl-m-icon.svg"
 
@@ -86,6 +87,7 @@ SKILL_ICONS = {
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
     "zombie-hunter": "zombie-hunter-radar.jpg", "Ecgberht": "ecgberht-project-seal.jpg",
+    "chekhov": "chekhov-icon.svg",
 }
 SKILL_ICON_FALLBACK = "gwl-m-icon.svg"
 
@@ -112,14 +114,11 @@ def _load_terms(cdir):
 
 
 def _save_terms(cdir, terms):
-    try:
-        f = _terms_file(cdir)
-        f.parent.mkdir(parents=True, exist_ok=True)
-        tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(terms, indent=2), encoding="utf-8")
-        os.replace(tmp, f)
-    except Exception:
-        pass
+    f = _terms_file(cdir)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(terms, indent=2), encoding="utf-8")
+    os.replace(tmp, f)
 
 
 def _bad_component(name):
@@ -236,7 +235,7 @@ def serve_page_doc(page, pid=""):
                 .replace('/brand/', '/vendor/brand/'))
     shim = _CLIENT_SHIM % (json.dumps(pid),
                            json.dumps(CONFIG.get("build") or ""))
-    return html.replace("<script", shim + "<script", 1)
+    return html.replace("<script", shim + '<script src="/steward-static/notebook-actions.js"></script><script', 1)
 
 
 def _effort_dir(proot, rel):
@@ -263,10 +262,29 @@ _PROJECT_VERBS = {"efforts", "grass", "boneyard", "skills", "gandalf",
 # always sends dir="" — if we resolve that through discover_efforts and the
 # root has no Face, the files tile was an honest empty while the folder
 # was full (2026-08-28).
-_PROJECT_FILE_VERBS = {"files", "filetext", "upload", "open"}
+_PROJECT_FILE_VERBS = {"files", "filetext", "upload", "open", "notebook-open",
+                       "notebook-register", "notebook-status", "deliverable-file"}
+
+
+_PROJECT_TERMINAL_VERBS = {"term_new", "term_archive", "term_restore"}
+_GENERAL_READ_VERBS = {"map", "history", "state", "events", "deliverables"}
+_GENERAL_POST_VERBS = {"say", "engine"}
+
+
+def _registered_project_terminal(proot, raw_tid):
+    tid = str(raw_tid or "")
+    if not re.fullmatch(r"\d{1,6}", tid):
+        return False
+    record = _load_terms(proot).get(tid)
+    return isinstance(record, dict) and not record.get("archived")
 
 
 def api_get(proot, verb, qs):
+    if qs.get("general") == "1" and not (qs.get("dir") or "").strip():
+        if verb in _GENERAL_READ_VERBS:
+            if not _registered_project_terminal(proot, qs.get("term")):
+                return {"error": "no such project terminal"}, 404
+            return events(proot, qs) if verb == "events" else handle_get(proot, verb, qs)
     if verb == "events":
         cdir = _effort_dir(proot, qs.get("dir", ""))
         if cdir is None:
@@ -291,6 +309,14 @@ def api_post(proot, verb, body):
                 "rename_effort"):
         return _project_post(proot, verb, body)
     rel = (body.get("dir") or "").strip()
+    if not rel and verb in _PROJECT_TERMINAL_VERBS:
+        return handle_post(proot, verb, body)
+    if not rel and body.get("general") is True and verb in _GENERAL_POST_VERBS:
+        if not _registered_project_terminal(proot, body.get("term")):
+            return {"ok": False, "error": "no such project terminal"}, 404
+        if body.get("refinement_context"):
+            return {"ok": False, "error": "refinement belongs to its campaign"}, 400
+        return handle_post(proot, verb, body)
     if verb in _PROJECT_FILE_VERBS and not rel:
         return handle_post(proot, verb, body)
     cdir = _effort_dir(proot, body.get("dir", ""))
@@ -434,13 +460,183 @@ def _efforts(cdir):
             "seal_name": livery.get("seal_name", "Seal"),
             "seats": campaign.read_seats(),
             "usage": _usage_rollup(cdir), "efforts": out,
+            "other_recorded_usage": _other_recorded_usage(cdir),
             "plates": campaign.list_plates(cdir)}
 
 
-def _usage_rollup(cdir):
-    zero = lambda: {"spend": 0.0, "tokens": 0, "secs": 0}
-    from steward_cockpit.steward_engine import _read_all_state
-    estate = _read_all_state()
+def _other_recorded_usage(cdir):
+    """Expose saved run records separately; their overlap with cockpit usage is unknown."""
+    import json
+    import math
+
+    result = {
+        "scope": "separate run records; may overlap cockpit history",
+        "status": "available", "records": [], "duplicate_count": 0,
+        "conflict_count": 0, "unavailable_sources": [], "project_aliases": [],
+    }
+
+    def unavailable(source, project_id=None, lane=None):
+        item = {"source": source, "status": "unavailable"}
+        if project_id is not None:
+            item["project_id"] = project_id
+        if lane is not None:
+            item["lane"] = lane
+        result["unavailable_sources"].append(item)
+
+    def nonnegative(value, integer=False):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        try:
+            if not math.isfinite(value) or value < 0 or (integer and int(value) != value):
+                return None
+        except (OverflowError, ValueError):
+            return None
+        return int(value) if integer else float(value)
+
+    try:
+        import effort_history as eh
+    except Exception:
+        unavailable("effort-history-import")
+        result["status"] = "unavailable"
+        return result
+    try:
+        import rnd_registry
+        projects = rnd_registry.list_projects()
+        if not isinstance(projects, (list, tuple)):
+            raise ValueError("invalid registry result")
+    except Exception:
+        unavailable("project-registry")
+        result["status"] = "unavailable"
+        return result
+
+    try:
+        target = os.path.normcase(os.path.realpath(cdir))
+    except (OSError, ValueError, TypeError):
+        unavailable("project-scope")
+        result["status"] = "unavailable"
+        return result
+    aliases = {}
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        folder = project.get("folder_path")
+        project_id = project.get("id")
+        if not isinstance(folder, str) or not folder.strip() or not isinstance(project_id, str) or not project_id:
+            continue
+        try:
+            matches = os.path.normcase(os.path.realpath(folder)) == target
+        except (OSError, ValueError):
+            matches = False
+        if matches:
+            name = project.get("name")
+            aliases[project_id] = {"id": project_id, "name": name[:160] if isinstance(name, str) else project_id}
+    result["project_aliases"] = [aliases[key] for key in sorted(aliases)]
+    groups = {}
+    for project_id in sorted(aliases):
+        for lane in eh.ROLLUP_LANES:
+            try:
+                records = eh.list_efforts(cdir, project_id, lane)
+                if not isinstance(records, (list, tuple)):
+                    raise ValueError("invalid effort history")
+            except Exception:
+                unavailable("effort-history", project_id, lane)
+                continue
+            for record in records:
+                if not isinstance(record, dict):
+                    unavailable("effort-history-record", project_id, lane)
+                    continue
+                try:
+                    discovered = eh.is_discovered(record)
+                except Exception:
+                    unavailable("effort-history-record", project_id, lane)
+                    continue
+                if discovered:
+                    continue
+                cost = record.get("cost")
+                cost = cost if isinstance(cost, dict) else {}
+                if not cost and record.get("kind") != "run-cost":
+                    continue
+                cost_context = {field: cost.get(field, record.get(field))
+                                for field in ("cost_state", "billing_mode", "cost_complete")}
+                try:
+                    # Different billing context must not disappear when equal saved
+                    # dollar amounts are deduplicated, especially legacy zeros.
+                    payload = json.dumps({"cost": cost, "context": cost_context}, sort_keys=True,
+                                         separators=(",", ":"), ensure_ascii=False)
+                except (TypeError, ValueError, OverflowError):
+                    unavailable("effort-history-cost", project_id, lane)
+                    continue
+                identity_type, identity = None, None
+                for field in ("engine_session_uuid", "session_id", "job_id"):
+                    value = record.get(field)
+                    if isinstance(value, str) and value.strip():
+                        identity_type, identity = field, value
+                        break
+                identity_key = (identity_type, identity) if identity is not None else None
+                group = groups.setdefault(identity_key, []) if identity_key is not None else []
+                duplicate = next((row for saved_payload, row in group if saved_payload == payload), None)
+                if duplicate is not None:
+                    if project_id not in duplicate["project_ids"]:
+                        duplicate["project_ids"].append(project_id)
+                    if lane not in duplicate["lanes"]:
+                        duplicate["lanes"].append(lane)
+                    result["duplicate_count"] += 1
+                    continue
+                saved_usd = nonnegative(cost.get("total_cost_usd"))
+                cost_state = cost.get("cost_state", record.get("cost_state"))
+                billing_mode = cost.get("billing_mode", record.get("billing_mode"))
+                cost_complete = cost.get("cost_complete", record.get("cost_complete"))
+                has_cost_context = (
+                    isinstance(cost_state, str) and bool(cost_state.strip()) or
+                    isinstance(billing_mode, str) and bool(billing_mode.strip()) or
+                    isinstance(cost_complete, bool)
+                )
+                zero_unverified = saved_usd == 0 and not has_cost_context
+                cost_status = "unavailable" if saved_usd is None else (
+                    "zero_requires_verification" if zero_unverified else
+                    "partial" if cost_complete is False else "recorded")
+                label = record.get("label")
+                title = " ".join(label.split())[:160] if isinstance(label, str) and label.strip() else str(lane) + " run"
+                row = {
+                    "title": title, "lane": lane, "lanes": [lane], "project_ids": [project_id],
+                    "identity_type": identity_type, "identity": identity,
+                    "tokens": nonnegative(cost.get("total_tokens"), integer=True),
+                    "saved_usd": saved_usd, "cost_status": cost_status,
+                    "cost_zero_requires_verification": zero_unverified,
+                    "source": "effort-history", "conflict": bool(group),
+                }
+                created_at = nonnegative(record.get("created_at"))
+                if created_at is not None:
+                    row["created_at"] = created_at
+                if group:
+                    if not any(previous["conflict"] for _, previous in group):
+                        result["conflict_count"] += 1
+                    for _, previous in group:
+                        previous["conflict"] = True
+                if identity_key is not None:
+                    group.append((payload, row))
+                result["records"].append(row)
+    if result["unavailable_sources"]:
+        result["status"] = "partial" if result["records"] else "unavailable"
+    return result
+
+
+def _usage_rollup(cdir, estate=None):
+    numeric_fields = ("reported_spend", "unpriced_turns", "tokens", "secs")
+    coverage_fields = ("tracked_invocations", "reported_invocations", "partial_invocations",
+                       "unavailable_invocations", "finalized_invocations")
+    def zero():
+        return {"reported_spend": 0.0, "unpriced_turns": 0, "tokens": 0, "secs": 0,
+                "checkpoint_coverage": {field: 0 for field in coverage_fields},
+                "usage_updated_at": None, "_cost_known": 0, "_cost_unknown": 0,
+                "_tokens_known": 0, "_tokens_unknown": 0, "_tokens_partial": 0,
+                "_sub_unpriced": 0, "_other_unpriced": 0, "_sub_clis": []}
+    def number(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value < float("inf")
+    from steward_cockpit.steward_engine import (
+        _read_all_state, _usage_snapshot, fmt_usage_cost_text, infer_subscription_cli)
+    if estate is None:
+        estate = _read_all_state()
     stew, term = zero(), zero()
     cdir_n = os.path.realpath(cdir)
     for key, entry in estate.items():
@@ -448,15 +644,103 @@ def _usage_rollup(cdir):
         # exact boundary, not a string prefix: '.../foo' must not match '.../foobar'
         if base != cdir_n and not base.startswith(cdir_n + os.sep):
             continue
-        u = entry.get("usage") or {}
+        raw = entry.get("usage")
+        u = _usage_snapshot(raw)
         b = term if "||general||" in key else stew
-        b["spend"] += u.get("spend", 0); b["tokens"] += u.get("tokens", 0)
-        b["secs"] += u.get("secs", 0)
-    total = {k: round(stew[k] + term[k], 4) for k in stew}
+        for field in numeric_fields:
+            b[field] += u[field]
+        coverage = u.get("checkpoint_coverage") or {}
+        for field in coverage_fields:
+            value = coverage.get(field)
+            if number(value):
+                b["checkpoint_coverage"][field] += value
+        updated = u.get("usage_updated_at")
+        if isinstance(updated, str) and updated:
+            b["usage_updated_at"] = max(b["usage_updated_at"] or updated, updated)
+        raw = raw if isinstance(raw, dict) else {}
+        activity = any(number(u.get(field)) and u[field] > 0 for field in numeric_fields)
+        activity = activity or (number(coverage.get("tracked_invocations")) and coverage["tracked_invocations"] > 0)
+        active_checkpoints = (number(coverage.get("tracked_invocations")) and
+                              number(coverage.get("finalized_invocations")) and
+                              coverage["tracked_invocations"] > coverage["finalized_invocations"])
+        incomplete = (u.get("cost_status") == "partial" or u.get("cost_complete") is False or
+                      u["unpriced_turns"] > 0 or active_checkpoints)
+        explicit_cost = any(number(raw.get(field)) for field in ("spend", "reported_spend"))
+        cost_known = u["reported_spend"] > 0 or (explicit_cost and not incomplete)
+        if u.get("cost_status") == "unavailable":
+            cost_known = False
+        b["_cost_known"] += int(cost_known)
+        b["_cost_unknown"] += int(incomplete or (activity and not cost_known))
+        token_status = u.get("token_status")
+        tokens_known = token_status == "reported" or u["tokens"] > 0 or (
+            token_status == "partial" and number(coverage.get("reported_invocations")) and coverage["reported_invocations"] > 0)
+        if token_status == "unavailable":
+            tokens_known = False
+        b["_tokens_known"] += int(tokens_known)
+        b["_tokens_unknown"] += int(activity and not tokens_known)
+        b["_tokens_partial"] += int(token_status == "partial")
+        family = infer_subscription_cli(entry.get("cli"), raw.get("usage_source") or u.get("usage_source"))
+        if u["unpriced_turns"] > 0:
+            if family:
+                b["_sub_unpriced"] += u["unpriced_turns"]
+                if family not in b["_sub_clis"]:
+                    b["_sub_clis"].append(family)
+            else:
+                b["_other_unpriced"] += u["unpriced_turns"]
+    total = zero()
+    for field in numeric_fields + ("_cost_known", "_cost_unknown", "_tokens_known",
+                                   "_tokens_unknown", "_tokens_partial",
+                                   "_sub_unpriced", "_other_unpriced"):
+        total[field] = round(stew[field] + term[field], 4)
+    for field in coverage_fields:
+        total["checkpoint_coverage"][field] = stew["checkpoint_coverage"][field] + term["checkpoint_coverage"][field]
+    total["usage_updated_at"] = max(filter(None, (stew["usage_updated_at"], term["usage_updated_at"])), default=None)
+    clis = []
+    for family in stew["_sub_clis"] + term["_sub_clis"]:
+        if family not in clis:
+            clis.append(family)
+    total["_sub_clis"] = clis
+    private = ("_cost_known", "_cost_unknown", "_tokens_known", "_tokens_unknown",
+               "_tokens_partial", "_sub_unpriced", "_other_unpriced", "_sub_clis")
+    for bucket in (stew, term, total):
+        bucket["reported_spend"] = round(bucket["reported_spend"], 4)
+        bucket["cost_status"] = "unavailable" if not bucket["_cost_known"] else (
+            "partial" if bucket["_cost_unknown"] else "reported")
+        bucket["cost_complete"] = bucket["cost_status"] == "reported"
+        bucket["spend"] = bucket["reported_spend"] if bucket["cost_complete"] else None
+        bucket["token_status"] = "unavailable" if not bucket["_tokens_known"] else (
+            "partial" if bucket["_tokens_unknown"] or bucket["_tokens_partial"] else "reported")
+        bucket["usage_source"] = "persisted session records"
+        bucket["usage_basis"] = "recorded"
+        if bucket["_sub_unpriced"] > 0 and bucket["_other_unpriced"] <= 0:
+            bucket["billing_mode"] = "subscription"
+            families = bucket["_sub_clis"]
+            bucket["billing_family"] = families[0] if len(families) == 1 else "mixed"
+        else:
+            bucket["billing_mode"] = None
+            bucket["billing_family"] = None
+        bucket["cost_text"] = fmt_usage_cost_text(bucket, cli=bucket.get("billing_family"))
+        for field in private:
+            del bucket[field]
     return {"steward": stew, "terms": term, "total": total}
 
 
+def _state_with_usage(eng, cdir):
+    state = eng.state()
+    state["usage_rollup"] = _usage_rollup(cdir)
+    return state
+
+
 def handle_get(cdir, verb, qs):
+    if verb == "notebook-status":
+        import anchor_notebooks
+        return anchor_notebooks.service_status(), 200
+    if verb == "notebook-open":
+        import anchor_notebooks
+        try:
+            return {"__notebook_redirect__": anchor_notebooks.open_url(cdir, qs.get("path", ""))}, 200
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}, 409
     if verb == "deliverables":
         # 2026-08-25 (John's ask; campaign journal 0010 "where is the thing I paid
         # for?"): the effort's DELIVERABLES.md register, parsed disk-true — the ONE
@@ -473,6 +757,9 @@ def handle_get(cdir, verb, qs):
             return {"error": "not an openable deliverable (outside this effort or missing)"}, 404
         if os.path.getsize(real) > 50 * 1024 * 1024:
             return {"error": "file too large to serve inline (50MB cap)"}, 413
+        expected_hash = qs.get("hash")
+        if expected_hash and hashlib.sha256(Path(real).read_bytes()).hexdigest() != expected_hash:
+            return {"error": "artifact-hash-mismatch"}, 409
         ext = Path(real).suffix.lower()
         # (2026-09-04, John) "PDFs, MD, Word, PPT, Excel docs should all show
         # up well." Every type gets its honest content-type; a browser renders
@@ -484,7 +771,31 @@ def handle_get(cdir, verb, qs):
         want_view = str(qs.get("view", "")).strip() in ("1", "true")
         want_download = str(qs.get("download", "")).strip() in ("1", "true")
         ctype, disposition = deliverable_content_type(ext)
-        if want_view and ext in OFFICE_PREVIEW_EXTENSIONS:
+        if want_view and not want_download and ext == ".pptx":
+            # Only a ledger-bound PDF of these exact deck bytes is a slide preview.
+            digest = hashlib.sha256(Path(real).read_bytes()).hexdigest()
+            refinement = campaign.read_refinement(cdir)
+            previews = [rev["visual_companion"]
+                for sl in (refinement or {}).get("state", {}).get("slices", {}).values()
+                for rev in sl.get("revisions", {}).values()
+                if rev.get("hash") == digest and rev.get("visual_companion")]
+            if previews:
+                preview = previews[-1]
+                target = (Path(cdir) / preview["path"]).resolve()
+                if (preview.get("source_hash") != digest or not target.is_relative_to(Path(cdir).resolve())
+                        or not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != preview["hash"]):
+                    return {"error": "visual-companion-mismatch"}, 409
+                return {"__file__": str(target), "__ctype__": "application/pdf", "__disposition__": "inline",
+                        "__csp__": sandbox_csp_for("application/pdf")}, 200
+            import html
+            dl = "/api/steward/deliverable-file?pid=%s&dir=%s&path=%s&hash=%s&download=1" % (
+                _q(str(qs.get("pid", ""))), _q(str(qs.get("dir", ""))), _q(rel), digest)
+            if qs.get("token"):
+                dl += "&token=" + _q(str(qs["token"]))
+            return {"__html__": "<!doctype html><meta charset='utf-8'><title>Slide preview unavailable</title>"
+                    "<h1>Slide preview not yet registered</h1><p>This PowerPoint version needs a verified PDF companion.</p>"
+                    '<p><a href="' + html.escape(dl, quote=True) + '">Download the PowerPoint</a></p>'}, 200
+        if want_view and not want_download and ext in OFFICE_PREVIEW_EXTENSIONS:
             import office_preview as _op
             with open(real, "rb") as fh:
                 data = fh.read()
@@ -505,12 +816,30 @@ def handle_get(cdir, verb, qs):
         m["steward"] = CONFIG["steward"]
         return m, 200
     if verb == "history":
+        if qs.get("turn_id"):
+            from steward_cockpit.conversation_history import read_history_document
+            try:
+                turns = read_history_document(cdir, thread_id=str(qs.get("term") or "1") if qs.get("general") == "1" else None)["turns"]
+                index = next((i for i,t in enumerate(turns) if t.get("turn_id") == qs["turn_id"]), None)
+                if index is None:
+                    return {"turns":[],"error":"original-exchange-not-found"},404
+                return {"turns":turns[max(0,index-1):index+1]},200
+            except (OSError,ValueError):
+                return {"turns":[],"error":"conversation-history-unreadable"},409
+        if qs.get("general") == "1":
+            from steward_cockpit.conversation_history import read_history_document
+            try:
+                turns = read_history_document(cdir, thread_id=str(qs.get("term") or "1"))["turns"]
+                return {"turns": turns[-campaign.TAIL_TURNS:],
+                        "note": "" if len(turns) <= campaign.TAIL_TURNS else f"showing last {campaign.TAIL_TURNS} of {len(turns)} turns"}, 200
+            except (OSError, ValueError) as exc:
+                return {"turns": [], "note": "conversation history unreadable: " + str(exc)}, 409
         return campaign.read_history(cdir), 200
     if verb == "state":
         eng = get_engine(cdir, qs.get("general") == "1", qs.get("term"))
         if eng is None:
             return {"error": "no such session"}, 404
-        st = eng.state(); st["stamp"] = campaign.map_stamp(cdir)
+        st = _state_with_usage(eng, cdir); st["stamp"] = campaign.map_stamp(cdir)
         return st, 200
     if verb == "status":
         # the deterministic two-part 10-minute status, composed FRESH
@@ -596,12 +925,12 @@ def events(cdir, qs):
                 eng._emit({"t": "sys", "text":
                            "automatic wake failed: " + type(exc).__name__})
     evs, oldest, gap = eng.events_since(since, timeout=8)
-    return {"events": evs, "state": eng.state(), "oldest_seq": oldest,
+    return {"events": evs, "state": _state_with_usage(eng, cdir), "oldest_seq": oldest,
             "gap": gap, "stamp": campaign.map_stamp(cdir)}, 200
 
 
 def _terms_view(cdir):
-    from steward_cockpit.steward_engine import _read_all_state
+    from steward_cockpit.steward_engine import _read_all_state, _usage_snapshot
     estate = _read_all_state()
     out = []
     for tid, meta in _load_terms(cdir).items():
@@ -617,7 +946,7 @@ def _terms_view(cdir):
                     "cli": (eng.cli if eng else entry.get("cli", "claude")),
                     "last_used": entry.get("last_used", ""),
                     "last_text": entry.get("last_text", ""),
-                    "usage": entry.get("usage", {})})
+                    "usage": _usage_snapshot(entry.get("usage"))})
     out.sort(key=lambda t: (t["alive"], t["last_used"] or t["created"]),
              reverse=True)
     return out
@@ -802,6 +1131,13 @@ def _files(cdir, sub, q):
                                 "mtime": int(mt)})
         except OSError as e:
             return {"error": str(e)}, 500
+    import anchor_notebooks
+    for entry in entries:
+        if not entry["dir"]:
+            rel = entry["name"] if q or not sub else sub.replace("\\", "/") + "/" + entry["name"]
+            info = anchor_notebooks.describe(cdir, rel)
+            if info:
+                entry["notebook_product"] = info
     return {"sub": sub, "q": q, "entries": entries}, 200
 
 
@@ -824,6 +1160,82 @@ def _filetext(cdir, fpath):
 
 # ---------- POST acts ----------
 def handle_post(cdir, verb, body):
+    if verb == "refinement-accept":
+        from steward_cockpit.refinement_client import update
+        import uuid
+        current = campaign.read_refinement(cdir)
+        if not current or not current.get("ok"):
+            return {"ok": False, "error": "refinement-state-unavailable"}, 409
+        sl = current["state"]["slices"].get(str(body.get("step_id")), {})
+        presentation = next((p for p in sl.get("presentations", []) if p["id"] == body.get("presentation_id")), {})
+        member = next((m for m in presentation.get("members", []) if m["product_id"] == body.get("product_id")), None)
+        if not member or member["revision_id"] != body.get("revision_id") or member["hash"] != body.get("hash"):
+            return {"ok": False, "error": "approval-version-mismatch"}, 409
+        target = (Path(cdir) / member["path"]).resolve()
+        if not target.is_relative_to(Path(cdir).resolve()) or not target.is_file() or hashlib.sha256(target.read_bytes()).hexdigest() != member["hash"]:
+            return {"ok": False, "error": "approval-artifact-changed"}, 409
+        result = update(cdir, {"action": "accept", "operation_id": str(uuid.uuid4()), "expected_seq": current["sequence"],
+            "step_id": body["step_id"], "presentation_id": presentation["id"], "member_product_id": member["product_id"],
+            "complete_current": True, "human": {"explicit": True, "source_message":
+                "Authenticated cockpit: Done with " + member["product_id"] + "; exact revision " + member["revision_id"]}})
+        if result.get('committed') is True and not result.get('ok'):
+            result={**result,'ok':True,'warning':'Approval saved; the derived collection needs repair.'}
+        return result, 200 if result.get("ok") else 409
+    if verb == "refinement-close":
+        from steward_cockpit.refinement_client import update
+        import uuid
+        current = campaign.read_refinement(cdir)
+        if not current or not current.get("ok"):
+            return {"ok": False, "error": "refinement-state-unavailable"}, 409
+        result = update(cdir, {"operation_id": str(uuid.uuid4()), "expected_seq": current["sequence"],
+            "action": "close", "step_id": body.get("step_id"), "presentation_id": body.get("presentation_id"),
+            "human": {"explicit": True, "source_message": "Authenticated cockpit: Done with this slice; named presentation " + str(body.get("presentation_id"))}})
+        if result.get('committed') is True and not result.get('ok'):
+            result={**result,'ok':True,'warning':'Completion saved; the derived collection needs repair.'}
+        return result, 200 if result.get("ok") else 409
+    if verb == "refinement-update":
+        from steward_cockpit.refinement_client import update
+        result = update(cdir, body)
+        return result, 200 if result.get("ok") else 409
+    if verb == "refinement-open":
+        # An explicit authenticated cockpit click, not a GET/prefetch receipt.
+        # Anchor authenticates this route before dispatch. Verify exact bytes
+        # before recording which frozen member the user chose to open.
+        from steward_cockpit.refinement_client import update
+        current = campaign.read_refinement(cdir)
+        if not current or not current.get("ok"):
+            return {"ok": False, "error": "refinement-state-unavailable"}, 409
+        state = current["state"]
+        step = state["slices"].get(str(body.get("step_id")))
+        presentation = next((p for p in (step or {}).get("presentations", []) if p["id"] == body.get("presentation_id")), None)
+        member = next((m for m in (presentation or {}).get("members", []) if m["product_id"] == body.get("product_id")), None)
+        if not member:
+            return {"ok": False, "error": "unknown-presentation-member"}, 409
+        root = Path(cdir).resolve()
+        target = (root / member["path"]).resolve()
+        if not target.is_relative_to(root) or not target.is_file():
+            return {"ok": False, "error": "containment-refused"}, 409
+        if hashlib.sha256(target.read_bytes()).hexdigest() != member["hash"]:
+            return {"ok": False, "error": "artifact-hash-mismatch"}, 409
+        pending = next((request for request in step.get("review_requests", []) if request.get("presentation_id") == presentation["id"]), {})
+        import uuid
+        result = update(cdir, {"action": "view", "operation_id": str(uuid.uuid4()),
+            "expected_seq": current["sequence"], "step_id": body["step_id"],
+            "presentation_id": presentation["id"], "member_product_id": member["product_id"],
+            "hash": member["hash"], "request_id": pending.get("id") if pending.get("presentation_id") == presentation["id"] else None,
+            "session_id": str(body.get("session_id") or "cockpit"), "source": "cockpit-user-open"})
+        if result.get("ok"):
+            result["path"] = member["path"]
+            result["hash"] = member["hash"]
+        return result, 200 if result.get("ok") else 409
+    if verb == "notebook-register":
+        import anchor_notebooks
+        try:
+            return anchor_notebooks.register(cdir, source=body.get("source"),
+                what=body.get("what"), step=body.get("step", ""),
+                regenerate=body.get("regenerate") is True), 200
+        except (ValueError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}, 409
     if verb == "drain-all":
         # 2026-08-25 hardening (review finding #1): the restart drain runs in a SEPARATE
         # process, so it can never see this service's live ENGINES — the in-process leg
@@ -851,11 +1263,28 @@ def handle_post(cdir, verb, body):
             return {"ok": False, "error": "no live engine"}, 404
         return eng.record_status_ack(str(body.get("at") or "")), 200
     if verb == "say":
+        context = body.get("refinement_context")
+        if isinstance(context, dict):
+            from steward_cockpit.refinement_client import update
+            import uuid
+            current = campaign.read_refinement(cdir)
+            if not current or not current.get("ok"):
+                return {"ok": False, "error": "refinement-state-unavailable"}, 409
+            feedback_id = str(uuid.uuid4())
+            result = update(cdir, {"operation_id": feedback_id, "expected_seq": current["sequence"],
+                "action": "feedback", "step_id": context.get("step_id"), "feedback_id": feedback_id,
+                "source_message": str(body.get("text", "")), "base_presentation_id": context.get("presentation_id"),
+                "changes": [{"id": "change-" + feedback_id, "scope": context.get("product_id") or "slice", "directive": "require", "text": str(body.get("text", ""))}],
+                "elegance": {"mode": "RC6", "source": "User selected Refine this slice", "reason": "Apply the user's requested changes within this slice; assess new elements before adding scope."}})
+            if not result.get("ok"):
+                return result, 409
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)
         if eng is None:
             return {"ok": False, "error": "no such session / cap hit"}, 404
-        return eng.say(body.get("text", "")), 200
+        result = (eng.say(body.get("text", ""), question_id=body["question_id"]) if body.get("question_id")
+                  else eng.say(body.get("text", "")))
+        return result, 200 if result.get("ok") else 409
     if verb == "engine":
         eng = get_engine(cdir, bool(body.get("general")),
                          str(body.get("term") or "") or None)

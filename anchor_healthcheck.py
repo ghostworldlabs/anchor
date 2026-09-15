@@ -1757,7 +1757,11 @@ def check_rnd_v4_surface(report: Report, server_proc, rnd_env: dict):
             # ── (a) seed-once on a stub Research session (so the gemini engine
             #         switch below is policy-allowed: gemini is research-only) ──
             try:
-                rec = _ts.start_session(pid, "research", label="hc v4 seed")
+                # This fixture measures Claude's stdin seed protocol. Other
+                # engines seed through argv, so saved user preferences must not
+                # select the protocol this synthetic assertion exercises.
+                rec = _ts.start_session(pid, "research", backend="claude",
+                                        label="hc v4 seed")
                 seed_tsid = rec["session_id"]
                 seeded_flag = bool(rec.get("seeded"))
                 out1 = _pty.read_since(seed_tsid, 0)
@@ -3081,9 +3085,15 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
                 import subprocess as _sp
                 # A LOCAL BARE repo stands in for github.com (file:// → no network).
                 bare = Path(_tf.mkdtemp(prefix="anchor-hc-v8-bare-")) / "bare.git"
-                _sp.run(["git", "init", "--bare", str(bare)],
-                        capture_output=True, text=True, timeout=30)
                 rnd_env["v3_temp_dirs"].append(bare.parent)
+                initialized = _sp.run(
+                    ["git", "init", "--bare", str(bare)],
+                    capture_output=True, text=True, timeout=30,
+                    creationflags=_paths.NO_WINDOW)
+                if initialized.returncode != 0:
+                    raise RuntimeError(
+                        "bare-init-failed: "
+                        + (initialized.stderr or initialized.stdout).strip())
                 bare_url = bare.resolve().as_uri()
 
                 # link via the gh CREATE seam → PRIVATE + persisted on the record.
@@ -3095,8 +3105,15 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
 
                 # Re-point origin at the LOCAL BARE remote so the push is
                 # network-free (the stub gh invented a github.com URL).
-                _remote.link_github(str(proj_folder), "existing", bare_url,
-                                    project_id=pid)
+                local_link = _remote.link_github(
+                    str(proj_folder), "existing", bare_url, project_id=pid)
+                if not local_link.get("ok"):
+                    raise RuntimeError(f"local-relink-failed: {local_link}")
+                origin_ok, _, origin, origin_err = _wt._git(
+                    proj_folder, ["remote", "get-url", "--push", "--all", "origin"])
+                if not origin_ok or origin.strip() != bare_url:
+                    raise RuntimeError(
+                        f"local-remote-mismatch: {origin_err or origin}")
 
                 # Non-opted → NEVER pushes.
                 no_opt = _remote.auto_push_if_opted(pid)
@@ -3104,18 +3121,35 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
                     and no_opt.get("reason") == "not-opted"
 
                 # Opt-in persists, THEN linked+opted pushes to the LOCAL BARE only.
-                _remote.set_auto_push(pid, True)
+                opted = _remote.set_auto_push(pid, True)
+                if not _remote.get_auto_push(pid):
+                    raise RuntimeError(f"opt-in-failed: {opted}")
                 pushed = _remote.auto_push_if_opted(pid)
-                bare_has = _sp.run(
-                    ["git", "-C", str(bare), "rev-parse", "--verify",
-                     "--quiet", "HEAD"],
-                    capture_output=True, text=True).returncode == 0
+                # A fresh bare HEAD can name a different default branch. Prove
+                # that the pushed branch contains this project's actual commit.
+                branch = pushed.get("branch") or ""
+                local_ok, _, local_commit, local_err = _wt._git(
+                    proj_folder, ["rev-parse", "--verify", "HEAD"])
+                bare_has, bare_commit, bare_err = False, "", ""
+                if branch:
+                    bare_has, _, bare_commit, bare_err = _wt._git(
+                        bare, ["rev-parse", "--verify", "--quiet",
+                               f"refs/heads/{branch}"])
+                commit_matches = (local_ok and bare_has
+                                  and local_commit.strip() == bare_commit.strip())
                 remote_ok = (link_ok and not_pushed
-                             and pushed.get("pushed") is True and bare_has)
+                             and pushed.get("ok") is True
+                             and pushed.get("pushed") is True and commit_matches)
+                remote_detail = (
+                    f"link_ok={link_ok} not_pushed={not_pushed} "
+                    f"pushed={pushed.get('pushed')} bare_has={bare_has} "
+                    f"branch={branch} commit_matches={commit_matches}")
+                if not remote_ok:
+                    remote_detail += (
+                        f" reason={pushed.get('reason', '')} "
+                        f"detail={pushed.get('detail') or bare_err or local_err or ''}")
                 steps.append(("remote: create(private)+opt-in gates push (local bare)",
-                              remote_ok,
-                              f"link_ok={link_ok} not_pushed={not_pushed} "
-                              f"pushed={pushed.get('pushed')} bare_has={bare_has}"))
+                              remote_ok, remote_detail))
             except Exception as e:
                 steps.append(("remote", False, f"{type(e).__name__}: {e}"))
         else:
@@ -3160,7 +3194,9 @@ def check_rnd_v8_surface(report: Report, server_proc, rnd_env: dict):
     if failures:
         report.check(name, False, "; ".join(failures))
     else:
-        report.check(name, True, f"{len(steps)} steps")
+        remote_receipt = next((d for s, _, d in steps if s.startswith("remote:")), "")
+        report.check(name, True, f"{len(steps)} steps"
+                     + (f"; {remote_receipt}" if remote_receipt else ""))
 
 
 def check_rnd_v9_surface(report: Report, server_proc, rnd_env: dict):
@@ -5384,8 +5420,8 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
 
     All model / PTY interaction is stubbed (``ANCHOR_PTY_BACKEND=stub`` +
     ``ANCHOR_RUNNER_CMD`` → the stream-json stub + a temp ``ANCHOR_WORKTREE_BASE``
-    + a throwaway temp git project). ``ANCHOR_PROACTIVE_SUMMARY`` stays OFF (so the
-    background stage summary hard no-ops, never spawning a live-claude run) and is
+    + a throwaway temp git project and data dir). ``ANCHOR_PROACTIVE_SUMMARY``
+    stays OFF (so the background stage summary never spawns a live-claude run) and is
     RESTORED in ``finally``. Every stub PTY + synthetic session row is reaped, all
     forced env is restored, and the temp dirs are torn down. Nothing binds
     ``:8777`` / touches real data / reaches the network. A sub-step that genuinely
@@ -5401,6 +5437,15 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
     import tempfile as _tf
     steps: list[tuple[str, bool, str]] = []
 
+    # This walk runs in the Doctor process alongside a separate dashboard.
+    # Its process-local WRITE_LOCK cannot protect a shared sessions.json from
+    # the dashboard's registry writes. Keep the entire synthetic lifecycle,
+    # including restart recovery and cleanup, outside the live data root.
+    import pty_manager as _pty
+    previous_ptys = set(_pty.live_sessions())
+    prev_data = os.environ.get("ANCHOR_DATA_DIR")
+    probe_data = Path(_tf.mkdtemp(prefix="anchor-hc-v12-data-"))
+    rnd_env.setdefault("v3_temp_dirs", []).append(probe_data)
     prev_pty = os.environ.get("ANCHOR_PTY_BACKEND")
     prev_wtbase = os.environ.get("ANCHOR_WORKTREE_BASE")
     prev_seed = os.environ.get("ANCHOR_TERMINAL_SEED")
@@ -5422,6 +5467,8 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
 
     pid = None
     try:
+        os.environ["ANCHOR_DATA_DIR"] = str(probe_data)
+        _paths.ensure_data_dirs()
         import rnd_registry as _rnd
         import terminal_session as _ts
         import session_registry as _sreg
@@ -5444,7 +5491,8 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
         proj = _rnd.add_project(SYNTHETIC_RND_NAME + " v12", str(proj_folder),
                                 scaffold=False)
         pid = proj["id"]
-        rnd_env["created_ids"].append(pid)
+        # Private project: remove it before restoring the outer data root,
+        # never hand its id to the later live-registry cleanup.
         steps.append(("register v12 project", bool(pid), str(pid)))
 
         # ── (1) effort-record back-compat normalize ───────────────────────────
@@ -5504,7 +5552,9 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
                     "zero-mint + stage flip",
                     bool(adv1_ok),
                     f"ok={out1.get('ok')} adv={out1.get('advanced')} "
-                    f"stage={rec1.get('current_stage')} set_eq={S1 == S0}"))
+                    f"stage={rec1.get('current_stage')} set_eq={S1 == S0} "
+                    f"reason={out1.get('reason')} detail={out1.get('detail')} "
+                    f"missing={sorted(S0 - S1)} added={sorted(S1 - S0)}"))
 
                 # plan→build CONVERSATION-ONLY: seed the stub PTY buffer (no file)
                 # for the PLAN stage that is about to close → it snapshots to a
@@ -5545,7 +5595,9 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
                     bool(adv2_ok),
                     f"ok={out2.get('ok')} stage={rec2.get('current_stage')} "
                     f"set_eq={S2 == S0} snap={snap_ok} "
-                    f"pty_delta={pty_after - pty_before}"))
+                    f"pty_delta={pty_after - pty_before} "
+                    f"reason={out2.get('reason')} detail={out2.get('detail')} "
+                    f"missing={sorted(S0 - S2)} added={sorted(S2 - S0)}"))
 
                 # Per-stage doc attribution DISJOINT: the research stage holds the
                 # committed findings; the plan stage holds the transcript snapshot;
@@ -5848,25 +5900,28 @@ def check_rnd_v12_surface(report: Report, server_proc, rnd_env: dict):
     except Exception as e:
         steps.append(("exception", False, f"{type(e).__name__}: {e}"))
     finally:
-        # Reap any stub PTY sessions this walk left live (defensive).
+        # Reap only this walk's stub PTYs, preserving earlier checks' sessions.
+        # All registry cleanup still resolves the private data root here.
         try:
             import pty_manager as _pty2
             import session_registry as _sreg2
-            for sid in list(_pty2.live_sessions()):
+            for sid in set(_pty2.live_sessions()) - previous_ptys:
                 try:
                     _pty2.kill(sid)
                 except Exception:
                     pass
-            for pid_ in rnd_env.get("created_ids", []):
-                for srec in _sreg2.list_sessions(project_id=pid_):
+            if pid:
+                for srec in _sreg2.list_sessions(project_id=pid):
                     try:
                         _sreg2.remove_session(srec.get("session_id"))
                     except Exception:
                         pass
+                _rnd.remove_project(pid)
         except Exception:
             pass
         # Restore every env var we forced for this walk.
-        for var, prev in (("ANCHOR_PTY_BACKEND", prev_pty),
+        for var, prev in (("ANCHOR_DATA_DIR", prev_data),
+                          ("ANCHOR_PTY_BACKEND", prev_pty),
                           ("ANCHOR_WORKTREE_BASE", prev_wtbase),
                           ("ANCHOR_TERMINAL_SEED", prev_seed),
                           ("ANCHOR_RUNNER_CMD", prev_runner),
@@ -6511,7 +6566,8 @@ def check_supervisor_seam(report: Report):
         folder.mkdir(parents=True, exist_ok=True)
         rec = sup.launch_guarded(
             "research", project_id="hc-sup-pid", folder_path=str(folder),
-            cwd=str(folder), extra_args=["--lines", "6", "--line-interval",
+            cwd=str(folder), backend="claude",
+            extra_args=["--lines", "6", "--line-interval",
                                          "0.15", "--sleep", "6"])
         jid = rec["job_id"]
 
@@ -6660,9 +6716,11 @@ def check_supervisor_live_probes(report: Report):
                                        "ANCHOR_SUPERVISOR_TOKEN": "WRONG"})
         bad_refused = (bad.mode == _sup.MODE_INLINE and bad.degraded)
 
-        rec = client.launch("research",
+        rec = client.launch("research", backend="claude",
                             extra_args=["--lines", "5", "--line-interval",
                                         "0.12", "--sleep", "5"])
+        if not rec.get("job_id"):
+            raise RuntimeError(f"synthetic supervisor launch failed: {rec}")
         jid = rec["job_id"]
         _deadline = _time.monotonic() + 5
         while _time.monotonic() < _deadline:

@@ -7,5 +7,6 @@
   "kind": "execlog",
   "title": "Sleep Engine Execution Log",
   "artifact_path": "foundry-gui/planning/crucible/EXECUTION-LOG.md",
-  "status": "imported"
+  "status": "imported",
+  "imported_from": "f69f6d66171f4dbd95c8c45db6846d97"
 }

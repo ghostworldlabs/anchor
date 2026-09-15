@@ -4,9 +4,17 @@
   "generated_from": {
     "schema": "foundry-map/v2",
     "map_version": 2,
-    "skill_count": 11
+    "skill_count": 12
   },
   "resolved": [
+    {
+      "ref": "skill:chekhov",
+      "name": "chekhov",
+      "version": "0.1.0",
+      "source": "skills/chekhov",
+      "dependencies": [],
+      "closure": []
+    },
     {
       "ref": "skill:crucible",
       "name": "crucible",

@@ -2656,29 +2656,40 @@ def _steward_status_tile_line(entry: dict) -> str:
         return ""
     now_lines = [str(x).strip() for x in (data.get("now") or []) if str(x).strip()]
     plan = data.get("plan") or {}
-    # (2026-09-04, John) the row says what is RUNNING (looked through the
-    # steward to the commissioned skill), the current slice, and its ETA.
-    run = data.get("running") or {}
-    sl = data.get("slice") or {}
+    # Same concise facts the cockpit status pane shows. Fall back to the older
+    # running/slice/wait join when a record predates the facts list.
+    facts = (data.get("compact") or {}).get("facts") if isinstance(data.get("compact"), dict) else None
     bits = []
-    if str(run.get("label") or "").strip():
-        bits.append(str(run["label"]).strip())
-    elif now_lines:
-        bits.append(now_lines[0])
-    if str(sl.get("name") or "").strip():
-        bits.append("slice %s/%s · %s" % (sl.get("n", "?"), sl.get("total", "?"),
-                                          str(sl["name"]).strip()))
-    else:
-        step = str(plan.get("step") or "").strip()
-        if step and step != "(no active step)":
-            bits.append("step %s/%s · %s" % (plan.get("steps_done", 0),
-                                             plan.get("steps_total", 0), step))
-    wait = str(plan.get("waiting_on_you") or "").strip()
-    if wait:
-        bits.append("waiting on you: " + wait)
-    eta = str(data.get("eta") or "").strip()
-    if eta:
-        bits.append("ETA " + eta)
+    if isinstance(facts, list) and facts:
+        wanted = ("Doing", "Status", "To do", "Blocker")
+        for fact in facts:
+            if not isinstance(fact, dict):
+                continue
+            label = str(fact.get("label") or "")
+            value = str(fact.get("value") or "").strip()
+            if label in wanted and value and value not in ("—", "none"):
+                bits.append(value)
+    if not bits:
+        run = data.get("running") or {}
+        sl = data.get("slice") or {}
+        if str(run.get("label") or "").strip():
+            bits.append(str(run["label"]).strip())
+        elif now_lines:
+            bits.append(now_lines[0])
+        if str(sl.get("name") or "").strip():
+            bits.append("slice %s/%s · %s" % (sl.get("n", "?"), sl.get("total", "?"),
+                                              str(sl["name"]).strip()))
+        else:
+            step = str(plan.get("step") or "").strip()
+            if step and step != "(no active step)":
+                bits.append("step %s/%s · %s" % (plan.get("steps_done", 0),
+                                                 plan.get("steps_total", 0), step))
+        wait = str(plan.get("waiting_on_you") or "").strip()
+        if wait:
+            bits.append("waiting on you: " + wait)
+        eta = str(data.get("eta") or "").strip()
+        if eta:
+            bits.append("ETA " + eta)
     if not bits:
         return ""
     return ("⏱ %s · %s" % (str(data.get("at", ""))[-5:],
@@ -2762,7 +2773,8 @@ def render_project_tile_html(entry: dict) -> str:
     live_n = _live_session_count(pid_raw)
     try:
         roll_txt = html_lib.escape(
-            _fmt_project_usage_line(roll, rate=rate, live_count=live_n))
+            _fmt_project_usage_line(roll, rate=rate, live_count=live_n,
+                                    project_id=pid_raw))
     except Exception:
         roll_txt = html_lib.escape("Σ no run sessions yet")
     # Honesty stamp: measured vs unmeasured (incl. Grok wall-clock-only).
@@ -2777,8 +2789,10 @@ def render_project_tile_html(entry: dict) -> str:
         cap_note = ""
     rollup_block = (
         f'<span class="rnd-row-roll" data-pid="{pid}" data-window="lifetime" '
-        f'title="Cost / tokens / time across run sessions (RUN provenance only;'
-        f' Grok may show time without $)">{roll_txt}{cap_note}</span>'
+        f'title="Run-session costs stay separate from steward cockpit usage. '
+        f'ChatGPT/Grok subscription turns have no per-turn dollar amount; '
+        f'token updates alone do not increase a reported subtotal."'
+        f'>{roll_txt}{cap_note}</span>'
     )
 
     is_active = state in ("active", "path-missing")
@@ -4818,47 +4832,152 @@ def _render_layoutd_grass_panel(folder_path, project_id) -> str:
 
 
 def _render_layoutd_deliverables_panel(folder_path, project_id) -> str:
-    """Render the Layout-D right-column Deliverables panel (v12 Wave 2). Reuses
-    the existing pinned-deliverable data; each row launches via the existing
-    ``launchDeliverable`` JS (carried verbatim, the row keeps the deliv hooks)."""
+    """Project Deliverables tab: same hierarchy as the cockpit tile.
+
+    Current work, approved versions, then expandable work streams (the course /
+    product groups). Pinned Foreman tiles remain as a stream when they are not
+    already in a steward register.
+    """
+    from steward_cockpit import steward_campaign as _scamp
+    try:
+        views = _scamp.project_deliverable_view(folder_path)
+    except Exception:
+        views = []
     try:
         pinned = _deliv.list_pinned_deliverables(folder_path, project_id)
     except Exception:
         pinned = []
-    rows = []
+    listed_paths = {str(it.get("path") or "").replace("\\", "/").lower()
+                    for v in views for it in (v.get("items") or [])}
+    leftover = []
     for r in pinned:
-        rel = r.get("artifact_path", "") or ""
-        name = html_lib.escape(r.get("title") or rel or "")
-        raw_type = (r.get("deliverable_type", "") or "").strip().lower()
-        if raw_type not in _deliv.VALID_TYPES:
-            raw_type = _deliv.infer_type(rel)
-        dtype = html_lib.escape(raw_type)
-        rel_attr = html_lib.escape(rel, quote=True)
-        did_attr = html_lib.escape(r.get("job_id", "") or "", quote=True)
-        rows.append(
-            f"<div class='delivrow tile deliv-tile deliv-pinned' "
-            f"data-deliv=\"{rel_attr}\" data-deliv-id=\"{did_attr}\" "
-            f"data-deliv-type=\"{dtype}\" onclick='launchDeliverable(this)'>"
-            f"<span class='dn'>&#8595; <span class='mono'>{name}</span></span>"
-            f"<span class='tag'>{dtype}</span></div>"
-        )
-    if not rows:
-        rows.append(
-            "<div class='idea-empty'>No deliverables pinned yet — a Foreman "
-            "build pins one on GREEN.</div>")
+        rel = (r.get("artifact_path") or "").replace("\\", "/")
+        if rel.lower() not in listed_paths:
+            leftover.append(r)
+    count = sum(len(v.get("items") or []) for v in views) + len(leftover)
+    body = []
+    current = [it for v in views for it in (v.get("current") or [])]
+    approved = [it for v in views for it in (v.get("approved") or [])]
+    body.append(_render_deliv_section("Current work and review", current, project_id,
+                                      empty="No current items awaiting review."))
+    body.append(_render_deliv_approved(approved, project_id))
+    if len(views) > 1:
+        for v in views:
+            streams = "".join(_render_deliv_stream(s, project_id) for s in (v.get("streams") or []))
+            if not streams:
+                streams = "".join(_render_deliv_item(it, project_id) for it in (v.get("items") or []))
+            if not streams:
+                streams = "<div class='navempty'>No deliverables registered yet.</div>"
+            body.append(
+                "<details class='deliv-stream'>"
+                f"<summary>{html_lib.escape(v.get('name') or 'effort')}</summary>"
+                f"<div class='deliv-stream-body'>{streams}</div></details>")
+    else:
+        streams = []
+        for v in views:
+            if v.get("streams"):
+                streams.extend(_render_deliv_stream(s, project_id) for s in v["streams"])
+            elif v.get("items"):
+                streams.extend(_render_deliv_item(it, project_id) for it in v["items"])
+        body.extend(streams)
+    if leftover:
+        pins = "".join(_render_pinned_deliv_row(r) for r in leftover)
+        body.append(
+            "<details class='deliv-stream'>"
+            "<summary><span class='plan-mark todo'>▷</span> Pinned builds</summary>"
+            f"<div class='deliv-stream-body'>{pins}</div></details>")
+    if count == 0:
+        body.append(
+            "<div class='idea-empty'>No deliverables registered yet — the steward "
+            "lists them when a human-facing artifact lands.</div>")
     return (
         "<div class='panel deliverables-panel'>"
-        # crucible-improve #4 (W5): deliverables start COLLAPSED — drop the
-        # `open` attribute so the panel renders folded by default (the
-        # disc-caret CSS keys off [open]/:not([open]) and flips automatically).
         "<details class='deliv-details'>"
         f"<summary class='ptitle' style='cursor:pointer; outline:none'>"
         f"<span class='disc-caret' style='font-size:11px; transition:transform 0.12s; display:inline-block; margin-right:4px'>&#9662;</span>"
-        f"&#128230; Deliverables <span class='cnt'>{len(pinned)}</span>"
+        f"&#128230; Deliverables <span class='cnt'>{count}</span>"
         f"</summary>"
-        f"<div class='deliv-body' style='margin-top:8px'>{''.join(rows)}</div>"
+        f"<div class='deliv-body' style='margin-top:8px'>{''.join(body)}</div>"
         "</details>"
         "</div>"
+    )
+
+
+def _deliv_item_label(it):
+    name = it.get("what") or it.get("product_id") or it.get("path") or "deliverable"
+    if it.get("managed"):
+        name = str(name).replace("-", " ")
+    return str(name)
+
+
+def _render_deliv_item(it, project_id):
+    from steward_cockpit import steward_campaign as _scamp
+    name = html_lib.escape(_deliv_item_label(it))
+    meta = html_lib.escape(_scamp._item_summary(it))
+    if it.get("job_id") and it.get("artifact_path"):
+        return _render_pinned_deliv_row(it)
+    dir_attr = html_lib.escape(it.get("dir") or "", quote=True)
+    path = html_lib.escape(it.get("path") or "", quote=True)
+    openable = "1" if it.get("openable") and it.get("path") else "0"
+    return (
+        f"<div class='delivrow deliv-cockpit' data-effort-dir=\"{dir_attr}\" "
+        f"data-path=\"{path}\" data-openable=\"{openable}\" "
+        f"onclick='openCockpitDeliverable(this)'>"
+        f"<span class='dn'><span class='mono'>{name}</span></span>"
+        f"<span class='deliv-meta'>{meta}</span></div>"
+    )
+
+
+def _render_pinned_deliv_row(r):
+    rel = r.get("artifact_path", "") or ""
+    name = html_lib.escape(r.get("title") or rel or "")
+    raw_type = (r.get("deliverable_type", "") or "").strip().lower()
+    if raw_type not in _deliv.VALID_TYPES:
+        raw_type = _deliv.infer_type(rel)
+    dtype = html_lib.escape(raw_type)
+    rel_attr = html_lib.escape(rel, quote=True)
+    did_attr = html_lib.escape(r.get("job_id", "") or "", quote=True)
+    return (
+        f"<div class='delivrow tile deliv-tile deliv-pinned' "
+        f"data-deliv=\"{rel_attr}\" data-deliv-id=\"{did_attr}\" "
+        f"data-deliv-type=\"{dtype}\" onclick='launchDeliverable(this)'>"
+        f"<span class='dn'>&#8595; <span class='mono'>{name}</span></span>"
+        f"<span class='tag'>{dtype}</span></div>"
+    )
+
+
+def _render_deliv_section(title, items, project_id, empty=""):
+    rows = "".join(_render_deliv_item(it, project_id) for it in items) or (
+        f"<div class='navempty'>{html_lib.escape(empty)}</div>" if empty else "")
+    return (
+        f"<div class='deliv-pin'><div class='naveyebrow'>{html_lib.escape(title)}</div>"
+        f"{rows}</div>"
+    )
+
+
+def _render_deliv_approved(items, project_id):
+    rows = "".join(_render_deliv_item(it, project_id) for it in items) or (
+        "<div class='navempty'>No explicitly approved deliverables yet.</div>")
+    return (
+        "<details class='deliv-stream'>"
+        f"<summary>Approved deliverables · {len(items)}</summary>"
+        f"<div class='deliv-stream-body'>{rows}</div></details>"
+    )
+
+
+def _render_deliv_stream(node, project_id):
+    mark = node.get("mark") or {"glyph": "▷", "cls": "todo"}
+    glyph = html_lib.escape(str(mark.get("glyph") or "▷"))
+    cls = html_lib.escape(str(mark.get("cls") or "todo"))
+    label = html_lib.escape(str(node.get("label") or node.get("id") or "stream"))
+    inner = "".join(_render_deliv_stream(child, project_id) for child in (node.get("children") or []))
+    inner += "".join(_render_deliv_item(it, project_id) for it in (node.get("items") or []))
+    if not inner:
+        inner = "<div class='navempty'>No deliverables registered yet.</div>"
+    return (
+        f"<details class='deliv-stream'>"
+        f"<summary><span class='plan-mark {cls}'>{glyph}</span> {label}</summary>"
+        f"<div class='deliv-stream-body'>{inner}</div></details>"
     )
 
 
@@ -5480,57 +5599,154 @@ def _live_session_count(project_id: str) -> int:
         return 0
 
 
-def _fmt_project_usage_line(roll, rate=None, live_count=0) -> str:
+def _live_steward_estate():
+    """Read the runtime cockpit ledger without moving the engine STATE_FILE.
+
+    The GUI relocates ``STATE_FILE`` to the data-dir ledger on steward API
+    calls; dashboard rendering can run before that swap. Prefer the data-dir
+    file when present so MBA-class totals are the live account, not the
+    in-repo proto-state residue.
+    """
+    from steward_cockpit import steward_engine as _se
+    tried = []
+    try:
+        live = _paths.data_dir() / "steward-cockpit-state.json"
+        if live.exists():
+            tried.append(live)
+    except Exception:
+        pass
+    current = getattr(_se, "STATE_FILE", None)
+    if current:
+        try:
+            path = Path(current)
+            if path.exists() and path.resolve() not in {p.resolve() for p in tried}:
+                tried.append(path)
+        except Exception:
+            pass
+    for path in tried:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    try:
+        return _se._read_all_state()
+    except Exception:
+        return {}
+
+
+def _project_steward_usage(project_id):
+    """Persisted cockpit usage for the project's folder. Not a RUN rollup.
+
+    Kept as a named source: overlap with effort_history is unknown, so this
+    is never added into ``project_effort_rollup`` as one certified bill.
+    """
+    if not project_id:
+        return None
+    try:
+        proj = _rnd.get_project(project_id)
+        folder = (proj or {}).get("folder_path") or ""
+        if not folder:
+            return None
+        from steward_cockpit.steward_routes import _usage_rollup
+        total = ((_usage_rollup(folder, estate=_live_steward_estate()) or {}).get("total") or {})
+        toks = int(total.get("tokens") or 0)
+        turns = int(total.get("unpriced_turns") or 0)
+        reported = float(total.get("reported_spend") or 0)
+        secs = float(total.get("secs") or 0)
+        if toks <= 0 and turns <= 0 and reported <= 0 and secs <= 0:
+            return None
+        return total
+    except Exception:
+        return None
+
+
+def _fmt_steward_usage_clause(steward) -> str:
+    """Named steward clause. Never invents dollars or merges RUN totals."""
+    if not steward:
+        return ""
+    try:
+        from steward_cockpit.steward_engine import fmt_usage_cost_text
+        cost = steward.get("cost_text") or fmt_usage_cost_text(
+            steward, cli=steward.get("billing_family") or steward.get("cli"))
+    except Exception:
+        cost = ""
+    toks = int(steward.get("tokens") or 0)
+    bits = ["steward"]
+    if toks >= 1_000_000:
+        bits.append("%dM tok" % round(toks / 1_000_000))
+    elif toks >= 1000:
+        bits.append("%dk tok" % round(toks / 1000))
+    elif toks > 0:
+        bits.append("%d tok" % toks)
+    if cost and cost != "cost unavailable":
+        bits.append(cost)
+    return " · ".join(bits) if len(bits) > 1 else ""
+
+
+def _fmt_project_usage_line(roll, rate=None, live_count=0, steward=None,
+                            project_id=None) -> str:
     """Honest project usage line combining effort rollup + capture-rate + live.
 
     ``project_effort_rollup`` only counts RUN cost records (tokens/wall). Managed
     terminal sessions can exist with zero rollup contribution (still live, or
     finalized unmeasured with no wall row). Never show ``Σ no run sessions yet``
-    when capture-rate or live registry sessions prove activity.
+    when capture-rate or live registry sessions prove activity. Steward cockpit
+    usage is appended as a named source when present; it is not summed into the
+    RUN dollar figure.
     """
+    if steward is None and project_id:
+        steward = _project_steward_usage(project_id)
     roll = roll or {}
     toks = int(roll.get("tokens", 0) or 0)
     ms = int(roll.get("wall_clock_ms", 0) or 0)
     n = int(roll.get("sessions", 0) or 0)
     if toks > 0 or ms > 0 or n > 0:
-        return _fmt_rollup_line(roll)
+        base = _fmt_rollup_line(roll)
+    else:
+        rate = rate or {}
+        total = int(rate.get("total", 0) or 0)
+        measured = int(rate.get("measured", 0) or 0)
+        unm = int(rate.get("unmeasured", 0) or 0)
+        failed = int(rate.get("capture_failed", 0)
+                     or rate.get("capture-failed", 0) or 0)
+        live = int(live_count or 0)
 
-    rate = rate or {}
-    total = int(rate.get("total", 0) or 0)
-    measured = int(rate.get("measured", 0) or 0)
-    unm = int(rate.get("unmeasured", 0) or 0)
-    failed = int(rate.get("capture_failed", 0)
-                 or rate.get("capture-failed", 0) or 0)
-    live = int(live_count or 0)
+        if total <= 0 and live <= 0:
+            base = "Σ no run sessions yet"
+        else:
+            parts = []
+            if live > 0:
+                parts.append("%d live" % live)
+            if measured > 0:
+                parts.append("%d measured" % measured)
+            if unm > 0:
+                parts.append("%d unmeasured" % unm)
+            if failed > 0:
+                parts.append("%d capture-failed" % failed)
+            if not parts and total > 0:
+                parts.append("%d session%s" % (total, "" if total == 1 else "s"))
 
-    if total <= 0 and live <= 0:
-        return "Σ no run sessions yet"
-
-    parts = []
-    if live > 0:
-        parts.append("%d live" % live)
-    if measured > 0:
-        parts.append("%d measured" % measured)
-    if unm > 0:
-        parts.append("%d unmeasured" % unm)
-    if failed > 0:
-        parts.append("%d capture-failed" % failed)
-    if not parts and total > 0:
-        parts.append("%d session%s" % (total, "" if total == 1 else "s"))
-
-    reason_bit = ""
-    reasons = rate.get("reasons") or {}
-    if isinstance(reasons, dict) and reasons:
-        try:
-            top = max(reasons.items(), key=lambda kv: int(kv[1] or 0))
-            if top and top[0]:
-                reason_bit = " (%s)" % top[0]
-        except Exception:
             reason_bit = ""
+            reasons = rate.get("reasons") or {}
+            if isinstance(reasons, dict) and reasons:
+                try:
+                    top = max(reasons.items(), key=lambda kv: int(kv[1] or 0))
+                    if top and top[0]:
+                        reason_bit = " (%s)" % top[0]
+                except Exception:
+                    reason_bit = ""
 
-    pending = " · usage pending finalize" if live > 0 and measured == 0 else ""
-    return ("Σ 0 tok measured · cost unknown · %s%s%s"
-            % (", ".join(parts), reason_bit, pending))
+            pending = " · usage pending finalize" if live > 0 and measured == 0 else ""
+            base = ("Σ 0 tok measured · cost unknown · %s%s%s"
+                    % (", ".join(parts), reason_bit, pending))
+    clause = _fmt_steward_usage_clause(steward)
+    if not clause:
+        return base
+    if base == "Σ no run sessions yet":
+        return "Σ " + clause
+    return base + " · " + clause
 
 
 def _fmt_capture_rate_short(rate: dict) -> str:
@@ -5575,7 +5791,8 @@ def render_header_rollup_html(project_id: str) -> str:
     live_n = _live_session_count(project_id)
     pid_attr = html_lib.escape(project_id, quote=True)
     life_txt = html_lib.escape(
-        _fmt_project_usage_line(life, rate=rate_life, live_count=live_n))
+        _fmt_project_usage_line(life, rate=rate_life, live_count=live_n,
+                                project_id=project_id))
     # Honest Telemetry W5: the capture-rate stamp beside the numeric rollup —
     # 'measured N/T sessions (lifetime) · K capture-failed'. capture-failed is
     # ALWAYS counted separately (never folded into unmeasured) and tinted red when
@@ -5980,7 +6197,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
     lab_style = "display:inline-flex;align-items:center;gap:4px;white-space:nowrap"
     html = (
         "<div id='modelPrefs' class='model-prefs' style=\"%s\" "
-        "title='Terminal, coding, and verification model families'>"
+        "title='Terminal, coding, and verification families: latest supported model, highest supported effort'>"
         "<label style=\"%s\">Terminal "
         "<select id='mpDefaultCli' data-key='default_cli' data-role='terminal' "
         "aria-describedby='mpCapability' style=\"%s\">%s</select>"
@@ -6080,6 +6297,7 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
   }
   function apply(d) {
     if (!d) return;
+    window.ANCHOR_SETTINGS_REVISION = d.settings_revision;
     var map = {
       default_cli: ['mpDefaultCli'],
       coding_family: ['mpCoding'],
@@ -6100,14 +6318,20 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
     var opts = { cache: 'no-store', headers: { Accept: 'application/json' } };
     fetch('/api/settings' + tq(), opts)
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.ok) apply(d); })
+      .then(function (d) { if (d && d.ok) { apply(d); if (d.settings_error) setStatus(d.settings_error); } })
       .catch(function () { });
   }
   function save(el) {
     var key = el.getAttribute('data-key');
     if (!key) return;
     var body = Object.create(null);
+    ['mpDefaultCli', 'mpCoding', 'mpReview'].forEach(function (id) {
+      var choice = document.getElementById(id);
+      if (choice) body[choice.getAttribute('data-key')] = choice.value;
+    });
     body[key] = el.value;
+    if (!Number.isInteger(window.ANCHOR_SETTINGS_REVISION)) { setStatus('load settings before saving'); load(); return; }
+    body.expected_revision = window.ANCHOR_SETTINGS_REVISION;
     setStatus('saving…');
     var h = {
       'Content-Type': 'application/json',
@@ -6121,10 +6345,10 @@ def render_model_prefs_controls(extra_html: str = "") -> str:
       .then(function (d) {
         if (d && d.ok) {
           apply(d);
-          setStatus('saved');
-          setTimeout(function () { setStatus(''); }, 1200);
+          setStatus(d.mirror_out_of_sync ? 'saved; standalone mirror needs repair' : 'saved · latest model / highest effort · active turns finish before switching');
         } else {
           setStatus((d && d.error) || 'error');
+          load();
         }
       })
       .catch(function () { setStatus('error'); });
@@ -6740,6 +6964,7 @@ def render_deliverables_html(project_id: str, folder_path: str) -> str:
             _deliv.TYPE_SKILL: "✓ verify status",
             _deliv.TYPE_TOOL: "✓ verify status",
             _deliv.TYPE_DOC: "📖 open rendered",
+            _deliv.TYPE_NOTEBOOK: "📓 open notebook on Anchor host",
         }
         items = []
         for r in pinned:
@@ -8777,8 +9002,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
                Ecgberht signal anywhere in Anchor. -->
           <!-- r3: Completed / Cancelled / Saved live on the Tasks tile line now. -->
           <!-- 2026-05-12: Stop button removed. Server lifecycle is owned by
-               the NSSM "anchor" service on gwl-server. To restart, run
-               `nssm restart anchor` on gwl-server. -->
+               the host's process supervisor when installed as a service. -->
           <!-- 2026-07-02: model-flex posture chip on the HOME header too (John);
                dismissible via its inline × (localStorage 'mflexDismissed'). The
                home stylesheet lacks the project window's .mflex rules, so a
@@ -9133,7 +9357,7 @@ body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, s
     <!-- Select-existing mode (Explorer-style expandable TREE) -->
     <div id="npExistingFields" style="display:none">
       <input type="hidden" id="npFolderPath" />
-      <label>Browse to a folder on gwl-server</label>
+      <label>Browse to a folder on the Anchor host</label>
       <div class="rnd-picker-err" id="npBrowseErr" style="display:none"></div>
       <div class="rnd-tree" id="npTree" role="tree"></div>
       <button type="button" class="btn btn-sm rnd-use-btn" id="npSelectHereBtn" style="margin-top:8px" onclick="npSelectCurrent()">&#10003; Use this folder</button>
@@ -10124,7 +10348,7 @@ async function createNewProject() {{
 
 // 2026-05-12: stopServer() removed. The dashboard no longer kills its own
 // server; that responsibility now belongs to the NSSM "anchor" service
-// supervisor on gwl-server. To restart, run `nssm restart anchor`.
+// supervisor on hosts configured to run Anchor as a service.
 // /api/shutdown is also gone from the Python side, so external POSTs can
 // no longer kill the server either.
 
@@ -11457,7 +11681,7 @@ def handle_settings_post(handler, path, body):
     body = body or {}
     kwargs = {}
     for key in ("default_cli", "coding_family", "review_family",
-                "steward_type"):
+                "steward_type", "expected_revision", "model_policy"):
         if key in body and body[key] is not None:
             kwargs[key] = body[key]
     if not kwargs:
@@ -11473,6 +11697,9 @@ def handle_settings_post(handler, path, body):
         return
     try:
         settings = _aset.save_settings(**kwargs)
+    except _aset.SettingsInvalid as exc:
+        handler._send_json({"ok": False, "error": str(exc)}, 409)
+        return
     except ValueError as exc:
         handler._send_json({"ok": False, "error": str(exc)}, 400)
         return
@@ -11545,7 +11772,8 @@ def handle_project_rollup(handler, path, body):
                             "capture_rate": rate,
                             "live_sessions": live_n,
                             "text": _fmt_project_usage_line(
-                                roll, rate=rate, live_count=live_n)})
+                                roll, rate=rate, live_count=live_n,
+                                project_id=pid)})
 
 
 def handle_effort_rollup(handler, path, body):
@@ -13233,6 +13461,12 @@ def _hs_enrich_tiles(out):
                 cost = (roll or {}).get("cost_usd") or (roll or {}).get("cost")
                 if cost:
                     t["spend_line"] = "$%.2f lifetime" % float(cost)
+                clause = _fmt_steward_usage_clause(
+                    _project_steward_usage(entry["id"]))
+                if clause:
+                    t["spend_line"] = (
+                        (t.get("spend_line") + " · " + clause)
+                        if t.get("spend_line") else clause)
             except Exception:
                 pass
     except Exception:
@@ -16024,20 +16258,34 @@ def _build_doctor_seed():
 def handle_doctor_session_start(handler, path, body):
     # Doctor V3 Wave 2 + W8/SC6 multi-engine — start (or attach to) THE doctor
     # agentic session. Token-authed by middleware BEFORE this handler runs.
-    # When the UI picker sends backend=claude|gemini|grok, resolve via the
-    # shared three-engine start helper (dead toggle forbidden). When no
-    # backend is provided (legacy API callers / V3 tests), keep honest
-    # select_engine_plan (claude/agy job-layer) so unavailable stays honest.
+    # Resolve an omitted backend from the same authoritative dashboard
+    # snapshot used by the status card. Never fall back to a legacy Claude seat.
     # Page itself must NOT auto-call this on load (shell-first / one-click
     # diagnose).
     body = body or {}
     short_only = bool(body.get("short") or body.get("shortSeed"))
     issue = body.get("issue") if isinstance(body.get("issue"), dict) else None
-    requested = _w8_normalize_engine(body.get("backend") or body.get("engine"))
+    explicit_backend = body.get("backend") or body.get("engine")
+    try:
+        launch_settings = _aset.get_launch_settings()
+    except _aset.SettingsInvalid as exc:
+        handler._send_json({"ok": False, "error": str(exc), "status": "settings_invalid",
+                            "failureNonBlocking": True}, 400)
+        return
+    requested = _w8_normalize_engine(explicit_backend or launch_settings["default_cli"])
+    if not requested:
+        handler._send_json({"ok": False, "error": "Unknown model provider", "status": "invalid_engine"}, 400)
+        return
+    if body.get("settings_revision") is not None and body["settings_revision"] != launch_settings["settings_revision"]:
+        handler._send_json({"ok": False, "error": "Model preferences changed; reload before starting",
+                            "status": "settings_changed"}, 409)
+        return
     start_plan = _w8_shared_session_start_plan(
         surface="doctor",
         engine=requested,
         issue=issue,
+        prefs={**launch_settings, "_selected": {
+            launch_settings[key] for key in ("default_cli", "coding_family", "review_family")}},
     )
     engine_meta = {
         "driver": None,
@@ -16062,29 +16310,6 @@ def handle_doctor_session_start(handler, path, body):
                 "p5Plumbing": _W8_P5_PLUMBING,
             })
             return
-    else:
-        # Legacy / no-picker path: claude|gemini job-layer honesty (V3 tests).
-        profile = _lanes.detect_host_profile()
-        plan = _lanes.select_engine_plan("general", profile=profile)
-        if plan.get("status") != _lanes.ENGINE_STATUS_OK or not plan.get("driver"):
-            handler._send_json({
-                "ok": False,
-                "status": plan.get("status") or _lanes.ENGINE_STATUS_UNAVAILABLE,
-                "reason": plan.get("reason", ""),
-                "session": None,
-                "engineToggle": start_plan.get("engineToggle"),
-                "shell": start_plan.get("shell"),
-                "failureNonBlocking": True,
-                "p5Plumbing": _W8_P5_PLUMBING,
-            })
-            return
-        backend = plan["driver"]
-        engine_meta = {
-            "driver": plan.get("driver"),
-            "swarm": plan.get("swarm"),
-            "swarm_ratio": plan.get("swarm_ratio"),
-            "reason": plan.get("reason", ""),
-        }
     # Only the JSON boolean true requests write-enabled Resolve posture. A
     # truthy string such as "false" must not silently turn Diagnose into write.
     resolve = body.get("resolve") is True
@@ -16106,8 +16331,9 @@ def handle_doctor_session_start(handler, path, body):
                 "component: %s\n"
                 "Do: reproduce it minimally, FIX it in this folder (edit code/"
                 "config/tests as needed), verify the fix (run the relevant "
-                "check), then report what changed in 5 lines. Ask John only "
-                "if the fix requires a real product decision."
+                "check), then report what changed in 5 lines. If a product "
+                "decision is required, ask John one short question in this "
+                "session and wait — do not sit on a tool-permission dialog."
                 % ((issue.get("message") or "")[:400],
                    (issue.get("component") or "")[:120]))
         elif short_only or issue:
@@ -16177,8 +16403,8 @@ _DOCTOR_STATUS_TEXT = {
 
 _DOCTOR_STATUS_DETAIL = {
     "red": "The latest report flags correctness issues (red banner).",
-    "yellow": ("All correctness checks passed; non-blocking performance "
-               "warnings present."),
+    "yellow": ("All correctness checks passed; non-blocking warnings "
+               "or skipped checks remain."),
     "green": "All checks passed in the latest report.",
     "unknown": "The latest report file could not be parsed.",
     "none": "Run diagnostics now, or wait for the daily 5 AM health check.",
@@ -16252,6 +16478,7 @@ def _doctor_stats():
         # has — the newest report's Issues, parsed deterministically — so
         # opening the page answers "what's wrong?" instantly, no model run.
         "issues": _doctor_latest_issues(newest_body or ""),
+        "warnings": _doctor_latest_section(newest_body or "", "Warnings"),
         "autofixes": _doctor_latest_section(newest_body or "", "Auto-fixes applied"),
     }
 
@@ -16297,14 +16524,25 @@ def handle_doctor_status(handler, path, body):
     # diagnostics run. Token-authed by the route row (?token= / header /
     # cookie). Never spawns / never blocks. W8: includes engine toggle so the
     # shell can paint pickers without starting a session.
-    try:
-        prefs = {"default_cli": _aset.get_default_cli()}
-    except Exception:
-        prefs = {}
-    toggle = _w8_engine_toggle(prefs=prefs)
+    state = _aset.read_settings_state()
+    prefs = state["settings"]
+    toggle = _w8_engine_toggle(prefs={**prefs, "_selected": {
+        prefs[key] for key in ("default_cli", "coding_family", "review_family")}})
+    # An unavailable configured default stays visible and disabled. Choosing
+    # another configured provider is an explicit user action, not a silent swap.
+    toggle["defaultEngine"] = prefs["default_cli"]
+    if not state["valid"]:
+        toggle["defaultEngine"] = None
+        for row in toggle["engines"]:
+            row["enabled"] = False
+    stats = _doctor_stats()
     handler._send_json({
-        "ok": True,
-        **_doctor_stats(),
+        "ok": state["valid"],
+        "error": state["error"],
+        "settings_revision": prefs.get("settings_revision", 0),
+        "model_policy": prefs.get("model_policy"),
+        **stats,
+        "issues_html": _doctor_issues_block_html(stats),
         "engines": toggle["engines"],
         "defaultEngine": toggle["defaultEngine"],
         "shellFirst": True,
@@ -16405,8 +16643,12 @@ def _doctor_probe_state():
     s = _doctor_stats()
     explained = _dp.explain_all(s.get("issues") or [], s.get("autofixes") or [])
     probe = [_doctor_live_probe(p) for p in _dp.probe_targets(explained)] if explained else []
-    decision = _dp.decide(explained, probe)
-    return s, explained, probe, decision
+    playbook = [{k: c.get(k) for k in
+                 ("id", "title", "meaning", "suggested", "verify", "session_advice", "do_not")
+                 if c.get(k) is not None}
+                for c in _dp.match_playbook(explained)]
+    decision = _dp.decide(explained, probe, playbook)
+    return s, explained, probe, decision, playbook
 
 
 def handle_doctor_probe(handler, path, body):
@@ -16420,9 +16662,10 @@ def handle_doctor_probe(handler, path, body):
     page never starts a model session. Token-authed by the route row.
     Read-only: no re-run, no session, no seed.
     """
-    s, explained, probe, decision = _doctor_probe_state()
+    s, explained, probe, decision, playbook = _doctor_probe_state()
     handler._send_json({"ok": True, "decision": decision, "issues": explained,
-                        "probe": probe, "last_run": s.get("last_run"),
+                        "probe": probe, "playbook": playbook,
+                        "last_run": s.get("last_run"),
                         "status": s.get("status")})
 
 
@@ -16440,14 +16683,15 @@ def handle_doctor_resolve_all(handler, path, body):
     No model runs here; the receipt is real numbers or absent.
     """
     import doctor_plain as _dp
-    s, explained, probe, decision = _doctor_probe_state()
-    out = {"ok": True, "decision": decision, "issues": explained, "probe": probe}
+    s, explained, probe, decision, playbook = _doctor_probe_state()
+    out = {"ok": True, "decision": decision, "issues": explained, "probe": probe,
+           "playbook": playbook}
     if decision == "rerun":
         out["rerun"] = _doctor_start_healthcheck_run()
     elif decision == "session":
         out["seed_issue"] = {
             "issueId": "resolve-all", "component": "all", "all": True,
-            "message": _dp.resolve_all_seed(explained, probe, decision),
+            "message": _dp.resolve_all_seed(explained, probe, decision, playbook),
             "suggestedChecks": [],
         }
     handler._send_json(out)
@@ -16654,7 +16898,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   <div class="cols">
     <div class="col-left">
-      __ISSUES_BLOCK__
+      <div id="doctorIssues">__ISSUES_BLOCK__</div>
       <div class="card panel">
         <h3>Diagnostics</h3>
         <button class="btn" id="runBtn" onclick="runDiagnostics()">Re-run full health check</button>
@@ -16673,12 +16917,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
           <span style="color:#71717a;font-size:12px">Engine:</span>
           <button type="button" class="btn eng-btn" data-eng="claude" id="engC" onclick="pickDoctorEng('claude')">Claude</button>
           <button type="button" class="btn eng-btn" data-eng="gemini" id="engG" onclick="pickDoctorEng('gemini')">Gemini</button>
-          <button type="button" class="btn eng-btn" data-eng="grok" id="engK" onclick="pickDoctorEng('grok')">Grok</button>
-          <button type="button" class="btn" id="diagnoseBtn" onclick="runDiagnose()">Diagnose</button>
+<button type="button" class="btn eng-btn" data-eng="grok" id="engK" onclick="pickDoctorEng('grok')">Grok</button>
+<button type="button" class="btn eng-btn" data-eng="chatgpt" id="engChat" onclick="pickDoctorEng('chatgpt')">ChatGPT</button>
+<button type="button" class="btn" id="diagnoseBtn" onclick="runDiagnose()">Diagnose</button>
           <span id="engHealth" style="color:#a1a1aa;font-size:11px"></span>
         </div>
         <div id="terminal"></div>
-        <div class="hint">Shell-first (W8/SC6): page is usable immediately. Session starts only when you click Diagnose — no multi-minute blank wait. Engines: Claude · Gemini(agy) · Grok (grok.exe -p). Unhealthy engines disable with health.</div>
+        <div class="hint">Shell-first (W8/SC6): page is usable immediately. Session starts only when you click Diagnose — no multi-minute blank wait. Engines: Claude · Gemini(agy) · Grok (grok.exe -p) · ChatGPT (Codex subscription). Unhealthy engines disable with health.</div>
       </div>
     </div>
   </div>
@@ -16687,6 +16932,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 <script>
 (function () {
   var token = new URLSearchParams(location.search).get('token') || '';
+  if (!token) { try { token = localStorage.getItem('anchor_token') || ''; } catch (_) {} }
   function tq(url) {
     if (!token) return url;
     return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(token);
@@ -16698,7 +16944,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   }
   function getHdrs() {
     var h = {};
-    if (token) h['X-Anchor-Token'] = token;
+    if (token) h['Authorization'] = 'Bearer ' + token;
     return h;
   }
   // Carry the token onto the server-rendered report links when configured.
@@ -16709,13 +16955,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // ── W8/SC6 shell-first doctor terminal (NO auto session_start on load) ──
   var term = new Terminal({ convertEol: true, fontSize: 13, theme: { background: '#0c0e14' }, scrollback: 5000 });
   term.open(document.getElementById('terminal'));
-  term.write('[doctor] Shell ready (≤1s). Pick Claude / Gemini / Grok, then Diagnose.\r\n');
+  term.write('[doctor] Shell ready (≤1s). Pick Claude / Gemini / Grok / ChatGPT, then Diagnose.\r\n');
   term.write('[doctor] No auto-session — page stays usable without multi-minute blank wait.\r\n');
   var activeWs = null;
   var sendChain = Promise.resolve();
   var sessionId = null;
-  var ZH_ENG = 'claude';
-  var ZH_ENG_HEALTH = { claude: true, gemini: true, grok: true, chatgpt: true };
+  var ZH_ENG = null;
+  var ZH_SETTINGS_REVISION = null;
+  var ZH_ENG_HEALTH = { claude: false, gemini: false, grok: false, chatgpt: false };
   function paintEng() {
     ['claude','gemini','grok','chatgpt'].forEach(function (e) {
       var id = e === 'claude' ? 'engC' : (e === 'gemini' ? 'engG' : (e === 'grok' ? 'engK' : 'engChat'));
@@ -16727,7 +16974,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       el.style.outline = (ZH_ENG === e) ? '1px solid #6c9cfc' : 'none';
     });
     var h = document.getElementById('engHealth');
-    if (h) h.textContent = ZH_ENG_HEALTH[ZH_ENG] === false ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' ready');
+    if (h) h.textContent = !ZH_ENG ? 'Model settings unavailable; reload after signing in' : (ZH_ENG_HEALTH[ZH_ENG] === false ? (ZH_ENG + ' unavailable') : (ZH_ENG + ' ready'));
+    var launchButton = document.getElementById('diagnoseBtn');
+    if (launchButton) launchButton.disabled = !ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true;
   }
   window.pickDoctorEng = function (e) {
     if (ZH_ENG_HEALTH[e] === false) {
@@ -16798,6 +17047,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // server re-probes the live server and decides — a re-run when nothing is
   // wrong (the banner clears when the report is clean), else ONE doctor
   // session seeded with all the issues + the probe receipt, and RUN.
+  function writePlaybook(p) {
+    (p.playbook || []).forEach(function (c) {
+      term.write('[doctor] known case: ' + (c.title || c.id) + '\r\n');
+      if (c.meaning) term.write('[doctor]   ' + c.meaning + '\r\n');
+    });
+  }
   window.resolveAll = function () {
     var btn = document.getElementById('resolveAllBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Probing…'; }
@@ -16809,16 +17064,24 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         (p.probe || []).forEach(function (q) {
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
+        writePlaybook(p);
         if (p.decision === 'rerun') {
-          term.write('[doctor] Every issue was the 5 AM self-test failing to reach its target, and the live server answers now. '
+          if (!p.rerun || !p.rerun.ok) {
+            term.write('[doctor] Verification could not start: ' + ((p.rerun && p.rerun.error) || 'no run receipt') + '\r\n');
+            refreshStats();
+            return;
+          }
+          term.write('[doctor] This looks like a known stale or load result, not live damage. '
             + 'Re-running the health check so the report says so; the red banner clears when it is clean.\r\n');
           if (btn) btn.textContent = 'Re-running…';
+          pollTail(0);
         } else if (p.decision === 'session' && p.seed_issue) {
           term.write('[doctor] ' + (p.issues || []).length + ' issue(s) need work - starting ONE doctor session for all of them.\r\n');
           BANNER_ISSUE = p.seed_issue;
           window.runDiagnose({ fromBanner: true, resolve: true });
         } else {
           term.write('[doctor] Nothing open to resolve.\r\n');
+          refreshStats();
         }
       })
       .catch(function (e) { if (btn) { btn.disabled = false; btn.textContent = 'Resolve all'; } term.write('[doctor] Resolve all failed: ' + e + '\r\n'); });
@@ -16891,8 +17154,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
         (p.probe || []).forEach(function (q) {
           term.write('[doctor] live ' + q.path + ': ' + (q.ok ? ('answers (' + q.code + ', ' + q.ms + ' ms)') : ('NO ANSWER - ' + (q.error || ''))) + '\r\n');
         });
+        writePlaybook(p);
         if (p.decision === 'rerun') {
-          term.write('[doctor] Every issue was the 5 AM self-test failing to reach its own copy, and the live server answers now. '
+          term.write('[doctor] This looks like a known stale or load result, not live damage. '
             + 'Re-running the health check myself; the red banner clears when the report is clean.\r\n');
           window.runDiagnostics();
         } else if (p.decision === 'session') {
@@ -16907,11 +17171,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // Shell-first: load deterministic status/engine health only. Opening this
   // page NEVER starts a paid model, including banner URLs with diagnose=1.
   fetch(tq('/api/doctor/status'), { headers: getHdrs() })
-    .then(function (r) { return r.json(); })
+    .then(function (r) { if (!r.ok) throw new Error('Model status authentication failed'); return r.json(); })
     .then(function (s) {
       if (s && s.engines) {
         s.engines.forEach(function (row) { ZH_ENG_HEALTH[row.id] = !!row.enabled; });
         if (s.defaultEngine) ZH_ENG = s.defaultEngine;
+        ZH_SETTINGS_REVISION = s.settings_revision == null ? null : s.settings_revision;
       }
       paintEng();
       // Banner URLs preload context but require a human click before a MODEL
@@ -16942,17 +17207,21 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
 
   window.runDiagnose = function (opts) {
     opts = opts || {};
-    if (sessionId) {
+    if (sessionId && !opts.resolve) {
       term.write('[doctor] Session already live.\r\n');
       return;
     }
-    if (ZH_ENG_HEALTH[ZH_ENG] === false) {
+    if (sessionId && opts.resolve) {
+      term.write('[doctor] Starting a fresh Resolve session on the selected engine.\r\n');
+      sessionId = null;
+    }
+    if (!ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true) {
       term.write('[doctor] Engine ' + ZH_ENG + ' disabled with health — pick another.\r\n');
       return;
     }
     var btn = document.getElementById('diagnoseBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
-    var startBody = { backend: ZH_ENG };
+    var startBody = { backend: ZH_ENG, settings_revision: ZH_SETTINGS_REVISION };
     if (token) startBody.token = token;
     // W9: seed Doctor 1:1 from banner issue payload (short diagnose seed).
     if (BANNER_ISSUE) {
@@ -16998,12 +17267,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
   // ── Background diagnostics run + live tail ──
   var chipNames = { red: 'issues', yellow: 'warnings', green: 'healthy' };
   function setCards(s) {
+    // A completed repair only clears findings after a newer report proves it.
+    // Replace the old issue panel as well as the status cards; never retain a
+    // stale Resolve All button after the report has become clean.
+    DOCTOR_ISSUES = s.issues || [];
+    var issuePanel = document.getElementById('doctorIssues');
+    if (issuePanel && typeof s.issues_html === 'string') issuePanel.innerHTML = s.issues_html;
     var el = document.getElementById('cardStatusDot');
     if (el) el.className = 'dot ' + (s.status || 'none');
     el = document.getElementById('cardStatusText');
     if (el) el.textContent = s.status_text || '';
     el = document.getElementById('cardStatusDetail');
-    if (el) el.textContent = s.status_detail || '';
+    if (el) el.textContent = (s.status_detail || '') +
+      ((s.warnings || []).length ? ' ' + s.warnings.join('; ') : '');
     el = document.getElementById('cardLastRun');
     if (el) el.textContent = s.last_run || '—';
     el = document.getElementById('cardLastAgo');
@@ -17037,6 +17313,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sa
       .then(function (s) { if (s && s.ok) setCards(s); })
       .catch(function () {});
   }
+  // Read-only refresh catches reports produced by a Doctor session or the
+  // scheduled checker too, not just this tab's diagnostics button.
+  setInterval(function () { if (!document.hidden) refreshStats(); }, 15000);
+  window.addEventListener('focus', refreshStats);
   var polling = false;
   function pollDone() {
     polling = false;
@@ -19135,8 +19415,8 @@ function resumeSession(sessionId, btn) {
     btn.innerText = "Resume";
   });
 }
-var ZH_ENG = 'claude';
-var ZH_ENG_HEALTH = { claude: true, gemini: true, grok: true, chatgpt: true };
+var ZH_ENG = null;
+var ZH_ENG_HEALTH = { claude: false, gemini: false, grok: false, chatgpt: false };
 function paintZhEng() {
   ['claude','gemini','grok','chatgpt'].forEach(function(e) {
     var el = document.getElementById('zh-eng-' + e);
@@ -19172,7 +19452,7 @@ function loadZhEngines() {
     .catch(function() { paintZhEng(); });
 }
 function startZombieTerminal(btn) {
-  if (ZH_ENG_HEALTH[ZH_ENG] === false) {
+  if (!ZH_ENG || ZH_ENG_HEALTH[ZH_ENG] !== true) {
     alert(ZH_ENG + ' is disabled (unhealthy). Pick another engine.');
     return;
   }
@@ -20553,6 +20833,16 @@ class AnchorHandler(BaseHTTPRequestHandler):
             # Deliverable file streaming (2026-08-25): the routes layer returns a
             # {__file__, __ctype__} marker (containment already enforced there);
             # everything else stays JSON.
+            if code == 200 and isinstance(obj, dict) and "__notebook_redirect__" in obj:
+                # Authorization already succeeded. Never forward Anchor's
+                # token/cookie to Jupyter or leak it in a Referer header.
+                self.send_response(302)
+                self.send_header("Location", obj["__notebook_redirect__"])
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if code == 200 and isinstance(obj, dict) and "__html__" in obj:
                 # (2026-09-04) a rendered preview page (Office deliverables)
                 self._send_html(obj["__html__"])
@@ -22181,7 +22471,7 @@ def main():
 
     try:
         import job_runner
-        job_runner.reconcile_on_startup()
+        job_runner.reconcile_on_startup(defer_handoffs=True)
     except Exception as e:
         _logger.error(f"job_runner.reconcile_on_startup failed: {e}")
 
@@ -22462,6 +22752,13 @@ def main():
     # 10061 until serve_forever finally started — the "0/7 endpoints" red banner.)
     # listen() now: "accepts connections" == "serving".
     server.server_activate()
+    try:
+        import job_runner
+        job_runner.start_terminal_handoff_recovery()
+    except Exception as e:
+        _logger.error(
+            "job_runner.start_terminal_handoff_recovery failed (%s)", type(e).__name__
+        )
     _boot_dt = time.time() - _boot_t0
     _logger.info("Server ready — accepting connections on %s (boot reconcile %.1fs)",
                  url, _boot_dt)

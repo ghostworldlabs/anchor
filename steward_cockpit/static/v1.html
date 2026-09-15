@@ -34,6 +34,7 @@
   </div>
 
   <div class="leftcol">
+    <div class="plan-grip" data-plangrip role="separator" aria-label="Resize plan" aria-orientation="vertical" tabindex="0"></div>
     <div class="rail">
       <button type="button" class="wptile" data-wptile title="Open the work-product map">
         <span class="wplab">Work product</span>
@@ -52,7 +53,7 @@
   <div class="railtab" data-railtoggle2>the plan</div>
 
   <div class="main">
-    <div class="openq" data-openq title="the steward is waiting on this — click to answer"></div>
+    <div class="openq" data-openq title="Show the saved decision context"></div>
     <div class="scroll"></div>
     <div class="composer">
       <textarea data-say rows="1"
@@ -142,13 +143,26 @@ document.querySelectorAll("[data-statustoggle],[data-statustoggle2]").forEach(b 
   });
 const t2 = document.querySelector("[data-railtoggle2]");
 if (t2) t2.onclick = () => app.classList.toggle("railhide");
+const planGrip=document.querySelector('[data-plangrip]');
+const setPlanWidth=w=>{const other=app.classList.contains('statusopen')?document.querySelector('.rightcol').offsetWidth:0;
+  const width=Math.min(620,Math.max(230,window.innerWidth-other-320),Math.max(230,w));document.documentElement.style.setProperty('--planw',width+'px');
+  try{localStorage.setItem('steward_plan_width',String(width));}catch(e){};planGrip.setAttribute('aria-valuenow',String(width));};
+if(planGrip){
+  try{const saved=Number(localStorage.getItem('steward_plan_width'));if(saved)setPlanWidth(saved);}catch(e){}
+  planGrip.addEventListener('pointerdown',e=>{e.preventDefault();planGrip.setPointerCapture(e.pointerId);
+    const move=ev=>setPlanWidth(ev.clientX-document.querySelector('.leftcol').getBoundingClientRect().left);
+    const end=()=>{planGrip.removeEventListener('pointermove',move);planGrip.removeEventListener('pointerup',end);planGrip.removeEventListener('pointercancel',end);};
+    planGrip.addEventListener('pointermove',move);planGrip.addEventListener('pointerup',end);planGrip.addEventListener('pointercancel',end);});
+  planGrip.addEventListener('keydown',e=>{if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();setPlanWidth(document.querySelector('.leftcol').offsetWidth+(e.key==='ArrowRight'?20:-20));}});
+}
 // slide the open status pane wider/narrower by its left grip
 const grip = document.querySelector("[data-pgrip]");
 if (grip) grip.addEventListener("pointerdown", (e) => {
   e.preventDefault();
   grip.setPointerCapture(e.pointerId);
   const move = (ev) => {
-    const w = Math.min(760, Math.max(280, window.innerWidth - ev.clientX));
+    const other=app.classList.contains('railhide')?0:document.querySelector('.leftcol').offsetWidth;
+    const w = Math.min(760,Math.max(280,window.innerWidth-other-320),Math.max(280, window.innerWidth - ev.clientX));
     document.documentElement.style.setProperty("--statusw", w + "px");
   };
   const up = () => { grip.removeEventListener("pointermove", move);
@@ -156,5 +170,16 @@ if (grip) grip.addEventListener("pointerdown", (e) => {
   grip.addEventListener("pointermove", move);
   grip.addEventListener("pointerup", up);
 });
+function fitConversation(){
+  if(innerWidth<850){app.classList.add('railhide');app.classList.remove('statusopen');}
+  else {
+    const left=app.classList.contains('railhide')?0:document.querySelector('.leftcol').offsetWidth;
+    const maximum=Math.max(280,innerWidth-left-320);
+    const right=Math.min(document.querySelector('.rightcol').offsetWidth||380,maximum);
+    document.documentElement.style.setProperty('--statusw',right+'px');
+    if(planGrip)setPlanWidth(document.querySelector('.leftcol').offsetWidth||300);
+  }
+}
+window.addEventListener('resize',fitConversation);fitConversation();
 </script>
 </body></html>

@@ -2587,6 +2587,20 @@ async function deleteGrassIdea(ideaId) {
 //   program    → run-to-result; report success/failure.
 //   doc        → open the rendered view (the /artifact route) in a new tab.
 // Token-aware via _postJson (retries once on 401).
+function openCockpitDeliverable(el) {
+  if (!el || el.getAttribute('data-openable') !== '1') return;
+  var path = el.getAttribute('data-path') || '';
+  if (!path) return;
+  var tok = '';
+  try { tok = (typeof _anchorToken === 'function' ? _anchorToken() : '') || localStorage.getItem('anchor_token') || ''; } catch (e) {}
+  var q = 'pid=' + encodeURIComponent(PROJECT_ID)
+    + '&dir=' + encodeURIComponent(el.getAttribute('data-effort-dir') || '')
+    + '&path=' + encodeURIComponent(path)
+    + '&view=1'
+    + (tok ? '&token=' + encodeURIComponent(tok) : '');
+  window.open('/api/steward/deliverable-file?' + q, '_blank', 'noopener');
+}
+
 async function launchDeliverable(btn) {
   var li = btn.closest('.deliv-pinned');
   var msg = li ? li.querySelector('.deliv-msg') : null;
@@ -2604,7 +2618,7 @@ async function launchDeliverable(btn) {
       data = await r.json();
     }
     if (!data || !data.ok) {
-      if (msg) msg.textContent = 'failed: ' + ((data && data.error) || 'unknown');
+      if (msg) msg.textContent = 'failed: ' + ((data && (data.error || data.reason)) || 'unknown');
       btn.disabled = false;
       return;
     }
@@ -2616,6 +2630,18 @@ async function launchDeliverable(btn) {
       if (stopBtn) stopBtn.style.display = '';
       btn.style.display = 'none';
       if (data.url) window.open(data.url, '_blank');
+    } else if (data.type === 'notebook' || dtype === 'notebook') {
+      if (msg) msg.textContent = 'opening on the Anchor host; Jupyter sign-in may be required';
+      btn.disabled = false;
+      if (data.href) {
+        var notebookLink = new URL(data.href, location.origin);
+        if (notebookLink.origin !== location.origin || notebookLink.pathname !== '/api/steward/notebook-open') {
+          throw new Error('Invalid notebook navigation route');
+        }
+        var notebookToken = _anchorToken();
+        if (notebookToken) notebookLink.searchParams.set('token', notebookToken);
+        window.open(notebookLink.href, '_blank', 'noopener,noreferrer');
+      }
     } else if (dtype === 'doc') {
       if (msg) msg.textContent = 'opened';
       btn.disabled = false;

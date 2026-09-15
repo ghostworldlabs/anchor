@@ -12,10 +12,13 @@ painted entirely from these four files (plus the conversation log tail):
 Unreadable or absent files produce honest gaps, never invented state.
 """
 import json
+import hashlib
 import math
 import os
 import re
 import time
+import threading
+from copy import deepcopy
 from pathlib import Path
 
 TAIL_TURNS = 40
@@ -130,6 +133,37 @@ def _first_sentence(text: str):
     return (m.group(1) if m else flat)[:220]
 
 
+def one_line(text, limit=110):
+    """One human-readable sentence for a status fact; never a hidden dump."""
+    flat = " ".join(str(text or "").split())
+    if not flat:
+        return ""
+    match = re.search(r"^(.{20,}?)(?<!\d)[.!?](?:\s|$)", flat)
+    sentence = match.group(0).strip() if match else flat
+    if len(sentence) <= limit:
+        return sentence
+    clipped = sentence[:limit - 1].rsplit(" ", 1)[0]
+    return (clipped or sentence[:limit - 1]) + "\u2026"
+
+
+def status_facts(effort="", summary="", doing="", status="", tests="",
+                 blocker="", procs="", journal="", eta="", todo=""):
+    """Locked status categories with concise values for cockpit and dashboard."""
+    rows = (
+        ("Summary", summary),
+        ("Effort", effort),
+        ("Doing", doing),
+        ("Status", status),
+        ("Tests", tests),
+        ("Blocker", blocker or "none"),
+        ("Procs", procs or "none"),
+        ("Journal", journal),
+        ("ETA", eta),
+        ("To do", todo),
+    )
+    return [{"label": label, "value": one_line(value) or "—"} for label, value in rows]
+
+
 def _goal_md(text: str):
     """Goal section with markdown bold kept (for the rich expanded tile):
     blockquote markers and horizontal rules removed, and soft line-wraps
@@ -162,6 +196,110 @@ def _goal_md(text: str):
         else:
             unwrapped.append(" ".join(s.strip() for s in para.splitlines()))
     return "\n\n".join(unwrapped)
+
+
+_REFINEMENT_READ_LOCK = threading.Lock()
+_REFINEMENT_READ_SLOTS = {}
+
+
+def _refinement_fingerprint(root):
+    result = []
+    for rel in ('roadmap.json', 'Finished Deliverables/index.json',
+                'Finished Deliverables/.steward-approved-pending.json'):
+        try:
+            st = (root / rel).stat()
+            result.append((st.st_ino, st.st_mtime_ns, st.st_size))
+        except OSError:
+            result.append(None)
+    return tuple(result)
+
+
+def read_refinement(campaign_dir: str):
+    """Coalesce dashboard reads; the spine remains the lifecycle authority.
+
+    Source changes invalidate immediately. A two-second maximum age also
+    rechecks external artifact damage that does not alter the ledger/index.
+    Mutations still use the writer's sequence and exact-byte checks.
+    """
+    root = Path(campaign_dir).resolve()
+    key = os.path.normcase(str(root))
+    with _REFINEMENT_READ_LOCK:
+        slot = _REFINEMENT_READ_SLOTS.setdefault(key, {'lock': threading.Lock()})
+    with slot['lock']:
+        fingerprint = _refinement_fingerprint(root)
+        if (slot.get('fingerprint') == fingerprint and
+                time.monotonic() < slot.get('until', 0)):
+            return deepcopy(slot['result'])
+        result = _read_refinement_uncached(str(root))
+        if _refinement_fingerprint(root) == fingerprint:
+            slot.update(fingerprint=fingerprint, result=deepcopy(result),
+                        until=time.monotonic() + (2.0 if result and result.get('ok') else .25))
+        return result
+
+
+def _read_refinement_uncached(campaign_dir: str):
+    """Ask the existing spine for managed truth; legacy campaigns stay legacy."""
+    try:
+        record = json.loads((Path(campaign_dir) / "roadmap.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not any(e.get("kind") == "refinement_update" for e in record.get("roadmap_events", [])):
+        return None
+    from steward_cockpit.refinement_client import read_state
+    return read_state(campaign_dir)
+
+
+def refinement_items(campaign_dir, state):
+    """Opening metadata from the verified event fold; no Python lifecycle fold."""
+    items = []
+    for step_id, s in state.get("slices", {}).items():
+        for product_id, revision_id in s.get("candidate", {}).items():
+            rev = s["revisions"][revision_id]
+            imported = [r for r in s['revisions'].values()
+                        if r['product_id'] == product_id and r.get('source_history')]
+            base = max((r['source_history']['iteration'] for r in imported), default=-1)
+            presentations = [p for p in s.get('presentations', [])
+                             if any(m['product_id'] == product_id for m in p['members'])]
+            offset = 0
+            if imported and presentations:
+                first = presentations[0]
+                first_member = next(m for m in first['members'] if m['product_id'] == product_id)
+                first_source = s['revisions'][first_member['revision_id']].get('source_history')
+                offset = (first_source['iteration'] if first_source else base + 1) - first['round']
+            displayed_round = (rev['source_history']['iteration'] if rev.get('source_history')
+                               else s['round'] + offset if presentations or not imported else base + 1)
+            item = {"what": product_id, "path": rev["path"], "where_text": rev["path"],
+                    "step": step_id, "date": rev.get("at", state.get("last_event_at", "")),
+                    "route": None, "run": None, "openable": True, "managed": True,
+                    "revision_id": revision_id, "product_id": product_id, "hash": rev["hash"], "round": displayed_round,
+                    "provisional": rev.get("provisional"),
+                    "phase": s["phase"], "history": []}
+            for p in s.get("presentations", []):
+                for member in p["members"]:
+                    if member["product_id"] != product_id:
+                        continue
+                    shown_round = p['round'] + offset
+                    entry = {"what": ("Initial draft" if shown_round == 0 else "Refinement %s" % shown_round),
+                             "path": member["path"], "hash": member["hash"], "step": step_id,
+                             "product_id": product_id, "revision_id": member["revision_id"],
+                             "presentation_id": p["id"], "round": p["round"], "date": p.get("at", ""),
+                             "accepted": p["id"] == s.get("accepted_presentation"),
+                             "managed": True, "openable": True}
+                    item["history"].append(entry)
+                    if member["revision_id"] == revision_id:
+                        item["presentation_id"] = p["id"]
+                        item["product_id"] = product_id
+            presented_ids = {v['revision_id'] for v in item['history']}
+            for old in imported:
+                if old['revision_id'] in presented_ids or old['revision_id'] == revision_id:
+                    continue
+                origin = old['source_history']; n = origin['iteration']
+                item['history'].append({'what':('Initial draft' if n == 0 else f'Refinement {n}'),
+                    'path':old['path'],'hash':old['hash'],'step':step_id,'product_id':product_id,
+                    'revision_id':old['revision_id'],'date':origin['at'],'managed':True,'openable':True,
+                    'source_history':origin})
+            items.append(item)
+    return items
 
 
 def read_map(campaign_dir: str):
@@ -202,7 +340,7 @@ def read_map(campaign_dir: str):
             if part not in _PART_TAGS:
                 part = ""
             gate = str(s.get("gate") or "").strip()
-            steps.append({
+            step = {
                 "id": s.get("id") or s.get("step_id") or "",
                 "name": s.get("name") or "(unnamed)",
                 "status": s.get("status") or "proposed",
@@ -211,7 +349,11 @@ def read_map(campaign_dir: str):
                 "commissioned_as": s.get("commissioned_as"),
                 "part": part,
                 "gate": gate,
-            })
+                "component_ids": deepcopy(s.get("component_ids") or []),
+            }
+            if isinstance(s.get("navigation"), dict):
+                step["navigation"] = s["navigation"]
+            steps.append(step)
         goal_flips = [ev for ev in (roadmap.get("roadmap_events") or [])
                       if ev.get("kind") == "goal_flip"]
 
@@ -237,7 +379,14 @@ def read_map(campaign_dir: str):
         "next_recommended": strip.get("next_recommended", ""),
         "why_next": strip.get("why_next", ""),
         "uncertainty_flags": strip.get("uncertainty_flags", []),
+        "current_step_id": strip.get("current_step_id"),
+        "current_session_id": strip.get("current_session_id"),
+        "current_run_id": strip.get("current_run_id"),
+        "current_skill_status_source": strip.get("current_skill_status_source"),
+        "receipts": strip.get("receipts") if isinstance(strip.get("receipts"), list) else [],
     }
+    if "pending_request" in strip:
+        heartbeat["pending_request"] = strip["pending_request"]
     grasscatch = strip.get("grasscatch", []) or []
 
     # --- Attention flag ---
@@ -304,7 +453,86 @@ def read_map(campaign_dir: str):
     goal_reread = (not last_done_id) or (
         bool(last_flip) and last_flip_step == last_done_id)
 
+    refinement = read_refinement(campaign_dir)
+    if refinement is not None:
+        # Managed wait has one authority. These are read-time projections,
+        # never a second attention/Face/Strip writer.
+        attention["managed_refinement"] = True
+        attention["pending_request"] = None
+        heartbeat["pending_request"] = None
+        heartbeat["human_wait"] = ""
+        human_wait_face = ""
+        if not refinement.get("ok"):
+            attention.update(state="unknown", reason="Refinement state unavailable")
+            gaps.append("Refinement state unavailable: " + str(refinement.get("error")))
+            for step in steps:
+                if step["status"] == "done":
+                    step["status"] = "waiting"
+        else:
+            state = refinement["state"]
+            display_rounds = {}
+            for item in refinement_items(campaign_dir, state):
+                display_rounds[item['step']] = max(display_rounds.get(item['step'], 0), item['round'])
+            attention["producer_recovery_required"] = any(
+                item.get("status") == "pending_steward_review" and
+                item.get("terminal") in ("failed", "orphaned", "reaped", "cancelled", "interrupted")
+                for item in state.get("producer_handoffs", {}).values())
+            pending = state.get("pending_request")
+            attention["pending_requests"] = [dict(r, asked_at=p.get("at"))
+                for sl in state["slices"].values() for r in sl.get("review_requests", [])
+                if r.get("status") == "pending"
+                for p in sl.get("presentations", []) if p["id"] == r["presentation_id"]]
+            attention["work_digest"] = hashlib.sha256(json.dumps({sid: {
+                "candidate": sl.get("candidate"), "requirements": sl.get("requirements"),
+                "depends_on": sl.get("depends_on")}
+                for sid, sl in state["slices"].items()}, sort_keys=True).encode()).hexdigest()
+            attention["pending_request"] = pending
+            heartbeat["pending_request"] = pending
+            human_wait_face = pending.get("purpose", "") if pending else ""
+            heartbeat["human_wait"] = human_wait_face
+            for step in steps:
+                if step["id"] in state["slices"]:
+                    step["refinement"] = dict(state["slices"][step["id"]])
+                    step['refinement']['display_round'] = display_rounds.get(step['id'], step['refinement']['round'])
+                    step["refinement"]["producer_handoffs"] = [
+                        item for item in state.get("producer_handoffs", {}).values()
+                        if item.get("step_id") == step["id"]
+                        and item.get("status") == "pending_steward_review"]
+                    failed_producers = [item for item in step["refinement"]["producer_handoffs"]
+                                        if item.get("terminal") in ("failed", "orphaned", "reaped", "cancelled", "interrupted")]
+                    if failed_producers:
+                        gaps.append(step["name"] + ": producer failed; Steward recovery required")
+                        if step["status"] != "done":
+                            step["status"] = "waiting"
+                            step["waiting_on"] = "Producer failed; Steward recovery required"
+            unmapped = [item for item in state.get("producer_handoffs", {}).values()
+                        if not item.get("step_id")
+                        and item.get("status") == "pending_steward_review"]
+            if unmapped:
+                gaps.append(str(len(unmapped)) + " completed work handoff(s) need Steward to identify their slice")
+            if pending and attention.get("state") != "working":
+                attention.update(state="needs_you", reason=human_wait_face)
+            elif attention.get("state") in ("needs_you", "blocked"):
+                attention.update(state="quiet", reason="No pending refinement request")
+            if not refinement["projection_status"]["consistent"]:
+                gaps.append("Refinement views need repair: " + str(refinement["projection_status"].get("error", "projection-lag")))
+            finished = refinement.get("finished_projection")
+            if finished and not finished.get("consistent"):
+                gaps.append("Finished Deliverables needs repair: " + str(finished.get("error")))
+            nav = refinement.get("navigation")
+            if isinstance(nav, dict):
+                for step in steps:
+                    extra = nav.get(step.get("id"))
+                    if isinstance(extra, dict):
+                        step["navigation"] = extra
+        done = sum(1 for s in steps if s["status"] == "done")
+    from .navigation_compat import with_compat_navigation
+    organized = with_compat_navigation({"name": root.name, "steps": steps}, roadmap)
+    steps = organized["steps"]
     return {
+        "navigation_mode": organized["navigation_mode"],
+        "navigation_fallback": organized.get("navigation_fallback"),
+        "refinement": refinement,
         "dir": str(root),
         "name": root.name,
         "goal": goal,
@@ -780,7 +1008,9 @@ def _slice_started_epoch(campaign_dir, step_id):
     for ev in roadmap.get("roadmap_events") or []:
         if str(ev.get("step_id") or ev.get("id") or "") != str(step_id):
             continue
-        st = " ".join(str(ev.get(k) or "") for k in ("status", "to", "kind")).lower()
+        fields = ev.get("fields") if isinstance(ev.get("fields"), dict) else {}
+        st = " ".join([*(str(ev.get(k) or "") for k in ("status", "to", "kind")),
+                       str(fields.get("status") or "")]).lower()
         if "active" not in st and "start" not in st:
             continue
         ep = _parse_epoch(ev.get("at") or ev.get("ts") or ev.get("time")
@@ -794,14 +1024,145 @@ def _real_wait(text):
     """A strip that says "none" / "-" is not waiting on anyone (the Blocker row
     read "waiting on you: none" on a live effort, 2026-09-04)."""
     t = str(text or "").strip()
-    return "" if t.lower().rstrip(".") in ("", "none", "nothing", "-", "\u2014", "n/a") else t
+    if t.lower().rstrip(".") in ("", "none", "nothing", "-", "\u2014", "n/a"):
+        return ""
+    # A negative wait followed by its explanation is still no action for John.
+    # Keep ordinary phrases such as "none of these plans is approved" intact.
+    if re.match(r"^(?:none|nothing)\s+[\u2014\u2013-]\s+", t, re.IGNORECASE):
+        return ""
+    return t
+
+
+def _focused_step(m):
+    """Use the declared work item; never guess among several active steps."""
+    steps = m.get("steps") or []
+    current_id = (m.get("heartbeat") or {}).get("current_step_id")
+    if current_id:
+        found = next((s for s in steps if str(s.get("id")) == str(current_id)), None)
+        if found:
+            return found, ""
+        return None, "Current work item is unavailable: current_step_id does not match the roadmap."
+    active = [s for s in steps if s.get("status") == "active"]
+    if len(active) == 1:
+        return active[0], ""
+    if len(active) > 1:
+        return None, "Current work item is unavailable: several steps are active and no current_step_id is set."
+    return None, ""
+
+
+def _local_status_evidence(campaign_dir, m, engine_state, step):
+    """Read explicit, current receipts rather than inferring a pass from prose."""
+    heartbeat = m.get("heartbeat") or {}
+    identity = {
+        "session_id": engine_state.get("session_id") or heartbeat.get("current_session_id"),
+        "run_id": engine_state.get("run_id") or heartbeat.get("current_run_id"),
+    }
+    identity = {key: str(value) for key, value in identity.items() if value is not None and str(value)}
+    result = {
+        "tests": "Unavailable — no check receipt for the current work and session",
+        "journal": "Unavailable — no journal receipt for the current work and session",
+        "eta": "Unavailable — no current estimate",
+        "eta_source": {"state": "unavailable"},
+        "source": {"path": "strip.json", "step_id": step.get("id") if step else None, **identity},
+        "checks": [],
+        "journal_source": {"state": "unavailable"},
+    }
+    if not step or not identity:
+        return result
+
+    def epoch(value):
+        try:
+            return _parse_epoch(value) if value else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def current(receipt):
+        if not isinstance(receipt, dict) or str(receipt.get("step_id")) != str(step.get("id")):
+            return False
+        matches = [key for key, value in identity.items() if str(receipt.get(key) or "") == value]
+        conflicts = [key for key, value in identity.items()
+                     if receipt.get(key) is not None and str(receipt.get(key)) != value]
+        return bool(matches) and not conflicts
+
+    def contained_file(value):
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            base = Path(campaign_dir).resolve()
+            candidate = (base / value).resolve()
+            relative = candidate.relative_to(base)
+            return relative.as_posix() if candidate.is_file() else None
+        except (OSError, ValueError, RuntimeError):
+            return None
+
+    receipts = [r for r in heartbeat.get("receipts", []) if current(r)]
+    checks = [r for r in receipts if r.get("kind") == "local_check"]
+    # A later run of the same command supersedes its earlier result. Different
+    # checks remain visible, so a later pass cannot hide an unrelated failure.
+    latest_checks = {}
+    for receipt in sorted(checks, key=lambda r: epoch(r.get("finished_at") or r.get("started_at")) or 0):
+        command = receipt.get("command")
+        key = command.strip() if isinstance(command, str) and command.strip() else "(missing command)"
+        latest_checks[key] = receipt
+    for command, receipt in latest_checks.items():
+        path = contained_file(receipt.get("evidence"))
+        started = epoch(receipt.get("started_at"))
+        finished = epoch(receipt.get("finished_at"))
+        exit_code = receipt.get("exit_code")
+        state, detail = "unavailable", "receipt is incomplete"
+        if not path:
+            detail = "evidence file is missing or outside the effort"
+        elif command == "(missing command)" or started is None:
+            detail = "command or start time is missing"
+        elif exit_code is None and finished is None:
+            state, detail = "untested", "check has not finished"
+        elif not isinstance(exit_code, int) or isinstance(exit_code, bool) or finished is None or finished < started:
+            detail = "completion time or exit code is invalid"
+        elif exit_code == 0:
+            state, detail = "passed", "exit 0"
+        else:
+            state, detail = "failed", f"exit {exit_code}"
+        item = {"state": state, "command": command, "evidence": path, "detail": detail,
+                "started_at": receipt.get("started_at"), "finished_at": receipt.get("finished_at"),
+                "exit_code": exit_code, "step_id": receipt.get("step_id"),
+                "session_id": receipt.get("session_id"), "run_id": receipt.get("run_id")}
+        result["checks"].append(item)
+        estimate = receipt.get("eta")
+        if state == "untested" and isinstance(estimate, dict):
+            until = epoch(estimate.get("at"))
+            basis = estimate.get("basis")
+            if until is not None and until > time.time() and isinstance(basis, str) and basis.strip():
+                result["eta"] = f"Estimated {time.strftime('%H:%M', time.localtime(until))} — {basis.strip()}"
+                result["eta_source"] = {"state": "available", "at": estimate["at"], "basis": basis.strip(),
+                                        "source": "local_check", "evidence": path,
+                                        "step_id": receipt.get("step_id"), **identity}
+    if result["checks"]:
+        result["tests"] = "; ".join(f"{item['state'].capitalize()} — {item['command']} ({item['detail']})"
+                                     for item in result["checks"])
+
+    journals = sorted((r for r in receipts if r.get("kind") == "journal_update"),
+                      key=lambda r: epoch(r.get("at")) or 0)
+    if journals:
+        receipt = journals[-1]
+        path = contained_file(receipt.get("path"))
+        summary = receipt.get("summary")
+        entry_id = receipt.get("entry_id")
+        state = "available" if path and epoch(receipt.get("at")) is not None and entry_id and isinstance(summary, str) and summary.strip() else "unavailable"
+        result["journal_source"] = {"state": state, "path": path, "entry_id": entry_id,
+                                     "at": receipt.get("at"), "step_id": receipt.get("step_id"),
+                                     "session_id": receipt.get("session_id"), "run_id": receipt.get("run_id")}
+        if state == "available":
+            result["journal"] = f"{entry_id}: {summary.strip()}"
+        else:
+            result["journal"] = "Unavailable — current journal receipt or its file is incomplete"
+    return result
 
 
 def slice_of(m):
     """The current slice: the active roadmap step, its position, and its
     done-when in one short line."""
     steps = m.get("steps") or []
-    active = next((s for s in steps if s.get("status") == "active"), None)
+    active, _focus_warning = _focused_step(m)
     if not active:
         return None
     brief = _first_sentence(active.get("done_when") or "")
@@ -896,8 +1257,17 @@ def compose_status(campaign_dir: str, engine_state=None):
     """
     m = read_map(campaign_dir)
     st = engine_state or {}
-    active = next((s for s in m["steps"] if s["status"] == "active"), None)
+    active, focus_warning = _focused_step(m)
     look = status_lookthrough(campaign_dir)
+    if m["heartbeat"].get("current_step_id"):
+        expected_source = m["heartbeat"].get("current_skill_status_source")
+        actual_source = look.get("source") if look else None
+        source_matches = (isinstance(expected_source, str) and expected_source.strip()
+                          and isinstance(actual_source, str)
+                          and expected_source.strip().replace("\\", "/") == actual_source.strip().replace("\\", "/"))
+        if not active or not source_matches:
+            look = None
+    local_evidence = _local_status_evidence(campaign_dir, m, st, active)
     now_lines = []
     running = None
     # THE LOOK-THROUGH: the commissioned skill is what is happening;
@@ -993,7 +1363,15 @@ def compose_status(campaign_dir: str, engine_state=None):
         plan_step = active["name"] if active else "(no active step)"
     next_text = (m["heartbeat"]["next_recommended"] or "").strip()
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
-    if halt and not waiting:
+    if "pending_request" in m["heartbeat"]:
+        pending = m["heartbeat"]["pending_request"]
+        if pending is None:
+            waiting = ""
+        elif isinstance(pending, str):
+            waiting = _real_wait(pending.strip())
+        elif isinstance(pending, dict):
+            waiting = str(pending.get("purpose") or pending.get("question") or pending.get("text") or "").strip()
+    if halt and not waiting and m.get("refinement") is None:
         # the run's stop is the thing waiting on him — a limit above all
         waiting = (("model session limit (" + halt["limit"] + "): ") if halt["limit"]
                    else (halt["skill"] + " stopped: ")) + halt["reason"]
@@ -1021,14 +1399,62 @@ def compose_status(campaign_dir: str, engine_state=None):
     slice_ = slice_of(m)
     started = _slice_started_epoch(campaign_dir, slice_["id"]) if slice_ else None
     live_skill = bool(look and not look["final"])
+    if focus_warning:
+        now_lines.append(focus_warning)
+    # Meaningful work time is separate from this status/heartbeat timestamp.
+    events = []
+    for sl in (m.get("refinement") or {}).get("state", {}).get("slices", {}).values():
+        for rev in sl.get("revisions", {}).values():
+            if rev.get("at"):
+                events.append({"at":(rev.get("source_history") or {}).get("at") or rev["at"], "summary":"Updated " + rev["product_id"].replace("-", " ")})
+        for accepted in sl.get("acceptance_history", []):
+            if accepted.get("at"):
+                events.append({"at":accepted["at"], "summary":"Approved " + str(accepted.get("member_product_id") or sl["title"]).replace("-", " ")})
+        for feedback in sl.get("feedback", []):
+            if feedback.get("at"):
+                events.append({"at":feedback["at"], "summary":"Feedback received for " + sl["title"]})
+    latest_event = max(events, key=lambda event:event["at"]) if events else None
+    doing = (running or {}).get("label") or (now_lines[0] if now_lines else "Idle")
+    summary = (slice_["name"] + (" — " + slice_["summary"] if slice_.get("summary") else "")) if slice_ else (m.get("goal_brief") or m.get("name") or "")
+    status_line = "%s · %s/%s done · %s" % (
+        plan_step or "no active step", plan["steps_done"], plan["steps_total"],
+        plan["attention"] or "quiet")
+    todo = (next_bullets(next_text)[:1] or [""])[0]
+    seats = []
+    for item in swarm:
+        if isinstance(item, dict):
+            seats.append((item.get("label") or "seat") + " · " + (item.get("state") or "?"))
+    facts = status_facts(
+        effort=m.get("name") or "",
+        summary=summary,
+        doing=doing,
+        status=status_line,
+        tests=(look.get("tests") if live_skill and look else None) or local_evidence["tests"],
+        blocker=("waiting on you: " + waiting) if waiting else ("blocked: " + halt["reason"] if halt else ""),
+        procs=" · ".join(seats) if seats else (
+            ((running or {}).get("skill") + " (commissioned)") if (running or {}).get("kind") == "skill" else ""),
+        journal=local_evidence["journal"],
+        eta=(look.get("eta") if live_skill and look and look.get("eta") else None) or local_evidence["eta"],
+        todo=todo,
+    )
+    compact = {"activity": doing,
+               "latest_event": latest_event, "next": next_bullets(next_text)[:1],
+               "question": (engine_state or {}).get("open_question") or plan.get("waiting_on_you") or "",
+               "facts": facts}
     out = {"at": time.strftime("%Y-%m-%d %H:%M"),
            "status_id": f"{time.time_ns():020d}",
-           "effort": m["name"],
+           "effort": m["name"], "latest_event":latest_event, "compact":compact,
            "now": now_lines,
            "running": running,
            "slice": slice_,
-           "eta": estimate_eta(slice_, look, started),
-           "tests": (look.get("tests") or "") if live_skill else "",
+           "eta": estimate_eta(slice_, look, started) if live_skill and look.get("eta") else local_evidence["eta"],
+           "tests": (look.get("tests") or local_evidence["tests"]) if live_skill else local_evidence["tests"],
+           "journal": local_evidence["journal"],
+           "evidence": {"source": local_evidence["source"], "checks": local_evidence["checks"],
+                        "journal": local_evidence["journal_source"],
+                        "eta": {"state": "available", "source": "live_skill", "skill": look.get("skill")}
+                               if live_skill and look.get("eta") else local_evidence["eta_source"]},
+           "focus_warning": focus_warning,
            "next_bullets": next_bullets(next_text),
            "project": project_line(m),
            "lookthrough": ({"source": look["source"], "age": look["age"],
@@ -1154,7 +1580,7 @@ def classify_route(token: str):
     return None
 
 
-def read_deliverables(campaign_dir: str):
+def _read_deliverables(campaign_dir: str):
     """Parse ``<cdir>/DELIVERABLES.md`` — THE campaign deliverables register (the
     steward's OWN convention, campaign journal 0010: one table row per thing a
     human would open; standing rule = a step producing a human-facing artifact is
@@ -1246,7 +1672,26 @@ def read_deliverables(campaign_dir: str):
                           # name fragment; the map embeds the link there
                           "step": cells[3].strip() if len(cells) > 3 else "",
                           "openable": openable})
-        return {"exists": True, "items": items + _plan_doc_rows(campaign_dir, items)}
+        refinement = read_refinement(campaign_dir)
+        if refinement is not None:
+            if not refinement.get("ok"):
+                return {"exists": True, "items": items, "error": refinement.get("error")}
+            managed = refinement_items(campaign_dir, refinement["state"])
+            paths = {item["path"] for item in managed}
+            items = managed + [item for item in items if item.get("path") not in paths]
+        approved = [{**item, "what": item["product_id"], "step": item["step_id"],
+            "date": item.get("accepted_at", ""), "accepted": True, "openable": True, "managed": True}
+            for item in (refinement or {}).get("approved_products", [])]
+        for item in items:
+            item["accepted_current"] = bool((refinement or {}).get("current_approvals", {})
+                .get(item.get("step"), {}).get(item.get("product_id"), False))
+            if item.get("managed"):
+                item["history"] = [v for v in item.get("history", []) if v.get("revision_id") != item.get("revision_id")]
+        from anchor_notebooks import decorate
+        return {"exists": True, "approved": approved,
+                "finished_projection": (refinement or {}).get("finished_projection"),
+                "items": [decorate(campaign_dir, item)
+                for item in items + _plan_doc_rows(campaign_dir, items)]}
     except Exception:
         return {"exists": True, "items": []}
 
@@ -1468,6 +1913,208 @@ def list_boneyard(root_dir: str):
     return out
 
 
+def _step_done(step):
+    r = step.get("refinement") if isinstance(step, dict) else None
+    if isinstance(r, dict):
+        return r.get("phase") == "done"
+    return (step or {}).get("status") == "done"
+
+
+def _step_needs_attention(step):
+    if not step:
+        return False
+    if step.get("status") in ("waiting", "blocked") or step.get("waiting_on"):
+        return True
+    r = step.get("refinement") if isinstance(step.get("refinement"), dict) else None
+    if r and r.get("phase") in ("awaiting_review", "blocked"):
+        return True
+    return any(h.get("status") == "pending_steward_review"
+               for h in (r or {}).get("producer_handoffs") or [] if isinstance(h, dict))
+
+
+def _stream_mark(steps):
+    if not steps:
+        return {"glyph": "▷", "cls": "todo"}
+    if all(_step_done(s) for s in steps):
+        return {"glyph": "✓", "cls": "done"}
+    if any(_step_needs_attention(s) for s in steps):
+        return {"glyph": "⚑", "cls": "flag"}
+    return {"glyph": "▷", "cls": "todo"}
+
+
+def _item_summary(item):
+    if item.get("accepted") or item.get("accepted_current"):
+        return "✓ Approved"
+    if item.get("managed"):
+        round_n = item.get("round")
+        round_l = "Initial draft" if round_n == 0 else (
+            "Refinement %s" % round_n if isinstance(round_n, int) else "")
+        phase = "Provisional draft" if item.get("provisional") else str(item.get("phase") or "").replace("_", " ")
+        return " · ".join(p for p in (round_l, phase) if p)
+    return str(item.get("date") or "").split("T")[0]
+
+
+def work_stream_model(map_, items):
+    """Same work-stream tree the cockpit Deliverables panel paints."""
+    from .navigation_compat import with_compat_navigation, resolve_step
+    map_ = map_ or {"name": "Project work", "steps": []}
+    if not map_.get("navigation_mode"):
+        map_ = with_compat_navigation(map_)
+    steps = list((map_ or {}).get("steps") or [])
+    definitions, featured = {}, set()
+    fallback = map_.get("navigation_fallback") or {}
+    for g in fallback.get("groups") or []:
+        definitions[g["id"]] = g
+    for s in steps:
+        n = s.get("navigation") or {}
+        for g in n.get("groups") or []:
+            if isinstance(g, dict) and g.get("id"):
+                definitions[g["id"]] = g
+        for p in n.get("featured_paths") or []:
+            featured.add(str(p).replace("\\", "/").lower())
+    roots, all_nodes, step_groups, overrides, related = [], {}, {}, {}, {}
+
+    def ensure(path):
+        if not (isinstance(path, list) and 0 < len(path) <= 2 and all(isinstance(g, str) and g in definitions for g in path)):
+            definitions["unclassified"] = {"id": "unclassified",
+                                           "label": "Other work — needs organization", "order": 99999}
+            path = [fallback["id"], "unclassified"] if fallback.get("id") else ["unclassified"]
+        parent = None
+        node = None
+        for gid in path:
+            g = definitions[gid]
+            node = all_nodes.get(g["id"])
+            if node is None:
+                node = {**g, "children": [], "steps": [], "items": [], "reference_steps": [], "reference_items": [], "parent": parent}
+                all_nodes[g["id"]] = node
+                (parent["children"] if parent else roots).append(node)
+            parent = node
+        return node
+
+    if fallback.get("id"):
+        ensure([fallback["id"]])
+        for c in fallback.get("components") or []:
+            ensure([fallback["id"], c["id"]])
+    for i, s in enumerate(steps):
+        n = s.get("navigation") or {}
+        group = ensure(n.get("path"))
+        group["steps"].append(s)
+        step_groups[s.get("id")] = group
+        for path in n.get("include_paths") or []:
+            ensure(path)
+        refs = []
+        for path in n.get("related_paths") or []:
+            ref = ensure(path)
+            if ref is not group and not any(ref is existing for existing in refs):
+                ref["reference_steps"].append(s)
+                refs.append(ref)
+        related[s.get("id")] = refs
+        for o in n.get("items") or []:
+            if isinstance(o, dict) and isinstance(o.get("source_path"), str):
+                overrides[o["source_path"].replace("\\", "/").lower()] = ensure(o.get("path"))
+    for it in items or []:
+        group = overrides.get(str(it.get("path") or "").replace("\\", "/").lower())
+        matched = resolve_step(steps, it.get("owner_step_id") if "owner_step_id" in it else it.get("step"))
+        if group is None:
+            if matched is not None:
+                group = step_groups.get(matched.get("id"))
+        (group or ensure(None))["items"].append(it)
+        if matched is not None:
+            for ref in related.get(matched.get("id"), []):
+                if ref is not group:
+                    ref["reference_items"].append(it)
+    def group_steps(node):
+        found = node["steps"] + node["reference_steps"]
+        for child in node["children"]:
+            found += group_steps(child)
+        return list({id(s): s for s in found}.values())
+    def sort_nodes(nodes):
+        nodes.sort(key=lambda n: (n.get("order") or 0, n.get("label") or ""))
+        for n in nodes:
+            sort_nodes(n["children"])
+            n["items"].sort(key=lambda it: (1 if it.get("managed") else 0,
+                                            str(it.get("date") or "")), reverse=True)
+            collected = group_steps(n)
+            primary = [s for s in collected if (s.get("navigation") or {}).get("role") == "primary"]
+            n["mark"] = _stream_mark(primary or collected)
+    sort_nodes(roots)
+    return {"roots": roots, "featured": featured}
+
+
+def current_review_items(map_, items):
+    from .navigation_compat import resolve_step
+    steps = (map_ or {}).get("steps") or []
+    current = []
+    for it in items or []:
+        owner = resolve_step(steps, it.get("step"))
+        if owner is None:
+            continue
+        nav = (owner or {}).get("navigation") or {}
+        if nav.get("current") is False or nav.get("role") == "support" or (owner or {}).get("status") == "parked":
+            continue
+        if it.get("accepted") or it.get("accepted_current"):
+            continue
+        if it.get("managed") and it.get("phase") != "done":
+            current.append(it)
+        elif not it.get("managed") and owner and owner.get("status") != "done" and (owner.get("refinement") or {}).get("phase") != "done":
+            normalize = lambda p: str(p or "").replace("\\", "/").lower()
+            featured = {normalize(p) for p in nav.get("featured_paths") or []}
+            designation = re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", str(it.get("what") or ""), re.I)
+            historical = re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)
+            if not historical and (normalize(it.get("path")) in featured or designation):
+                current.append(it)
+    current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
+    return current
+
+
+def read_deliverables(campaign_dir: str):
+    """Expose authoritative ownership/current flags to every cockpit client."""
+    from .navigation_compat import resolve_step
+    result = _read_deliverables(campaign_dir)
+    map_ = read_map(campaign_dir)
+    items = result.get("items") or []
+    current = {id(it) for it in current_review_items(map_, items)}
+    decorated = []
+    for it in items:
+        owner = resolve_step(map_["steps"], it.get("step"))
+        decorated.append({**it, "owner_step_id": owner.get("id") if owner else None,
+                          "is_current": id(it) in current})
+    return {**result, "items": decorated}
+
+
+def effort_deliverable_view(campaign_dir, effort_name="", effort_rel=""):
+    """One effort's cockpit deliverables view: current, approved, work streams."""
+    d = read_deliverables(campaign_dir)
+    m = read_map(campaign_dir)
+    items = d.get("items") or []
+    for it in items:
+        it["effort"] = effort_name
+        it["dir"] = effort_rel
+    approved = d.get("approved") or []
+    for it in approved:
+        it["effort"] = effort_name
+        it["dir"] = effort_rel
+    model = work_stream_model(m, items)
+    return {
+        "name": effort_name or m.get("name") or Path(campaign_dir).name,
+        "rel": effort_rel,
+        "current": current_review_items(m, items),
+        "approved": approved,
+        "streams": (model or {}).get("roots") or [],
+        "items": items,
+        "exists": d.get("exists", False),
+    }
+
+
+def project_deliverable_view(root_dir: str):
+    """Union of every steward effort under a project, grouped as in the cockpit."""
+    views = []
+    for e in discover_efforts(root_dir):
+        edir = str(Path(root_dir) / e["rel"]) if e["rel"] else root_dir
+        views.append(effort_deliverable_view(edir, e["name"], e["rel"]))
+    return views
+
+
 def discover_efforts(root_dir: str):
     """Steward efforts under a project: the project root itself (if it has a
     Face) plus one level of subdirs carrying their own ECGBERHT.md - the same
@@ -1498,7 +2145,7 @@ def map_stamp(campaign_dir: str):
     """Cheap change detector: mtimes of the files the map is painted from."""
     root = Path(campaign_dir)
     stamp = []
-    for rel in ("ECGBERHT.md", "roadmap.json", "strip.json",
+    for rel in ("ECGBERHT.md", "roadmap.json", "strip.json", "DELIVERABLES.md",
                 ".ecgberht/attention.json"):
         try:
             stamp.append((root / rel).stat().st_mtime_ns)
@@ -1561,6 +2208,12 @@ def _steps_from_plan_doc(root: Path):
 
 def plan_drift(campaign_dir: str):
     """Is the roadmap behind the plan documents? Pure, disk-true, never raises."""
+    refinement = read_refinement(campaign_dir)
+    if refinement is not None:
+        status = refinement.get("projection_status", {})
+        return {"drift": not (refinement.get("ok") and status.get("consistent")),
+                "reason": "" if refinement.get("ok") and status.get("consistent") else str(status.get("error") or refinement.get("error") or "projection-lag"),
+                "docs": ["PLAN.md"], "generation": status.get("generation")}
     root = Path(campaign_dir)
     docs = _plan_docs(root)
     if not docs:

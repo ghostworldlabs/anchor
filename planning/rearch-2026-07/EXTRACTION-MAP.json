@@ -11,16 +11,16 @@
   "blobs": {
     "generate_html": [
       [
-        7614,
-        7664
+        7728,
+        7778
       ],
       [
-        7863,
-        7882
+        7977,
+        7996
       ],
       [
-        7898,
-        10518
+        8012,
+        10632
       ]
     ],
     "render_project_window_html": []
@@ -30,697 +30,697 @@
       "kind": "named-var",
       "occurrences": 3,
       "slots": [
-        "generate_html_L7454_0",
-        "generate_html_L7525_0",
-        "generate_html_L7673_0"
+        "generate_html_L7568_0",
+        "generate_html_L7639_0",
+        "generate_html_L7787_0"
       ]
     },
-    "generate_html_L7455_0": {
+    "generate_html_L7569_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7455_0"
+        "generate_html_L7569_0"
       ]
     },
     "tier_btn": {
       "kind": "named-var",
       "occurrences": 3,
       "slots": [
-        "generate_html_L7458_0",
-        "generate_html_L7500_0",
-        "generate_html_L7529_0"
+        "generate_html_L7572_0",
+        "generate_html_L7614_0",
+        "generate_html_L7643_0"
       ]
     },
     "gpid_attr": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7492_0"
+        "generate_html_L7606_0"
       ]
     },
-    "generate_html_L7497_0": {
+    "generate_html_L7611_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7497_0"
+        "generate_html_L7611_0"
       ]
     },
-    "generate_html_L7503_0": {
+    "generate_html_L7617_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7503_0"
+        "generate_html_L7617_0"
       ]
     },
-    "generate_html_L7526_0": {
+    "generate_html_L7640_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7526_0"
+        "generate_html_L7640_0"
       ]
     },
-    "generate_html_L7609_0": {
+    "generate_html_L7723_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7609_0"
+        "generate_html_L7723_0"
       ]
     },
     "d_top_rows": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7648_0"
+        "generate_html_L7762_0"
       ]
     },
     "project_card": {
       "kind": "renderer-call",
       "occurrences": 4,
       "slots": [
-        "generate_html_L7651_0",
-        "generate_html_L7661_0",
-        "generate_html_L8757_0",
-        "generate_html_L8758_0"
+        "generate_html_L7765_0",
+        "generate_html_L7775_0",
+        "generate_html_L8871_0",
+        "generate_html_L8872_0"
       ]
     },
-    "generate_html_L7651_1": {
+    "generate_html_L7765_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7651_1"
+        "generate_html_L7765_1"
       ]
     },
-    "generate_html_L7659_0": {
+    "generate_html_L7773_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7659_0"
+        "generate_html_L7773_0"
       ]
     },
-    "generate_html_L7661_1": {
+    "generate_html_L7775_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7661_1"
+        "generate_html_L7775_1"
       ]
     },
-    "generate_html_L7663_0": {
+    "generate_html_L7777_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7663_0"
+        "generate_html_L7777_0"
       ]
     },
-    "generate_html_L7675_0": {
+    "generate_html_L7789_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L7675_0"
+        "generate_html_L7789_0"
       ]
     },
     "r3_rail_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8603_0"
+        "generate_html_L8717_0"
       ]
     },
     "health_banner_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8626_0"
+        "generate_html_L8740_0"
       ]
     },
     "render_model_prefs_controls": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8656_0"
+        "generate_html_L8770_0"
       ]
     },
     "r3_attention_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8683_0"
+        "generate_html_L8797_0"
       ]
     },
     "tasks_tile_links_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8699_0"
+        "generate_html_L8813_0"
       ]
     },
     "top_task_row": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8730_0"
+        "generate_html_L8844_0"
       ]
     },
-    "generate_html_L8735_0": {
+    "generate_html_L8849_0": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8735_0"
+        "generate_html_L8849_0"
       ]
     },
     "rnd_projects_html": {
       "kind": "named-var",
       "occurrences": 2,
       "slots": [
-        "generate_html_L8756_0",
-        "generate_html_L8851_0"
+        "generate_html_L8870_0",
+        "generate_html_L8965_0"
       ]
     },
-    "generate_html_L8757_1": {
+    "generate_html_L8871_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8757_1"
+        "generate_html_L8871_1"
       ]
     },
-    "generate_html_L8758_1": {
+    "generate_html_L8872_1": {
       "kind": "inline-literal",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8758_1"
+        "generate_html_L8872_1"
       ]
     },
     "r3_calendar_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8778_0"
+        "generate_html_L8892_0"
       ]
     },
     "r3_email_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8779_0"
+        "generate_html_L8893_0"
       ]
     },
     "grass_tile_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8780_0"
+        "generate_html_L8894_0"
       ]
     },
     "rnd_archive_html": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "generate_html_L8863_0"
+        "generate_html_L8977_0"
       ]
     },
     "cache_bust_script": {
       "kind": "renderer-call",
       "occurrences": 1,
       "slots": [
-        "generate_html_L10508_0"
+        "generate_html_L10622_0"
       ]
     },
     "pid_attr": {
       "kind": "named-var",
       "occurrences": 9,
       "slots": [
-        "render_project_window_html_L6098_0",
-        "render_project_window_html_L6103_0",
-        "render_project_window_html_L6104_0",
-        "render_project_window_html_L6111_0",
-        "render_project_window_html_L6124_0",
-        "render_project_window_html_L6125_0",
-        "render_project_window_html_L6127_0",
-        "render_project_window_html_L6128_0",
-        "render_project_window_html_L6132_0"
+        "render_project_window_html_L6209_0",
+        "render_project_window_html_L6214_0",
+        "render_project_window_html_L6215_0",
+        "render_project_window_html_L6222_0",
+        "render_project_window_html_L6235_0",
+        "render_project_window_html_L6236_0",
+        "render_project_window_html_L6238_0",
+        "render_project_window_html_L6239_0",
+        "render_project_window_html_L6243_0"
       ]
     },
     "rescan_btn": {
       "kind": "named-var",
       "occurrences": 2,
       "slots": [
-        "render_project_window_html_L6126_0",
-        "render_project_window_html_L6133_0"
+        "render_project_window_html_L6237_0",
+        "render_project_window_html_L6244_0"
       ]
     },
     "blurb_attr": {
       "kind": "named-var",
       "occurrences": 1,
       "slots": [
-        "render_project_window_html_L6266_0"
+        "render_project_window_html_L6377_0"
       ]
     }
   },
   "slots": [
     {
-      "slot": "generate_html_L7454_0",
+      "slot": "generate_html_L7568_0",
       "function": "generate_html",
-      "lineno": 7454,
+      "lineno": 7568,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L7455_0",
+      "slot": "generate_html_L7569_0",
       "function": "generate_html",
-      "lineno": 7455,
+      "lineno": 7569,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7455_0",
+      "helper": "generate_html_L7569_0",
       "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L7458_0",
+      "slot": "generate_html_L7572_0",
       "function": "generate_html",
-      "lineno": 7458,
+      "lineno": 7572,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L7492_0",
+      "slot": "generate_html_L7606_0",
       "function": "generate_html",
-      "lineno": 7492,
+      "lineno": 7606,
       "rule": "markup-named-var:gpid_attr",
       "kind": "named-var",
       "helper": "gpid_attr",
       "expr": "gpid_attr"
     },
     {
-      "slot": "generate_html_L7497_0",
+      "slot": "generate_html_L7611_0",
       "function": "generate_html",
-      "lineno": 7497,
+      "lineno": 7611,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7497_0",
+      "helper": "generate_html_L7611_0",
       "expr": "f'<span class=\"due-badge\">{esc(p[\"due\"])}</span>' if p.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L7500_0",
+      "slot": "generate_html_L7614_0",
       "function": "generate_html",
-      "lineno": 7500,
+      "lineno": 7614,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L7503_0",
+      "slot": "generate_html_L7617_0",
       "function": "generate_html",
-      "lineno": 7503,
+      "lineno": 7617,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7503_0",
+      "helper": "generate_html_L7617_0",
       "expr": "f'<div class=\"next-text\">Next: {esc(p[\"next\"])}</div>' if p.get(\"next\") else \"\""
     },
     {
-      "slot": "generate_html_L7525_0",
+      "slot": "generate_html_L7639_0",
       "function": "generate_html",
-      "lineno": 7525,
+      "lineno": 7639,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L7526_0",
+      "slot": "generate_html_L7640_0",
       "function": "generate_html",
-      "lineno": 7526,
+      "lineno": 7640,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7526_0",
+      "helper": "generate_html_L7640_0",
       "expr": "f'<span class=\"top-task-due\">{esc(t[\"due\"])}</span>' if t.get(\"due\") else \"\""
     },
     {
-      "slot": "generate_html_L7529_0",
+      "slot": "generate_html_L7643_0",
       "function": "generate_html",
-      "lineno": 7529,
+      "lineno": 7643,
       "rule": "markup-named-var:tier_btn",
       "kind": "named-var",
       "helper": "tier_btn",
       "expr": "tier_btn"
     },
     {
-      "slot": "generate_html_L7609_0",
+      "slot": "generate_html_L7723_0",
       "function": "generate_html",
-      "lineno": 7609,
+      "lineno": 7723,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7609_0",
+      "helper": "generate_html_L7723_0",
       "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
     },
     {
-      "slot": "generate_html_L7648_0",
+      "slot": "generate_html_L7762_0",
       "function": "generate_html",
-      "lineno": 7648,
+      "lineno": 7762,
       "rule": "markup-named-var:d_top_rows",
       "kind": "named-var",
       "helper": "d_top_rows",
       "expr": "d_top_rows"
     },
     {
-      "slot": "generate_html_L7651_0",
+      "slot": "generate_html_L7765_0",
       "function": "generate_html",
-      "lineno": 7651,
+      "lineno": 7765,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in d_p1_projects)"
     },
     {
-      "slot": "generate_html_L7651_1",
+      "slot": "generate_html_L7765_1",
       "function": "generate_html",
-      "lineno": 7651,
+      "lineno": 7765,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7651_1",
+      "helper": "generate_html_L7765_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
     },
     {
-      "slot": "generate_html_L7659_0",
+      "slot": "generate_html_L7773_0",
       "function": "generate_html",
-      "lineno": 7659,
+      "lineno": 7773,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7659_0",
+      "helper": "generate_html_L7773_0",
       "expr": "f'<div class=\"section-header\"><h3>Other Tasks</h3></div><div class=\"task-list\">{\"\".join(task_item(t) for t in d_other..."
     },
     {
-      "slot": "generate_html_L7661_0",
+      "slot": "generate_html_L7775_0",
       "function": "generate_html",
-      "lineno": 7661,
+      "lineno": 7775,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in d_p2_projects)"
     },
     {
-      "slot": "generate_html_L7661_1",
+      "slot": "generate_html_L7775_1",
       "function": "generate_html",
-      "lineno": 7661,
+      "lineno": 7775,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7661_1",
+      "helper": "generate_html_L7775_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
     },
     {
-      "slot": "generate_html_L7663_0",
+      "slot": "generate_html_L7777_0",
       "function": "generate_html",
-      "lineno": 7663,
+      "lineno": 7777,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7663_0",
+      "helper": "generate_html_L7777_0",
       "expr": "f'<div class=\"section-header\" style=\"margin-top:24px\"><h3>Completed ({len(d_done)})</h3></div><div class=\"task-list\">..."
     },
     {
-      "slot": "generate_html_L7673_0",
+      "slot": "generate_html_L7787_0",
       "function": "generate_html",
-      "lineno": 7673,
+      "lineno": 7787,
       "rule": "markup-named-var:notes_html",
       "kind": "named-var",
       "helper": "notes_html",
       "expr": "notes_html"
     },
     {
-      "slot": "generate_html_L7675_0",
+      "slot": "generate_html_L7789_0",
       "function": "generate_html",
-      "lineno": 7675,
+      "lineno": 7789,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L7675_0",
+      "helper": "generate_html_L7789_0",
       "expr": "f'<span class=\"task-energy\">{t[\"energy\"]}</span>' if t.get(\"energy\") else \"\""
     },
     {
-      "slot": "generate_html_L8603_0",
+      "slot": "generate_html_L8717_0",
       "function": "generate_html",
-      "lineno": 8603,
+      "lineno": 8717,
       "rule": "markup-named-var:r3_rail_html",
       "kind": "named-var",
       "helper": "r3_rail_html",
       "expr": "r3_rail_html"
     },
     {
-      "slot": "generate_html_L8626_0",
+      "slot": "generate_html_L8740_0",
       "function": "generate_html",
-      "lineno": 8626,
+      "lineno": 8740,
       "rule": "markup-named-var:health_banner_html",
       "kind": "named-var",
       "helper": "health_banner_html",
       "expr": "health_banner_html"
     },
     {
-      "slot": "generate_html_L8656_0",
+      "slot": "generate_html_L8770_0",
       "function": "generate_html",
-      "lineno": 8656,
+      "lineno": 8770,
       "rule": "call-to-renderer:render_model_prefs_controls",
       "kind": "renderer-call",
       "helper": "render_model_prefs_controls",
       "expr": "render_model_prefs_controls(extra_html=render_steward_control())"
     },
     {
-      "slot": "generate_html_L8683_0",
+      "slot": "generate_html_L8797_0",
       "function": "generate_html",
-      "lineno": 8683,
+      "lineno": 8797,
       "rule": "markup-named-var:r3_attention_html",
       "kind": "named-var",
       "helper": "r3_attention_html",
       "expr": "r3_attention_html"
     },
     {
-      "slot": "generate_html_L8699_0",
+      "slot": "generate_html_L8813_0",
       "function": "generate_html",
-      "lineno": 8699,
+      "lineno": 8813,
       "rule": "markup-named-var:tasks_tile_links_html",
       "kind": "named-var",
       "helper": "tasks_tile_links_html",
       "expr": "tasks_tile_links_html"
     },
     {
-      "slot": "generate_html_L8730_0",
+      "slot": "generate_html_L8844_0",
       "function": "generate_html",
-      "lineno": 8730,
+      "lineno": 8844,
       "rule": "call-to-renderer:top_task_row",
       "kind": "renderer-call",
       "helper": "top_task_row",
       "expr": "\"\".join(top_task_row(t) for t in top_tasks)"
     },
     {
-      "slot": "generate_html_L8735_0",
+      "slot": "generate_html_L8849_0",
       "function": "generate_html",
-      "lineno": 8735,
+      "lineno": 8849,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L8735_0",
+      "helper": "generate_html_L8849_0",
       "expr": "\"\".join(task_item(t) for t in other_tasks) or '<div class=\"empty-msg\">No P2/P3 tasks.</div>'"
     },
     {
-      "slot": "generate_html_L8756_0",
+      "slot": "generate_html_L8870_0",
       "function": "generate_html",
-      "lineno": 8756,
+      "lineno": 8870,
       "rule": "markup-named-var:rnd_projects_html",
       "kind": "named-var",
       "helper": "rnd_projects_html",
       "expr": "rnd_projects_html"
     },
     {
-      "slot": "generate_html_L8757_0",
+      "slot": "generate_html_L8871_0",
       "function": "generate_html",
-      "lineno": 8757,
+      "lineno": 8871,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in p1_projects)"
     },
     {
-      "slot": "generate_html_L8757_1",
+      "slot": "generate_html_L8871_1",
       "function": "generate_html",
-      "lineno": 8757,
+      "lineno": 8871,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L8757_1",
+      "helper": "generate_html_L8871_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 1 Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for p..."
     },
     {
-      "slot": "generate_html_L8758_0",
+      "slot": "generate_html_L8872_0",
       "function": "generate_html",
-      "lineno": 8758,
+      "lineno": 8872,
       "rule": "call-to-renderer:project_card",
       "kind": "renderer-call",
       "helper": "project_card",
       "expr": "\"\".join(project_card(p) for p in p2_projects)"
     },
     {
-      "slot": "generate_html_L8758_1",
+      "slot": "generate_html_L8872_1",
       "function": "generate_html",
-      "lineno": 8758,
+      "lineno": 8872,
       "rule": "literal-contains-<",
       "kind": "inline-literal",
-      "helper": "generate_html_L8758_1",
+      "helper": "generate_html_L8872_1",
       "expr": "f'<div class=\"section-header\"><h3>Priority 2+ Projects</h3></div><div class=\"card-grid\">{\"\".join(project_card(p) for ..."
     },
     {
-      "slot": "generate_html_L8778_0",
+      "slot": "generate_html_L8892_0",
       "function": "generate_html",
-      "lineno": 8778,
+      "lineno": 8892,
       "rule": "markup-named-var:r3_calendar_html",
       "kind": "named-var",
       "helper": "r3_calendar_html",
       "expr": "r3_calendar_html"
     },
     {
-      "slot": "generate_html_L8779_0",
+      "slot": "generate_html_L8893_0",
       "function": "generate_html",
-      "lineno": 8779,
+      "lineno": 8893,
       "rule": "markup-named-var:r3_email_html",
       "kind": "named-var",
       "helper": "r3_email_html",
       "expr": "r3_email_html"
     },
     {
-      "slot": "generate_html_L8780_0",
+      "slot": "generate_html_L8894_0",
       "function": "generate_html",
-      "lineno": 8780,
+      "lineno": 8894,
       "rule": "markup-named-var:grass_tile_html",
       "kind": "named-var",
       "helper": "grass_tile_html",
       "expr": "grass_tile_html"
     },
     {
-      "slot": "generate_html_L8851_0",
+      "slot": "generate_html_L8965_0",
       "function": "generate_html",
-      "lineno": 8851,
+      "lineno": 8965,
       "rule": "markup-named-var:rnd_projects_html",
       "kind": "named-var",
       "helper": "rnd_projects_html",
       "expr": "rnd_projects_html"
     },
     {
-      "slot": "generate_html_L8863_0",
+      "slot": "generate_html_L8977_0",
       "function": "generate_html",
-      "lineno": 8863,
+      "lineno": 8977,
       "rule": "markup-named-var:rnd_archive_html",
       "kind": "named-var",
       "helper": "rnd_archive_html",
       "expr": "rnd_archive_html"
     },
     {
-      "slot": "generate_html_L10508_0",
+      "slot": "generate_html_L10622_0",
       "function": "generate_html",
-      "lineno": 10508,
+      "lineno": 10622,
       "rule": "call-to-renderer:cache_bust_script",
       "kind": "renderer-call",
       "helper": "cache_bust_script",
       "expr": "cache_bust_script()"
     },
     {
-      "slot": "render_project_window_html_L6098_0",
+      "slot": "render_project_window_html_L6209_0",
       "function": "render_project_window_html",
-      "lineno": 6098,
+      "lineno": 6209,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6103_0",
+      "slot": "render_project_window_html_L6214_0",
       "function": "render_project_window_html",
-      "lineno": 6103,
+      "lineno": 6214,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6104_0",
+      "slot": "render_project_window_html_L6215_0",
       "function": "render_project_window_html",
-      "lineno": 6104,
+      "lineno": 6215,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6111_0",
+      "slot": "render_project_window_html_L6222_0",
       "function": "render_project_window_html",
-      "lineno": 6111,
+      "lineno": 6222,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6124_0",
+      "slot": "render_project_window_html_L6235_0",
       "function": "render_project_window_html",
-      "lineno": 6124,
+      "lineno": 6235,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6125_0",
+      "slot": "render_project_window_html_L6236_0",
       "function": "render_project_window_html",
-      "lineno": 6125,
+      "lineno": 6236,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6126_0",
+      "slot": "render_project_window_html_L6237_0",
       "function": "render_project_window_html",
-      "lineno": 6126,
+      "lineno": 6237,
       "rule": "markup-named-var:rescan_btn",
       "kind": "named-var",
       "helper": "rescan_btn",
       "expr": "rescan_btn"
     },
     {
-      "slot": "render_project_window_html_L6127_0",
+      "slot": "render_project_window_html_L6238_0",
       "function": "render_project_window_html",
-      "lineno": 6127,
+      "lineno": 6238,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6128_0",
+      "slot": "render_project_window_html_L6239_0",
       "function": "render_project_window_html",
-      "lineno": 6128,
+      "lineno": 6239,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6132_0",
+      "slot": "render_project_window_html_L6243_0",
       "function": "render_project_window_html",
-      "lineno": 6132,
+      "lineno": 6243,
       "rule": "markup-named-var:pid_attr",
       "kind": "named-var",
       "helper": "pid_attr",
       "expr": "pid_attr"
     },
     {
-      "slot": "render_project_window_html_L6133_0",
+      "slot": "render_project_window_html_L6244_0",
       "function": "render_project_window_html",
-      "lineno": 6133,
+      "lineno": 6244,
       "rule": "markup-named-var:rescan_btn",
       "kind": "named-var",
       "helper": "rescan_btn",
       "expr": "rescan_btn"
     },
     {
-      "slot": "render_project_window_html_L6266_0",
+      "slot": "render_project_window_html_L6377_0",
       "function": "render_project_window_html",
-      "lineno": 6266,
+      "lineno": 6377,
       "rule": "markup-named-var:blurb_attr",
       "kind": "named-var",
       "helper": "blurb_attr",

@@ -7,5 +7,6 @@
   "kind": "execlog",
   "title": "Anchor R&D Surface v3 — \"Mission Control\" — Execution Log",
   "artifact_path": "planning/rnd-v3/EXECUTION-LOG.md",
-  "status": "imported"
+  "status": "imported",
+  "imported_from": "f69f6d66171f4dbd95c8c45db6846d97"
 }

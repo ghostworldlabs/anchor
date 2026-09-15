@@ -68,9 +68,12 @@ class StatusWindowTest(unittest.TestCase):
                     '["Blocker"', '["Procs"', '["Journal"', '["ETA"', '["To do"'):
             self.assertIn(row, body, row)
         self.assertIn('el("table", "stab")', body)
+        self.assertIn('compact.appendChild(tab)', body)  # categories stay visible
         self.assertIn('stat.tests || "—"', body)     # honest dash, never a guess
         self.assertIn('stat.journal || "—"', body)
         self.assertIn('stat.eta || "—"', body)
+        self.assertIn('glyph: "▷"', self.js)
+        self.assertIn('Action needed', self.js)
         self.assertIn('"last update " + hhmm', body)
         self.assertIn("last update on record", body)  # the stale marker
         # the replay guard is untouched
@@ -109,6 +112,46 @@ class StatusWindowTest(unittest.TestCase):
         self.assertIn("campaign.read_last_status(cdir)", blk)
         self.assertIn("if eng is None:", blk)
         self.assertIn("campaign.compose_status(", blk)   # a live engine still composes fresh
+
+
+def test_status_facts_keep_every_category_in_one_line():
+    facts = campaign.status_facts(
+        effort="MBA Teaching AI",
+        summary="Lecture 4 is in review while Lecture 3 stays approved.",
+        doing="Working on the Lecture 4 refinement and checking the visual companion.",
+        status="8/12 done · needs_you",
+        tests="pass",
+        blocker="waiting on you: Keep the current Lecture 4 structure, or try the experimental flow?",
+        procs="none",
+        journal="none",
+        eta="—",
+        todo="Review Lecture 4 Refinement 2",
+    )
+    assert [row["label"] for row in facts] == [
+        "Summary", "Effort", "Doing", "Status", "Tests",
+        "Blocker", "Procs", "Journal", "ETA", "To do"]
+    assert all(len(row["value"]) <= 110 for row in facts)
+    clipped = campaign.one_line("First sentence stays. " + ("later detail " * 40), 110)
+    assert clipped.startswith("First sentence stays.")
+    assert len(clipped) <= 110
+    assert campaign.one_line("1. Fix the chart 2. Ship the deck") == "1. Fix the chart 2. Ship the deck"
+    assert "v1.2.15" in campaign.one_line("Lecture v1.2.15 shipped to review")
+
+
+def test_status_table_is_visible_and_plan_uses_attention_flags():
+    js = (STATIC / "shared.js").read_text(encoding="utf-8")
+    css = (STATIC / "shared.css").read_text(encoding="utf-8")
+    body = js.split("function renderStatus(stat)")[1].split("function stepDeliverables")[0]
+    assert 'compact.appendChild(tab)' in body
+    assert 'el("table", "stab")' in body
+    assert 'status-details' not in body
+    assert 'No extra diagnostics' not in body
+    assert 'glyph: "▷"' in js
+    assert 'Action needed' in js
+    assert 'Accept recommendation' in js
+    assert '.action-needed.open .action-more' in css
+    assert '.action-needed.open .action-close' in css
+    assert 'plan-mark.todo' in css
 
 
 if __name__ == "__main__":

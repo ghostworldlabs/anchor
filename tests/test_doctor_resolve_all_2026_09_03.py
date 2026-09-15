@@ -67,6 +67,18 @@ class PlainWordsTest(unittest.TestCase):
         self.assertTrue(seed.startswith("ANCHOR DOCTOR - RESOLVE ALL 1 OPEN ISSUES NOW"))
         self.assertIn("live re-probe just now: / answers; /api/status answers", seed)
 
+    def test_playbook_reruns_known_v10_stale_delete_capture(self):
+        row = dp.explain({"component": "R&D v10 surface",
+                          "detail": "killed=True deleted=False live_del=True grass=True search=True"})
+        hits = dp.match_playbook([row])
+        self.assertEqual([h["id"] for h in hits], ["rnd-v10-boneyard-deleted-false"])
+        self.assertEqual(dp.decide([row], [{"path": "/api/status", "ok": True}], hits), "rerun")
+        mixed = [row, dp.explain({"component": "journal", "detail": "5/6 passed; failures: x"})]
+        self.assertEqual(dp.decide(mixed, [{"path": "/api/status", "ok": True}]), "session")
+        seed = dp.resolve_all_seed(mixed, [], "session")
+        self.assertIn("rnd-v10-boneyard-deleted-false", seed)
+        self.assertIn("Do not: edit boneyard.py", seed)
+
 
 class _FakeHandler:
     def __init__(self):
@@ -113,6 +125,22 @@ class ResolveAllRouteTest(unittest.TestCase):
         run.assert_not_called()
         self.assertTrue(out["seed_issue"]["all"])
         self.assertIn("RESOLVE ALL 1 OPEN ISSUES", out["seed_issue"]["message"])
+
+    def test_known_v10_stale_capture_reruns_without_a_model(self):
+        h = _FakeHandler()
+        stats = {"issues": [{"component": "R&D v10 surface",
+                             "detail": "killed=True deleted=False live_del=True grass=True search=True"}],
+                 "autofixes": []}
+        with mock.patch.object(anchor_gui, "_doctor_stats", return_value=stats), \
+             mock.patch.object(anchor_gui, "_doctor_live_probe",
+                               side_effect=lambda p, timeout=4.0: {"path": p, "ok": True, "code": 200, "ms": 3}), \
+             mock.patch.object(anchor_gui, "_doctor_start_healthcheck_run", return_value={"ok": True, "pid": 9}) as run:
+            anchor_gui.handle_doctor_resolve_all(h, "/api/doctor/resolve_all", {})
+        out = h.sent[0][1]
+        self.assertEqual(out["decision"], "rerun")
+        self.assertEqual(out["playbook"][0]["id"], "rnd-v10-boneyard-deleted-false")
+        run.assert_called_once()
+        self.assertNotIn("seed_issue", out)
 
     def test_page_card_is_plain_words_with_resolve_all(self):
         s = {"issues": [{"component": "HTTP endpoints", "detail": RAW_HTTP}], "autofixes": AUTOFIX}
@@ -176,8 +204,21 @@ class AutoSubmitTest(unittest.TestCase):
     def test_only_resolve_sessions_auto_submit(self):
         src = (REPO / "terminal_session.py").read_text(encoding="utf-8")
         blk = src.split("def start_doctor_session(")[1].split("def _auto_submit_seed(")[0]
-        self.assertIn('if resolve and seed_context and rec and rec.get("session_id"):', blk)
         self.assertIn('_auto_submit_seed(rec["session_id"])', blk)
+        self.assertIn("DOCTOR_ARGV_SEED_BACKENDS", blk)
+
+    def test_grok_and_chatgpt_take_the_brief_as_the_first_turn(self):
+        self.assertIn(ts._reg.BACKEND_GROK, ts.DOCTOR_ARGV_SEED_BACKENDS)
+        self.assertEqual(ts.DOCTOR_READONLY_CLI_ARGS[ts._reg.BACKEND_GROK],
+                         ("--permission-mode", "plan"))
+        self.assertEqual(ts.DOCTOR_RESOLVE_CLI_ARGS[ts._reg.BACKEND_GROK],
+                         ("--permission-mode", "acceptEdits", "--no-plan"))
+
+    def test_resolve_all_starts_even_if_a_diagnose_session_is_already_on_the_page(self):
+        src = (REPO / "anchor_gui.py").read_text(encoding="utf-8")
+        blk = src.split("window.runDiagnose = function")[1].split("window.runDiagnostics")[0]
+        self.assertIn("if (sessionId && !opts.resolve)", blk)
+        self.assertIn("sessionId = null", blk)
 
 
 if __name__ == "__main__":

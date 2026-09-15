@@ -7,5 +7,6 @@
   "kind": "plan-doc",
   "title": "Anchor Re-architecture — the Butler substrate — Implementation Plan (Foreman-ready)",
   "artifact_path": "planning/crucible-rearchitecture-2026-07/IMPLEMENTATION-PLAN-DRAFT.md",
-  "status": "imported"
+  "status": "imported",
+  "imported_from": "f69f6d66171f4dbd95c8c45db6846d97"
 }

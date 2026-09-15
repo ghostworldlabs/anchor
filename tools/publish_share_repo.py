@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Publish the built clean-ship Package B tree to the collaborator repo.
 
-The distribution channel for the v1.1.x share line is a PRIVATE GitHub repo
-(`johncliechty/anchor-plus-skills`) that collaborators clone; upgrades reach
+The distribution channel is a public GitHub repo containing only the scrubbed
+collaborator export; collaborators clone it, and upgrades reach
 them as `git pull`. This tool syncs the ALREADY-BUILT, already-gated tree
 (run `planning/share-anchor-skills-2026-07/_build_clean_ship.py` first —
 every scan/gate lives THERE, fail-closed) into a working clone, commits with

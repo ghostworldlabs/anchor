@@ -145,3 +145,8 @@ steward_cockpit/proto-state.json
 steward_cockpit/*.tmp
 steward_cockpit/handoffs/
 steward_cockpit/__pycache__/
+
+# Planning-folder pytest scratch trees (fake exes, disposable fixtures) are never authoring content
+planning/**/pytest-*/
+planning/**/test-tmp-*/
+test_tmp*/

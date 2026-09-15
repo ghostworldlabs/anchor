@@ -86,13 +86,13 @@ Proto.init({
     att.className = "dot " + (map.attention.state || "unknown");
   }
 });
-// workbench terminals: seat switch (claude | grok | gemini), handoff-preserving
+// workbench terminals: seat switch (chatgpt | claude | grok | gemini), handoff-preserving
 if (IS_GENERAL) {
   const qp = new URLSearchParams(location.search);
   const args = { dir: qp.get("dir") || "", general: true,
                  term: qp.get("term") || "" };
   const sel = document.createElement("select");
-  ["claude", "grok", "gemini"].forEach(c => {
+  ["chatgpt", "claude", "grok", "gemini"].forEach(c => {
     const o = document.createElement("option"); o.value = c; o.textContent = c;
     sel.appendChild(o);
   });

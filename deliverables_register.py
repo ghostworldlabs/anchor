@@ -175,6 +175,17 @@ def register(effort_dir, what, where, *, date=None, step=None,
         if not what_n or not where_n:
             return {"written": False, "reason": "empty-what-or-where"}
         d = Path(str(effort_dir))
+        # Managed publication belongs to the roadmap spine. Legacy hooks must
+        # not append a parallel row or silently announce completion.
+        import json
+        ledger = d / "roadmap.json"
+        if ledger.is_file():
+            try:
+                state = json.loads(ledger.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {"written": False, "reason": "backing-store-unreadable"}
+            if any(e.get("kind") == "refinement_update" for e in state.get("roadmap_events", [])):
+                return {"written": False, "reason": "managed-refinement-update-required"}
         target = d / REGISTER_NAME
         with _paths.WRITE_LOCK:
             d.mkdir(parents=True, exist_ok=True)

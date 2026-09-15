@@ -121,11 +121,11 @@ def _make_host(tmp_path, name, body):
 
 
 def _journal_entries(skill_dir: Path) -> list:
-    return sorted((Path(skill_dir) / "journal").glob("*.md"))
+    return sorted((Path(skill_dir) / "journal" / "machine").glob("*.md"))
 
 
 def _entry_for(skill_dir: Path, run_id: str):
-    p = Path(skill_dir) / "journal" / (str(run_id) + ".md")
+    p = Path(skill_dir) / "journal" / "machine" / (str(run_id) + ".md")
     assert p.is_file(), "no journal entry for run %s in %s" % (run_id,
                                                                skill_dir)
     return p.read_text(encoding="utf-8")
@@ -413,7 +413,7 @@ def test_all_three_auto_journal_via_the_runner_seam(w4):
 def test_registry_discovery_imports_no_skill_code(w4):
     fs = w4["fs"]
     dispatch = _registry_dispatch(w4)
-    assert set(dispatch) == {"gandalf", "jumper", fs.THIRD_SKILL}
+    assert set(dispatch) == {"gandalf", "jumper", fs.THIRD_SKILL, "chekhov"}
     # Declare-then-resolve stayed pure data: nothing activated, nothing ran,
     # nothing imported — every trap un-sprung.
     for entry in dispatch.values():

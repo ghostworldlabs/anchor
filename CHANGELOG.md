@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.3.2 — Collaborator privacy and portability correction
+
+The release scanner and skill exporter now handle JSON-escaped Windows profile paths. The dashboard uses generic host labels. Optional Ramanujan tools export valid JSON with explicit example paths that collaborators configure locally.
+
+Windows notebook startup remains under repair; skip optional notebook-host setup in this release. The core dashboard and bundled skills install independently. Older public Git history retains author machine identifiers; this ordinary patch release does not rewrite history.
+
+## v1.3.1 — Retry notebook password confirmation
+
+The Windows notebook installer now explains the minimum password length and lets the user retry short or mismatched entries without restarting dependency preparation. Secure input is disposed after every attempt; dependency failures still stop setup.
+
+Remaining limits: Installation and authenticated Python/R, browser, and recovery acceptance are required on each host before notebook links are enabled.
+
+## v1.3.0 — Provider routing and optional notebooks
+
+- Adds provider-neutral `latest_supported` / `highest_supported` model selection across Anchor, Trio, Foundry, and Ecgberht.
+- Adds native ChatGPT and Grok cockpit turns with conversation history continuity.
+- Adds `.py` / `.R` notebook work products with persistence, registration, and opening from the shared UI.
+- Adds an optional Windows Jupyter installer with a dedicated account, automatic startup, and Python and R support.
+
+Remaining limits: Each host must complete installation and authenticated Python/R acceptance before notebook links are enabled. Host reboot and remote tablet acceptance are not yet verified by source gates. This release targets trusted single-user deployments; installers for other operating systems and multiuser support are excluded.
+
 ## v1.2.15 — HTML deliverables render; plan rows close again
 
 John, 2026-09-06: "when I open up details for plan elements, I try and close them and

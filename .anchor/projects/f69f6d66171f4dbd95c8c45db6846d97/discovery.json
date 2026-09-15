@@ -942,7 +942,7 @@
         "rel": "SAVED_FOR_LATER.md",
         "kind": "idea-doc",
         "title": "Saved for Later",
-        "mtime": 1786791684.089463,
+        "mtime": 1788519696.880975,
         "lane": "grass"
       },
       {
@@ -976,6 +976,12 @@
       "mtime": 1782587659.3095112
     },
     {
+      "rel": "docs/friction/2026-09-04-cockpit-plan-visibility.md",
+      "kind": "plan-md",
+      "title": "Friction — a plan the steward asks John to approve is not visible in the cockpit",
+      "mtime": 1788564733.4753268
+    },
+    {
       "rel": "gandalf/run-1782239589528/report.md",
       "kind": "report-doc",
       "title": "Gandalf read",
@@ -998,6 +1004,12 @@
       "kind": "report-doc",
       "title": "Gandalf Deep-Think Read — Anchor (`C:\\dev\\Anchor`)",
       "mtime": 1784233167.051725
+    },
+    {
+      "rel": "planning/STEWARD-CODEX-ANCHOR-MORNING-PLAN-2026-08-30.md",
+      "kind": "plan-md",
+      "title": "Steward–Codex–Anchor implementation plan",
+      "mtime": 1788215855.605596
     },
     {
       "rel": "planning/anchor-as-app/00-PLAN.md",
@@ -1043,10 +1055,10 @@
     "deliverables": 0,
     "grass": 3,
     "gandalf": 0,
-    "docs": 12,
-    "total": 148
+    "docs": 14,
+    "total": 150
   },
-  "generated_at": 1786797258.2966444,
+  "generated_at": 1788566781.6618526,
   "root": "C:\\dev\\Anchor",
   "truncated": true,
   "stage_links": [

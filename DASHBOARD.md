@@ -64,8 +64,21 @@
 - [x] Build presentation for Community of Practice for Smeal — Priority: 1 — energy: med — [academic]
 - [x] Share my trust and trust summary doc w/Brothers. — Priority: 1 — energy: med — [family]
 - [x] Revise the two family trusts and share with Stanford to get in place. — Priority: 1 — energy: med — [family]
-- [ ] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
+- [x] Get a working version of Anchor w/ Steward — Priority: 1 — energy: med — [commercial]
 - [ ] Look at the chamber's project archive/put-away path, then rule on tile decision 3 (dismiss-finished-tile) — Priority: 1 — energy: med — [commercial] — Notes: Steward-chamber W12 signing. BLOCKED FIRST: live anchor service runs pre-chamber code (status_overlay 404) - needs elevated warm restart: powershell -ExecutionPolicy Bypass -File .\restart_anchor.ps1 . Branch foreman/steward-chamber has the build. Then open a project window, check how you put a finished project away and get back to it. Gate doc: chamber/TILE-RETIREMENT-GATE.md. Two other rows already ruled (transcript link = amendment ordered; rearm-watch = tile kept).
+- [ ] LDS Church Youth Training and Other Clearences — Priority: 1 — energy: med — [personal]
+- [x] Set up meeting with Pysician — Priority: 1 — energy: med — [personal] — Due: 2026-09-08
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
+- [ ] Prep Deacon’s Lesson Week 3 — Priority: 1 — energy: med — [personal] — Due: 2026-09-16
 
 
 ### P1 (carried — Mon/Tue)

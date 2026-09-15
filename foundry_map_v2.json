@@ -3,6 +3,16 @@
   "map_version": 2,
   "skills": [
     {
+      "ref": "skill:chekhov",
+      "name": "chekhov",
+      "source": "skills/chekhov",
+      "status": "2 - Pre-Alpha",
+      "tier": "standard",
+      "version": "0.1.0",
+      "edges": [],
+      "note": "the writing skill — session engine + per-project ledger; W1 scaffold row (Foreman build 2026-09-07, RIDER 7)"
+    },
+    {
       "ref": "skill:crucible",
       "name": "crucible",
       "source": "C:/dev/trio/crucible",

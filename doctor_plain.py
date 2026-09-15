@@ -17,7 +17,11 @@ Nothing here runs a model or touches the network; the caller probes.
 """
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+
+_PLAYBOOK_PATH = Path(__file__).with_name("doctor_playbook.json")
 
 KIND_SELF_TEST_UNREACHABLE = "self-test-unreachable"
 KIND_CHECKS_FAILED = "checks-failed"
@@ -137,11 +141,58 @@ def probe_targets(explained):
     return targets or ["/api/version", "/api/status"]
 
 
-def decide(explained, probe):
+def load_playbook(path=None):
+    """Known health-issue recipes. Missing or junk file → no cases."""
+    p = Path(path) if path else _PLAYBOOK_PATH
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return []
+    cases = data.get("cases") if isinstance(data, dict) else None
+    return [c for c in (cases or []) if isinstance(c, dict) and c.get("id")]
+
+
+def _case_matches(case, explained_row):
+    if case.get("kind") and case["kind"] != explained_row.get("kind"):
+        return False
+    if case.get("component"):
+        raw = explained_row.get("raw") or ""
+        title = explained_row.get("title") or ""
+        if case["component"] not in raw and case["component"] not in title:
+            return False
+    blob = " ".join([
+        str(explained_row.get("raw") or ""),
+        str(explained_row.get("meaning") or ""),
+        str(explained_row.get("title") or ""),
+    ])
+    for needle in case.get("detail_contains") or ():
+        if needle not in blob:
+            return False
+    for needle in case.get("detail_excludes") or ():
+        if needle in blob:
+            return False
+    return True
+
+
+def match_playbook(explained, cases=None):
+    """Return the playbook cases that cover these explained issues, in order."""
+    cases = list(cases) if cases is not None else load_playbook()
+    hits = []
+    for row in explained or ():
+        hit = next((c for c in cases if _case_matches(c, row)), None)
+        if hit:
+            hits.append(hit)
+    return hits
+
+
+def decide(explained, probe, playbook_hits=None):
     """What Resolve all does. ``probe`` = [{path, ok}] from the live server.
 
     ``rerun``  — every issue is the self-test failing to reach its target and
                  every probed path answered → re-run the health check.
+                 Also when every open issue matches a playbook recipe whose
+                 suggested action is rerun (a known stale/load result, not a
+                 live-data defect).
     ``session`` — anything else → one doctor session seeded with all issues.
     ``nothing`` — no issues.
     """
@@ -149,10 +200,15 @@ def decide(explained, probe):
         return "nothing"
     all_unreach = all(e.get("kind") == KIND_SELF_TEST_UNREACHABLE for e in explained)
     all_answer = bool(probe) and all(bool(p.get("ok")) for p in probe)
-    return "rerun" if (all_unreach and all_answer) else "session"
+    if all_unreach and all_answer:
+        return "rerun"
+    hits = playbook_hits if playbook_hits is not None else match_playbook(explained)
+    if hits and len(hits) == len(explained) and all(h.get("suggested") == "rerun" for h in hits):
+        return "rerun"
+    return "session"
 
 
-def resolve_all_seed(explained, probe, decision):
+def resolve_all_seed(explained, probe, decision, playbook_hits=None):
     """The seed for ONE doctor session covering every open issue (RESOLVE
     posture). Short on purpose — the PTY paste path mangles long seeds."""
     lines = ["ANCHOR DOCTOR - RESOLVE ALL %d OPEN ISSUES NOW" % len(explained)]
@@ -164,9 +220,20 @@ def resolve_all_seed(explained, probe, decision):
             "%s %s" % (p.get("path"), "answers" if p.get("ok") else
                        ("FAILS %s" % (p.get("code") or p.get("error") or "")))
             for p in probe))
+    hits = playbook_hits if playbook_hits is not None else match_playbook(explained)
+    if hits:
+        lines.append("Known prior cases (do not invent a new architecture):")
+        for h in hits:
+            lines.append("- %s: %s" % (h.get("id"), h.get("title") or ""))
+            if h.get("session_advice"):
+                lines.append("  " + h["session_advice"])
+            for ban in h.get("do_not") or ():
+                lines.append("  Do not: " + ban)
     lines.append(
         "Do: take the issues in order; for each, reproduce minimally, FIX it in "
         "this folder, verify (run the relevant check), then one line of receipt. "
         "Finish by running the health check once so the report says what is "
-        "true now. Ask John only for a real product decision.")
+        "true now. If a product decision is required, ask John one short "
+        "question in this session and wait — do not sit on a tool-permission dialog. "
+        "Never delete live campaign data or rewrite skills to make a check green.")
     return "\n".join(lines)

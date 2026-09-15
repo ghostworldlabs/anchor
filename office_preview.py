@@ -19,6 +19,7 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from urllib.parse import urlsplit
 
 OFFICE_EXTENSIONS = {".docx": "Word", ".pptx": "PowerPoint", ".xlsx": "Excel"}
 LEGACY_OFFICE = {".doc": "Word", ".ppt": "PowerPoint", ".xls": "Excel"}
@@ -109,7 +110,8 @@ def _rels(z, rels_path: str) -> dict:
         root = ET.fromstring(z.read(rels_path))
     except KeyError:
         return {}
-    return {r.get("Id"): r.get("Target") for r in root.findall("rel:Relationship", _NS)}
+    return {r.get("Id"): r.get("Target") for r in root.findall("rel:Relationship", _NS)
+            if (r.get("TargetMode") or "Internal").lower() == "internal"}
 
 
 def pptx_slides(data: bytes) -> list:
@@ -179,6 +181,28 @@ def _col_index(ref: str) -> int:
     return n - 1
 
 
+def _package_target(owner: str, target: str) -> str:
+    """Resolve an internal relationship using package paths, never disk paths."""
+    if not target or "\\" in target or any(ord(c) < 32 for c in target):
+        raise ValueError("missing or invalid worksheet relationship")
+    uri = urlsplit(target)
+    if uri.scheme or uri.netloc or target.startswith("//") or "?" in target or "#" in target:
+        raise ValueError("worksheet relationship is not an internal package part")
+    parts = [] if target.startswith("/") else owner.split("/")[:-1]
+    for part in target.split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if not parts:
+                raise ValueError("worksheet relationship leaves the package")
+            parts.pop()
+        else:
+            parts.append(part)
+    if not parts or target.endswith(("/", "/.", "/..")):
+        raise ValueError("worksheet relationship does not name a part")
+    return "/".join(parts)
+
+
 def xlsx_sheets(data: bytes) -> list:
     """Sheets → [{"name": str, "rows": [[str]], "truncated": bool}] (values only)."""
     out = []
@@ -195,10 +219,15 @@ def xlsx_sheets(data: bytes) -> list:
         sheets = wb.find("s:sheets", _NS)
         for sh in (sheets.findall("s:sheet", _NS) if sheets is not None else []):
             target = rels.get(sh.get("{%s}id" % _NS["r"])) or ""
-            path = target if target.startswith("xl/") else "xl/" + target.lstrip("/")
             try:
+                path = _package_target("xl/workbook.xml", target)
+                # Retain tolerance for older package-qualified, slashless targets.
+                if path not in z.namelist() and target.startswith("xl/") and target in z.namelist():
+                    path = target
                 root = ET.fromstring(z.read(path))
-            except KeyError:
+            except (KeyError, ET.ParseError, ValueError):
+                out.append({"name": sh.get("name") or "Worksheet", "rows": [], "truncated": False,
+                            "error": "This worksheet could not be read. Download the workbook to open it in Excel."})
                 continue
             rows, truncated = [], False
             for i, row in enumerate(root.iter("{%s}row" % _NS["s"])):
@@ -308,7 +337,10 @@ def render_preview(data: bytes, filename: str, download_href: str = "") -> str:
             parts = []
             for sh in xlsx_sheets(data):
                 parts.append("<section class='sheet'><h2>%s</h2>" % _esc(sh["name"]))
-                parts.append(_table_html(sh["rows"], header_first=True) or "<p class='dim'>(empty sheet)</p>")
+                if sh.get("error"):
+                    parts.append("<p class='dim'>%s</p>" % _esc(sh["error"]))
+                else:
+                    parts.append(_table_html(sh["rows"], header_first=True) or "<p class='dim'>(empty sheet)</p>")
                 if sh["truncated"]:
                     parts.append("<p class='dim'>Showing the first %d rows — download for the rest.</p>" % MAX_ROWS_PER_SHEET)
                 parts.append("</section>")

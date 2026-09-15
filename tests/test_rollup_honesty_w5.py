@@ -412,6 +412,31 @@ class TestDashboardWiring:
         assert "pending finalize" in live
         assert "no run sessions yet" not in live
 
+    def test_fmt_project_usage_line_names_steward_without_merging_run_dollars(self):
+        import anchor_gui
+        empty_roll = {"tokens": 0, "cost_usd": 0.0, "wall_clock_ms": 0, "sessions": 0}
+        steward = {
+            "tokens": 107167250,
+            "reported_spend": 11.6975,
+            "unpriced_turns": 45,
+            "billing_mode": "subscription",
+            "billing_family": "chatgpt",
+            "cost_text": "$11.70 previously reported · ChatGPT subscription (45 turns)",
+        }
+        line = anchor_gui._fmt_project_usage_line(empty_roll, steward=steward)
+        assert line.startswith("Σ steward")
+        assert "107M tok" in line
+        assert "$11.70 previously reported" in line
+        assert "ChatGPT subscription (45 turns)" in line
+        assert "incomplete" not in line
+        priced = {"tokens": 12000, "cost_usd": 1.25, "wall_clock_ms": 65000,
+                  "sessions": 1, "cost_states": ["engine_reported"]}
+        mixed = anchor_gui._fmt_project_usage_line(priced, steward=steward)
+        assert "$1.25" in mixed
+        assert "12k tok" in mixed
+        assert "steward" in mixed
+        assert "$11.70 previously reported" in mixed
+
 
     def test_header_rollup_stamps_capture_rate(self, tmp_path, monkeypatch):
         """The project-window header visibly stamps the capture-rate with

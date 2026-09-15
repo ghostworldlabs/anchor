@@ -190,10 +190,11 @@ class LookThroughTest(unittest.TestCase):
         body = js.split("function renderStatus(stat)")[1].split("function stepDeliverables")[0]
         self.assertIn("const sl = stat.slice || null;", body)
         self.assertIn("const run = stat.running || null;", body)
-        self.assertIn('["Summary", sliceLine || goal ||', body)
-        self.assertIn('["Doing", doingLine ||', body)
+        self.assertIn('factValue("Summary"', body)
+        self.assertIn('factValue("Doing"', body)
         self.assertIn("bullets.slice(0, 3)", body)
         self.assertIn('["To do", todo ||', body)
+        self.assertNotIn("status-details", body)
         self.assertNotIn('"map: "', body)          # the map is not the to-do list
         self.assertIn('line += " · ETA " + stat.eta', body)
         self.assertIn('line += " · slice " + sl.n', body)

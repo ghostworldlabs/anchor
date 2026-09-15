@@ -17,6 +17,7 @@
     { name: "tidy-idy",         icon: "tidy-idy-icon.jpg",        aliases: ["tidy idy", "tidy-idy"] },
     { name: "zombie-hunter",    icon: "zombie-hunter-radar.jpg",  aliases: ["zombie hunter", "zombie-hunter"] },
     { name: "Ecgberht",         icon: "ecgberht-project-seal.jpg", aliases: ["ecgberht", "steward"] },
+    { name: "chekhov",          icon: "chekhov-icon.svg",         aliases: ["chekhov", "writing skill"] },
     { name: "Skill Foundry",    icon: "skill-foundry-icon.jpg",   aliases: ["skill foundry"] }
   ];
   var BASE = (function () {

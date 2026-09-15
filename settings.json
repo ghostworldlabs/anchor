@@ -1,7 +1,12 @@
 {
-  "default_cli": "claude",
-  "coding_family": "claude",
+  "default_cli": "chatgpt",
+  "coding_family": "chatgpt",
   "review_family": "grok",
   "steward_type": "jarvis",
-  "updated_at": "2026-08-07T00:48:43+00:00"
+  "model_policy": {
+    "mode": "latest_supported",
+    "effort": "highest_supported"
+  },
+  "settings_revision": 6,
+  "updated_at": "2026-09-13T00:02:53+00:00"
 }
