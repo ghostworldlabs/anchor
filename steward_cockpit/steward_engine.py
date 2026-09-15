@@ -507,18 +507,15 @@ class Engine:
         self.cli = stored_entry.get("cli") or prefs["default_cli"]
         self.model_selection = stored_entry.get("model_policy")
         self.policy_override = stored_entry.get("policy_override")
-        # codex-discipline-2026-09-15 Wave 1.1 (family pin): once a steward has
-        # launched on a family, the dashboard's default_cli no longer moves it.
-        # On 2026-09-15 06:34 a dashboard default change rolled the Book 1
-        # Codex steward onto a new Claude session on John's next message with
-        # nothing asking. Only an explicit switch (switch_cli), a missing CLI
-        # or dead auth changes a pinned family.
-        self._family_pinned = bool(stored_entry.get("cli"))
+        # codex-discipline-2026-09-15 Wave 1.1 as corrected by John: the
+        # dashboard selection drives every steward. What stays: a transient
+        # catalog failure keeps the running family and its last selection
+        # (journaled), and only a missing CLI or a dead login walks the ladder.
         self._stale_catalog_noted_at = 0.0
         # the FAMILY the background probe found unavailable (missing CLI or
         # dead login) — never a process-lifetime boolean that would walk the
         # steward off the family it failed over TO (Grok R2 N2)
-        self._pinned_unavailable_family = None
+        self._unavailable_family = None
         self._catalog_refresh_thread = None
         # Wave 1.2: human-first, durable ingress. The resume brief rides on his
         # next message instead of spending a turn; every send carries an
@@ -664,15 +661,8 @@ class Engine:
     def state(self):
         import anchor_settings
         selected = anchor_settings.load_settings()
-        # Wave 1.1: a pinned family never has a pending dashboard switch; the
-        # only pending switch is an explicit one that has not landed yet.
-        override = self.policy_override or {}
-        if self._family_pinned:
-            pending = (override.get("reason") == "explicit_session_choice"
-                       and override.get("family") not in (None, self.cli))
-        else:
-            pending = selected["default_cli"] != self.cli and not (
-                override and override.get("revision") == selected["settings_revision"])
+        pending = selected["default_cli"] != self.cli and not (
+            self.policy_override and self.policy_override.get("revision") == selected["settings_revision"])
         attention = self._attention()
         question = self.open_question
         question_kind = self.open_question_kind
@@ -724,9 +714,7 @@ class Engine:
             "files": self.files[-40:],
             "cli": self.cli,
             "selected_cli": selected["default_cli"],
-            "pending_switch": ((override.get("family") if self._family_pinned else selected["default_cli"])
-                               if pending else None),
-            "family_pinned": self._family_pinned,
+            "pending_switch": selected["default_cli"] if pending else None,
             "model_policy": self.model_selection,
             "settings_error": selected.get("settings_error"),
             "john_msgs": self.john_msgs,
@@ -828,14 +816,10 @@ class Engine:
         import anchor_settings
         settings = anchor_settings.get_launch_settings()
         override = self.policy_override or {}
-        if override.get("family") and override.get("reason") == "explicit_session_choice":
-            # switch_cli: John's explicit choice for THIS steward, any revision.
-            target = override["family"]
-        elif self._family_pinned and self.cli in ("claude", "chatgpt", "grok"):
-            # Wave 1.1: a launched steward keeps its family. The dashboard
-            # default_cli is the workbench knob; it seeds new stewards only.
-            target = self.cli
-        elif override.get("revision") == settings["settings_revision"]:
+        # The dashboard selection drives every steward (John, 2026-09-15):
+        # a newly selected model reviews the history and takes over on the
+        # next message. An explicit switch carries the current revision.
+        if override.get("revision") == settings["settings_revision"]:
             target = override["family"]
         else:
             self.policy_override = None
@@ -843,8 +827,8 @@ class Engine:
         return settings, target
 
     def _note_stale_catalog(self, reason):
-        """Wave 1.1: a transient catalog failure keeps the family AND the last
-        selection; it is journaled (rate-limited), never a silent failover."""
+        """A transient catalog failure keeps the family AND the last selection;
+        it is journaled (rate-limited), never a silent failover."""
         now = time.time()
         if now - self._stale_catalog_noted_at < 600:
             return
@@ -852,24 +836,25 @@ class Engine:
         sel = self.model_selection or {}
         message = (f"{self.cli} capability probe failed ({reason}); keeping "
                    f"{sel.get('model', '?')}/{sel.get('effort', '?')} from the last "
-                   "successful discovery (stale catalog, family pinned)")
+                   "successful discovery (stale catalog, family kept)")
         try:
             self._journal_routing(action="stale_catalog", family=self.cli, message=message)
         except RuntimeError:
             self._emit({"t": "sys", "text": "MODEL ROUTING (not journaled): " + message})
 
-    def _pinned_selection(self, settings, target):
-        """Wave 1.1: resolve the model for a pinned family without walking the
-        family ladder on transient failures. Only a missing CLI (or a family
-        that never launched) reaches _select_available_policy."""
+    def _current_selection(self, settings, target):
+        """Resolve the model for the dashboard-selected family. When that is the
+        family already running, a transient catalog failure keeps the last
+        selection (journaled) instead of walking the family ladder; only a
+        missing CLI or a dead login (found off-thread) reaches the ladder."""
         import model_policy
         if self.busy:
             return self.cli, self.model_selection
-        if not (self._family_pinned and target == self.cli and self.model_selection):
+        if not (target == self.cli and self.model_selection):
             return self._select_available_policy(settings, target)
-        if self._pinned_unavailable_family == self.cli:
+        if self._unavailable_family == self.cli:
             failed = self.cli
-            self._pinned_unavailable_family = None  # one walk per finding
+            self._unavailable_family = None  # one walk per finding
             return self._select_available_policy(settings, target, excluded=(failed,))
         try:
             cached = model_policy.cached_selection(self.cli, settings=settings)
@@ -907,7 +892,7 @@ class Engine:
                 if exc.code in ("cli_missing", "auth_required"):
                     # real capacity loss (Grok R1 F5): the next send walks the
                     # ladder instead of pretending the family still answers
-                    self._pinned_unavailable_family = family
+                    self._unavailable_family = family
                 self._note_stale_catalog(str(exc))
             except (ValueError, RuntimeError) as exc:
                 self._note_stale_catalog(str(exc))
@@ -1027,7 +1012,7 @@ class Engine:
                     model_policy.launch_args(expected_selection)
                     selection = dict(expected_selection)
                 else:
-                    target, selection = self._pinned_selection(settings, target)
+                    target, selection = self._current_selection(settings, target)
             except (OSError, ValueError, RuntimeError) as exc:
                 self._emit({"t": "sys", "text": "Model policy unavailable: " + str(exc)})
                 return False, str(exc)
@@ -1114,7 +1099,6 @@ class Engine:
         _update_state(self.skey(), {"cli": self.cli, "model_policy": self.model_selection,
                                    "policy_override": self.policy_override,
                                    "session_id": stored})
-        self._family_pinned = True  # Wave 1.1: launched once -> pinned
 
         self.broken = False
         self.busy = False
@@ -1653,7 +1637,7 @@ class Engine:
                     return False
                 return self._rollover_locked(target, settings, text)
             try:
-                target, selection = self._pinned_selection(settings, target)
+                target, selection = self._current_selection(settings, target)
                 if target != self.cli:
                     if self.busy:
                         self._emit({"t": "sys", "text":

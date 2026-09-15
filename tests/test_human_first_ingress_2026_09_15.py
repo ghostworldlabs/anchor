@@ -203,17 +203,16 @@ def test_cached_selection_reports_staleness(monkeypatch):
     model_policy._MEMORY.clear()
 
 
-def test_pinned_selection_answers_from_a_stale_cache_and_refreshes_off_thread(engine, monkeypatch):
+def test_current_selection_answers_from_a_stale_cache_and_refreshes_off_thread(engine, monkeypatch):
     e = engine
     e.cli = "chatgpt"
-    e._family_pinned = True
     e.model_selection = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra"}
     stale = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra", "stale": True}
     monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: dict(stale))
     monkeypatch.setattr(model_policy, "resolve", lambda *a, **k: pytest.fail("must not probe on the request thread"))
     refreshed = []
     monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: refreshed.append(settings))
-    target, selection = e._pinned_selection({"settings_revision": 8}, "chatgpt")
+    target, selection = e._current_selection({"settings_revision": 8}, "chatgpt")
     assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra")
     assert "stale" not in selection
     assert refreshed == [{"settings_revision": 8}]
@@ -285,13 +284,12 @@ def test_cache_miss_after_restart_answers_from_last_selection(engine, monkeypatc
     """Grok R1 F4: a fresh process has an empty catalog cache."""
     e = engine
     e.cli = "chatgpt"
-    e._family_pinned = True
     e.model_selection = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra"}
     monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: None)
     monkeypatch.setattr(model_policy, "resolve", lambda *a, **k: pytest.fail("no probe on the request thread"))
     refreshed = []
     monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: refreshed.append(settings))
-    target, selection = e._pinned_selection({"settings_revision": 8}, "chatgpt")
+    target, selection = e._current_selection({"settings_revision": 8}, "chatgpt")
     assert (target, selection["model"]) == ("chatgpt", "gpt-6-astra") and refreshed
 
 
@@ -299,19 +297,18 @@ def test_dead_login_walks_the_ladder(engine, monkeypatch):
     """Grok R1 F5: a dead subscription login is a capacity loss, not a stale catalog."""
     e = engine
     e.cli = "chatgpt"
-    e._family_pinned = True
     e.model_selection = {"family": "chatgpt", "model": "gpt-6-astra", "effort": "ultra"}
     monkeypatch.setattr(model_policy, "cached_selection", lambda family, settings=None, env=None: None)
 
     def dead(family, **_kw):
         raise model_policy.PolicyUnavailable(family, "CLI discovery exited 1; check subscription login", code="auth_required")
     # the async refresh is what discovers it; make it synchronous here
-    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: setattr(e, "_pinned_unavailable_family", "chatgpt"))
+    monkeypatch.setattr(e, "_refresh_catalog_async", lambda settings: setattr(e, "_unavailable_family", "chatgpt"))
     seen = {}
     monkeypatch.setattr(e, "_select_available_policy",
                         lambda settings, target, excluded=(): seen.update(excluded=tuple(excluded)) or ("claude", {"family": "claude", "model": "best", "effort": "max"}))
-    e._pinned_selection({"settings_revision": 8}, "chatgpt")   # marks the family unavailable
-    target, _sel = e._pinned_selection({"settings_revision": 8}, "chatgpt")
+    e._current_selection({"settings_revision": 8}, "chatgpt")   # marks the family unavailable
+    target, _sel = e._current_selection({"settings_revision": 8}, "chatgpt")
     assert target == "claude" and seen["excluded"] == ("chatgpt",)
     # and discover() tags ONLY an auth-shaped failure (Grok R2 N1)
     monkeypatch.setattr(model_policy.shutil, "which", lambda *a, **k: "C:/fake/codex.exe")
