@@ -559,8 +559,9 @@ class Engine:
         self.unpriced_turns = _u["unpriced_turns"]
         self.tokens, self.secs, self.turns = _u["tokens"], _u["secs"], _u["turns"]
         self._restore_usage_checkpoints(stored_entry.get("usage"))
-        # S2: a resumed steward's children land now, not at its next turn end
-        self._ledger_children()
+        # S2: a resumed steward's children land now, not at its next turn end;
+        # the stored session serves every family (Claude binds its own later)
+        self._ledger_children(_usage_uuid(stored_entry.get("session_id")))
         self.last_output = 0.0
         self.last_tick = 0.0
         self.last_status = 0.0      # deterministic status cadence (separate
@@ -2122,16 +2123,19 @@ class Engine:
             pass
         self._ledger_children()
 
-    def _ledger_children(self):
-        """S2: one write-once row per child this session spawned (Codex thread
-        children by parent chain, Claude agent transcripts), under this effort,
-        beside the steward's own figure. Best-effort."""
-        if not self.session_id:
+    def _ledger_children(self, session_id=None):
+        """S2: one row per child this session spawned (Codex thread children by
+        root session, Claude agent transcripts), under this effort, beside the
+        steward's own figure. ``session_id`` names a stored session at engine
+        start (a resumed Claude steward binds its own only at its first native
+        event — Grok S2 F8). Best-effort."""
+        session_id = session_id or self.session_id
+        if not session_id:
             return
         try:
             import usage_capture as _uc
             project_id, folder_path = self._attribution_ids()
-            _uc.ingest_children(self.session_id, self.cli, project_id=project_id,
+            _uc.ingest_children(session_id, self.cli, project_id=project_id,
                                 folder_path=folder_path, effort_dir=self.dir)
         except Exception:
             pass

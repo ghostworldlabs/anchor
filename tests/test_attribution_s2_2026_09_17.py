@@ -296,6 +296,30 @@ def test_a_resumed_steward_records_its_children_at_engine_start(env, monkeypatch
     assert sorted(r["native_id"] for r in ui.load_rows(env["pid"])) == sorted([C1, C2, G1])
 
 
+def test_a_resumed_claude_steward_records_its_children_at_engine_start(env, monkeypatch, tmp_path):
+    """A Claude steward binds its own session only at its first native event;
+    at engine start the stored session serves (Grok S2 F8)."""
+    import usage_index as ui
+    expected = _claude_tree(env)
+    _engine(env, monkeypatch, tmp_path, stored={"cli": "claude", "session_id": SESSION, "usage": {"turns": 3}})
+    rows = ui.load_rows(env["pid"])
+    assert [r["native_id"] for r in rows] == ["a1"] and rows[0]["tokens"] == expected and rows[0]["cli"] == "claude"
+
+
+def test_a_child_never_shrinks_on_the_ledger_only_path_either(env):
+    """Without a project the index has no row; the ledger's own child row is the
+    comparison, so a smaller snapshot is refused there too (Grok S2 F9)."""
+    import usage_capture as uc
+    import usage_ledger as ul
+    elsewhere = str(Path(env["project"]).parent / "elsewhere")
+    _codex_tree(env, c1_totals=2_000_000)
+    uc.ingest_children(SESSION, "chatgpt", effort_dir=elsewhere, codex_root=env["codex_root"])
+    time.sleep(1.1)
+    _codex_tree(env, c1_totals=400)
+    uc.ingest_children(SESSION, "chatgpt", effort_dir=elsewhere, codex_root=env["codex_root"])
+    assert [e["tokens"] for e in ul.ledger_entries(SESSION) if e.get("native_id") == C1] == [2_000_000]
+
+
 # ── the reader ────────────────────────────────────────────────────────────────
 
 def test_rollup_counts_children_beside_jobs_and_the_steward_total(env):

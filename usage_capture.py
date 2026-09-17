@@ -1062,10 +1062,15 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             known = {r.get("key"): r for r in _ui.load_rows(project_id)}
         except Exception:
             known = {}
+    try:      # the ledger's own child rows: the comparison when no index row exists (Grok S2 F9)
+        ledgered = {e.get("key"): e for e in _ul.load_ledger(engine_session_uuid)["entries"].values()
+                    if e.get("source") == SOURCE_SUBAGENT}
+    except Exception:
+        ledgered = {}
     written = 0
     for child in found:
         key = "child:%s:%s" % (engine_session_uuid, child["id"])
-        have = known.get(key)
+        have = known.get(key) or ledgered.get(_ul.entry_key(engine_session_uuid, line=key))
         if have is not None and have.get("usage_state") != USAGE_UNKNOWN:
             try:
                 unchanged = int(os.path.getmtime(child["path"])) <= _recorded_epoch(have.get("recorded_at"))
