@@ -33,7 +33,7 @@ def main():
     jobs_dir = jr.jobs_dir()
     seen = with_cost = attributed = written = 0
     per_project = {}
-    before_rows = sum(len(ui.load_rows(p.stem)) for p in ui.index_dir().glob('*.json')) if ui.index_dir().is_dir() else 0
+    before_rows = sum(len(ui.load_rows(p.stem)) for p in ui.index_dir().glob('*.jsonl')) if ui.index_dir().is_dir() else 0
     for name in sorted(os.listdir(jobs_dir)):
         if not name.endswith(".json"):
             continue

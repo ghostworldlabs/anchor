@@ -2527,6 +2527,25 @@ def _record_terminal_handoff(rec):
     return rec
 
 
+def _attribute_job(rec_or_job_id) -> None:
+    """Wave 2 S1: every job that reaches a terminal status becomes ONE attributed
+    row through the usage seam — its captured usage under the engine session the
+    envelope reported, or an "unknown" row when no result reached us. Called by
+    every writer that first sets a terminal status (finalize, cancel, a failed
+    cancel, the liveness check, startup reconciliation); first write wins, so a
+    later writer for the same job adds nothing. Best-effort, never raises."""
+    try:
+        rec = rec_or_job_id if isinstance(rec_or_job_id, dict) else load_record(rec_or_job_id)
+        if not isinstance(rec, dict) or not rec.get("job_id"):
+            return
+        import usage_capture as _usage_cap
+        cost = rec.get("cost") if isinstance(rec.get("cost"), dict) else None
+        _usage_cap.ingest_job_cost((cost or {}).get("session_id") or None, cost,
+                                   rec["job_id"], record=rec)
+    except Exception:
+        pass
+
+
 def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     """Record the terminal status once the process exits.
 
@@ -2618,18 +2637,9 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
                 },
             )
             _write_record(rec)
-    # Honest Telemetry W4 + Wave 2 S1: every finished job becomes an attributed
-    # row through the one usage seam — its captured stream-json usage under the
-    # engine session the envelope reported (lane launches, Gandalf shards and
-    # summarizer runs all land in the one ledger), or an "unknown" row when no
-    # result reached us. Idempotent (keyed by job_id); never breaks finalization.
-    try:
-        import usage_capture as _usage_cap
-        _cost = rec.get("cost") if isinstance(rec.get("cost"), dict) else None
-        _usage_cap.ingest_job_cost((_cost or {}).get("session_id") or None, _cost,
-                                   job_id, record=rec)
-    except Exception:
-        pass
+    # Honest Telemetry W4 + Wave 2 S1: the finished job becomes an attributed row
+    # (lane launches, Gandalf shards and summarizer runs all land in one ledger).
+    _attribute_job(rec)
     # Mirror the terminal status onto the swarm session (gandalf finally analog),
     # OUTSIDE the write lock the registry takes its own lock internally.
     _mirror_session_status(job_id, final_status,
@@ -2917,6 +2927,7 @@ def liveness_check(job_id: str) -> dict:
         return rec
     out = _update_record(job_id, status=STATUS_INTERRUPTED,
                          finished_at=time.time())
+    _attribute_job(out if isinstance(out, dict) else job_id)
     _mirror_session_status(job_id, STATUS_INTERRUPTED)
     return _record_terminal_handoff(out)
 
@@ -2973,6 +2984,7 @@ def reconcile_on_startup(*, defer_handoffs=False) -> list:
         if not _pid_alive(rec.get("pid")):
             terminal = _update_record(jid, status=STATUS_INTERRUPTED,
                                       finished_at=time.time())
+            _attribute_job(terminal if isinstance(terminal, dict) else jid)
             _mirror_session_status(jid, STATUS_INTERRUPTED)
             if attempted and not defer_handoffs:
                 _record_terminal_handoff(terminal)
@@ -3280,6 +3292,7 @@ def cancel(job_id: str) -> dict:
         cancel_failed_at=time.time(),
     )
     if failed_status == STATUS_INTERRUPTED:
+        _attribute_job(failed if isinstance(failed, dict) else job_id)
         _mirror_session_status(job_id, STATUS_INTERRUPTED)
         failed = _record_terminal_handoff(failed)
     return failed
@@ -3303,15 +3316,7 @@ def _commit_cancelled(job_id, record, verification) -> dict:
         cancelled_at=time.time(),
         failure_reason=None,
     )
-    # (Wave 2 S1) a cancelled spawn is still a spawn: one attributed row, with
-    # whatever usage was captured before the cancel, else "unknown". Idempotent.
-    try:
-        import usage_capture as _usage_cap
-        _cost = (out or {}).get("cost") if isinstance((out or {}).get("cost"), dict) else None
-        _usage_cap.ingest_job_cost((_cost or {}).get("session_id") or None, _cost, job_id,
-                                   record=out if isinstance(out, dict) else record)
-    except Exception:
-        pass
+    _attribute_job(out if isinstance(out, dict) else job_id)   # a cancelled spawn is still a spawn
     _mirror_session_status(job_id, STATUS_CANCELLED)
     return _record_terminal_handoff(out)
 

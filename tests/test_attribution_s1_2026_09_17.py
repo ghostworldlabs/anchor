@@ -343,3 +343,22 @@ def test_rollup_without_any_index_shows_no_jobs(env):
     r = steward_routes._usage_rollup(env["effort"], estate={})
     assert r["jobs"]["count"] == 0 and r["jobs"]["unknown"] == 0
     assert r["total"]["tokens"] == 0 and r["total"]["cost_status"] == "unavailable"
+
+
+def test_interrupted_jobs_are_counted_by_every_terminal_writer(env):
+    """A dead running job marked interrupted by startup reconciliation or the
+    liveness check is still a spawn: one unknown row, never invisible (Grok R2 F9)."""
+    import job_runner as jr
+    import usage_index as ui
+    jr._write_record(_job_rec("job-dead-boot", cwd=env["project"], pid=999998,
+                              proc_create_time=1.0))
+    jr._write_record(_job_rec("job-dead-live", cwd=env["project"], pid=999997,
+                              proc_create_time=1.0))
+    jr.reconcile_on_startup()
+    assert jr.load_record("job-dead-boot")["status"] == jr.STATUS_INTERRUPTED
+    jr.liveness_check("job-dead-live")
+    rows = {r["native_id"]: r for r in ui.load_rows(env["pid"])}
+    assert set(rows) == {"job-dead-boot", "job-dead-live"}
+    assert all(r["usage_state"] == "unknown" and r["cost_usd"] is None for r in rows.values())
+    jr.reconcile_on_startup()                            # replay: nothing new
+    assert len(ui.load_rows(env["pid"])) == 2
