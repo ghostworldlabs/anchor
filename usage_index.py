@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
-"""Anchor usage index — one small doc per project: the reader's file for spend by source.
+"""Anchor usage index — one small file per project: the reader's file for delegated jobs.
 
 codex-discipline Wave 2 S1 (2026-09-17). The usage ledger (``usage_ledger.py``)
-is the durable per-engine-session detail: one doc per engine session, write-once
-per entry. Nothing in it says which project an engine session belongs to, and
-finding a project's rows would mean opening every doc (4,000+) on every cockpit
-poll. This index is the projection the cockpit reads instead: one JSON doc per
-project id holding a compact write-once row per ledger entry that carried a
-project (steward turns, delegated jobs). A row carries the ids that flow back to
-the project (project_id, folder_path, effort_dir, engine session uuid, native
-id) and the honest figures (tokens, cost_usd or null, usage_state).
+holds the per-engine-session detail, write-once per entry, but nothing in it
+says which project an engine session belongs to; a cockpit poll cannot open
+4,000+ docs, and of 16,000+ job records only 120 carry a project id. This index
+is the projection the cockpit sums: one JSON-lines file per project id, one
+compact write-once row per attributed job, each naming its job, its ledger doc,
+the folder it ran in (stamped in comparable form) and the honest figures
+(tokens, cost_usd or null, usage_state).
 
-Written only through ``usage_capture.ingest_usage`` (the one seam). Same
-discipline as the ledger: ``paths.WRITE_LOCK`` + ``journal.pairing()`` + atomic
-tmp->rename; first write wins per key. Reads are cached by the file's
-(mtime, size), so a poll costs one ``stat`` when nothing changed.
-
-Stdlib only. No third-party imports.
+Written only through ``usage_capture.ingest_usage``. Same discipline as the
+ledger: ``paths.WRITE_LOCK`` + ``journal.pairing()``; first write wins per key.
+A row is one appended line (fsynced), so a project with 8,000 jobs is never
+rewritten whole; a torn last line from a crash is skipped on read and repaired
+by the seam's next replay. Stdlib only.
 """
 
 import json
+import os
 import re
-import threading
 from pathlib import Path
 
 import paths as _paths
@@ -31,8 +29,6 @@ INDEX_DIRNAME = "usage_index"
 ANCHOR_DIRNAME = ".anchor"
 
 _UNSAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
-_CACHE = {}
-_CACHE_LOCK = threading.Lock()
 
 
 def index_dir() -> Path:
@@ -46,68 +42,72 @@ def _safe_id(project_id) -> str:
 
 
 def index_path(project_id) -> Path:
-    """Absolute path to one project's index doc. Not created."""
-    return index_dir() / f"{_safe_id(project_id)}.json"
+    """Absolute path to one project's index file. Not created."""
+    return index_dir() / f"{_safe_id(project_id)}.jsonl"
 
 
-def _read(project_id) -> dict:
+def _rows(project_id) -> dict:
+    """``{key: row}`` in first-write order; malformed lines are skipped."""
     p = index_path(project_id)
-    empty = {"project_id": str(project_id or ""), "rows": {}}
+    out = {}
     if not p.exists():
-        return empty
+        return out
     try:
-        raw = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, ValueError):
-        return empty
-    if not isinstance(raw, dict) or not isinstance(raw.get("rows"), dict):
-        return empty
-    return {"project_id": raw.get("project_id") or str(project_id or ""),
-            "rows": raw["rows"]}
+        text = p.read_text(encoding="utf-8")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("key") and row["key"] not in out:
+            out[row["key"]] = row
+    return out
 
 
 def append_rows(project_id, rows) -> int:
     """Idempotently append rows for a project. Returns the count actually added.
 
     Each row MUST carry a ``"key"`` (the ledger entry key). A key already present
-    is a no-op (first write wins), so a replayed finalize or a re-ingested line
-    never counts twice. Atomic + crash-safe like the ledger.
+    is a no-op (first write wins), so a replayed finalize never counts twice.
     """
     rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("key")]
     if not project_id or not rows:
         return 0
     with _paths.WRITE_LOCK, _journal.pairing():
-        doc = _read(project_id)
-        store = doc["rows"]
-        added = 0
+        have = _rows(project_id)
+        fresh = []
         for row in rows:
-            if row["key"] in store:
+            if row["key"] in have or any(row["key"] == f["key"] for f in fresh):
                 continue
-            store[row["key"]] = row
-            added += 1
-        if added:
+            fresh.append(row)
+        if fresh:
             index_dir().mkdir(parents=True, exist_ok=True)
-            _paths.atomic_write_text(
-                index_path(project_id),
-                json.dumps(doc, indent=1, ensure_ascii=False))
-        return added
+            path = index_path(project_id)
+            torn = False
+            try:
+                if path.exists() and path.stat().st_size:
+                    with open(path, "rb") as fh:
+                        fh.seek(-1, os.SEEK_END)
+                        torn = fh.read(1) != b"\n"
+            except OSError:
+                torn = False
+            with open(path, "a", encoding="utf-8", newline="\n") as fh:
+                if torn:
+                    fh.write("\n")   # end a line a crash left open; it stays skipped
+                for row in fresh:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+        return len(fresh)
 
 
 def load_rows(project_id) -> list:
-    """The project's rows in first-write order. Cached by (mtime, size); never raises."""
+    """The project's rows in first-write order. Never raises."""
     if not project_id:
         return []
-    p = index_path(project_id)
-    try:
-        st = p.stat()
-        sig = (st.st_mtime_ns, st.st_size)
-    except OSError:
-        sig = None
-    key = str(p)
-    with _CACHE_LOCK:
-        hit = _CACHE.get(key)
-        if hit is not None and hit[0] == sig:
-            return list(hit[1])
-    rows = list(_read(project_id)["rows"].values()) if sig is not None else []
-    with _CACHE_LOCK:
-        _CACHE[key] = (sig, rows)
-    return list(rows)
+    return list(_rows(project_id).values())

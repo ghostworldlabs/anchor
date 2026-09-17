@@ -702,12 +702,12 @@ def _usage_rollup(cdir, estate=None):
                     b["_sub_clis"].append(family)
             else:
                 b["_other_unpriced"] += u["unpriced_turns"]
-    # (codex-discipline Wave 2 S1, 2026-09-17) delegated jobs are a source of
-    # their own: the rows the attribution seam indexed for the project this
-    # effort belongs to, joined by the folder the job ran in (this effort dir or
-    # under it). One small doc per project, cached by mtime — never a scan of
-    # rnd_jobs or the ledger on a poll. Shown only when rows exist; "unknown" is
-    # a count of jobs whose usage never reached us, never a zero.
+    # (Wave 2 S1) delegated jobs are a source of their own, beside the total the
+    # dashboard already reads as the steward's figure: the rows the seam indexed
+    # for this effort's project, joined by the folder the job ran in (this effort
+    # dir or under it). One small doc per project — never a scan of rnd_jobs or
+    # the ledger on a poll. Shown only when rows exist; "unknown" counts jobs
+    # whose usage never reached us, never a zero.
     jobs = zero()
     jobs["count"], jobs["unknown"] = 0, 0
     try:
@@ -718,17 +718,16 @@ def _usage_rollup(cdir, estate=None):
     except Exception:
         rows = []
     cdir_c = os.path.normcase(cdir_n)
+    cdir_prefix = cdir_c.rstrip(os.sep) + os.sep
+
+    def in_scope(scope):
+        return isinstance(scope, str) and (scope == cdir_c or scope.startswith(cdir_prefix))
     for row in rows:
         if not isinstance(row, dict) or row.get("source") != "job":
             continue
-        where = row.get("effort_dir") or row.get("folder_path") or ""
-        if not isinstance(where, str) or not where:
-            continue
-        try:
-            base = os.path.normcase(os.path.realpath(where))
-        except (TypeError, ValueError):
-            continue
-        if base != cdir_c and not base.startswith(cdir_c.rstrip(os.sep) + os.sep):
+        # a job that ran in a worktree outside the project folder joins at the
+        # project folder (Grok R1 F2); scopes were stamped at write time (F5)
+        if not (in_scope(row.get("scope")) or in_scope(row.get("folder_scope"))):
             continue
         state, tokens, cost = row.get("usage_state"), row.get("tokens"), row.get("cost_usd")
         jobs["count"] += 1
@@ -762,13 +761,12 @@ def _usage_rollup(cdir, estate=None):
     for field in numeric_fields + ("_cost_known", "_cost_unknown", "_tokens_known",
                                    "_tokens_unknown", "_tokens_partial",
                                    "_sub_unpriced", "_other_unpriced"):
-        total[field] = round(stew[field] + term[field] + jobs[field], 4)
+        total[field] = round(stew[field] + term[field], 4)
     for field in coverage_fields:
         total["checkpoint_coverage"][field] = stew["checkpoint_coverage"][field] + term["checkpoint_coverage"][field]
-    total["usage_updated_at"] = max(filter(None, (stew["usage_updated_at"], term["usage_updated_at"],
-                                                  jobs["usage_updated_at"])), default=None)
+    total["usage_updated_at"] = max(filter(None, (stew["usage_updated_at"], term["usage_updated_at"])), default=None)
     clis = []
-    for family in stew["_sub_clis"] + term["_sub_clis"] + jobs["_sub_clis"]:
+    for family in stew["_sub_clis"] + term["_sub_clis"]:
         if family not in clis:
             clis.append(family)
     total["_sub_clis"] = clis

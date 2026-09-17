@@ -2090,18 +2090,20 @@ class Engine:
             return ids
         return self._project_ids
 
-    def _ledger_turn(self, ev, accounting, turn_id, tick=False):
-        """codex-discipline Wave 2 S1 (2026-09-17): one write-once ledger row per
-        finalized turn, stamped with the ids that flow back to the project
-        (project_id, folder_path, this effort dir, the engine session, the
-        provider's invocation id or the cockpit turn id). Honest: an unpriced
-        turn keeps cost ``None``. Never affects the turn (best-effort)."""
+    def _ledger_turn(self, ev, accounting, turn_id):
+        """Wave 2 S1: one write-once ledger row per finalized turn, stamped with
+        the ids that flow back to the project (project_id, folder_path, this
+        effort dir, the engine session, the provider's invocation id or the
+        cockpit turn id). An unpriced turn keeps cost ``None``. Best-effort."""
         if (not isinstance(accounting, dict) or not accounting.get("accounted")
                 or not self.session_id):
             return
         try:
             import usage_capture as _uc
-            native = _usage_uuid(ev.get("usage_invocation_id")) or turn_id
+            # the provider's invocation id, else cli:session:turn — no boot epoch,
+            # so the same turn keys the same row across a restart (Grok R1 F6)
+            native = (_usage_uuid(ev.get("usage_invocation_id"))
+                      or f"{self.cli}:{self.session_id}:{self.turns}")
             project_id, folder_path = self._attribution_ids()
             served = (self.model_selection.get("model_served")
                       if isinstance(self.model_selection, dict) else None)
@@ -2113,7 +2115,7 @@ class Engine:
                 cost_usd=accounting.get("cost"), project_id=project_id,
                 folder_path=folder_path, effort_dir=self.dir, cli=self.cli,
                 model=served, duration_ms=int((accounting.get("duration") or 0) * 1000),
-                usage=usage, extra={"turn_id": turn_id, "tick": bool(tick)})
+                usage=usage)
         except Exception:
             pass
 
@@ -2237,7 +2239,7 @@ class Engine:
 
             was_tick = self.in_tick
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
-            self._ledger_turn(ev, accounting, completed_turn_id, tick=was_tick)
+            self._ledger_turn(ev, accounting, completed_turn_id)
             producer_id = getattr(self, "_refinement_producer_id", None)
             history_saved = (not txt or was_tick or self._record_conversation(
                 "steward", txt, turn_id=completed_turn_id))

@@ -2580,19 +2580,6 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
                 rec["model_receipt"] = model_receipt
             if cost.get("session_id") and not rec.get("session_id"):
                 rec["session_id"] = cost["session_id"]
-            # Honest Telemetry W4 — job_runner unification: route this durable
-            # job's captured stream-json usage through the SAME usage ledger as
-            # interactive PTY sessions, keyed by the engine session UUID the
-            # result envelope reported. Lane launches, Gandalf shards, and
-            # summarizer runs all land in one ledger. Best-effort + idempotent
-            # (keyed by job_id) — never breaks job finalization.
-            try:
-                euuid = cost.get("session_id")
-                if euuid:
-                    import usage_capture as _usage_cap
-                    _usage_cap.ingest_job_cost(euuid, cost, job_id, record=rec)
-            except Exception:
-                pass
         if failure_ok:
             raw_receipt = result_envelope["model_receipt"]
             rec["adapter_failure_status"] = raw_receipt["status"]
@@ -2631,6 +2618,18 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
                 },
             )
             _write_record(rec)
+    # Honest Telemetry W4 + Wave 2 S1: every finished job becomes an attributed
+    # row through the one usage seam — its captured stream-json usage under the
+    # engine session the envelope reported (lane launches, Gandalf shards and
+    # summarizer runs all land in the one ledger), or an "unknown" row when no
+    # result reached us. Idempotent (keyed by job_id); never breaks finalization.
+    try:
+        import usage_capture as _usage_cap
+        _cost = rec.get("cost") if isinstance(rec.get("cost"), dict) else None
+        _usage_cap.ingest_job_cost((_cost or {}).get("session_id") or None, _cost,
+                                   job_id, record=rec)
+    except Exception:
+        pass
     # Mirror the terminal status onto the swarm session (gandalf finally analog),
     # OUTSIDE the write lock the registry takes its own lock internally.
     _mirror_session_status(job_id, final_status,
@@ -3304,6 +3303,15 @@ def _commit_cancelled(job_id, record, verification) -> dict:
         cancelled_at=time.time(),
         failure_reason=None,
     )
+    # (Wave 2 S1) a cancelled spawn is still a spawn: one attributed row, with
+    # whatever usage was captured before the cancel, else "unknown". Idempotent.
+    try:
+        import usage_capture as _usage_cap
+        _cost = (out or {}).get("cost") if isinstance((out or {}).get("cost"), dict) else None
+        _usage_cap.ingest_job_cost((_cost or {}).get("session_id") or None, _cost, job_id,
+                                   record=out if isinstance(out, dict) else record)
+    except Exception:
+        pass
     _mirror_session_status(job_id, STATUS_CANCELLED)
     return _record_terminal_handoff(out)
 
