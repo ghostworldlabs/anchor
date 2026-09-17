@@ -2590,7 +2590,7 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
                 euuid = cost.get("session_id")
                 if euuid:
                     import usage_capture as _usage_cap
-                    _usage_cap.ingest_job_cost(euuid, cost, job_id)
+                    _usage_cap.ingest_job_cost(euuid, cost, job_id, record=rec)
             except Exception:
                 pass
         if failure_ok:

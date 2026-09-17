@@ -1450,10 +1450,18 @@ const Proto = (() => {
           (effortUsage.usage_updated_at ? " · Last recorded " + effortUsage.usage_updated_at : " · Freshness unavailable") +
           (effortUsage.usage_source ? " · Source: " + effortUsage.usage_source : "");
       }
-      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) +
+      // (codex-discipline Wave 2 S1) delegated jobs are a source of their own on
+      // the line: shown only when rows exist, never as a zero; unknown usage is a count.
+      const jobsUsage = !st.usage_persistence_error && st.usage_rollup && st.usage_rollup.jobs;
+      const jobsText = (jobsUsage && Number.isInteger(jobsUsage.count) && jobsUsage.count > 0)
+        ? " · " + jobsUsage.count + (jobsUsage.count === 1 ? " job " : " jobs ") + (jobsUsage.cost_text || "cost unavailable") +
+          (jobsUsage.unknown > 0 ? " (" + jobsUsage.unknown + " unknown usage)" : "")
+        : "";
+      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText +
         (st.usage_persistence_error ? " · not saved" : "") +
         (!st.alive ? " · " + (GENERAL ? "idle" : "steward asleep") + (st.queued ? " · " + st.queued + " held" : "") : "");
       if (!effortUsage) spend.title = "Session: " + sessionCostText + sessionTokensText;
+      if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
       spend.title += " · Reported dollars are recorded charges, not an estimate. ChatGPT/Grok subscription turns have no per-turn dollar amount; token updates alone do not increase this subtotal.";
       if (st.usage_persistence_error) spend.title = "Usage totals could not be saved. These session counts are in memory and may be lost on restart.";
     }

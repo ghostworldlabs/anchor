@@ -526,6 +526,7 @@ class Engine:
         self._submitted = stored_entry.get("submitted") if isinstance(stored_entry.get("submitted"), dict) else None
         self._interrupted = stored_entry.get("interrupted") if isinstance(stored_entry.get("interrupted"), dict) else None
         self._bridge_system_prompt = None
+        self._project_ids = None    # (project_id, folder_path) once resolved (Wave 2 S1)
         self._last_submitted = ""
         self._turn_had_tools = False
         self.proc = None
@@ -2074,6 +2075,48 @@ class Engine:
         return {"cost": cost, "duration": duration, "turn_tokens": turn_tokens,
                 "usage_persisted": saved, "accounted": not refused}
 
+    def _attribution_ids(self):
+        """``(project_id, folder_path)`` of the registered project this effort dir
+        belongs to — the ids the cockpit already uses. A hit is cached for the
+        engine's life; a miss is retried (a project may be registered later)."""
+        if self._project_ids is None:
+            try:
+                import usage_capture as _uc
+                ids = _uc.resolve_project(self.dir)
+            except Exception:
+                ids = (None, None)
+            if ids[0]:
+                self._project_ids = ids
+            return ids
+        return self._project_ids
+
+    def _ledger_turn(self, ev, accounting, turn_id, tick=False):
+        """codex-discipline Wave 2 S1 (2026-09-17): one write-once ledger row per
+        finalized turn, stamped with the ids that flow back to the project
+        (project_id, folder_path, this effort dir, the engine session, the
+        provider's invocation id or the cockpit turn id). Honest: an unpriced
+        turn keeps cost ``None``. Never affects the turn (best-effort)."""
+        if (not isinstance(accounting, dict) or not accounting.get("accounted")
+                or not self.session_id):
+            return
+        try:
+            import usage_capture as _uc
+            native = _usage_uuid(ev.get("usage_invocation_id")) or turn_id
+            project_id, folder_path = self._attribution_ids()
+            served = (self.model_selection.get("model_served")
+                      if isinstance(self.model_selection, dict) else None)
+            usage = ev.get("usage") if isinstance(ev.get("usage"), dict) else None
+            _uc.ingest_usage(
+                self.session_id, _uc.turn_key(self.session_id, native),
+                source=_uc.SOURCE_TERMINAL_TURN if self.general else _uc.SOURCE_STEWARD_TURN,
+                native_id=native, tokens=accounting.get("turn_tokens") or 0,
+                cost_usd=accounting.get("cost"), project_id=project_id,
+                folder_path=folder_path, effort_dir=self.dir, cli=self.cli,
+                model=served, duration_ms=int((accounting.get("duration") or 0) * 1000),
+                usage=usage, extra={"turn_id": turn_id, "tick": bool(tick)})
+        except Exception:
+            pass
+
     def _ack_submitted(self, proc, ev):
         """Wave 1.2 acknowledgement: a native event for this turn means the
         provider has the message; the durable copy is no longer needed.
@@ -2194,6 +2237,7 @@ class Engine:
 
             was_tick = self.in_tick
             completed_turn_id = f"{self.cli}:{self.session_id}:{self.epoch}:{self.turns}"
+            self._ledger_turn(ev, accounting, completed_turn_id, tick=was_tick)
             producer_id = getattr(self, "_refinement_producer_id", None)
             history_saved = (not txt or was_tick or self._record_conversation(
                 "steward", txt, turn_id=completed_turn_id))

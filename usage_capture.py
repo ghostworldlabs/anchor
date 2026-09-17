@@ -40,6 +40,8 @@ fixture/temp dir — so this pipeline is physically unable to open a real user's
 """
 
 import json
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +49,7 @@ import paths as _paths
 import session_registry as _reg
 import effort_history as _eh
 import usage_ledger as _ul
+import usage_index as _ui
 
 # ── Usage states (an ENUM, never free text — the rollup renders by these) ─────
 STATE_MEASURED = "measured"
@@ -670,33 +673,183 @@ def snapshot_session_usage(session_id, record=None) -> dict:
 # job_runner unification — durable-job stream-json usage → the SAME ledger
 # ══════════════════════════════════════════════════════════════════════════════
 
-def ingest_job_cost(engine_session_uuid, cost, job_id) -> int:
+def ingest_job_cost(engine_session_uuid, cost, job_id, record=None) -> int:
     """Route a durable ``job_runner`` job's captured usage through the SAME ledger.
 
     One-shot jobs (lane launches, Gandalf shards, summarizer runs) end with a
     ``{"type":"result", ...}`` stream-json envelope carrying ``usage`` +
     ``session_id`` (the engine session UUID). This appends that usage to the
-    engine session's ledger doc, keyed by the ``job_id`` line-hash so a re-finalize
-    is idempotent. Best-effort — never breaks job finalization. Returns the count
-    of new ledger entries (0 or 1).
+    engine session's ledger doc, keyed by the ``job_id`` line-hash so a
+    re-finalize is idempotent. Best-effort — never breaks job finalization.
+    Returns the count of new ledger entries (0 or 1).
+
+    (codex-discipline Wave 2 S1, 2026-09-17) Goes through :func:`ingest_usage`:
+    a missing price stays ``None`` (never a priced $0), an empty envelope is an
+    ``unknown`` row (never dropped), and the row carries the project the job ran
+    for — the record's own ``project_id``/``folder_path`` when a guarded launch
+    set them, else the registered project at or above the folder it ran in.
     """
     if not engine_session_uuid or not isinstance(cost, dict):
         return 0
     inp = _int(cost.get("input_tokens"))
     out = _int(cost.get("output_tokens"))
-    if inp == 0 and out == 0:
-        return 0  # nothing to ledger (an empty envelope)
-    entry = {
-        "key": _ul.entry_key(engine_session_uuid, line="job:%s" % (job_id,)),
-        "job_id": job_id,
-        "input_tokens": inp,
-        "output_tokens": out,
-        "total_tokens": _int(cost.get("total_tokens")) or (inp + out),
-        "duration_ms": _int(cost.get("duration_ms")),
-        "total_cost_usd": cost.get("total_cost_usd", 0.0),
-        "source": "job",
-    }
+    total = _int(cost.get("total_tokens")) or (inp + out)
+    rec = record if isinstance(record, dict) else {}
+    project_id = rec.get("project_id") or None
+    folder_path = rec.get("folder_path") or None
+    where = (rec.get("effort_dir") or rec.get("refinement_dir") or rec.get("cwd")
+             or folder_path or None)
+    if not project_id:
+        project_id, folder_path = resolve_project(where)
+    receipt = rec.get("model_receipt") if isinstance(rec.get("model_receipt"), dict) else {}
+    priced = _cost_number(cost.get("total_cost_usd"))
+    return ingest_usage(
+        engine_session_uuid,
+        _ul.entry_key(engine_session_uuid, line="job:%s" % (job_id,)),
+        source=SOURCE_JOB, native_id=job_id, tokens=total, cost_usd=priced,
+        project_id=project_id, folder_path=folder_path, effort_dir=where,
+        cli=rec.get("backend") or None,
+        model=receipt.get("model_served") or receipt.get("model") or None,
+        duration_ms=_int(cost.get("duration_ms")),
+        usage={"input_tokens": inp, "output_tokens": out,
+               "cached_input_tokens": _int(cost.get("cached_input_tokens"))},
+        extra={"job_id": job_id, "input_tokens": inp, "output_tokens": out,
+               "total_tokens": total, "duration_ms": _int(cost.get("duration_ms")),
+               "total_cost_usd": priced, "lane": rec.get("lane"),
+               "finished_at": rec.get("finished_at"),
+               "metadata_only": bool(rec.get("metadata_only")),
+               "cost_state": cost.get("cost_state"),
+               "billing_mode": cost.get("billing_mode")})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Attribution — the one honest seam (codex-discipline Wave 2 S1, 2026-09-17)
+# ══════════════════════════════════════════════════════════════════════════════
+# John's rule: everything that spends carries an ID that flows back up to the
+# project in the AI cockpit. A ledger row therefore carries the ids that already
+# exist (project_id, folder_path, effort_dir, engine session uuid, native turn /
+# job id) and an honest state. Nothing is priced that was not priced.
+
+#: Usage states on an attributed row. The cockpit shows a source only when rows
+#: exist for it — never a zero — and "unknown" is a count of spawns without usage.
+USAGE_MEASURED = "measured"    # tokens known and a recorded charge
+USAGE_UNPRICED = "unpriced"    # tokens known, no per-turn price (subscription)
+USAGE_UNKNOWN = "unknown"      # a spawn is known, no usage reached us
+USAGE_STATES = (USAGE_MEASURED, USAGE_UNPRICED, USAGE_UNKNOWN)
+
+SOURCE_STEWARD_TURN = "steward-turn"
+SOURCE_TERMINAL_TURN = "terminal-turn"   # a cockpit workbench (general) turn
+SOURCE_JOB = "job"
+
+#: The compact row the per-project index keeps (``usage_index``); the ledger
+#: entry keeps everything, including the raw ``usage`` block.
+INDEX_FIELDS = ("key", "source", "native_id", "engine_session_uuid", "project_id",
+                "folder_path", "effort_dir", "cli", "model", "tokens", "cost_usd",
+                "usage_state", "duration_ms", "recorded_at", "finished_at", "lane",
+                "metadata_only", "turn_id", "tick")
+
+
+def _cost_number(value):
+    """A recorded charge as a float, else ``None`` (missing / not a number / bool)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    if value != value or value in (float("inf"), float("-inf")) or value < 0:
+        return None
+    return value
+
+
+def usage_state_for(tokens, cost_usd) -> str:
+    """measured when tokens and a positive charge are known; unpriced when tokens
+    are known without a price (or a $0 that prices nothing); unknown otherwise."""
+    tokens = _int(tokens)
+    cost = _cost_number(cost_usd)
+    if tokens > 0 and cost is not None and cost > 0:
+        return USAGE_MEASURED
+    if tokens > 0:
+        return USAGE_UNPRICED
+    return USAGE_UNKNOWN
+
+
+def resolve_project(folder):
+    """``(project_id, folder_path)`` of the registered project at or above
+    ``folder`` — the same id the cockpit and the AI cockpit already use.
+    The nearest (longest) registered folder wins; ``(None, None)`` when the
+    folder is not under any registered project. Never raises."""
+    if not folder:
+        return (None, None)
     try:
-        return _ul.append_entries(engine_session_uuid, [entry])
+        import rnd_registry as _rr
+        target = os.path.normcase(os.path.realpath(str(folder)))
+        best = None
+        for project in _rr.list_projects():
+            if not isinstance(project, dict):
+                continue
+            root = project.get("folder_path")
+            pid = project.get("id")
+            if (not isinstance(root, str) or not root.strip()
+                    or not isinstance(pid, str) or not pid):
+                continue
+            base = os.path.normcase(os.path.realpath(root))
+            if target != base and not target.startswith(base.rstrip(os.sep) + os.sep):
+                continue
+            rank = (len(base), pid)
+            if (best is None or rank[0] > best[0][0]
+                    or (rank[0] == best[0][0] and rank[1] < best[0][1])):
+                best = (rank, pid, root)
+        return (best[1], best[2]) if best else (None, None)
     except Exception:
+        return (None, None)
+
+
+def turn_key(engine_session_uuid, native_id) -> str:
+    """The write-once key of a finalized turn: the invocation id when the
+    provider gave one, else the cockpit's own ``cli:session:epoch:turn`` id."""
+    return _ul.entry_key(engine_session_uuid, line="turn:%s" % (native_id,))
+
+
+def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
+                 cost_usd=None, project_id=None, folder_path=None, effort_dir=None,
+                 cli=None, model=None, duration_ms=0, usage=None, usage_state=None,
+                 extra=None) -> int:
+    """Write ONE attributed usage row: the ledger entry (write-once per key under
+    the engine session's doc) and, when the row carries a project, the compact
+    per-project index row the cockpit reads.
+
+    ``cost_usd`` ``None`` stays ``None`` — a subscription turn is *unpriced*, not
+    $0. ``usage_state`` is derived honestly unless given. Returns the number of
+    NEW ledger entries (0 or 1). The index append is idempotent on the same key,
+    so a replay repairs a missing index row without counting anything twice.
+    Best-effort: never raises into a turn or a job's finalization.
+    """
+    if not engine_session_uuid or not key:
         return 0
+    tokens = _int(tokens)
+    cost = _cost_number(cost_usd)
+    state = usage_state if usage_state in USAGE_STATES else usage_state_for(tokens, cost)
+    entry = {
+        "key": key, "source": source, "native_id": native_id,
+        "engine_session_uuid": str(engine_session_uuid),
+        "project_id": project_id or None, "folder_path": folder_path or None,
+        "effort_dir": str(effort_dir) if effort_dir else None,
+        "cli": cli or None, "model": model or None,
+        "tokens": tokens, "cost_usd": cost, "usage_state": state,
+        "duration_ms": _int(duration_ms),
+        "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if isinstance(usage, dict):
+        entry["usage"] = dict(usage)
+    if isinstance(extra, dict):
+        for k, v in extra.items():
+            entry.setdefault(k, v)
+    try:
+        added = _ul.append_entries(engine_session_uuid, [entry])
+    except Exception:
+        added = 0
+    if entry["project_id"]:
+        try:
+            _ui.append_rows(entry["project_id"],
+                            [{f: entry[f] for f in INDEX_FIELDS if f in entry}])
+        except Exception:
+            pass
+    return added
