@@ -39,6 +39,7 @@ fixture/temp dir — so this pipeline is physically unable to open a real user's
 ``~/.claude`` store under test. Stdlib only. No third-party imports.
 """
 
+import io
 import json
 import os
 import time
@@ -735,16 +736,19 @@ USAGE_STATES = (USAGE_MEASURED, USAGE_UNPRICED, USAGE_UNKNOWN)
 SOURCE_STEWARD_TURN = "steward-turn"
 SOURCE_TERMINAL_TURN = "terminal-turn"   # a cockpit workbench (general) turn
 SOURCE_JOB = "job"
+SOURCE_SUBAGENT = "subagent"             # a child the steward's session spawned (S2)
 #: Sources the cockpit sums from the index. Steward and workbench turns stay
 #: sourced from cockpit state (history + in-flight), so they are ledger-only.
-INDEXED_SOURCES = (SOURCE_JOB,)
+INDEXED_SOURCES = (SOURCE_JOB, SOURCE_SUBAGENT)
 #: The index row: what the rollup reads (``scope``/``folder_scope`` are the
 #: normalized paths stamped at write time so a poll compares strings and never
-#: realpaths 8k rows — Grok R1 F5), plus the two ids that lead back to the job
-#: and its ledger doc (a key is a hash; a row must still name its job).
+#: realpaths 8k rows — Grok R1 F5), plus the ids that lead back to the job or
+#: child and its ledger doc (a key is a hash; a row must still name its spawn).
+#: ``parent_id``/``label``/``model`` name a child's parent, nickname and model
+#: for the child rows the cockpit lists (S2).
 INDEX_FIELDS = ("key", "source", "native_id", "engine_session_uuid", "folder_path",
-                "effort_dir", "scope", "folder_scope", "cli", "tokens", "cost_usd",
-                "usage_state", "duration_ms", "recorded_at")
+                "effort_dir", "scope", "folder_scope", "cli", "model", "tokens", "cost_usd",
+                "usage_state", "duration_ms", "recorded_at", "parent_id", "label")
 
 
 def _iso(unix_seconds) -> str:
@@ -829,7 +833,7 @@ def turn_key(engine_session_uuid, native_id) -> str:
 def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
                  cost_usd=None, project_id=None, folder_path=None, effort_dir=None,
                  cli=None, model=None, duration_ms=0, usage=None, recorded_at=None,
-                 index_key=None) -> int:
+                 index_key=None, parent_id=None, label=None) -> int:
     """Write ONE attributed usage row: the ledger entry (write-once per key under
     the engine session's doc) and, for an indexed source with a project, the
     compact per-project index row the cockpit reads. A row with no engine
@@ -859,6 +863,7 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
         "duration_ms": _int(duration_ms),
         "recorded_at": recorded_at if isinstance(recorded_at, str) and recorded_at
         else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "parent_id": parent_id or None, "label": label or None,
     }
     if isinstance(usage, dict):
         entry["usage"] = dict(usage)
@@ -875,4 +880,219 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
             _ui.append_rows(entry["project_id"], [row])
         except Exception:
             pass
+    return added
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Children (codex-discipline Wave 2 S2, 2026-09-17): one row per sub-agent
+# ══════════════════════════════════════════════════════════════════════════════
+# John's rule: agents spawn sub-agents and every one carries an ID that flows
+# back to the project. A Codex steward's children are rollout threads whose
+# header names their parent thread (a chain for grandchildren); a Claude
+# steward's children are the ``subagents/agent-*.jsonl`` transcripts beside its
+# own. Children are recorded at the parent's turn end (they run inside the turn),
+# one write-once row per child under the steward's effort, ``unpriced`` when
+# their tokens are known and ``unknown`` (index-only, upgraded once usage
+# appears) when not. A child is never folded into the parent's own figure: the
+# parent's tracker follows one thread, and the parent's sidecar excludes them.
+
+_CODEX_HEADERS = {}          # rollout path -> header dict (headers never change)
+CODEX_CHILD_DAYS = 3         # day folders walked for a steward's children
+CHAIN_LIMIT = 8              # parent-chain depth guard
+
+
+def codex_sessions_root(env=None):
+    """``<CODEX_HOME>/sessions`` — the same rule the cockpit's usage tracker uses."""
+    env = env if env is not None else os.environ
+    home = env.get("CODEX_HOME") or str(Path.home() / ".codex")
+    return Path(home) / "sessions"
+
+
+def _codex_header(path):
+    """The first line of a rollout when it is a ``session_meta``: thread id,
+    parent thread id (top-level or inside ``source.subagent.thread_spawn``),
+    spawn depth, nickname, cwd, start time. Cached per path; ``None`` otherwise."""
+    key = str(path)
+    if key in _CODEX_HEADERS:
+        return _CODEX_HEADERS[key]
+    header = None
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            first = json.loads(fh.readline() or "null")
+        if isinstance(first, dict) and first.get("type") == "session_meta":
+            p = first.get("payload") or {}
+            spawn = {}
+            src = p.get("source")
+            if isinstance(src, dict) and isinstance(src.get("subagent"), dict):
+                spawn = src["subagent"].get("thread_spawn") or {}
+            header = {"thread_id": p.get("id"), "parent": p.get("parent_thread_id") or spawn.get("parent_thread_id"),
+                      "depth": spawn.get("depth"), "label": spawn.get("agent_nickname"),
+                      "cwd": p.get("cwd"), "started": first.get("timestamp")}
+    except (OSError, ValueError):
+        header = None
+    _CODEX_HEADERS[key] = header
+    return header
+
+
+def _codex_day_dirs(root, days=CODEX_CHILD_DAYS, now=None):
+    now = now if now is not None else time.time()
+    out = []
+    for back in range(days):
+        t = time.gmtime(now - back * 86400)
+        d = Path(root) / time.strftime("%Y", t) / time.strftime("%m", t) / time.strftime("%d", t)
+        if d.is_dir():
+            out.append(d)
+    return out
+
+
+def codex_children(parent_thread_id, root=None, days=CODEX_CHILD_DAYS, now=None):
+    """Every rollout thread whose parent chain reaches ``parent_thread_id``, from
+    the last ``days`` day folders (header reads only). Each item: ``id``,
+    ``path``, ``parent`` (immediate), ``depth``, ``label``, ``started``."""
+    if not parent_thread_id:
+        return []
+    root = Path(root) if root is not None else codex_sessions_root()
+    headers = {}
+    for d in _codex_day_dirs(root, days, now):
+        try:
+            names = sorted(d.glob("rollout-*.jsonl"))
+        except OSError:
+            continue
+        for path in names:
+            h = _codex_header(path)
+            if h and h.get("thread_id"):
+                headers[h["thread_id"]] = (h, path)
+    out = []
+    for tid, (h, path) in headers.items():
+        parent = h.get("parent")
+        hops = 0
+        while parent and parent != parent_thread_id and parent in headers and hops < CHAIN_LIMIT:
+            parent = headers[parent][0].get("parent")
+            hops += 1
+        if parent == parent_thread_id and tid != parent_thread_id:
+            out.append({"id": tid, "path": str(path), "parent": h.get("parent"),
+                        "depth": h.get("depth"), "label": h.get("label"), "started": h.get("started")})
+    out.sort(key=lambda c: str(c.get("started") or ""))
+    return out
+
+
+def codex_rollout_usage(path):
+    """A child thread's whole usage: the last ``token_count`` event's cumulative
+    ``total_token_usage`` (tokens = its ``total_tokens``), and the model from the
+    first ``turn_context``. Missing usage → tokens 0 (an ``unknown`` child)."""
+    totals, model = None, None
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+                p = ev.get("payload") or {}
+                if ev.get("type") == "turn_context" and model is None and isinstance(p, dict):
+                    model = p.get("model") or None
+                if ev.get("type") == "event_msg" and isinstance(p, dict) and p.get("type") == "token_count":
+                    info = p.get("info") or {}
+                    if isinstance(info.get("total_token_usage"), dict):
+                        totals = info["total_token_usage"]
+    except OSError:
+        pass
+    totals = totals or {}
+    usage = {k: _int(totals.get(k)) for k in ("input_tokens", "cached_input_tokens", "output_tokens",
+                                                 "reasoning_output_tokens")}
+    tokens = _int(totals.get("total_tokens")) or (usage["input_tokens"] + usage["output_tokens"])
+    return {"tokens": tokens, "usage": usage if totals else None, "model": model}
+
+
+def claude_children(session_uuid, root=None):
+    """The ``subagents/agent-*.jsonl`` transcripts beside a Claude session's own
+    sidecar: ``id`` (the agent id), ``path``. Empty when the sidecar root is
+    unavailable (hermetic) or the session has no children."""
+    try:
+        main = locate_sidecar(session_uuid, root=root)
+    except Exception:
+        return []
+    if main is None:
+        return []
+    folder = Path(main).parent / str(session_uuid) / "subagents"
+    if not folder.is_dir():
+        return []
+    out = []
+    for path in sorted(folder.glob("agent-*.jsonl")):
+        out.append({"id": path.stem[len("agent-"):], "path": str(path), "parent": str(session_uuid),
+                    "depth": 1, "label": None, "started": None})
+    return out
+
+
+def claude_agent_usage(path):
+    """A Claude child's whole usage from its transcript (the same per-message
+    parser the ledger uses; repeated message ids collapse), plus the last model."""
+    try:
+        text = io.open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return {"tokens": 0, "usage": None, "model": None}
+    res = parse_sidecar_text(text)
+    totals = res.get("token_totals") or {}
+    model = None
+    for line in text.splitlines():
+        if '"model"' not in line:
+            continue
+        try:
+            m = (json.loads(line).get("message") or {}).get("model")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(m, str) and m:
+            model = m
+    tokens = _int(totals.get("total_all_classes"))
+    usage = {k: _int(totals.get(k)) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                 "cache_read_input_tokens", "output_tokens")} if totals else None
+    return {"tokens": tokens, "usage": usage, "model": model}
+
+
+def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=None,
+                    effort_dir=None, codex_root=None, sidecar_root=None, now=None) -> int:
+    """S2: one write-once row per child the steward's session spawned, attributed
+    to the steward's effort. Codex children by parent chain across the last
+    ``CODEX_CHILD_DAYS`` day folders; Claude children by the sidecar's
+    ``subagents`` folder. A child whose usage is known becomes an ``unpriced``
+    row (no per-token price is recorded for either family) under the parent's
+    ledger doc and in the project index; a child with no usage yet is an
+    index-only ``unknown`` row that upgrades once usage appears. A child already
+    recorded with usage is skipped. Returns the number of new ledger entries.
+    Best-effort: never raises into the turn."""
+    if not engine_session_uuid:
+        return 0
+    try:
+        if cli == "chatgpt":
+            found = [(c, codex_rollout_usage(c["path"])) for c in
+                     codex_children(engine_session_uuid, root=codex_root, now=now)]
+        elif cli == "claude":
+            found = [(c, claude_agent_usage(c["path"])) for c in
+                     claude_children(engine_session_uuid, root=sidecar_root)]
+        else:
+            return 0
+    except Exception:
+        return 0
+    known = {}
+    if project_id:
+        try:
+            known = {r.get("key"): r for r in _ui.load_rows(project_id)}
+        except Exception:
+            known = {}
+    added = 0
+    for child, u in found:
+        key = "child:%s" % (child["id"],)
+        have = known.get(key)
+        if have is not None and have.get("usage_state") != USAGE_UNKNOWN:
+            continue
+        tokens = _int(u.get("tokens"))
+        added += ingest_usage(
+            engine_session_uuid if tokens > 0 else None,
+            _ul.entry_key(engine_session_uuid, line=key), index_key=key,
+            source=SOURCE_SUBAGENT, native_id=child["id"], tokens=tokens, cost_usd=None,
+            project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
+            cli=cli, model=u.get("model"), usage=u.get("usage"),
+            parent_id=child.get("parent"), label=child.get("label"))
     return added

@@ -1457,11 +1457,25 @@ const Proto = (() => {
         ? " · " + jobsUsage.count + (jobsUsage.count === 1 ? " job " : " jobs ") + (jobsUsage.cost_text || "cost unavailable") +
           (jobsUsage.unknown > 0 ? " (" + jobsUsage.unknown + " unknown usage)" : "")
         : "";
-      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText +
+      // (Wave 2 S2) the sub-agents the stewards of this effort spawned: their own
+      // clause, tokens only (no per-token price exists for them), never a zero.
+      const kids = !st.usage_persistence_error && st.usage_rollup && st.usage_rollup.children;
+      const kidsText = (kids && Number.isInteger(kids.count) && kids.count > 0)
+        ? " · " + kids.count + (kids.count === 1 ? " sub-agent " : " sub-agents ") + recordedTokenText(kids) +
+          (kids.unknown > 0 ? " (" + kids.unknown + " unknown usage)" : "")
+        : "";
+      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText + kidsText +
         (st.usage_persistence_error ? " · not saved" : "") +
         (!st.alive ? " · " + (GENERAL ? "idle" : "steward asleep") + (st.queued ? " · " + st.queued + " held" : "") : "");
       if (!effortUsage) spend.title = "Session: " + sessionCostText + sessionTokensText;
       if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
+      if (kidsText) {
+        spend.title += " · Sub-agents" + kidsText.replace(/^ · /, ": ");
+        (kids.rows || []).forEach(r => {
+          spend.title += "\n  " + (r.label || r.id || "?") + " · " + (r.model || r.cli || "?") + " · " +
+            (r.state === "unknown" ? "usage unknown" : Math.round(r.tokens).toLocaleString() + " tokens");
+        });
+      }
       spend.title += " · Reported dollars are recorded charges, not an estimate. ChatGPT/Grok subscription turns have no per-turn dollar amount; token updates alone do not increase this subtotal.";
       if (st.usage_persistence_error) spend.title = "Usage totals could not be saved. These session counts are in memory and may be lost on restart.";
     }

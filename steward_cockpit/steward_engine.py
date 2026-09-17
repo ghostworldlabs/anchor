@@ -2116,6 +2116,12 @@ class Engine:
                 folder_path=folder_path, effort_dir=self.dir, cli=self.cli,
                 model=served, duration_ms=int((accounting.get("duration") or 0) * 1000),
                 usage=usage)
+            # S2: the children this session spawned during the turn (Codex
+            # thread children by parent chain, Claude agent transcripts), one
+            # write-once row each under this effort; never folded into the
+            # steward's own figure.
+            _uc.ingest_children(self.session_id, self.cli, project_id=project_id,
+                                folder_path=folder_path, effort_dir=self.dir)
         except Exception:
             pass
 
