@@ -10,6 +10,7 @@
     { name: "Foreman",          icon: "foreman-icon.svg",         aliases: ["foreman"] },
     { name: "Gandalf",          icon: "gandalf-icon.jpg",         aliases: ["gandalf"] },
     { name: "Jumper",           icon: "jumper-icon.jpg",          aliases: ["jumper"] },
+    { name: "Superjump",        icon: "superjump-icon.jpg",       aliases: ["superjump", "super jump"] },
     { name: "Ramanujan",        icon: "ramanujan-icon.jpg",       aliases: ["ramanujan"] },
     { name: "legal-beagle",     icon: "legal-beagle-icon.jpg",    aliases: ["legal beagle", "legal-beagle"] },
     { name: "financial-analyst", icon: "financial-analyst-icon.jpg", aliases: ["financial analyst", "financial-analyst"] },
@@ -66,6 +67,7 @@
   function fromPath(path) {
     var p = String(path || "").toLowerCase();
     if (/(^|\/)gandalf(\/|$)/.test(p)) return "Gandalf";
+    if (/(^|\/)superjump(\/|$)/.test(p)) return "Superjump";
     if (/(^|\/)jumper(\/|$)/.test(p)) return "Jumper";
     if (/(^|\/)(research|researchprime)(\/|$)/.test(p)) return "researchPrime";
     if (/(^|\/)(plan|planning|crucible)(\/|$)/.test(p)) return "Crucible";

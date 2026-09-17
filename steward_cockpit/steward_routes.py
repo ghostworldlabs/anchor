@@ -56,6 +56,7 @@ _UPLOAD_TEMP_PREFIX = ".anchor-upload-"
 CONFIG = {"steward": "Ecgberht", "fake": False, "permission_mode": "bypassPermissions"}
 BONEYARD = campaign.BONEYARD_DIRNAME
 SKILLS = ["researchPrime", "Crucible", "Foreman", "Gandalf", "Jumper",
+          "Superjump",
           "ramanujan", "legal-beagle", "financial-analyst",
           "literature-review", "tidy-idy", "chekhov"]
 # (2026-09-05, John) every skill has a brand mark under /vendor/brand/; the cockpit
@@ -63,6 +64,7 @@ SKILLS = ["researchPrime", "Crucible", "Foreman", "Gandalf", "Jumper",
 SKILL_ICONS = {
     "researchPrime": "research-prime-icon.jpg", "Crucible": "crucible-icon.svg",
     "Foreman": "foreman-icon.svg", "Gandalf": "gandalf-icon.jpg", "Jumper": "jumper-icon.jpg",
+    "Superjump": "superjump-icon.jpg",
     "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
@@ -84,6 +86,7 @@ def skill_icon(name):
 SKILL_ICONS = {
     "researchPrime": "research-prime-icon.jpg", "Crucible": "crucible-icon.svg",
     "Foreman": "foreman-icon.svg", "Gandalf": "gandalf-icon.jpg", "Jumper": "jumper-icon.jpg",
+    "Superjump": "superjump-icon.jpg",
     "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",

@@ -3397,6 +3397,7 @@ function openPanel(sessionId) {
       {g:'foundry', name:'financial-analyst', label:'Financial Analyst', icon:'financial-analyst-icon.jpg'},
       {g:'foundry', name:'gandalf', label:'Gandalf', icon:'gandalf-icon.jpg'},
       {g:'foundry', name:'jumper', label:'Jumper', icon:'jumper-icon.jpg'},
+      {g:'foundry', name:'superjump', label:'Superjump', icon:'superjump-icon.jpg'},
       {g:'foundry', name:'legal-beagle', label:'Legal Beagle', icon:'legal-beagle-icon.jpg'},
       {g:'foundry', name:'literature-review', label:'Literature Review', icon:'literature-review-icon.jpg'},
       {g:'foundry', name:'ramanujan', label:'Ramanujan', icon:'ramanujan-icon.jpg'},

@@ -82,6 +82,7 @@ PORTFOLIO_BRAND_ICON_MAP = {
     "gandalf": "gandalf-icon.jpg",
     "researchPrime": "research-prime-icon.jpg",
     "jumper": "jumper-icon.jpg",
+    "superjump": "superjump-icon.jpg",
     "ramanujan": "ramanujan-icon.jpg",
     "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",

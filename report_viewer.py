@@ -166,6 +166,7 @@ def markdown_to_html(md_text: str) -> str:
 SKILL_ICON_FILES = {
     "researchprime": "research-prime-icon.jpg", "crucible": "crucible-icon.svg",
     "foreman": "foreman-icon.svg", "gandalf": "gandalf-icon.jpg", "jumper": "jumper-icon.jpg",
+    "superjump": "superjump-icon.jpg",
     "ramanujan": "ramanujan-icon.jpg", "legal-beagle": "legal-beagle-icon.jpg",
     "financial-analyst": "financial-analyst-icon.jpg",
     "literature-review": "literature-review-icon.jpg", "tidy-idy": "tidy-idy-icon.jpg",
