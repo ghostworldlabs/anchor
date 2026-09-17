@@ -709,6 +709,7 @@ def ingest_job_cost(engine_session_uuid, cost, job_id, record=None) -> int:
     return ingest_usage(
         engine_session_uuid or None,
         _ul.entry_key(engine_session_uuid or "", line="job:%s" % (job_id,)),
+        index_key="job:%s" % (job_id,),
         source=SOURCE_JOB, native_id=job_id,
         tokens=_int(cost.get("total_tokens")) or (inp + out),
         cost_usd=_cost_number(cost.get("total_cost_usd")),
@@ -827,17 +828,21 @@ def turn_key(engine_session_uuid, native_id) -> str:
 
 def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
                  cost_usd=None, project_id=None, folder_path=None, effort_dir=None,
-                 cli=None, model=None, duration_ms=0, usage=None, recorded_at=None) -> int:
+                 cli=None, model=None, duration_ms=0, usage=None, recorded_at=None,
+                 index_key=None) -> int:
     """Write ONE attributed usage row: the ledger entry (write-once per key under
     the engine session's doc) and, for an indexed source with a project, the
     compact per-project index row the cockpit reads. A row with no engine
     session (a spawn that died before any result) has no ledger doc to join and
     is written to the index only, as ``unknown``.
 
-    ``cost_usd`` ``None`` stays ``None`` — a subscription turn is *unpriced*, not
-    $0. Returns the number of NEW ledger entries (0 or 1). The index append is
-    idempotent on the same key, so a replay repairs a missing index row without
-    counting anything twice. Best-effort: never raises into a turn or a job.
+    ``index_key`` names the index row independently of the engine session (a
+    job is ``job:<job_id>``), so two writers for one spawn — a liveness check
+    while the reader still drains, then the finalize with the envelope — land on
+    ONE row: the index keeps the first write and upgrades an ``unknown``
+    placeholder once usage arrives (Grok R3 F11). ``cost_usd`` ``None`` stays
+    ``None`` — a subscription turn is *unpriced*, not $0. Returns the number of
+    NEW ledger entries (0 or 1). Best-effort: never raises into a turn or a job.
     """
     if not key:
         return 0
@@ -865,7 +870,9 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
             added = 0
     if entry["project_id"] and source in INDEXED_SOURCES:
         try:
-            _ui.append_rows(entry["project_id"], [{f: entry[f] for f in INDEX_FIELDS}])
+            row = {f: entry[f] for f in INDEX_FIELDS}
+            row["key"] = index_key or key
+            _ui.append_rows(entry["project_id"], [row])
         except Exception:
             pass
     return added

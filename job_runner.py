@@ -2532,8 +2532,10 @@ def _attribute_job(rec_or_job_id) -> None:
     row through the usage seam — its captured usage under the engine session the
     envelope reported, or an "unknown" row when no result reached us. Called by
     every writer that first sets a terminal status (finalize, cancel, a failed
-    cancel, the liveness check, startup reconciliation); first write wins, so a
-    later writer for the same job adds nothing. Best-effort, never raises."""
+    cancel, the liveness check, startup reconciliation). The index keys the row
+    by the job, keeps the first write and upgrades an "unknown" placeholder
+    once usage arrives, so a liveness check that fires while the reader still
+    drains and the finalize that follows land on ONE row. Best-effort."""
     try:
         rec = rec_or_job_id if isinstance(rec_or_job_id, dict) else load_record(rec_or_job_id)
         if not isinstance(rec, dict) or not rec.get("job_id"):

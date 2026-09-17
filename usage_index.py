@@ -46,8 +46,16 @@ def index_path(project_id) -> Path:
     return index_dir() / f"{_safe_id(project_id)}.jsonl"
 
 
+def _upgrades(existing, row) -> bool:
+    """A later row replaces an earlier one only when the earlier is the
+    ``unknown`` placeholder of a spawn and the later carries usage."""
+    return (existing.get("usage_state") == "unknown"
+            and row.get("usage_state") not in (None, "unknown"))
+
+
 def _rows(project_id) -> dict:
-    """``{key: row}`` in first-write order; malformed lines are skipped."""
+    """``{key: row}`` in first-write order; malformed lines are skipped; an
+    ``unknown`` placeholder is superseded by a later row with usage."""
     p = index_path(project_id)
     out = {}
     if not p.exists():
@@ -64,16 +72,23 @@ def _rows(project_id) -> dict:
             row = json.loads(line)
         except ValueError:
             continue
-        if isinstance(row, dict) and row.get("key") and row["key"] not in out:
+        if not isinstance(row, dict) or not row.get("key"):
+            continue
+        have = out.get(row["key"])
+        if have is None:
             out[row["key"]] = row
+        elif _upgrades(have, row):
+            out[row["key"]] = row      # same slot, first-write order kept
     return out
 
 
 def append_rows(project_id, rows) -> int:
     """Idempotently append rows for a project. Returns the count actually added.
 
-    Each row MUST carry a ``"key"`` (the ledger entry key). A key already present
-    is a no-op (first write wins), so a replayed finalize never counts twice.
+    Each row MUST carry a ``"key"``. A key already present is a no-op (first
+    write wins) unless the present row is an ``unknown`` placeholder and the new
+    one carries usage; so a replayed finalize never counts twice, and a spawn
+    counted before its result arrived is upgraded, never doubled.
     """
     rows = [r for r in (rows or []) if isinstance(r, dict) and r.get("key")]
     if not project_id or not rows:
@@ -82,7 +97,10 @@ def append_rows(project_id, rows) -> int:
         have = _rows(project_id)
         fresh = []
         for row in rows:
-            if row["key"] in have or any(row["key"] == f["key"] for f in fresh):
+            if any(row["key"] == f["key"] for f in fresh):
+                continue
+            present = have.get(row["key"])
+            if present is not None and not _upgrades(present, row):
                 continue
             fresh.append(row)
         if fresh:

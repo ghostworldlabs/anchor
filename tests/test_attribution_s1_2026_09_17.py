@@ -362,3 +362,27 @@ def test_interrupted_jobs_are_counted_by_every_terminal_writer(env):
     assert all(r["usage_state"] == "unknown" and r["cost_usd"] is None for r in rows.values())
     jr.reconcile_on_startup()                            # replay: nothing new
     assert len(ui.load_rows(env["pid"])) == 2
+
+
+def test_a_spawn_counted_before_its_result_is_upgraded_not_doubled(env):
+    """The liveness check fires while the reader still drains (an unknown row),
+    then finalize brings the envelope: one row, measured (Grok R3 F11)."""
+    import job_runner as jr
+    import usage_index as ui
+    from steward_cockpit import steward_routes
+    jr._write_record(_job_rec("job-race", cwd=env["effort"], pid=999996, proc_create_time=1.0))
+    jr.liveness_check("job-race")                        # dead pid: interrupted, unknown row
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 1 and rows[0]["usage_state"] == "unknown"
+    jr._finalize("job-race", 0, result_envelope={
+        "type": "result", "session_id": JOB_UUID, "total_cost_usd": 0.3,
+        "usage": {"input_tokens": 5, "output_tokens": 5}})
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 1
+    assert rows[0]["usage_state"] == "measured" and rows[0]["cost_usd"] == 0.3
+    assert rows[0]["engine_session_uuid"] == JOB_UUID
+    r = steward_routes._usage_rollup(env["effort"], estate={})
+    assert r["jobs"]["count"] == 1 and r["jobs"]["unknown"] == 0 and r["jobs"]["reported_spend"] == 0.3
+    # and once known, a later unknown writer (a replayed reconcile) changes nothing
+    jr.liveness_check("job-race")
+    assert ui.load_rows(env["pid"])[0]["usage_state"] == "measured"
