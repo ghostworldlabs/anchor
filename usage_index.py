@@ -48,9 +48,17 @@ def index_path(project_id) -> Path:
 
 def _upgrades(existing, row) -> bool:
     """A later row replaces an earlier one only when the earlier is the
-    ``unknown`` placeholder of a spawn and the later carries usage."""
-    return (existing.get("usage_state") == "unknown"
-            and row.get("usage_state") not in (None, "unknown"))
+    ``unknown`` placeholder of a spawn and the later carries usage, or when
+    both are a sub-agent's rows and the later cumulative total is larger (a
+    child recorded while it still ran — its figure grows, never shrinks)."""
+    if existing.get("usage_state") == "unknown" and row.get("usage_state") not in (None, "unknown"):
+        return True
+    if existing.get("source") == "subagent" and row.get("source") == "subagent":
+        try:
+            return float(row.get("tokens") or 0) > float(existing.get("tokens") or 0)
+        except (TypeError, ValueError):
+            return False
+    return False
 
 
 def _rows(project_id) -> dict:

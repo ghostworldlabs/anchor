@@ -145,6 +145,28 @@ def append_entries(engine_session_uuid, entries) -> int:
         return added
 
 
+def upsert_entries(engine_session_uuid, entries) -> int:
+    """Write entries REPLACING any existing entry with the same key. Returns the
+    count written. For rows whose figure is a current cumulative total that may
+    still grow (a sub-agent recorded while it runs — Wave 2 S2), where the
+    first-write-wins rule of :func:`append_entries` would freeze a partial
+    figure. Same lock, pairing and atomic write."""
+    entries = [e for e in (entries or []) if isinstance(e, dict) and e.get("key")]
+    if not engine_session_uuid or not entries:
+        return 0
+    with _paths.WRITE_LOCK, _journal.pairing():
+        doc = load_ledger(engine_session_uuid)
+        for ent in entries:
+            doc["entries"][ent["key"]] = ent
+        doc["engine_session_uuid"] = str(engine_session_uuid)
+        ledger_dir().mkdir(parents=True, exist_ok=True)
+        _paths.atomic_write_text(
+            ledger_path(engine_session_uuid),
+            json.dumps(doc, indent=2, ensure_ascii=False),
+        )
+        return len(entries)
+
+
 def ledger_entries(engine_session_uuid) -> list:
     """Return the deduped ledger entries for an engine session (a list of dicts).
 

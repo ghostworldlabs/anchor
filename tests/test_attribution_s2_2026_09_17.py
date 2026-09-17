@@ -1,17 +1,18 @@
 """codex-discipline Wave 2 S2 (2026-09-17) — sub-agent child rows.
 
 STUB GATE for John's sub-agent rule ("agents spawn sub-agents ... every one
-carries an ID that flows back up to the particular project"):
+carries an ID that flows back up to the particular project"). Behaviours only:
 
-- Codex children: rollout threads whose header names the steward's thread as
-  parent (a chain for grandchildren) are found from header reads alone; their
-  usage is the last cumulative token_count; unrelated threads are ignored.
-- Claude children: the subagents/agent-*.jsonl transcripts beside the session's
-  sidecar; usage through the ledger's own per-message parser.
+- Codex children are found by parent chain from rollout headers alone (a
+  grandchild reaches the steward; an unrelated thread does not); their usage is
+  the last cumulative token_count.
+- Claude children are the subagents/agent-*.jsonl transcripts beside the
+  session's sidecar, summed by the ledger's own parser.
 - One write-once row per child under the steward's effort, unpriced when tokens
-  are known, index-only unknown when not (upgraded once usage appears); a
-  replay adds nothing; the parent's own turn row is untouched (no folding).
-- The rollup shows children as their own bucket with the rows the line lists.
+  are known, index-only unknown when not, upgraded once; a replay adds nothing.
+- The parent's own turn row and cockpit sum never absorb a child; a resumed
+  steward's children land at engine start.
+- The rollup shows children as a bucket (count, tokens, unknown) beside jobs.
 """
 import importlib
 import io
@@ -32,14 +33,14 @@ OTHER = "01a0b0c6-4444-7b50-a38b-b91aad844444"
 OTHER_PARENT = "01a0b0c6-5555-7b50-a38b-b91aad845555"
 
 
-def _rollout(path, thread_id, parent=None, label=None, depth=1, model="gpt-6-astra", totals=None):
-    meta = {"timestamp": "2026-09-17T19:09:28.077Z", "type": "session_meta",
+def _rollout(path, thread_id, parent=None, label=None, depth=1, model="gpt-6-astra", totals=None,
+             root=None, started="2026-09-17T19:09:28.077Z"):
+    meta = {"timestamp": started, "type": "session_meta",
             "payload": {"id": thread_id, "model_provider": "openai", "cwd": "C:\\\\x",
-                        "parent_thread_id": parent,
+                        "parent_thread_id": parent, "session_id": root,
                         "source": {"subagent": {"thread_spawn": {"parent_thread_id": parent, "depth": depth,
                                                                   "agent_nickname": label}}} if parent else "cli"}}
-    lines = [json.dumps(meta)]
-    lines.append(json.dumps({"type": "turn_context", "payload": {"model": model, "effort": "ultra"}}))
+    lines = [json.dumps(meta), json.dumps({"type": "turn_context", "payload": {"model": model, "effort": "ultra"}})]
     if totals is not None:
         for t in (max(1, totals // 2), totals):
             lines.append(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {
@@ -71,40 +72,22 @@ def env(tmp_path, monkeypatch):
     effort = project / "planning" / "eff-1"
     effort.mkdir(parents=True)
     pid = rnd_registry.add_project("Attribution", str(project), scaffold=False)["id"]
-    day = codex_home / "sessions" / time.strftime("%Y", time.gmtime()) / time.strftime("%m", time.gmtime()) / time.strftime("%d", time.gmtime())
+    g = time.gmtime()
+    day = codex_home / "sessions" / time.strftime("%Y", g) / time.strftime("%m", g) / time.strftime("%d", g)
     return {"pid": pid, "project": str(project), "effort": str(effort), "day": day,
             "codex_root": codex_home / "sessions", "sidecars": sidecars}
 
 
-def _codex_tree(env, c2_totals=None):
+def _codex_tree(env, c2_totals=None, c1_totals=1000):
     d = env["day"]
     _rollout(d / f"rollout-2026-09-17T19-00-00-{SESSION}.jsonl", SESSION)                       # the steward
-    _rollout(d / f"rollout-2026-09-17T19-09-28-{C1}.jsonl", C1, parent=SESSION, label="Chandrasekhar", totals=1000)
-    _rollout(d / f"rollout-2026-09-17T19-10-00-{C2}.jsonl", C2, parent=SESSION, label="Noether", totals=c2_totals)
-    _rollout(d / f"rollout-2026-09-17T19-11-00-{G1}.jsonl", G1, parent=C1, label="Ramanujan", depth=2, totals=200)
-    _rollout(d / f"rollout-2026-09-17T19-12-00-{OTHER}.jsonl", OTHER, parent=OTHER_PARENT, label="Stranger", totals=999)
+    _rollout(d / f"rollout-2026-09-17T19-09-28-{C1}.jsonl", C1, parent=SESSION, root=SESSION, label="Chandrasekhar", totals=c1_totals)
+    _rollout(d / f"rollout-2026-09-17T19-10-00-{C2}.jsonl", C2, parent=SESSION, root=SESSION, label="Noether", totals=c2_totals)
+    _rollout(d / f"rollout-2026-09-17T19-11-00-{G1}.jsonl", G1, parent=C1, root=SESSION, label="Ramanujan", depth=2, totals=200)
+    _rollout(d / f"rollout-2026-09-17T19-12-00-{OTHER}.jsonl", OTHER, parent=OTHER_PARENT, root=OTHER_PARENT, label="Stranger", totals=999)
 
 
-# ── discovery ─────────────────────────────────────────────────────────────────
-
-def test_codex_children_follow_the_parent_chain_from_headers_alone(env):
-    import usage_capture as uc
-    _codex_tree(env)
-    kids = uc.codex_children(SESSION, root=env["codex_root"])
-    assert [k["id"] for k in kids] == [C1, C2, G1]
-    by = {k["id"]: k for k in kids}
-    assert by[C1]["parent"] == SESSION and by[C1]["label"] == "Chandrasekhar" and by[C1]["depth"] == 1
-    assert by[G1]["parent"] == C1 and by[G1]["depth"] == 2          # a grandchild reaches the steward
-    assert uc.codex_children(OTHER_PARENT, root=env["codex_root"]) and \
-        [k["id"] for k in uc.codex_children(OTHER_PARENT, root=env["codex_root"])] == [OTHER]
-    assert uc.codex_children("not-a-thread", root=env["codex_root"]) == []
-    u = uc.codex_rollout_usage(by[C1]["path"])
-    assert u["tokens"] == 1000 and u["model"] == "gpt-6-astra" and u["usage"]["output_tokens"] == 10
-    assert uc.codex_rollout_usage(by[C2]["path"]) == {"tokens": 0, "usage": None, "model": "gpt-6-astra"}
-
-
-def test_claude_children_sit_beside_the_session_sidecar(env):
-    import usage_capture as uc
+def _claude_tree(env):
     slug = env["sidecars"] / "slug"
     (slug / f"{SESSION}.jsonl").write_text('{"type":"user","message":{"role":"user","content":"hi"}}\n', encoding="utf-8")
     sub = slug / SESSION / "subagents"
@@ -117,10 +100,51 @@ def test_claude_children_sit_beside_the_session_sidecar(env):
                                                        "cache_read_input_tokens": 1000, "output_tokens": out}}}))
     lines.append(lines[-1])                                              # a repeated message id collapses
     (sub / "agent-a1.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return 2 * (10 + 1000) + 100 + 250
+
+
+def _same(a, b):
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+# ── discovery ─────────────────────────────────────────────────────────────────
+
+def test_codex_children_follow_the_parent_chain_from_headers_alone(env):
+    import usage_capture as uc
+    _codex_tree(env)
+    kids = uc.codex_children(SESSION, root=env["codex_root"])
+    assert [k["id"] for k in kids] == [C1, C2, G1]                       # a grandchild reaches the steward
+    assert {k["id"]: k["parent"] for k in kids} == {C1: SESSION, C2: SESSION, G1: C1}
+    assert [k["id"] for k in uc.codex_children(OTHER_PARENT, root=env["codex_root"])] == [OTHER]
+    assert uc.codex_children("not-a-thread", root=env["codex_root"]) == []
+    assert uc.codex_rollout_usage(kids[0]["path"]) == {"tokens": 1000, "model": "gpt-6-astra"}
+    assert uc.codex_rollout_usage(kids[1]["path"])["tokens"] == 0        # no usage yet
+
+
+def test_membership_by_root_session_survives_a_missing_parent_and_a_rollover(env):
+    """A grandchild whose parent rollout is outside the window still names its
+    root steward (Grok S2 F4); an older header without a root joins by chain; a
+    thread seen in two files keeps the newest (F5)."""
+    import usage_capture as uc
+    d = env["day"]
+    _rollout(d / f"rollout-2026-09-17T19-11-00-{G1}.jsonl", G1, parent=C1, root=SESSION, totals=200)   # C1's file absent
+    _rollout(d / f"rollout-2026-09-17T19-12-00-{OTHER}.jsonl", OTHER, parent=SESSION, totals=50)      # old header: no root
+    _rollout(d / f"rollout-2026-09-16T19-00-00-{C2}.jsonl", C2, parent=SESSION, root=SESSION, totals=10,
+             started="2026-09-16T19:00:00.000Z")
+    _rollout(d / f"rollout-2026-09-17T19-30-00-{C2}.jsonl", C2, parent=SESSION, root=SESSION, totals=700,
+             started="2026-09-17T19:30:00.000Z")
+    kids = {k["id"]: k for k in uc.codex_children(SESSION, root=env["codex_root"])}
+    assert set(kids) == {G1, OTHER, C2}
+    assert kids[G1]["parent"] == C1
+    assert uc.codex_rollout_usage(kids[C2]["path"])["tokens"] == 700     # the newest file wins
+
+
+def test_claude_children_sit_beside_the_session_sidecar(env):
+    import usage_capture as uc
+    expected = _claude_tree(env)
     kids = uc.claude_children(SESSION, root=env["sidecars"])
     assert [k["id"] for k in kids] == ["a1"] and kids[0]["parent"] == SESSION
-    u = uc.claude_agent_usage(kids[0]["path"])
-    assert u["tokens"] == 2 * (10 + 1000) + 100 + 250 and u["model"] == "claude-fable-5-1"
+    assert uc.claude_agent_usage(kids[0]["path"]) == {"tokens": expected, "model": "claude-fable-5-1"}
     assert uc.claude_children("00000000-0000-0000-0000-000000000000", root=env["sidecars"]) == []
 
 
@@ -137,24 +161,73 @@ def test_ingest_children_writes_one_row_per_child_and_upgrades_unknown_once(env)
     rows = {r["native_id"]: r for r in ui.load_rows(env["pid"])}
     assert set(rows) == {C1, C2, G1}
     assert rows[C1]["source"] == "subagent" and rows[C1]["usage_state"] == "unpriced"
-    assert rows[C1]["tokens"] == 1000 and rows[C1]["cost_usd"] is None
-    assert rows[C1]["parent_id"] == SESSION and rows[C1]["label"] == "Chandrasekhar"
-    assert rows[C1]["model"] == "gpt-6-astra" and rows[C1]["cli"] == "chatgpt"
-    assert rows[G1]["parent_id"] == C1 and rows[G1]["tokens"] == 200      # attributed to the effort, parent named
+    assert rows[C1]["tokens"] == 1000 and rows[C1]["cost_usd"] is None and rows[C1]["cli"] == "chatgpt"
+    assert rows[C1]["parent_id"] == SESSION and rows[G1]["parent_id"] == C1
     assert rows[C2]["usage_state"] == "unknown" and rows[C2]["engine_session_uuid"] is None
     ledger = {e["native_id"]: e for e in ul.ledger_entries(SESSION) if e.get("source") == "subagent"}
-    assert set(ledger) == {C1, G1} and ledger[C1]["project_id"] == env["pid"]
-    # replay: nothing new
-    assert uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
-                              effort_dir=env["effort"], codex_root=env["codex_root"]) == 0
+    assert set(ledger) == {C1, G1}
+    assert ledger[C1]["project_id"] == env["pid"] and ledger[C1]["model"] == "gpt-6-astra"
+    assert all(r["key"] == f"child:{SESSION}:{r['native_id']}" for r in rows.values())   # steward-scoped key
+    # replay: nothing new, and an unchanged child file is not read again
+    reads = []
+    real = uc.codex_rollout_usage
+    monkeypatch_reads = lambda path: (reads.append(path), real(path))[1]
+    uc.codex_rollout_usage = monkeypatch_reads
+    try:
+        assert uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
+                                  effort_dir=env["effort"], codex_root=env["codex_root"]) == 0
+    finally:
+        uc.codex_rollout_usage = real
+    assert [C2 in p for p in reads] == [True]                            # only the unknown child was re-read
     assert len(ui.load_rows(env["pid"])) == 3
     # C2's usage arrives: the unknown placeholder upgrades once, the ledger gains its row
+    time.sleep(0.05)
     _codex_tree(env, c2_totals=500)
     assert uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
                               effort_dir=env["effort"], codex_root=env["codex_root"]) == 1
     rows = {r["native_id"]: r for r in ui.load_rows(env["pid"])}
     assert len(rows) == 3 and rows[C2]["usage_state"] == "unpriced" and rows[C2]["tokens"] == 500
     assert len([e for e in ul.ledger_entries(SESSION) if e.get("source") == "subagent"]) == 3
+
+
+def test_a_child_still_running_grows_and_never_shrinks(env):
+    """A child recorded at one turn end keeps growing: its row and its ledger
+    entry carry the current cumulative total, one row each (Grok S2 F1)."""
+    import usage_capture as uc
+    import usage_index as ui
+    import usage_ledger as ul
+    _codex_tree(env, c1_totals=500)
+    uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
+                       effort_dir=env["effort"], codex_root=env["codex_root"])
+    assert {r["native_id"]: r["tokens"] for r in ui.load_rows(env["pid"])}[C1] == 500
+    time.sleep(1.1)                                                      # the file's mtime moves past the row
+    _codex_tree(env, c1_totals=2_000_000)
+    uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
+                       effort_dir=env["effort"], codex_root=env["codex_root"])
+    rows = [r for r in ui.load_rows(env["pid"]) if r["native_id"] == C1]
+    assert len(rows) == 1 and rows[0]["tokens"] == 2_000_000
+    entries = [e for e in ul.ledger_entries(SESSION) if e.get("native_id") == C1]
+    assert len(entries) == 1 and entries[0]["tokens"] == 2_000_000
+    time.sleep(1.1)
+    _codex_tree(env, c1_totals=400)                                      # a smaller snapshot never shrinks the row
+    uc.ingest_children(SESSION, "chatgpt", project_id=env["pid"], folder_path=env["project"],
+                       effort_dir=env["effort"], codex_root=env["codex_root"])
+    assert [r["tokens"] for r in ui.load_rows(env["pid"]) if r["native_id"] == C1] == [2_000_000]
+
+
+def test_claude_children_reach_the_effort_through_the_same_seam(env):
+    import usage_capture as uc
+    import usage_index as ui
+    import usage_ledger as ul
+    expected = _claude_tree(env)
+    assert uc.ingest_children(SESSION, "claude", project_id=env["pid"], folder_path=env["project"],
+                              effort_dir=env["effort"], sidecar_root=env["sidecars"]) == 1
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 1 and rows[0]["native_id"] == "a1" and rows[0]["tokens"] == expected
+    assert rows[0]["usage_state"] == "unpriced" and rows[0]["parent_id"] == SESSION and rows[0]["cli"] == "claude"
+    assert ul.ledger_entries(SESSION)[0]["model"] == "claude-fable-5-1"
+    assert uc.ingest_children(SESSION, "claude", project_id=env["pid"], folder_path=env["project"],
+                              effort_dir=env["effort"], sidecar_root=env["sidecars"]) == 0
 
 
 def test_children_without_a_project_reach_the_ledger_only(env):
@@ -168,15 +241,17 @@ def test_children_without_a_project_reach_the_ledger_only(env):
     assert len([e for e in ul.ledger_entries(SESSION) if e.get("source") == "subagent"]) == 2
 
 
-# ── the steward's turn end ────────────────────────────────────────────────────
+# ── the steward ───────────────────────────────────────────────────────────────
 
-@pytest.fixture
-def cockpit(env, monkeypatch, tmp_path):
+def _engine(env, monkeypatch, tmp_path, stored=None):
     import anchor_settings
     from steward_cockpit import steward_engine as engine_mod
-    monkeypatch.setattr(engine_mod, "STATE_FILE", tmp_path / "state.json")
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(engine_mod, "STATE_FILE", state_file)
     monkeypatch.setattr(anchor_settings, "load_settings",
                         lambda: {"default_cli": "chatgpt", "settings_revision": 1})
+    if stored:
+        state_file.write_text(json.dumps({env["effort"]: stored}), encoding="utf-8")
     engine = engine_mod.Engine(env["effort"], fake=True)
     engine.cli = "chatgpt"
     engine.session_id = SESSION
@@ -193,9 +268,10 @@ def _result(**extra):
             "total_cost_usd": None, "duration_ms": 2000, **extra}
 
 
-def test_turn_end_records_children_without_folding_them_into_the_parent(env, cockpit):
+def test_turn_end_records_children_without_folding_them_into_the_parent(env, monkeypatch, tmp_path):
     import usage_index as ui
     import usage_ledger as ul
+    cockpit = _engine(env, monkeypatch, tmp_path)
     _codex_tree(env)
     cockpit.turn_text = "Delegated and done."
     cockpit._handle(_result(), cockpit.proc)
@@ -213,13 +289,16 @@ def test_turn_end_records_children_without_folding_them_into_the_parent(env, coc
     assert len(ul.ledger_entries(SESSION)) == 3 and len(ui.load_rows(env["pid"])) == 3
 
 
-def _same(a, b):
-    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+def test_a_resumed_steward_records_its_children_at_engine_start(env, monkeypatch, tmp_path):
+    import usage_index as ui
+    _codex_tree(env)
+    _engine(env, monkeypatch, tmp_path, stored={"cli": "chatgpt", "session_id": SESSION, "usage": {"turns": 3}})
+    assert sorted(r["native_id"] for r in ui.load_rows(env["pid"])) == sorted([C1, C2, G1])
 
 
 # ── the reader ────────────────────────────────────────────────────────────────
 
-def test_rollup_lists_children_beside_jobs_and_the_steward_total(env):
+def test_rollup_counts_children_beside_jobs_and_the_steward_total(env):
     import usage_capture as uc
     from steward_cockpit import steward_routes
     _codex_tree(env)
@@ -230,12 +309,7 @@ def test_rollup_lists_children_beside_jobs_and_the_steward_total(env):
     r = steward_routes._usage_rollup(env["effort"], estate={})
     kids = r["children"]
     assert kids["count"] == 3 and kids["unknown"] == 1 and kids["tokens"] == 1200
-    assert kids["unpriced_turns"] == 2 and kids["cost_status"] == "unavailable"
-    assert kids["billing_mode"] == "subscription" and kids["billing_family"] == "chatgpt"
     assert kids["token_status"] == "partial"                     # one child's usage is unknown
-    labels = {row["label"] for row in kids["rows"]}
-    assert labels == {"Chandrasekhar", "Noether", "Ramanujan"}
-    assert {row["state"] for row in kids["rows"]} == {"unpriced", "unknown"}
     assert r["jobs"]["count"] == 1 and r["total"]["tokens"] == 0  # jobs and children stay beside the total
     other = steward_routes._usage_rollup(str(Path(env["project"]) / "planning" / "eff-2"), estate={})
-    assert other["children"]["count"] == 0 and other["children"]["rows"] == []
+    assert other["children"]["count"] == 0

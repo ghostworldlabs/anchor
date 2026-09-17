@@ -559,6 +559,8 @@ class Engine:
         self.unpriced_turns = _u["unpriced_turns"]
         self.tokens, self.secs, self.turns = _u["tokens"], _u["secs"], _u["turns"]
         self._restore_usage_checkpoints(stored_entry.get("usage"))
+        # S2: a resumed steward's children land now, not at its next turn end
+        self._ledger_children()
         self.last_output = 0.0
         self.last_tick = 0.0
         self.last_status = 0.0      # deterministic status cadence (separate
@@ -2116,10 +2118,19 @@ class Engine:
                 folder_path=folder_path, effort_dir=self.dir, cli=self.cli,
                 model=served, duration_ms=int((accounting.get("duration") or 0) * 1000),
                 usage=usage)
-            # S2: the children this session spawned during the turn (Codex
-            # thread children by parent chain, Claude agent transcripts), one
-            # write-once row each under this effort; never folded into the
-            # steward's own figure.
+        except Exception:
+            pass
+        self._ledger_children()
+
+    def _ledger_children(self):
+        """S2: one write-once row per child this session spawned (Codex thread
+        children by parent chain, Claude agent transcripts), under this effort,
+        beside the steward's own figure. Best-effort."""
+        if not self.session_id:
+            return
+        try:
+            import usage_capture as _uc
+            project_id, folder_path = self._attribution_ids()
             _uc.ingest_children(self.session_id, self.cli, project_id=project_id,
                                 folder_path=folder_path, effort_dir=self.dir)
         except Exception:

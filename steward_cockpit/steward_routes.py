@@ -710,13 +710,9 @@ def _usage_rollup(cdir, estate=None):
     # whose usage never reached us, never a zero.
     jobs = zero()
     jobs["count"], jobs["unknown"] = 0, 0
-    # (Wave 2 S2) sub-agents the stewards of this effort spawned: one row per
-    # child, joined by the effort scope stamped at write time; listed (newest
-    # first, at most 20) so the line can name them; unpriced by nature
-    # (no per-token price is recorded for either family), unknown when no usage
-    # reached us.
+    # (S2) sub-agents the stewards of this effort spawned: count, tokens, unknown
     children = zero()
-    children["count"], children["unknown"], children["rows"] = 0, 0, []
+    children["count"], children["unknown"] = 0, 0
     try:
         import usage_capture as _uc
         import usage_index as _ui
@@ -735,32 +731,20 @@ def _usage_rollup(cdir, estate=None):
         if row.get("source") == "subagent":
             if not in_scope(row.get("scope")):
                 continue
-            state, tokens = row.get("usage_state"), row.get("tokens")
+            tokens = row.get("tokens")
             children["count"] += 1
             if number(tokens):
                 children["tokens"] += tokens
-            if state == "unknown":
+            if row.get("usage_state") == "unknown":
                 children["unknown"] += 1
-                children["_cost_unknown"] += 1
                 children["_tokens_unknown"] += 1
             else:
                 children["unpriced_turns"] += 1
-                children["_cost_unknown"] += 1
                 children["_tokens_known"] += 1
-                family = infer_subscription_cli(row.get("cli"))
-                if family:
-                    children["_sub_unpriced"] += 1
-                    if family not in children["_sub_clis"]:
-                        children["_sub_clis"].append(family)
-                else:
-                    children["_other_unpriced"] += 1
+            children["_cost_unknown"] += 1
             stamp = row.get("recorded_at")
             if isinstance(stamp, str) and stamp:
                 children["usage_updated_at"] = max(children["usage_updated_at"] or stamp, stamp)
-            children["rows"].append({"id": row.get("native_id"), "label": row.get("label"),
-                                     "cli": row.get("cli"), "model": row.get("model"),
-                                     "tokens": tokens if number(tokens) else 0, "state": state,
-                                     "recorded_at": stamp, "parent_id": row.get("parent_id")})
             continue
         if row.get("source") != "job":
             continue
@@ -811,7 +795,6 @@ def _usage_rollup(cdir, estate=None):
     total["_sub_clis"] = clis
     private = ("_cost_known", "_cost_unknown", "_tokens_known", "_tokens_unknown",
                "_tokens_partial", "_sub_unpriced", "_other_unpriced", "_sub_clis")
-    children["rows"] = sorted(children["rows"], key=lambda r: str(r.get("recorded_at") or ""), reverse=True)[:20]
     for bucket in (stew, term, jobs, children, total):
         bucket["reported_spend"] = round(bucket["reported_spend"], 4)
         bucket["cost_status"] = "unavailable" if not bucket["_cost_known"] else (
