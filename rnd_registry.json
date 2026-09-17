@@ -304,7 +304,7 @@
     "name": "ADHD",
     "folder_path": "C:\\dev\\ADHD",
     "priority": 2,
-    "state": "active",
+    "state": "archived",
     "notes": "",
     "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
     "remote_url": "",
@@ -322,5 +322,29 @@
     "remote_url": "",
     "auto_push": false,
     "group": "Research"
+  },
+  {
+    "id": "f548c4cc6bef4be88af823569954fe6f",
+    "name": "Bread",
+    "folder_path": "C:\\dev\\Nutrition",
+    "priority": 2,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "Personal"
+  },
+  {
+    "id": "c2cab09b1c8c45ab9ec19877c43aa1c7",
+    "name": "Open Source Token Source",
+    "folder_path": "C:\\dev\\Open Source Token Source",
+    "priority": 1,
+    "state": "active",
+    "notes": "",
+    "blurb": "R&D project managed by Anchor — research/plan/build via the trio.",
+    "remote_url": "",
+    "auto_push": false,
+    "group": "AI Infastructure"
   }
 ]

@@ -117,20 +117,20 @@
       "cost_complete": false,
       "completed_cost_complete": false,
       "cost_status": "partial",
-      "unpriced_turns": 86,
-      "tokens": 219859985,
-      "secs": 61264,
-      "turns": 86,
+      "unpriced_turns": 109,
+      "tokens": 323834391,
+      "secs": 84012,
+      "turns": 109,
       "token_status": "partial",
       "usage_source": "codex-cli-final",
-      "usage_updated_at": "2026-09-15T01:57:01Z",
+      "usage_updated_at": "2026-09-17T18:50:09Z",
       "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
       "checkpoint_coverage": {
-        "tracked_invocations": 46,
-        "reported_invocations": 45,
+        "tracked_invocations": 69,
+        "reported_invocations": 68,
         "partial_invocations": 1,
         "unavailable_invocations": 0,
-        "finalized_invocations": 46
+        "finalized_invocations": 69
       },
       "usage_persistence_error": null,
       "usage_attribution_error": null,
@@ -735,15 +735,314 @@
           "finalized": true,
           "source": "codex-cli-final",
           "updated_at": "2026-09-15T01:57:01Z"
+        },
+        "9cf2b6a5-e337-4c82-843e-86e15f2aa497": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 1988090,
+          "counts": {
+            "input_tokens": 1978139,
+            "output_tokens": 9951,
+            "cached_input_tokens": 1773440
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:38:03Z"
+        },
+        "5cb651cf-cf71-4355-9e88-4b948e6ee0c8": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 19292766,
+          "counts": {
+            "input_tokens": 19191148,
+            "output_tokens": 101618,
+            "cached_input_tokens": 18615296
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T17:52:30Z"
+        },
+        "ce348308-3ebb-43d3-bda6-efb0aaa82e29": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 523361,
+          "counts": {
+            "input_tokens": 520995,
+            "output_tokens": 2366,
+            "cached_input_tokens": 430080
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T17:57:38Z"
+        },
+        "8d9409be-d44b-4120-afb6-fc41a5a4eaf7": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 116609,
+          "counts": {
+            "input_tokens": 116343,
+            "output_tokens": 266,
+            "cached_input_tokens": 114176
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T17:58:05Z"
+        },
+        "f9df5466-f501-4142-a746-3e68507b6abc": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 631930,
+          "counts": {
+            "input_tokens": 628730,
+            "output_tokens": 3200,
+            "cached_input_tokens": 600960
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:00:43Z"
+        },
+        "e66c2890-9f89-488f-9176-d25a14d86f8d": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 86063,
+          "counts": {
+            "input_tokens": 85566,
+            "output_tokens": 497,
+            "cached_input_tokens": 83200
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:01:08Z"
+        },
+        "57bb3ddd-2f16-4e01-a012-2e247c7a2f74": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 86240,
+          "counts": {
+            "input_tokens": 86214,
+            "output_tokens": 26,
+            "cached_input_tokens": 85376
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:01:18Z"
+        },
+        "190b595f-c4fd-4ae0-adb0-e4d07a00999e": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 566170,
+          "counts": {
+            "input_tokens": 563053,
+            "output_tokens": 3117,
+            "cached_input_tokens": 550784
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:03:34Z"
+        },
+        "f21bde18-e3ba-4c58-9fab-be0cef49f8d9": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 405376,
+          "counts": {
+            "input_tokens": 403053,
+            "output_tokens": 2323,
+            "cached_input_tokens": 385536
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:05:16Z"
+        },
+        "89301f89-1198-4a9e-a392-4e7fff423215": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 6118012,
+          "counts": {
+            "input_tokens": 6092681,
+            "output_tokens": 25331,
+            "cached_input_tokens": 5933568
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:30:55Z"
+        },
+        "8ec43f42-aaa4-4278-8dff-6a75fd1c6141": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 407137,
+          "counts": {
+            "input_tokens": 406137,
+            "output_tokens": 1000,
+            "cached_input_tokens": 385536
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:31:37Z"
+        },
+        "29eb728b-208a-4f4c-b5d9-0fbacbeeaba4": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 410176,
+          "counts": {
+            "input_tokens": 409500,
+            "output_tokens": 676,
+            "cached_input_tokens": 406400
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:32:06Z"
+        },
+        "cb9f1529-b5a5-4680-bc77-c19fc1992858": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 3107971,
+          "counts": {
+            "input_tokens": 3085169,
+            "output_tokens": 22802,
+            "cached_input_tokens": 2976768
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T19:01:47Z"
+        },
+        "1c4671ce-d707-4444-ac3f-1cc46201f686": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 2683636,
+          "counts": {
+            "input_tokens": 2665613,
+            "output_tokens": 18023,
+            "cached_input_tokens": 2479360
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T14:48:17Z"
+        },
+        "c95e5e4c-946f-4048-871c-a1f2299a1033": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 5014150,
+          "counts": {
+            "input_tokens": 4972392,
+            "output_tokens": 41758,
+            "cached_input_tokens": 4613760
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T17:16:04Z"
+        },
+        "72235f90-675d-496c-bd41-3bdcb09dabf2": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 12834452,
+          "counts": {
+            "input_tokens": 12779035,
+            "output_tokens": 55417,
+            "cached_input_tokens": 12445824
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T19:00:26Z"
+        },
+        "d0bfb295-9a04-47a1-8ad3-27941f034f9e": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 9135514,
+          "counts": {
+            "input_tokens": 9096295,
+            "output_tokens": 39219,
+            "cached_input_tokens": 8582144
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T22:53:25Z"
+        },
+        "5fb5ebb4-96d6-4201-bf7b-8497010a3529": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 10070134,
+          "counts": {
+            "input_tokens": 10020281,
+            "output_tokens": 49853,
+            "cached_input_tokens": 9752448
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T23:28:35Z"
+        },
+        "40afdbde-c09b-461b-9357-17b5b0745d6c": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 12285631,
+          "counts": {
+            "input_tokens": 12236381,
+            "output_tokens": 49250,
+            "cached_input_tokens": 11865984
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T01:33:37Z"
+        },
+        "ab8977d6-d933-467d-911a-581de1d4f108": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 1451557,
+          "counts": {
+            "input_tokens": 1445392,
+            "output_tokens": 6165,
+            "cached_input_tokens": 1184768
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T12:50:57Z"
+        },
+        "99907153-27c7-4224-a21b-e24eddffa2af": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 7779089,
+          "counts": {
+            "input_tokens": 7751511,
+            "output_tokens": 27578,
+            "cached_input_tokens": 7612288
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T13:12:01Z"
+        },
+        "70f2c80f-cab3-4c74-95b4-2764135a52d8": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 3196595,
+          "counts": {
+            "input_tokens": 3187541,
+            "output_tokens": 9054,
+            "cached_input_tokens": 2985088
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T18:19:17Z"
+        },
+        "2103d2d2-4fcc-46af-9016-40a812a0329f": {
+          "session_id": "01a09ac1-a731-76d3-ba7a-cf6421ad52f7",
+          "credited_tokens": 5783747,
+          "counts": {
+            "input_tokens": 5738237,
+            "output_tokens": 45510,
+            "cached_input_tokens": 5519872
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T18:50:09Z"
         }
       }
     },
-    "last_text": "ibution.html) is now the first item in Deliverables, followed by those R files; I verified the program opens and draws a sample.\n\nNo Lecture 3 video recommendations have been produced yet\u2014the prepared clip-search plan still awaits approval.",
-    "last_used": "2026-09-14 19:57",
+    "last_text": "ecking answers.\n\nEach targets twenty minutes. The PowerPoints include teaching notes, and both formats appear in **Current work and review**. I checked the rendered slides, calculations and opening links; both remain drafts for your review.",
+    "last_used": "2026-09-17 12:50",
     "cli": "chatgpt",
     "open_question": "",
     "open_question_kind": "",
-    "epoch": 22,
+    "epoch": 25,
     "files": [
       "C:\\dev\\MBA Teaching AI\\.ecgberht\\resync-20260903.mjs",
       "C:\\dev\\MBA Teaching AI\\ECGBERHT.md",
@@ -769,8 +1068,8 @@
       "selection_evidence": "provider_priority",
       "model_attested": false,
       "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
-      "discovered_at": 1789436308.6280718,
-      "settings_revision": 6,
+      "discovered_at": 1789566396.6873767,
+      "settings_revision": 10,
       "model_served": null
     },
     "policy_override": null,
@@ -843,48 +1142,241 @@
     "refinement_handoff": {
       "ok": true,
       "idempotent": true,
-      "handoff_id": "producer-handoff-4c4aba592e9a4a96d7559965ebf3e0e7cb40538fb67d9bd307422de8ba33c9d1",
+      "handoff_id": "producer-handoff-2cb5f1757fa67ca01ffc54f5e44f776a301128c84a4eec929b967fcc5bab8b2b",
       "handoff": {
-        "handoff_id": "producer-handoff-4c4aba592e9a4a96d7559965ebf3e0e7cb40538fb67d9bd307422de8ba33c9d1",
+        "handoff_id": "producer-handoff-2cb5f1757fa67ca01ffc54f5e44f776a301128c84a4eec929b967fcc5bab8b2b",
         "producer_kind": "conversation",
-        "source_ref": "Cockpit conversation chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:22:79",
-        "step_id": null,
-        "outputs": [],
-        "dispatch_context": null,
-        "terminal": "done",
-        "inventory_complete": false,
-        "status": "pending_steward_review",
-        "freshness": "unknown",
-        "changed_context_fields": [],
-        "review_reasons": [
-          "slice_unmapped",
-          "dispatch_context_unknown",
-          "output_inventory_incomplete"
+        "source_ref": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+        "step_id": "lecture-3-ai-supplement",
+        "outputs": [
+          {
+            "source_ref": "BA 815/Fall 2026/Lecture 3 AI Supplement - Draft 1.pdf",
+            "sha256": "8f6b9bba444213650134107ade69dc77ff4707d84c91b537c33c2bc510b1f925",
+            "product_id": "Lecture-3-AI-Draft-PDF"
+          },
+          {
+            "source_ref": "BA 815/Fall 2026/Lecture 3 AI Supplement - Draft 1.pptx",
+            "sha256": "2946ef289416da30b550e18092e9b1158e41c125ac2557cf132c1221693700df",
+            "product_id": "Lecture-3-AI-Draft-PowerPoint"
+          },
+          {
+            "source_ref": "BA 815/Fall 2026/Lecture 4 AI Supplement - Draft 1.pdf",
+            "sha256": "f3aad141fa465bb576a0170ad357caa9a82b5ee18caa7e48780904560a5de476",
+            "product_id": "Lecture-4-AI-Draft-PDF"
+          },
+          {
+            "source_ref": "BA 815/Fall 2026/Lecture 4 AI Supplement - Draft 1.pptx",
+            "sha256": "33608a7ad03bbd14a1caab62435a0b32e79b63465a4fe27577beb1717a3ed639",
+            "product_id": "Lecture-4-AI-Draft-PowerPoint"
+          },
+          {
+            "source_ref": "CURRENT-WORK.md",
+            "sha256": "8e5f269744a1c7738982ba2e3307051670edb645f22b12d35413b98642f76c6d"
+          }
         ],
-        "operation_id": "producer-handoff-4c4aba592e9a4a96d7559965ebf3e0e7cb40538fb67d9bd307422de8ba33c9d1",
-        "generation": 350,
-        "at": "2026-09-15T00:53:08.595Z",
+        "dispatch_context": {
+          "step_id": "lecture-3-ai-supplement",
+          "round": 0,
+          "requirements": {
+            "mba-ai34-drafts-20260917-scope-3": {
+              "id": "mba-ai34-drafts-20260917-scope-3",
+              "scope": "whole-lesson",
+              "directive": "require",
+              "text": "Build initial PDF/PPTX draft of AI Supplement3 using its exact retained Outline v6 section, twenty-minute 2/6/7/3/2 timing and natural continuity from AI1/2. Source outline BA 815/Fall 2026/planning/AI-SUPPLEMENTS-OUTLINE-v6.md sha256 bd5b3795dafed78f8b0f604c56f5848727f34856e81cc83bc2b4aaf0c81ab751. Nontechnical MBA baseline; no installation or paid account prerequisite.",
+              "feedback_id": "mba-ai34-drafts-20260917-brief-3",
+              "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+              "round": 0,
+              "status": "active"
+            },
+            "mba-ai34-drafts-20260917-style-3": {
+              "id": "mba-ai34-drafts-20260917-style-3",
+              "scope": "whole-lesson",
+              "directive": "preserve",
+              "text": "Preserve approved AI1/2 masters, blue rim/corner logos, title and figure-forward conventions, visual vocabulary and content sequence. Preserve all accepted main lectures, syllabus, aids, and supplements byte-for-byte.",
+              "feedback_id": "mba-ai34-drafts-20260917-brief-3",
+              "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+              "round": 0,
+              "status": "active"
+            },
+            "mba-ai34-drafts-20260917-accuracy-3": {
+              "id": "mba-ai34-drafts-20260917-accuracy-3",
+              "scope": "whole-lesson",
+              "directive": "require",
+              "text": "Distinguish illustrative vectors/probabilities from measured output. AI3 token-level lookup, learned representations and similarity limits; end with ambiguity. AI4 context/attention, generation loop and actual accepted water-dose results, p-value versus next-token probability and staged-error evidence check. No matrix algebra, whole-comment search, new skills/agents lesson or unrequested learner study.",
+              "feedback_id": "mba-ai34-drafts-20260917-brief-3",
+              "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+              "round": 0,
+              "status": "active"
+            }
+          },
+          "candidate": {},
+          "depends_on": [
+            {
+              "slice_id": "lecture-1-ai-supplement",
+              "presentation_id": "mba-course-approvals-20260914-lecture-1-ai-supplement",
+              "accepted_revision_hashes": {
+                "Lecture-1-AI-Supplement-PDF": "b5901e621a34b9cd67e78d7d8c5e2f77692f8089f299170826cac0a0130e8540",
+                "Lecture-1-AI-Supplement-PowerPoint": "8da245bb2db4a303c4e19bb66a70850ed962b612e95cda268557d8054a8bf309"
+              },
+              "state": "pinned",
+              "reason": "Continue approved representation foundations and original style."
+            },
+            {
+              "slice_id": "lecture-2-ai-supplement",
+              "presentation_id": "mba-course-approvals-20260914-lecture-2-ai-supplement",
+              "accepted_revision_hashes": {
+                "Lecture-2-AI-Supplement-PDF": "58a6216a12d9b1cba0dd7f10b113497c978e60fa3bacefa598693a39dd68e1ea",
+                "Lecture-2-AI-Supplement-PowerPoint": "62e08d453143650a9da25f29aeef7320dd46d5656d39b733908ce4b5feea6c9e"
+              },
+              "state": "pinned",
+              "reason": "Continue approved neural-network/generative introduction and its promised mechanics."
+            }
+          ],
+          "related_dispatch_contexts": [
+            {
+              "step_id": "lecture-4-ai-supplement",
+              "round": 0,
+              "requirements": {
+                "mba-ai34-drafts-20260917-scope-4": {
+                  "id": "mba-ai34-drafts-20260917-scope-4",
+                  "scope": "whole-lesson",
+                  "directive": "require",
+                  "text": "Build initial PDF/PPTX draft of AI Supplement4 using its exact retained Outline v6 section, twenty-minute 2/6/7/3/2 timing and natural continuity from AI1/2. Source outline BA 815/Fall 2026/planning/AI-SUPPLEMENTS-OUTLINE-v6.md sha256 bd5b3795dafed78f8b0f604c56f5848727f34856e81cc83bc2b4aaf0c81ab751. Nontechnical MBA baseline; no installation or paid account prerequisite.",
+                  "feedback_id": "mba-ai34-drafts-20260917-brief-4",
+                  "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+                  "round": 0,
+                  "status": "active"
+                },
+                "mba-ai34-drafts-20260917-style-4": {
+                  "id": "mba-ai34-drafts-20260917-style-4",
+                  "scope": "whole-lesson",
+                  "directive": "preserve",
+                  "text": "Preserve approved AI1/2 masters, blue rim/corner logos, title and figure-forward conventions, visual vocabulary and content sequence. Preserve all accepted main lectures, syllabus, aids, and supplements byte-for-byte.",
+                  "feedback_id": "mba-ai34-drafts-20260917-brief-4",
+                  "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+                  "round": 0,
+                  "status": "active"
+                },
+                "mba-ai34-drafts-20260917-accuracy-4": {
+                  "id": "mba-ai34-drafts-20260917-accuracy-4",
+                  "scope": "whole-lesson",
+                  "directive": "require",
+                  "text": "Distinguish illustrative vectors/probabilities from measured output. AI3 token-level lookup, learned representations and similarity limits; end with ambiguity. AI4 context/attention, generation loop and actual accepted water-dose results, p-value versus next-token probability and staged-error evidence check. No matrix algebra, whole-comment search, new skills/agents lesson or unrequested learner study.",
+                  "feedback_id": "mba-ai34-drafts-20260917-brief-4",
+                  "source_message": "John, durable turn 61ec7815-8ad4-48bf-ac75-f8a47cd6d5d8, 2026-09-17T18:15:53.269694+00:00: explicitly build draft AI supplements for Lectures3 and4 from the retained plan and materials, consistent in style and content with the first two approved AI supplements and with a natural transition. Both drafts authorized; no acceptance or slice close.",
+                  "round": 0,
+                  "status": "active"
+                }
+              },
+              "candidate": {},
+              "depends_on": [
+                {
+                  "slice_id": "lecture-1-ai-supplement",
+                  "presentation_id": "mba-course-approvals-20260914-lecture-1-ai-supplement",
+                  "accepted_revision_hashes": {
+                    "Lecture-1-AI-Supplement-PDF": "b5901e621a34b9cd67e78d7d8c5e2f77692f8089f299170826cac0a0130e8540",
+                    "Lecture-1-AI-Supplement-PowerPoint": "8da245bb2db4a303c4e19bb66a70850ed962b612e95cda268557d8054a8bf309"
+                  },
+                  "state": "pinned",
+                  "reason": "Continue approved representation foundations and original style."
+                },
+                {
+                  "slice_id": "lecture-2-ai-supplement",
+                  "presentation_id": "mba-course-approvals-20260914-lecture-2-ai-supplement",
+                  "accepted_revision_hashes": {
+                    "Lecture-2-AI-Supplement-PDF": "58a6216a12d9b1cba0dd7f10b113497c978e60fa3bacefa598693a39dd68e1ea",
+                    "Lecture-2-AI-Supplement-PowerPoint": "62e08d453143650a9da25f29aeef7320dd46d5656d39b733908ce4b5feea6c9e"
+                  },
+                  "state": "pinned",
+                  "reason": "Continue approved neural-network/generative introduction and its promised mechanics."
+                }
+              ]
+            }
+          ]
+        },
+        "terminal": "Two first draft AI supplements built, source/arithmetic/render checked, published as PDF/PowerPoint and exact live links verified. Focused Gandalf advisory findings addressed. Both remain drafts; no acceptance or slice close.",
+        "inventory_complete": true,
+        "status": "pending_steward_review",
+        "freshness": "stale",
+        "changed_context_fields": [
+          "candidate"
+        ],
+        "review_reasons": [
+          "dispatch_context_changed"
+        ],
+        "operation_id": "mba-ai34-drafts-20260917-handoff",
+        "generation": 458,
+        "at": "2026-09-17T18:48:39.079Z",
         "resolution": null
       },
-      "sequence": 892
+      "sequence": 1138
     },
     "question_context": {
-      "id": "0ca15dae698d8af9bf0f1dfe6db1a9fae550640303bd77af97b1d6a6f6223733",
-      "question": "Approve the [short clip-search plan](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fplanning%2FLECTURE-3-CLIP-RESEARCH-PLAN.md)?",
-      "context": "I\u2019m checking the saved campaign record and the current review copies.\nThe teaching-aid package is finalized, and your latest saved feedback says Lectures 3 and 4 look good. You also asked for the Lecture 4 R script and CSV as student downloads and reported that the sampling program still would not open; I\u2019m taking up those remaining items now. No Lecture 3 video recommendation has been produced yet.\nThe standalone sampling entry was filed under older work, while the packaged copy uses the failing review control. I\u2019m putting a clear direct program link at the top and bundling the lecture\u2019s exact R script, CSV and expected output for Canvas.\nThe plan now includes the student R downloads alongside Lecture 4 and a clearly named Sampling Distribution program under Lecture 3. The extracted R package reproduces the lecture\u2019s results; I\u2019m checking that the actual links in the status tab open and download correctly after a refresh.\nThe direct program link works, but the pane was still placing older review buttons above it. I\u2019m making the newly published program link and R download appear first, so you won\u2019t have to hunt through those controls.\nThe [Lecture 4 R/CSV ZIP](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2FLecture%204%20-%20R%20Example%20Student%20Files%20v1.zip) is ready for Canvas, with checked output and student instructions. The [Sampling Distribution program](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fsampling-distribution.html) now appears first in Deliverables; I verified that its actual control opens and draws a sample.\n\nNo Lecture 3 video recommendation exists yet. The prepared search still awaits approval. I recommend that bounded search to return one suitable clip and a fallback; deferring keeps the lecture unchanged.\n\nApprove the [short clip-search plan](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fplanning%2FLECTURE-3-CLIP-RESEARCH-PLAN.md)?",
+      "id": "ec20ed89f3ff4bedfd369ac5dee49d41e22280e604bcc44884bfd092142a6c38",
+      "question": "Draft both?",
+      "context": "I\u2019ll check the saved versions and record your decision to keep the additions.\nThe course outline is through the additional Claude review, and its minor corrections are incorporated in Outline v6. Your decision keeps the IBM and prompting additions within the agreed twenty-minute supplements; I\u2019m recording that approval and clearing the review question.\nThe additions are retained in Outline v6, and the plan no longer shows them as awaiting approval. The next stage is the detailed AI supplements for Lectures 3 and 4.\nRecorded: the additions stay in Outline v6, with twenty minutes per supplement. Next are Supplement 3 on tokens and embeddings, and Supplement 4 on context, prediction and checking answers.\n\nI recommend drafting both together so the explanations connect smoothly; drafting 3 first would give you an earlier review.\n\nDraft both?",
       "truncated": false,
-      "recommendation": "",
+      "recommendation": "I recommend drafting both together so the explanations connect smoothly; drafting 3 first would give you an earlier review.",
       "alternatives": [],
       "authorization_scope": {
-        "presentation_id": "mba-lecture34-photos-20260914-l3",
-        "request_id": "mba-lecture34-photos-20260914-l3-review",
-        "source_turn_id": "chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:22:85",
-        "step_id": "lecture3-machine-revision",
-        "work_digest": "39cbc37f1eaa1bcd7aa792b5c468022543e3bcadfe22fa05d25b6b1b6579e438"
+        "presentation_id": "mba-ai-additions-kept-20260917-production-scope",
+        "request_id": "mba-ai-additions-kept-20260917-draft-both-choice",
+        "source_turn_id": "chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:25:108",
+        "step_id": "ai-supplement-course-outline",
+        "work_digest": "2d6f5bfa17f7b679a592a501b314f51e81d9e7991369d2a6e3c7ba48e116b697"
       },
-      "asked_at": 1789437324.4829104,
-      "source_ref": "Cockpit conversation chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:22:85"
-    }
+      "asked_at": 1789669168.5348825,
+      "source_ref": "Cockpit conversation chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:25:108"
+    },
+    "question_history": [
+      {
+        "question": {
+          "id": "4e29924172a6b9080c563cf90a413f61392f7d9d49866761923245e0d3b10f06",
+          "question": "Add BBC?",
+          "context": "I\u2019ll check the saved next step so I continue from the work already completed.\nThe Jumper-assisted search is complete, and the [three clip choices are ready](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fplanning%2FLECTURE-3-CLIP-CHOICES.pdf). Lecture 3 remains unchanged pending your selection.\n\nI recommend adding the 75-second *Yes, Prime Minister* clip after the sample-size discussion: it adds humor while showing why more data cannot remove bias. StatQuest offers a playful CLT recap; Dr Nic reviews confidence intervals; keeping none preserves the lecture\u2019s current length.\n\nAdd BBC?",
+          "truncated": false,
+          "recommendation": "I recommend adding the 75-second *Yes, Prime Minister* clip after the sample-size discussion: it adds humor while showing why more data cannot remove bias. StatQuest offers a playful CLT recap; Dr Nic reviews confidence intervals; keeping none preserves the lecture\u2019s current length.",
+          "alternatives": [],
+          "authorization_scope": {
+            "presentation_id": "mba-clip-recommendations-20260915-pdf-access-v3",
+            "request_id": "mba-clip-recommendations-20260915-pdf-access-choice",
+            "source_turn_id": "chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:23:94",
+            "step_id": "lecture3-clip-recommendations",
+            "work_digest": "1bb7724a0e7044dd817765836efb5edf6bdf7488a08be74a87206c9f51c4ad8a"
+          },
+          "asked_at": 1789495418.7664046,
+          "source_ref": "Cockpit conversation chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:23:94"
+        },
+        "answer": "Accept recommendation: I recommend adding the 75-second *Yes, Prime Minister* clip after the sample-size discussion: it adds humor while showing why more data cannot remove bias. StatQuest offers a playful CLT recap; Dr Nic reviews confidence intervals; keeping none preserves the lecture\u2019s current length.",
+        "answered_at": 1789496080.088533,
+        "status": "response_recorded",
+        "source_ref": "Cockpit conversation"
+      },
+      {
+        "question": {
+          "id": "97de778bf85e0e634fae4d81e58d06802a82a56ba82fa40c5a0697ebf6191d98",
+          "question": "Keep these additions?",
+          "context": "I\u2019ll retrieve the video\u2019s transcript, check its prompting advice through ResearchPrime, and show where the useful findings fit in the same supplement outline. Your review of the earlier additions remains open.\nI\u2019m using the same ResearchPrime process, with official OpenAI documentation for model-specific prompting claims. The report will distinguish broadly useful practices from advice that depends on the model or task.\nThe visible plan now includes the prompting investigation. It has three parts:\n\n- **Read the video:** Identify its actual advice and examples from the transcript.\n- **Check the claims:** Compare them with primary guidance and research, including model-dependent limits.\n- **Fit the course:** Add useful practices within existing lessons, without increasing the twenty-minute target.\nThe video has useful advice about defining the task, explaining its purpose, clarifying unknowns and specifying a good result. One claim needs correction: its advice to avoid verification prompts combines models whose official guidance differs. I\u2019ll preserve the distinction between redundant checking instructions and checking results against evidence.\nThe proposed classroom addition is a short task brief followed by checks against the result\u2014not a list of special phrases. It fits mainly in Supplements 5, 6 and 12. ResearchPrime is now reviewing the seven-rule assessment and whether that practice fits the existing lessons.\nThe draft keeps three distinctions clear: explaining a rule does not remove it, requesting checkable calculations is different from demanding internal reasoning, and a well-written prompt does not make an answer correct. ResearchPrime is checking those points against the sources and the proposed teaching example.\nThe draft report assesses all seven rules with timestamps and sources, and includes a water-dose prompt students can check against the existing R output. The model-specific cautions stay in instructor notes so the classroom practice remains simple.\nResearchPrime\u2019s first review attempt failed: none of its three reviewers returned a completed assessment. The source research is intact. I\u2019m retrying with a shorter packet containing the decisive source passages and proposed lesson changes, so the review can focus on the claims that matter.\nThe shorter review is running. The proposed teaching change remains focused: students practise stating what they need, then check the answer against the data and sources. The draft includes no new software requirement or claim of measured time savings.\nThe clarification technique can be demonstrated in an ordinary chat: let the assistant identify a consequential ambiguity, answer it, then review the brief. The draft uses that in the existing source-card exercise; the retry is still checking its fit and wording.\nThe source checks and PDF drafts are ready; the retry has not returned a completed assessment yet. I\u2019m waiting for its recorded result so the handback can state accurately what ResearchPrime did\u2014and did not\u2014validate.\nThe video has useful prompting advice, but its recommendation to stop asking for verification does not hold across the models it discusses. ResearchPrime\u2019s retry also failed to return a completed review, so I\u2019m marking that limitation clearly and finishing the source-checked report and revised outline for you.\nThe proposed changes concentrate on Supplements 5, 6 and 12: write a clear brief, reuse it as a skill, and check the answer against evidence. Supplements 3 and 4 keep their mechanics focus, and every supplement retains the twenty-minute target. I\u2019m putting the revised outline and report in the current deliverables.\nThe report assesses all seven rules from the video and includes a practical prompt using your water-dose example. The revised outline and both research reports open from Current work and review; I\u2019m checking that the links remain available after reloading.\nThe [prompting report](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fplanning%2FAI-SUPPLEMENTS-PROMPTING-RESEARCH-v1.pdf) assesses all seven rules against official guidance. ResearchPrime\u2019s two review attempts failed without completed assessments, so the report clearly distinguishes my source checks from independent validation.\n\nThe useful ideas now appear in [Outline v4](/api/steward/deliverable-file?pid=6765ece4b3bc43b0b0b0907b92b17280&path=BA%20815%2FFall%202026%2Fplanning%2FAI-SUPPLEMENTS-OUTLINE-v4.pdf), with the visible plan updated:\n\n- **Supplement 5:** Write a clear brief covering purpose, inputs, constraints and the required result.\n- **Supplement 6:** Reuse those instructions as a skill, keeping necessary boundaries.\n- **Supplement 12:** Check the answer\u2019s calculations, evidence and limitations.\n\nThe video\u2019s advice against verification needs qualification: current [Opus guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5) and [Fable guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5) differ.\n\nOutline v4 combines these proposals with the earlier IBM additions. Your twenty-minute targets and Supplements 3\u20134 mechanics remain unchanged.\n\nI recommend keeping these additions because they connect effective prompting with checkable results. Alternatively, keep them in instructor notes to preserve more classroom time for the existing examples.\n\nKeep these additions?",
+          "truncated": false,
+          "recommendation": "I recommend keeping these additions because they connect effective prompting with checkable results. Alternatively, keep them in instructor notes to preserve more classroom time for the existing examples.",
+          "alternatives": [],
+          "authorization_scope": {
+            "presentation_id": "mba-ai-prompting-research-20260916-outline-v4",
+            "request_id": "mba-ai-prompting-research-20260916-additions-choice",
+            "source_turn_id": "chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:25:104",
+            "step_id": "ai-supplement-course-outline",
+            "work_digest": "dacf2be70554ba882b075e7aad4cb3b3eedf7841a1011e2c724dfe8767b98ec4"
+          },
+          "asked_at": 1789601318.0665648,
+          "source_ref": "Cockpit conversation chatgpt:01a09ac1-a731-76d3-ba7a-cf6421ad52f7:25:104"
+        },
+        "answer": "So, redo researchPrime and validate before accepting.",
+        "answered_at": 1789606690.8676784,
+        "status": "response_recorded",
+        "source_ref": "Cockpit conversation"
+      }
+    ],
+    "submitted": null
   },
   "C:\\dev\\MBA Teaching AI\\MBA Teaching with AI": {
     "pending_queue": []
@@ -1904,41 +2396,37 @@
       "family": "chatgpt",
       "model": "gpt-6-astra",
       "effort": "ultra",
-      "selection_evidence": "installed_cli_priority+native_capabilities",
+      "selection_evidence": "provider_priority",
       "model_attested": false,
       "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
-      "discovered_at": 1789471529.0474515,
-      "settings_revision": 6,
+      "discovered_at": 1789644548.6006436,
+      "settings_revision": 10,
       "model_served": null
     },
     "policy_override": null,
-    "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+    "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
     "question_context": null,
-    "pending_queue": [
-      "This can be part of the hackathons they do for HPP They're just trying to hack around in Atlas craft a bit because they play Atlas craft. They like to do it. It's just when they start real izing about start realizing about hackers prank. And I guess that's well known, but they realized they can try to front run it. That's when we get serious about hacking and looking for resources They also be tried to hack into other systems so they can get access to Atlas Crest servers to accept their own servers. that's an idea we can play with. Thanks",
-      "Where's the voice sample like the writing sample of chapter one? I thought we had chapter one drafted or something or at least you wanted. I asked me if the Connecticut and Jeff's voices kind of way they were described worked. I don't see that. If you can show me where that's at, that would be great. Thanks.",
-      "The nice thing about a Dubai International competition is that Corvo can create isolated in Dubai that is not something can undo what the demons out. So can actually run his experiment at the level he needs to run it to get in. I like the ability. Thinks you can get back out. Julian can get him back out. Maybe that might be a nice idea of the Julian's supposed to give him back out for Julian's, since, oops, sorry, I can't. And takes over his organization and brings Durgan in and Remy's gone. So Julianne Jerger now the antigenous to the hacker for pizza in peace. And agent Riley has to bring your team in to save him in Dubai, get him back. But it's devastating, because Remy's gone, and Julian's now this powerful guy who can come back to New York because he's not Well, I don't know. Maybe he can't. Maybe Riley makes a rather won't let him. I don't know how to think about that"
-    ],
+    "pending_queue": [],
     "usage": {
       "spend": null,
-      "reported_spend": 452.3644,
+      "reported_spend": 841.1923,
       "cost_complete": false,
       "completed_cost_complete": false,
       "cost_status": "partial",
-      "unpriced_turns": 53,
-      "tokens": 184582221,
-      "secs": 31435,
-      "turns": 71,
+      "unpriced_turns": 66,
+      "tokens": 242078364,
+      "secs": 42885,
+      "turns": 92,
       "token_status": "partial",
-      "usage_source": "codex-rollout",
-      "usage_updated_at": "2026-09-15T12:14:48Z",
+      "usage_source": "codex-cli-final",
+      "usage_updated_at": "2026-09-17T13:03:29Z",
       "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
       "checkpoint_coverage": {
-        "tracked_invocations": 37,
-        "reported_invocations": 35,
+        "tracked_invocations": 50,
+        "reported_invocations": 48,
         "partial_invocations": 2,
         "unavailable_invocations": 0,
-        "finalized_invocations": 36
+        "finalized_invocations": 49
       },
       "usage_persistence_error": null,
       "usage_attribution_error": null,
@@ -2416,24 +2904,193 @@
         },
         "c7a8a51d-ffe7-4cea-bafa-f77a2b41cbd7": {
           "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
-          "credited_tokens": 2043417,
+          "credited_tokens": 2853579,
           "counts": {
-            "input_tokens": 2037068,
-            "output_tokens": 6349,
-            "cached_input_tokens": 1813504
+            "input_tokens": 2841014,
+            "output_tokens": 12565,
+            "cached_input_tokens": 2601216
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:18:15Z"
+        },
+        "3e0dd935-16fe-4bc0-8c31-a9d03361470a": {
+          "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+          "credited_tokens": 689264,
+          "counts": {
+            "input_tokens": 686825,
+            "output_tokens": 2439,
+            "cached_input_tokens": 664192
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:19:47Z"
+        },
+        "becb2488-d1e5-4a89-931e-882ad8a03389": {
+          "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+          "credited_tokens": 177935,
+          "counts": {
+            "input_tokens": 177670,
+            "output_tokens": 265,
+            "cached_input_tokens": 169728
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:20:03Z"
+        },
+        "821af62d-1aca-48c9-bd2d-33e84e6ae571": {
+          "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+          "credited_tokens": 1572099,
+          "counts": {
+            "input_tokens": 1565587,
+            "output_tokens": 6512,
+            "cached_input_tokens": 1524864
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:24:20Z"
+        },
+        "e8c7d6f7-da9f-44f4-8452-94e2528a5959": {
+          "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+          "credited_tokens": 205334,
+          "counts": {
+            "input_tokens": 205072,
+            "output_tokens": 262,
+            "cached_input_tokens": 199936
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:24:36Z"
+        },
+        "7557aeaf-529b-4179-8150-35af3a4b4ca6": {
+          "session_id": "01a09813-6605-7e13-b5ed-701477dd3d5e",
+          "credited_tokens": 1835239,
+          "counts": {
+            "input_tokens": 1825428,
+            "output_tokens": 9811,
+            "cached_input_tokens": 1699072
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T12:33:18Z"
+        },
+        "deaa8b14-16ba-4ac9-a0c1-d9221f3752e7": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 72940,
+          "counts": {
+            "input_tokens": 71984,
+            "output_tokens": 956,
+            "cached_input_tokens": 51712
           },
           "token_status": "reported",
           "finalized": false,
           "source": "codex-rollout",
-          "updated_at": "2026-09-15T12:14:48Z"
+          "updated_at": "2026-09-15T19:18:40Z"
+        },
+        "e347d8e6-cf9d-492c-baad-8321aa32808d": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 4699942,
+          "counts": {
+            "input_tokens": 4685068,
+            "output_tokens": 14874,
+            "cached_input_tokens": 4538752
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T19:28:52Z"
+        },
+        "de478a5c-81cd-4e4f-8c30-65d2793bf5d9": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 996041,
+          "counts": {
+            "input_tokens": 993342,
+            "output_tokens": 2699,
+            "cached_input_tokens": 793600
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T01:15:06Z"
+        },
+        "459db638-7fbf-4494-bf21-bc5db57f4b55": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 2752610,
+          "counts": {
+            "input_tokens": 2727187,
+            "output_tokens": 25423,
+            "cached_input_tokens": 2425856
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T11:56:07Z"
+        },
+        "37323d78-de7c-4a4c-ac3c-6c566813d664": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 5308894,
+          "counts": {
+            "input_tokens": 5264136,
+            "output_tokens": 44758,
+            "cached_input_tokens": 5120256
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T12:44:49Z"
+        },
+        "d925ce9a-d88a-4b2b-ac76-7e25be47aa6d": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 1770230,
+          "counts": {
+            "input_tokens": 1747083,
+            "output_tokens": 23147,
+            "cached_input_tokens": 1561216
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T13:00:22Z"
+        },
+        "b35d0517-a8dd-4525-9240-e26ce0891515": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 424648,
+          "counts": {
+            "input_tokens": 422517,
+            "output_tokens": 2131,
+            "cached_input_tokens": 374144
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T13:02:16Z"
+        },
+        "9fe503a4-6a55-48ff-b35f-44d6dd2e53fa": {
+          "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+          "credited_tokens": 337209,
+          "counts": {
+            "input_tokens": 335277,
+            "output_tokens": 1932,
+            "cached_input_tokens": 329728
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T13:03:29Z"
         }
       }
     },
-    "last_text": "Corvo succeeds at entering but loses control and cannot return\u2014a substantive change from the older accidental disappearance. Dubai\u2019s competition remains a proposal.\n\nThe visible plan is updated. Chapter 1 remains unchanged while you review.",
-    "last_used": "2026-09-15 06:06",
+    "last_text": "making four rows, you must break each row separately. That takes 3 + (4 \u00d7 5) = **23 breaks**.\n\nDurgan\u2019s answer makes sense for cutting the whole grid. His mistake is overlooking the one-piece-at-a-time rule\u2014which ct initially overlooks too.",
+    "last_used": "2026-09-17 07:03",
     "open_question": "",
     "open_question_kind": "",
-    "epoch": 5,
+    "epoch": 7,
     "provider_sessions": [
       {
         "family": "grok",
@@ -2498,6 +3155,47 @@
           "model_served": null
         },
         "preserved_at": 1789263370.4730582
+      },
+      {
+        "family": "claude",
+        "session_id": "57ba0e5a-26a9-4a84-9935-15a302cc19ae",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "claude",
+          "model": "best",
+          "effort": "max",
+          "selection_evidence": "provider_moving_alias",
+          "model_attested": true,
+          "command": "C:\\Users\\john\\.local\\bin\\claude.exe",
+          "discovered_at": 1789475679.846673,
+          "settings_revision": 8,
+          "model_served": "claude-fable-5-1"
+        },
+        "preserved_at": 1789476986.8410804
+      },
+      {
+        "family": "chatgpt",
+        "session_id": "01a0a681-2fc8-74f2-93ce-3ebf08a2bf1f",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "chatgpt",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "selection_evidence": "installed_cli_priority+native_capabilities",
+          "model_attested": false,
+          "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+          "discovered_at": 1789499878.489714,
+          "settings_revision": 10
+        },
+        "preserved_at": 1789499921.788412
       }
     ],
     "files": [
@@ -2509,7 +3207,31 @@
       "C:\\dev\\Skill Foundry\\skills\\chekhov\\journal\\0038-campaign-register-and-plan-sequence.md",
       "C:\\dev\\Skill Foundry\\skills\\chekhov\\journal\\0039-storyboard-stage-wanted.md",
       "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\pin-board-v4.mjs",
-      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\pin-board-v5.mjs"
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\pin-board-v5.mjs",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\render-julian-note.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\check-julian-reading.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\update-julian-decision.mjs",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\spine-review\\v8\\refinement-1\\JULIAN-SUCCESSION-v1.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\journal\\0030-julian-succession-decision.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\chapters\\chapter-01\\CHAPTER-01-v1-FEEDBACK.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\chapters\\chapter-01\\CHAPTER-01-BEAT-PLAN-v2.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\chapters\\chapter-01\\CHAPTER-01-v2_source.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\render-chapter-one-v2.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\check-chapter-one-v2-reading.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\update-chapter-one-v2.mjs",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\journal\\0032-pause-status-bar-and-dollar-count.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\trim-chapter-one-v2.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\trim-chapter-one-v2-pass2.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\chapters\\chapter-01\\CHAPTER-01-v2-NOTES.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\journal\\0031-chapter-one-feedback-round-one.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\update-julian-confirmed.mjs",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\journal\\0033-julian-line-confirmed.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\update-writing-loop-halt.mjs",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\journal\\0035-pausing-question-redelivered.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\spine-review\\v8\\CHAPTER-02-PLAN-v2.md",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\render-chapter-two-plan.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\check-chapter-two-plan.py",
+      "C:\\dev\\Writing\\Artificial Magi\\Book 1\\.ecgberht\\update-chapter-two-plan.mjs"
     ],
     "pending_refinement_handoffs": {},
     "refinement_handoff": {
@@ -2518,7 +3240,18 @@
       "reason": "unmanaged"
     },
     "pending_switch": null,
-    "pending_handoff": null
+    "pending_handoff": null,
+    "interrupted": null,
+    "routing_events": [
+      {
+        "at": "2026-09-15T13:18:40",
+        "action": "interrupted",
+        "family": "chatgpt",
+        "origin": "control",
+        "message": "turn interrupted: human message arrived during a self-started turn (origin control); outcome uncertain"
+      }
+    ],
+    "submitted": null
   },
   "C:\\dev\\Fitness\\Crossfit Prep": {
     "cli": "chatgpt",
@@ -3526,33 +4259,24 @@
     }
   },
   "C:\\dev\\Mez Tool\\Memorization Tool": {
-    "cli": "grok",
+    "cli": "chatgpt",
     "model_policy": {
       "policy_version": 1,
       "requested_policy": {
         "mode": "latest_supported",
         "effort": "highest_supported"
       },
-      "family": "grok",
-      "model": "grok-4.6",
-      "effort": "xhigh",
-      "selection_evidence": "provider_catalog_order",
-      "model_attested": true,
-      "warning": "Provider-recommended catalog order; frontier ranking is not explicitly attested.",
-      "command": "C:\\Users\\john\\.grok\\bin\\grok.exe",
-      "discovered_at": 1789432573.0369031,
-      "settings_revision": 6,
-      "model_served": "grok-4.6-build"
+      "family": "chatgpt",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "selection_evidence": "provider_priority",
+      "model_attested": false,
+      "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+      "discovered_at": 1789672096.7799013,
+      "settings_revision": 10
     },
-    "policy_override": {
-      "family": "grok",
-      "revision": 6,
-      "reason": "visible_failover",
-      "failed_families": [
-        "chatgpt"
-      ]
-    },
-    "session_id": "d3648e91-649e-4877-af52-787b5e7ea96d",
+    "policy_override": null,
+    "session_id": "01a0b0c5-0567-7101-a280-903cf4d432f7",
     "question_context": {
       "id": "3c44d9adf9a9d5516127a66649c48e2e48740f24ecf37d66c4ba9046644b1d19",
       "question": "Do Mez and Anchor both open on the iPhone once Tailscale is on?",
@@ -3570,7 +4294,9 @@
       "asked_at": 1789432916.9610891,
       "source_ref": "Cockpit conversation grok:d3648e91-649e-4877-af52-787b5e7ea96d:2:20"
     },
-    "pending_queue": [],
+    "pending_queue": [
+      "can you give me a qr code for each that I can scan with my camera on my phone? I have tailscale loaded, but I don't know about vpn (do I have to be connected to a webservice, or can this work over my phone data?)."
+    ],
     "usage": {
       "spend": null,
       "reported_spend": 0.0,
@@ -3578,23 +4304,23 @@
       "completed_cost_complete": false,
       "cost_status": "unavailable",
       "unpriced_turns": 20,
-      "tokens": 35264876,
+      "tokens": 35774437,
       "secs": 6338,
       "turns": 20,
       "token_status": "partial",
-      "usage_source": "recorded-turn-results",
-      "usage_updated_at": "2026-09-15T00:41:56Z",
+      "usage_source": "codex-rollout",
+      "usage_updated_at": "2026-09-17T19:10:14Z",
       "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
       "checkpoint_coverage": {
-        "tracked_invocations": 9,
-        "reported_invocations": 8,
+        "tracked_invocations": 10,
+        "reported_invocations": 9,
         "partial_invocations": 1,
         "unavailable_invocations": 0,
         "finalized_invocations": 9
       },
       "usage_persistence_error": null,
       "usage_attribution_error": null,
-      "unpriced_inflight": 0,
+      "unpriced_inflight": 1,
       "usage_legacy_unknown": false,
       "usage_legacy_reported": true,
       "usage_checkpoints": {
@@ -3714,6 +4440,19 @@
           "finalized": true,
           "source": "codex-rollout",
           "updated_at": "2026-09-14T01:55:01Z"
+        },
+        "95992111-3453-4f9d-a3d5-882f77989277": {
+          "session_id": "01a0b0c5-0567-7101-a280-903cf4d432f7",
+          "credited_tokens": 509561,
+          "counts": {
+            "input_tokens": 506902,
+            "output_tokens": 2659,
+            "cached_input_tokens": 446720
+          },
+          "token_status": "reported",
+          "finalized": false,
+          "source": "codex-rollout",
+          "updated_at": "2026-09-17T19:10:14Z"
         }
       }
     },
@@ -3937,5 +4676,676 @@
         "preserved_at": 1789406149.4969049
       }
     ]
+  },
+  "C:\\dev\\Nutrition\\Bread": {
+    "cli": "chatgpt",
+    "model_policy": {
+      "policy_version": 1,
+      "requested_policy": {
+        "mode": "latest_supported",
+        "effort": "highest_supported"
+      },
+      "family": "chatgpt",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "selection_evidence": "installed_cli_priority+native_capabilities",
+      "model_attested": false,
+      "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+      "discovered_at": 1789485767.387197,
+      "settings_revision": 10,
+      "model_served": null
+    },
+    "policy_override": null,
+    "session_id": "01a0a5a9-dcd8-73e1-aaf9-7f3edd635a95",
+    "question_context": null,
+    "pending_queue": [],
+    "usage": {
+      "spend": null,
+      "reported_spend": 162.7301,
+      "cost_complete": false,
+      "completed_cost_complete": false,
+      "cost_status": "partial",
+      "unpriced_turns": 2,
+      "tokens": 18648321,
+      "secs": 4916,
+      "turns": 12,
+      "token_status": "reported",
+      "usage_source": "codex-cli-final",
+      "usage_updated_at": "2026-09-15T16:38:43Z",
+      "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
+      "checkpoint_coverage": {
+        "tracked_invocations": 2,
+        "reported_invocations": 2,
+        "partial_invocations": 0,
+        "unavailable_invocations": 0,
+        "finalized_invocations": 2
+      },
+      "usage_persistence_error": null,
+      "usage_attribution_error": null,
+      "unpriced_inflight": 0,
+      "usage_legacy_unknown": false,
+      "usage_legacy_reported": true,
+      "usage_checkpoints": {
+        "4b698410-6f9e-4eba-b6ba-c66b322e7023": {
+          "session_id": "01a0a5a9-dcd8-73e1-aaf9-7f3edd635a95",
+          "credited_tokens": 15128008,
+          "counts": {
+            "input_tokens": 15040991,
+            "output_tokens": 87017,
+            "cached_input_tokens": 14594944
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:24:42Z"
+        },
+        "e27473d4-35e7-47f4-bd14-7f4408ec0c75": {
+          "session_id": "01a0a5a9-dcd8-73e1-aaf9-7f3edd635a95",
+          "credited_tokens": 1473572,
+          "counts": {
+            "input_tokens": 1466241,
+            "output_tokens": 7331,
+            "cached_input_tokens": 1218688
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:38:43Z"
+        }
+      }
+    },
+    "last_text": " and the roadmap now shows the remaining steps parked. I\u2019m checking the saved view and committing the pause record.\nVersion 2 is accepted, John, and the effort is paused. Everything is saved and committed, ready whenever you want to return.",
+    "last_used": "2026-09-15 10:38",
+    "open_question": "",
+    "open_question_kind": "",
+    "epoch": 1,
+    "provider_sessions": [
+      {
+        "family": "claude",
+        "session_id": "d016e299-dc1b-45b3-a6d4-6b7e38febd2c",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "claude",
+          "model": "best",
+          "effort": "max",
+          "selection_evidence": "provider_moving_alias",
+          "model_attested": true,
+          "command": "C:\\Users\\john\\.local\\bin\\claude.exe",
+          "discovered_at": 1789480746.0872447,
+          "settings_revision": 8,
+          "model_served": "claude-fable-5-1"
+        },
+        "preserved_at": 1789480784.9699585
+      },
+      {
+        "family": "chatgpt",
+        "session_id": "01a0a5a9-dcd8-73e1-aaf9-7f3edd635a95",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "chatgpt",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "selection_evidence": "installed_cli_priority+native_capabilities",
+          "model_attested": false,
+          "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+          "discovered_at": 1789485767.387197,
+          "settings_revision": 10,
+          "model_served": null
+        },
+        "preserved_at": 1789489860.792825
+      }
+    ],
+    "files": [
+      "C:\\dev\\Nutrition\\Bread\\sources\\video\\CLAIMS.md",
+      "C:\\dev\\Nutrition\\Bread\\DELIVERABLES.md"
+    ],
+    "pending_switch": null,
+    "pending_handoff": null,
+    "pending_refinement_handoffs": {},
+    "refinement_handoff": {
+      "ok": true,
+      "skipped": true,
+      "reason": "unmanaged"
+    }
+  },
+  "C:\\dev\\DARPA\\DARPA proposal": {
+    "cli": "chatgpt",
+    "model_policy": {
+      "policy_version": 1,
+      "requested_policy": {
+        "mode": "latest_supported",
+        "effort": "highest_supported"
+      },
+      "family": "chatgpt",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "selection_evidence": "provider_priority",
+      "model_attested": false,
+      "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+      "discovered_at": 1789487372.3266525,
+      "settings_revision": 10,
+      "model_served": null
+    },
+    "policy_override": null,
+    "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+    "question_context": {
+      "id": "da623321388b4030857e9f15c74a6ec56ef973d1c9beaf169f08ac179874df02",
+      "question": "Shall the first sketch use shared health?",
+      "context": "Yes\u2014the technical report gives us enough to sketch the model\u2019s variables, latent health states, regime transitions and inference methods. I\u2019ll record the methodology note as complete, then use the report to frame the first model sketch and identify the main choice we need to settle.\nThe report is enough for a provisional mathematical specification. The main unresolved choice is whether to model one shared health process for the environment or separate health processes for individual actors; keeping their perceptions distinct does not settle that choice.\nThe methodology note is now closed. Yes\u2014the report gives us enough for a formal model sketch; fitting it will still require measurement definitions and data. The first structural choice is whether health is shared across the environment or modeled separately for each actor.\n\nI recommend starting sketch v1 with one shared health process, keeping actors\u2019 perceptions distinct, because DEL\u2019s primary target is environment health. Separate actor-level processes would capture differing local dynamics, but require more parameters and data.\n\nShall the first sketch use shared health?",
+      "truncated": false,
+      "recommendation": "I recommend starting sketch v1 with one shared health process, keeping actors\u2019 perceptions distinct, because DEL\u2019s primary target is environment health. Separate actor-level processes would capture differing local dynamics, but require more parameters and data.",
+      "alternatives": [],
+      "authorization_scope": {
+        "presentation_id": null,
+        "request_id": null,
+        "source_turn_id": "chatgpt:01a0a5c2-58f3-77d0-9e93-4d916988ea19:1:6",
+        "step_id": null,
+        "work_digest": "43884d1994da98a86cb0025aef4c1867556c1129ca96acead1d7dea91c03a8f7"
+      },
+      "asked_at": 1789493126.8502355,
+      "source_ref": "Cockpit conversation chatgpt:01a0a5c2-58f3-77d0-9e93-4d916988ea19:1:6"
+    },
+    "pending_queue": [],
+    "usage": {
+      "spend": null,
+      "reported_spend": 0.0,
+      "cost_complete": false,
+      "completed_cost_complete": false,
+      "cost_status": "unavailable",
+      "unpriced_turns": 7,
+      "tokens": 25872456,
+      "secs": 6021,
+      "turns": 7,
+      "token_status": "reported",
+      "usage_source": "codex-cli-final",
+      "usage_updated_at": "2026-09-15T18:02:06Z",
+      "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
+      "checkpoint_coverage": {
+        "tracked_invocations": 7,
+        "reported_invocations": 7,
+        "partial_invocations": 0,
+        "unavailable_invocations": 0,
+        "finalized_invocations": 7
+      },
+      "usage_persistence_error": null,
+      "usage_attribution_error": null,
+      "unpriced_inflight": 0,
+      "usage_legacy_unknown": false,
+      "usage_legacy_reported": false,
+      "usage_checkpoints": {
+        "5e6ea49c-1db0-46c3-ac2c-4eec36112ec5": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 17478,
+          "counts": {
+            "input_tokens": 17309,
+            "output_tokens": 169,
+            "cached_input_tokens": 12288
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T15:49:42Z"
+        },
+        "637f8366-64d0-420b-b70f-1dcf20544669": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 11987846,
+          "counts": {
+            "input_tokens": 11941362,
+            "output_tokens": 46484,
+            "cached_input_tokens": 11760128
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:23:53Z"
+        },
+        "c855755a-1c14-46be-9cea-325045735f38": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 940838,
+          "counts": {
+            "input_tokens": 929182,
+            "output_tokens": 11656,
+            "cached_input_tokens": 862208
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:31:15Z"
+        },
+        "774b72ef-5b84-4234-a713-ea78a20f135f": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 1950423,
+          "counts": {
+            "input_tokens": 1936204,
+            "output_tokens": 14219,
+            "cached_input_tokens": 1877376
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:52:32Z"
+        },
+        "6e949eda-6c12-4a82-9685-79f779bf2066": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 1285236,
+          "counts": {
+            "input_tokens": 1274432,
+            "output_tokens": 10804,
+            "cached_input_tokens": 1229696
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T16:59:01Z"
+        },
+        "53dcc824-aaf6-4e21-9232-2fda5b24dad8": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 1311896,
+          "counts": {
+            "input_tokens": 1302641,
+            "output_tokens": 9255,
+            "cached_input_tokens": 1254656
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T17:25:25Z"
+        },
+        "b8871e86-f7ee-435c-ac2d-e60daf78dbcd": {
+          "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+          "credited_tokens": 8378739,
+          "counts": {
+            "input_tokens": 8330634,
+            "output_tokens": 48105,
+            "cached_input_tokens": 8063488
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-15T18:02:06Z"
+        }
+      }
+    },
+    "last_text": "PA%20proposal%2FMODEL-SPECIFICATION-v1.md&render=1) supplies matching equations and distributions. Jumper and Gandalf informed and checked the explanation; numerical and browser checks passed. Both remain illustrative drafts for refinement.",
+    "last_used": "2026-09-15 12:02",
+    "open_question": "",
+    "open_question_kind": "",
+    "epoch": 1,
+    "provider_sessions": [
+      {
+        "family": "chatgpt",
+        "session_id": "01a0a5c2-58f3-77d0-9e93-4d916988ea19",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "chatgpt",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "selection_evidence": "provider_priority",
+          "model_attested": false,
+          "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+          "discovered_at": 1789487372.3266525,
+          "settings_revision": 10,
+          "model_served": null
+        },
+        "preserved_at": 1789487382.7545395
+      }
+    ],
+    "pending_refinement_handoffs": {},
+    "refinement_handoff": {
+      "ok": true,
+      "idempotent": true,
+      "handoff_id": "producer-handoff-34ec24cb8c67c6985bbc33fe9885876a7ef5ecb7fcce3a8de8dc99b1e450d127",
+      "handoff": {
+        "handoff_id": "producer-handoff-34ec24cb8c67c6985bbc33fe9885876a7ef5ecb7fcce3a8de8dc99b1e450d127",
+        "producer_kind": "conversation",
+        "source_ref": "MODEL-EXPLAINER-v1.html",
+        "step_id": "model-review",
+        "outputs": [
+          "MODEL-EXPLAINER-v1.html",
+          "MODEL-SPECIFICATION-v1.md",
+          "PLAN.md",
+          "research/model-visual-v1/REVIEW-NOTE.md"
+        ],
+        "dispatch_context": {
+          "step_id": "model-review",
+          "round": 0,
+          "requirements": {
+            "shared-baseline": {
+              "id": "shared-baseline",
+              "scope": "model-explainer",
+              "directive": "require",
+              "text": "John accepts one shared environmental health process for formal model sketch v1, while keeping actors information, perceptions and actions distinct. Explain hierarchy and an optional actor-regime extension without silently replacing the accepted baseline.",
+              "feedback_id": "john-shared-model-visual",
+              "source_message": "John: OK that'll be fine. I need a simple visualization: what system are we modeling, is information quality and confusion individual or overall, potentially hierarchical? Use Jumper and Gandalf. Explain who the agents are, how they interact, mathematics, probability distributions, dynamics, and parameters changing over time.",
+              "round": 0,
+              "status": "pending"
+            },
+            "worked-visual": {
+              "id": "worked-visual",
+              "scope": "model-explainer",
+              "directive": "require",
+              "text": "Provide a simple but substantive visualization with illustrative actors and interactions, typed model levels, changing regimes and selected effective parameters, and inspectable probability computation. Use real Jumper and Gandalf engines.",
+              "feedback_id": "john-shared-model-visual",
+              "source_message": "John: OK that'll be fine. I need a simple visualization: what system are we modeling, is information quality and confusion individual or overall, potentially hierarchical? Use Jumper and Gandalf. Explain who the agents are, how they interact, mathematics, probability distributions, dynamics, and parameters changing over time.",
+              "round": 0,
+              "status": "pending"
+            },
+            "formal-mathematics": {
+              "id": "formal-mathematics",
+              "scope": "model-specification",
+              "directive": "require",
+              "text": "State variables, timing, distributions, priors, transitions, observation model and forward/backward inference. Align explicitly with the confidential technical report. Distinguish report requirements from illustrative modeling choices.",
+              "feedback_id": "john-shared-model-visual",
+              "source_message": "John: OK that'll be fine. I need a simple visualization: what system are we modeling, is information quality and confusion individual or overall, potentially hierarchical? Use Jumper and Gandalf. Explain who the agents are, how they interact, mathematics, probability distributions, dynamics, and parameters changing over time.",
+              "round": 0,
+              "status": "pending"
+            },
+            "carry-methodology": {
+              "id": "carry-methodology",
+              "scope": "model-specification",
+              "directive": "preserve",
+              "text": "Preserve accepted DEL methodology: Bayesian parameter estimation, discrete time first, transition covariates, conditional Kalman methods where appropriate, distinct actual/perceived conditions, reusable historical/real-time inference code as later deliverable, uncertainty and controlled validation.",
+              "feedback_id": "john-shared-model-visual",
+              "source_message": "John: OK that'll be fine. I need a simple visualization: what system are we modeling, is information quality and confusion individual or overall, potentially hierarchical? Use Jumper and Gandalf. Explain who the agents are, how they interact, mathematics, probability distributions, dynamics, and parameters changing over time.",
+              "round": 0,
+              "status": "pending"
+            }
+          },
+          "candidate": {},
+          "depends_on": []
+        },
+        "terminal": "Initial model explainer v1 and formal specification v1 produced and checked, with plan v1.2 scope and supporting Jumper/Gandalf findings. Keep this handoff pending for later inspection. No model slice close or user acceptance is inferred.",
+        "inventory_complete": true,
+        "status": "pending_steward_review",
+        "freshness": "current",
+        "changed_context_fields": [],
+        "review_reasons": [],
+        "operation_id": "record-producer-handoff-34ec24cb8c67c6985bbc33fe9885876a7ef5ecb7fcce3a8de8dc99b1e450d127",
+        "generation": 37,
+        "at": "2026-09-15T17:59:57.772Z",
+        "resolution": null
+      },
+      "sequence": 57
+    }
+  },
+  "C:\\dev\\Open Source Token Source\\Basic Infastructure": {
+    "cli": "chatgpt",
+    "model_policy": {
+      "policy_version": 1,
+      "requested_policy": {
+        "mode": "latest_supported",
+        "effort": "highest_supported"
+      },
+      "family": "chatgpt",
+      "model": "gpt-6-astra",
+      "effort": "ultra",
+      "selection_evidence": "provider_priority",
+      "model_attested": false,
+      "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+      "discovered_at": 1789597960.0288258,
+      "settings_revision": 10,
+      "model_served": null
+    },
+    "policy_override": null,
+    "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+    "question_context": {
+      "id": "3c97696f8889c855a7c5ea1fea894f56b56e874588792a9721573b3331ea2783",
+      "question": "Approve research plan v2?",
+      "context": "I\u2019ll check the saved plan and measurement records, then pick up from the latest agreed state.Fable\u2019s review is complete, and research plan v2 now focuses on the computer, model, harness and full ownership cost. The new studies are ready, with the saved approval decision still open; Puter is the recorded name.The visible map now matches plan v2, including separate comparisons for one answer\u2019s speed and the server\u2019s total output across simultaneous requests.\nFable\u2019s review is complete, and the visible roadmap now matches research plan v2: computer, model, harness and ownership cost. Puter is the corrected name; the new studies await the saved approval decision.\n\nRunning locally removes network delay, but generating one answer still involves repeated GPU work. Ordinary generation proceeds token by token, and reading large model weights from GPU memory can limit speed\u2014even on a powerful GPU. [NVIDIA explains these limits](https://developer.nvidia.com/blog/mastering-llm-techniques-inference-optimization/).\n\nThousands of tokens per second can describe **many simultaneous answers combined**, or processing input, rather than generating one answer that quickly. For illustration, 20 requests each producing 50 tokens/sec total 1,000 tokens/sec; that is arithmetic, not a prediction for Puter. Puter\u2019s roughly **95 tokens/sec** came from two short, warm runs of a quantized 7B model; we have not measured near-frontier capability or maximum server throughput.\n\nPlan v2 will compare both individual-answer speed and total throughput, alongside useful task performance and cost. It commissions three researchPrime studies and Gandalf\u2019s synthesis; [researchPrime\u2019s protocol](C:/dev/trio/researchPrime/SKILL.md) says \u201cexecution does not begin until the user APPROVEs,\u201d so that existing decision remains open.\n\nI recommend approval because the revised work directly answers what to build and what it will deliver. The alternatives are revise, to change its coverage before starting, or pause, to defer the research.\n\nApprove research plan v2?",
+      "truncated": false,
+      "recommendation": "I recommend approval because the revised work directly answers what to build and what it will deliver. The alternatives are revise, to change its coverage before starting, or pause, to defer the research.",
+      "alternatives": [],
+      "authorization_scope": {
+        "presentation_id": null,
+        "request_id": null,
+        "source_turn_id": "chatgpt:01a0ac59-ca5d-7832-9474-08a6afada25b:2:9",
+        "step_id": null,
+        "work_digest": null
+      },
+      "asked_at": 1789671436.7452638,
+      "source_ref": "Cockpit conversation chatgpt:01a0ac59-ca5d-7832-9474-08a6afada25b:2:9"
+    },
+    "pending_queue": [],
+    "interrupted": null,
+    "routing_events": [
+      {
+        "at": "2026-09-16T16:32:40",
+        "action": "interrupted",
+        "family": "chatgpt",
+        "origin": "control",
+        "message": "turn interrupted: human message arrived during a self-started turn (origin control); outcome uncertain"
+      }
+    ],
+    "usage": {
+      "spend": null,
+      "reported_spend": 0.0,
+      "cost_complete": false,
+      "completed_cost_complete": false,
+      "cost_status": "unavailable",
+      "unpriced_turns": 9,
+      "tokens": 52861931,
+      "secs": 11249,
+      "turns": 9,
+      "token_status": "partial",
+      "usage_source": "codex-rollout",
+      "usage_updated_at": "2026-09-17T19:09:39Z",
+      "usage_basis": "recorded-turn-results-and-invocation-checkpoints",
+      "checkpoint_coverage": {
+        "tracked_invocations": 10,
+        "reported_invocations": 9,
+        "partial_invocations": 1,
+        "unavailable_invocations": 0,
+        "finalized_invocations": 9
+      },
+      "usage_persistence_error": null,
+      "usage_attribution_error": null,
+      "unpriced_inflight": 1,
+      "usage_legacy_unknown": false,
+      "usage_legacy_reported": false,
+      "usage_checkpoints": {
+        "7604fea7-5804-4fc6-beba-45792ed65a05": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 875938,
+          "counts": {
+            "input_tokens": 869583,
+            "output_tokens": 6355,
+            "cached_input_tokens": 750720
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T22:37:04Z"
+        },
+        "0d25c66e-da09-42ae-9131-d32728f80036": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 2349640,
+          "counts": {
+            "input_tokens": 2336506,
+            "output_tokens": 13134,
+            "cached_input_tokens": 2185984
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-16T22:44:38Z"
+        },
+        "bf49c7e5-3fd9-4b59-89b4-b5e2f6910e29": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 924410,
+          "counts": {
+            "input_tokens": 919329,
+            "output_tokens": 5081,
+            "cached_input_tokens": 838656
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T00:59:40Z"
+        },
+        "5f3f760b-a722-490c-93e6-448645fbda01": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 822309,
+          "counts": {
+            "input_tokens": 816743,
+            "output_tokens": 5566,
+            "cached_input_tokens": 804608
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T01:08:03Z"
+        },
+        "167ca3f3-3de7-4bc2-ab00-89d26778556d": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 3819403,
+          "counts": {
+            "input_tokens": 3788640,
+            "output_tokens": 30763,
+            "cached_input_tokens": 3641728
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T01:31:15Z"
+        },
+        "224322c7-9c96-44aa-9512-1e95f85a5a0b": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 262520,
+          "counts": {
+            "input_tokens": 260440,
+            "output_tokens": 2080,
+            "cached_input_tokens": 217088
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T01:32:28Z"
+        },
+        "96f35ec8-dfa0-4ac4-93c4-6b8708806339": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 33077142,
+          "counts": {
+            "input_tokens": 32924160,
+            "output_tokens": 152982,
+            "cached_input_tokens": 31871744
+          },
+          "token_status": "partial",
+          "finalized": true,
+          "source": "codex-rollout",
+          "updated_at": "2026-09-17T13:25:51Z"
+        },
+        "522d24ad-dc35-4256-a718-f595ae62d276": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 5308596,
+          "counts": {
+            "input_tokens": 5273406,
+            "output_tokens": 35190,
+            "cached_input_tokens": 5130624
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T18:43:48Z"
+        },
+        "35806efa-bd70-40a2-b8ea-625a22e3325c": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 1483527,
+          "counts": {
+            "input_tokens": 1477495,
+            "output_tokens": 6032,
+            "cached_input_tokens": 1345664
+          },
+          "token_status": "reported",
+          "finalized": true,
+          "source": "codex-cli-final",
+          "updated_at": "2026-09-17T18:57:16Z"
+        },
+        "dde70ba1-0503-48fb-b023-7ad3e759c600": {
+          "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+          "credited_tokens": 3938446,
+          "counts": {
+            "input_tokens": 3925227,
+            "output_tokens": 13219,
+            "cached_input_tokens": 3808000
+          },
+          "token_status": "reported",
+          "finalized": false,
+          "source": "codex-rollout",
+          "updated_at": "2026-09-17T19:09:39Z"
+        }
+      }
+    },
+    "last_text": "s open.\n\nI recommend approval because the revised work directly answers what to build and what it will deliver. The alternatives are revise, to change its coverage before starting, or pause, to defer the research.\n\nApprove research plan v2?",
+    "last_used": "2026-09-17 12:57",
+    "open_question": "Approve research plan v2?",
+    "open_question_kind": "decision",
+    "epoch": 2,
+    "submitted": null,
+    "provider_sessions": [
+      {
+        "family": "chatgpt",
+        "session_id": "01a0ac59-ca5d-7832-9474-08a6afada25b",
+        "model_policy": {
+          "policy_version": 1,
+          "requested_policy": {
+            "mode": "latest_supported",
+            "effort": "highest_supported"
+          },
+          "family": "chatgpt",
+          "model": "gpt-6-astra",
+          "effort": "ultra",
+          "selection_evidence": "provider_priority",
+          "model_attested": false,
+          "command": "C:\\Users\\john\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+          "discovered_at": 1789597960.0288258,
+          "settings_revision": 10,
+          "model_served": null
+        },
+        "preserved_at": 1789598225.009822
+      }
+    ],
+    "question_history": [
+      {
+        "question": {
+          "id": "8608748282d8c41f0648f4f88a56fdb0b79bee2e71081e0a727c270a4c1a5410",
+          "question": "Use one design with separate installations?",
+          "context": "I have the full brief and all three videos. I\u2019ll start with Pooter\u2019s hardware and the earlier Ghost World Labs work; those checks can proceed while the shared-versus-separate deployment choice remains open.\nPooter has an RTX 4070 with 12 GB of GPU memory, so we have a concrete starting point for the hardware comparisons. I also found the older agent work under Agentic-Home, including reports on OpenClaw and token-cost growth. I\u2019m using researchPrime\u2019s planning protocol to preserve those lessons in the new study.\nThe visible map now includes the starting-point work, and the Pooter inventory and recovered source notes are saved. The older material contains useful leads, but its performance and security claims still need checking; I haven\u2019t treated them as verified results for the new study.\nPooter has an i9-13900K, 32 GB of RAM and a 12 GB RTX 4070. I also recovered the Ghost World Labs harness code and its cost-management history, giving the study a concrete starting point for assessing reuse.\n\nI recommend one reusable design with separate installations for the scientists and hedge-fund user, keeping their systems apart while sharing development. A yes carries that scope into the forthcoming research plan v1; alternatives are one shared server with less hardware duplication, or independent designs with more tailoring and duplicated development.\n\nUse one design with separate installations?",
+          "truncated": false,
+          "recommendation": "I recommend one reusable design with separate installations for the scientists and hedge-fund user, keeping their systems apart while sharing development. A yes carries that scope into the forthcoming research plan v1; alternatives are one shared server with less hardware duplication, or independent designs with more tailoring and duplicated development.",
+          "alternatives": [],
+          "authorization_scope": {
+            "presentation_id": null,
+            "request_id": null,
+            "source_turn_id": "chatgpt:01a0ac59-ca5d-7832-9474-08a6afada25b:1:2",
+            "step_id": null,
+            "work_digest": null
+          },
+          "asked_at": 1789598678.9414198,
+          "source_ref": "Cockpit conversation chatgpt:01a0ac59-ca5d-7832-9474-08a6afada25b:1:2"
+        },
+        "answer": "Accept recommendation: I recommend one reusable design with separate installations for the scientists and hedge-fund user, keeping their systems apart while sharing development. A yes carries that scope into the forthcoming research plan v1; alternatives are one shared server with less hardware duplication, or independent designs with more tailoring and duplicated development.",
+        "answered_at": 1789606575.4504697,
+        "status": "response_recorded",
+        "source_ref": "Cockpit conversation"
+      }
+    ],
+    "pending_refinement_handoffs": {},
+    "refinement_handoff": {
+      "ok": true,
+      "skipped": true,
+      "reason": "unmanaged"
+    }
   }
 }

@@ -89,3 +89,10 @@ Immediate campaign correction is implemented: separate active deck rows, no fals
 ## September8 implementation receipt
 
 John explicitly approved repair. Live workflow links and sandboxed demo comparisons are repaired and browser-verified; the client supports stable step IDs, clearer work status and a completion refresh. Server publication/focus/evidence changes pass isolated behavioral checks and await safe server activation. Automatic receipt producers, owner renewal, exact per-pane acknowledgements, North Star completion auditing and full lifecycle/two-interval acceptance remain open. The general friction report contains the evidence and activation boundary. This update supersedes earlier “proposed/no production change” wording for the completed client and campaign scope only.
+
+
+## 16 September: legacy campaign focus integration
+
+Observed in Open Source Token Source / Basic Infastructure on 2026-09-16: roadmap had two active steps, no strip.json and no current_step_id. Live Current work showed PLAN.md correctly and opened the report, but the status row showed no active step. Source _focused_step deliberately returns unavailable when multiple steps lack explicit focus; campaign initialization/writer integration had omitted that focus. Campaign now initializes the existing Strip schema and points current_step_id to standard-performance-tests; no engine source changed. Keep general prevention open: create or require truthful focus when a campaign gains multiple active/review steps, preserve every review pin, and verify across refresh, provider pickup and two status cadences without inferring acceptance. Evidence: Basic Infastructure/.ecgberht/plan-current-work.png and journal/0005-standard-performance-test-plan.md. Local status evidence rows still report unavailable; do not claim journal/test receipts are consumed.
+
+Canonical friction record: `2026-09-16-03-legacy-campaign-missing-explicit-status`. Prevention remains open; campaign bookkeeping is not a general engine repair.
