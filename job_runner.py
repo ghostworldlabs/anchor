@@ -642,11 +642,8 @@ def _relaunch_env_seed(env) -> dict:
 
 
 def _commissioned(rec) -> str:
-    """The project a LANE launch was commissioned for (what launch_guarded
-    passed, kept on the relaunch spec) — the gate for the lane hooks, so a bare
-    launch that merely runs inside a project folder (its record names that
-    project from the start, S4) does not bridge cost onto an effort or register
-    a deliverable. A record with no spec (early Wave 1) keeps its own field."""
+    """The project launch_guarded commissioned this job for (the spec's; the
+    record's own for an early record without a spec) — the lane hooks' gate."""
     spec = rec.get("relaunch_spec")
     if isinstance(spec, dict) and spec:
         return spec.get("project_id") or None
@@ -833,10 +830,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
             "chatgpt-artifact-contract-invalid: expected artifacts are owned "
             "by the ChatGPT adapter"
         )
-    # The project a bare launch belongs to is the registered project at or above
-    # its cwd, known from the start (S4) — on the record, in the journal, and in
-    # its children's environment. What launch_guarded passed (the commissioning
-    # context) is what the relaunch spec and the lane hooks keep reading.
+    # a bare launch belongs to the registered project at or above its cwd; what
+    # launch_guarded passed stays on the relaunch spec (the lane hooks' gate)
     commissioned = (project_id, folder_path)
     if not project_id and cwd:
         try:
@@ -1005,7 +1000,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "status": STATUS_RUNNING,
         "log_path": str(lp),
         "cwd": str(cwd) if cwd else None,
-        "project_id": project_id,                    # commissioned, else resolved from cwd (S4)
+        "project_id": project_id,
         "folder_path": str(folder_path) if folder_path else None,
         "started_at": time.time(),
         "exit_code": None,

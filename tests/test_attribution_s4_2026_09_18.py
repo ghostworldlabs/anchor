@@ -120,12 +120,31 @@ def test_a_bare_launch_names_its_project_from_the_start(env, monkeypatch):
     assert e.get("ANCHOR_PROJECT_ID") == env["pid"] and e.get("ANCHOR_EFFORT_DIR") == env["effort"]
 
 
-def test_the_lane_hooks_key_on_the_commissioning_launch():
+def test_a_bare_launch_never_triggers_the_lane_hooks_at_finalize(env, monkeypatch):
+    """A finished bare job carries its resolved project, but the W3 cost bridge
+    and Hook B's deliverable register fire only for a commissioned lane launch
+    (the spec's project); an early record with no spec keeps its own field."""
+    import effort_history as eh
     import job_runner as jr
-    assert jr._commissioned({"relaunch_spec": {"project_id": None}, "project_id": "p1"}) is None
-    assert jr._commissioned({"relaunch_spec": {"project_id": "p1"}, "project_id": "p1"}) == "p1"
-    assert jr._commissioned({"project_id": "p1"}) == "p1"                    # an early record without a spec
-    assert jr._commissioned({}) is None
+    import deliverables_register as dreg
+    registered = []
+    monkeypatch.setattr(dreg, "register", lambda *a, **k: registered.append(a) or {"register": "written"})
+    envelope = {"type": "result", "total_cost_usd": 0.42, "duration_ms": 5000,
+                "usage": {"input_tokens": 100, "output_tokens": 200}}
+    base = {"lane": "research", "status": "running", "started_at": 1.0, "exit_code": None, "session_id": None,
+            "backend": "claude", "cost": None, "project_id": env["pid"], "folder_path": env["project"]}
+    # resolved at launch, commissioned by nobody: no bridge, no register
+    jr._write_record(dict(base, job_id="job-bare-2", relaunch_spec={"project_id": None, "folder_path": None}))
+    jr._finalize("job-bare-2", 0, result_envelope=envelope)
+    assert eh.load_effort(env["project"], env["pid"], "research", "job-bare-2") is None and registered == []
+    # commissioned through launch_guarded (the spec names the project): both hooks
+    jr._write_record(dict(base, job_id="job-lane-2", relaunch_spec={"project_id": env["pid"], "folder_path": env["project"]}))
+    jr._finalize("job-lane-2", 0, result_envelope=envelope)
+    assert eh.load_effort(env["project"], env["pid"], "research", "job-lane-2") is not None and len(registered) == 1
+    # an early record without a spec keeps its own field (the W3 behaviour)
+    jr._write_record(dict(base, job_id="job-early-2"))
+    jr._finalize("job-early-2", 0, result_envelope=envelope)
+    assert eh.load_effort(env["project"], env["pid"], "research", "job-early-2") is not None
 
 
 # ── the spawn list ────────────────────────────────────────────────────────────
@@ -146,7 +165,9 @@ def test_claude_spawned_names_the_agents_the_session_launched(env):
                     "text": "Async agent launched successfully. (internal metadata)\nagentId: ad7a4792df5592e7a\noutput file: x"}]}]}}),
         json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "no ids here"}]}}),
         json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text",
-                    "text": "agentId: ad7a4792df5592e7a (again)"}]}]}}),
+                    "text": "Async agent launched successfully.\nagentId: ad7a4792df5592e7a (again)"}]}]}}),
+        json.dumps({"type": "user", "message": {"content": [{"type": "text",
+                    "text": "John pasted a log with agentId: deadbeefdeadbeef1 in it"}]}}),   # user text never mints a row
     ]
     main.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert uc.claude_spawned(SESSION) == ["ad7a4792df5592e7a"]

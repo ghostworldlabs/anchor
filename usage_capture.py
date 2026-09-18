@@ -901,7 +901,7 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
 # parent's turn end (and once at engine start for a resumed steward), under the
 # steward's effort; never folded into the parent's own figure.
 CODEX_CHILD_DAYS = 3          # day folders walked; an older chain link is invisible (named)
-CODEX_PARENT_DAYS = 45        # day folders searched BY NAME for the steward's own rollout (no reads)
+CODEX_PARENT_DAYS = 45        # day folders name-matched for a steward's own rollout (no reads)
 
 
 def codex_sessions_root(env=None):
@@ -1043,7 +1043,7 @@ def claude_spawned(session_uuid, root=None):
     try:
         with io.open(main, encoding="utf-8", errors="replace") as fh:
             for line in fh:
-                if "agentId" not in line:
+                if "agentId" not in line or "agent launched" not in line:   # the tool's own line
                     continue
                 for m in _AGENT_ID_RE.finditer(line):
                     if m.group(1) not in seen:
@@ -1126,9 +1126,9 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
     both replaced when the total grows (a child recorded while it still ran);
     no usage → index-only ``unknown``, upgraded once usage appears. A child whose
     file has not changed since its row was recorded is not read again. A child
-    the steward's own transcript names but whose file was not found is an
-    ``unknown`` row too, so "unknown" counts every spawn seen (S4). Returns the
-    ledger rows written. Never raises."""
+    the steward named but whose file is not in the walk is read by name, else
+    rowed ``unknown``: "unknown" counts every spawn seen. Returns the ledger
+    rows written. Never raises."""
     if not engine_session_uuid:
         return 0
     try:
@@ -1178,12 +1178,12 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
             cli=cli, model=u.get("model"), parent_id=child.get("parent"))
     found_ids = {c["id"] for c in found}
-    for tid in spawned:                    # seen to start but not in the walk: read it by name, else unknown
+    for tid in spawned:
         key = "child:%s:%s" % (engine_session_uuid, tid)
         if tid in found_ids or key in known or _ul.entry_key(engine_session_uuid, line=key) in ledgered:
             continue
         tokens, model = 0, None
-        if cli == "chatgpt":               # an older child's rollout still exists: its figure, not a guess
+        if cli == "chatgpt":
             path = _codex_rollout_path(tid, root=codex_root, now=now)
             if path is not None:
                 try:

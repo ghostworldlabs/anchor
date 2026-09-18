@@ -247,8 +247,8 @@ def subscription_only_env(env=None) -> dict:
     clean["CODEX_HOME"] = str(codex_home)
     source = env if env is not None else os.environ
     for key in sorted(ATTRIBUTION_ENV_KEYS):
-        value = source.get(key) if hasattr(source, "get") else None
-        if isinstance(value, str) and value and len(value) <= 1024:
+        value = source.get(key)
+        if isinstance(value, str) and value:
             clean[key] = value
     return clean
 
