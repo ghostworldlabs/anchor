@@ -1023,6 +1023,9 @@ def test_run_button_gated_on_it_run_no_innerhtml_and_toggle_hidden():
     project window renders NO engine toggle for a 'shell' session."""
     js = (STATIC / "shared.js").read_text(encoding="utf-8")
     deliv = js.split("function delivRow(it)")[1].split("function actLabel")[0]
+    managed = deliv.split("if (it.managed && it.presentation_id)")[1].split("if (it.run)")[0]
+    assert managed.index("preview.location") < managed.index("await post")
+    assert "preview.close()" not in managed
     assert "if (it.run)" in deliv                 # gated on the run: marker
     assert '"drun"' in deliv
     assert "_postJson(" in deliv

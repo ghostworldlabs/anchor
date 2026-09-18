@@ -1110,22 +1110,33 @@ const Proto = (() => {
         const href = a.href;
         a.onclick = async (ev) => {
           ev.preventDefault();
-          // Open synchronously to preserve browser popup policy, then navigate
-          // only after the exact immutable member has been verified.
+          // Open the already-addressed file immediately. Recording the view is
+          // bookkeeping and must not withhold or close the document (John,
+          // 2026-09-14 and 2026-09-18: managed Current work opened about:blank,
+          // waited on a slow view write, then closed the window).
           const preview = window.open("about:blank", "_blank");
+          const target = isText ? "/steward/report?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(dirRel) + "&path=" + encodeURIComponent(it.path) + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "") : href;
+          if (preview) { preview.opener = null; preview.location = target; }
+          else window.location.assign(target);
           try {
             const response = await post("/api/refinement-open", {
               step_id: it.step, presentation_id: it.presentation_id,
               product_id: it.product_id, session_id: String(window.STEWARD_TERM || "cockpit")
             });
             const result = await response.json();
-            if (!response.ok || !result.ok) throw new Error(result.error || "Could not open this revision");
-            const target = isText ? "/steward/report?pid=" + encodeURIComponent(window.STEWARD_PID || "") + "&dir=" + encodeURIComponent(dirRel) + "&path=" + encodeURIComponent(result.path) + (window.STEWARD_TOKEN ? "&token=" + encodeURIComponent(window.STEWARD_TOKEN) : "") : href;
-            if (preview) { preview.opener = null; preview.location = target; }
-            else window.location.assign(target);
+            if (!response.ok || !result.ok) {
+              if (!row.querySelector("[data-view-record-miss]")) {
+                const note = el("span", "sdmeta", "Opened the file; viewing was not recorded.");
+                note.dataset.viewRecordMiss = "1";
+                row.appendChild(note);
+              }
+            }
           } catch (error) {
-            if (preview) preview.close();
-            row.appendChild(el("span", "sdmeta", "Open failed: " + error.message));
+            if (!row.querySelector("[data-view-record-miss]")) {
+              const note = el("span", "sdmeta", "Opened the file; viewing was not recorded.");
+              note.dataset.viewRecordMiss = "1";
+              row.appendChild(note);
+            }
           }
         };
       }

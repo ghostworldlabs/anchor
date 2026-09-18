@@ -61,6 +61,23 @@ def test_managed_current_link_records_view_and_opens_in_nested_effort(cockpit):
     popup.close()
 
 
+def test_managed_current_link_opens_when_view_recording_fails(cockpit, monkeypatch):
+    from steward_cockpit import refinement_client
+    monkeypatch.setattr(refinement_client, 'update', lambda *args, **kwargs: {
+        'ok': False, 'error': 'dependency-slow-or-killed',
+        'message': 'The refinement CLI exceeded its time limit.'})
+    page,server=cockpit
+    surface=open_surface(page)
+    row=surface.locator('[data-delivmount] .navpin [data-product-id="guide"]')
+    with page.expect_popup() as opened:
+        row.locator('.navfilelink a').first.click()
+    popup=opened.value
+    popup.wait_for_url(re.compile(r'^http'),wait_until='domcontentloaded')
+    assert 'guide' in popup.content().lower()
+    expect(row.locator('[data-view-record-miss]')).to_contain_text('Opened the file')
+    popup.close()
+
+
 def test_selected_b_individual_approval_retains_approved_copy_during_revision(cockpit):
     page,server=cockpit
     navigation(server)
