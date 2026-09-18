@@ -759,8 +759,8 @@ INDEXED_SOURCES = (SOURCE_JOB, SOURCE_SUBAGENT, SOURCE_SEAT)
 #: its ledger doc (a key is a hash; a row must still name its job or child, and
 #: a child its immediate parent).
 INDEX_FIELDS = ("key", "source", "native_id", "engine_session_uuid", "folder_path",
-                "effort_dir", "scope", "folder_scope", "cli", "model", "tokens", "cost_usd",
-                "usage_state", "duration_ms", "recorded_at", "parent_id")
+                "effort_dir", "scope", "folder_scope", "cli", "model", "model_attested", "tokens",
+                "cost_usd", "usage_state", "duration_ms", "recorded_at", "parent_id")
 
 
 def _iso(unix_seconds) -> str:
@@ -876,9 +876,8 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
         "recorded_at": recorded_at if isinstance(recorded_at, str) and recorded_at
         else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "parent_id": parent_id or None,
+        "model_attested": None if attested is None else bool(attested),
     }
-    if attested is not None:
-        entry["model_attested"] = bool(attested)
     if isinstance(usage, dict):
         entry["usage"] = dict(usage)
     added = 0

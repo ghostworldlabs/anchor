@@ -173,7 +173,7 @@ def test_receipts_become_seat_rows_priced_unpriced_and_unknown(env):
     assert rows[SEAT_B]["usage_state"] == "unknown" and rows[SEAT_B]["engine_session_uuid"] is None
     entry = ul.ledger_entries(SEAT_A)[0]                         # the seat's own engine session is its doc
     assert entry["model"] == "claude-fable-5-1" and entry["model_attested"] is True
-    assert a["model"] == "claude-fable-5-1"                      # the cockpit's row names the model too
+    assert a["model"] == "claude-fable-5-1" and a["model_attested"] is True   # the cockpit's row too
     assert list(root.glob("*.json")) == []                       # consumed
     assert uc.ingest_receipts() == 0 and len(ui.load_rows(env["pid"])) == 3
 
