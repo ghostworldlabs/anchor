@@ -650,11 +650,21 @@ def _resolve_model_selection(backend, settings=None):
         raise TerminalSessionError(str(exc)) from exc
 
 
-def _model_launch_env(selection):
-    if selection is None:
-        return None
+def _model_launch_env(selection, project_id=None, session_id=None):
+    """The PTY's environment: the model policy (or the service's own when no
+    selection applies) plus the ids its children inherit (Wave 2 S3)."""
     import model_policy
-    return model_policy.policy_environment()
+    env = model_policy.policy_environment() if selection is not None else dict(os.environ)
+    try:
+        import usage_capture as _uc
+        folder = None
+        if project_id:
+            folder = (_rnd.get_project(project_id) or {}).get("folder_path") or None
+        env.update(_uc.attribution_env(project_id=project_id, folder_path=folder,
+                                       effort_dir=folder, session_id=session_id))
+    except Exception:
+        pass
+    return env
 
 
 def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
@@ -864,7 +874,8 @@ def start_session(project_id, lane, backend=_UNSET, label="", seed_context=None,
     # 2) Launch a BARE interactive PTY in the worktree (no skill/prompt seeding).
     try:
         assert_not_live_engine_under_test(launch_argv)
-        pty_sid = _pty.start(launch_argv, cwd=worktree_path, env=_model_launch_env(model_selection))
+        pty_sid = _pty.start(launch_argv, cwd=worktree_path,
+                             env=_model_launch_env(model_selection, project_id=project_id, session_id=engine_uuid))
     except Exception as exc:
         # Roll back the worktree so a failed launch leaves nothing behind.
         try:
@@ -1742,7 +1753,8 @@ def switch_engine(session_id, engine, seed_context=None):
     # 2) Launch a NEW PTY on the other engine in the SAME worktree.
     try:
         assert_not_live_engine_under_test(relaunch_argv)
-        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path, env=_model_launch_env(model_selection))
+        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path,
+                             env=_model_launch_env(model_selection, project_id=record.get("project_id"), session_id=engine_uuid_b))
     except Exception as exc:
         # Relaunch failed: leave the record CONSISTENT. The old PTY is already
         # reaped, so mark the session IDLE (no live process) but keep its prior
@@ -1886,7 +1898,8 @@ def resume_parked_session(session_id):
         pass
     try:
         assert_not_live_engine_under_test(relaunch_argv)
-        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path, env=_model_launch_env(model_selection))
+        pty_sid = _pty.start(relaunch_argv, cwd=worktree_path,
+                             env=_model_launch_env(model_selection, project_id=record.get("project_id"), session_id=engine_uuid))
     except Exception as exc:
         return {"ok": False, "reason": "relaunch-failed", "detail": str(exc)}
     # Rebind the new PTY under the EXISTING session_id (one id per session).

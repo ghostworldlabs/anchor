@@ -745,9 +745,10 @@ SOURCE_STEWARD_TURN = "steward-turn"
 SOURCE_TERMINAL_TURN = "terminal-turn"   # a cockpit workbench (general) turn
 SOURCE_JOB = "job"
 SOURCE_SUBAGENT = "subagent"             # a child the steward's session spawned (S2)
+SOURCE_SEAT = "seat"                     # a trio seat a skill ran (S3)
 #: Sources the cockpit sums from the index. Steward and workbench turns stay
 #: sourced from cockpit state (history + in-flight), so they are ledger-only.
-INDEXED_SOURCES = (SOURCE_JOB, SOURCE_SUBAGENT)
+INDEXED_SOURCES = (SOURCE_JOB, SOURCE_SUBAGENT, SOURCE_SEAT)
 #: The index row: what the rollup reads (``scope``/``folder_scope`` are the
 #: normalized paths stamped at write time so a poll compares strings and never
 #: realpaths 8k rows — Grok R1 F5), plus the ids that lead back to the spawn and
@@ -1091,4 +1092,127 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             source=SOURCE_SUBAGENT, native_id=child["id"], tokens=tokens, cost_usd=None,
             project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
             cli=cli, model=u.get("model"), parent_id=child.get("parent"))
+    return written
+
+
+# ── Ids into children + seat receipts (Wave 2 S3) ────────────────────────────
+# A child Anchor spawns inherits the ids the cockpit already has, by environment
+# name; a trio seat any skill runs drops one receipt file (the dispatcher's
+# sink) into ``ANCHOR_RECEIPTS_DIR``; the sweep below turns each into one row.
+ENV_PROJECT = "ANCHOR_PROJECT_ID"
+ENV_EFFORT = "ANCHOR_EFFORT_DIR"
+ENV_JOB = "ANCHOR_JOB_ID"
+ENV_SESSION = "ANCHOR_SESSION_ID"
+ENV_RECEIPTS = "ANCHOR_RECEIPTS_DIR"
+_UUID_RE = None
+
+
+def receipts_dir() -> Path:
+    """Where trio seats drop their receipts (``.anchor/receipts/``). Not created."""
+    return _paths.data_dir() / ".anchor" / "receipts"
+
+
+def attribution_env(project_id=None, effort_dir=None, job_id=None, session_id=None,
+                    folder_path=None) -> dict:
+    """The ids a child inherits: project, effort dir, the job or the engine
+    session that spawned it, and where to drop receipts. A missing project is
+    resolved from the folder; only known ids are set."""
+    env = {ENV_RECEIPTS: str(receipts_dir())}
+    where = effort_dir or folder_path
+    if not project_id and where:
+        project_id, folder_path = resolve_project(where)
+    if project_id:
+        env[ENV_PROJECT] = str(project_id)
+    if where:
+        env[ENV_EFFORT] = str(where)
+    if job_id:
+        env[ENV_JOB] = str(job_id)
+    if session_id:
+        env[ENV_SESSION] = str(session_id)
+    return env
+
+
+def _uuid_like(value) -> bool:
+    global _UUID_RE
+    if _UUID_RE is None:
+        import re as _re
+        _UUID_RE = _re.compile(r"[0-9a-fA-F]{8}(-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+    return isinstance(value, str) and bool(_UUID_RE.fullmatch(value))
+
+
+def ingest_receipts(receipts_root=None, now=None) -> int:
+    """Sweep the receipt files trio seats dropped (one JSON file per physical
+    receipt) into rows through the seam: ``source=seat``, keyed by the seat's
+    native session (its own engine session when uuid-shaped, so it is the
+    ledger doc), attributed by the ids the seat inherited, else by the folder it
+    ran in. A seat whose native session is already a job's engine session is
+    skipped (the job wins). A consumed file is removed; a file younger than a
+    minute that does not parse is left for the next sweep. Returns the ledger
+    rows written. Never raises."""
+    root = Path(receipts_root) if receipts_root is not None else receipts_dir()
+    try:
+        files = sorted(root.glob("*.json")) if root.is_dir() else []
+    except OSError:
+        return 0
+    now = now if now is not None else time.time()
+    written = 0
+    job_sessions = {}
+    for path in files:
+        try:
+            r = json.loads(io.open(path, encoding="utf-8", errors="replace").read())
+        except (OSError, ValueError):
+            try:
+                if now - path.stat().st_mtime > 60:
+                    path.unlink()
+            except OSError:
+                pass
+            continue
+        if not isinstance(r, dict):
+            r = {}
+        ids = r.get("env") if isinstance(r.get("env"), dict) else {}
+        project_id = ids.get("project_id") or None
+        effort_dir = ids.get("effort_dir") or r.get("cwd") or None
+        folder_path = None
+        if project_id:
+            try:
+                import rnd_registry as _rr
+                folder_path = (_rr.get_project(project_id) or {}).get("folder_path") or None
+            except Exception:
+                folder_path = None
+            if not folder_path:
+                folder_path = resolve_project(effort_dir)[1]
+        elif effort_dir:
+            project_id, folder_path = resolve_project(effort_dir)
+        native = r.get("native_id") if isinstance(r.get("native_id"), str) and r.get("native_id") else None
+        usage = r.get("usage") if isinstance(r.get("usage"), dict) else None
+        tokens = sum(_int(v) for k, v in (usage or {}).items() if str(k).endswith("_tokens"))
+        key = "seat:%s" % (native or path.stem,)
+        if native and project_id:
+            if project_id not in job_sessions:
+                try:
+                    job_sessions[project_id] = {row.get("engine_session_uuid") for row in _ui.load_rows(project_id)
+                                                if row.get("source") == SOURCE_JOB}
+                except Exception:
+                    job_sessions[project_id] = set()
+            if native in job_sessions[project_id]:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+                continue
+        cost = _cost_number(r.get("cost_usd"))
+        doc = native if _uuid_like(native) and (tokens > 0 or cost is not None) else None   # unknown stays index-only
+        stamp = r.get("at") if isinstance(r.get("at"), str) and r.get("at").endswith("Z") else None
+        written += ingest_usage(
+            doc, _ul.entry_key(doc or "", line=key), index_key=key,
+            source=SOURCE_SEAT, native_id=native or path.stem, tokens=tokens,
+            cost_usd=cost, project_id=project_id,
+            folder_path=folder_path, effort_dir=effort_dir, cli=r.get("family") or None,
+            model=r.get("model_served") or None, duration_ms=_int(r.get("duration_ms")),
+            usage=usage, parent_id=ids.get("session_id") or ids.get("job_id") or None,
+            recorded_at=stamp)
+        try:
+            path.unlink()
+        except OSError:
+            pass
     return written

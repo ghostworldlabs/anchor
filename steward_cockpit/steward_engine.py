@@ -1094,7 +1094,7 @@ class Engine:
                 stderr=subprocess.PIPE,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
                 creationflags=flags,
-                env=None if is_fake else model_policy.policy_environment(),
+                env=None if is_fake else self._spawn_env(),
             )
         except Exception as e:
             self._emit({"t": "sys", "text": f"could not start the steward: {e}"})
@@ -2123,6 +2123,21 @@ class Engine:
             pass
         self._ledger_children()
 
+    def _spawn_env(self):
+        """The steward process's environment: the model policy plus the ids its
+        children inherit (project, this effort dir, where to drop receipts) —
+        Wave 2 S3."""
+        import model_policy
+        env = model_policy.policy_environment()
+        try:
+            import usage_capture as _uc
+            project_id, folder_path = self._attribution_ids()
+            env.update(_uc.attribution_env(project_id=project_id, effort_dir=self.dir,
+                                           folder_path=folder_path))
+        except Exception:
+            pass
+        return env
+
     def _ledger_children(self, session_id=None):
         """S2: one row per child this session spawned (Codex thread children by
         root session, Claude agent transcripts), under this effort, beside the
@@ -2137,6 +2152,7 @@ class Engine:
             project_id, folder_path = self._attribution_ids()
             _uc.ingest_children(session_id, self.cli, project_id=project_id,
                                 folder_path=folder_path, effort_dir=self.dir)
+            _uc.ingest_receipts()             # S3: the seats this steward's skills ran
         except Exception:
             pass
 

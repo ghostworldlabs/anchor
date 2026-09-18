@@ -713,6 +713,9 @@ def _usage_rollup(cdir, estate=None):
     # (S2) sub-agents the stewards of this effort spawned: count, tokens, unknown
     children = zero()
     children["count"], children["unknown"] = 0, 0
+    # (S3) trio seats the skills of this effort ran: priced, unpriced or unknown, like jobs
+    seats = zero()
+    seats["count"], seats["unknown"] = 0, 0
     try:
         import usage_capture as _uc
         import usage_index as _ui
@@ -746,40 +749,41 @@ def _usage_rollup(cdir, estate=None):
             if isinstance(stamp, str) and stamp:
                 children["usage_updated_at"] = max(children["usage_updated_at"] or stamp, stamp)
             continue
-        if row.get("source") != "job":
+        if row.get("source") not in ("job", "seat"):
             continue
         # a job that ran in a worktree outside the project folder joins at the
         # project folder (Grok R1 F2); scopes were stamped at write time (F5)
         if not (in_scope(row.get("scope")) or in_scope(row.get("folder_scope"))):
             continue
+        b = jobs if row.get("source") == "job" else seats
         state, tokens, cost = row.get("usage_state"), row.get("tokens"), row.get("cost_usd")
-        jobs["count"] += 1
+        b["count"] += 1
         if number(tokens):
-            jobs["tokens"] += tokens
+            b["tokens"] += tokens
         if number(row.get("duration_ms")):
-            jobs["secs"] += row["duration_ms"] / 1000
+            b["secs"] += row["duration_ms"] / 1000
         if state == "measured" and number(cost):
-            jobs["reported_spend"] += cost
-            jobs["_cost_known"] += 1
-            jobs["_tokens_known"] += 1
+            b["reported_spend"] += cost
+            b["_cost_known"] += 1
+            b["_tokens_known"] += 1
         elif state == "unpriced":
-            jobs["unpriced_turns"] += 1
-            jobs["_cost_unknown"] += 1
-            jobs["_tokens_known"] += 1
+            b["unpriced_turns"] += 1
+            b["_cost_unknown"] += 1
+            b["_tokens_known"] += 1
             family = infer_subscription_cli(row.get("cli"))
             if family:
-                jobs["_sub_unpriced"] += 1
-                if family not in jobs["_sub_clis"]:
-                    jobs["_sub_clis"].append(family)
+                b["_sub_unpriced"] += 1
+                if family not in b["_sub_clis"]:
+                    b["_sub_clis"].append(family)
             else:
-                jobs["_other_unpriced"] += 1
+                b["_other_unpriced"] += 1
         else:
-            jobs["unknown"] += 1
-            jobs["_cost_unknown"] += 1
-            jobs["_tokens_unknown"] += 1
+            b["unknown"] += 1
+            b["_cost_unknown"] += 1
+            b["_tokens_unknown"] += 1
         stamp = row.get("recorded_at")
         if isinstance(stamp, str) and stamp:
-            jobs["usage_updated_at"] = max(jobs["usage_updated_at"] or stamp, stamp)
+            b["usage_updated_at"] = max(b["usage_updated_at"] or stamp, stamp)
     total = zero()
     for field in numeric_fields + ("_cost_known", "_cost_unknown", "_tokens_known",
                                    "_tokens_unknown", "_tokens_partial",
@@ -795,7 +799,7 @@ def _usage_rollup(cdir, estate=None):
     total["_sub_clis"] = clis
     private = ("_cost_known", "_cost_unknown", "_tokens_known", "_tokens_unknown",
                "_tokens_partial", "_sub_unpriced", "_other_unpriced", "_sub_clis")
-    for bucket in (stew, term, jobs, children, total):
+    for bucket in (stew, term, jobs, children, seats, total):
         bucket["reported_spend"] = round(bucket["reported_spend"], 4)
         bucket["cost_status"] = "unavailable" if not bucket["_cost_known"] else (
             "partial" if bucket["_cost_unknown"] else "reported")
@@ -815,7 +819,7 @@ def _usage_rollup(cdir, estate=None):
         bucket["cost_text"] = fmt_usage_cost_text(bucket, cli=bucket.get("billing_family"))
         for field in private:
             del bucket[field]
-    return {"steward": stew, "terms": term, "jobs": jobs, "children": children, "total": total}
+    return {"steward": stew, "terms": term, "jobs": jobs, "children": children, "seats": seats, "total": total}
 
 
 def _state_with_usage(eng, cdir):

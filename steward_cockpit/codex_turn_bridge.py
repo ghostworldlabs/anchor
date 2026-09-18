@@ -633,6 +633,17 @@ class Broker:
             from steward_cockpit.codex_usage import CodexUsageTracker
             self._usage_tracker_factory = CodexUsageTracker
 
+
+    def _spawn_env(self):
+        """The model policy plus the ids the steward's children inherit (Wave 2 S3)."""
+        env = policy_environment()
+        try:
+            import usage_capture as _uc
+            env.update(_uc.attribution_env(effort_dir=self.target))
+        except Exception:
+            pass
+        return env
+
     def _terminate_owned(self) -> None:
         guard = self._guard
         if guard is not None:
@@ -724,7 +735,7 @@ class Broker:
                 raise BridgeError(f"{self.provider_label} broker has been cancelled")
             argv, stdin_prompt = self._prepare_prompt(encoded_prompt)
             options: dict[str, Any] = {
-                "cwd": self.target, "env": policy_environment(), "shell": False,
+                "cwd": self.target, "env": self._spawn_env(), "shell": False,
                 "stdin": subprocess.PIPE, "stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
             }
             options.update(self._spawn_containment)

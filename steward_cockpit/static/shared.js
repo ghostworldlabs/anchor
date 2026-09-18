@@ -1463,12 +1463,19 @@ const Proto = (() => {
         ? " · " + kids.count + (kids.count === 1 ? " sub-agent " : " sub-agents ") + recordedTokenText(kids) +
           (kids.unknown > 0 ? " (" + kids.unknown + " unknown usage)" : "")
         : "";
-      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText + kidsText +
+      // (S3) trio seats the effort's skills ran: their own clause, like jobs.
+      const seats = !st.usage_persistence_error && st.usage_rollup && st.usage_rollup.seats;
+      const seatsText = (seats && Number.isInteger(seats.count) && seats.count > 0)
+        ? " · " + seats.count + (seats.count === 1 ? " seat " : " seats ") + (seats.cost_text || "cost unavailable") +
+          (seats.unknown > 0 ? " (" + seats.unknown + " unknown usage)" : "")
+        : "";
+      spend.textContent = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText + kidsText + seatsText +
         (st.usage_persistence_error ? " · not saved" : "") +
         (!st.alive ? " · " + (GENERAL ? "idle" : "steward asleep") + (st.queued ? " · " + st.queued + " held" : "") : "");
       if (!effortUsage) spend.title = "Session: " + sessionCostText + sessionTokensText;
       if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
       if (kidsText) spend.title += " · Sub-agents" + kidsText.replace(/^ · /, ": ");
+      if (seatsText) spend.title += " · Skill seats" + seatsText.replace(/^ · /, ": ") + " · " + recordedTokenText(seats);
       spend.title += " · Reported dollars are recorded charges, not an estimate. ChatGPT/Grok subscription turns have no per-turn dollar amount; token updates alone do not increase this subtotal.";
       if (st.usage_persistence_error) spend.title = "Usage totals could not be saved. These session counts are in memory and may be lost on restart.";
     }
