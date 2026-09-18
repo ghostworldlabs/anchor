@@ -141,32 +141,69 @@ def test_a_bare_launch_never_triggers_the_lane_hooks_at_finalize(env, monkeypatc
     jr._write_record(dict(base, job_id="job-lane-2", relaunch_spec={"project_id": env["pid"], "folder_path": env["project"]}))
     jr._finalize("job-lane-2", 0, result_envelope=envelope)
     assert eh.load_effort(env["project"], env["pid"], "research", "job-lane-2") is not None and len(registered) == 1
-    # an early record without a spec keeps its own field (the W3 behaviour)
+    # an early record without a spec, or whose spec omits the key, keeps its own field (the W3 behaviour)
     jr._write_record(dict(base, job_id="job-early-2"))
     jr._finalize("job-early-2", 0, result_envelope=envelope)
     assert eh.load_effort(env["project"], env["pid"], "research", "job-early-2") is not None
+    jr._write_record(dict(base, job_id="job-early-3", relaunch_spec={"lane": "research"}))
+    jr._finalize("job-early-3", 0, result_envelope=envelope)
+    assert eh.load_effort(env["project"], env["pid"], "research", "job-early-3") is not None
 
 
-def test_a_relaunch_keeps_a_bare_job_uncommissioned(env, monkeypatch):
-    """An interrupted bare job carries its resolved project on the record; its
-    relaunch still goes through launch_guarded with NO project (nothing
-    commissioned it), so it takes no lane slot and never becomes a lane launch
-    (Grok S4 F1). A commissioned spec passes its project as before."""
+def test_a_relaunched_bare_job_stays_named_and_uncommissioned(env, monkeypatch):
+    """A REAL relaunch of an interrupted bare job: the new record names the
+    project launch() resolved (launch_guarded no longer wipes it), nothing
+    commissions it (no lane slot), and a commissioned spec still passes its
+    project (Grok S4 F1, both reads)."""
     import job_runner as jr
     seen = []
-    monkeypatch.setattr(jr, "launch_guarded", lambda lane, **kw: seen.append(kw) or {"job_id": "new-%d" % len(seen)})
+
+    class FakeProc:
+        pid = 4321
+        stdout = io.StringIO("")
+        stdin = None
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+    monkeypatch.setattr(jr.subprocess, "Popen", lambda argv, **kw: seen.append(kw.get("env") or {}) or FakeProc())
+    monkeypatch.setattr(jr, "_register_swarm_session", lambda *a, **k: None)
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", "python -c pass")
+    jr._ACTIVE_LANE.clear()
     spec = {"lane": "research", "cwd": env["effort"], "prompt": "p", "backend": "claude", "gated": False,
             "permission_mode": "plan", "expected_artifacts": [], "env_keys": {}, "project_id": None, "folder_path": None}
     jr._write_record({"job_id": "job-int-1", "lane": "research", "status": jr.STATUS_INTERRUPTED, "backend": "claude",
                       "project_id": env["pid"], "folder_path": env["project"], "relaunch_spec": spec})
     out = jr.relaunch("job-int-1")
-    assert out.get("ok") is not False, out
-    assert seen[-1]["project_id"] is None and seen[-1]["folder_path"] == env["effort"]     # the cwd, for the build lock key
+    assert out.get("ok") is True, out
+    new = jr.load_record(out["job_id"])
+    assert new["project_id"] == env["pid"] and new["folder_path"] == env["project"]      # named from the start
+    assert jr._commissioned(new) is None and jr.lane_holder(env["pid"], "research") is None
+    assert seen[-1].get("ANCHOR_PROJECT_ID") == env["pid"]
     jr._write_record({"job_id": "job-int-2", "lane": "research", "status": jr.STATUS_INTERRUPTED, "backend": "claude",
                       "project_id": env["pid"], "folder_path": env["project"],
                       "relaunch_spec": dict(spec, project_id=env["pid"], folder_path=env["project"])})
-    jr.relaunch("job-int-2")
-    assert seen[-1]["project_id"] == env["pid"] and seen[-1]["folder_path"] == env["project"]
+    out = jr.relaunch("job-int-2")
+    assert out.get("ok") is True, out
+    assert jr._commissioned(jr.load_record(out["job_id"])) == env["pid"]      # (the fake process exits at once, so no slot to hold)
+    jr._ACTIVE_LANE.clear()
+
+
+def test_a_worktree_outside_the_project_resolves_to_the_session_that_owns_it(env, monkeypatch, tmp_path):
+    """A bare job whose cwd is a managed worktree (outside the project folder)
+    names the project of the session that owns the worktree (Grok S4 F2)."""
+    import session_registry as sr
+    import usage_capture as uc
+    wt = tmp_path / "worktrees" / "sess-1"
+    (wt / "sub").mkdir(parents=True)
+    assert uc.resolve_project(str(wt)) == (None, None)
+    monkeypatch.setattr(sr, "list_sessions", lambda *a, **k: [{"session_id": "sess-1", "project_id": env["pid"],
+                                                                "worktree_path": str(wt)}])
+    assert uc.resolve_project(str(wt / "sub")) == (env["pid"], env["project"])
+    assert uc.resolve_project(str(tmp_path / "elsewhere")) == (None, None)
 
 
 def test_the_restart_rebuild_keys_lane_slots_on_the_commissioning_launch(env, monkeypatch):

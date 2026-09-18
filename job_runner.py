@@ -645,7 +645,7 @@ def _commissioned(rec) -> str:
     """The project launch_guarded commissioned this job for (the spec's; the
     record's own for an early record without a spec) — the lane hooks' gate."""
     spec = rec.get("relaunch_spec")
-    if isinstance(spec, dict) and spec:
+    if isinstance(spec, dict) and "project_id" in spec:
         return spec.get("project_id") or None
     return rec.get("project_id") or None
 
@@ -832,13 +832,13 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         )
     # a bare launch belongs to the registered project at or above its cwd; what
     # launch_guarded passed stays on the relaunch spec (the lane hooks' gate)
-    commissioned = (project_id, folder_path)
+    commissioned = (project_id, folder_path) if project_id else (None, None)
     if not project_id and cwd:
         try:
             import usage_capture as _usage_cap
             _pid, _pfolder = _usage_cap.resolve_project(cwd)
             if _pid:
-                project_id, folder_path = _pid, folder_path or _pfolder
+                project_id, folder_path = _pid, _pfolder or folder_path
         except Exception:
             pass
     # An explicit runner override owns its command and does not launch the
@@ -3758,7 +3758,8 @@ def launch_guarded(lane: str, project_id: str, folder_path, cwd=None,
             _FOLDER_BUILD[folder_path] = jid
         # Stamp the policy context onto the durable record for introspection
         # (and so the folder-build-lock badge can be reconstructed from disk).
-        _update_record(jid, project_id=project_id, folder_path=folder_path)
+        if project_id:                      # a bare relaunch keeps the name launch() resolved
+            _update_record(jid, project_id=project_id, folder_path=folder_path)
         return rec
 
 

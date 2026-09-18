@@ -562,7 +562,7 @@ class InlineSupervisor(Supervisor):
                         _jr._ACTIVE_LANE[key] = jid
                         lane_slots += 1
                 spec = rec.get("relaunch_spec")
-                folder = (spec.get("folder_path") if isinstance(spec, dict) and spec
+                folder = (spec.get("folder_path") if isinstance(spec, dict) and "folder_path" in spec
                           else rec.get("folder_path"))
                 if lane == _jr.BUILD_LANE and folder:
                     if folder not in _jr._FOLDER_BUILD:

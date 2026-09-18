@@ -832,9 +832,30 @@ def resolve_project(folder):
             if (best is None or rank[0] > best[0][0]
                     or (rank[0] == best[0][0] and rank[1] < best[0][1])):
                 best = (rank, pid, root)
-        return (best[1], best[2]) if best else (None, None)
+        if best:
+            return (best[1], best[2])
+        return _worktree_owner(target)
     except Exception:
         return (None, None)
+
+
+def _worktree_owner(target):
+    """The project of the managed session whose worktree holds ``target`` — a
+    job or seat running in a worktree outside the project folder joins the
+    project that session belongs to (the S1 rule for guarded worktree jobs)."""
+    try:
+        import rnd_registry as _rr
+        import session_registry as _sr
+        for sess in _sr.list_sessions():
+            if not isinstance(sess, dict) or not sess.get("project_id"):
+                continue
+            wp = _scope(sess.get("worktree_path"))
+            if wp and (target == wp or target.startswith(wp.rstrip(os.sep) + os.sep)):
+                folder = (_rr.get_project(sess["project_id"]) or {}).get("folder_path")
+                return (sess["project_id"], folder or None)
+    except Exception:
+        pass
+    return (None, None)
 
 
 def turn_key(engine_session_uuid, native_id) -> str:
