@@ -1143,6 +1143,20 @@ def _uuid_like(value) -> bool:
     return isinstance(value, str) and bool(_UUID_RE.fullmatch(value))
 
 
+def _seat_tokens(usage) -> int:
+    """A seat's token total from its usage block: ``total_tokens`` when the CLI
+    reports one, else the additive classes summed — input, output, cache
+    creation, cache read. Codex's ``cached_input_tokens`` and
+    ``reasoning_output_tokens`` are subsets of input/output (the S1 job and S2
+    child rules count them once too)."""
+    if not isinstance(usage, dict):
+        return 0
+    if _int(usage.get("total_tokens")):
+        return _int(usage.get("total_tokens"))
+    return sum(_int(usage.get(k)) for k in ("input_tokens", "output_tokens",
+                                            "cache_creation_input_tokens", "cache_read_input_tokens"))
+
+
 def _owned_sessions(project_id) -> set:
     """Native sessions the project index already counts as a job (its engine
     session) or as a steward's child (its native id): a seat on one of these is
@@ -1220,7 +1234,7 @@ def ingest_receipts(receipts_root=None, parent_session=None, parent_effort=None)
             project_id, folder_path = resolve_project(effort_dir)
         native = r.get("native_id") if isinstance(r.get("native_id"), str) and r.get("native_id") else None
         usage = r.get("usage") if isinstance(r.get("usage"), dict) else None
-        tokens = sum(_int(v) for k, v in (usage or {}).items() if str(k).endswith("_tokens"))
+        tokens = _seat_tokens(usage)
         if folder_path and not _under(effort_dir, folder_path):
             effort_dir = r.get("cwd") if _under(r.get("cwd"), folder_path) else folder_path
         key = "seat:%s" % (native or path.stem,)

@@ -169,7 +169,7 @@ def test_receipts_become_seat_rows_priced_unpriced_and_unknown(env):
     assert a["tokens"] == 1150 and a["cli"] == "claude" and a["parent_id"] == SESSION
     assert a["effort_dir"] == env["effort"]
     b = rows["01a0b0c6-2222-7b50-a38b-b91aad842222"]
-    assert b["usage_state"] == "unpriced" and b["tokens"] == 19 and b["cli"] == "chatgpt"
+    assert b["usage_state"] == "unpriced" and b["tokens"] == 13 and b["cli"] == "chatgpt"   # cached/reasoning are subsets
     assert rows[SEAT_B]["usage_state"] == "unknown" and rows[SEAT_B]["engine_session_uuid"] is None
     entry = ul.ledger_entries(SEAT_A)[0]                         # the seat's own engine session is its doc
     assert entry["model"] == "claude-fable-5-1" and entry["model_attested"] is True
