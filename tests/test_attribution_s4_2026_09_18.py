@@ -152,6 +152,23 @@ def test_claude_spawned_names_the_agents_the_session_launched(env):
     assert uc.claude_spawned(SESSION) == ["ad7a4792df5592e7a"]
 
 
+def test_an_older_child_the_walk_missed_is_read_by_name_not_guessed(env):
+    """The 3-day walk misses a child whose rollout sits in an old day folder; the
+    steward's spawn list names it, so its rollout is found by name and read —
+    a real figure, not an unknown placeholder."""
+    import usage_capture as uc
+    import usage_index as ui
+    d = _day_dir(env["codex"])
+    _rollout(d / ("rollout-2026-09-18T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_A,))
+    old = _day_dir(env["codex"], days_ago=20)
+    _rollout(old / ("rollout-2026-08-29T10-05-00-%s.jsonl" % CHILD_A), CHILD_A, parent=STEWARD, root_session=STEWARD,
+             started="2026-08-29T10:05:00.000Z", totals=777)
+    assert uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"]) == 1
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 1 and rows[0]["native_id"] == CHILD_A and rows[0]["usage_state"] == "unpriced" and rows[0]["tokens"] == 777
+    assert uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"]) == 0
+
+
 def test_a_spawn_seen_without_a_file_is_unknown_until_it_appears(env):
     import usage_capture as uc
     import usage_index as ui

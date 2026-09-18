@@ -1178,14 +1178,25 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
             cli=cli, model=u.get("model"), parent_id=child.get("parent"))
     found_ids = {c["id"] for c in found}
-    for tid in spawned:                    # seen to start, no file to read: unknown, until it appears
+    for tid in spawned:                    # seen to start but not in the walk: read it by name, else unknown
         key = "child:%s:%s" % (engine_session_uuid, tid)
         if tid in found_ids or key in known or _ul.entry_key(engine_session_uuid, line=key) in ledgered:
             continue
-        ingest_usage(None, _ul.entry_key(engine_session_uuid, line=key), index_key=key,
-                     source=SOURCE_SUBAGENT, native_id=tid, tokens=0, cost_usd=None,
-                     project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
-                     cli=cli, parent_id=engine_session_uuid)
+        tokens, model = 0, None
+        if cli == "chatgpt":               # an older child's rollout still exists: its figure, not a guess
+            path = _codex_rollout_path(tid, root=codex_root, now=now)
+            if path is not None:
+                try:
+                    u = codex_rollout_usage(path)
+                    tokens, model = _int(u.get("tokens")), u.get("model")
+                except Exception:
+                    tokens, model = 0, None
+        written += ingest_usage(
+            engine_session_uuid if tokens > 0 else None,
+            _ul.entry_key(engine_session_uuid, line=key), index_key=key,
+            source=SOURCE_SUBAGENT, native_id=tid, tokens=tokens, cost_usd=None,
+            project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
+            cli=cli, model=model, parent_id=engine_session_uuid)
     return written
 
 
