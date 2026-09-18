@@ -1463,7 +1463,7 @@ const Proto = (() => {
         ? " · " + kids.count + (kids.count === 1 ? " sub-agent " : " sub-agents ") + recordedTokenText(kids) +
           (kids.unknown > 0 ? " (" + kids.unknown + " unknown usage)" : "")
         : "";
-      // (S3) trio seats the effort's skills ran: their own clause, like jobs.
+      // seats the effort's skills ran: their own clause, like jobs
       const seats = !st.usage_persistence_error && st.usage_rollup && st.usage_rollup.seats;
       const seatsText = (seats && Number.isInteger(seats.count) && seats.count > 0)
         ? " · " + seats.count + (seats.count === 1 ? " seat " : " seats ") + (seats.cost_text || "cost unavailable") +

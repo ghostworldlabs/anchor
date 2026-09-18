@@ -713,7 +713,9 @@ def _usage_rollup(cdir, estate=None):
     # (S2) sub-agents the stewards of this effort spawned: count, tokens, unknown
     children = zero()
     children["count"], children["unknown"] = 0, 0
-    # (S3) trio seats the skills of this effort ran: priced, unpriced or unknown, like jobs
+    # (S3) trio seats the skills of this effort ran: priced, unpriced or unknown, like
+    # jobs; a seat that is a job's own engine session or a recorded child is not
+    # counted twice (the job or the child wins)
     seats = zero()
     seats["count"], seats["unknown"] = 0, 0
     try:
@@ -723,6 +725,10 @@ def _usage_rollup(cdir, estate=None):
         rows = _ui.load_rows(project_id) if project_id else []
     except Exception:
         rows = []
+    owned = {row.get("engine_session_uuid") for row in rows
+             if isinstance(row, dict) and row.get("source") == "job" and row.get("engine_session_uuid")}
+    owned |= {row.get("native_id") for row in rows
+              if isinstance(row, dict) and row.get("source") == "subagent" and row.get("native_id")}
     cdir_c = os.path.normcase(cdir_n)
     cdir_prefix = cdir_c.rstrip(os.sep) + os.sep
 
@@ -754,6 +760,8 @@ def _usage_rollup(cdir, estate=None):
         # a job that ran in a worktree outside the project folder joins at the
         # project folder (Grok R1 F2); scopes were stamped at write time (F5)
         if not (in_scope(row.get("scope")) or in_scope(row.get("folder_scope"))):
+            continue
+        if row.get("source") == "seat" and (row.get("engine_session_uuid") in owned or row.get("native_id") in owned):
             continue
         b = jobs if row.get("source") == "job" else seats
         state, tokens, cost = row.get("usage_state"), row.get("tokens"), row.get("cost_usd")

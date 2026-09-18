@@ -872,17 +872,15 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
     
     crypt_token = uuid.uuid4().hex
     full_env["ANCHOR_SESSION_ID_CRYPT_TOKEN"] = crypt_token
-    # (Wave 2 S3) the ids a child inherits: project, effort dir, this job, where
-    # to drop seat receipts. The Codex adapter's verified minimal env carries no
-    # extra keys, so a Codex job's seats attribute by the folder they ran in.
-    if backend != BACKEND_CHATGPT:
-        try:
-            import usage_capture as _usage_cap
-            full_env.update(_usage_cap.attribution_env(
-                project_id=project_id, effort_dir=str(cwd) if cwd else None,
-                folder_path=str(folder_path) if folder_path else None, job_id=job_id))
-        except Exception:
-            pass
+    # the ids a child inherits (on a Codex job they ride beside the crypt token
+    # above; the adapter's preflight verifies its own minimal env, not this one)
+    try:
+        import usage_capture as _usage_cap
+        full_env.update(_usage_cap.attribution_env(
+            project_id=project_id, effort_dir=str(cwd) if cwd else None,
+            folder_path=str(folder_path) if folder_path else None, job_id=job_id))
+    except Exception:
+        pass
 
     # On Windows, create a new process group so the whole tree is reapable and
     # signals/kills target the group. taskkill /T handles tree reap regardless,
@@ -2555,7 +2553,7 @@ def _attribute_job(rec_or_job_id) -> None:
         cost = rec.get("cost") if isinstance(rec.get("cost"), dict) else None
         _usage_cap.ingest_job_cost((cost or {}).get("session_id") or None, cost,
                                    rec["job_id"], record=rec)
-        _usage_cap.ingest_receipts()          # S3: the seats this job's skill ran
+        _usage_cap.ingest_receipts()
     except Exception:
         pass
 

@@ -440,6 +440,10 @@ def finalize_session_usage(session_id, project_id=None, lane=None, record=None,
     if not won:
         out["reason"] = "already-finalized"
         return out
+    try:
+        ingest_receipts()      # the seats this session's skills ran (S3)
+    except Exception:
+        pass
 
     if project_id is None:
         project_id = rec.get("project_id") or None
@@ -755,7 +759,7 @@ INDEXED_SOURCES = (SOURCE_JOB, SOURCE_SUBAGENT, SOURCE_SEAT)
 #: its ledger doc (a key is a hash; a row must still name its job or child, and
 #: a child its immediate parent).
 INDEX_FIELDS = ("key", "source", "native_id", "engine_session_uuid", "folder_path",
-                "effort_dir", "scope", "folder_scope", "cli", "tokens", "cost_usd",
+                "effort_dir", "scope", "folder_scope", "cli", "model", "tokens", "cost_usd",
                 "usage_state", "duration_ms", "recorded_at", "parent_id")
 
 
@@ -841,7 +845,7 @@ def turn_key(engine_session_uuid, native_id) -> str:
 def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
                  cost_usd=None, project_id=None, folder_path=None, effort_dir=None,
                  cli=None, model=None, duration_ms=0, usage=None, recorded_at=None,
-                 index_key=None, parent_id=None, replace=False) -> int:
+                 index_key=None, parent_id=None, replace=False, attested=None) -> int:
     """Write ONE attributed usage row: the ledger entry (write-once per key under
     the engine session's doc) and, for an indexed source with a project, the
     compact per-project index row the cockpit reads. A row with no engine
@@ -873,6 +877,8 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
         else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "parent_id": parent_id or None,
     }
+    if attested is not None:
+        entry["model_attested"] = bool(attested)
     if isinstance(usage, dict):
         entry["usage"] = dict(usage)
     added = 0
@@ -1115,12 +1121,10 @@ def receipts_dir() -> Path:
 def attribution_env(project_id=None, effort_dir=None, job_id=None, session_id=None,
                     folder_path=None) -> dict:
     """The ids a child inherits: project, effort dir, the job or the engine
-    session that spawned it, and where to drop receipts. A missing project is
-    resolved from the folder; only known ids are set."""
+    session that spawned it, and where to drop receipts. Only known ids are
+    set; a missing project is resolved from the folder at ingest, not here."""
     env = {ENV_RECEIPTS: str(receipts_dir())}
     where = effort_dir or folder_path
-    if not project_id and where:
-        project_id, folder_path = resolve_project(where)
     if project_id:
         env[ENV_PROJECT] = str(project_id)
     if where:
@@ -1140,30 +1144,62 @@ def _uuid_like(value) -> bool:
     return isinstance(value, str) and bool(_UUID_RE.fullmatch(value))
 
 
-def ingest_receipts(receipts_root=None, now=None) -> int:
+def _owned_sessions(project_id) -> set:
+    """Native sessions the project index already counts as a job (its engine
+    session) or as a steward's child (its native id): a seat on one of these is
+    the same process seen again."""
+    try:
+        out = set()
+        for row in _ui.load_rows(project_id):
+            if row.get("source") == SOURCE_JOB and row.get("engine_session_uuid"):
+                out.add(row["engine_session_uuid"])
+            elif row.get("source") == SOURCE_SUBAGENT and row.get("native_id"):
+                out.add(row["native_id"])
+        return out
+    except Exception:
+        return set()
+
+
+def _steward_session_for(effort_dir):
+    """The engine session the cockpit state holds for ``effort_dir`` (the
+    steward's own key), so any sweep can name a seat's parent. ``None`` when
+    the cockpit is not importable or holds no session."""
+    try:
+        from steward_cockpit import steward_engine as _eng
+        sid = _eng._read_state_entry(str(effort_dir)).get("session_id")
+        return str(sid) if sid else None
+    except Exception:
+        return None
+
+
+def ingest_receipts(receipts_root=None, parent_session=None, parent_effort=None) -> int:
     """Sweep the receipt files trio seats dropped (one JSON file per physical
-    receipt) into rows through the seam: ``source=seat``, keyed by the seat's
-    native session (its own engine session when uuid-shaped, so it is the
-    ledger doc), attributed by the ids the seat inherited, else by the folder it
-    ran in. A seat whose native session is already a job's engine session is
-    skipped (the job wins). A consumed file is removed; a file younger than a
-    minute that does not parse is left for the next sweep. Returns the ledger
-    rows written. Never raises."""
+    receipt; the sink renames a complete file into place, so a file that does
+    not parse is junk and is removed) into rows through the seam: ``source=seat``,
+    keyed by the seat's native session (its own engine session when uuid-shaped,
+    so it is the ledger doc), attributed by the ids the seat inherited, else by
+    the folder it ran in (a worktree outside the project joins at the project
+    folder, like a job). A seat that names no spawner is the steward's whose
+    effort it ran under: the sweeping steward's own (``parent_session`` /
+    ``parent_effort``), else the session the cockpit state holds for that
+    effort. A seat whose native session is already a job's engine session or a
+    recorded child is skipped (counted once: the job or the child wins). A
+    re-prompted seat (a second call on the same session) is its own row. A
+    consumed file is removed. Returns the ledger rows written. Never raises."""
     root = Path(receipts_root) if receipts_root is not None else receipts_dir()
     try:
         files = sorted(root.glob("*.json")) if root.is_dir() else []
     except OSError:
         return 0
-    now = now if now is not None else time.time()
     written = 0
-    job_sessions = {}
+    owned = {}
+    own = _scope(parent_effort)
     for path in files:
         try:
             r = json.loads(io.open(path, encoding="utf-8", errors="replace").read())
         except (OSError, ValueError):
             try:
-                if now - path.stat().st_mtime > 60:
-                    path.unlink()
+                path.unlink()
             except OSError:
                 pass
             continue
@@ -1186,15 +1222,15 @@ def ingest_receipts(receipts_root=None, now=None) -> int:
         native = r.get("native_id") if isinstance(r.get("native_id"), str) and r.get("native_id") else None
         usage = r.get("usage") if isinstance(r.get("usage"), dict) else None
         tokens = sum(_int(v) for k, v in (usage or {}).items() if str(k).endswith("_tokens"))
+        if folder_path and not _under(effort_dir, folder_path):
+            effort_dir = r.get("cwd") if _under(r.get("cwd"), folder_path) else folder_path
         key = "seat:%s" % (native or path.stem,)
+        if r.get("kind") == "schema_reprompt":
+            key += ":reprompt"
         if native and project_id:
-            if project_id not in job_sessions:
-                try:
-                    job_sessions[project_id] = {row.get("engine_session_uuid") for row in _ui.load_rows(project_id)
-                                                if row.get("source") == SOURCE_JOB}
-                except Exception:
-                    job_sessions[project_id] = set()
-            if native in job_sessions[project_id]:
+            if project_id not in owned:
+                owned[project_id] = _owned_sessions(project_id)
+            if native in owned[project_id]:
                 try:
                     path.unlink()
                 except OSError:
@@ -1203,13 +1239,18 @@ def ingest_receipts(receipts_root=None, now=None) -> int:
         cost = _cost_number(r.get("cost_usd"))
         doc = native if _uuid_like(native) and (tokens > 0 or cost is not None) else None   # unknown stays index-only
         stamp = r.get("at") if isinstance(r.get("at"), str) and r.get("at").endswith("Z") else None
+        parent = ids.get("session_id") or ids.get("job_id") or None
+        if not parent and parent_session and own and _scope(effort_dir) == own:
+            parent = parent_session
+        if not parent and ids.get("effort_dir"):
+            parent = _steward_session_for(ids.get("effort_dir"))
         written += ingest_usage(
             doc, _ul.entry_key(doc or "", line=key), index_key=key,
             source=SOURCE_SEAT, native_id=native or path.stem, tokens=tokens,
             cost_usd=cost, project_id=project_id,
             folder_path=folder_path, effort_dir=effort_dir, cli=r.get("family") or None,
-            model=r.get("model_served") or None, duration_ms=_int(r.get("duration_ms")),
-            usage=usage, parent_id=ids.get("session_id") or ids.get("job_id") or None,
+            model=r.get("model_served") or None, attested=r.get("model_attested"),
+            duration_ms=_int(r.get("duration_ms")), usage=usage, parent_id=parent,
             recorded_at=stamp)
         try:
             path.unlink()

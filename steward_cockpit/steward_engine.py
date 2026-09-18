@@ -2125,15 +2125,14 @@ class Engine:
 
     def _spawn_env(self):
         """The steward process's environment: the model policy plus the ids its
-        children inherit (project, this effort dir, where to drop receipts) —
-        Wave 2 S3."""
+        children inherit (project, this effort dir, where to drop receipts)."""
         import model_policy
         env = model_policy.policy_environment()
         try:
             import usage_capture as _uc
             project_id, folder_path = self._attribution_ids()
             env.update(_uc.attribution_env(project_id=project_id, effort_dir=self.dir,
-                                           folder_path=folder_path))
+                                           folder_path=folder_path, session_id=self.session_id))
         except Exception:
             pass
         return env
@@ -2152,7 +2151,7 @@ class Engine:
             project_id, folder_path = self._attribution_ids()
             _uc.ingest_children(session_id, self.cli, project_id=project_id,
                                 folder_path=folder_path, effort_dir=self.dir)
-            _uc.ingest_receipts()             # S3: the seats this steward's skills ran
+            _uc.ingest_receipts(parent_session=session_id, parent_effort=self.dir)
         except Exception:
             pass
 

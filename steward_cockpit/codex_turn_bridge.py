@@ -635,7 +635,7 @@ class Broker:
 
 
     def _spawn_env(self):
-        """The model policy plus the ids the steward's children inherit (Wave 2 S3)."""
+        """The model policy plus the ids the steward's children inherit."""
         env = policy_environment()
         try:
             import usage_capture as _uc

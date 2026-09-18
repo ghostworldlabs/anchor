@@ -652,7 +652,7 @@ def _resolve_model_selection(backend, settings=None):
 
 def _model_launch_env(selection, project_id=None, session_id=None):
     """The PTY's environment: the model policy (or the service's own when no
-    selection applies) plus the ids its children inherit (Wave 2 S3)."""
+    selection applies) plus the ids its children inherit."""
     import model_policy
     env = model_policy.policy_environment() if selection is not None else dict(os.environ)
     try:
