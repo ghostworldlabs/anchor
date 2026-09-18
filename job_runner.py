@@ -641,6 +641,18 @@ def _relaunch_env_seed(env) -> dict:
     return seed
 
 
+def _commissioned(rec) -> str:
+    """The project a LANE launch was commissioned for (what launch_guarded
+    passed, kept on the relaunch spec) — the gate for the lane hooks, so a bare
+    launch that merely runs inside a project folder (its record names that
+    project from the start, S4) does not bridge cost onto an effort or register
+    a deliverable. A record with no spec (early Wave 1) keeps its own field."""
+    spec = rec.get("relaunch_spec")
+    if isinstance(spec, dict) and spec:
+        return spec.get("project_id") or None
+    return rec.get("project_id") or None
+
+
 def _build_relaunch_spec(lane, cwd, prompt, output_dir, gated,
                          permission_mode, backend, env,
                          project_id=None, folder_path=None,
@@ -821,6 +833,19 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
             "chatgpt-artifact-contract-invalid: expected artifacts are owned "
             "by the ChatGPT adapter"
         )
+    # The project a bare launch belongs to is the registered project at or above
+    # its cwd, known from the start (S4) — on the record, in the journal, and in
+    # its children's environment. What launch_guarded passed (the commissioning
+    # context) is what the relaunch spec and the lane hooks keep reading.
+    commissioned = (project_id, folder_path)
+    if not project_id and cwd:
+        try:
+            import usage_capture as _usage_cap
+            _pid, _pfolder = _usage_cap.resolve_project(cwd)
+            if _pid:
+                project_id, folder_path = _pid, folder_path or _pfolder
+        except Exception:
+            pass
     # An explicit runner override owns its command and does not launch the
     # installed provider. Do not require (or attest) a model for that transport.
     # ChatGPT always uses its receipt-bearing adapter, even with this seam set.
@@ -980,6 +1005,8 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         "status": STATUS_RUNNING,
         "log_path": str(lp),
         "cwd": str(cwd) if cwd else None,
+        "project_id": project_id,                    # commissioned, else resolved from cwd (S4)
+        "folder_path": str(folder_path) if folder_path else None,
         "started_at": time.time(),
         "exit_code": None,
         "session_id": None,
@@ -993,7 +1020,7 @@ def launch(lane: str, cwd=None, extra_args=None, env=None,
         # when the launch came through launch_guarded().
         "relaunch_spec": _build_relaunch_spec(
             lane, cwd, prompt, output_dir, gated, permission_mode, backend, env,
-            project_id=project_id, folder_path=folder_path, command=command,
+            project_id=commissioned[0], folder_path=commissioned[1], command=command,
             expected_artifacts=normalized_expected_artifacts),
     }
     rec["relaunch_spec"]["model_policy"] = selection
@@ -2667,7 +2694,7 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     # auto_commit=False (no git commit from job finalization). Lazy import +
     # broad guard so a bridge failure can never break job finalization. Runs
     # OUTSIDE the WRITE_LOCK (record_effort takes the lock itself).
-    if rec.get("project_id") and rec.get("folder_path") and rec.get("cost"):
+    if _commissioned(rec) and rec.get("folder_path") and rec.get("cost"):
         try:
             import effort_history as _eh
             _eh.finalize_effort(
@@ -2685,7 +2712,7 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
     # a registrar failure can never break job finalization. The outcome is
     # journaled as {register: written|dup|<reason>} on the existing
     # deliverable-pinned event so a silent no-op is auditable.
-    if (final_status == STATUS_DONE and rec.get("project_id")
+    if (final_status == STATUS_DONE and _commissioned(rec)
             and rec.get("folder_path")
             and rec.get("lane") in ("research", "plan")):
         try:

@@ -38,6 +38,9 @@ def env(tmp_path, monkeypatch):
     data = tmp_path / "data"
     data.mkdir()
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))        # never the real sessions store
+    monkeypatch.setenv("ANCHOR_SIDECAR_DIR", str(tmp_path / "sidecars"))
+    (tmp_path / "sidecars").mkdir(exist_ok=True)
     monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
     for mod in ("paths", "journal", "usage_ledger", "usage_index", "usage_capture",
                 "job_runner", "rnd_registry", "session_registry", "sessions",

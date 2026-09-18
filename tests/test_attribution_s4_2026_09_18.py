@@ -1,0 +1,224 @@
+"""codex-discipline Wave 2 S4 (2026-09-18) — the remaining holes.
+
+STUB GATE for the last attribution slice. Behaviours only:
+
+- a bare launch (no project passed) names the registered project at or above
+  its cwd from the start: on its record, in its children's environment; the
+  lane hooks (cost bridge, deliverable register) still key on what
+  launch_guarded commissioned, so a bare launch never triggers them.
+- "unknown" counts every spawn seen: a child the steward's own transcript names
+  when it started it (Codex ``SubAgentActivity``; Claude's Agent result line)
+  but whose file was not found is an ``unknown`` row until it appears.
+- a Grok steward turn is an honest row: unpriced with its tokens, else unknown.
+- the Codex adapter's minimal env carries the five attribution names through
+  to the CLI child and still refuses any other extra key.
+"""
+import importlib
+import io
+import json
+import os
+import time
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+STEWARD = "01a0ac59-ca5d-7832-9474-08a6afada25b"
+CHILD_A = "01a0b5b6-10bc-7252-9e6f-db00746cf976"
+CHILD_B = "01a0b5b7-2222-7252-9e6f-db00746cf977"
+SESSION = "01a08260-068d-76a1-99f6-5a7bdf3aaab8"
+GROK_SESSION = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(data))
+    monkeypatch.delenv("ANCHOR_TOKEN", raising=False)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    monkeypatch.setenv("ANCHOR_SIDECAR_DIR", str(tmp_path / "sidecars"))
+    (tmp_path / "sidecars").mkdir()
+    for mod in ("paths", "journal", "usage_ledger", "usage_index", "usage_capture",
+                "job_runner", "rnd_registry", "session_registry", "sessions",
+                "effort_history", "summarizer", "effort_view"):
+        importlib.reload(importlib.import_module(mod))
+    import paths
+    paths.ensure_data_dirs()
+    import rnd_registry
+    project = tmp_path / "proj"
+    effort = project / "planning" / "eff-1"
+    effort.mkdir(parents=True)
+    pid = rnd_registry.add_project("Attribution", str(project), scaffold=False)["id"]
+    return {"pid": pid, "project": str(project), "effort": str(effort), "data": data,
+            "codex": tmp_path / "codex-home" / "sessions", "sidecars": tmp_path / "sidecars"}
+
+
+def _day_dir(root, days_ago=0):
+    t = time.gmtime(time.time() - days_ago * 86400)
+    d = Path(root) / time.strftime("%Y", t) / time.strftime("%m", t) / time.strftime("%d", t)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _rollout(path, thread_id, parent=None, root_session=None, started="2026-09-18T12:00:00.000Z",
+             spawned=(), totals=None, model="gpt-6-astra"):
+    """A Codex rollout: the header (a child names its parent and root session),
+    the SubAgentActivity items a steward writes when it starts children, and
+    a cumulative token_count when usage is known."""
+    src = {"subagent": {"thread_spawn": {"parent_thread_id": parent, "depth": 1}}} if parent else None
+    meta = {"timestamp": started, "type": "session_meta",
+            "payload": {"id": thread_id, "parent_thread_id": parent, "session_id": root_session, "source": src}}
+    lines = [json.dumps(meta)]
+    for tid in spawned:
+        for kind in ("started", "interacted"):
+            lines.append(json.dumps({"timestamp": started, "type": "event_msg", "payload": {
+                "type": "item_completed", "thread_id": thread_id,
+                "item": {"type": "SubAgentActivity", "id": "call_x", "kind": kind, "agent_thread_id": tid}}}))
+    if totals is not None:
+        lines.append(json.dumps({"type": "turn_context", "payload": {"model": model}}))
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "total_token_usage": {"input_tokens": totals, "output_tokens": 0, "total_tokens": totals}}}}))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+# ── bare launches ─────────────────────────────────────────────────────────────
+
+def test_a_bare_launch_names_its_project_from_the_start(env, monkeypatch):
+    import job_runner as jr
+    seen = {}
+
+    class FakeProc:
+        pid = 4321
+        stdout = io.StringIO("")
+        stdin = None
+        returncode = 0
+
+        def poll(self):
+            return 0
+
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kw):
+        seen["env"] = kw.get("env") or {}
+        return FakeProc()
+    monkeypatch.setattr(jr.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(jr, "_register_swarm_session", lambda *a, **k: None)
+    monkeypatch.setenv("ANCHOR_RUNNER_CMD", "python -c pass")
+    rec = None
+    try:
+        rec = jr.launch("research", cwd=env["effort"], prompt="hi", job_id="job-bare-1", backend="claude")
+    except Exception:
+        pass
+    rec = rec or jr.load_record("job-bare-1") or {}
+    assert rec.get("project_id") == env["pid"] and rec.get("folder_path") == env["project"]
+    assert (rec.get("relaunch_spec") or {}).get("project_id") is None        # nothing commissioned it
+    assert jr._commissioned(rec) is None
+    e = seen.get("env") or {}
+    assert e.get("ANCHOR_PROJECT_ID") == env["pid"] and e.get("ANCHOR_EFFORT_DIR") == env["effort"]
+
+
+def test_the_lane_hooks_key_on_the_commissioning_launch():
+    import job_runner as jr
+    assert jr._commissioned({"relaunch_spec": {"project_id": None}, "project_id": "p1"}) is None
+    assert jr._commissioned({"relaunch_spec": {"project_id": "p1"}, "project_id": "p1"}) == "p1"
+    assert jr._commissioned({"project_id": "p1"}) == "p1"                    # an early record without a spec
+    assert jr._commissioned({}) is None
+
+
+# ── the spawn list ────────────────────────────────────────────────────────────
+
+def test_codex_spawned_names_the_children_the_steward_started(env):
+    import usage_capture as uc
+    d = _day_dir(env["codex"], days_ago=40)                                  # an old steward, found by name
+    _rollout(d / ("rollout-2026-08-09T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_A, CHILD_B, CHILD_A))
+    assert uc.codex_spawned(STEWARD) == [CHILD_A, CHILD_B]
+    assert uc.codex_spawned("01a0ffff-0000-7000-8000-000000000000") == []
+
+
+def test_claude_spawned_names_the_agents_the_session_launched(env):
+    import usage_capture as uc
+    main = env["sidecars"] / (SESSION + ".jsonl")
+    lines = [
+        json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text",
+                    "text": "Async agent launched successfully. (internal metadata)\nagentId: ad7a4792df5592e7a\noutput file: x"}]}]}}),
+        json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "no ids here"}]}}),
+        json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text",
+                    "text": "agentId: ad7a4792df5592e7a (again)"}]}]}}),
+    ]
+    main.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert uc.claude_spawned(SESSION) == ["ad7a4792df5592e7a"]
+
+
+def test_a_spawn_seen_without_a_file_is_unknown_until_it_appears(env):
+    import usage_capture as uc
+    import usage_index as ui
+    from steward_cockpit import steward_routes
+    d = _day_dir(env["codex"])
+    _rollout(d / ("rollout-2026-09-18T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_A, CHILD_B))
+    _rollout(d / ("rollout-2026-09-18T10-05-00-%s.jsonl" % CHILD_A), CHILD_A, parent=STEWARD, root_session=STEWARD,
+             started="2026-09-18T10:05:00.000Z", totals=1000)
+    uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"])
+    rows = {r["native_id"]: r for r in ui.load_rows(env["pid"])}
+    assert rows[CHILD_A]["usage_state"] == "unpriced" and rows[CHILD_A]["tokens"] == 1000
+    assert rows[CHILD_B]["usage_state"] == "unknown" and rows[CHILD_B]["parent_id"] == STEWARD
+    assert rows[CHILD_B]["engine_session_uuid"] is None                       # index-only until it appears
+    r = steward_routes._usage_rollup(env["effort"], estate={})
+    assert r["children"]["count"] == 2 and r["children"]["unknown"] == 1
+    # the child's rollout appears: the placeholder is upgraded, never doubled
+    _rollout(d / ("rollout-2026-09-18T10-06-00-%s.jsonl" % CHILD_B), CHILD_B, parent=STEWARD, root_session=STEWARD,
+             started="2026-09-18T10:06:00.000Z", totals=250)
+    uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"])
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 2 and {r["native_id"]: r["usage_state"] for r in rows}[CHILD_B] == "unpriced"
+    r = steward_routes._usage_rollup(env["effort"], estate={})
+    assert r["children"]["count"] == 2 and r["children"]["unknown"] == 0 and r["children"]["tokens"] == 1250
+
+
+# ── Grok honesty ──────────────────────────────────────────────────────────────
+
+def test_a_grok_steward_turn_is_an_honest_row(env, monkeypatch, tmp_path):
+    import anchor_settings
+    import usage_ledger as ul
+    from steward_cockpit import steward_engine as engine_mod
+    monkeypatch.setattr(engine_mod, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(anchor_settings, "load_settings", lambda: {"default_cli": "grok", "settings_revision": 1})
+    engine = engine_mod.Engine(env["effort"], fake=True)
+    engine.cli = "grok"
+    engine.session_id = GROK_SESSION
+    engine.proc = SimpleNamespace(stdin=io.StringIO(), poll=lambda: None)
+    monkeypatch.setattr(engine, "_status_update", lambda **kwargs: None)
+    engine.turn_text = "Reviewed."
+    engine._handle({"type": "result", "subtype": "success", "session_id": GROK_SESSION,
+                    "usage": {"input_tokens": 400, "output_tokens": 100}, "total_cost_usd": None,
+                    "duration_ms": 900}, engine.proc)
+    entries = ul.ledger_entries(GROK_SESSION)
+    assert len(entries) == 1
+    e = entries[0]
+    assert e["source"] == "steward-turn" and e["cli"] == "grok" and e["project_id"] == env["pid"]
+    assert e["tokens"] == 500 and e["cost_usd"] is None and e["usage_state"] == "unpriced"
+    # a turn that reported nothing is an unknown row, never a made-up figure
+    engine.turn_text = "Again."
+    engine._handle({"type": "result", "subtype": "success", "session_id": GROK_SESSION,
+                    "total_cost_usd": None, "duration_ms": 400}, engine.proc)
+    states = sorted(x["usage_state"] for x in ul.ledger_entries(GROK_SESSION))
+    assert states == ["unknown", "unpriced"]
+
+
+# ── the Codex adapter's minimal env ───────────────────────────────────────────
+
+def test_the_codex_minimal_env_carries_the_attribution_ids_and_nothing_else_extra():
+    import codex_adapter as ca
+    clean = ca.subscription_only_env({
+        "ANCHOR_PROJECT_ID": "p1", "ANCHOR_EFFORT_DIR": "C:/proj/eff", "ANCHOR_RECEIPTS_DIR": "C:/data/.anchor/receipts",
+        "ANCHOR_JOB_ID": "job-7", "OPENAI_API_KEY": "secret", "ANCHOR_RUNNER_CMD": "C:/malicious/runner",
+    })
+    assert clean["ANCHOR_PROJECT_ID"] == "p1" and clean["ANCHOR_JOB_ID"] == "job-7"
+    assert clean["ANCHOR_RECEIPTS_DIR"] == "C:/data/.anchor/receipts" and "ANCHOR_SESSION_ID" not in clean
+    assert "OPENAI_API_KEY" not in clean and "ANCHOR_RUNNER_CMD" not in clean
+    assert ca._minimal_env_verified(clean) is True
+    assert ca._minimal_env_verified(dict(clean, UNDOCUMENTED_RUNTIME="1")) is False
+    bare = ca.subscription_only_env({})
+    assert not (set(bare) & ca.ATTRIBUTION_ENV_KEYS) and ca._minimal_env_verified(bare) is True

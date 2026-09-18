@@ -184,8 +184,18 @@ def resolve_codex_cmd(env=None) -> str:
         "Codex executable was not found in an approved installation directory")
 
 
+#: The attribution ids Anchor sets on every process it spawns (codex-discipline
+#: S4): they ride through to the CLI child so a trio seat it runs can drop its
+#: receipt. Ids and paths only — never auth, endpoints or command overrides.
+ATTRIBUTION_ENV_KEYS = frozenset({
+    "ANCHOR_PROJECT_ID", "ANCHOR_EFFORT_DIR", "ANCHOR_JOB_ID", "ANCHOR_SESSION_ID",
+    "ANCHOR_RECEIPTS_DIR",
+})
+
+
 def subscription_only_env(env=None) -> dict:
-    """Return the minimal OS environment needed by a saved-login Codex child."""
+    """Return the minimal OS environment needed by a saved-login Codex child,
+    plus the attribution ids when the caller's environment carries them."""
     if os.name == "nt":
         windows_path = _windows_directory()
         profile_path = _os_profile_dir("nt")
@@ -235,6 +245,11 @@ def subscription_only_env(env=None) -> dict:
     if os.path.normcase(str(nominal_home)) != os.path.normcase(str(codex_home)):
         raise ValueError("fixed CODEX_HOME must not be redirected by a link or junction")
     clean["CODEX_HOME"] = str(codex_home)
+    source = env if env is not None else os.environ
+    for key in sorted(ATTRIBUTION_ENV_KEYS):
+        value = source.get(key) if hasattr(source, "get") else None
+        if isinstance(value, str) and value and len(value) <= 1024:
+            clean[key] = value
     return clean
 
 
@@ -250,7 +265,8 @@ def _minimal_env_verified(clean: dict, platform_name=None) -> bool:
         "SHELL", "TMPDIR", "USER",
     }
     expected = windows_keys if runtime_platform == "nt" else posix_keys
-    if set(clean) != expected or any(not isinstance(value, str) for value in clean.values()):
+    if (set(clean) - ATTRIBUTION_ENV_KEYS != expected
+            or any(not isinstance(value, str) for value in clean.values())):
         return False
     forbidden_fragments = (
         "API_KEY", "ACCESS_TOKEN", "REFRESH_TOKEN", "IDENTITY_TOKEN",

@@ -42,6 +42,7 @@ fixture/temp dir — so this pipeline is physically unable to open a real user's
 import calendar
 import io
 import json
+import re
 import os
 import time
 from datetime import datetime
@@ -900,6 +901,7 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
 # parent's turn end (and once at engine start for a resumed steward), under the
 # steward's effort; never folded into the parent's own figure.
 CODEX_CHILD_DAYS = 3          # day folders walked; an older chain link is invisible (named)
+CODEX_PARENT_DAYS = 45        # day folders searched BY NAME for the steward's own rollout (no reads)
 
 
 def codex_sessions_root(env=None):
@@ -978,6 +980,80 @@ def codex_children(parent_thread_id, root=None, days=CODEX_CHILD_DAYS, now=None)
     return out
 
 
+def _codex_rollout_path(thread_id, root=None, days=CODEX_PARENT_DAYS, now=None):
+    """The rollout file of ``thread_id`` — its id is in the file name, so this is
+    a name match over the day folders, newest first, without reading anything."""
+    if not thread_id:
+        return None
+    root = Path(root) if root is not None else codex_sessions_root()
+    for d in _codex_day_dirs(root, days, now):
+        try:
+            hits = sorted(d.glob("rollout-*-%s.jsonl" % thread_id))
+        except OSError:
+            continue
+        if hits:
+            return hits[-1]
+    return None
+
+
+def codex_spawned(parent_thread_id, root=None, now=None):
+    """The child thread ids the steward's own rollout names when it started
+    them (``SubAgentActivity`` items of kind ``started``): every spawn seen,
+    whether or not the child's rollout was found. Empty when the steward's
+    rollout is not found."""
+    path = _codex_rollout_path(parent_thread_id, root, now=now)
+    if path is None:
+        return []
+    out, seen = [], set()
+    try:
+        with io.open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if '"SubAgentActivity"' not in line or '"started"' not in line:
+                    continue
+                try:
+                    ev = json.loads(line)
+                except ValueError:
+                    continue
+                item = ((ev.get("payload") or {}).get("item") or {}) if isinstance(ev, dict) else {}
+                if (isinstance(item, dict) and item.get("type") == "SubAgentActivity"
+                        and item.get("kind") == "started" and item.get("agent_thread_id")):
+                    tid = str(item["agent_thread_id"])
+                    if tid not in seen:
+                        seen.add(tid)
+                        out.append(tid)
+    except OSError:
+        pass
+    return out
+
+
+_AGENT_ID_RE = re.compile(r"agentId:\s*([0-9a-f]{8,})")
+
+
+def claude_spawned(session_uuid, root=None):
+    """The agent ids a Claude session's own transcript names when it launched
+    them (the Agent tool's result line), whether or not their transcripts
+    exist beside it."""
+    try:
+        main = locate_sidecar(session_uuid, root=root)
+    except Exception:
+        return []
+    if main is None:
+        return []
+    out, seen = [], set()
+    try:
+        with io.open(main, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if "agentId" not in line:
+                    continue
+                for m in _AGENT_ID_RE.finditer(line):
+                    if m.group(1) not in seen:
+                        seen.add(m.group(1))
+                        out.append(m.group(1))
+    except OSError:
+        pass
+    return out
+
+
 def codex_rollout_usage(path):
     """A child thread's whole usage: the last ``token_count`` event's cumulative
     ``total_tokens`` and the model from the first ``turn_context``; no usage →
@@ -1049,15 +1125,19 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
     for either family) under the parent's ledger doc and in the project index,
     both replaced when the total grows (a child recorded while it still ran);
     no usage → index-only ``unknown``, upgraded once usage appears. A child whose
-    file has not changed since its row was recorded is not read again. Returns
-    the ledger rows written. Never raises."""
+    file has not changed since its row was recorded is not read again. A child
+    the steward's own transcript names but whose file was not found is an
+    ``unknown`` row too, so "unknown" counts every spawn seen (S4). Returns the
+    ledger rows written. Never raises."""
     if not engine_session_uuid:
         return 0
     try:
         if cli == "chatgpt":
             found, usage_of = codex_children(engine_session_uuid, root=codex_root, now=now), codex_rollout_usage
+            spawned = codex_spawned(engine_session_uuid, root=codex_root, now=now)
         elif cli == "claude":
             found, usage_of = claude_children(engine_session_uuid, root=sidecar_root), claude_agent_usage
+            spawned = claude_spawned(engine_session_uuid, root=sidecar_root)
         else:
             return 0
     except Exception:
@@ -1097,6 +1177,15 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             source=SOURCE_SUBAGENT, native_id=child["id"], tokens=tokens, cost_usd=None,
             project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
             cli=cli, model=u.get("model"), parent_id=child.get("parent"))
+    found_ids = {c["id"] for c in found}
+    for tid in spawned:                    # seen to start, no file to read: unknown, until it appears
+        key = "child:%s:%s" % (engine_session_uuid, tid)
+        if tid in found_ids or key in known or _ul.entry_key(engine_session_uuid, line=key) in ledgered:
+            continue
+        ingest_usage(None, _ul.entry_key(engine_session_uuid, line=key), index_key=key,
+                     source=SOURCE_SUBAGENT, native_id=tid, tokens=0, cost_usd=None,
+                     project_id=project_id, folder_path=folder_path, effort_dir=effort_dir,
+                     cli=cli, parent_id=engine_session_uuid)
     return written
 
 
