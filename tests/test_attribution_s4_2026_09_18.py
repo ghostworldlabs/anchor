@@ -147,14 +147,73 @@ def test_a_bare_launch_never_triggers_the_lane_hooks_at_finalize(env, monkeypatc
     assert eh.load_effort(env["project"], env["pid"], "research", "job-early-2") is not None
 
 
+def test_a_relaunch_keeps_a_bare_job_uncommissioned(env, monkeypatch):
+    """An interrupted bare job carries its resolved project on the record; its
+    relaunch still goes through launch_guarded with NO project (nothing
+    commissioned it), so it takes no lane slot and never becomes a lane launch
+    (Grok S4 F1). A commissioned spec passes its project as before."""
+    import job_runner as jr
+    seen = []
+    monkeypatch.setattr(jr, "launch_guarded", lambda lane, **kw: seen.append(kw) or {"job_id": "new-%d" % len(seen)})
+    spec = {"lane": "research", "cwd": env["effort"], "prompt": "p", "backend": "claude", "gated": False,
+            "permission_mode": "plan", "expected_artifacts": [], "env_keys": {}, "project_id": None, "folder_path": None}
+    jr._write_record({"job_id": "job-int-1", "lane": "research", "status": jr.STATUS_INTERRUPTED, "backend": "claude",
+                      "project_id": env["pid"], "folder_path": env["project"], "relaunch_spec": spec})
+    out = jr.relaunch("job-int-1")
+    assert out.get("ok") is not False, out
+    assert seen[-1]["project_id"] is None and seen[-1]["folder_path"] == env["effort"]     # the cwd, for the build lock key
+    jr._write_record({"job_id": "job-int-2", "lane": "research", "status": jr.STATUS_INTERRUPTED, "backend": "claude",
+                      "project_id": env["pid"], "folder_path": env["project"],
+                      "relaunch_spec": dict(spec, project_id=env["pid"], folder_path=env["project"])})
+    jr.relaunch("job-int-2")
+    assert seen[-1]["project_id"] == env["pid"] and seen[-1]["folder_path"] == env["project"]
+
+
+def test_the_restart_rebuild_keys_lane_slots_on_the_commissioning_launch(env, monkeypatch):
+    """After a dashboard restart the supervisor re-adopts running jobs into the
+    lane slots. A live bare job (resolved project on its record, nothing
+    commissioned) must not hold the project's lane or the folder-build lock
+    (Grok S4 F2); a commissioned job still does."""
+    import job_runner as jr
+    import supervisor as sup
+    monkeypatch.setattr(jr, "_pid_alive", lambda pid: True)
+    jr._ACTIVE_LANE.clear()
+    jr._FOLDER_BUILD.clear()
+    base = {"status": jr.STATUS_RUNNING, "pid": 4242, "backend": "claude", "started_at": 1.0,
+            "project_id": env["pid"], "folder_path": env["project"]}
+    jr._write_record(dict(base, job_id="job-live-bare", lane="research", cwd=env["project"],
+                          relaunch_spec={"project_id": None, "folder_path": None, "cwd": env["project"]}))
+    jr._write_record(dict(base, job_id="job-live-build", lane=jr.BUILD_LANE, cwd=env["project"],
+                          relaunch_spec={"project_id": None, "folder_path": None, "cwd": env["project"]}))
+    jr._write_record(dict(base, job_id="job-live-lane", lane="plan", cwd=env["project"],
+                          relaunch_spec={"project_id": env["pid"], "folder_path": env["project"], "cwd": env["project"]}))
+    out = sup.InlineSupervisor().rebuild()
+    assert jr.lane_holder(env["pid"], "research") is None and jr.lane_holder(env["pid"], jr.BUILD_LANE) is None
+    assert env["project"] not in jr._FOLDER_BUILD
+    assert jr.lane_holder(env["pid"], "plan") == "job-live-lane"
+    assert out.get("lane_slots") == 1 if "lane_slots" in out else True
+    jr._ACTIVE_LANE.clear()
+    jr._FOLDER_BUILD.clear()
+
+
 # ── the spawn list ────────────────────────────────────────────────────────────
 
 def test_codex_spawned_names_the_children_the_steward_started(env):
     import usage_capture as uc
     d = _day_dir(env["codex"], days_ago=40)                                  # an old steward, found by name
-    _rollout(d / ("rollout-2026-08-09T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_A, CHILD_B, CHILD_A))
+    p = _rollout(d / ("rollout-2026-08-09T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_A, CHILD_B, CHILD_A))
     assert uc.codex_spawned(STEWARD) == [CHILD_A, CHILD_B]
     assert uc.codex_spawned("01a0ffff-0000-7000-8000-000000000000") == []
+    # the rollout grows: only the new bytes are scanned; a line still being written waits (Grok S4 F4)
+    third = "01a0b5b8-3333-7252-9e6f-db00746cf978"
+    with io.open(p, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"type": "event_msg", "payload": {"type": "item_completed", "item": {
+            "type": "SubAgentActivity", "kind": "started", "agent_thread_id": third}}}) + "\n")
+        fh.write('{"type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "SubAgentActivity", "kind": "started", "agent_thread_id": "01a0b5b9-4444')
+    assert uc.codex_spawned(STEWARD) == [CHILD_A, CHILD_B, third]
+    with io.open(p, "a", encoding="utf-8") as fh:
+        fh.write('-7252-9e6f-db00746cf979"}}}\n')
+    assert uc.codex_spawned(STEWARD) == [CHILD_A, CHILD_B, third, "01a0b5b9-4444-7252-9e6f-db00746cf979"]
 
 
 def test_claude_spawned_names_the_agents_the_session_launched(env):
@@ -213,6 +272,24 @@ def test_a_spawn_seen_without_a_file_is_unknown_until_it_appears(env):
     assert len(rows) == 2 and {r["native_id"]: r["usage_state"] for r in rows}[CHILD_B] == "unpriced"
     r = steward_routes._usage_rollup(env["effort"], estate={})
     assert r["children"]["count"] == 2 and r["children"]["unknown"] == 0 and r["children"]["tokens"] == 1250
+
+
+def test_a_placeholder_upgrades_when_its_file_turns_up_by_name(env):
+    """The placeholder was written first; the child's rollout later appears in
+    an OLD day folder (outside the walk) — the spawned loop reads it by name
+    and the unknown row becomes a real one (Grok S4 F3)."""
+    import usage_capture as uc
+    import usage_index as ui
+    d = _day_dir(env["codex"])
+    _rollout(d / ("rollout-2026-09-18T10-00-00-%s.jsonl" % STEWARD), STEWARD, spawned=(CHILD_B,))
+    uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"])
+    assert ui.load_rows(env["pid"])[0]["usage_state"] == "unknown"
+    old = _day_dir(env["codex"], days_ago=10)
+    _rollout(old / ("rollout-2026-09-08T10-05-00-%s.jsonl" % CHILD_B), CHILD_B, parent=STEWARD, root_session=STEWARD,
+             started="2026-09-08T10:05:00.000Z", totals=333)
+    assert uc.ingest_children(STEWARD, "chatgpt", project_id=env["pid"], folder_path=env["project"], effort_dir=env["effort"]) == 1
+    rows = ui.load_rows(env["pid"])
+    assert len(rows) == 1 and rows[0]["usage_state"] == "unpriced" and rows[0]["tokens"] == 333
 
 
 # ── Grok honesty ──────────────────────────────────────────────────────────────

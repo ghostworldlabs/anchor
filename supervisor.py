@@ -552,14 +552,18 @@ class InlineSupervisor(Supervisor):
                 if not jid or not _jr._pid_alive(rec.get("pid")):
                     continue
                 running.append(jid)
-                pid = rec.get("project_id")
+                # the slots are launch_guarded's: what commissioned the job, not
+                # the project a bare launch merely runs inside (S4)
+                pid = _jr._commissioned(rec)
                 lane = rec.get("lane")
                 if pid and lane:
                     key = (pid, lane)
                     if key not in _jr._ACTIVE_LANE:
                         _jr._ACTIVE_LANE[key] = jid
                         lane_slots += 1
-                folder = rec.get("folder_path")
+                spec = rec.get("relaunch_spec")
+                folder = (spec.get("folder_path") if isinstance(spec, dict) and spec
+                          else rec.get("folder_path"))
                 if lane == _jr.BUILD_LANE and folder:
                     if folder not in _jr._FOLDER_BUILD:
                         _jr._FOLDER_BUILD[folder] = jid

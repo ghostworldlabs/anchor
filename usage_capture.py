@@ -901,7 +901,8 @@ def ingest_usage(engine_session_uuid, key, *, source, native_id, tokens,
 # parent's turn end (and once at engine start for a resumed steward), under the
 # steward's effort; never folded into the parent's own figure.
 CODEX_CHILD_DAYS = 3          # day folders walked; an older chain link is invisible (named)
-CODEX_PARENT_DAYS = 45        # day folders name-matched for a steward's own rollout (no reads)
+CODEX_PARENT_DAYS = 120       # day folders name-matched for a steward's own rollout (no reads)
+_SPAWNED = {}                 # steward rollout path -> {"size": bytes scanned, "ids": [...]}
 
 
 def codex_sessions_root(env=None):
@@ -1004,14 +1005,27 @@ def codex_spawned(parent_thread_id, root=None, now=None):
     path = _codex_rollout_path(parent_thread_id, root, now=now)
     if path is None:
         return []
-    out, seen = [], set()
     try:
-        with io.open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if '"SubAgentActivity"' not in line or '"started"' not in line:
+        size = path.stat().st_size
+    except OSError:
+        return []
+    cached = _SPAWNED.get(str(path))
+    if cached and cached["size"] == size:
+        return list(cached["ids"])
+    start = cached["size"] if cached and cached["size"] < size else 0
+    out = list(cached["ids"]) if start else []
+    seen, scanned = set(out), start
+    try:
+        with io.open(path, "rb") as fh:
+            fh.seek(start)
+            for raw in fh:                       # only the bytes added since the last pass
+                if not raw.endswith(b"\n"):
+                    break                        # a line still being written waits for the next pass
+                scanned += len(raw)
+                if b'"SubAgentActivity"' not in raw or b'"started"' not in raw:
                     continue
                 try:
-                    ev = json.loads(line)
+                    ev = json.loads(raw.decode("utf-8", "replace"))
                 except ValueError:
                     continue
                 item = ((ev.get("payload") or {}).get("item") or {}) if isinstance(ev, dict) else {}
@@ -1022,7 +1036,8 @@ def codex_spawned(parent_thread_id, root=None, now=None):
                         seen.add(tid)
                         out.append(tid)
     except OSError:
-        pass
+        return out
+    _SPAWNED[str(path)] = {"size": scanned, "ids": list(out)}
     return out
 
 
@@ -1179,9 +1194,12 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
             cli=cli, model=u.get("model"), parent_id=child.get("parent"))
     found_ids = {c["id"] for c in found}
     for tid in spawned:
-        key = "child:%s:%s" % (engine_session_uuid, tid)
-        if tid in found_ids or key in known or _ul.entry_key(engine_session_uuid, line=key) in ledgered:
+        if tid in found_ids:
             continue
+        key = "child:%s:%s" % (engine_session_uuid, tid)
+        have = known.get(key) or ledgered.get(_ul.entry_key(engine_session_uuid, line=key))
+        if have is not None and have.get("usage_state") != USAGE_UNKNOWN:
+            continue                           # a real row stands; only a placeholder is re-tried
         tokens, model = 0, None
         if cli == "chatgpt":
             path = _codex_rollout_path(tid, root=codex_root, now=now)
@@ -1191,6 +1209,8 @@ def ingest_children(engine_session_uuid, cli, *, project_id=None, folder_path=No
                     tokens, model = _int(u.get("tokens")), u.get("model")
                 except Exception:
                     tokens, model = 0, None
+        if have is not None and tokens <= 0:
+            continue                           # still nothing to read; the placeholder stands
         written += ingest_usage(
             engine_session_uuid if tokens > 0 else None,
             _ul.entry_key(engine_session_uuid, line=key), index_key=key,

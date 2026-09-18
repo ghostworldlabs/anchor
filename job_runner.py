@@ -3171,8 +3171,8 @@ def relaunch(job_id: str) -> dict:
     # (record-level fields are a fallback for early-Wave-1 records). The
     # folder_path degrades to the job's cwd so the folder-build lock still has
     # an honest key for a metadata-less build record.
-    project_id = spec.get("project_id") or rec.get("project_id")
-    folder_path = (spec.get("folder_path") or rec.get("folder_path")
+    project_id = _commissioned(rec)
+    folder_path = ((spec.get("folder_path") if "folder_path" in spec else rec.get("folder_path"))
                    or spec.get("cwd") or "")
 
     # Durable gate answers (2026-07 Wave 2): a pending gate rides the relaunch.
