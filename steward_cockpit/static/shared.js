@@ -719,9 +719,13 @@ const Proto = (() => {
       const current=items.filter(i=>{
         if(typeof i.is_current==='boolean')return i.is_current;
         const owner=navOwner(map?.steps||[],i);
+        if(i.accepted||i.accepted_current)return false;
+        // a product awaiting John's review stays here whatever the focus (journal 0132)
+        if(i.managed)return i.phase!=='done';
+        const forReview=/^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)/i.test(String(i.what||''));
+        if(forReview)return owner?.status!=='done';
         if(owner?.navigation?.current===false||owner?.navigation?.role==='support'||owner?.status==='parked')return false;
-        return i.managed && i.phase!=='done' && !i.accepted_current ||
-          !i.managed && owner?.refinement?.phase!=='done' && model?.featured.has(String(i.path||'').replace(/\\/g,'/').toLowerCase());
+        return owner?.refinement?.phase!=='done' && model?.featured.has(String(i.path||'').replace(/\\/g,'/').toLowerCase());
       })
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
       current.forEach(it=>p.appendChild(navFile(it,surface+':pin')));
@@ -1536,6 +1540,9 @@ const Proto = (() => {
       if (st.cli) details.push(st.cli);
       const policy = st.model_policy;
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
+      if (policy && policy.model_served) details.push("served " + policy.model_served + " · " +
+        (policy.model_source === "provider-confirmed" ? "provider-confirmed" : "recorded by the CLI"));
+      if (policy && policy.model_mismatch) txt += " · model mismatch: served " + policy.model_served;
       if (st.pending_switch) details.push("switch to " + st.pending_switch + " at the next safe turn boundary");
       if (st.settings_error) txt += " · " + st.settings_error;
       stx.title = details.join(" · ");

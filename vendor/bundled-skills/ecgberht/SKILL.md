@@ -344,9 +344,11 @@ Elegance rule 9: a correction that lives only in a journal has not been made).**
   session. **No in-process Shark swarm** (`in_process_shark_tank: false`); that
   is Crucible, only when commissioned. Commission Crucible/Foreman only when
   the session cannot hold the work AND the step has a `gate` (a command that
-  can fail). After EVERY close, including research, append a `goal_flip`
-  (`reaffirmed` or `rewritten`) and update the Face if rewritten; then recommend
-  whether to move on — he decides.
+  can fail). After EVERY close, including research, append a `goal_flip` (`reaffirmed` or
+  `rewritten`) carrying `goal_revision` (the cockpit state's `goal_revision`, a hash of the North Star
+  text you re-read) and `scope` (the closed step id) — a flip that read an older revision does not
+  stand for the current one — and update the Face if rewritten; then recommend whether to move on —
+  he decides.
 
 **The Grasscatcher capacity — 2026-08-19 (John's commission).** The grasscatch
 list is a first-class conversational duty, not just a verb. It is the talking

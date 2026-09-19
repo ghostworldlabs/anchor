@@ -21,6 +21,7 @@ JSON mode:
 Session ids persist to proto-state.json so a server restart resumes the same
 conversation instead of starting cold.
 """
+import io
 import json
 import math
 import os
@@ -99,6 +100,19 @@ RESUME_BRIEF = (
     "quiet the moment it lands. In managed campaigns, pending_request from "
     "refinement-update exclusively owns human wait; never stamp needs_you or "
     "Face/Strip human_wait. Legacy unmanaged campaigns retain their wait flag."
+)
+
+#: The compact standing rules every native turn of a bridge family carries
+#: (each Codex/Grok turn is a new process; compaction can drop the first
+#: prompt). The full persona + CONTRACT still opens the thread.
+STANDING_RULES = (
+    "Standing rules (every turn): you are the project steward talking with John through the "
+    "cockpit; replies are a few plain sentences, no headers or bullet walls; at most one "
+    "question per turn, as the last line, after your recommendation; when something is John's "
+    "to decide, end in this order: context, what you recommend and why, the alternatives, then "
+    "the question; never post status tables into the conversation; keep roadmap.json and "
+    "strip.json true as you work; write .ecgberht/attention.json when background work starts "
+    "and when it lands; never close a slice without John's explicit instruction."
 )
 
 CONTRACT = (
@@ -959,6 +973,7 @@ class Engine:
             return False
         old, proc = self.cli, self.proc
         self._emit({"t": "sys", "text": f"Dashboard provider change: {old} -> {target}. Starting a new provider session with a history handoff."})
+        self._journal_receipt("provider_rollover", f"{old} -> {target} with a history handoff")
         if (not self._retain_native_session(_read_state_entry(self.skey()))
                 or not _update_state(self.skey(), {"pending_switch": target, "pending_handoff": handoff})):
             self._emit({"t": "sys", "text": "Provider switch withheld: handoff could not be saved; original session retained"})
@@ -1668,6 +1683,8 @@ class Engine:
                            "content": [{"type": "text", "text": text}]}}
         if self._bridge_system_prompt:
             msg["system_prompt"] = self._bridge_system_prompt
+        if self.cli in ("chatgpt", "grok"):
+            msg["standing_rules"] = STANDING_RULES        # rules on every native turn
         # No CLI call under the stdin arbiter. A producer captures its exact
         # context through the lifecycle CLI; automatic fallback remains unknown.
         refinement_context = None
@@ -1781,7 +1798,10 @@ class Engine:
 
     def interrupt_turn(self, reason="stopped by John"):
         with self._lock:
-            return self._interrupt_turn_locked(reason)
+            out = self._interrupt_turn_locked(reason)
+        if out:
+            self._journal_receipt("turn_interrupted", reason)
+        return out
 
     def _send(self, text):
         with self._lock:
@@ -2212,17 +2232,22 @@ class Engine:
                     self._turn_had_tools = True
                     inp = block.get("input") or {}
                     fp = inp.get("file_path")
+                    # a Claude edit names one file_path; a Codex file_change names its paths
+                    touched = [p for p in (inp.get("paths") or []) if isinstance(p, str) and p.strip()] \
+                        if isinstance(inp.get("paths"), list) else []
+                    if isinstance(fp, str) and fp.strip():
+                        touched.insert(0, fp)
                     if block.get("name") in ("Write", "Edit", "NotebookEdit", "file_change"):
                         self._turn_wrote_files = True
-                        if isinstance(fp, str) and fp.strip():
-                            refs = getattr(self, "_turn_output_refs", [])
-                            if fp not in refs:
-                                refs.append(fp)
-                            self._turn_output_refs = refs
-                    if (block.get("name") in ("Write", "Edit", "NotebookEdit")
-                            and isinstance(fp, str) and fp not in self.files):
-                        self.files.append(fp)
-                        _update_state(self.skey(), {"files": self.files[-40:]})
+                        refs = getattr(self, "_turn_output_refs", [])
+                        for path in touched:
+                            if path not in refs:
+                                refs.append(path)
+                        self._turn_output_refs = refs
+                        new = [p for p in touched if p not in self.files]
+                        if new:
+                            self.files.extend(new)
+                            _update_state(self.skey(), {"files": self.files[-40:]})
                     self._emit({"t": "tool",
                                 "name": block.get("name", "?"),
                                 "detail": _tool_detail(block),
@@ -2238,16 +2263,26 @@ class Engine:
             err_text = result_error_text(ev)
             if self.model_selection:
                 actual = ev.get("model_served") if ev.get("model_attested") is True else None
+                source = ev.get("model_source") if isinstance(ev.get("model_source"), str) else None
                 if self.cli == "claude" and not err_text:
                     usage_models = ev.get("modelUsage")
                     if isinstance(usage_models, dict) and len(usage_models) == 1:
-                        actual = next(iter(usage_models))
+                        actual, source = next(iter(usage_models)), "cli-recorded"
+                requested = self.model_selection.get("model")
                 self.model_selection = {**self.model_selection, "model_served": actual,
-                                        "model_attested": bool(actual)}
+                                        "model_attested": bool(actual),
+                                        "model_source": source if actual else None,
+                                        # the served model is not the one requested: shown, never hidden
+                                        "model_mismatch": bool(actual and requested and actual != requested)}
                 _update_state(self.skey(), {"model_policy": self.model_selection})
+                if self.model_selection["model_mismatch"]:
+                    self._emit({"t": "sys", "text": f"model served {actual} (requested {requested})"})
+            if not err_text:
+                self._journal_changed_receipt()
             if err_text:
                 limit = _campaign_limit(err_text)
                 self._model_limit = ("model session limit: " + err_text) if limit else ""
+                self._journal_receipt("turn_error", err_text)
                 hint = ev.get("stderr_hint")
                 tail_text = ""
                 if isinstance(hint, dict) and hint.get("kinds"):
@@ -2704,23 +2739,103 @@ class Engine:
                 self._commit_if_dirty("steward cadence checkpoint")
 
     def _commit_if_dirty(self, message):
+        """Commit the campaign's own paths only ("." from the campaign dir):
+        another session's dirty or staged files elsewhere in the repo are left
+        exactly as they were, and a commit is announced only when git said it
+        happened."""
         if self.fake:
             return
         try:
             dirty = subprocess.run(
-                ["git", "status", "--porcelain"], cwd=self.dir,
+                ["git", "status", "--porcelain", "--", "."], cwd=self.dir,
                 capture_output=True, text=True, timeout=15)
             if dirty.returncode != 0 or not dirty.stdout.strip():
                 return
-            subprocess.run(["git", "add", "-A"], cwd=self.dir,
-                           capture_output=True, timeout=30)
-            subprocess.run(["git", "commit", "-m", message], cwd=self.dir,
-                           capture_output=True, timeout=30)
-            # cadence housekeeping → the status pane, not the conversation
-            self._emit({"t": "sys", "tick": True,
-                        "text": "committed work-in-progress (cadence)"})
+            add = subprocess.run(["git", "add", "-A", "--", "."], cwd=self.dir,
+                                 capture_output=True, text=True, timeout=30)
+            commit = (subprocess.run(["git", "commit", "-m", message, "--", "."], cwd=self.dir,
+                                     capture_output=True, text=True, timeout=30)
+                      if add.returncode == 0 else add)
+            if commit.returncode == 0:
+                # cadence housekeeping → the status pane, not the conversation
+                self._emit({"t": "sys", "tick": True,
+                            "text": "committed work-in-progress (cadence)"})
+            else:
+                tail = (commit.stderr or commit.stdout or "").strip().splitlines()
+                self._emit({"t": "sys", "tick": True,
+                            "text": "commit failed: " + (tail[-1] if tail else f"git exit {commit.returncode}")})
+        except Exception as exc:
+            self._emit({"t": "sys", "tick": True, "text": "commit failed: " + str(exc)})
+
+    # ---------- journal receipts (Wave 3.1) ----------
+    def _journal_receipt(self, kind, detail):
+        """Journal an engine-detected event at detection (turn error, watchdog,
+        kill, provider rollover): one small entry under the campaign's
+        ``.ecgberht/engine-journal/`` and one ``journal_update`` receipt on
+        strip.json, so the Journal row is never blank for something the engine
+        saw. Best-effort; never raises."""
+        try:
+            base = Path(self.dir)
+            folder = base / ".ecgberht" / "engine-journal"
+            folder.mkdir(parents=True, exist_ok=True)
+            stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+            name = f"{stamp}-{kind}.md"
+            text = str(detail or "").strip().replace("\r", " ").replace("\n", " ")[:600]
+            (folder / name).write_text(
+                f"# {kind}\n\nAt {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} ({self.cli}, session "
+                f"{self.session_id or '-'}): {text}\n", encoding="utf-8")
+            self._strip_receipt({"kind": "journal_update", "path": f".ecgberht/engine-journal/{name}",
+                                 "entry_id": name[:-3], "summary": f"{kind}: {text}"[:300]})
         except Exception:
             pass
+
+    def _journal_changed_receipt(self):
+        """At turn end: when a journal file under the campaign changed since the
+        last look, record a receipt pointing at it (the steward's own entry)."""
+        try:
+            base = Path(self.dir)
+            newest, newest_m = None, 0.0
+            for rel in ("journal", ".ecgberht/journal"):
+                d = base / rel
+                if not d.is_dir():
+                    continue
+                for p in d.glob("*.md"):
+                    m = p.stat().st_mtime
+                    if m > newest_m:
+                        newest, newest_m = p, m
+            if newest is None or newest_m <= getattr(self, "_journal_seen_mtime", 0.0):
+                self._journal_seen_mtime = max(newest_m, getattr(self, "_journal_seen_mtime", 0.0))
+                return
+            self._journal_seen_mtime = newest_m
+            first = ""
+            with io.open(newest, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    if line.strip():
+                        first = line.strip().lstrip("# ").strip()
+                        break
+            rel = newest.relative_to(base).as_posix()
+            self._strip_receipt({"kind": "journal_update", "path": rel, "entry_id": newest.stem,
+                                 "summary": first[:300] or newest.stem})
+        except Exception:
+            pass
+
+    def _strip_receipt(self, receipt):
+        """Append one receipt to the campaign's strip.json (bounded), atomically."""
+        path = Path(self.dir) / "strip.json"
+        try:
+            strip = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (OSError, ValueError):
+            strip = {}
+        if not isinstance(strip, dict):
+            strip = {}
+        receipts = strip.get("receipts") if isinstance(strip.get("receipts"), list) else []
+        entry = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": "engine",
+                 "step_id": strip.get("current_step_id"), "session_id": self.session_id, **receipt}
+        receipts.append(entry)
+        strip["receipts"] = receipts[-60:]
+        tmp = path.with_suffix(".json.engine.tmp")
+        tmp.write_text(json.dumps(strip, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
 
 
 #: Phrases that mark a real recommendation, checked over the TAIL of the turn
@@ -2774,4 +2889,7 @@ def _tool_detail(block):
         if key in inp and isinstance(inp[key], str):
             text = inp[key].replace("\n", " ")
             return text[:90] + ("..." if len(text) > 90 else "")
+    if isinstance(inp.get("paths"), list) and inp["paths"]:
+        text = ", ".join(str(p) for p in inp["paths"][:6])
+        return text[:90] + ("..." if len(text) > 90 else "")
     return ""

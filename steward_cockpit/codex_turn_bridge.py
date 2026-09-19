@@ -392,6 +392,11 @@ class EventNormalizer:
             "model_served": self.model_served,
             "effort_served": self.effort_served,
             "model_attested": self.model_served is not None,
+            # what attests it: Codex only records the model in its own rollout
+            # (recorded by the CLI); Grok's envelope is the provider's receipt
+            "model_source": (None if self.model_served is None
+                             else "provider-confirmed" if getattr(self, "provider_label", "Codex") == "Grok"
+                             else "cli-recorded"),
         }
 
     def accept(self, event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -460,6 +465,14 @@ class EventNormalizer:
                 changes = item.get("changes")
                 if isinstance(changes, list):
                     metadata["change_count"] = len(changes)
+                    # the paths a file change touched (bounded; never contents)
+                    paths = []
+                    for change in changes[:20]:
+                        path = _bounded_string((change or {}).get("path") if isinstance(change, dict) else None, 240)
+                        if path and path not in paths:
+                            paths.append(path)
+                    if paths:
+                        metadata["paths"] = paths
                 elif type(item.get("_change_count")) is int and item["_change_count"] >= 0:
                     metadata["change_count"] = item["_change_count"]
                 return [{
@@ -547,6 +560,26 @@ def user_text(envelope: Any) -> tuple[str, str | None]:
     return text, system
 
 
+def standing_rules_of(envelope):
+    """The compact rules the engine attaches to every bridge turn, or None."""
+    standing = envelope.get("standing_rules")
+    if standing is not None and not isinstance(standing, str):
+        raise BridgeError("standing_rules must be text")
+    return standing
+
+
+def turn_prompt(system_prompt, standing_rules, text, fresh_thread):
+    """The native prompt for one turn: the full system contract rides the
+    thread's first turn; every later turn (a new ``exec resume`` process, whose
+    context compaction can drop the first prompt) carries the compact standing
+    rules ahead of the message."""
+    if fresh_thread and system_prompt:
+        return f"{system_prompt}\n\n{text}"
+    if not fresh_thread and standing_rules:
+        return f"{standing_rules}\n\n{text}"
+    return text
+
+
 class Broker:
     provider_label = "Codex"
     prompt_available_on_launch = False
@@ -556,7 +589,9 @@ class Broker:
                    permission_mode=permission_mode, thread_id=resume)
 
     def _make_normalizer(self):
-        return EventNormalizer(self.model, self.effort, self.thread_id)
+        normalizer = EventNormalizer(self.model, self.effort, self.thread_id)
+        normalizer.provider_label = self.provider_label     # names who attests the served model
+        return normalizer
 
     def _prepare_prompt(self, encoded_prompt: bytes):
         """Provider hook: return argv and optional stdin bytes."""
@@ -720,14 +755,13 @@ class Broker:
         }
         try:
             text, system = user_text(envelope)
+            standing = standing_rules_of(envelope)
             if self._input_seen and system is not None and system != self._system_prompt:
                 raise BridgeError("Cannot change the system contract inside an existing broker")
             if not self._input_seen:
                 self._system_prompt = system
             self._input_seen = True
-            prompt = text
-            if self.thread_id is None and self._system_prompt:
-                prompt = f"{self._system_prompt}\n\n{text}"
+            prompt = turn_prompt(self._system_prompt, standing, text, self.thread_id is None)
             encoded_prompt = (prompt + "\n").encode("utf-8")
             if self.provider_label != "Codex" and len(encoded_prompt) > MAX_INPUT_BYTES:
                 raise BridgeError("User prompt exceeds the input byte limit")
