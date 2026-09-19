@@ -1532,7 +1532,7 @@ const Proto = (() => {
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
       if (policy && policy.model_served) details.push("served " + policy.model_served + " · " +
         (policy.model_source === "provider-confirmed" ? "provider-confirmed" : "recorded by the CLI"));
-      if (policy && policy.model_served && policy.model && !String(policy.model_served).startsWith(String(policy.model))) txt += " · model mismatch: served " + policy.model_served;
+      if (policy && policy.model_served && policy.model && !sameModel(policy.model, policy.model_served)) txt += " · model mismatch: served " + policy.model_served;
       if (st.pending_switch) details.push("switch to " + st.pending_switch + " at the next safe turn boundary");
       if (st.settings_error) txt += " · " + st.settings_error;
       stx.title = details.join(" · ");
@@ -1546,6 +1546,13 @@ const Proto = (() => {
     if (pm) pm.textContent = "you: " + (st.john_msgs || 0) +
       " messages this session · ask “what's my overhead?” for the ease metric";
     document.body.dataset.alive = st.alive ? "1" : "";
+  }
+
+  // the served id is the requested one, or it plus a dated snapshot / build suffix; a sibling is another model
+  function sameModel(requested, served) {
+    requested = String(requested || ''); served = String(served || '');
+    if (!requested || !served || served === requested) return true;
+    return served.startsWith(requested) && /^-(?:\d[\d-]*|build.*)$/.test(served.slice(requested.length));
   }
 
   function openQuestionContext(questionId=null) {

@@ -2265,7 +2265,7 @@ class Engine:
                                         "model_attested": bool(actual),
                                         "model_source": source if actual else None}
                 _update_state(self.skey(), {"model_policy": self.model_selection})
-                if actual and requested and not str(actual).startswith(str(requested)):
+                if actual and requested and not _same_model(requested, actual):
                     self._emit({"t": "sys", "text": f"model served {actual} (requested {requested})"})
             if not err_text:
                 self._journal_changed_receipt()
@@ -2866,6 +2866,21 @@ def _has_recommendation(text) -> bool:
     asked at the end.
     """
     return bool(_RECOMMEND_RE.search((text or "")[-_RECOMMEND_TAIL:]))
+
+
+_SNAPSHOT_SUFFIX = re.compile(r"^-(?:\d[\d-]*|build.*)$")
+
+
+def _same_model(requested, served):
+    """The served id is the requested one, or the requested one plus a dated
+    snapshot (``-2026-09-01``) or build suffix (``-build``); a sibling
+    (``gpt-6-astra-mini``, ``gpt-5.4`` for ``gpt-5``) is a different model."""
+    requested, served = str(requested or ""), str(served or "")
+    if not requested or not served:
+        return True
+    if served == requested:
+        return True
+    return served.startswith(requested) and bool(_SNAPSHOT_SUFFIX.match(served[len(requested):]))
 
 
 def _tool_detail(block):

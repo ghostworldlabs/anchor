@@ -113,6 +113,9 @@ def test_codex_file_change_paths_reach_both_inventories_and_the_tool_line(env, m
     done = broker.accept({"type": "item.completed", "thread_id": broker.thread_id,
                           "item": {"id": "fc-2", "type": "file_change", "status": "completed", "changes": [{"path": "src/c.py", "kind": "add"}]}})
     assert done[0]["message"]["content"][0]["input"]["paths"] == ["src/c.py"]
+    again = broker.accept({"type": "item.completed", "thread_id": broker.thread_id,
+                           "item": {"id": "fc-2", "type": "file_change", "status": "completed", "changes": [{"path": "src/c.py", "kind": "add"}]}})
+    assert again == []                                                        # one completed refresh, no second line
     assert block["input"]["change_count"] == 3 and "changes" not in block["input"]     # never contents
     engine = _engine(env, monkeypatch, tmp_path)
     engine._handle(out[0], engine.proc)
@@ -146,7 +149,11 @@ def test_the_served_model_carries_its_source_and_a_mismatch_is_said(env, monkeyp
     grok = GrokNormalizer("grok-4.6", "high", expected_id="7c9e6679-7425-40de-944b-e07fc1f90ae7")
     grok.model_served = "grok-4.6-build"
     assert grok._receipt()["model_source"] == "provider-confirmed"
-    # a dated or build id of the requested model is not a mismatch
+    # a dated or build id of the requested model is not a mismatch; a sibling is
+    from steward_cockpit.steward_engine import _same_model
+    assert _same_model("gpt-6-astra", "gpt-6-astra-2026-09-01") and _same_model("grok-4.6", "grok-4.6-build")
+    assert _same_model("gpt-6-astra", "gpt-6-astra") and _same_model(None, "anything")
+    assert not _same_model("gpt-6-astra", "gpt-6-astra-mini") and not _same_model("gpt-5", "gpt-5.4")
     engine._emitted.clear()
     engine.turn_text = "Once more."
     engine._handle({"type": "result", "subtype": "success", "session_id": SESSION,
