@@ -449,8 +449,8 @@ class EventNormalizer:
                 }]
             if item_type in ("command_execution", "file_change", "mcp_tool_call", "web_search"):
                 tool_id = item_id or f"tool-{len(self._tool_items)}"
-                if tool_id in self._tool_items:
-                    return []
+                if tool_id in self._tool_items and not (item_type == "file_change" and kind == "item.completed"):
+                    return []                            # a completed file_change refreshes its paths
                 self._tool_items.add(tool_id)
                 # Never forward aggregated command output, credentials, raw
                 # arguments, file contents, reasoning, or arbitrary tool data.

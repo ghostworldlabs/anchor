@@ -449,7 +449,7 @@ def read_map(campaign_dir: str):
     last_done_id = last_done["id"] if last_done else ""
     last_flip_step = str((last_flip or {}).get("step_id") or "")
     # a goal_flip stands only for the North Star revision it read (a legacy flip, on step alone)
-    goal_revision = hashlib.sha256(goal.encode("utf-8")).hexdigest()[:12] if goal else ""
+    goal_revision = hashlib.sha256(re.sub(r"\s+", " ", goal).strip().encode("utf-8")).hexdigest()[:12] if goal else ""
     flip_revision = str((last_flip or {}).get("goal_revision") or "")
     revision_ok = not flip_revision or flip_revision == goal_revision
     # No close yet → nothing to re-read. A close without a matching goal_flip
@@ -1045,7 +1045,7 @@ def _focused_step(m):
     """Use the declared work item; never guess among several active steps."""
     steps = m.get("steps") or []
     current_id = (m.get("heartbeat") or {}).get("current_step_id")
-    if not current_id:                     # the one pinned step names the work item
+    if not current_id:                     # read-side: the one pinned step names the work item
         pinned = [s for s in steps if isinstance(s.get("navigation"), dict)
                   and (s["navigation"].get("pin") or s["navigation"].get("current"))]
         if len(pinned) == 1:
@@ -2071,17 +2071,19 @@ def current_review_items(map_, items):
         nav = (owner or {}).get("navigation") or {}
         if it.get("accepted") or it.get("accepted_current"):
             continue
-        designation = re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", str(it.get("what") or ""), re.I)
-        # awaiting John's review stays whatever the focus (journal 0132)
+        if it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"):
+            current.append(it)                 # asked for review: stays whatever the focus (journal 0132)
+            continue
+        if nav.get("current") is False or nav.get("role") == "support" or (owner or {}).get("status") == "parked":
+            continue
         if it.get("managed") and it.get("phase") != "done":
             current.append(it)
-            continue
-        if not it.get("managed") and owner and owner.get("status") != "done" and (owner.get("refinement") or {}).get("phase") != "done":
+        elif not it.get("managed") and owner and owner.get("status") != "done" and (owner.get("refinement") or {}).get("phase") != "done":
             normalize = lambda p: str(p or "").replace("\\", "/").lower()
             featured = {normalize(p) for p in nav.get("featured_paths") or []}
+            designation = re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", str(it.get("what") or ""), re.I)
             historical = re.match(r"^(?:HISTORICAL|SUPERSEDED|ARCHIVED|EARLIER|PREVIOUS)\b", str(it.get("what") or ""), re.I)
-            out_of_focus = nav.get("current") is False or nav.get("role") == "support" or owner.get("status") == "parked"
-            if not historical and (designation or (normalize(it.get("path")) in featured and not out_of_focus)):
+            if not historical and (normalize(it.get("path")) in featured or designation):
                 current.append(it)
     current.sort(key=lambda it: str(it.get("date") or ""), reverse=True)
     return current

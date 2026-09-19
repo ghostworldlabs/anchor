@@ -23,6 +23,7 @@ conversation instead of starting cold.
 """
 import io
 import json
+import paths as _paths
 import math
 import os
 import re
@@ -160,7 +161,9 @@ CONTRACT = (
     "AND the step has a gate command (a runner that can fail: tests, render-to-PNG, "
     "a certify script). After EVERY close including research, re-read the North "
     "Star and append a goal_flip event {verdict: reaffirmed|rewritten, goal_from, "
-    "goal_to, step_id, receipt}; if rewritten, update the Face. Then recommend "
+    "goal_to, step_id, goal_revision (the cockpit state's goal_revision - the hash of "
+    "the North Star you re-read), scope (the closed step id), receipt}; if rewritten, "
+    "update the Face. Then recommend "
     "whether to move on; he decides. The cockpit Work product tile is the "
     "living map of the deliverable — same steps as the plan. "
     "(14) PLANS FORWARD (John, 2026-09-04): whenever a plan for going forward "
@@ -2262,7 +2265,7 @@ class Engine:
                                         "model_attested": bool(actual),
                                         "model_source": source if actual else None}
                 _update_state(self.skey(), {"model_policy": self.model_selection})
-                if actual and requested and actual != requested:
+                if actual and requested and not str(actual).startswith(str(requested)):
                     self._emit({"t": "sys", "text": f"model served {actual} (requested {requested})"})
             if not err_text:
                 self._journal_changed_receipt()
@@ -2779,10 +2782,9 @@ class Engine:
                             newest, newest_m = p, m
             if newest is None:
                 return
-            strip = self._read_strip()
-            last = [r for r in strip.get("receipts") or [] if isinstance(r, dict) and r.get("kind") == "journal_update"]
-            if last and last[-1].get("entry_id") == newest.stem:
-                return
+            if any(isinstance(r, dict) and r.get("entry_id") == newest.stem
+                   for r in self._read_strip().get("receipts") or []):
+                return                                   # already receipted
             first = ""
             with io.open(newest, encoding="utf-8", errors="replace") as fh:
                 for line in fh:
@@ -2790,7 +2792,7 @@ class Engine:
                         first = line.strip().lstrip("# ").strip()
                         break
             self._strip_receipt({"kind": "journal_update", "path": newest.relative_to(base).as_posix(),
-                                 "entry_id": newest.stem, "summary": first[:300] or newest.stem}, strip)
+                                 "entry_id": newest.stem, "summary": first[:300] or newest.stem})
         except Exception:
             pass
 
@@ -2802,17 +2804,25 @@ class Engine:
             strip = {}
         return strip if isinstance(strip, dict) else {}
 
-    def _strip_receipt(self, receipt, strip=None):
-        """Append one receipt to the campaign's strip.json (bounded to 60), atomically."""
-        strip = strip if strip is not None else self._read_strip()
-        receipts = strip.get("receipts") if isinstance(strip.get("receipts"), list) else []
-        receipts.append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": "engine",
-                         "step_id": strip.get("current_step_id"), "session_id": self.session_id, **receipt})
-        strip["receipts"] = receipts[-60:]
+    def _strip_receipt(self, receipt):
+        """Append one receipt to the campaign's strip.json (bounded to 60). The
+        strip has one writer (the steward); the engine re-reads it at the moment
+        of writing under the process lock and touches only ``receipts``, and
+        never mints a strip that does not exist."""
         path = Path(self.dir) / "strip.json"
-        tmp = path.with_suffix(".json.engine.tmp")
-        tmp.write_text(json.dumps(strip, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, path)
+        with _paths.WRITE_LOCK:
+            if not path.is_file():
+                return
+            strip = self._read_strip()
+            if not strip:
+                return
+            receipts = strip.get("receipts") if isinstance(strip.get("receipts"), list) else []
+            receipts.append({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "source": "engine",
+                             "step_id": strip.get("current_step_id"), "session_id": self.session_id, **receipt})
+            strip["receipts"] = receipts[-60:]
+            tmp = path.with_suffix(".json.engine.tmp")
+            tmp.write_text(json.dumps(strip, indent=1, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
 
 
 #: Phrases that mark a real recommendation, checked over the TAIL of the turn

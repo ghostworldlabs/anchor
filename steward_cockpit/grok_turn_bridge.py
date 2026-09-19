@@ -387,6 +387,7 @@ def private_prompt(payload: bytes):
 
 
 class GrokNormalizer(EventNormalizer):
+    provider_label = "Grok"          # its envelope is the provider's receipt
     def __init__(self, model: str, effort: str, *, expected_id: str, resume: str | None = None):
         super().__init__(model, effort, resume)
         self.expected_id = canonical_session_id(expected_id)

@@ -106,6 +106,13 @@ def test_codex_file_change_paths_reach_both_inventories_and_the_tool_line(env, m
                                               {"path": "src/a.py", "kind": "update"}]}})
     block = out[0]["message"]["content"][0]
     assert block["name"] == "file_change" and block["input"]["paths"] == ["src/a.py", "docs/b.md"]
+    # Codex starts a file_change with no changes, then completes it with them: the completed event still carries the paths
+    started = broker.accept({"type": "item.started", "thread_id": broker.thread_id,
+                             "item": {"id": "fc-2", "type": "file_change", "status": "in_progress"}})
+    assert "paths" not in started[0]["message"]["content"][0]["input"]
+    done = broker.accept({"type": "item.completed", "thread_id": broker.thread_id,
+                          "item": {"id": "fc-2", "type": "file_change", "status": "completed", "changes": [{"path": "src/c.py", "kind": "add"}]}})
+    assert done[0]["message"]["content"][0]["input"]["paths"] == ["src/c.py"]
     assert block["input"]["change_count"] == 3 and "changes" not in block["input"]     # never contents
     engine = _engine(env, monkeypatch, tmp_path)
     engine._handle(out[0], engine.proc)
@@ -135,10 +142,17 @@ def test_the_served_model_carries_its_source_and_a_mismatch_is_said(env, monkeyp
                     "model_served": "gpt-6-astra", "model_attested": True, "model_source": "cli-recorded"}, engine.proc)
     assert not any("model served" in (e.get("text") or "") for e in engine._emitted)
     from steward_cockpit.codex_turn_bridge import EventNormalizer
-    grok = EventNormalizer("grok-4.6", "high")
-    grok.provider_label = "Grok"
+    from steward_cockpit.grok_turn_bridge import GrokNormalizer
+    grok = GrokNormalizer("grok-4.6", "high", expected_id="7c9e6679-7425-40de-944b-e07fc1f90ae7")
     grok.model_served = "grok-4.6-build"
     assert grok._receipt()["model_source"] == "provider-confirmed"
+    # a dated or build id of the requested model is not a mismatch
+    engine._emitted.clear()
+    engine.turn_text = "Once more."
+    engine._handle({"type": "result", "subtype": "success", "session_id": SESSION,
+                    "usage": {"input_tokens": 10, "output_tokens": 2}, "total_cost_usd": None, "duration_ms": 900,
+                    "model_served": "gpt-6-astra-2026-09-01", "model_attested": True, "model_source": "cli-recorded"}, engine.proc)
+    assert not any("model served" in (e.get("text") or "") for e in engine._emitted)
     codex = EventNormalizer("gpt-6-astra", "high")
     assert codex._receipt()["model_source"] is None
     codex.model_served = "gpt-6-astra"
@@ -153,16 +167,18 @@ def test_the_review_tile_keeps_requested_reviews_whatever_the_focus():
               "navigation": {"current": False, "role": "primary", "featured_paths": ["docs/featured.md"]}},
              {"id": "spine", "name": "Spine", "status": "active", "navigation": {"current": True, "pin": True}}]
     items = [
-        {"what": "Chapter 1 v1", "path": "chapters/ch1.html", "step": "chapters", "managed": True, "phase": "review", "date": "2026-09-15"},
+        {"what": "Chapter 1 v1", "path": "chapters/ch1.html", "step": "chapters", "managed": True, "phase": "awaiting_review", "date": "2026-09-15"},
+        {"what": "Chapter 2 draft", "path": "chapters/ch2.html", "step": "chapters", "managed": True, "phase": "preparing", "date": "2026-09-15"},
         {"what": "Old draft", "path": "chapters/ch0.html", "step": "chapters", "managed": True, "phase": "done", "date": "2026-09-01"},
         {"what": "Notes", "path": "docs/featured.md", "step": "chapters", "managed": False, "date": "2026-09-10"},
-        {"what": "FOR REVIEW: the spine note", "path": "docs/spine.md", "step": "chapters", "managed": False, "date": "2026-09-14"},
-        {"what": "Accepted thing", "path": "docs/ok.md", "step": "spine", "managed": True, "phase": "review", "accepted": True, "date": "2026-09-16"},
+        {"what": "Spine note", "path": "docs/spine.md", "step": "spine", "managed": True, "phase": "preparing", "date": "2026-09-14"},
+        {"what": "Accepted thing", "path": "docs/ok.md", "step": "spine", "managed": True, "phase": "awaiting_review", "accepted": True, "date": "2026-09-16"},
     ]
     current = [it["path"] for it in current_review_items({"steps": steps}, items)]
-    assert "chapters/ch1.html" in current                  # awaiting review, focus elsewhere: stays
-    assert "docs/spine.md" in current                      # designated for review: stays
+    assert "chapters/ch1.html" in current                  # asked for review, focus elsewhere: stays (journal 0132)
+    assert "chapters/ch2.html" not in current              # not yet asked: follows the focus
     assert "docs/featured.md" not in current               # merely featured under an out-of-focus step: follows the focus
+    assert "docs/spine.md" in current                      # the focused step's own work in progress
     assert "chapters/ch0.html" not in current and "docs/ok.md" not in current
 
 
@@ -231,12 +247,16 @@ def test_journal_receipts_at_detection_and_at_turn_end_and_the_reader_keeps_them
     from steward_cockpit.steward_campaign import _local_status_evidence
     engine = _engine(env, monkeypatch, tmp_path)
     base = Path(env["effort"])
-    (base / "strip.json").write_text(json.dumps({"schema": "strip", "current_step_id": None, "receipts": []}), encoding="utf-8")
+    engine._journal_receipt("turn_error", "no strip yet")
+    assert not (base / "strip.json").exists()                                    # never minted by the engine
+    (base / "strip.json").write_text(json.dumps({"schema": "strip", "current_step_id": None, "pending_request": {"purpose": "John's wait"},
+                                                 "grasscatch": ["idea"], "receipts": []}), encoding="utf-8")
     engine._journal_receipt("turn_error", "rate limit: try later")
     strip = json.loads((base / "strip.json").read_text(encoding="utf-8"))
     r = strip["receipts"][-1]
     assert r["kind"] == "journal_update" and r["source"] == "engine" and r["step_id"] is None
     assert "path" not in r and r["summary"].startswith("turn_error: rate limit")     # the receipt is the record
+    assert strip["pending_request"] == {"purpose": "John's wait"} and strip["grasscatch"] == ["idea"]   # the steward's fields untouched
     # the reader: a different session id and no step id still count (before a rollover / before a step existed)
     out = _local_status_evidence(str(base), {"heartbeat": strip}, {"session_id": "another-session"}, {"id": "s1"})
     assert out["journal"].startswith(r["entry_id"] + ": turn_error") and out["journal_source"]["state"] == "available"
@@ -244,6 +264,7 @@ def test_journal_receipts_at_detection_and_at_turn_end_and_the_reader_keeps_them
     (base / "journal").mkdir()
     (base / "journal" / "0007-what-changed.md").write_text("# 0007 — What changed\n\nBody.\n", encoding="utf-8")
     engine._journal_changed_receipt()
+    engine._journal_receipt("turn_error", "an engine receipt in between")
     _engine(env, monkeypatch, tmp_path)._journal_changed_receipt()      # a fresh engine (a restart) adds nothing
     strip = json.loads((base / "strip.json").read_text(encoding="utf-8"))
     entries = [x for x in strip["receipts"] if x.get("entry_id") == "0007-what-changed"]

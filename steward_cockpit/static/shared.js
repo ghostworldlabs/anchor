@@ -1532,7 +1532,7 @@ const Proto = (() => {
       if (policy && policy.model) details.push("requested " + policy.model + " / " + policy.effort);
       if (policy && policy.model_served) details.push("served " + policy.model_served + " · " +
         (policy.model_source === "provider-confirmed" ? "provider-confirmed" : "recorded by the CLI"));
-      if (policy && policy.model_served && policy.model && policy.model_served !== policy.model) txt += " · model mismatch: served " + policy.model_served;
+      if (policy && policy.model_served && policy.model && !String(policy.model_served).startsWith(String(policy.model))) txt += " · model mismatch: served " + policy.model_served;
       if (st.pending_switch) details.push("switch to " + st.pending_switch + " at the next safe turn boundary");
       if (st.settings_error) txt += " · " + st.settings_error;
       stx.title = details.join(" · ");
