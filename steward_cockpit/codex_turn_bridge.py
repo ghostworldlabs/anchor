@@ -392,9 +392,7 @@ class EventNormalizer:
             "model_served": self.model_served,
             "effort_served": self.effort_served,
             "model_attested": self.model_served is not None,
-            # what attests it: Codex only records the model in its own rollout
-            # (recorded by the CLI); Grok's envelope is the provider's receipt
-            "model_source": (None if self.model_served is None
+            "model_source": (None if self.model_served is None      # who attests it
                              else "provider-confirmed" if getattr(self, "provider_label", "Codex") == "Grok"
                              else "cli-recorded"),
         }
@@ -465,8 +463,7 @@ class EventNormalizer:
                 changes = item.get("changes")
                 if isinstance(changes, list):
                     metadata["change_count"] = len(changes)
-                    # the paths a file change touched (bounded; never contents)
-                    paths = []
+                    paths = []                                  # bounded paths, never contents
                     for change in changes[:20]:
                         path = _bounded_string((change or {}).get("path") if isinstance(change, dict) else None, 240)
                         if path and path not in paths:
@@ -555,24 +552,16 @@ def user_text(envelope: Any) -> tuple[str, str | None]:
     system = envelope.get("system_prompt")
     if system is not None and not isinstance(system, str):
         raise BridgeError("system_prompt must be text")
-    if not text.strip():
-        raise BridgeError("User message must not be empty")
-    return text, system
-
-
-def standing_rules_of(envelope):
-    """The compact rules the engine attaches to every bridge turn, or None."""
     standing = envelope.get("standing_rules")
     if standing is not None and not isinstance(standing, str):
         raise BridgeError("standing_rules must be text")
-    return standing
+    if not text.strip():
+        raise BridgeError("User message must not be empty")
+    return text, system, standing
 
 
 def turn_prompt(system_prompt, standing_rules, text, fresh_thread):
-    """The native prompt for one turn: the full system contract rides the
-    thread's first turn; every later turn (a new ``exec resume`` process, whose
-    context compaction can drop the first prompt) carries the compact standing
-    rules ahead of the message."""
+    """The full contract opens a thread; every later turn (a new process) carries the standing rules."""
     if fresh_thread and system_prompt:
         return f"{system_prompt}\n\n{text}"
     if not fresh_thread and standing_rules:
@@ -754,8 +743,7 @@ class Broker:
             "mode": "injected_process", "descendants_verified": False, "degraded": True,
         }
         try:
-            text, system = user_text(envelope)
-            standing = standing_rules_of(envelope)
+            text, system, standing = user_text(envelope)
             if self._input_seen and system is not None and system != self._system_prompt:
                 raise BridgeError("Cannot change the system contract inside an existing broker")
             if not self._input_seen:

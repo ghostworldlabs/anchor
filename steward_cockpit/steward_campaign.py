@@ -448,9 +448,7 @@ def read_map(campaign_dir: str):
     last_done = next((s for s in reversed(steps) if s["status"] == "done"), None)
     last_done_id = last_done["id"] if last_done else ""
     last_flip_step = str((last_flip or {}).get("step_id") or "")
-    # The North Star's revision: a goal_flip re-read is tied to the goal text it
-    # read (Wave 3.2); a flip that read an older revision does not stand for the
-    # current one. A flip without a revision (legacy) is trusted on step alone.
+    # a goal_flip stands only for the North Star revision it read (a legacy flip, on step alone)
     goal_revision = hashlib.sha256(goal.encode("utf-8")).hexdigest()[:12] if goal else ""
     flip_revision = str((last_flip or {}).get("goal_revision") or "")
     revision_ok = not flip_revision or flip_revision == goal_revision
@@ -1047,8 +1045,7 @@ def _focused_step(m):
     """Use the declared work item; never guess among several active steps."""
     steps = m.get("steps") or []
     current_id = (m.get("heartbeat") or {}).get("current_step_id")
-    if not current_id:
-        # written through on read: the one pinned/current step names the work item
+    if not current_id:                     # the one pinned step names the work item
         pinned = [s for s in steps if isinstance(s.get("navigation"), dict)
                   and (s["navigation"].get("pin") or s["navigation"].get("current"))]
         if len(pinned) == 1:
@@ -1095,9 +1092,7 @@ def _local_status_evidence(campaign_dir, m, engine_state, step):
     def current(receipt):
         if not isinstance(receipt, dict):
             return False
-        if receipt.get("kind") == "journal_update":
-            # a journal receipt recorded before the step existed, or before a
-            # provider rollover, is still this effort's journal (Wave 3.1)
+        if receipt.get("kind") == "journal_update":     # kept across steps and rollovers
             return receipt.get("step_id") in (None, "") or str(receipt.get("step_id")) == str(step.get("id"))
         if str(receipt.get("step_id")) != str(step.get("id")):
             return False
@@ -1169,7 +1164,9 @@ def _local_status_evidence(campaign_dir, m, engine_state, step):
         path = contained_file(receipt.get("path"))
         summary = receipt.get("summary")
         entry_id = receipt.get("entry_id")
-        state = "available" if path and epoch(receipt.get("at")) is not None and entry_id and isinstance(summary, str) and summary.strip() else "unavailable"
+        engine_sourced = receipt.get("source") == "engine" and not receipt.get("path")   # the receipt is the record
+        state = ("available" if (path or engine_sourced) and epoch(receipt.get("at")) is not None and entry_id
+                 and isinstance(summary, str) and summary.strip() else "unavailable")
         result["journal_source"] = {"state": state, "path": path, "entry_id": entry_id,
                                      "at": receipt.get("at"), "step_id": receipt.get("step_id"),
                                      "session_id": receipt.get("session_id"), "run_id": receipt.get("run_id")}
@@ -2075,9 +2072,7 @@ def current_review_items(map_, items):
         if it.get("accepted") or it.get("accepted_current"):
             continue
         designation = re.match(r"^(?:START\s+HERE|CURRENT|FOR\s+REVIEW)\s*(?:[:—–-]|$)", str(it.get("what") or ""), re.I)
-        # something explicitly awaiting John's review stays here whatever the
-        # focus (journal 0132): a managed product not yet accepted, or a row
-        # designated FOR REVIEW; only merely-featured files follow the focus
+        # awaiting John's review stays whatever the focus (journal 0132)
         if it.get("managed") and it.get("phase") != "done":
             current.append(it)
             continue

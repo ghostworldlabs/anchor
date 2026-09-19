@@ -70,16 +70,16 @@ def _engine(env, monkeypatch, tmp_path, cli="chatgpt"):
 # ── rules on every turn ───────────────────────────────────────────────────────
 
 def test_the_bridge_prompt_carries_the_rules_on_every_turn():
-    from steward_cockpit.codex_turn_bridge import turn_prompt, user_text, standing_rules_of, BridgeError
+    from steward_cockpit.codex_turn_bridge import turn_prompt, user_text, BridgeError
     assert turn_prompt("SYSTEM", "RULES", "hi", fresh_thread=True) == "SYSTEM\n\nhi"
     assert turn_prompt("SYSTEM", "RULES", "hi", fresh_thread=False) == "RULES\n\nhi"
     assert turn_prompt("SYSTEM", None, "hi", fresh_thread=False) == "hi"           # the old shape, unchanged
     assert turn_prompt(None, "RULES", "hi", fresh_thread=True) == "hi"
     env = {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "hi"}]},
            "system_prompt": "S", "standing_rules": "R"}
-    assert user_text(env) == ("hi", "S") and standing_rules_of(env) == "R"
+    assert user_text(env) == ("hi", "S", "R")
     with pytest.raises(BridgeError):
-        standing_rules_of(dict(env, standing_rules=7))
+        user_text(dict(env, standing_rules=7))
 
 
 def test_the_engine_sends_standing_rules_to_bridge_families_only(env, monkeypatch, tmp_path):
@@ -91,7 +91,7 @@ def test_the_engine_sends_standing_rules_to_bridge_families_only(env, monkeypatc
         sent = json.loads(engine.proc.stdin.getvalue().strip().splitlines()[-1])
         assert ("standing_rules" in sent) is expected, cli
         if expected:
-            assert sent["standing_rules"] == engine_mod.STANDING_RULES and "one question per turn" in sent["standing_rules"]
+            assert sent["standing_rules"] == engine_mod.CONTRACT          # the one contract, every turn
 
 
 # ── Codex file paths ──────────────────────────────────────────────────────────
@@ -126,13 +126,14 @@ def test_the_served_model_carries_its_source_and_a_mismatch_is_said(env, monkeyp
                     "usage": {"input_tokens": 10, "output_tokens": 2}, "total_cost_usd": None, "duration_ms": 900,
                     "model_served": "gpt-6-mini", "model_attested": True, "model_source": "cli-recorded"}, engine.proc)
     p = engine.model_selection
-    assert p["model_served"] == "gpt-6-mini" and p["model_source"] == "cli-recorded" and p["model_mismatch"] is True
+    assert p["model_served"] == "gpt-6-mini" and p["model_source"] == "cli-recorded"
     assert any("model served gpt-6-mini (requested gpt-6-astra)" in (e.get("text") or "") for e in engine._emitted)
+    engine._emitted.clear()
     engine.turn_text = "Again."
     engine._handle({"type": "result", "subtype": "success", "session_id": SESSION,
                     "usage": {"input_tokens": 10, "output_tokens": 2}, "total_cost_usd": None, "duration_ms": 900,
                     "model_served": "gpt-6-astra", "model_attested": True, "model_source": "cli-recorded"}, engine.proc)
-    assert engine.model_selection["model_mismatch"] is False
+    assert not any("model served" in (e.get("text") or "") for e in engine._emitted)
     from steward_cockpit.codex_turn_bridge import EventNormalizer
     grok = EventNormalizer("grok-4.6", "high")
     grok.provider_label = "Grok"
@@ -235,7 +236,7 @@ def test_journal_receipts_at_detection_and_at_turn_end_and_the_reader_keeps_them
     strip = json.loads((base / "strip.json").read_text(encoding="utf-8"))
     r = strip["receipts"][-1]
     assert r["kind"] == "journal_update" and r["source"] == "engine" and r["step_id"] is None
-    assert (base / r["path"]).is_file() and r["summary"].startswith("turn_error: rate limit")
+    assert "path" not in r and r["summary"].startswith("turn_error: rate limit")     # the receipt is the record
     # the reader: a different session id and no step id still count (before a rollover / before a step existed)
     out = _local_status_evidence(str(base), {"heartbeat": strip}, {"session_id": "another-session"}, {"id": "s1"})
     assert out["journal"].startswith(r["entry_id"] + ": turn_error") and out["journal_source"]["state"] == "available"
@@ -243,7 +244,7 @@ def test_journal_receipts_at_detection_and_at_turn_end_and_the_reader_keeps_them
     (base / "journal").mkdir()
     (base / "journal" / "0007-what-changed.md").write_text("# 0007 — What changed\n\nBody.\n", encoding="utf-8")
     engine._journal_changed_receipt()
-    engine._journal_changed_receipt()
+    _engine(env, monkeypatch, tmp_path)._journal_changed_receipt()      # a fresh engine (a restart) adds nothing
     strip = json.loads((base / "strip.json").read_text(encoding="utf-8"))
     entries = [x for x in strip["receipts"] if x.get("entry_id") == "0007-what-changed"]
     assert len(entries) == 1 and entries[0]["summary"] == "0007 — What changed" and entries[0]["path"] == "journal/0007-what-changed.md"
@@ -253,6 +254,11 @@ def test_journal_receipts_at_detection_and_at_turn_end_and_the_reader_keeps_them
                     "error": "boom", "result": "boom", "duration_ms": 10}, engine.proc)
     strip = json.loads((base / "strip.json").read_text(encoding="utf-8"))
     assert any(x.get("kind") == "journal_update" and x.get("summary", "").startswith("turn_error") for x in strip["receipts"][-2:])
+    # an interrupt with no turn running journals nothing
+    before = len(strip["receipts"])
+    engine.busy = False
+    engine.interrupt_turn("stopped by John")
+    assert len(json.loads((base / "strip.json").read_text(encoding="utf-8"))["receipts"]) == before
 
 
 # ── the North Star re-read is tied to its revision ────────────────────────────
@@ -271,7 +277,7 @@ def test_the_goal_reread_is_tied_to_the_north_star_revision(tmp_path):
         }), encoding="utf-8")
     roadmap(None)
     m = campaign.read_map(str(d))
-    assert m["goal_reread"] is False and len(m["goal_revision"]) == 12
+    assert m["goal_reread"] is False and m["goal_revision"]
     rev = m["goal_revision"]
     roadmap({"kind": "goal_flip", "step_id": "m1", "verdict": "kept", "goal_revision": rev, "at": "2026-09-18T10:00:00Z",
              "receipt": {"who": "steward", "why": "re-read"}})

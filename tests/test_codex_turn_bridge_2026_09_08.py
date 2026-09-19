@@ -387,7 +387,7 @@ def test_pre_cancelled_broker_never_spawns_and_reports_safe_failure():
 def test_content_blocks_preserve_text_order():
     assert user_text({"type": "user", "message": {"content": [
         {"type": "text", "text": "one"}, {"type": "text", "text": "two"},
-    ]}}) == ("one\ntwo", None)
+    ]}}) == ("one\ntwo", None, None)
 
 
 def test_windows_default_guard_requires_suspended_and_hidden_creation():
