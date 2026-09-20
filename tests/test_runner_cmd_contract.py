@@ -61,6 +61,8 @@ def test_claude_research_argv_is_valid_and_has_no_dead_flags(jr):
     # WRITE-capable permission mode (research must write its report).
     i = argv.index("--permission-mode")
     assert argv[i + 1] == "acceptEdits"
+    # Headless research can fetch its evidence (2026-09-20: 228 refused web calls).
+    assert argv[argv.index("--allowedTools") + 1] == "WebFetch,WebSearch"
     # The natural-language seed IS the prompt, on argv (non-gated).
     assert SEED in argv
     # NONE of the dead flags survive.
@@ -179,7 +181,8 @@ def test_research_default_permission_is_accept_edits(jr):
 
 
 def test_permission_mode_plan_is_read_only(jr):
-    """permission_mode='plan' → read-only argv (no acceptEdits anywhere)."""
+    """permission_mode='plan' → read-only argv (no acceptEdits anywhere, no web allowance)."""
+    assert "--allowedTools" not in jr.build_backend_argv("claude", SEED, OUT, False, permission_mode="plan")
     argv = jr.build_backend_argv("claude", SEED, OUT, False, permission_mode="plan")
     i = argv.index("--permission-mode")
     assert argv[i + 1] == "plan"
