@@ -1346,6 +1346,7 @@ export function verbRoadmapSet(opts = {}) {
       to: opts.status,
       receipt,
       at: opts.as_of ?? undefined,
+      ...(opts.goal_reread ? { goal_reread: opts.goal_reread } : {}),
       ...(opts.client_event_id ? { client_event_id: opts.client_event_id } : {}),
     };
     if (event.from == null) delete event.from;

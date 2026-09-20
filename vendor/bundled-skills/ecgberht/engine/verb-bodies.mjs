@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import { verbRefinementUpdate } from './refinement.mjs';
 import { writeFileAtomicSync } from './durable-write.mjs';
+import { appendRoadmapEventThroughSpine, overCap } from './ledger-spine.mjs';
 import path from 'node:path';
 
 import { SPELLING, resolvePrimaryVerb } from './verbs.mjs';
@@ -99,6 +100,8 @@ export function parseVerbArgs(args = []) {
     seat: null,
     who: null,
     when: null,
+    goal_reread: null,
+    current_step_id: null,
     altitude: null,
     anchor_root: null,
     mark_seen: false,
@@ -284,6 +287,8 @@ export function parseVerbArgs(args = []) {
       '--commissioned-as': 'commissioned_as',
       '--who': 'who',
       '--when': 'when',
+      '--goal-reread': 'goal_reread',
+      '--current-step': 'current_step_id',
     };
     if (roadmapFlags[t]) {
       const next = tokens[i + 1];
@@ -706,6 +711,36 @@ export function verbUpdate(opts = {}) {
     };
   }
 
+  // cockpit Wave B: the lead line must fit - the strip's next / why / wait are capped by words
+  const face_patch0 = opts.face_patch ?? {};
+  const tip0 = opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {};
+  for (const [field, value] of [['next_recommended', tip0.next_recommended], ['why_next', tip0.why_next ?? face_patch0.why_next],
+                                ['human_wait', tip0.human_wait ?? face_patch0.human_wait]]) {
+    const over = overCap(field, value);
+    if (over) {
+      return { ok: false, error: 'over_cap', ...over, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
+               message: `${field} is ${over.words} words; the cap is ${over.cap}. Say it shorter.` };
+    }
+  }
+  // cockpit Wave B: --current-step pins the step that follows; it needs a next and a why to stand
+  const pin_id = typeof opts.current_step_id === 'string' && opts.current_step_id.trim() ? opts.current_step_id.trim() : null;
+  let pin_steps = null;
+  if (pin_id) {
+    pin_steps = lifecycle.ok && Array.isArray(lifecycle.roadmap?.roadmap_projection) ? lifecycle.roadmap.roadmap_projection : [];
+    if (!pin_steps.some((st) => st && st.id === pin_id)) {
+      return { ok: false, error: 'unknown_step', step_id: pin_id, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
+               message: `--current-step ${pin_id}: no such step in the roadmap.` };
+    }
+    const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '';
+    const missing = [];
+    if (!nonEmpty(tip0.next_recommended) && !nonEmpty(surfaces.strip?.next_recommended)) missing.push('next_recommended');
+    if (!nonEmpty(tip0.why_next ?? face_patch0.why_next) && !nonEmpty(surfaces.strip?.why_next)) missing.push('why_next');
+    if (missing.length) {
+      return { ok: false, error: 'spine_required', missing, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
+               message: 'A pin needs a next and a why: pass --next-recommended and --strip-why-next (or have them on the strip).' };
+    }
+  }
+
   const prior_as_of = surfaces.strip?.as_of ?? null;
   const prior_instruments = Array.isArray(surfaces.strip?.instruments)
     ? surfaces.strip.instruments.map((e) => ({ ...e }))
@@ -757,6 +792,7 @@ export function verbUpdate(opts = {}) {
     if (face_patch.why_next != null && instrument.why_next == null) {
       instrument.why_next = face_patch.why_next;
     }
+    if (pin_id) instrument.current_step_id = pin_id;
 
     const appended = appendStripInstrument(strip, instrument, { apply_to_projection: true });
     if (!appended.ok) {
@@ -817,6 +853,24 @@ export function verbUpdate(opts = {}) {
       // can be KILLED on timeout — a truncated write here loses receipts.
       writeFileAtomicSync(stripPath, `${JSON.stringify(strip, null, 2)}\n`);
       written.strip = true;
+    }
+    // the same call pins the roadmap: navigation.current on the step that follows, off the rest
+    if (pin_id) {
+      written.pinned = pin_id;
+      written.unpinned = [];
+      // navigation.current is presentation metadata and needs a course path; a step without
+      // a navigation is pinned by the strip alone (the reader's current_step_id comes first)
+      for (const st of pin_steps) {
+        const nav = st.navigation && typeof st.navigation === 'object' ? st.navigation : null;
+        const isTarget = st.id === pin_id;
+        if (!nav) { if (isTarget) written.navigation_unset = true; continue; }
+        if (!isTarget && nav.current !== true) continue;
+        if (isTarget && nav.current === true) continue;
+        const res = appendRoadmapEventThroughSpine(project_path,
+          { kind: 'step_set', step_id: st.id, fields: { navigation: { ...nav, current: isTarget } } }, { skip_index: true });
+        if (!res.ok) return { ...res, verb: verb_name, primary: 'update', project_path, pinned: false };
+        if (!isTarget) written.unpinned.push(st.id);
+      }
     }
     // TW2 precompute hook: brief cache is a declared projection (zero write
     // authority) refreshed at update/heartbeat time so the packet opens with

@@ -302,6 +302,25 @@ def refinement_items(campaign_dir, state):
     return items
 
 
+def _closed_within_a_day(roadmap, step_id):
+    """True when the step's last status_flip to done is less than a day old."""
+    from datetime import datetime as _dt
+    try:
+        flips = [ev for ev in (roadmap or {}).get("roadmap_events") or []
+                 if ev.get("kind") == "status_flip" and ev.get("to") == "done" and str(ev.get("step_id")) == str(step_id)]
+        if not flips:
+            return False
+        at = str(flips[-1].get("at") or "").strip()
+        when = _dt.fromisoformat(at.replace("Z", "+00:00")) if at else None
+        if when is None:
+            return False
+        if when.tzinfo is not None:
+            when = when.astimezone().replace(tzinfo=None)
+        return (_dt.now() - when).total_seconds() < 86400
+    except Exception:
+        return False
+
+
 def read_map(campaign_dir: str):
     root = Path(campaign_dir)
     gaps = []
@@ -454,8 +473,11 @@ def read_map(campaign_dir: str):
     revision_ok = not flip_revision or flip_revision == goal_revision
     # No close yet → nothing to re-read. A close without a matching goal_flip
     # is the Math Review hole (goal frozen after the slice that falsified it).
+    # The engine appends the flip at close (cockpit Wave B); a close younger
+    # than a day is not yet a missed re-read.
     goal_reread = (not last_done_id) or (
-        bool(last_flip) and last_flip_step == last_done_id and revision_ok)
+        bool(last_flip) and last_flip_step == last_done_id and revision_ok) or \
+        _closed_within_a_day(roadmap, last_done_id)
     if last_done_id and last_flip and last_flip_step == last_done_id and not revision_ok:
         gaps.append("North Star changed since its last re-read (goal_flip at " + str(last_flip.get("at") or "?")
                     + " read revision " + flip_revision + ", now " + goal_revision + ")")

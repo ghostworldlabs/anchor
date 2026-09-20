@@ -802,10 +802,15 @@ const Proto = (() => {
       parent.appendChild(shared);
     }
     function renderGroup(g,parent) {
-      const d=navDisclosure(surface+':'+g.id,g.label,false,groupMarkInfo(g)),body=el('div','navcontents');
+      // the sequence stays open; done, parked and supporting steps fold (John, 2026-09-19: "a mess of flags")
+      const offPath=st=>stepDone(st)||st.status==='parked';
+      const actives=g.steps.filter(s=>s.step.status==='active');
+      const pinned=g.steps.some(s=>s.step.navigation&&(s.step.navigation.pin||s.step.navigation.current));
+      const title=g.label+(actives.length>1&&!pinned?' · '+actives.length+' active — pin one':'');
+      const d=navDisclosure(surface+':'+g.id,title,false,groupMarkInfo(g)),body=el('div','navcontents');
       d.dataset.groupId=g.id;
       if(stepRows) {
-        const main=g.steps.filter(s=>s.step.navigation&&s.step.navigation.role==='primary');
+        const main=g.steps.filter(s=>s.step.navigation&&s.step.navigation.role==='primary'&&!offPath(s.step));
         if(main.length) {const list=el('ul','navstep-list');main.forEach(s=>{const row=stepRows.get(s.index);if(row)list.appendChild(row);});body.appendChild(list);}
       }
       g.children.forEach(child=>renderGroup(child,body));
@@ -816,8 +821,8 @@ const Proto = (() => {
       if(rest.length){const more=navDisclosure(surface+':materials:'+g.id,'Earlier work and supporting materials · '+rest.length);rest.forEach(it=>more.appendChild(navFile(it,surface)));body.appendChild(more);}
       renderReferences(g,body,surface);
       if(stepRows) {
-        const support=g.steps.filter(s=>!s.step.navigation||s.step.navigation.role!=='primary');
-        if(support.length){const more=navDisclosure(surface+':support:'+g.id,'Supporting work and earlier steps · '+support.length),list=el('ul','navstep-list');more.classList.add('navsupport');support.forEach(s=>{const row=stepRows.get(s.index);if(row)list.appendChild(row);});more.appendChild(list);body.appendChild(more);}
+        const support=g.steps.filter(s=>!s.step.navigation||s.step.navigation.role!=='primary'||offPath(s.step));
+        if(support.length){const more=navDisclosure(surface+':support:'+g.id,'Done, parked and supporting steps · '+support.length),list=el('ul','navstep-list');more.classList.add('navsupport');support.forEach(s=>{const row=stepRows.get(s.index);if(row)list.appendChild(row);});more.appendChild(list);body.appendChild(more);}
       } else if(!g.items.length&&!g.referenceItems.length&&!g.referenceSteps.length&&!g.children.length)body.appendChild(el('div','navempty','No deliverables registered yet.'));
       d.appendChild(body);parent.appendChild(d);
     }

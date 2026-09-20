@@ -4,6 +4,7 @@
  */
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 export const FACE_FILE_NAME = 'ECGBERHT.md';
@@ -121,6 +122,25 @@ function sectionBody(markdown, heading) {
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The North Star's revision: sha256 of the "## North star" section with
+ * blockquote markers, bold and rules stripped and whitespace folded, first 12
+ * hex - the same hash the cockpit reader computes (steward_campaign.read_map),
+ * so a goal_flip written here stands for the revision the cockpit shows. ''
+ * when the Face has no North Star.
+ * @param {string} markdown the Face
+ */
+export function northStarRevision(markdown) {
+  const lines = [];
+  for (const raw of String(sectionBody(String(markdown ?? ''), 'North star')).split(/\r?\n/)) {
+    const line = raw.replace(/^\s*>\s?/, '').replace(/\*\*/g, '');
+    if (/^\s*-{3,}\s*$/.test(line)) continue;
+    lines.push(line);
+  }
+  const goal = lines.join('\n').trim().replace(/\s+/g, ' ').trim();
+  return goal ? createHash('sha256').update(goal, 'utf8').digest('hex').slice(0, 12) : '';
 }
 
 /**

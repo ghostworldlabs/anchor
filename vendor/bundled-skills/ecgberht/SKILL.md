@@ -222,6 +222,19 @@ Elegance rule 9: a correction that lives only in a journal has not been made).**
   compulsory for every campaign. Use backticked contained paths in legacy
   table cells and stable step IDs. HTML opens in the contained sandboxed
   preview, Markdown in the reader, PDF inline; verify the actual link.
+- **Outstanding reviews survive focus changes (John, 2026-09-15).** Before a
+  review request, verify the exact version is directly openable in Current work
+  and review. Keep every independently pending review there across topic, skill
+  and provider changes; a focus pin is not the review queue. Only John's scoped
+  acceptance, deferral, withdrawal or replacement disposes of that review.
+  Never set `navigation.current:false` merely because conversation moved while
+  its products still await review. Preserve actual product ownership and the
+  existing register/lifecycle; do not move unrelated files into the focused
+  step or create another list. In legacy campaigns recover pending review from
+  original instructions without inventing acceptance. Check the actual panel
+  after refresh/reopening, not only file existence or a link in another note.
+  This applies to Chekhov and every other producer. It supersedes journal0127's
+  single-current-step corollary, not the useful distinction of one work focus.
 - **Cumulative refinement within the slice (formal improvement, 2026-09-10).**
   Important intermediate foundations have the same loop as final products:
   Initial draft, Refinement 1, Refinement 2, and further rounds as requested.
@@ -344,11 +357,16 @@ Elegance rule 9: a correction that lives only in a journal has not been made).**
   session. **No in-process Shark swarm** (`in_process_shark_tank: false`); that
   is Crucible, only when commissioned. Commission Crucible/Foreman only when
   the session cannot hold the work AND the step has a `gate` (a command that
-  can fail). After EVERY close, including research, append a `goal_flip` (`reaffirmed` or
-  `rewritten`) carrying `goal_revision` (the cockpit state's `goal_revision`, a hash of the North Star
-  text you re-read) and `scope` (the closed step id) — a flip that read an older revision does not
-  stand for the current one — and update the Face if rewritten; then recommend whether to move on —
-  he decides.
+  can fail). **A close states the next act (cockpit Wave B, 2026-09-20).** Before you close a step,
+  pin the one that follows and say what you will do there: `ecgberht update --current-step <id>
+  --next-recommended "<up to 15 words>" --strip-why-next "<up to 20 words>"` (`--human-wait` up to 15
+  words; over a cap the write is refused with the count). The close itself — `roadmap-set --step <id>
+  --status done --who … --reason … --goal-reread reaffirmed|rewritten`, or `goal_reread` on the
+  refinement `close` operation — is refused (`spine_required`) until the strip names the step that
+  follows with its next and why (a campaign with no open step left needs none), and refused
+  (`goal_reread_required`) without the re-read; the engine then appends the `goal_flip` itself with
+  the North Star's revision and the closed step as `scope`. Update the Face if rewritten; then
+  recommend whether to move on — he decides.
 
 **The Grasscatcher capacity — 2026-08-19 (John's commission).** The grasscatch
 list is a first-class conversational duty, not just a verb. It is the talking

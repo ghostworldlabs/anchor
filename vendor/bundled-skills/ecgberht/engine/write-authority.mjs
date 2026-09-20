@@ -46,6 +46,7 @@ export const STRIP_CLOCK_FIELDS = Object.freeze([
   'tool_depth_cell',
   'next_recommended',
   'why_next',
+  'current_step_id',
   'grasscatch',
   'uncertainty_flags',
 ]);

@@ -23,6 +23,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { northStarRevision, FACE_FILE_NAME } from './face-strip.mjs';
 import { prepareRefinementEvent, publishRefinementProjections } from './refinement.mjs';
 import { foldRefinements } from './refinement-state.mjs';
 
@@ -476,6 +477,62 @@ export const SPINE_SINGLE_WRITER = Object.freeze({
  *   appendOpts?: object,
  * }} [opts]
  */
+/** The step a close event closes (one not already done), with its goal re-read, else null. */
+function closeOf(event, base) {
+  let step_id = null, goal_reread = null;
+  if (event?.kind === 'status_flip' && event.to === 'done') {
+    step_id = event.step_id; goal_reread = event.goal_reread ?? null;
+  } else if (event?.kind === 'refinement_update' && event.operation?.action === 'close') {
+    step_id = event.operation.step_id; goal_reread = event.operation.goal_reread ?? null;
+  } else return null;
+  const steps = Array.isArray(base?.roadmap_projection) ? base.roadmap_projection : [];
+  const step = steps.find((st) => st && st.id === step_id);
+  if (step && step.status === 'done') return null;      // already closed: nothing to demand, no second flip
+  return { step_id, goal_reread };
+}
+
+const SPINE_WORD_CAPS = Object.freeze({ next_recommended: 15, why_next: 20, human_wait: 15 });
+
+/** Words over the cap on a strip field, else null (cockpit Wave B, the lead line must fit). */
+export function overCap(field, value) {
+  const cap = SPINE_WORD_CAPS[field];
+  if (!cap || typeof value !== 'string') return null;
+  const words = value.trim() ? value.trim().split(/\s+/).length : 0;
+  return words > cap ? { field, words, cap } : null;
+}
+
+/**
+ * A close is refused until the strip names the step that follows and what the
+ * steward will do there (John, 2026-09-19: "status does not say what is
+ * next"). A campaign with no open step left needs no next. No strip (a
+ * legacy campaign) - nothing to demand.
+ */
+function demandSpineForClose(root, base, step_id) {
+  const stripPath = path.join(root, 'strip.json');
+  if (!fs.existsSync(stripPath)) return { ok: true, demanded: false };
+  let strip;
+  try { strip = JSON.parse(fs.readFileSync(stripPath, 'utf8')); } catch { return { ok: true, demanded: false }; }
+  if (!strip || typeof strip !== 'object') return { ok: true, demanded: false };
+  const steps = Array.isArray(base?.roadmap_projection) ? base.roadmap_projection : [];
+  const open = steps.filter((st) => st && st.id !== step_id && !['done', 'parked'].includes(st.status));
+  if (!open.length) return { ok: true, demanded: false, campaign_done: true };
+  const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '';
+  const missing = [];
+  if (!nonEmpty(strip.current_step_id)) missing.push('current_step_id');
+  else if (strip.current_step_id === step_id) missing.push('current_step_id (still the step being closed)');
+  if (!nonEmpty(strip.next_recommended)) missing.push('next_recommended');
+  if (!nonEmpty(strip.why_next)) missing.push('why_next');
+  if (missing.length) {
+    return {
+      ok: false, error: 'spine_required', closing: step_id, missing,
+      message: 'Close refused: first pin the step that follows and say what comes next - '
+        + 'ecgberht update --current-step <id> --next-recommended "<up to 15 words>" --strip-why-next "<up to 20 words>" - then close. '
+        + 'A campaign with no open step left needs no next.',
+    };
+  }
+  return { ok: true, demanded: true };
+}
+
 export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
   const storeGate = assertStoreDeclared('roadmap_events');
   if (!storeGate.ok) return storeGate;
@@ -527,6 +584,19 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
           base = emptyRoadmap(opts.project_id ?? null);
         }
 
+        // cockpit Wave B: a close demands the spine and a goal re-read; the spine appends the goal_flip
+        const closing = closeOf(event, base);
+        if (closing) {
+          const demand = demandSpineForClose(root, base, closing.step_id);
+          if (!demand.ok) return demand;
+          if (!['reaffirmed', 'rewritten'].includes(closing.goal_reread)) {
+            return {
+              ok: false, error: 'goal_reread_required', closing: closing.step_id,
+              message: 'Close refused: re-read the North Star and say so - --goal-reread reaffirmed|rewritten '
+                + '(or goal_reread on the refinement close operation); the engine records the goal_flip.',
+            };
+          }
+        }
         if (event.kind === 'refinement_update') {
           const prior = findEventByClientId(base,event.client_event_id);
           if (!prior) {
@@ -538,8 +608,22 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
         } else if (event.kind === 'status_flip' && event.to === 'done' && foldRefinements(base.roadmap_events).slices?.[event.step_id]) {
           return {ok:false,error:'managed-slice-requires-explicit-close'};
         }
-        const law = appendRoadmapEventSpineLaw(base, event, { at: opts.at });
+        let law = appendRoadmapEventSpineLaw(base, event, { at: opts.at });
         if (!law.ok) return law;
+        let goalFlip = null;
+        if (closing && !law.idempotent) {
+          let face = '';
+          try { face = fs.readFileSync(path.join(root, FACE_FILE_NAME), 'utf8'); } catch { face = ''; }
+          goalFlip = {
+            kind: 'goal_flip', step_id: closing.step_id, verdict: closing.goal_reread,
+            goal_revision: northStarRevision(face), scope: closing.step_id,
+            receipt: { who: 'engine', why: 'close of ' + closing.step_id },
+            ...(opts.at ? { at: opts.at } : {}),
+          };
+          const flipLaw = appendRoadmapEventSpineLaw(law.roadmap, goalFlip, { at: opts.at });
+          if (!flipLaw.ok) return flipLaw;
+          law = { ...law, roadmap: flipLaw.roadmap, projection: flipLaw.projection, goal_flip: flipLaw.event };
+        }
         if (law.idempotent) {
           const publication=event.kind==='refinement_update' ? publishRefinementProjections(root,law.roadmap) : null;
           if(publication && !publication.ok) return {...publication,committed:true,operation_id:event.client_event_id};
