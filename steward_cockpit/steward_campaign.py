@@ -1059,7 +1059,9 @@ def _focused_step(m):
     if len(active) == 1:
         return active[0], ""
     if len(active) > 1:
-        return None, "Current work item is unavailable: several steps are active and no current_step_id is set."
+        names = ", ".join(str(s.get("name") or s.get("id") or "?") for s in active[:6])
+        return None, ("Current work item is unavailable: %d steps are active and no current_step_id is set "
+                      "- the steward must pin one: %s" % (len(active), names))
     return None, ""
 
 
@@ -1395,15 +1397,20 @@ def compose_status(campaign_dir: str, engine_state=None):
         waiting = (("model session limit (" + halt["limit"] + "): ") if halt["limit"]
                    else (halt["skill"] + " stopped: ")) + halt["reason"]
         waiting = waiting if len(waiting) <= 220 else waiting[:219].rsplit(" ", 1)[0] + "\u2026"
+    why_text = (m["heartbeat"].get("why_next") or "").strip()
     plan = {
         "step": plan_step,
         "steps_done": m["steps_done"],
         "steps_total": m["steps_total"],
         "waiting_on_you": waiting,
         "next": next_text,
+        "why": why_text,
         "attention": m["attention"]["state"],
         "goal_reread": m.get("goal_reread", True),
     }
+    # the lead: what the steward said comes next and why, and who it waits on —
+    # the strip's own next_recommended / why_next / the wait; never a guess
+    lead = {"next": next_text, "why": why_text, "waiting_on": waiting, "stated": bool(next_text)}
     if not m.get("goal_reread", True):
         now_lines.append("goal not re-read since last close")
     # (2026-09-07, journals 0026/0111) the effort line carries its AGE, and a line
@@ -1463,6 +1470,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     out = {"at": time.strftime("%Y-%m-%d %H:%M"),
            "status_id": f"{time.time_ns():020d}",
            "effort": m["name"], "latest_event":latest_event, "compact":compact,
+           "lead": lead,
            "now": now_lines,
            "running": running,
            "slice": slice_,
@@ -2101,7 +2109,31 @@ def read_deliverables(campaign_dir: str):
         owner = resolve_step(map_["steps"], it.get("step"))
         decorated.append({**it, "owner_step_id": owner.get("id") if owner else None,
                           "is_current": id(it) in current})
-    return {**result, "items": decorated}
+    return {**result, "items": decorated, "acts": review_acts(map_, items)}
+
+
+def review_acts(map_, items):
+    """What John does now, in order: review each product awaiting him, open the
+    current step's featured files, then what the steward said comes next.
+    (The open decision is added by the page from the engine state.)"""
+    from .navigation_compat import resolve_step
+    steps = (map_ or {}).get("steps") or []
+    acts = []
+    for it in current_review_items(map_, items):
+        if it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"):
+            acts.append({"act": "Review", "label": str(it.get("what") or it.get("product_id") or it.get("path") or "").replace("-", " "),
+                         "path": it.get("path"), "step": it.get("step"), "item": it})
+    cur, _warn = _focused_step(map_)
+    nav = (cur or {}).get("navigation") or {}
+    seen = {a.get("path") for a in acts}
+    for p in (nav.get("featured_paths") or [])[:2]:
+        if p and p not in seen:
+            acts.append({"act": "Open", "label": str(p).replace("\\", "/").rsplit("/", 1)[-1], "path": p,
+                         "step": (cur or {}).get("id")})
+    nxt = ((map_ or {}).get("heartbeat") or {}).get("next_recommended") or ""
+    if str(nxt).strip():
+        acts.append({"act": "Next", "label": str(nxt).strip(), "step": (cur or {}).get("id")})
+    return acts
 
 
 def effort_deliverable_view(campaign_dir, effort_name="", effort_rel=""):
@@ -2121,6 +2153,7 @@ def effort_deliverable_view(campaign_dir, effort_name="", effort_rel=""):
         "name": effort_name or m.get("name") or Path(campaign_dir).name,
         "rel": effort_rel,
         "current": current_review_items(m, items),
+        "acts": review_acts(m, items),
         "approved": approved,
         "streams": (model or {}).get("roots") or [],
         "items": items,

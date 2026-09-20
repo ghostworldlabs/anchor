@@ -198,7 +198,7 @@ def test_a_missing_current_step_id_falls_back_to_the_one_pinned_step():
     step, warning = _focused_step({"heartbeat": {"current_step_id": "b"}, "steps": steps})
     assert step["id"] == "b"
     step, warning = _focused_step({"heartbeat": {}, "steps": [dict(s, navigation={}) for s in steps]})
-    assert step is None and "several steps are active" in warning
+    assert step is None and "steps are active" in warning
 
 
 # ── honest auto-commit ────────────────────────────────────────────────────────

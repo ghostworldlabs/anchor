@@ -395,7 +395,23 @@ const Proto = (() => {
       tab.appendChild(tr);
     });
     const compact = el("div", "status-compact");
-    compact.appendChild(tab);
+    // the lead: next and why, and who it waits on — first, before the locked rows
+    const lead = stat.lead || {};
+    const leadEl = el("div", "slead");
+    leadEl.dataset.statusFact = "lead";
+    if (lead.stated) {
+      leadEl.appendChild(el("strong", "", "Next "));
+      leadEl.appendChild(el("span", "", oneLine(lead.next, 110) + (lead.why ? " — " + oneLine(lead.why, 90) : "")));
+    } else {
+      leadEl.appendChild(el("strong", "", "Next "));
+      leadEl.appendChild(el("span", "dim", "not stated by the steward"));
+    }
+    if (lead.waiting_on) leadEl.appendChild(el("div", "sleadwait", "waiting on you: " + oneLine(lead.waiting_on, 110)));
+    compact.appendChild(leadEl);
+    const rowsBox = el("details", "status-rows");
+    rowsBox.appendChild(el("summary", "", "Details"));
+    rowsBox.appendChild(tab);
+    compact.appendChild(rowsBox);
     if (stat.latest_event && stat.latest_event.summary) {
       const latest = el("p");
       latest.dataset.statusFact = "latest";
@@ -432,10 +448,11 @@ const Proto = (() => {
     try {
       const brief = $("[data-goalbrief]"), lab = $("[data-goallabel]");
       if (brief) {
-        // what is running (looked through) · the slice · its ETA
-        let line = (run && run.label) || (stat.now || [])[0] || "quiet";
-        if (sl) line += " · slice " + sl.n + "/" + sl.total + " " + sl.name;
-        else line += " · " + (p.steps_done || 0) + "/" + (p.steps_total || 0) + " done";
+        // the lead (next and why) when the steward stated one; else what is running
+        const ld = stat.lead || {};
+        let line = ld.stated ? ("Next: " + ld.next + (ld.why ? " — " + ld.why : ""))
+          : ((run && run.label) || (stat.now || [])[0] || "quiet");
+        if (!ld.stated) line += " · " + (p.steps_done || 0) + "/" + (p.steps_total || 0) + " done";
         if (p.waiting_on_you) line += " · waiting on you: " + p.waiting_on_you;
         else if (stat.eta) line += " · ETA " + stat.eta;
         if (line.length > 120) line = line.slice(0, 117).replace(/\s+\S*$/, "") + "…";
@@ -480,7 +497,7 @@ const Proto = (() => {
   // per-step embedding (John, 2026-08-26: "embed the work products in the
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
-  let _delivItems = [], _approvedItems = [], _lastMap = null, _refinementContext = null, _answerQuestionId = null;
+  let _delivItems = [], _approvedItems = [], _lastActs = [], _lastMap = null, _refinementContext = null, _answerQuestionId = null;
   let _delivOpen = (() => {
     try { return localStorage.getItem("steward_deliv_open") === "1"; }
     catch (e) { return false; }
@@ -716,10 +733,29 @@ const Proto = (() => {
     const pin=(map?.steps||[]).find(s=>s.navigation&&s.navigation.pin);
     if(!stepRows) {
       const p=el('div','navpin');p.appendChild(el('div','naveyebrow','Current work and review'));
+      // Do now: the open decision, each product awaiting review, the current step's files, then the steward's next
+      const acts=[];
+      const q=currentQuestion();
+      if(q&&q.question)acts.push({act:'Answer',label:String(q.question).slice(0,110),question:q});
+      (_lastActs||[]).forEach(a=>acts.push(a));
+      const doNow=el('div','navacts');doNow.appendChild(el('div','navactshead','Do now'));
+      acts.forEach(a=>{
+        const row=el('div','navact navact-'+a.act.toLowerCase());
+        row.appendChild(el('span','navactkind',a.act));
+        if(a.act==='Answer'){const b=el('button','navactbtn',a.label);b.onclick=()=>openQuestionContext(a.question&&a.question.id);row.appendChild(b);}
+        else if(a.item){row.appendChild(navFile(a.item,surface+':act'));}
+        else if(a.path){row.appendChild(navFile({what:a.label,path:a.path,openable:true,step:a.step},surface+':act'));}
+        else row.appendChild(el('span','navactlabel',a.label));
+        doNow.appendChild(row);
+      });
+      if(!acts.length)doNow.appendChild(el('div','navempty','Nothing waits on you; the steward has not stated a next step.'));
+      p.appendChild(doNow);
       const current=items.filter(i=>i.is_current===true)   // the server's one rule (current_review_items)
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
-      current.forEach(it=>p.appendChild(navFile(it,surface+':pin')));
-      if(!current.length)p.appendChild(el('div','navempty','No current items awaiting review.'));
+      const files=navDisclosure(surface+':files','Files awaiting you · '+current.length);
+      current.forEach(it=>files.appendChild(navFile(it,surface+':pin')));
+      if(!current.length)files.appendChild(el('div','navempty','No files awaiting review.'));
+      p.appendChild(files);
       target.appendChild(p);
       const approved=navDisclosure(surface+':approved','Approved deliverables · '+_approvedItems.length);
       _approvedItems.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))
@@ -970,6 +1006,7 @@ const Proto = (() => {
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     _delivItems = items;
     _approvedItems = (d && d.approved) || [];
+    _lastActs = (d && d.acts) || [];
     // repaint the plan so step-tagged deliverables land under their steps
     if (_lastMap) { try { paintStepsList(_lastMap); } catch (e) {} }
     // — the tile: its OWN slot above the scrollport when the page provides
