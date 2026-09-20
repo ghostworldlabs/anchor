@@ -2656,14 +2656,10 @@ def _steward_status_tile_line(entry: dict) -> str:
         return ""
     now_lines = [str(x).strip() for x in (data.get("now") or []) if str(x).strip()]
     plan = data.get("plan") or {}
-    lead = data.get("lead") if isinstance(data.get("lead"), dict) else None
-    if lead and lead.get("stated"):
-        line = "Next: " + str(lead.get("next") or "").strip()
-        if str(lead.get("why") or "").strip():
-            line += " — " + str(lead["why"]).strip()
-        if str(lead.get("waiting_on") or "").strip():
-            line += " · waiting on you: " + str(lead["waiting_on"]).strip()
-        return ("⏱ %s · %s" % (str(data.get("at", ""))[-5:], line))[:200]
+    from steward_cockpit.steward_campaign import lead_line   # the ONE lead template (pane, top bar, tile)
+    lead = lead_line(plan)
+    if str(plan.get("next") or "").strip():
+        return ("⏱ %s · %s" % (str(data.get("at", ""))[-5:], lead))[:200]
     # Same concise facts the cockpit status pane shows. Fall back to the older
     # running/slice/wait join when a record predates the facts list.
     facts = (data.get("compact") or {}).get("facts") if isinstance(data.get("compact"), dict) else None

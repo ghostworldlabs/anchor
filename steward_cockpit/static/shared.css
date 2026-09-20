@@ -318,6 +318,14 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .status-compact p { margin:7px 0;line-height:1.45;overflow-wrap:anywhere; }
 .status-compact strong { font-size:12px;opacity:.75; }
 .status-compact .stab { margin-top:2px; }
+.slead { margin:6px 0 8px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600; }
+.slead.dim { opacity:.65;font-weight:400; }
+.navacts { margin:4px 0 8px; }
+.navactshead { font-size:11px;text-transform:uppercase;letter-spacing:.04em;opacity:.7;margin-bottom:3px; }
+.navact { display:flex;gap:6px;align-items:baseline;margin:2px 0;overflow-wrap:anywhere; }
+.navactkind { flex:0 0 auto;font-size:11px;opacity:.75;min-width:52px; }
+.navactbtn { background:none;border:0;padding:0;color:inherit;text-decoration:underline;cursor:pointer;text-align:left;font:inherit; }
+.navactlabel { opacity:.9; }
 .status-history { margin-top:10px; }
 .status-history>summary { cursor:pointer;font-size:12px;opacity:.8; }
 .blk.status.latest { position:relative; }

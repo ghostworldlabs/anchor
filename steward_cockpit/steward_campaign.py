@@ -1060,8 +1060,16 @@ def _focused_step(m):
         return active[0], ""
     if len(active) > 1:
         names = ", ".join(str(s.get("name") or s.get("id") or "?") for s in active[:6])
+        if len(active) > 6:
+            names += " and %d more" % (len(active) - 6)
         return None, ("Current work item is unavailable: %d steps are active and no current_step_id is set "
                       "- the steward must pin one: %s" % (len(active), names))
+    open_steps = [s for s in steps if s.get("status") not in ("done", "parked", "cancelled", "dropped")]
+    if steps and not open_steps:
+        return None, ""                        # every step closed or parked: nothing to pin
+    if steps:
+        return None, ("Current work item is unavailable: no step is active and no current_step_id is set "
+                      "- the steward must pin one of the %d open steps" % len(open_steps))
     return None, ""
 
 
@@ -1408,9 +1416,7 @@ def compose_status(campaign_dir: str, engine_state=None):
         "attention": m["attention"]["state"],
         "goal_reread": m.get("goal_reread", True),
     }
-    # the lead: what the steward said comes next and why, and who it waits on —
-    # the strip's own next_recommended / why_next / the wait; never a guess
-    lead = {"next": next_text, "why": why_text, "waiting_on": waiting, "stated": bool(next_text)}
+    lead = lead_line(plan)
     if not m.get("goal_reread", True):
         now_lines.append("goal not re-read since last close")
     # (2026-09-07, journals 0026/0111) the effort line carries its AGE, and a line
@@ -1470,7 +1476,7 @@ def compose_status(campaign_dir: str, engine_state=None):
     out = {"at": time.strftime("%Y-%m-%d %H:%M"),
            "status_id": f"{time.time_ns():020d}",
            "effort": m["name"], "latest_event":latest_event, "compact":compact,
-           "lead": lead,
+           "lead_line": lead,
            "now": now_lines,
            "running": running,
            "slice": slice_,
@@ -1541,6 +1547,17 @@ def effort_line_freshness(campaign_dir: str, m=None):
     return out
 
 
+def lead_line(plan):
+    """The ONE lead template for the pane, the top bar and the dashboard tile:
+    what the steward said comes next and why, and who it waits on - the strip's
+    own next_recommended / why_next / the wait; never a guess."""
+    plan = plan if isinstance(plan, dict) else {}
+    nxt, why = str(plan.get("next") or "").strip(), str(plan.get("why") or "").strip()
+    line = ("Next: " + nxt + (" \u2014 " + why if why else "")) if nxt else "Next not stated by the steward"
+    wait = str(plan.get("waiting_on_you") or "").strip()
+    return line + (" \u00b7 waiting on you: " + wait if wait else "")
+
+
 def read_last_status(campaign_dir: str):
     """The last 10-minute status the engine PERSISTED for this effort
     (``<cdir>/.ecgberht/status-summary.json``), marked ``stale: True`` — or
@@ -1555,6 +1572,7 @@ def read_last_status(campaign_dir: str):
         if not isinstance(d, dict) or not d.get("at"):
             return None
         d["stale"] = True
+        d.setdefault("lead_line", lead_line(d.get("plan")))   # a record written before the lead existed
         return d
     except Exception:
         return None
@@ -2103,33 +2121,32 @@ def read_deliverables(campaign_dir: str):
     result = _read_deliverables(campaign_dir)
     map_ = read_map(campaign_dir)
     items = result.get("items") or []
-    current = {id(it) for it in current_review_items(map_, items)}
+    current_items = current_review_items(map_, items)
+    current = {id(it) for it in current_items}
     decorated = []
     for it in items:
         owner = resolve_step(map_["steps"], it.get("step"))
         decorated.append({**it, "owner_step_id": owner.get("id") if owner else None,
                           "is_current": id(it) in current})
-    return {**result, "items": decorated, "acts": review_acts(map_, items)}
+    return {**result, "items": decorated, "acts": review_acts(map_, current_items),
+            "current_warning": _focused_step(map_)[1]}
 
 
-def review_acts(map_, items):
-    """What John does now, in order: review each product awaiting him, open the
-    current step's featured files, then what the steward said comes next.
-    (The open decision is added by the page from the engine state.)"""
-    from .navigation_compat import resolve_step
-    steps = (map_ or {}).get("steps") or []
+def review_acts(map_, current_items):
+    """What John does now, in order: review each product awaiting him (from the
+    current list), open the current step's featured file, then what the steward
+    said comes next. (The open decision is added by the page from the engine state.)"""
     acts = []
-    for it in current_review_items(map_, items):
+    for it in current_items:
         if it.get("managed") and it.get("phase") in ("awaiting_review", "blocked"):
             acts.append({"act": "Review", "label": str(it.get("what") or it.get("product_id") or it.get("path") or "").replace("-", " "),
                          "path": it.get("path"), "step": it.get("step"), "item": it})
     cur, _warn = _focused_step(map_)
-    nav = (cur or {}).get("navigation") or {}
     seen = {a.get("path") for a in acts}
-    for p in (nav.get("featured_paths") or [])[:2]:
-        if p and p not in seen:
-            acts.append({"act": "Open", "label": str(p).replace("\\", "/").rsplit("/", 1)[-1], "path": p,
-                         "step": (cur or {}).get("id")})
+    featured = [p for p in ((cur or {}).get("navigation") or {}).get("featured_paths") or [] if p and p not in seen]
+    if featured:
+        acts.append({"act": "Open", "label": str(featured[0]).replace("\\", "/").rsplit("/", 1)[-1], "path": featured[0],
+                     "step": (cur or {}).get("id")})
     nxt = ((map_ or {}).get("heartbeat") or {}).get("next_recommended") or ""
     if str(nxt).strip():
         acts.append({"act": "Next", "label": str(nxt).strip(), "step": (cur or {}).get("id")})
@@ -2153,7 +2170,6 @@ def effort_deliverable_view(campaign_dir, effort_name="", effort_rel=""):
         "name": effort_name or m.get("name") or Path(campaign_dir).name,
         "rel": effort_rel,
         "current": current_review_items(m, items),
-        "acts": review_acts(m, items),
         "approved": approved,
         "streams": (model or {}).get("roots") or [],
         "items": items,
