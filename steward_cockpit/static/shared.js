@@ -802,12 +802,9 @@ const Proto = (() => {
       parent.appendChild(shared);
     }
     function renderGroup(g,parent) {
-      // the sequence stays open; done, parked and supporting steps fold (John, 2026-09-19: "a mess of flags")
+      // the sequence stays open; done, parked and supporting steps fold
       const offPath=st=>stepDone(st)||st.status==='parked';
-      const actives=g.steps.filter(s=>s.step.status==='active');
-      const pinned=g.steps.some(s=>s.step.navigation&&(s.step.navigation.pin||s.step.navigation.current));
-      const title=g.label+(actives.length>1&&!pinned?' · '+actives.length+' active — pin one':'');
-      const d=navDisclosure(surface+':'+g.id,title,false,groupMarkInfo(g)),body=el('div','navcontents');
+      const d=navDisclosure(surface+':'+g.id,g.label,false,groupMarkInfo(g)),body=el('div','navcontents');
       d.dataset.groupId=g.id;
       if(stepRows) {
         const main=g.steps.filter(s=>s.step.navigation&&s.step.navigation.role==='primary'&&!offPath(s.step));

@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import { verbRefinementUpdate } from './refinement.mjs';
 import { writeFileAtomicSync } from './durable-write.mjs';
-import { appendRoadmapEventThroughSpine, overCap } from './ledger-spine.mjs';
+import { appendRoadmapEventThroughSpine } from './ledger-spine.mjs';
 import path from 'node:path';
 
 import { SPELLING, resolvePrimaryVerb } from './verbs.mjs';
@@ -27,6 +27,7 @@ import {
   appendStripInstrument,
   appendStripReceipt,
 } from './write-authority.mjs';
+import { overCap, missingSpine } from './write-authority.mjs';
 import { discoverStrips } from './discovery.mjs';
 import {
   rankPortfolioStripFirst,
@@ -711,7 +712,7 @@ export function verbUpdate(opts = {}) {
     };
   }
 
-  // cockpit Wave B: the lead line must fit - the strip's next / why / wait are capped by words
+  // the strip's next / why / wait are capped by words (the lead line must fit)
   const face_patch0 = opts.face_patch ?? {};
   const tip0 = opts.strip_tip && typeof opts.strip_tip === 'object' ? opts.strip_tip : {};
   for (const [field, value] of [['next_recommended', tip0.next_recommended], ['why_next', tip0.why_next ?? face_patch0.why_next],
@@ -722,7 +723,7 @@ export function verbUpdate(opts = {}) {
                message: `${field} is ${over.words} words; the cap is ${over.cap}. Say it shorter.` };
     }
   }
-  // cockpit Wave B: --current-step pins the step that follows; it needs a next and a why to stand
+  // --current-step pins the step that follows; a pin needs a next and a why
   const pin_id = typeof opts.current_step_id === 'string' && opts.current_step_id.trim() ? opts.current_step_id.trim() : null;
   let pin_steps = null;
   if (pin_id) {
@@ -731,10 +732,7 @@ export function verbUpdate(opts = {}) {
       return { ok: false, error: 'unknown_step', step_id: pin_id, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
                message: `--current-step ${pin_id}: no such step in the roadmap.` };
     }
-    const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '';
-    const missing = [];
-    if (!nonEmpty(tip0.next_recommended) && !nonEmpty(surfaces.strip?.next_recommended)) missing.push('next_recommended');
-    if (!nonEmpty(tip0.why_next ?? face_patch0.why_next) && !nonEmpty(surfaces.strip?.why_next)) missing.push('why_next');
+    const missing = missingSpine(surfaces.strip, { next_recommended: tip0.next_recommended, why_next: tip0.why_next ?? face_patch0.why_next });
     if (missing.length) {
       return { ok: false, error: 'spine_required', missing, spelling: SPELLING, verb: verb_name, primary: 'update', project_path,
                message: 'A pin needs a next and a why: pass --next-recommended and --strip-why-next (or have them on the strip).' };
@@ -858,12 +856,11 @@ export function verbUpdate(opts = {}) {
     if (pin_id) {
       written.pinned = pin_id;
       written.unpinned = [];
-      // navigation.current is presentation metadata and needs a course path; a step without
-      // a navigation is pinned by the strip alone (the reader's current_step_id comes first)
+      // a step without a course navigation is pinned by the strip alone (the reader's current_step_id comes first)
       for (const st of pin_steps) {
         const nav = st.navigation && typeof st.navigation === 'object' ? st.navigation : null;
         const isTarget = st.id === pin_id;
-        if (!nav) { if (isTarget) written.navigation_unset = true; continue; }
+        if (!nav) continue;
         if (!isTarget && nav.current !== true) continue;
         if (isTarget && nav.current === true) continue;
         const res = appendRoadmapEventThroughSpine(project_path,

@@ -29,27 +29,30 @@ def _campaign(tmp, close_at, with_flip=False):
     return d
 
 
-def test_a_close_younger_than_a_day_is_not_yet_a_missed_re_read(tmp_path):
+def test_a_close_made_today_with_no_flip_yet_is_not_a_missed_re_read(tmp_path):
     from steward_cockpit import steward_campaign as sc
-    fresh = (datetime.now() - timedelta(hours=2)).isoformat(timespec="seconds")
-    m = sc.read_map(str(_campaign(tmp_path / "fresh", fresh)))
+    today = datetime.now().replace(hour=0, minute=5).isoformat(timespec="seconds")
+    m = sc.read_map(str(_campaign(tmp_path / "fresh", today)))
     assert m["goal_reread"] is True
     st = sc.compose_status(str(tmp_path / "fresh" / "camp"), {"busy": False})
     assert "goal not re-read" not in " ".join(st["now"])
     old = (datetime.now() - timedelta(days=2)).isoformat(timespec="seconds")
-    m = sc.read_map(str(_campaign(tmp_path / "old", old)))
-    assert m["goal_reread"] is False                                        # two days without the flip: the note stands
+    assert sc.read_map(str(_campaign(tmp_path / "old", old)))["goal_reread"] is False           # an older close without a flip: the note stands
     assert sc.read_map(str(_campaign(tmp_path / "flipped", old, with_flip=True)))["goal_reread"] is True
-    m = sc.read_map(str(_campaign(tmp_path / "dated", (datetime.now() - timedelta(days=3)).date().isoformat())))
-    assert m["goal_reread"] is False                                        # a date-only stamp (the CLI's todayIso) reads too
-    assert sc.read_map(str(_campaign(tmp_path / "today", datetime.now().date().isoformat())))["goal_reread"] is True
+    assert sc.read_map(str(_campaign(tmp_path / "dated", (datetime.now() - timedelta(days=3)).date().isoformat())))["goal_reread"] is False
+    assert sc.read_map(str(_campaign(tmp_path / "today", datetime.now().date().isoformat())))["goal_reread"] is True   # the CLI's date-only stamp
+    # a flip at an older North Star revision is never excused by the date
+    d = _campaign(tmp_path / "stale", datetime.now().date().isoformat(), with_flip=True)
+    events = json.loads((d / "roadmap.json").read_text(encoding="utf-8"))
+    events["roadmap_events"][-1]["goal_revision"] = "000000000000"
+    (d / "roadmap.json").write_text(json.dumps(events), encoding="utf-8")
+    assert sc.read_map(str(d))["goal_reread"] is False
 
 
-def test_the_plan_tree_keeps_the_sequence_open_and_folds_the_rest():
+def test_lint_the_plan_tree_keeps_the_sequence_open_and_folds_the_rest():
+    """A source lint, not a behaviour test: the fold rule and its one title."""
     js = Path(__file__).resolve().parents[1].joinpath("steward_cockpit", "static", "shared.js").read_text(encoding="utf-8")
     body = js.split("function renderGroup(g,parent)")[1].split("if(stepRows)model.roots.forEach")[0]
-    assert "const offPath=st=>stepDone(st)||st.status==='parked';" in body
     assert "s.step.navigation.role==='primary'&&!offPath(s.step)" in body              # the open sequence
     assert "s.step.navigation.role!=='primary'||offPath(s.step)" in body                # the fold
-    assert "'Done, parked and supporting steps · '" in body
-    assert "' active — pin one'" in body and "actives.length>1&&!pinned" in body       # the honest count in the title
+    assert "'Done, parked and supporting steps · '" in body and "pin one" not in body   # one sentence for that fact lives in Current work

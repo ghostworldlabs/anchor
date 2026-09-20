@@ -51,6 +51,23 @@ export const STRIP_CLOCK_FIELDS = Object.freeze([
   'uncertainty_flags',
 ]);
 
+/** Word caps on the strip's lead fields (cockpit Wave B: the lead line must fit one row). */
+export const STRIP_WORD_CAPS = Object.freeze({ next_recommended: 15, why_next: 20, human_wait: 15 });
+
+/** {field, words, cap} when a value is over its cap, else null. */
+export function overCap(field, value) {
+  const cap = STRIP_WORD_CAPS[field];
+  if (!cap || typeof value !== 'string') return null;
+  const words = value.trim() ? value.trim().split(/\s+/).length : 0;
+  return words > cap ? { field, words, cap } : null;
+}
+
+/** The spine fields (next_recommended, why_next) neither the strip nor the call supplies. */
+export function missingSpine(strip, extra = {}) {
+  const has = (v) => typeof v === 'string' && v.trim() !== '';
+  return ['next_recommended', 'why_next'].filter((f) => !has(extra[f]) && !has(strip?.[f]));
+}
+
 /** Append-only history bags — silent rewrite of prior entries is forbidden. */
 export const STRIP_HISTORY_FIELDS = Object.freeze(['instruments', 'receipts']);
 

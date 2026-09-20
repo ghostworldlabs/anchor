@@ -24,6 +24,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { northStarRevision, FACE_FILE_NAME } from './face-strip.mjs';
+import { overCap, missingSpine } from './write-authority.mjs';
 import { prepareRefinementEvent, publishRefinementProjections } from './refinement.mjs';
 import { foldRefinements } from './refinement-state.mjs';
 
@@ -491,24 +492,9 @@ function closeOf(event, base) {
   return { step_id, goal_reread };
 }
 
-const SPINE_WORD_CAPS = Object.freeze({ next_recommended: 15, why_next: 20, human_wait: 15 });
 export const GOAL_REREAD = Object.freeze(['reaffirmed', 'rewritten']);
 
-/** Words over the cap on a strip field, else null (cockpit Wave B, the lead line must fit). */
-export function overCap(field, value) {
-  const cap = SPINE_WORD_CAPS[field];
-  if (!cap || typeof value !== 'string') return null;
-  const words = value.trim() ? value.trim().split(/\s+/).length : 0;
-  return words > cap ? { field, words, cap } : null;
-}
-
-/**
- * The steward's close verbs refuse a close until the strip names the step that
- * follows and what the steward will do there (John, 2026-09-19: "status does
- * not say what is next"). A campaign with no open step left needs no next; a
- * step already done is not a close; no strip (a legacy campaign) - nothing to
- * demand. Returns ok:false spine_required | goal_reread_required, else ok.
- */
+/** A steward's close: the strip must name the step that follows with its next and why (within the caps), and the close its goal re-read. */
 export function demandClose(root, base, step_id, goal_reread) {
   const closing = closeOf({ kind: 'status_flip', to: 'done', step_id, goal_reread }, base);
   if (!closing) return { ok: true, demanded: false };
@@ -524,6 +510,7 @@ export function demandClose(root, base, step_id, goal_reread) {
   return { ok: true, demanded: true };
 }
 
+/** No strip (legacy) or no open step left after the close: nothing to demand. */
 export function demandSpineForClose(root, base, step_id) {
   const stripPath = path.join(root, 'strip.json');
   if (!fs.existsSync(stripPath)) return { ok: true, demanded: false };
@@ -533,19 +520,21 @@ export function demandSpineForClose(root, base, step_id) {
   const steps = Array.isArray(base?.roadmap_projection) ? base.roadmap_projection : [];
   const open = steps.filter((st) => st && st.id !== step_id && !['done', 'parked'].includes(st.status));
   if (!open.length) return { ok: true, demanded: false, campaign_done: true };
-  const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '';
-  const missing = [];
-  if (!nonEmpty(strip.current_step_id)) missing.push('current_step_id');
-  else if (strip.current_step_id === step_id) missing.push('current_step_id (still the step being closed)');
-  if (!nonEmpty(strip.next_recommended)) missing.push('next_recommended');
-  if (!nonEmpty(strip.why_next)) missing.push('why_next');
+  const pinned = typeof strip.current_step_id === 'string' ? strip.current_step_id.trim() : '';
+  const stale = pinned === step_id;
+  const missing = [...(pinned && !stale ? [] : ['current_step_id']), ...missingSpine(strip)];
   if (missing.length) {
     return {
       ok: false, error: 'spine_required', closing: step_id, missing,
-      message: 'Close refused: first pin the step that follows and say what comes next - '
+      message: (stale ? 'current_step_id is still the step being closed. ' : '')
+        + 'Close refused: first pin the step that follows and say what comes next - '
         + 'ecgberht update --current-step <id> --next-recommended "<up to 15 words>" --strip-why-next "<up to 20 words>" - then close. '
         + 'A campaign with no open step left needs no next.',
     };
+  }
+  for (const field of ['next_recommended', 'why_next']) {
+    const over = overCap(field, strip[field]);
+    if (over) return { ok: false, error: 'over_cap', ...over, closing: step_id, message: `${field} on the strip is ${over.words} words; the cap is ${over.cap}. Say it shorter, then close.` };
   }
   return { ok: true, demanded: true };
 }
@@ -614,8 +603,7 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
         }
         let law = appendRoadmapEventSpineLaw(base, event, { at: opts.at });
         if (!law.ok) return law;
-        // cockpit Wave B: an accepted close that carries its goal re-read gets its goal_flip from the
-        // ONE writer (the steward's close verbs demand the re-read; engine flips carry none)
+        // an accepted close that carries its goal re-read gets its goal_flip from the one writer
         const closing = closeOf(event, base);
         let goalFlip = null;
         if (closing && GOAL_REREAD.includes(closing.goal_reread) && !law.idempotent) {
@@ -624,7 +612,7 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
           goalFlip = {
             kind: 'goal_flip', step_id: closing.step_id, verdict: closing.goal_reread,
             goal_revision: northStarRevision(face), scope: closing.step_id,
-            receipt: { who: 'engine', why: 'close of ' + closing.step_id },
+            receipt: { who: event.receipt?.who ?? event.operation?.human?.who ?? 'steward', why: 'close of ' + closing.step_id },
             ...(opts.at ? { at: opts.at } : {}),
           };
           const flipLaw = appendRoadmapEventSpineLaw(law.roadmap, goalFlip, { at: opts.at });

@@ -302,21 +302,17 @@ def refinement_items(campaign_dir, state):
     return items
 
 
-def _closed_within_a_day(roadmap, step_id):
-    """True when the step's last status_flip to done is less than a day old."""
+def _closed_today(roadmap, step_id):
+    """True when the step's last status_flip to done is stamped today (the CLI stamps a date)."""
     from datetime import datetime as _dt
     try:
         flips = [ev for ev in (roadmap or {}).get("roadmap_events") or []
                  if ev.get("kind") == "status_flip" and ev.get("to") == "done" and str(ev.get("step_id")) == str(step_id)]
-        if not flips:
-            return False
-        at = str(flips[-1].get("at") or "").strip()
+        at = str(flips[-1].get("at") or "").strip() if flips else ""
         when = _dt.fromisoformat(at.replace("Z", "+00:00")) if at else None
-        if when is None:
-            return False
-        if when.tzinfo is not None:
+        if when is not None and when.tzinfo is not None:
             when = when.astimezone().replace(tzinfo=None)
-        return (_dt.now() - when).total_seconds() < 86400
+        return when is not None and when.date() == _dt.now().date()
     except Exception:
         return False
 
@@ -472,12 +468,11 @@ def read_map(campaign_dir: str):
     flip_revision = str((last_flip or {}).get("goal_revision") or "")
     revision_ok = not flip_revision or flip_revision == goal_revision
     # No close yet → nothing to re-read. A close without a matching goal_flip
-    # is the Math Review hole (goal frozen after the slice that falsified it).
-    # The engine appends the flip at close (cockpit Wave B); a close younger
-    # than a day is not yet a missed re-read.
+    # is the Math Review hole (goal frozen after the slice that falsified it);
+    # a close made today with no flip yet is not one (the engine writes the flip).
     goal_reread = (not last_done_id) or (
-        bool(last_flip) and last_flip_step == last_done_id and revision_ok) or \
-        _closed_within_a_day(roadmap, last_done_id)
+        bool(last_flip) and last_flip_step == last_done_id and revision_ok) or (
+        last_flip_step != last_done_id and _closed_today(roadmap, last_done_id))
     if last_done_id and last_flip and last_flip_step == last_done_id and not revision_ok:
         gaps.append("North Star changed since its last re-read (goal_flip at " + str(last_flip.get("at") or "?")
                     + " read revision " + flip_revision + ", now " + goal_revision + ")")

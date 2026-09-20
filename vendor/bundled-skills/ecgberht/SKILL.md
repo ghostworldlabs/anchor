@@ -357,16 +357,11 @@ Elegance rule 9: a correction that lives only in a journal has not been made).**
   session. **No in-process Shark swarm** (`in_process_shark_tank: false`); that
   is Crucible, only when commissioned. Commission Crucible/Foreman only when
   the session cannot hold the work AND the step has a `gate` (a command that
-  can fail). **A close states the next act (cockpit Wave B, 2026-09-20).** Before you close a step,
-  pin the one that follows and say what you will do there: `ecgberht update --current-step <id>
-  --next-recommended "<up to 15 words>" --strip-why-next "<up to 20 words>"` (`--human-wait` up to 15
-  words; over a cap the write is refused with the count). The close itself — `roadmap-set --step <id>
-  --status done --who … --reason … --goal-reread reaffirmed|rewritten`, or `goal_reread` on the
-  refinement `close` operation — is refused (`spine_required`) until the strip names the step that
-  follows with its next and why (a campaign with no open step left needs none), and refused
-  (`goal_reread_required`) without the re-read; the engine then appends the `goal_flip` itself with
-  the North Star's revision and the closed step as `scope`. Update the Face if rewritten; then
-  recommend whether to move on — he decides.
+  can fail). **A close states the next act (2026-09-20).** First pin the step that follows with its
+  next and why (`ecgberht update --current-step <id> --next-recommended … --strip-why-next …`); then
+  close with `--goal-reread reaffirmed|rewritten` (or `goal_reread` on the refinement close) — the
+  engine refuses a close without either and writes the `goal_flip` itself. Update the Face if
+  rewritten; then recommend whether to move on — he decides.
 
 **The Grasscatcher capacity — 2026-08-19 (John's commission).** The grasscatch
 list is a first-class conversational duty, not just a verb. It is the talking
