@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 from steward_cockpit.question_context import (save_question_context, normalize_question_context,
-                                               has_recommendation as _has_recommendation, wait_hash)
+                                               has_recommendation as _has_recommendation)
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "proto-state.json"
@@ -547,8 +547,7 @@ class Engine:
         # cleared only by a human message — keying it on the question STRING
         # looped, because the nudge's own re-ask rewords the question.
         self._decision_nudged = False
-        self._reasked_answered = None       # an answered question the steward asked again (told once)
-        self._reask_told = set()
+        self._reasked_answered = None       # an answered question the steward asked again
         self.cond = threading.Condition()
         self.busy = False
         # never-lose: restore undelivered words from the durable record so a
@@ -1463,13 +1462,7 @@ class Engine:
                         return {"ok": False, "error": "Question response context could not be saved"}
                     self.question_history = history
                     if not (answer_context.get("authorization_scope") or {}).get("request_id"):
-                        # a decision (not a product review): the ENGINE records the answer on the strip
-                        # with the wait text that stood, so the reader can drop that wait until the
-                        # steward restates it - never the steward's memory
-                        self._strip_receipt({"kind": "decision_answered", "question_id": answer_context.get("id"),
-                                             "question": str(answer_context.get("question") or "")[:200],
-                                             "answer": text[:300],
-                                             "human_wait_hash": wait_hash(self._read_strip().get("human_wait"))})
+                        self._strip_clear_wait()    # a decision answered: the wait on John is over (C2)
 
                 if wait.get("managed_refinement"):
                     # Conversation and drive controls never resolve a review.
@@ -2358,13 +2351,12 @@ class Engine:
                         step_id = request.get("step_id") or self._read_strip().get("current_step_id")
                         prior = self.question_context if isinstance(self.question_context, dict) else None
                         answered = self._answered_before(sentences[-1], step_id)
-                        if answered and answered["question"].get("id") not in self._reask_told:
-                            # answered means retired: the same question on the same step is not pinned again
-                            self._reask_told.add(answered["question"].get("id"))
-                            self._reasked_answered = answered
-                            self._emit({"t": "sys", "tick": True,
-                                        "text": "asked again after John answered it - his answer: \""
-                                                + str(answered.get("answer") or "")[:160] + "\""})
+                        if answered:
+                            # answered means retired: never pinned again; the steward is told once
+                            if not answered.get("reask_told_at"):
+                                answered["reask_told_at"] = time.time()
+                                _update_state(self.skey(), {"question_history": self.question_history})
+                                self._reasked_answered = answered
                         else:
                             self.open_question = sentences[-1]
                             self.open_question_kind = _question_kind(
@@ -2375,13 +2367,12 @@ class Engine:
                             replaced = (prior if (prior and not origin_id and prior.get("question") != self.open_question
                                         and (prior.get("authorization_scope") or {}).get("step_id") == step_id) else None)
                             self.question_context = save_question_context(self.open_question, txt,
-                                asked_at=time.time(), source_ref="Cockpit conversation " + completed_turn_id,
+                                asked_at=time.time(), source_ref="Cockpit conversation",
                                 scope={"request_id":request.get("id"), "step_id":step_id,
                                        "presentation_id":request.get("presentation_id"),
                                        "source_turn_id":completed_turn_id,
                                        "work_digest":question_attention.get("work_digest")},
                                 origin_id=origin_id,
-                                supersedes=replaced.get("id") if replaced else None,
                                 what_changed=replaced.get("question") if replaced else None)
                             pinned_now = True
 
@@ -2466,9 +2457,9 @@ class Engine:
                         "in plain words and nothing else: two or three "
                         "sentences of context (assume he has been away and "
                         "holds none of it), then what you RECOMMEND and one "
-                        "line of why, then the realistic alternatives in a "
-                        "phrase each with the trade-off, then the question as "
-                        "the LAST line, answerable in one word.")
+                        "line of why, then the realistic alternatives as bullet "
+                        "lines, a phrase each with the trade-off, then the "
+                        "question as the LAST line, answerable in one word.")
                 else:
                     if txt:
                         self._human_asked = False
@@ -2839,17 +2830,30 @@ class Engine:
             pass
 
     def _answered_before(self, question, step_id):
-        """The history entry that already answered this question on this step
-        (the same words, whitespace and punctuation aside), else None."""
-        norm = lambda v: re.sub(r"[\W_]+", " ", str(v or "").lower()).strip()
+        """The history entry that already answered this very question on this
+        step, else None."""
         for entry in reversed(getattr(self, "question_history", None) or []):
             saved = entry.get("question") if isinstance(entry, dict) else None
-            if not isinstance(saved, dict) or not norm(saved.get("question")):
-                continue
-            if norm(saved.get("question")) == norm(question) and \
-                    (saved.get("authorization_scope") or {}).get("step_id") == step_id:
+            if isinstance(saved, dict) and str(saved.get("question") or "").strip() == str(question or "").strip() \
+                    and (saved.get("authorization_scope") or {}).get("step_id") == step_id:
                 return entry
         return None
+
+    def _strip_clear_wait(self):
+        """John answered a decision: the wait on him is over. The engine's one
+        strip field, one atomic write under the process lock, never minting a
+        strip that does not exist (a product review's wait is the ledger's)."""
+        path = Path(self.dir) / "strip.json"
+        with _paths.WRITE_LOCK:
+            if not path.is_file():
+                return
+            strip = self._read_strip()
+            if not strip or not str(strip.get("human_wait") or "").strip():
+                return
+            strip["human_wait"] = ""
+            tmp = path.with_suffix(".json.engine.tmp")
+            tmp.write_text(json.dumps(strip, indent=1, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
 
     def _read_strip(self):
         path = Path(self.dir) / "strip.json"

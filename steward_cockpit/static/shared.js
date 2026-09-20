@@ -81,8 +81,11 @@ const Proto = (() => {
     host.textContent = "";
     const pending = () => (lastState && lastState.pending_questions) || [];
     const gone = (btn) => { btn.disabled = true; host.appendChild(el("p", "", "This question changed or was resolved. Open the current question.")); };
-    // four short lines (~60 words): the stake · the recommendation (the first button) and why · the alternatives · the question
-    if (q.stake) host.appendChild(el("p", "action-stake", oneLine(q.stake, 160)));
+    // four short lines under ONE ~60-word budget: the stake · the recommendation (the first button) and why · the alternatives · the question
+    let budget = 360;
+    const take = (text, cap) => { const t = oneLine(text, Math.max(24, Math.min(cap, budget))); budget -= t.length; return t; };
+    if (q.stake) host.appendChild(el("p", "action-stake", take(q.stake, 160)));
+    if (!q.recommendation) host.appendChild(el("p", "action-rec dim", "no recommendation given"));
     if (q.recommendation) {
       const row = el("p", "action-rec");
       const accept = el("button", "action-accept", "Accept recommendation");
@@ -96,12 +99,11 @@ const Proto = (() => {
         else accept.disabled = false;
       };
       row.appendChild(accept);
-      row.appendChild(el("span", "action-rectext", " " + oneLine(q.recommendation, 160) + (q.why ? " \u2014 " + oneLine(q.why, 120) : "")));
+      row.appendChild(el("span", "action-rectext", " " + take(q.recommendation, 160) + (q.why ? " \u2014 " + take(q.why, 120) : "")));
       host.appendChild(row);
     }
-    if ((q.alternatives || []).length)
-      host.appendChild(el("p", "action-alts", "Or: " + q.alternatives.slice(0, 3).map(a => oneLine(a, 90)).join(" \u00b7 ")));
-    if (q.what_changed) host.appendChild(el("p", "sdmeta", "Replaces: " + oneLine(q.what_changed, 120)));
+    if ((q.alternatives || []).length && budget > 24)
+      host.appendChild(el("p", "action-alts", "Or: " + q.alternatives.slice(0, 3).map(a => take(a, 90)).join(" \u00b7 ")));
     if (q.id) {
       const answer = el("button", "", "Answer this question");
       answer.onclick = (ev) => {
@@ -123,6 +125,7 @@ const Proto = (() => {
     const scopeBits = [scope.step_id, scope.presentation_id, scope.request_id, scope.product_id].filter(Boolean);
     if (scopeBits.length) more.appendChild(el("p", "sdmeta", "Applies to " + scopeBits.join(" \u00b7 ")));
     if (q.authorization) more.appendChild(el("p", "sdmeta", "An answer would " + q.authorization));
+    if (q.what_changed) more.appendChild(el("p", "sdmeta", "Replaces: " + oneLine(q.what_changed, 120)));
     host.appendChild(more);
     if (scope.source_turn_id) {
       const source = el("button", "", "Original exchange");

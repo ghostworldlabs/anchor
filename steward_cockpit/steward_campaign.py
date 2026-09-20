@@ -1028,16 +1028,6 @@ def _slice_started_epoch(campaign_dir, step_id):
     return best
 
 
-def _answered_since(heartbeat):
-    """True when the newest decision_answered receipt the engine wrote carries
-    the hash of the strip's CURRENT human_wait: John answered while that wait
-    stood and the steward has not restated it."""
-    from .question_context import wait_hash
-    receipts = [r for r in (heartbeat or {}).get("receipts") or []
-                if isinstance(r, dict) and r.get("kind") == "decision_answered"]
-    return bool(receipts) and receipts[-1].get("human_wait_hash") == wait_hash((heartbeat or {}).get("human_wait"))
-
-
 def _real_wait(text):
     """A strip that says "none" / "-" is not waiting on anyone (the Blocker row
     read "waiting on you: none" on a live effort, 2026-09-04)."""
@@ -1402,8 +1392,6 @@ def compose_status(campaign_dir: str, engine_state=None):
         plan_step = active["name"] if active else "(no active step)"
     next_text = (m["heartbeat"]["next_recommended"] or "").strip()
     waiting = _real_wait((m["heartbeat"]["human_wait"] or "").split("\u00b7")[0].strip())
-    if waiting and _answered_since(m["heartbeat"]):
-        waiting = ""                    # John answered while this wait stood (engine receipt); not restated since
     if "pending_request" in m["heartbeat"]:
         pending = m["heartbeat"]["pending_request"]
         if pending is None:

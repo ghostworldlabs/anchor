@@ -4,11 +4,11 @@ STUB GATE for PLAN.md v3 rows C1–C3 (Skill Foundry/planning/cockpit-workflow-2
 
 - C1 one matcher, one record: parse_decision reads the decision shape (stake, recommendation, why,
   alternatives, the question) from the tail of a turn; has_recommendation IS the engine's check.
-- C2 two wait authorities: the ENGINE stamps John's answer to a decision on the strip as a receipt carrying
-  the wait text that stood; the reader drops that wait until the steward restates it.
-- C3 answered means retired: the reshape re-ask keeps the decision's identity; a verbatim re-ask of an
-  answered question on the same step is not pinned and the steward is told once; a changed question
-  names what it replaces.
+- C2 two wait authorities: a product review's wait is the ledger's; for a decision the ENGINE records
+  John's answer and clears the strip's human_wait in the same turn.
+- C3 answered means retired: the turn leaves the identity (the same question on the same work is the same
+  question); the reshape re-ask keeps the decision's identity; an answered question asked again is never
+  pinned and the steward is told once; a changed question names what it replaces.
 """
 import json
 from pathlib import Path
@@ -32,14 +32,13 @@ def finish(engine, text):
 
 def test_the_one_parser_reads_the_decision_shape():
     d = qc.parse_decision(SHAPED)
-    assert d == {"question": "Keep it?",
-                 "stake": "The guide gates the build path and John has been away.",
-                 "recommendation": "I recommend keeping this version.",
-                 "why": "It already passed the independent check.",
-                 "alternatives": ["Alternatively we redo the intro, which costs a day."]}
-    bullets = "Context.\n**Recommendation:** ship v2.\n- keep v1 (safer, later)\n- redo both (a week)\nShip?"
+    assert d["recommendation"] == "I recommend keeping this version."
+    assert d["stake"] == "The guide gates the build path and John has been away."
+    assert d["why"] == "It already passed the independent check."
+    assert d["alternatives"] == []                                          # prose is not an alternative; bullets are
+    bullets = "Context.\n**Recommendation:** ship v2.\nIt is the smaller change.\n- keep v1 (safer, later)\n- redo both (a week)\nShip?"
     d = qc.parse_decision(bullets)
-    assert d["recommendation"] == "**Recommendation:** ship v2." and d["why"] == ""
+    assert d["recommendation"] == "**Recommendation:** ship v2." and d["why"] == "It is the smaller change."
     assert d["alternatives"] == ["- keep v1 (safer, later)", "- redo both (a week)"]
     assert qc.parse_decision("Nothing decided here. What now?")["recommendation"] == ""
 
@@ -53,18 +52,21 @@ def test_has_recommendation_is_the_engine_check():
 
 
 def test_the_record_carries_the_shape_and_keeps_its_origin_through_normalize():
-    saved = qc.save_question_context("Keep it?", SHAPED, asked_at=1, source_ref="turn:1", scope={"step_id": "s2"})
+    saved = qc.save_question_context("Keep it?", SHAPED, asked_at=1, source_ref="Cockpit conversation",
+                                     scope={"step_id": "s2", "source_turn_id": "t1"})
     assert saved["stake"].startswith("The guide gates") and saved["why"].startswith("It already passed")
-    assert saved["alternatives"] == ["Alternatively we redo the intro, which costs a day."]
-    reshaped = qc.save_question_context("Keep this version?", SHAPED, asked_at=2, source_ref="turn:2",
+    later = qc.save_question_context("Keep it?", "other words", asked_at=2, source_ref="Cockpit conversation",
+                                     scope={"step_id": "s2", "source_turn_id": "t2"})
+    assert later["id"] == saved["id"]                                        # the turn leaves the identity
+    assert qc.save_question_context("Keep it?", SHAPED, asked_at=2, source_ref="Cockpit conversation",
+                                    scope={"step_id": "s3", "source_turn_id": "t1"})["id"] != saved["id"]
+    reshaped = qc.save_question_context("Keep this version?", SHAPED, asked_at=2, source_ref="Cockpit conversation",
                                         scope={"step_id": "s2"}, origin_id=saved["id"])
     assert reshaped["id"] == saved["id"] and reshaped["origin_id"] == saved["id"]
     again = qc.normalize_question_context(json.loads(json.dumps(reshaped)))
     assert again["id"] == saved["id"] and again["stake"] == reshaped["stake"] and again["why"] == reshaped["why"]
     assert qc.save_question_context("Q?", "x", asked_at=1, origin_id="not-a-hash")["origin_id"] is None
-    changed = qc.save_question_context("Ship v2?", SHAPED, asked_at=3, scope={"step_id": "s2"},
-                                       supersedes=saved["id"], what_changed=saved["question"])
-    assert qc.normalize_question_context(changed)["supersedes"] == saved["id"]
+    changed = qc.save_question_context("Ship v2?", SHAPED, asked_at=3, scope={"step_id": "s2"}, what_changed=saved["question"])
     assert qc.normalize_question_context(changed)["what_changed"] == "Keep it?"
 
 
@@ -97,7 +99,9 @@ def test_an_answered_question_asked_again_is_not_pinned_and_the_steward_is_told_
     told = [t for t in sent if "already answered this question" in t]
     assert len(told) == 1 and '"Keep it"' in told[0]
     finish(cockpit, "Once more. I recommend keeping this version. Keep it?")
+    assert cockpit.state()["question_context"] is None                              # still retired
     assert len([t for t in sent if "already answered this question" in t]) == 1     # told once
+    assert cockpit.question_history[-1]["reask_told_at"]
     finish(cockpit, "A new one. I recommend the short intro. Cut the intro?")       # a genuinely new question pins
     assert cockpit.state()["question_context"]["question"] == "Cut the intro?"
     assert cockpit.state()["decision_history"][-1]["answer"] == "Keep it"
@@ -110,12 +114,12 @@ def test_a_changed_question_while_one_is_open_names_what_it_replaces(cockpit, mo
     first = cockpit.state()["question_context"]
     finish(cockpit, "Thinking again. I recommend the short intro. Cut the intro instead?")
     second = cockpit.state()["question_context"]
-    assert second["id"] != first["id"] and second["supersedes"] == first["id"] and second["what_changed"] == "Keep it?"
+    assert second["id"] != first["id"] and second["what_changed"] == "Keep it?"
 
 
 # ── C2 ────────────────────────────────────────────────────────────────────────
 
-def test_the_engine_stamps_the_answer_and_the_reader_drops_the_wait_until_restated(cockpit, monkeypatch):
+def test_the_engine_records_the_answer_and_clears_the_wait(cockpit, monkeypatch):
     from steward_cockpit import steward_campaign as sc
     d = Path(cockpit.dir)
     (d / "ECGBERHT.md").write_text("## North star\n\nShip the guide.\n", encoding="utf-8")
@@ -131,18 +135,14 @@ def test_the_engine_stamps_the_answer_and_the_reader_drops_the_wait_until_restat
     finish(cockpit, SHAPED)
     saved = cockpit.state()["question_context"]
     assert cockpit.say("Keep it", question_id=saved["id"])["ok"]
-    receipts = json.loads((d / "strip.json").read_text(encoding="utf-8"))["receipts"]
-    assert receipts[-1]["kind"] == "decision_answered" and receipts[-1]["answer"] == "Keep it"
-    assert receipts[-1]["question_id"] == saved["id"] and receipts[-1]["human_wait_hash"] == qc.wait_hash(strip["human_wait"])
+    after = json.loads((d / "strip.json").read_text(encoding="utf-8"))
+    assert after["human_wait"] == "" and after["next_recommended"] == "Keep the guide"        # one field cleared, the rest untouched
+    assert cockpit.question_history[-1]["answer"] == "Keep it"
     st = sc.compose_status(str(d), {"busy": False})
     assert st["plan"]["waiting_on_you"] == "" and "waiting on you" not in st["lead_line"]     # answered: not a wait
-    strip = json.loads((d / "strip.json").read_text(encoding="utf-8"))
-    strip["human_wait"] = "John: read chapter 2"                                            # the steward restates the wait
-    (d / "strip.json").write_text(json.dumps(strip), encoding="utf-8")
-    assert sc.compose_status(str(d), {"busy": False})["plan"]["waiting_on_you"] == "John: read chapter 2"
 
 
-def test_a_product_review_answer_writes_no_decision_receipt(cockpit, monkeypatch):
+def test_a_product_review_answer_leaves_the_strip_alone(cockpit, monkeypatch):
     d = Path(cockpit.dir)
     (d / "strip.json").write_text(json.dumps({"schema": "ecgberht-strip-v0", "human_wait": "review it", "receipts": []}), encoding="utf-8")
     request = {"id": "review-1", "step_id": "s2", "presentation_id": "p1", "purpose": "Review this guide", "source_message": "The guide."}
@@ -150,7 +150,7 @@ def test_a_product_review_answer_writes_no_decision_receipt(cockpit, monkeypatch
     monkeypatch.setattr(cockpit, "_send_locked", lambda text, **kw: True)
     saved = cockpit.state()["pending_questions"][0]
     assert cockpit.say("Looks good", question_id=saved["id"])["ok"]
-    assert json.loads((d / "strip.json").read_text(encoding="utf-8"))["receipts"] == []    # the ledger owns a review's wait
+    assert json.loads((d / "strip.json").read_text(encoding="utf-8"))["human_wait"] == "review it"   # the ledger owns a review's wait
 
 
 # ── the tile ──────────────────────────────────────────────────────────────────
@@ -158,8 +158,5 @@ def test_a_product_review_answer_writes_no_decision_receipt(cockpit, monkeypatch
 def test_the_tile_is_four_lines_with_the_recommendation_as_the_first_button():
     js = Path(__file__).resolve().parents[1].joinpath("steward_cockpit", "static", "shared.js").read_text(encoding="utf-8")
     body = js.split("function fillQuestionPanel(host, q)")[1].split("function paintActionNeeded")[0]
-    order = [body.index(k) for k in ('"action-stake"', '"Accept recommendation"', '"action-alts"', '"Answer this question"',
-                                     'el("details", "action-context")', '"Earlier decisions')]
-    assert order == sorted(order)                                            # stake · recommendation · alternatives · question · the rest
-    assert body.index('"Accept recommendation"') < body.index('"question-source"')   # the literal context sits behind the disclosure
-    assert "oneLine(q.recommendation, 160)" in body and "oneLine(q.stake, 160)" in body
+    assert body.index('"Accept recommendation"') < body.index('el("details", "action-context")') < body.index('"question-source"')
+    assert "let budget = 360;" in body and '"no recommendation given"' in body   # one ~60-word budget; honest when the parser finds none

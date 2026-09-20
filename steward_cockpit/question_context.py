@@ -29,8 +29,6 @@ RECOMMEND_RE = re.compile(
 RECOMMEND_TAIL = 1200
 
 _LIST_MARK = re.compile(r"^(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)")
-_ALT_RE = re.compile(r"^(?:alternative(?:s|ly)?\b|or\b|otherwise\b|else\b|instead\b|failing that\b"
-                     r"|the other (?:option|route|path|way)\b|option [a-z0-9]+\b)", re.I)
 
 
 def _clean(line):
@@ -52,12 +50,11 @@ def _sentences(text):
 
 
 def parse_decision(text):
-    """The decision shape read from the TAIL of a turn: the question (the last
-    sentence ending in ?), the recommendation (the last marker sentence before
-    it, with words beyond the marker), why (the sentence after it), the
-    alternatives (marked sentences between the recommendation and the question)
-    and the stake (up to two sentences before the recommendation). Every field
-    is verbatim text, bounded; "" or [] when the shape is not there."""
+    """The decision shape read from the TAIL of a turn, before its last question:
+    the recommendation (the last marker sentence with words beyond the marker),
+    why (the sentence after it), the alternatives (bullet lines between the
+    recommendation and the question, at most three) and the stake (the one
+    sentence before the recommendation). Verbatim, bounded; "" / [] when absent."""
     sents = _sentences((text or "")[-RECOMMEND_TAIL:])
     q_idx = next((i for i in range(len(sents) - 1, -1, -1) if sents[i][1].endswith("?")), None)
     scan_end = q_idx if q_idx is not None else len(sents)
@@ -67,18 +64,17 @@ def parse_decision(text):
         if m and re.search(r"\w", sents[i][1][m.end():]):
             rec_idx = i
             break
-    out = {"question": sents[q_idx][0][:400] if q_idx is not None else "",
-           "stake": "", "recommendation": "", "why": "", "alternatives": []}
+    out = {"stake": "", "recommendation": "", "why": "", "alternatives": []}
     if rec_idx is None:
         return out
-    out["recommendation"] = sents[rec_idx][0][:MAX_CONTEXT_CHARS if len(sents[rec_idx][0]) <= 240 else 240]
-    stake = [v for v, c, _b in sents[max(0, rec_idx - 2):rec_idx] if not c.endswith("?")]
-    out["stake"] = " ".join(stake)[:240]
+    out["recommendation"] = sents[rec_idx][0][:240]
+    if rec_idx and not sents[rec_idx - 1][1].endswith("?"):
+        out["stake"] = sents[rec_idx - 1][0][:240]
     after = sents[rec_idx + 1:scan_end]
-    if after and not _ALT_RE.match(after[0][1]) and not after[0][2] and not after[0][1].endswith("?"):
+    if after and not after[0][2] and not after[0][1].endswith("?"):
         out["why"] = after[0][0][:200]
         after = after[1:]
-    out["alternatives"] = [v[:160] for v, c, b in after if (_ALT_RE.match(c) or b) and not c.endswith("?")][:3]
+    out["alternatives"] = [v[:160] for v, c, b in after if b and not c.endswith("?")][:3]
     return out
 
 
@@ -87,12 +83,6 @@ def has_recommendation(text) -> bool:
     only: a recommendation buried in a long narrative is not one about the
     question asked at the end)."""
     return bool(parse_decision(text)["recommendation"])
-
-
-def wait_hash(text) -> str:
-    """The identity of a wait text (whitespace-folded), for the engine's
-    decision_answered receipt and the reader that honours it."""
-    return hashlib.sha256(" ".join(str(text or "").split()).encode("utf-8")).hexdigest()[:16]
 
 
 def _json_copy(value):
@@ -115,7 +105,7 @@ def _source_window(response_text, question):
 
 
 def save_question_context(question, response_text, *, asked_at, source_ref="", scope=None,
-                          origin_id=None, supersedes=None, what_changed=None):
+                          origin_id=None, what_changed=None):
     """Return a JSON snapshot, preserving the question and original source ref.
 
     ``context`` is a literal source substring of at most 12,000 characters.
@@ -123,12 +113,13 @@ def save_question_context(question, response_text, *, asked_at, source_ref="", s
     the source and fits. The separate ``question`` field is always exact, even
     for questions longer than that bound. ``truncated`` signals lost context.
 
-    The stable ID binds question, source reference, and JSON authorization scope;
-    a changed timestamp or context window alone does not create a new identity.
-    ``origin_id`` (a reshaped re-ask of the same decision) makes THAT the identity:
-    the shape changed, the decision did not. ``supersedes``/``what_changed`` name
-    the open question this one replaces. Invalid strings or non-JSON
-    scope/timestamps raise TypeError or ValueError.
+    The stable ID binds question, source reference, and JSON authorization scope
+    minus the turn (``source_turn_id``): the same question asked again on the
+    same work is the same question; a changed timestamp, context window or turn
+    alone does not create a new identity. ``origin_id`` (a reshaped re-ask of the
+    same decision) makes THAT the identity: the shape changed, the decision did
+    not. ``what_changed`` is the open question this one replaces. Invalid strings
+    or non-JSON scope/timestamps raise TypeError or ValueError.
     """
     if not isinstance(question, str) or not isinstance(response_text, str):
         raise TypeError("question and response_text must be strings")
@@ -140,7 +131,8 @@ def save_question_context(question, response_text, *, asked_at, source_ref="", s
     authorization_scope = _json_copy(scope)
     context, truncated = _source_window(response_text, question)
     identity = json.dumps(
-        [question, source_ref, authorization_scope],
+        [question, source_ref, {k: v for k, v in authorization_scope.items() if k != "source_turn_id"}
+         if isinstance(authorization_scope, dict) else authorization_scope],
         ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
     )
     shape = parse_decision(response_text)
@@ -158,7 +150,6 @@ def save_question_context(question, response_text, *, asked_at, source_ref="", s
         "asked_at": _json_copy(asked_at),
         "source_ref": source_ref,
         "origin_id": origin,
-        "supersedes": supersedes if isinstance(supersedes, str) else None,
         "what_changed": str(what_changed)[:400] if isinstance(what_changed, str) else None,
     }
 
@@ -186,8 +177,7 @@ def normalize_question_context(value):
             asked_at=value.get("asked_at"),
             source_ref=source_ref if isinstance(source_ref, str) else "",
             scope=value.get("authorization_scope", value.get("scope")),
-            origin_id=value.get("origin_id"), supersedes=value.get("supersedes"),
-            what_changed=value.get("what_changed"),
+            origin_id=value.get("origin_id"), what_changed=value.get("what_changed"),
         )
     except (TypeError, ValueError, OverflowError):
         return None
