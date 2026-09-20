@@ -133,8 +133,16 @@ function escapeRegExp(s) {
  * @param {string} markdown the Face
  */
 export function northStarRevision(markdown) {
+  // the reader's own section walk: a "## " heading opens a section, the next one closes it (an empty section is empty)
+  const body = [];
+  let inside = false;
+  for (const raw of String(markdown ?? '').split(/\r?\n/)) {
+    const heading = raw.match(/^##\s+(.+?)\s*$/);
+    if (heading) { inside = heading[1].trim().toLowerCase() === 'north star'; continue; }
+    if (inside) body.push(raw);
+  }
   const lines = [];
-  for (const raw of String(sectionBody(String(markdown ?? ''), 'North star')).split(/\r?\n/)) {
+  for (const raw of body) {
     const line = raw.replace(/^\s*>\s?/, '').replace(/\*\*/g, '');
     if (/^\s*-{3,}\s*$/.test(line)) continue;
     lines.push(line);
