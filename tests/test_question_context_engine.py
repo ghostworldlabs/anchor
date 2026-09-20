@@ -25,7 +25,7 @@ def test_answer_context_is_saved_and_delivered_without_minting_acceptance(cockpi
     monkeypatch.setattr(cockpit,'_attention',lambda:{'state':'quiet'})
     finish(cockpit,'This affects the plan.\nI recommend one shared method.\nUse one shared method?')
     saved=cockpit.state()['question_context'];sent=[]
-    monkeypatch.setattr(cockpit,'_send_locked',lambda text:(sent.append(text),True)[1])
+    monkeypatch.setattr(cockpit,'_send_locked',lambda text,**kw:(sent.append(text),True)[1])
     assert cockpit.say('Yes',question_id=saved['id'])['ok']
     assert len(sent)==1 and saved['question'] in sent[0]
     assert 'not automatic acceptance' in sent[0]

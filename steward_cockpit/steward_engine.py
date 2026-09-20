@@ -33,7 +33,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from steward_cockpit.question_context import save_question_context, normalize_question_context
+from steward_cockpit.question_context import (save_question_context, normalize_question_context,
+                                               has_recommendation as _has_recommendation, wait_hash)
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "proto-state.json"
@@ -546,6 +547,8 @@ class Engine:
         # cleared only by a human message — keying it on the question STRING
         # looped, because the nudge's own re-ask rewords the question.
         self._decision_nudged = False
+        self._reasked_answered = None       # an answered question the steward asked again (told once)
+        self._reask_told = set()
         self.cond = threading.Condition()
         self.busy = False
         # never-lose: restore undelivered words from the durable record so a
@@ -730,6 +733,9 @@ class Engine:
             "open_question_kind": question_kind,
             "question_context": contexts[0] if contexts else None,
             "pending_questions": contexts,
+            "decision_history": [{"question": str((e.get("question") or {}).get("question") or "")[:200],
+                                  "answer": str(e.get("answer") or "")[:200], "answered_at": e.get("answered_at")}
+                                 for e in (getattr(self, "question_history", None) or [])[-5:]],
             "epoch": self.epoch,
         }
 
@@ -1456,6 +1462,14 @@ class Engine:
                     if not _update_state(self.skey(), {"question_history":history}):
                         return {"ok": False, "error": "Question response context could not be saved"}
                     self.question_history = history
+                    if not (answer_context.get("authorization_scope") or {}).get("request_id"):
+                        # a decision (not a product review): the ENGINE records the answer on the strip
+                        # with the wait text that stood, so the reader can drop that wait until the
+                        # steward restates it - never the steward's memory
+                        self._strip_receipt({"kind": "decision_answered", "question_id": answer_context.get("id"),
+                                             "question": str(answer_context.get("question") or "")[:200],
+                                             "answer": text[:300],
+                                             "human_wait_hash": wait_hash(self._read_strip().get("human_wait"))})
 
                 if wait.get("managed_refinement"):
                     # Conversation and drive controls never resolve a review.
@@ -2339,18 +2353,37 @@ class Engine:
                                  re.split(r"(?<=[.!?])\s+", txt)
                                  if s.strip().endswith("?")]
                     if sentences and (not question_attention.get("managed_refinement") or
-                            question_attention.get("pending_request") or re.search(r"\b(?:I recommend|Recommendation\s*:)", txt, re.I)):
-                        self.open_question = sentences[-1]
-                        self.open_question_kind = _question_kind(
-                            self.open_question)
+                            question_attention.get("pending_request") or _has_recommendation(txt)):
                         request = question_attention.get("pending_request") or {}
-                        self.question_context = save_question_context(self.open_question, txt,
-                            asked_at=time.time(), source_ref="Cockpit conversation " + completed_turn_id,
-                            scope={"request_id":request.get("id"), "step_id":request.get("step_id"),
-                                   "presentation_id":request.get("presentation_id"),
-                                   "source_turn_id":completed_turn_id,
-                                   "work_digest":question_attention.get("work_digest")})
-                        pinned_now = True
+                        step_id = request.get("step_id") or self._read_strip().get("current_step_id")
+                        prior = self.question_context if isinstance(self.question_context, dict) else None
+                        answered = self._answered_before(sentences[-1], step_id)
+                        if answered and answered["question"].get("id") not in self._reask_told:
+                            # answered means retired: the same question on the same step is not pinned again
+                            self._reask_told.add(answered["question"].get("id"))
+                            self._reasked_answered = answered
+                            self._emit({"t": "sys", "tick": True,
+                                        "text": "asked again after John answered it - his answer: \""
+                                                + str(answered.get("answer") or "")[:160] + "\""})
+                        else:
+                            self.open_question = sentences[-1]
+                            self.open_question_kind = _question_kind(
+                                self.open_question)
+                            # the reshape re-ask keeps the decision's identity; a changed
+                            # question while one is open names what it replaces
+                            origin_id = prior.get("id") if (prior and self._decision_nudged) else None
+                            replaced = (prior if (prior and not origin_id and prior.get("question") != self.open_question
+                                        and (prior.get("authorization_scope") or {}).get("step_id") == step_id) else None)
+                            self.question_context = save_question_context(self.open_question, txt,
+                                asked_at=time.time(), source_ref="Cockpit conversation " + completed_turn_id,
+                                scope={"request_id":request.get("id"), "step_id":step_id,
+                                       "presentation_id":request.get("presentation_id"),
+                                       "source_turn_id":completed_turn_id,
+                                       "work_digest":question_attention.get("work_digest")},
+                                origin_id=origin_id,
+                                supersedes=replaced.get("id") if replaced else None,
+                                what_changed=replaced.get("question") if replaced else None)
+                            pinned_now = True
 
                 _update_state(self.skey(), {
                     # The outcome is the conclusion, not the opening of a long
@@ -2411,6 +2444,15 @@ class Engine:
                         "(interface - not John) You ended without answering "
                         "John in words. Reply now in one or two plain "
                         "sentences.")
+                elif (getattr(self, "_reasked_answered", None) and not was_tick
+                      and not self.general):
+                    entry = self._reasked_answered
+                    self._reasked_answered = None
+                    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(entry.get("answered_at") or 0))
+                    self._send_locked(
+                        "(interface - not John) John already answered this question at " + when
+                        + ": \"" + str(entry.get("answer") or "")[:300]
+                        + "\". Do not ask it again; act on his answer.")
                 elif (pinned_now and txt and not was_tick
                       and not self.general and not self._decision_nudged
                       and not _has_recommendation(txt)):
@@ -2796,6 +2838,19 @@ class Engine:
         except Exception:
             pass
 
+    def _answered_before(self, question, step_id):
+        """The history entry that already answered this question on this step
+        (the same words, whitespace and punctuation aside), else None."""
+        norm = lambda v: re.sub(r"[\W_]+", " ", str(v or "").lower()).strip()
+        for entry in reversed(getattr(self, "question_history", None) or []):
+            saved = entry.get("question") if isinstance(entry, dict) else None
+            if not isinstance(saved, dict) or not norm(saved.get("question")):
+                continue
+            if norm(saved.get("question")) == norm(question) and \
+                    (saved.get("authorization_scope") or {}).get("step_id") == step_id:
+                return entry
+        return None
+
     def _read_strip(self):
         path = Path(self.dir) / "strip.json"
         try:
@@ -2825,21 +2880,8 @@ class Engine:
             os.replace(tmp, path)
 
 
-#: Phrases that mark a real recommendation, checked over the TAIL of the turn
-#: only (where the decision lives). Deliberately NARROW after the 2026-08-26
-#: review: a false POSITIVE silently disables the check, which is the
-#: expensive direction. Dropped from an earlier draft: bare "recommended"
-#: (matches "as recommended by the plan") and "my call" (matches the exact
-#: opposite sentence, "that's not my call - it's yours").
-_RECOMMEND_RE = re.compile(
-    r"\b(i\s*(?:'|\u2019)?\s*(?:d|would)?\s*(?:recommend|suggest|propose)"
-    r"|i\s*(?:'|\u2019)?\s*d?\s*lean\s+toward"
-    r"|i\s*(?:'|\u2019)?\s*d?\s*go\s+with"
-    r"|i\s+think\s+we\s+should|my\s+recommendation|my\s+advice\s+is"
-    r"|recommendation\s*[:\u2014-]|the\s+right\s+move\s+is)", re.I)
-
-#: How much of the turn tail counts as "where the decision is stated".
-_RECOMMEND_TAIL = 1200
+#: The recommendation matcher lives in question_context (ONE matcher for the
+#: decision-shape check and the saved record); ``_has_recommendation`` is it.
 
 
 _DRIVE_OFFER_RE = re.compile(
@@ -2856,16 +2898,6 @@ def _question_kind(question) -> str:
     """
     normalized = re.sub(r"\s+", " ", (question or "").strip())
     return "drive_offer" if _DRIVE_OFFER_RE.fullmatch(normalized) else "decision"
-
-
-def _has_recommendation(text) -> bool:
-    """True when a decision turn actually carried a recommendation.
-
-    Only the TAIL is searched: a recommendation recorded in the middle of a
-    long working narrative is not a recommendation ABOUT the question being
-    asked at the end.
-    """
-    return bool(_RECOMMEND_RE.search((text or "")[-_RECOMMEND_TAIL:]))
 
 
 _SNAPSHOT_SUFFIX = re.compile(r"^-(?:\d[\d-]*|build.*)$")

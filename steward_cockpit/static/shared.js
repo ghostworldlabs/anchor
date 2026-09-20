@@ -79,47 +79,62 @@ const Proto = (() => {
   }
   function fillQuestionPanel(host, q) {
     host.textContent = "";
-    host.appendChild(el("p", "question-source", q.context || "No additional context was saved."));
-    if (q.truncated) host.appendChild(el("p", "sdmeta", "This is an excerpt. The original exchange contains the full context."));
-    if (q.why) host.appendChild(el("p", "", "Why now: " + q.why));
+    const pending = () => (lastState && lastState.pending_questions) || [];
+    const gone = (btn) => { btn.disabled = true; host.appendChild(el("p", "", "This question changed or was resolved. Open the current question.")); };
+    // four short lines (~60 words): the stake · the recommendation (the first button) and why · the alternatives · the question
+    if (q.stake) host.appendChild(el("p", "action-stake", oneLine(q.stake, 160)));
     if (q.recommendation) {
-      host.appendChild(el("p", "action-rec", q.recommendation));
+      const row = el("p", "action-rec");
       const accept = el("button", "action-accept", "Accept recommendation");
       accept.onclick = async (ev) => {
         ev.stopPropagation();
-        if (q.id && !((lastState && lastState.pending_questions) || []).some(item => item.id === q.id)) {
-          accept.disabled = true;
-          host.appendChild(el("p", "", "This question changed or was resolved. Open the current question."));
-          return;
-        }
+        if (q.id && !pending().some(item => item.id === q.id)) return gone(accept);
         accept.disabled = true;
         const tile = host.closest("[data-openq],[data-status-action]");
         const result = await sendSay("Accept recommendation: " + q.recommendation, q.id || null);
-        if (result && result.ok) {
-          if (tile) tile.classList.remove("open");
-        } else {
-          accept.disabled = false;
-        }
+        if (result && result.ok) { if (tile) tile.classList.remove("open"); }
+        else accept.disabled = false;
       };
-      host.appendChild(accept);
+      row.appendChild(accept);
+      row.appendChild(el("span", "action-rectext", " " + oneLine(q.recommendation, 160) + (q.why ? " \u2014 " + oneLine(q.why, 120) : "")));
+      host.appendChild(row);
     }
-    (q.alternatives || []).forEach(item => host.appendChild(el("p", "sdmeta", item)));
-    if (q.source_ref) host.appendChild(el("p", "sdmeta", "Source: " + q.source_ref));
+    if ((q.alternatives || []).length)
+      host.appendChild(el("p", "action-alts", "Or: " + q.alternatives.slice(0, 3).map(a => oneLine(a, 90)).join(" \u00b7 ")));
+    if (q.what_changed) host.appendChild(el("p", "sdmeta", "Replaces: " + oneLine(q.what_changed, 120)));
+    if (q.id) {
+      const answer = el("button", "", "Answer this question");
+      answer.onclick = (ev) => {
+        ev.stopPropagation();
+        if (!pending().some(item => item.id === q.id)) return gone(answer);
+        _answerQuestionId = q.id;
+        const ta = $("[data-say]");
+        if (ta) { ta.placeholder = "Answer: " + q.question; ta.focus(); }
+      };
+      host.appendChild(answer);
+    }
+    // everything else - the literal context, its source and scope - behind one disclosure
+    const more = el("details", "action-context");
+    more.appendChild(el("summary", "", "Full context"));
+    more.appendChild(el("p", "question-source", q.context || "No additional context was saved."));
+    if (q.truncated) more.appendChild(el("p", "sdmeta", "This is an excerpt. The original exchange contains the full context."));
+    if (q.source_ref) more.appendChild(el("p", "sdmeta", "Source: " + q.source_ref));
     const scope = q.authorization_scope || {};
     const scopeBits = [scope.step_id, scope.presentation_id, scope.request_id, scope.product_id].filter(Boolean);
-    if (scopeBits.length) host.appendChild(el("p", "sdmeta", "Applies to " + scopeBits.join(" · ")));
-    if (q.authorization) host.appendChild(el("p", "sdmeta", "An answer would " + q.authorization));
+    if (scopeBits.length) more.appendChild(el("p", "sdmeta", "Applies to " + scopeBits.join(" \u00b7 ")));
+    if (q.authorization) more.appendChild(el("p", "sdmeta", "An answer would " + q.authorization));
+    host.appendChild(more);
     if (scope.source_turn_id) {
       const source = el("button", "", "Original exchange");
       source.onclick = async (ev) => {
         ev.stopPropagation();
-        if (host.querySelector("details")) return;
+        if (host.querySelector("details.exchange")) return;
         source.disabled = true;
         try {
           const response = await fetch(api("/api/history") + "&turn_id=" + encodeURIComponent(scope.source_turn_id));
           const result = await response.json();
           if (!response.ok) throw Error(result.error || "Original exchange unavailable");
-          const history = el("details");
+          const history = el("details", "exchange");
           history.open = true;
           history.appendChild(el("summary", "", "Original exchange"));
           (result.turns || []).forEach(turn => {
@@ -134,23 +149,15 @@ const Proto = (() => {
       };
       host.appendChild(source);
     }
-    if (q.id) {
-      const answer = el("button", "", "Answer this question");
-      answer.onclick = (ev) => {
-        ev.stopPropagation();
-        if (!((lastState && lastState.pending_questions) || []).some(item => item.id === q.id)) {
-          answer.disabled = true;
-          host.appendChild(el("p", "", "This question changed or was resolved. Open the current question."));
-          return;
-        }
-        _answerQuestionId = q.id;
-        const ta = $("[data-say]");
-        if (ta) { ta.placeholder = "Answer: " + q.question; ta.focus(); }
-      };
-      host.appendChild(answer);
+    // what John already decided, one click away (never re-asked)
+    const decided = (lastState && lastState.decision_history) || [];
+    if (decided.length) {
+      const d = el("details", "action-history");
+      d.appendChild(el("summary", "", "Earlier decisions \u00b7 " + decided.length));
+      decided.slice().reverse().forEach(h => d.appendChild(el("p", "sdmeta", oneLine(h.question, 90) + " \u2192 " + oneLine(h.answer, 60))));
+      host.appendChild(d);
     }
-    const questions = (lastState && lastState.pending_questions) || [];
-    questions.filter(item => item.id !== q.id).forEach(item => {
+    pending().filter(item => item.id !== q.id).forEach(item => {
       const b = el("button", "question-other", item.question);
       b.onclick = (ev) => { ev.stopPropagation(); paintActionNeeded(host.closest("[data-openq],[data-status-action]"), item.id); };
       host.appendChild(b);
