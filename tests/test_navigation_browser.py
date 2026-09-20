@@ -39,7 +39,8 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
         return surface, panel
 
     surface, panel = open_surface()
-    expect(panel.locator('.navpin .navfile')).to_have_count(1)
+    expect(panel.locator('.navpin .navfile')).to_have_count(1)          # the current file is the one Open act (Wave A, 2026-09-20)
+    expect(panel.locator('.navpin')).to_contain_text('Do now')
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
     expect(panel.locator('.nav-choice[data-group-id="tracker"]')).to_be_visible()
@@ -86,7 +87,7 @@ def test_empty_campaign_uses_same_panel_order(cockpit):
     expect(panel).to_be_visible()
     folded = panel.locator(':scope.folded > .who')
     if folded.count(): folded.click()
-    expect(panel.locator('.navpin')).to_contain_text('No current items awaiting review.')
+    expect(panel.locator('.navpin')).to_contain_text('Nothing waits on you; the steward has not stated a next step.')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
     expect(panel.locator('.nav-choice[data-group-id="compat-root"]')).to_be_visible()
     expect(surface.locator('[data-steps] .navgroup > summary').first).to_contain_text('Empty campaign')

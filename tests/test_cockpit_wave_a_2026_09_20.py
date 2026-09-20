@@ -105,15 +105,17 @@ def test_acts_come_in_order_review_open_next(tmp_path):
     items = [
         {"what": "decision-guide", "path": "research/guide-r2.md", "step": "s2", "managed": True, "phase": "awaiting_review", "date": "2026-09-19"},
         {"what": "draft-notes", "path": "research/notes.md", "step": "s2", "managed": True, "phase": "preparing", "date": "2026-09-18"},
+        {"what": "Guide v1", "path": "docs/guide.md", "step": "s2", "managed": False, "date": "2026-09-17"},
         {"what": "Old survey", "path": "research/survey.md", "step": "s1", "managed": False, "date": "2026-09-10"},
     ]
     acts = sc.review_acts(map_, sc.current_review_items(map_, items))
     assert [(a["act"], a["label"]) for a in acts] == [
         ("Review", "decision guide"),
-        ("Open", "guide.md"),                                             # one featured file, the first not already reviewed
+        ("Open", "Guide v1"),                                             # the current step's own file: one act, the register's row
         ("Next", "Read Refinement 2 and say what to change"),
     ]
-    assert acts[0]["item"]["path"] == "research/guide-r2.md" and acts[1]["path"] == "docs/guide.md"
+    assert acts[0]["item"]["path"] == "research/guide-r2.md" and acts[1]["item"]["path"] == "docs/guide.md"
+    assert "draft-notes" not in [a["label"] for a in acts]                # a product the steward is still preparing is not John's act
     empty = _campaign(tmp_path / "e", next_text="", featured=())
     assert sc.review_acts(sc.read_map(str(empty)), []) == []
 
@@ -126,6 +128,7 @@ def test_the_deliverables_reader_serves_the_acts(tmp_path):
     (d / "docs" / "guide.md").write_text("# Guide\n", encoding="utf-8")
     view = sc.read_deliverables(str(d))
     assert [a["act"] for a in view["acts"]] == ["Open", "Next"]           # the featured file, then the steward's next
+    assert view["acts"][0]["label"] == "Guide v1" and view["acts"][0]["item"]["path"] == "docs/guide.md"   # the register's own row
     assert view["acts"][1]["label"] == "Read Refinement 2 and say what to change"
     assert view["current_warning"] == ""                                  # s2 is pinned
     (d / "strip.json").write_text(json.dumps({"schema": "ecgberht-strip-v0", "phase": "slice", "active_effort": "Guide",

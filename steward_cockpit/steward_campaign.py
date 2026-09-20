@@ -2142,11 +2142,10 @@ def review_acts(map_, current_items):
             acts.append({"act": "Review", "label": str(it.get("what") or it.get("product_id") or it.get("path") or "").replace("-", " "),
                          "path": it.get("path"), "step": it.get("step"), "item": it})
     cur, _warn = _focused_step(map_)
-    seen = {a.get("path") for a in acts}
-    featured = [p for p in ((cur or {}).get("navigation") or {}).get("featured_paths") or [] if p and p not in seen]
-    if featured:
-        acts.append({"act": "Open", "label": str(featured[0]).replace("\\", "/").rsplit("/", 1)[-1], "path": featured[0],
-                     "step": (cur or {}).get("id")})
+    row = next((it for it in current_items if not it.get("managed")), None)   # the current step's own file (featured or designated)
+    if row:
+        acts.append({"act": "Open", "label": str(row.get("what") or row.get("path") or "").strip(),
+                     "path": row.get("path"), "step": row.get("step"), "item": row})
     nxt = ((map_ or {}).get("heartbeat") or {}).get("next_recommended") or ""
     if str(nxt).strip():
         acts.append({"act": "Next", "label": str(nxt).strip(), "step": (cur or {}).get("id")})

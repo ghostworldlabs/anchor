@@ -197,7 +197,7 @@ class LookThroughTest(unittest.TestCase):
         self.assertNotIn("status-details", body)
         self.assertNotIn('"map: "', body)          # the map is not the to-do list
         self.assertIn('line += " · ETA " + stat.eta', body)
-        self.assertIn('line += " · slice " + sl.n', body)
+        self.assertIn('let line = stat.lead_line || "Next not stated by the steward";', body)   # Wave A (2026-09-20): the lead is the line of record
         css = (STATIC / "shared.css").read_text(encoding="utf-8")
         self.assertIn(".stab .stodo", css)
 
