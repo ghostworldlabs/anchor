@@ -492,6 +492,7 @@ function closeOf(event, base) {
 }
 
 const SPINE_WORD_CAPS = Object.freeze({ next_recommended: 15, why_next: 20, human_wait: 15 });
+export const GOAL_REREAD = Object.freeze(['reaffirmed', 'rewritten']);
 
 /** Words over the cap on a strip field, else null (cockpit Wave B, the lead line must fit). */
 export function overCap(field, value) {
@@ -502,12 +503,28 @@ export function overCap(field, value) {
 }
 
 /**
- * A close is refused until the strip names the step that follows and what the
- * steward will do there (John, 2026-09-19: "status does not say what is
- * next"). A campaign with no open step left needs no next. No strip (a
- * legacy campaign) - nothing to demand.
+ * The steward's close verbs refuse a close until the strip names the step that
+ * follows and what the steward will do there (John, 2026-09-19: "status does
+ * not say what is next"). A campaign with no open step left needs no next; a
+ * step already done is not a close; no strip (a legacy campaign) - nothing to
+ * demand. Returns ok:false spine_required | goal_reread_required, else ok.
  */
-function demandSpineForClose(root, base, step_id) {
+export function demandClose(root, base, step_id, goal_reread) {
+  const closing = closeOf({ kind: 'status_flip', to: 'done', step_id, goal_reread }, base);
+  if (!closing) return { ok: true, demanded: false };
+  const demand = demandSpineForClose(root, base, step_id);
+  if (!demand.ok) return demand;
+  if (!GOAL_REREAD.includes(goal_reread)) {
+    return {
+      ok: false, error: 'goal_reread_required', closing: step_id,
+      message: 'Close refused: re-read the North Star and say so - --goal-reread reaffirmed|rewritten '
+        + '(or goal_reread on the refinement close operation); the engine records the goal_flip.',
+    };
+  }
+  return { ok: true, demanded: true };
+}
+
+export function demandSpineForClose(root, base, step_id) {
   const stripPath = path.join(root, 'strip.json');
   if (!fs.existsSync(stripPath)) return { ok: true, demanded: false };
   let strip;
@@ -584,19 +601,6 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
           base = emptyRoadmap(opts.project_id ?? null);
         }
 
-        // cockpit Wave B: a close demands the spine and a goal re-read; the spine appends the goal_flip
-        const closing = closeOf(event, base);
-        if (closing) {
-          const demand = demandSpineForClose(root, base, closing.step_id);
-          if (!demand.ok) return demand;
-          if (!['reaffirmed', 'rewritten'].includes(closing.goal_reread)) {
-            return {
-              ok: false, error: 'goal_reread_required', closing: closing.step_id,
-              message: 'Close refused: re-read the North Star and say so - --goal-reread reaffirmed|rewritten '
-                + '(or goal_reread on the refinement close operation); the engine records the goal_flip.',
-            };
-          }
-        }
         if (event.kind === 'refinement_update') {
           const prior = findEventByClientId(base,event.client_event_id);
           if (!prior) {
@@ -610,8 +614,11 @@ export function appendRoadmapEventThroughSpine(projectPath, event, opts = {}) {
         }
         let law = appendRoadmapEventSpineLaw(base, event, { at: opts.at });
         if (!law.ok) return law;
+        // cockpit Wave B: an accepted close that carries its goal re-read gets its goal_flip from the
+        // ONE writer (the steward's close verbs demand the re-read; engine flips carry none)
+        const closing = closeOf(event, base);
         let goalFlip = null;
-        if (closing && !law.idempotent) {
+        if (closing && GOAL_REREAD.includes(closing.goal_reread) && !law.idempotent) {
           let face = '';
           try { face = fs.readFileSync(path.join(root, FACE_FILE_NAME), 'utf8'); } catch { face = ''; }
           goalFlip = {

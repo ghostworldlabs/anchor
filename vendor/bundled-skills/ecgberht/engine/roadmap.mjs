@@ -34,6 +34,7 @@ import { resolveProjectPath, loadProjectSurfaces } from './face-strip.mjs';
 // Wave 6 spine — circular with ledger-spine (it imports pure law from here).
 // Safe: both sides only call the other's exports from function bodies.
 import { appendRoadmapEventThroughSpine } from './ledger-spine.mjs';
+import { demandClose } from './ledger-spine.mjs';
 
 export const ROADMAP_FILE_NAME = 'roadmap.json';
 export const ROADMAP_SCHEMA_ID = 'ecgberht-roadmap-v0';
@@ -1338,6 +1339,11 @@ export function verbRoadmapSet(opts = {}) {
           'Status flip refused without receipt: pass --who and --reason (who/why; when defaults to event date).',
         single_writer: ROADMAP_SINGLE_WRITER,
       };
+    }
+    if (opts.status === 'done') {
+      // cockpit Wave B: the steward's close states the next act and the goal re-read first
+      const demand = demandClose(project_path, loaded.roadmap, step_id, opts.goal_reread ?? null);
+      if (!demand.ok) return { ...demand, spelling: SPELLING, verb: 'roadmap-set', primary: 'roadmap-set', project_path, step_id };
     }
     event = {
       kind: 'status_flip',

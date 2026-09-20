@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { foldRefinements, refinementDigest, currentProductApprovals } from './refinement-state.mjs';
 import { appendRoadmapEventThroughSpine } from './ledger-spine.mjs';
+import { demandClose } from './ledger-spine.mjs';
 import { loadProjectRoadmap, buildRoadmapProjection } from './roadmap.mjs';
 import { writeFileAtomicSync, withFileLock } from './durable-write.mjs';
 import { approvedDeliverables, publishApprovedDeliverables, approvedProjectionStatus } from './approved-deliverables.mjs';
@@ -256,6 +257,11 @@ export function verbRefinementUpdate(opts={}) {
       return {...result,operation_id:input.operation_id,committed:!!found,result:found?{...result,committed:true,operation_id:input.operation_id}:undefined};
     }
     if(!input.operation_id || !Number.isInteger(input.expected_seq)) return fail('operation-id-and-sequence-required');
+    if(input.action==='close') {
+      // cockpit Wave B: the steward's close states the next act and the goal re-read first
+      const demand=demandClose(root,loaded.roadmap,input.step_id,input.goal_reread??null);
+      if(!demand.ok) return demand;
+    }
     const result=appendRoadmapEventThroughSpine(root,{kind:'refinement_update',at:new Date().toISOString(),client_event_id:input.operation_id,request_digest:refinementDigest(input),operation:input},{skip_index:true});
     if(!result.ok) return result;
     const view=refinementResult(root,result.roadmap);
