@@ -62,9 +62,13 @@ def test_claude_research_argv_is_valid_and_has_no_dead_flags(jr):
     i = argv.index("--permission-mode")
     assert argv[i + 1] == "acceptEdits"
     # Headless research can fetch its evidence (2026-09-20: 228 refused web calls).
-    assert argv[argv.index("--allowedTools") + 1] == "WebFetch,WebSearch"
-    # The natural-language seed IS the prompt, on argv (non-gated).
-    assert SEED in argv
+    a = argv.index("--allowedTools")
+    assert argv[a + 1] == "WebFetch,WebSearch"
+    # ...and the variadic flag is followed by another flag, never by the prompt
+    # (claude would swallow the prompt as a tool name: "Input must be provided").
+    assert argv[a + 2].startswith("--")
+    # The natural-language seed IS the prompt, on argv (non-gated), LAST.
+    assert argv[-1] == SEED
     # NONE of the dead flags survive.
     for dead in DEAD_FLAGS:
         assert dead not in argv

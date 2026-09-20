@@ -413,12 +413,14 @@ def _build_claude_argv(prompt, output_dir, gated, permission_mode=None) -> list:
         # only emits its analysis as the final message) passes
         # ``permission_mode="plan"`` so claude can NEVER edit the analyzed project.
         # The seed is the prompt on argv.
-        argv += ["--permission-mode", permission_mode or "acceptEdits"]
         if not permission_mode:
             # A headless research run has nobody to approve a web fetch: without this
             # every WebFetch/WebSearch (the whole evidence path of a researchPrime
             # read, sub-agents included) is refused (228 refusals, 2026-09-20).
+            # --allowedTools is VARIADIC: it must sit before another flag, never
+            # right before the prompt, or it swallows the prompt as a tool name.
             argv += ["--allowedTools", "WebFetch,WebSearch"]
+        argv += ["--permission-mode", permission_mode or "acceptEdits"]
         if prompt:
             argv.append(prompt)
     return argv
