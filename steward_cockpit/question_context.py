@@ -53,8 +53,8 @@ def parse_decision(text):
     """The decision shape read from the TAIL of a turn, before its last question:
     the recommendation (the last marker sentence with words beyond the marker),
     why (the sentence after it), the alternatives (bullet lines between the
-    recommendation and the question, at most three) and the stake (the one
-    sentence before the recommendation). Verbatim, bounded; "" / [] when absent."""
+    recommendation and the question, at most three) and the stake (up to three
+    sentences before the recommendation - John reads two or three, as bullets). Verbatim, bounded; "" / [] when absent."""
     sents = _sentences((text or "")[-RECOMMEND_TAIL:])
     q_idx = next((i for i in range(len(sents) - 1, -1, -1) if sents[i][1].endswith("?")), None)
     scan_end = q_idx if q_idx is not None else len(sents)
@@ -68,8 +68,8 @@ def parse_decision(text):
     if rec_idx is None:
         return out
     out["recommendation"] = sents[rec_idx][0][:240]
-    if rec_idx and not sents[rec_idx - 1][1].endswith("?"):
-        out["stake"] = sents[rec_idx - 1][0][:240]
+    stake = [v for v, c, _b in sents[max(0, rec_idx - 3):rec_idx] if not c.endswith("?")]
+    out["stake"] = " ".join(stake)[:600]
     after = sents[rec_idx + 1:scan_end]
     if after and not after[0][2] and not after[0][1].endswith("?"):
         out["why"] = after[0][0][:200]

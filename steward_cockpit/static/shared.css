@@ -68,9 +68,8 @@ a { color: var(--steward); text-decoration: none; }
             align-items: baseline; cursor: default; }
 .steps .mark { font-family: var(--mono); width: 15px; flex: none; }
 .steps li.done   { color: var(--dim); }  .steps li.done .mark, .plan-mark.done { color: var(--ok); }
-.steps li.active .mark { color: var(--run); }
 .steps .mark.todo, .plan-mark.todo { color: #e8eaef; }
-.steps li.active { color: var(--text); font-weight: 600; }
+.steps li.active { color: var(--text); }
 .steps li.waiting .mark, .plan-mark.flag { color: var(--flag); }
 .steps li.planned, .steps li.proposed { color: var(--dim); }
 .steps li .why { display: none; font-weight: 400; color: var(--dim);
@@ -387,6 +386,17 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .action-more button { margin: 8px 8px 0 0; }
 .action-accept { background: #24466e; border-color: #35577f; }
 .action-rec { margin: 6px 0; }
+.action-bullets { margin: 6px 0; padding-left: 18px; }
+.action-bullets li { margin: 3px 0; line-height: 1.4; }
+.sdonow { margin: 4px 0 8px; }
+.sdonowhead { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; margin-bottom: 3px; }
+.notdone { list-style: none; margin-top: 10px; }
+.notdonebox > summary { cursor: pointer; font-weight: 600; }
+.notdonerow { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; overflow-wrap: anywhere; }
+.notdonerow.waits, .notdonerow.waits .mark { color: var(--flag); }
+.notdonerow.later { color: var(--dim); }
+.notdonestate { opacity: .85; font-size: 12.5px; }
+.planlegend { font-size: 11px; opacity: .6; margin-top: 6px; }
 .action-stake { margin: 4px 0 6px; opacity: .9; }
 .action-rectext { opacity: .95; }
 .action-alts { margin: 4px 0; font-size: 12.5px; opacity: .85; }

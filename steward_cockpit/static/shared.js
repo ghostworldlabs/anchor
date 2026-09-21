@@ -59,18 +59,24 @@ const Proto = (() => {
     if (st.refinement) return st.refinement.phase === "done";
     return st.status === "done";
   }
-  function stepNeedsAttention(st) {
-    if (!st) return false;
-    if (st.status === "waiting" || st.status === "blocked") return true;
-    if (hasWaitingOn(st.waiting_on)) return true;
+  // waiting on John, from structured facts only - a product awaiting his review or blocked, a step the
+  // steward set to waiting/blocked, or an open decision pinned to the step; never a text match (John, 2026-09-21)
+  function stepWaitsOnJohn(st) {
+    if (!st) return "";
     const r = st.refinement;
-    if (r && (r.phase === "awaiting_review" || r.phase === "blocked")) return true;
-    return ((r && r.producer_handoffs) || []).some(h => h && h.status === "pending_steward_review");
+    if (r && r.phase === "awaiting_review") return "awaiting your review";
+    if (r && r.phase === "blocked") return "blocked";
+    const q = ((lastState && lastState.pending_questions) || []).find(x => ((x.authorization_scope || {}).step_id) === st.id);
+    if (q) return "your answer: " + oneLine(q.question, 90);
+    if (st.status === "waiting" || st.status === "blocked") return hasWaitingOn(st.waiting_on) ? oneLine(String(st.waiting_on), 90) : st.status;
+    return "";
   }
+  function stepNeedsAttention(st) { return !!stepWaitsOnJohn(st); }
+  // two marks: done, waiting on you; everything else carries none (colour carries no state)
   function planMarkInfo(st) {
     if (stepDone(st)) return {glyph: "✓", cls: "done", row: "done"};
     if (stepNeedsAttention(st)) return {glyph: "⚑", cls: "flag", row: "waiting"};
-    return {glyph: "▷", cls: "todo", row: st.status === "active" ? "active" : "planned"};
+    return {glyph: "", cls: "todo", row: st.status === "active" ? "active" : "planned"};
   }
   function currentQuestion() {
     const questions = (lastState && lastState.pending_questions) || [];
@@ -81,13 +87,15 @@ const Proto = (() => {
     host.textContent = "";
     const pending = () => (lastState && lastState.pending_questions) || [];
     const gone = (btn) => { btn.disabled = true; host.appendChild(el("p", "", "This question changed or was resolved. Open the current question.")); };
-    // four short lines under ONE ~60-word budget: the stake · the recommendation (the first button) and why · the alternatives · the question
-    let budget = 360;
+    // bullets under one budget: two or three sentences of context (John, 2026-09-21), the recommendation
+    // as the first button with its why, the alternatives, then the question
+    let budget = 900;
     const take = (text, cap) => { const t = oneLine(text, Math.max(24, Math.min(cap, budget))); budget -= t.length; return t; };
-    if (q.stake) host.appendChild(el("p", "action-stake", take(q.stake, 160)));
-    if (!q.recommendation) host.appendChild(el("p", "action-rec dim", "no recommendation given"));
+    const bullets = el("ul", "action-bullets");
+    String(q.stake || "").split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 3).forEach(sentence => bullets.appendChild(el("li", "action-stake", take(sentence, 220))));
+    if (!q.recommendation) bullets.appendChild(el("li", "action-rec dim", "no recommendation given"));
     if (q.recommendation) {
-      const row = el("p", "action-rec");
+      const row = el("li", "action-rec");
       const accept = el("button", "action-accept", "Accept recommendation");
       accept.onclick = async (ev) => {
         ev.stopPropagation();
@@ -99,11 +107,11 @@ const Proto = (() => {
         else accept.disabled = false;
       };
       row.appendChild(accept);
-      row.appendChild(el("span", "action-rectext", " " + take(q.recommendation, 160) + (q.why ? " \u2014 " + take(q.why, 120) : "")));
-      host.appendChild(row);
+      row.appendChild(el("span", "action-rectext", " " + take(q.recommendation, 220) + (q.why ? " \u2014 " + take(q.why, 160) : "")));
+      bullets.appendChild(row);
     }
-    if ((q.alternatives || []).length && budget > 24)
-      host.appendChild(el("p", "action-alts", "Or: " + q.alternatives.slice(0, 3).map(a => take(a, 90)).join(" \u00b7 ")));
+    (q.alternatives || []).slice(0, 3).forEach(a => { if (budget > 24) bullets.appendChild(el("li", "action-alts", "Or: " + take(a, 120))); });
+    host.appendChild(bullets);
     if (q.id) {
       const answer = el("button", "", "Answer this question");
       answer.onclick = (ev) => {
@@ -329,6 +337,28 @@ const Proto = (() => {
      into the RIGHT STATUS PANE only — never the conversation. The same shape
      is persisted server-side to .ecgberht/status-summary.json for the
      main-dashboard tile. */
+  // Do now: the open decision, each product awaiting John, the current step's file, the steward's next -
+  // the acts the deliverables read serves, painted under the lead line and refreshed on its cadence
+  function paintDoNow(host) {
+    if (!host) return;
+    host.textContent = "";
+    const acts = [];
+    const q = currentQuestion();
+    if (q && q.question) acts.push({act: "Answer", label: String(q.question).slice(0, 80), question: q});
+    (_deliv.acts || []).forEach(a => acts.push(a));
+    host.appendChild(el("div", "sdonowhead", "Do now"));
+    if (_deliv.warning) host.appendChild(el("div", "navempty", _deliv.warning));   // the current item, honestly
+    acts.forEach(a => {
+      const row = el("div", "navact navact-" + a.act.toLowerCase());
+      row.appendChild(el("span", "navactkind", a.act));
+      if (a.act === "Answer") { const b = el("button", "navactbtn", a.label); b.onclick = () => openQuestionContext(a.question && a.question.id); row.appendChild(b); }
+      else if (a.item) row.appendChild(navFile(a.item, "status:act"));
+      else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "status:act"));
+      else row.appendChild(el("span", "navactlabel", a.label));
+      host.appendChild(row);
+    });
+    if (!acts.length) host.appendChild(el("div", "navempty", "Nothing waits on you; the steward has not stated a next step."));
+  }
   function renderStatus(stat) {
     const s = paneEl();
     if (!s || !stat) return;
@@ -411,6 +441,10 @@ const Proto = (() => {
     leadEl.dataset.statusFact = "lead";
     leadEl.title = leadText;
     compact.appendChild(leadEl);
+    const doNow = el("div", "sdonow");
+    doNow.dataset.donow = "1";
+    paintDoNow(doNow);   // Do now, under the lead (John, 2026-09-21: "the list is better under status")
+    compact.appendChild(doNow);
     compact.appendChild(tab);   // the ten locked rows stay open below the lead (John, 2026-09-11: wording, not hiding)
     if (stat.latest_event && stat.latest_event.summary) {
       const latest = el("p");
@@ -729,32 +763,15 @@ const Proto = (() => {
     const pin=(map?.steps||[]).find(s=>s.navigation&&s.navigation.pin);
     if(!stepRows) {
       const p=el('div','navpin');p.appendChild(el('div','naveyebrow','Current work and review'));
-      // Do now: the open decision, each product awaiting review, the current step's files, then the steward's next
-      const acts=[];
-      const q=currentQuestion();
-      if(q&&q.question)acts.push({act:'Answer',label:String(q.question).slice(0,80),question:q});
-      (_deliv.acts||[]).forEach(a=>acts.push(a));
-      const doNow=el('div','navacts');doNow.appendChild(el('div','navactshead','Do now'));
-      if(_deliv.warning)doNow.appendChild(el('div','navempty',_deliv.warning));   // A2: the current item, honestly
-      acts.forEach(a=>{
-        const row=el('div','navact navact-'+a.act.toLowerCase());
-        row.appendChild(el('span','navactkind',a.act));
-        if(a.act==='Answer'){const b=el('button','navactbtn',a.label);b.onclick=()=>openQuestionContext(a.question&&a.question.id);row.appendChild(b);}
-        else if(a.item){row.appendChild(navFile(a.item,surface+':act'));}
-        else if(a.path){row.appendChild(navFile({what:a.label,path:a.path,openable:true,step:a.step},surface+':act'));}
-        else row.appendChild(el('span','navactlabel',a.label));
-        doNow.appendChild(row);
-      });
-      if(!acts.length)doNow.appendChild(el('div','navempty','Nothing waits on you; the steward has not stated a next step.'));
-      p.appendChild(doNow);
-      const acted=new Set(acts.map(a=>a.path).filter(Boolean));
+      // the acts live under the status lead (Do now); this block keeps the files
+      const acted=new Set((_deliv.acts||[]).map(a=>a.path).filter(Boolean));
       const current=items.filter(i=>i.is_current===true&&!acted.has(i.path))   // the server's one rule, minus what is already an act
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
         const files=navDisclosure(surface+':files','Files awaiting you · '+current.length);
         current.forEach(it=>files.appendChild(navFile(it,surface+':pin')));
         p.appendChild(files);
-      }
+      } else p.appendChild(el('div','navempty','No files awaiting review.'));
       target.appendChild(p);
       const approved=navDisclosure(surface+':approved','Approved deliverables · '+_deliv.approved.length);
       _deliv.approved.slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))
@@ -995,6 +1012,35 @@ const Proto = (() => {
       renderNavigation(host,map,_deliv.items,'plan',stepRows);list.appendChild(host);
       prior.forEach(n=>list.appendChild(n));restoreNavFocus(focusKey);
     }
+    list.appendChild(notDoneList(map, stepRows));
+  }
+  // the red-flag list (John, 2026-09-21): every step not done, waiting on you first and in red with the
+  // wait text, then in progress, then planned - one line each; a click opens the step above
+  function notDoneList(map, stepRows) {
+    const li = el("li", "notdone");
+    li.style.display = "block";
+    const open = map.steps.map((st, i) => ({st, i})).filter(x => !stepDone(x.st));
+    const rank = x => stepWaitsOnJohn(x.st) ? 0 : x.st.status === "active" ? 1 : 2;
+    open.sort((a, b) => rank(a) - rank(b) || a.i - b.i);
+    const box = el("details", "navgroup notdonebox");
+    box.open = navChoice("plan:notdone", true);
+    box.addEventListener("toggle", () => { navChoices["plan:notdone"] = box.open; try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {} });
+    box.appendChild(el("summary", "", "Not done \u00b7 " + open.length));
+    open.forEach(x => {
+      const wait = stepWaitsOnJohn(x.st);
+      const row = el("div", "notdonerow " + (wait ? "waits" : x.st.status === "active" ? "active" : "later"));
+      row.appendChild(el("span", "mark", wait ? "\u2691" : ""));
+      const name = el("button", "navactbtn", (x.st.navigation && x.st.navigation.label) || x.st.name);
+      name.onclick = () => { const target = stepRows.get(x.i); if (target) { target.classList.add("open"); target.scrollIntoView({block: "nearest"}); } };
+      row.appendChild(name);
+      const state = wait ? "waiting on you: " + wait : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
+      row.appendChild(el("span", "notdonestate", " \u2014 " + state));
+      box.appendChild(row);
+    });
+    if (!open.length) box.appendChild(el("div", "navempty", "Every step is done."));
+    li.appendChild(box);
+    li.appendChild(el("div", "planlegend", "\u2713 done \u00b7 \u2691 waiting on you"));
+    return li;
   }
   async function renderDeliverablesTile() {
     if (_delivBusy) return;
@@ -1006,6 +1052,7 @@ const Proto = (() => {
     const items = (d && d.items) || [];
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     _deliv = {items, approved: (d && d.approved) || [], acts: (d && d.acts) || [], warning: (d && d.current_warning) || ""};
+    paintDoNow(document.querySelector(".blk.status.latest [data-donow]"));   // the newest status carries the list
     // repaint the plan so step-tagged deliverables land under their steps
     if (_lastMap) { try { paintStepsList(_lastMap); } catch (e) {} }
     // — the tile: its OWN slot above the scrollport when the page provides

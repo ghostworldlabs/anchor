@@ -159,4 +159,4 @@ def test_the_tile_is_four_lines_with_the_recommendation_as_the_first_button():
     js = Path(__file__).resolve().parents[1].joinpath("steward_cockpit", "static", "shared.js").read_text(encoding="utf-8")
     body = js.split("function fillQuestionPanel(host, q)")[1].split("function paintActionNeeded")[0]
     assert body.index('"Accept recommendation"') < body.index('el("details", "action-context")') < body.index('"question-source"')
-    assert "let budget = 360;" in body and '"no recommendation given"' in body   # one ~60-word budget; honest when the parser finds none
+    assert "let budget = 900;" in body and '"no recommendation given"' in body   # bullets, two or three sentences of context (John, 2026-09-21)
