@@ -33,7 +33,7 @@ def finish(engine, text):
 def test_the_one_parser_reads_the_decision_shape():
     d = qc.parse_decision(SHAPED)
     assert d["recommendation"] == "I recommend keeping this version."
-    assert d["stake"] == "The guide gates the build path and John has been away."
+    assert d["stake"] == ["The guide gates the build path and John has been away."]
     assert d["why"] == "It already passed the independent check."
     assert d["alternatives"] == []                                          # prose is not an alternative; bullets are
     bullets = "Context.\n**Recommendation:** ship v2.\nIt is the smaller change.\n- keep v1 (safer, later)\n- redo both (a week)\nShip?"
@@ -54,7 +54,7 @@ def test_has_recommendation_is_the_engine_check():
 def test_the_record_carries_the_shape_and_keeps_its_origin_through_normalize():
     saved = qc.save_question_context("Keep it?", SHAPED, asked_at=1, source_ref="Cockpit conversation",
                                      scope={"step_id": "s2", "source_turn_id": "t1"})
-    assert saved["stake"].startswith("The guide gates") and saved["why"].startswith("It already passed")
+    assert saved["stake"][0].startswith("The guide gates") and saved["why"].startswith("It already passed")
     later = qc.save_question_context("Keep it?", "other words", asked_at=2, source_ref="Cockpit conversation",
                                      scope={"step_id": "s2", "source_turn_id": "t2"})
     assert later["id"] == saved["id"]                                        # the turn leaves the identity
@@ -159,4 +159,4 @@ def test_the_tile_is_four_lines_with_the_recommendation_as_the_first_button():
     js = Path(__file__).resolve().parents[1].joinpath("steward_cockpit", "static", "shared.js").read_text(encoding="utf-8")
     body = js.split("function fillQuestionPanel(host, q)")[1].split("function paintActionNeeded")[0]
     assert body.index('"Accept recommendation"') < body.index('el("details", "action-context")') < body.index('"question-source"')
-    assert "let budget = 900;" in body and '"no recommendation given"' in body   # bullets, two or three sentences of context (John, 2026-09-21)
+    assert '"no recommendation given"' in body                                   # honest when the parser finds none

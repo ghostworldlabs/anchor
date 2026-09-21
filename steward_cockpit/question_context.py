@@ -64,12 +64,11 @@ def parse_decision(text):
         if m and re.search(r"\w", sents[i][1][m.end():]):
             rec_idx = i
             break
-    out = {"stake": "", "recommendation": "", "why": "", "alternatives": []}
+    out = {"stake": [], "recommendation": "", "why": "", "alternatives": []}
     if rec_idx is None:
         return out
     out["recommendation"] = sents[rec_idx][0][:240]
-    stake = [v for v, c, _b in sents[max(0, rec_idx - 3):rec_idx] if not c.endswith("?")]
-    out["stake"] = " ".join(stake)[:600]
+    out["stake"] = [v[:240] for v, c, _b in sents[max(0, rec_idx - 3):rec_idx] if not c.endswith("?")][:3]
     after = sents[rec_idx + 1:scan_end]
     if after and not after[0][2] and not after[0][1].endswith("?"):
         out["why"] = after[0][0][:200]
@@ -185,9 +184,13 @@ def normalize_question_context(value):
     recommendation = value.get("recommendation")
     if isinstance(recommendation, str) and has_recommendation(recommendation):
         normalized["recommendation"] = recommendation.strip()[:240]
-    for key in ("stake", "why"):
-        if isinstance(value.get(key), str) and value[key].strip():
-            normalized[key] = value[key].strip()[:240]
+    if isinstance(value.get("why"), str) and value["why"].strip():
+        normalized["why"] = value["why"].strip()[:240]
+    stake = value.get("stake")
+    if isinstance(stake, str) and stake.strip():
+        stake = [stake]
+    if isinstance(stake, list) and stake:
+        normalized["stake"] = [item.strip()[:240] for item in stake if isinstance(item, str) and item.strip()][:3]
     alternatives = value.get("alternatives")
     if isinstance(alternatives, list) and alternatives:
         normalized["alternatives"] = [item[:160] for item in alternatives if isinstance(item, str)][:3]
