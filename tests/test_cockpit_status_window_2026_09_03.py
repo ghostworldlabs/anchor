@@ -72,7 +72,8 @@ class StatusWindowTest(unittest.TestCase):
         self.assertIn('stat.tests || "—"', body)     # honest dash, never a guess
         self.assertIn('stat.journal || "—"', body)
         self.assertIn('stat.eta || "—"', body)
-        self.assertIn('glyph: "▷"', self.js)
+        self.assertIn('glyph: "⚑"', self.js)     # two marks: done, waiting on you (John, 2026-09-21); no arrow
+        self.assertNotIn('▷', self.js)
         self.assertIn('Action needed', self.js)
         self.assertIn('"last update " + hhmm', body)
         self.assertIn("last update on record", body)  # the stale marker
@@ -146,7 +147,7 @@ def test_status_table_is_visible_and_plan_uses_attention_flags():
     assert 'el("table", "stab")' in body
     assert 'status-details' not in body
     assert 'No extra diagnostics' not in body
-    assert 'glyph: "▷"' in js
+    assert 'glyph: "⚑"' in js and '▷' not in js      # two marks on the plan; the Not done list carries the rest
     assert 'Action needed' in js
     assert 'Accept recommendation' in js
     assert '.action-needed.open .action-more' in css

@@ -761,7 +761,7 @@ const Proto = (() => {
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
         const files=navDisclosure(surface+':files','Files awaiting you · '+current.length);
-        current.forEach(it=>files.appendChild(navFile(it,surface+':pin')));
+        current.forEach(it=>files.appendChild(navFile(it,surface+':pin',true)));   // files open here; the acts (Done with this item) live in Do now
         p.appendChild(files);
       } else p.appendChild(el('div','navempty','No files awaiting review.'));
       target.appendChild(p);
