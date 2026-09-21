@@ -89,7 +89,7 @@ def test_selected_b_individual_approval_retains_approved_copy_during_revision(co
     expect(approved).to_contain_text('Approved deliverables · 0')
     panel.locator('.nav-choice[data-group-id="block2"]').click()
     expect(panel.locator('.nav-inspect h3')).to_have_text('Block 2')
-    row=panel.locator('.navpin [data-product-id="guide"]')
+    row=surface.locator('.blk.status.latest .sdonow [data-product-id="guide"]')   # the Review act sits in Do now under the status lead (Wave E)
     with page.expect_response(lambda r:'/refinement-accept' in r.url and r.request.method=='POST') as result:
         row.get_by_role('button',name='Done with this item').click()
     assert result.value.ok
