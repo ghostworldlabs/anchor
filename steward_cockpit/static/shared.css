@@ -389,7 +389,7 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .action-bullets { margin: 6px 0; padding-left: 18px; }
 .action-bullets li { margin: 3px 0; line-height: 1.4; }
 .sdonow { margin: 4px 0 8px; }
-.notdone { display: block; list-style: none; margin-top: 10px; }
+.steps li.notdone { display: block; list-style: none; margin-top: 10px; }   /* the list and its legend stack; the row rule is flex */
 .notdonerow { display: flex; gap: 6px; align-items: baseline; margin: 3px 0; overflow-wrap: anywhere; }
 .notdonerow.waits, .notdonerow.waits .mark { color: var(--flag); }
 .notdonestate { opacity: .85; }

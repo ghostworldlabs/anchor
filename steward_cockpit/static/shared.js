@@ -1027,7 +1027,7 @@ const Proto = (() => {
         target.scrollIntoView({block: "nearest"});
       };
       row.appendChild(name);
-      const state = wait ? (wait === "blocked" ? "blocked" : "waiting on you: " + wait) : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
+      const state = wait ? (wait === "blocked" ? "blocked" : wait === "waiting" ? "waiting on you" : "waiting on you: " + wait) : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
       row.appendChild(el("span", "notdonestate", " \u2014 " + state));
       box.appendChild(row);
     });
