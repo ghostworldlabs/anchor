@@ -832,43 +832,7 @@ const Proto = (() => {
       } else if(!g.items.length&&!g.referenceItems.length&&!g.referenceSteps.length&&!g.children.length)body.appendChild(el('div','navempty','No deliverables registered yet.'));
       d.appendChild(body);parent.appendChild(d);
     }
-    if(stepRows)model.roots.forEach(g=>renderGroup(g,target));
-    else {
-      const choose=el('div','nav-select'), detail=el('section','nav-inspect');
-      detail.setAttribute('aria-label','Selected group deliverables');
-      const key=surface+':selected';let selected=navChoice(key,model.roots[0]?.id);
-      if(!model.all.has(selected))selected=model.roots[0]?.id;
-      const buttons=[];
-      function inspect(id){
-        const g=model.all.get(id);if(!g)return;
-        selected=id;navChoices[key]=id;try{localStorage.setItem(navStorageKey(),JSON.stringify(navChoices));}catch(e){}
-        buttons.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.groupId===id)));
-        detail.textContent='';detail.appendChild(el('h3','',g.label));
-        if(g.parent)detail.appendChild(el('div','sdmeta',g.parent.label));
-        const main=g.items.filter(it=>it.managed||model.featured.has(String(it.path||'').replace(/\\/g,'/').toLowerCase()));
-        const shown=g.items.length<=6?g.items:main.length?main:g.items.slice(0,3);
-        shown.forEach(it=>detail.appendChild(navFile(it,surface+':selected')));
-        const rest=g.items.filter(it=>!shown.includes(it));
-        if(rest.length){const more=navDisclosure(surface+':support:'+g.id,'Earlier work and supporting materials · '+rest.length);
-          rest.forEach(it=>more.appendChild(navFile(it,surface+':support')));detail.appendChild(more);}
-        renderReferences(g,detail,surface+':selected');
-        g.children.forEach(child=>{
-          const mark=groupMarkInfo(child), b=el('button','nav-child');
-          b.appendChild(el('span','plan-mark '+mark.cls, mark.glyph));
-          b.appendChild(document.createTextNode(' '+child.label));
-          b.onclick=()=>inspect(child.id);detail.appendChild(b);
-        });
-        if(!g.items.length&&!g.referenceItems.length&&!g.referenceSteps.length&&!g.children.length)detail.appendChild(el('div','navempty','No deliverables registered yet.'));
-      }
-      function choice(g,parent){
-        const mark=groupMarkInfo(g), b=el('button','nav-choice');
-        b.appendChild(el('span','plan-mark '+mark.cls, mark.glyph));
-        b.appendChild(document.createTextNode(' '+g.label));
-        b.dataset.groupId=g.id;
-        b.dataset.navFocus=surface+':select:'+g.id;b.onclick=()=>inspect(g.id);buttons.push(b);parent.appendChild(b);
-        if(g.children.length){const children=navDisclosure(surface+':choose:'+g.id,'Sections and deliverables');g.children.forEach(c=>choice(c,children));parent.appendChild(children);}}
-      model.roots.forEach(g=>choice(g,choose));target.appendChild(choose);target.appendChild(detail);inspect(selected);
-    }
+    model.roots.forEach(g=>renderGroup(g,target));   // one tree for the plan and the deliverables tile (John, 2026-09-23)
     return true;
   }
   function restoreNavFocus(key) {
@@ -1006,6 +970,14 @@ const Proto = (() => {
     }
     list.appendChild(notDoneList(map, stepRows));
   }
+  // the dialogue with a reference to an item ("act on")
+  function sayAbout(text) {
+    const ta = $("[data-say]");
+    if (!ta) return;
+    ta.value = text + "\n";
+    ta.focus();
+    ta.scrollIntoView({block: "nearest"});
+  }
   // the red-flag list at the bottom of the plan: every step not done, waiting on you first and in red
   function notDoneList(map, stepRows) {
     const li = el("li", "notdone");
@@ -1014,10 +986,12 @@ const Proto = (() => {
     open.sort((a, b) => rank(a) - rank(b) || a.i - b.i);
     const box = navDisclosure("plan:notdone", "Not done \u00b7 " + open.length, true);
     open.forEach(x => {
-      const wait = stepWaitsOnJohn(x.st);
+      const wait = stepWaitsOnJohn(x.st), bare = wait === "waiting" || wait === "blocked";
+      const label = (x.st.navigation && x.st.navigation.label) || x.st.name;
       const row = el("div", "notdonerow" + (wait ? " waits" : ""));
-      row.appendChild(el("span", "mark", wait ? "\u2691" : ""));
-      const name = el("button", "navactbtn", (x.st.navigation && x.st.navigation.label) || x.st.name);
+      const head = el("div", "ndhead");
+      head.appendChild(el("span", "mark", wait ? "\u2691" : ""));
+      const name = el("button", "navactbtn", label);
       name.onclick = () => {
         const target = stepRows.get(x.i);
         if (!target) return;
@@ -1026,9 +1000,21 @@ const Proto = (() => {
         for (let d = target.closest("details"); d; d = d.parentElement && d.parentElement.closest("details")) d.open = true;
         target.scrollIntoView({block: "nearest"});
       };
-      row.appendChild(name);
-      const state = wait ? (wait === "blocked" ? "blocked" : wait === "waiting" ? "waiting on you" : "waiting on you: " + wait) : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
-      row.appendChild(el("span", "notdonestate", " \u2014 " + state));
+      head.appendChild(name);
+      row.appendChild(head);
+      const line = el("div", "ndline");
+      const state = wait ? (wait === "blocked" ? "blocked" : "waiting on you") : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
+      if (wait && !bare) {
+        const d = el("details", "ndwait");
+        d.appendChild(el("summary", "", state));
+        d.appendChild(el("div", "ndwaittext", wait));
+        line.appendChild(d);
+      } else line.appendChild(el("span", "notdonestate", state));
+      const act = el("button", "navactbtn ndact", "act on");
+      act.title = "Put this item into the dialogue";
+      act.onclick = () => sayAbout("Act on: " + label + " \u2014 " + state + (wait && !bare ? ": " + wait : ""));
+      line.appendChild(act);
+      row.appendChild(line);
       box.appendChild(row);
     });
     if (!open.length) box.appendChild(el("div", "navempty", "Every step is done."));

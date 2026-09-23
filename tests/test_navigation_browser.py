@@ -44,18 +44,24 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(donow.locator('.navfile')).to_have_count(1)                   # the current file is the one Open act
     expect(donow).to_contain_text('Working tracker')
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')            # the pin block lists the current files
-    expect(surface.locator('[data-steps] .notdone')).to_contain_text('Not done')    # the red-flag list at the bottom of the plan
+    notdone = surface.locator('[data-steps] .notdone')
+    expect(notdone).to_contain_text('Not done')                                    # the red-flag list at the bottom of the plan
+    notdone.locator('.ndact').first.click()                                        # "act on" puts a reference to the item into the dialogue
+    expect(surface.locator('[data-say]')).to_have_value(re.compile(r'^Act on: Build tracker'))
+    surface.locator('[data-say]').fill('')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
-    expect(panel.locator('.nav-choice[data-group-id="tracker"]')).to_be_visible()
-    sections = panel.locator('summary').filter(has_text='Sections and deliverables')
-    sections.click()
-    panel.locator('.nav-choice[data-group-id="calendar"]').click()
-    expect(panel.locator('.nav-inspect h3')).to_have_text('Calendar')
-    panel.locator('.nav-inspect summary').filter(has_text='Shared work and deliverables').click()
-    expect(panel.locator('.nav-inspect .navfilelink a').first).to_be_visible()
-    expect(panel.locator('.nav-inspect')).to_contain_text('Working tracker')
-    expect(panel.locator('.nav-inspect')).to_contain_text('Earlier workbook')
-    expect(panel.locator('.nav-inspect .nav-accept')).to_have_count(0)
+    tracker = panel.locator('details[data-group-id="tracker"]')                    # the deliverables tile is the plan's tree
+    expect(tracker.locator('> summary')).to_be_visible()
+    expect(panel.locator('summary').filter(has_text='Sections and deliverables')).to_have_count(0)
+    tracker.locator('> summary').click()
+    calendar = tracker.locator('details[data-group-id="calendar"]')                # the section sits inside its group
+    calendar.locator('> summary').click()
+    expect(calendar).to_have_attribute('open', '')
+    calendar.locator('summary').filter(has_text='Shared work and deliverables').click()
+    expect(calendar.locator('.navfilelink a').first).to_be_visible()
+    expect(calendar).to_contain_text('Working tracker')
+    expect(calendar).to_contain_text('Earlier workbook')
+    expect(calendar.locator('.nav-accept')).to_have_count(0)
     with page.expect_popup() as opened:
         donow.locator('.navfilelink a').first.click()
     popup = opened.value
@@ -64,15 +70,14 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     popup.close()
     # Change the register to force its periodic repaint, without changing ownership.
     (root/'DELIVERABLES.md').write_text(register.replace('Earlier workbook', 'Earlier workbook retained'), encoding='utf-8')
-    expect(panel.locator('.nav-inspect')).to_contain_text('Earlier workbook retained', timeout=20000)
-    expect(panel.locator('.nav-inspect h3')).to_have_text('Calendar')
+    expect(panel.locator('details[data-group-id="calendar"]')).to_contain_text('Earlier workbook retained', timeout=20000)
+    expect(panel.locator('details[data-group-id="calendar"]')).to_have_attribute('open', '')   # the open group survives the repaint
     expect(surface.locator('[data-say]')).to_be_visible()
     page.reload()
     surface, panel = open_surface()
-    expect(panel.locator('.nav-inspect h3')).to_have_text('Calendar')
-    expect(panel.locator('.nav-choice[data-group-id="calendar"]')).to_be_visible()
-    panel.locator('.nav-choice[data-group-id="unclassified"]').click()
-    expect(panel.locator('.nav-inspect')).to_contain_text('Unassigned reference')
+    expect(panel.locator('details[data-group-id="calendar"]')).to_have_attribute('open', '')   # and the reload
+    panel.locator('details[data-group-id="unclassified"] > summary').click()
+    expect(panel.locator('details[data-group-id="unclassified"]')).to_contain_text('Unassigned reference')
     assert not (root/'Finished Deliverables').exists()
 
 
@@ -93,7 +98,7 @@ def test_empty_campaign_uses_same_panel_order(cockpit):
     expect(panel.locator('.navpin')).to_contain_text('No files awaiting review.')
     expect(surface.locator('.blk.status.latest .sdonow')).to_contain_text('Nothing waits on you; the steward has not stated a next step.')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
-    expect(panel.locator('.nav-choice[data-group-id="compat-root"]')).to_be_visible()
+    expect(panel.locator('details[data-group-id="compat-root"] > summary')).to_be_visible()
     expect(surface.locator('[data-steps] .navgroup > summary').first).to_contain_text('Empty campaign')
     order = panel.locator('.body').evaluate("e=>[...e.children].map(c=>c.className)")
-    assert order.index('navpin') < order.index('navgroup') < order.index('nav-select')
+    assert order.index('navpin') < order.index('navgroup')                        # current work, approved, then the tree

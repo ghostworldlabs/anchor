@@ -87,8 +87,8 @@ def test_selected_b_individual_approval_retains_approved_copy_during_revision(co
     expect(panel.locator('.navpin')).to_contain_text('Current work and review')
     approved=panel.locator('details').filter(has=surface.locator('summary',has_text='Approved deliverables')).first
     expect(approved).to_contain_text('Approved deliverables · 0')
-    panel.locator('.nav-choice[data-group-id="block2"]').click()
-    expect(panel.locator('.nav-inspect h3')).to_have_text('Block 2')
+    panel.locator('details[data-group-id="block2"] > summary').click()
+    expect(panel.locator('details[data-group-id="block2"]')).to_have_attribute('open', '')
     row=surface.locator('.blk.status.latest .sdonow [data-product-id="guide"]')   # the Review act sits in Do now under the status lead (Wave E)
     with page.expect_response(lambda r:'/refinement-accept' in r.url and r.request.method=='POST') as result:
         row.get_by_role('button',name='Done with this item').click()
@@ -96,7 +96,7 @@ def test_selected_b_individual_approval_retains_approved_copy_during_revision(co
     assert _state(server)['slices']['foundation']['phase']=='done'
     expect(approved).to_contain_text('Approved deliverables · 1')
     # Another required part is unfinished: approving the guide does not finish Block 1.
-    expect(panel.locator('.nav-choice[data-group-id="block1"] .plan-mark')).not_to_have_class(re.compile(r'\bdone\b'))
+    expect(panel.locator('details[data-group-id="block1"] > summary .plan-mark')).not_to_have_class(re.compile(r'\bdone\b'))
     index=json.loads((server.campaign/'Finished Deliverables/index.json').read_text(encoding='utf-8'))
     saved=server.campaign/'Finished Deliverables'/index['files'][0]['path']
     before=saved.read_bytes()
