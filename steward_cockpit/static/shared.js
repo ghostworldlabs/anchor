@@ -970,11 +970,11 @@ const Proto = (() => {
     }
     list.appendChild(notDoneList(map, stepRows));
   }
-  // the dialogue with a reference to an item ("act on")
   function sayAbout(text) {
     const ta = $("[data-say]");
     if (!ta) return;
-    ta.value = text + "\n";
+    const line = text + "\n";
+    ta.value = (!ta.value.trim() || /^Act on: /.test(ta.value)) ? line : ta.value.replace(/\s*$/, "\n") + line;
     ta.focus();
     ta.scrollIntoView({block: "nearest"});
   }
@@ -1005,7 +1005,9 @@ const Proto = (() => {
       const line = el("div", "ndline");
       const state = wait ? (wait === "blocked" ? "blocked" : "waiting on you") : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
       if (wait && !bare) {
-        const d = el("details", "ndwait");
+        const d = el("details", "ndwait"), key = "plan:notdone:" + (x.st.id || x.st.name || String(x.i));
+        d.open = navChoice(key, false);
+        d.addEventListener("toggle", () => { if (d.isConnected) { navChoices[key] = d.open; try { localStorage.setItem(navStorageKey(), JSON.stringify(navChoices)); } catch (e) {} } });
         d.appendChild(el("summary", "", state));
         d.appendChild(el("div", "ndwaittext", wait));
         line.appendChild(d);

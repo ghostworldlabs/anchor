@@ -46,8 +46,9 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')            # the pin block lists the current files
     notdone = surface.locator('[data-steps] .notdone')
     expect(notdone).to_contain_text('Not done')                                    # the red-flag list at the bottom of the plan
-    notdone.locator('.ndact').first.click()                                        # "act on" puts a reference to the item into the dialogue
-    expect(surface.locator('[data-say]')).to_have_value(re.compile(r'^Act on: Build tracker'))
+    surface.locator('[data-say]').fill('My own note')
+    notdone.locator('.ndact').first.click()                                        # "act on" adds a reference to the item after what John typed
+    expect(surface.locator('[data-say]')).to_have_value(re.compile(r'^My own note\nAct on: Build tracker'))
     surface.locator('[data-say]').fill('')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
     tracker = panel.locator('details[data-group-id="tracker"]')                    # the deliverables tile is the plan's tree

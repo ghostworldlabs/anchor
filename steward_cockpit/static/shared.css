@@ -392,7 +392,6 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .ndwait > summary { cursor: pointer; }
 .ndwaittext { padding: 2px 0 2px 12px; opacity: .85; }
 .notdonestate { opacity: .85; }
-.ndact { opacity: .75; }
 .planlegend { font-size: 11px; opacity: .6; margin-top: 6px; }
 .action-stake { margin: 4px 0 6px; opacity: .9; }
 .action-rectext { opacity: .95; }
