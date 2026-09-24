@@ -27,8 +27,9 @@ RECOMMEND_RE = re.compile(
 
 #: How much of the turn tail counts as "where the decision is stated".
 RECOMMEND_TAIL = 1200
+_BULLET_RE = re.compile(r"^\s*[-*•·]\s*")
 AUTHORIZES_RE = re.compile(r"^\s*(?:this\s+)?authoriz(?:es|ation)\s*[:\-\u2013\u2014]\s*(.+?)\s*$", re.I | re.M)
-DECIDE_BY_RE = re.compile(r"^\s*decide\s+by\s*[:\-\u2013\u2014]?\s*(.+?)\s*$", re.I | re.M)
+DECIDE_BY_RE = re.compile(r"^\s*decide\s+by\s*:\s*(.+?)\s*$", re.I | re.M)
 
 _LIST_MARK = re.compile(r"^(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)")
 
@@ -67,12 +68,13 @@ def parse_decision(text):
             rec_idx = i
             break
     out = {"stake": [], "recommendation": "", "why": "", "alternatives": [], "authorizes": "", "decide_by": ""}
-    m = AUTHORIZES_RE.search(text or "")
-    if m:
-        out["authorizes"] = m.group(1)[:160]
-    m = DECIDE_BY_RE.search(text or "")
-    if m:
-        out["decide_by"] = m.group(1)[:80]
+    tail = (text or "")[-RECOMMEND_TAIL:]
+    hits = AUTHORIZES_RE.findall(tail)
+    if hits:
+        out["authorizes"] = hits[-1][:160]
+    hits = DECIDE_BY_RE.findall(tail)
+    if hits:
+        out["decide_by"] = hits[-1][:80]
     if rec_idx is None:
         return out
     out["recommendation"] = sents[rec_idx][0][:240]
@@ -81,7 +83,7 @@ def parse_decision(text):
     if after and not after[0][2] and not after[0][1].endswith("?"):
         out["why"] = after[0][0][:200]
         after = after[1:]
-    out["alternatives"] = [v[:160] for v, c, b in after if b and not c.endswith("?")][:3]
+    out["alternatives"] = [_BULLET_RE.sub("", v)[:160] for v, c, b in after if b and not c.endswith("?")][:3]
     return out
 
 

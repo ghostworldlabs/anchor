@@ -553,7 +553,7 @@ def read_map(campaign_dir: str):
     from .navigation_compat import with_compat_navigation
     organized = with_compat_navigation({"name": root.name, "steps": steps}, roadmap)
     steps = organized["steps"]
-    return {
+    m = {
         "navigation_mode": organized["navigation_mode"],
         "navigation_fallback": organized.get("navigation_fallback"),
         "refinement": refinement,
@@ -579,6 +579,9 @@ def read_map(campaign_dir: str):
         "history": {"started": started, "days": days, "history_md": history_md},
         "gaps": gaps,
     }
+    focused, _focus_warning = _focused_step(m)
+    m["now_step_id"] = (focused or {}).get("id")
+    return m
 
 
 #: Words that carry no identity in an effort name (articles, glue, modals).

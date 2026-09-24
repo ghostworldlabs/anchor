@@ -37,6 +37,18 @@ PERMISSION_MODES = ("plan", "acceptEdits", "bypassPermissions", "dontAsk", "defa
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,191}\Z")
 
 
+_SKILL_FOLDER_RE = re.compile(r"(?:^|[\\/\s\"'])skills[\\/]([A-Za-z0-9_.-]{1,40})[\\/]", re.I)
+
+
+def _skill_token(*values):
+    """The skill folder's NAME from a command or path (a derived token, never the command itself)."""
+    for value in values:
+        if isinstance(value, str) and value:
+            m = _SKILL_FOLDER_RE.search(value)
+            if m:
+                return m.group(1)
+    return ""
+
 class PromptCleanupError(BridgeError):
     """A private prompt resource could not be proven absent after failure."""
 
@@ -412,9 +424,14 @@ class GrokNormalizer(EventNormalizer):
         if not tool_id or tool_id in self._tool_items:
             return []
         self._tool_items.add(tool_id)
+        args = block.get("input") if isinstance(block.get("input"), dict) else {}
+        skill = _skill_token(name, *[v for v in args.values() if isinstance(v, str)])
+        payload = {"provider_tool": name or "grok_tool"}
+        if skill:
+            payload["skill"] = skill   # the cockpit marks the skill in use; the folder's name only
         return [{"type": "assistant", "session_id": self.thread_id, "message": {
             "role": "assistant", "content": [{"type": "tool_use", "id": tool_id,
-                "name": name or "grok_tool", "input": {"provider_tool": name or "grok_tool"}}],
+                "name": name or "grok_tool", "input": payload}],
         }}]
 
     def accept(self, event: dict[str, Any]):

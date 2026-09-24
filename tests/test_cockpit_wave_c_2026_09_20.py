@@ -39,7 +39,7 @@ def test_the_one_parser_reads_the_decision_shape():
     bullets = "Context.\n**Recommendation:** ship v2.\nIt is the smaller change.\n- keep v1 (safer, later)\n- redo both (a week)\nShip?"
     d = qc.parse_decision(bullets)
     assert d["recommendation"] == "**Recommendation:** ship v2." and d["why"] == "It is the smaller change."
-    assert d["alternatives"] == ["- keep v1 (safer, later)", "- redo both (a week)"]
+    assert d["alternatives"] == ["keep v1 (safer, later)", "redo both (a week)"]   # the bullet marker is not part of the alternative (Wave H: it becomes a Choose button)
     assert qc.parse_decision("Nothing decided here. What now?")["recommendation"] == ""
 
 

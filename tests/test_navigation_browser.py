@@ -118,3 +118,22 @@ def test_empty_campaign_uses_same_panel_order(cockpit):
     expect(surface.locator('[data-steps] .navgroup > summary').first).to_contain_text('Empty campaign')
     order = panel.locator('.body').evaluate("e=>[...e.children].map(c=>c.className)")
     assert order.index('navpin') < order.index('navgroup')                        # current work, approved, then the tree
+
+
+def test_a_waiting_current_step_keeps_the_flag_and_says_now(cockpit):
+    page, server = cockpit
+    root = server.campaign.parent / 'Waiting campaign'
+    root.mkdir()
+    (root/'ECGBERHT.md').write_text('# Waiting campaign\n\n## North star\nOne read.\n', encoding='utf-8')
+    (root/'roadmap.json').write_text(json.dumps({'roadmap_events': [], 'roadmap_projection': [
+        {'id': 'read', 'name': 'John reads the draft', 'status': 'waiting', 'waiting_on': 'your read', 'navigation': {'current': True}},
+        {'id': 'next', 'name': 'Fold the notes in', 'status': 'proposed'}]}), encoding='utf-8')
+    page.reload()
+    page.locator('[data-efforts] .efrow').filter(has_text='Waiting campaign').first.click()
+    surface = page.frame_locator('[data-fsframe]')
+    expect(surface.locator('[data-say]')).to_be_visible()
+    notdone = surface.locator('[data-steps] .notdone')
+    expect(notdone).to_contain_text('Not done \u00b7 2')
+    expect(notdone.locator('.ndwait > summary').first).to_have_text('now \u00b7 waiting on you')   # the flag wins the mark; the word says now
+    expect(surface.locator('[data-steps] .mark.now')).to_have_count(0)
+    expect(surface.locator('[data-steps] li[data-step-id="read"] > .mark.flag')).to_have_count(1)

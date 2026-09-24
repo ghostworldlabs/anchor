@@ -55,6 +55,18 @@ PERMISSIONS = {
 }
 
 
+_SKILL_FOLDER_RE = re.compile(r"(?:^|[\\/\s\"'])skills[\\/]([A-Za-z0-9_.-]{1,40})[\\/]", re.I)
+
+
+def _skill_token(*values):
+    """The skill folder's NAME from a command or path (a derived token, never the command itself)."""
+    for value in values:
+        if isinstance(value, str) and value:
+            m = _SKILL_FOLDER_RE.search(value)
+            if m:
+                return m.group(1)
+    return ""
+
 class BridgeError(ValueError):
     """Invalid input or an unsafe/malformed provider protocol response."""
 
@@ -477,6 +489,9 @@ class EventNormalizer:
                         metadata["paths"] = paths
                 elif type(item.get("_change_count")) is int and item["_change_count"] >= 0:
                     metadata["change_count"] = item["_change_count"]
+                skill = _skill_token(item.get("command"), item.get("tool"), *(metadata.get("paths") or []))
+                if skill:
+                    metadata["skill"] = skill   # the cockpit marks the skill in use; the folder's name only
                 return [{
                     "type": "assistant", "session_id": self.thread_id,
                     "message": {"role": "assistant", "content": [{

@@ -130,6 +130,34 @@ def test_accept_recommendation_sends_the_saved_choice(cockpit):
     assert 'keeping the current guide' in posted[0]['text']
 
 
+def test_choose_sends_the_alternative_as_the_answer(cockpit):
+    import json
+    from steward_cockpit import steward_routes
+    from steward_cockpit.question_context import save_question_context
+    page, server = cockpit
+    navigation(server)
+    engine = steward_routes.get_engine(str(server.campaign))
+    request = _state(server)['pending_request']
+    saved = save_question_context(
+        'Shall we keep it?',
+        'I recommend keeping the current guide.\n- Rebuild from the outline: a day more.\nShall we keep it?',
+        asked_at='2026-09-24T18:00:00Z', source_ref='Cockpit conversation',
+        scope={'request_id': request['id'], 'presentation_id':'p1', 'step_id':'foundation'})
+    engine.question_context = saved
+    surface = open_surface(page)
+    posted = []
+    def respond(route):
+        posted.append(route.request.post_data_json)
+        route.fulfill(status=200, content_type='application/json', body=json.dumps({'ok': True}))
+    page.route('**/api/steward/say?*', respond)
+    tile = surface.locator('[data-openq]')
+    tile.click()
+    tile.get_by_role('button', name='Choose', exact=True).click()                 # the alternative is an equal button (Wave H)
+    expect(tile).not_to_have_class(re.compile(r'\bopen\b'), timeout=5000)
+    assert posted and posted[0]['question_id'] == saved['id']
+    assert posted[0]['text'] == 'Alternative: Rebuild from the outline: a day more.'
+
+
 def test_side_panel_expansion_preserves_conversation_at_laptop_width(cockpit):
     page, server = cockpit
     navigation(server)
