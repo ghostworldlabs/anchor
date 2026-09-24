@@ -52,6 +52,14 @@ def _sentences(text):
     return out
 
 
+def question_line(text):
+    """The last sentence that asks (ends with a question mark), or ''."""
+    for verbatim, cleaned, _bullet in reversed(_sentences(text or "")):
+        if cleaned.endswith("?"):
+            return verbatim[:300]
+    return ""
+
+
 def parse_decision(text):
     """The decision shape read from the TAIL of a turn, before its last question:
     the recommendation (the last marker sentence with words beyond the marker),

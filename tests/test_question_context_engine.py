@@ -60,3 +60,16 @@ def test_review_context_expires_when_its_exact_request_is_resolved(cockpit,monke
     assert cockpit.state()['question_context'] is None
     assert not cockpit.say('Yes',question_id=saved['id'])['ok']
 
+
+def test_a_review_request_memo_gets_the_decision_shape(cockpit, monkeypatch):
+    memo = ("AI Supplement 3 Draft 5 is ready: interfaces and permissions. I recommend reviewing its teaching flow "
+            "alongside the companion lesson. Alternatively, review one lesson now and defer the other. "
+            "Does this version match your intended explanation?")
+    request = {'id': 'review-9', 'step_id': 'lecture', 'presentation_id': 'p9', 'purpose': memo, 'source_message': ''}
+    attention = {'state': 'needs_you', 'managed_refinement': True, 'pending_request': request}
+    monkeypatch.setattr(cockpit, '_attention', lambda: attention)
+    q = [x for x in cockpit.state()['pending_questions'] if x['source_ref'] == 'Review request review-9'][0]
+    assert q['question'] == 'Does this version match your intended explanation?'          # the asking sentence, not the memo
+    assert q['recommendation'].startswith('I recommend reviewing its teaching flow')       # the memo is the source
+    assert q['stake'] == ['AI Supplement 3 Draft 5 is ready: interfaces and permissions.']
+    assert q['authorization_scope']['request_id'] == 'review-9'

@@ -34,7 +34,7 @@ import time
 import uuid
 from pathlib import Path
 from steward_cockpit.question_context import (save_question_context, normalize_question_context,
-                                               has_recommendation as _has_recommendation)
+                                               has_recommendation as _has_recommendation, question_line)
 
 HERE = Path(__file__).parent
 STATE_FILE = HERE / "proto-state.json"
@@ -664,7 +664,11 @@ class Engine:
             if any((q.get("authorization_scope") or {}).get("request_id") == request.get("id") for q in contexts):
                 continue
             purpose = request.get("purpose") or "Review this deliverable"
-            contexts.append(save_question_context(purpose, request.get("source_message") or "",
+            # the request's memo is the decision's source when it carries the recommendation; the record's
+            # question is the memo's asking sentence, so the card shows the same shape as a conversational ask
+            source = purpose if _has_recommendation(purpose) else (request.get("source_message") or purpose)
+            asked = question_line(purpose) or purpose
+            contexts.append(save_question_context(asked, source,
                 asked_at=request.get("asked_at"), source_ref="Review request " + str(request.get("id")),
                 scope={"request_id":request.get("id"), "step_id":request.get("step_id"),
                        "presentation_id":request.get("presentation_id"), "members":request.get("members", [])}))
