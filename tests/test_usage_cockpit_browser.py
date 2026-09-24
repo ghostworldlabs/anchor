@@ -46,7 +46,7 @@ def test_project_usage_includes_checkpoint_and_remains_visible_asleep(cockpit, m
     expect(footer).not_to_contain_text("effort sessions")
     expect(footer).to_contain_text("1.25")
     expect(footer).to_contain_text("not priced")
-    assert "effort sessions" in footer.get_attribute("title")
+    assert "effort total" in footer.get_attribute("title").lower()   # the parts stay in the hover
     assert "999999" not in footer.inner_text()
     eng.proc = None
     eng.busy = False
@@ -55,6 +55,6 @@ def test_project_usage_includes_checkpoint_and_remains_visible_asleep(cockpit, m
     footer = page.frame_locator('[data-fsframe]').locator('[data-spend]')
     expect(footer).to_contain_text("130")
     expect(footer).to_contain_text("1.25")
-    expect(footer).to_contain_text("effort sessions")
+    expect(footer).to_contain_text("Total $")
     assert "session" in footer.get_attribute("title").lower()
     page.screenshot(path=str(server.campaign.parent / "usage-cockpit.png"), full_page=True)

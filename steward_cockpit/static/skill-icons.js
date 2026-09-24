@@ -63,17 +63,29 @@
       if (im) { n.insertBefore(im, n.firstChild); n.setAttribute("data-skico", "1"); }
     }
   }
-  /* Which skill produced a document, from its path (gandalf/run-…/report.md → Gandalf; a lane dir → its skill). */
-  function fromPath(path) {
-    var p = String(path || "").toLowerCase();
-    if (/(^|\/)gandalf(\/|$)/.test(p)) return "Gandalf";
-    if (/(^|\/)superjump(\/|$)/.test(p)) return "Superjump";
-    if (/(^|\/)jumper(\/|$)/.test(p)) return "Jumper";
-    if (/(^|\/)(research|researchprime)(\/|$)/.test(p)) return "researchPrime";
-    if (/(^|\/)(plan|planning|crucible)(\/|$)/.test(p)) return "Crucible";
-    if (/(^|\/)(build|foreman)(\/|$)/.test(p)) return "Foreman";
-    var e = entryFor(p);
-    return e ? e.name : null;
+  function exact(text) {
+    var t = String(text || "").toLowerCase();
+    if (!t) return null;
+    for (var i = 0; i < MAP.length; i++) {
+      if (t === MAP[i].name.toLowerCase() || MAP[i].aliases.indexOf(t) >= 0) return MAP[i];
+    }
+    return null;
   }
-  window.SkillIcons = { MAP: MAP, entryFor: entryFor, iconFor: iconFor, img: img, decorate: decorate, fromPath: fromPath };
+  /* Which skill produced a document: a directory on its path that IS a skill's name (gandalf/run-…/report.md →
+     Gandalf); a lane folder (planning/, build/, research/) says nothing about who made the file. */
+  function fromPath(path) {
+    var segs = String(path || "").replace(/\\/g, "/").split("/");
+    for (var i = 0; i < segs.length - 1; i++) {
+      var e = exact(segs[i]);
+      if (e) return e.name;
+    }
+    return null;
+  }
+  /* The skill that made a register item: its owning step's commission, else its folder. */
+  function forItem(it, owner) {
+    if (!it) return null;
+    var e = owner && owner.commissioned_as ? exact(String(owner.commissioned_as).split(":")[0]) : null;
+    return e ? e.name : fromPath(it.path || it.route || "");
+  }
+  window.SkillIcons = { MAP: MAP, entryFor: entryFor, exact: exact, iconFor: iconFor, img: img, decorate: decorate, fromPath: fromPath, forItem: forItem };
 })();

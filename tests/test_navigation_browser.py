@@ -23,11 +23,11 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
         '| Earlier workbook | `old.html` | 2026-09-12 | live |\n' + \
         '| START HERE: supporting evidence | `support.html` | 2026-09-13 | research |\n' + \
         '| Unassigned reference | `orphan.html` | 2026-09-13 | unresolved |\n' + \
-        '| Field notes | `research/notes.md` | 2026-09-12 | unresolved |\n'
+        '| Field notes | `gandalf/notes.md` | 2026-09-12 | unresolved |\n'
     (root/'DELIVERABLES.md').write_text(register, encoding='utf-8')
     for name in ('current', 'old', 'support', 'orphan'):
         (root/(name+'.html')).write_text('<h1>'+name+' tracker example</h1>', encoding='utf-8')
-    (root/'research').mkdir(); (root/'research'/'notes.md').write_text('# notes\n', encoding='utf-8')
+    (root/'gandalf').mkdir(); (root/'gandalf'/'notes.md').write_text('# notes\n', encoding='utf-8')
     page.reload()
 
     def open_surface():
@@ -61,7 +61,7 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(notdone).to_contain_text('\u25cf now')                                   # and the legend names it
     expect(surface.locator('[data-steps] li[data-step-id="live"] > .mark.now')).to_have_count(1)
     expect(surface.locator('[data-steps] li[data-step-id="live"] .stitle img.skico')).to_have_attribute('alt', 'Foreman')   # the commissioned skill's mark on the step
-    expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="researchPrime"]')).to_have_count(1)   # a file's skill from its folder (Wave I)
+    expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="Gandalf"]')).to_have_count(1)   # a file's skill from a folder that IS a skill's name (Wave I)
     spend = surface.locator('[data-spend]')
     expect(spend).not_to_contain_text('effort sessions')                            # one total on the line, the parts in the hover (Wave I)
     expect(spend).to_have_text(re.compile(r'^(Total|cost unavailable)'))

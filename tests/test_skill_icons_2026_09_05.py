@@ -41,7 +41,7 @@ def test_the_client_map_and_the_four_surfaces_are_wired():
     assert "fromPath" in js and "decorate" in js
     shared = (ROOT / "steward_cockpit" / "static" / "shared.js").read_text(encoding="utf-8")
     assert 'S.entryFor(String(st.commissioned_as || "").split(":")[0] + " " + st.name)' in shared   # the plan outline: the commissioned skill or the name's mention
-    assert "function skillOfItem(it)" in shared and "S.fromPath(it.path || it.route" in shared      # a file's skill: its name, its step's commission, or its folder (Wave I)
+    assert "forItem" in js and "SkillIcons.forItem(" in shared             # a file's skill: its step's commission or a folder named for the skill (Wave I)
     cockpit = (ROOT / "steward_cockpit" / "static" / "cockpit.html").read_text(encoding="utf-8")
     assert "SkillIcons.img(name, 18)" in cockpit                       # the workbench skill rail
     assert '<script src="/static/skill-icons.js">' in cockpit

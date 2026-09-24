@@ -580,7 +580,7 @@ const Proto = (() => {
     const row = el("div", "sdrow");
     const one = (it.what || "").split(" — ")[0].trim() || it.what || "(untitled)";
     const line = el("div", "sdone", "▸ " + one);
-    try { const im = window.SkillIcons && window.SkillIcons.img(one, 14); if (im) line.insertBefore(im, line.firstChild); } catch (e) { /* no-op */ }
+    try { const im = window.SkillIcons && window.SkillIcons.img(itemMark(it) || "", 14); if (im) line.insertBefore(im, line.firstChild); } catch (e) { /* no-op */ }
     const detail = el("div", "sddetail");
     if (it.managed) detail.style.overflowWrap = "anywhere";
     const full = el("div", "", it.what || "");
@@ -747,17 +747,7 @@ const Proto = (() => {
     const sortNodes=nodes=>{nodes.sort((a,b)=>(a.order-b.order)||a.label.localeCompare(b.label));nodes.forEach(n=>{sortNodes(n.children);n.items.sort(itemOrder);n.referenceItems.sort(itemOrder);});};
     sortNodes(roots);return {roots,all,featured};
   }
-  // the skill that made an item: its name's mention, else the owning step's commission, else its folder
-  function skillOfItem(it) {
-    const S = window.SkillIcons;
-    if (!S || !it) return null;
-    const byWhat = S.entryFor(it.what || "");
-    if (byWhat) return byWhat.name;
-    const owner = navOwner((_lastMap && _lastMap.steps) || [], it);
-    const byStep = owner && owner.commissioned_as ? S.entryFor(String(owner.commissioned_as).split(":")[0]) : null;
-    if (byStep) return byStep.name;
-    return S.fromPath(it.path || it.route || "");
-  }
+  const itemMark = it => window.SkillIcons ? window.SkillIcons.forItem(it, navOwner((_lastMap && _lastMap.steps) || [], it)) : null;
   function navFile(it, surface, readOnly=false) {
     const box=el('div','navfile');box.dataset.navPath=it.path||it.route||it.what;box.dataset.productId=it.product_id||'';
     const shown={...it,date:String(it.date||'').split('T')[0]};
@@ -919,12 +909,10 @@ const Proto = (() => {
       const title = el("div", "stitle");
       title.appendChild(el("span", "tw", ""));
       if (st.part) title.appendChild(el("span", "wpkind", st.part));
-      // a step carries the mark of the skill it was commissioned as, or that its name mentions, or that made its files
+      // (2026-09-05, John) a step that names a skill carries its mark
       try {
-        const S = window.SkillIcons;
-        let skName = S && (S.entryFor(String(st.commissioned_as || "").split(":")[0] + " " + st.name) || {}).name;
-        if (S && !skName) { for (const it of stepDeliverables(st, i + 1)) { skName = skillOfItem(it); if (skName) break; } }
-        const _sk = skName && S.img(skName, 16);
+        const S = window.SkillIcons, e = S && S.entryFor(String(st.commissioned_as || "").split(":")[0] + " " + st.name);
+        const _sk = e && S.img(e.name, 16);
         if (_sk) title.appendChild(_sk);
       } catch (e) { /* no-op */ }
       title.appendChild(document.createTextNode((st.navigation && st.navigation.label) || st.name));
@@ -1184,7 +1172,7 @@ const Proto = (() => {
       const a = document.createElement("a");
       // labelled by the document it opens, never the whole route (2026-09-05)
       a.textContent = "• " + (it.what || routeName(it.route));
-      try { const im = window.SkillIcons && window.SkillIcons.img(skillOfItem(it) || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
+      try { const im = window.SkillIcons && window.SkillIcons.img(itemMark(it) || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
       a.href = routeHref(it.route);
       a.target = "_blank";
       a.rel = "noopener";
@@ -1192,7 +1180,7 @@ const Proto = (() => {
     } else if (it.openable && it.path) {
       const a = document.createElement("a");
       a.textContent = "• " + it.what;
-      try { const im = window.SkillIcons && window.SkillIcons.img(skillOfItem(it) || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
+      try { const im = window.SkillIcons && window.SkillIcons.img(itemMark(it) || "", 14); if (im) a.insertBefore(im, a.firstChild); } catch (e) { /* no-op */ }
       // 2026-08-26 (John: "I click on them and the page had nothing"): a raw
       // <a href> NAVIGATES — it never passes through the fetch shim, so the
       // old api() URL arrived with no /api/steward/ prefix, no pid and no
@@ -1618,8 +1606,6 @@ const Proto = (() => {
         ? " · " + seats.count + (seats.count === 1 ? " seat " : " seats ") + (seats.cost_text || "cost unavailable") +
           (seats.unknown > 0 ? " (" + seats.unknown + " unknown usage)" : "")
         : "";
-      const breakdown = (effortUsageText || "session " + sessionCostText + " · " + st.turns + " turns" + sessionTokensText) + jobsText + kidsText + seatsText;
-      // ONE total on the line (John, 2026-09-24: "why are the costs not simply added up and the total shown"); the parts stay in the title
       const num = v => (typeof v === "number" && Number.isFinite(v) && v >= 0) ? v : 0;
       const priced = [effortUsage, jobsUsage, seats].filter(Boolean);
       const sessionOnly = !effortUsage;
@@ -1627,19 +1613,17 @@ const Proto = (() => {
       const unpricedTotal = priced.reduce((a, b) => a + num(b.unpriced_turns), 0) + (sessionOnly ? num(st.unpriced_turns) : 0);
       const tokensTotal = [effortUsage, jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.tokens), 0) + (sessionOnly ? num(st.tokens) : 0);
       const unknownTotal = [jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.unknown), 0);
-      const fam = (effortUsage && effortUsage.billing_family) || st.cli || "";
-      const onSub = (effortUsage || st).billing_mode === "subscription" || fam === "chatgpt" || fam === "grok" || fam === "mixed";
-      const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : "ChatGPT";
-      const turnsBit = unpricedTotal ? unpricedTotal.toLocaleString() + " turn" + (unpricedTotal === 1 ? "" : "s") + (onSub ? " on the " + subName + " subscription (not priced)" : " not priced") : "";
-      let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (turnsBit ? " · " + turnsBit : "")
-        : turnsBit ? "Total: " + turnsBit : "cost unavailable";
+      const fam = String((effortUsage || st).billing_family || "");
+      const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : fam === "chatgpt" ? "ChatGPT" : "";
+      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + " not priced" + (subName ? " (" + subName + " subscription)" : "") : "";
+      let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (notPriced ? " · " + notPriced : "")
+        : notPriced ? "Total: " + notPriced : "cost unavailable";
       if (tokensTotal) total += " · " + Math.round(tokensTotal).toLocaleString() + " tokens recorded";
       if (unknownTotal) total += " · " + unknownTotal + " run" + (unknownTotal === 1 ? "" : "s") + " with unknown usage";
       spend.textContent = total +
         (st.usage_persistence_error ? " · not saved" : "") +
         (!st.alive ? " · " + (GENERAL ? "idle" : "steward asleep") + (st.queued ? " · " + st.queued + " held" : "") : "");
-      spend.title = "Breakdown: " + breakdown + (effortUsage ? " · " + spend.title : "");
-      if (!effortUsage) spend.title += " · Session: " + sessionCostText + sessionTokensText;
+      if (!effortUsage) spend.title = "Session: " + sessionCostText + sessionTokensText;
       if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
       if (kidsText) spend.title += " · Sub-agents" + kidsText.replace(/^ · /, ": ");
       if (seatsText) spend.title += " · Skill seats" + seatsText.replace(/^ · /, ": ") + " · " + recordedTokenText(seats);

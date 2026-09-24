@@ -1037,7 +1037,7 @@ async function loadDeliv() {
        which serve_page_doc 404s (wave-1 reviewer finding, 2026-09-05).
        Hostile cells arrive route:null and stay text. */
     const fn = el(it.route ? "a" : "span", "fn", "• " + it.what);
-    try { const S = window.SkillIcons; const im = S && (S.img(it.what || "", 14) || S.img(S.fromPath(it.path || it.route || "") || "", 14)); if (im) fn.insertBefore(im, fn.firstChild); } catch (e) {}
+    try { const S = window.SkillIcons; const im = S && S.img(S.forItem(it, null) || "", 14); if (im) fn.insertBefore(im, fn.firstChild); } catch (e) {}
     fn.title = it.path || "";
     if (it.route) {
       // markdown renders in the Reader, Office documents preview (2026-09-05)
