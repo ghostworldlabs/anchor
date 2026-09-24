@@ -89,7 +89,9 @@ def test_selected_b_individual_approval_retains_approved_copy_during_revision(co
     expect(approved).to_contain_text('Approved deliverables · 0')
     panel.locator('details[data-group-id="block2"] > summary').click()
     expect(panel.locator('details[data-group-id="block2"]')).to_have_attribute('open', '')
-    row=surface.locator('.blk.status.latest .sdonow [data-product-id="guide"]')   # the Review act sits in Do now under the status lead (Wave E)
+    nxt=surface.locator('[data-delivmount] .blk.next')                              # the Review act sits in the Next steps tile (Wave G)
+    if nxt.locator(':scope.folded').count(): nxt.locator('.who').click()
+    row=nxt.locator('[data-product-id="guide"]')
     with page.expect_response(lambda r:'/refinement-accept' in r.url and r.request.method=='POST') as result:
         row.get_by_role('button',name='Done with this item').click()
     assert result.value.ok

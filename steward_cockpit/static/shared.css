@@ -383,7 +383,6 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .action-rec { margin: 6px 0; }
 .action-bullets { margin: 6px 0; padding-left: 18px; }
 .action-bullets li { margin: 3px 0; line-height: 1.4; }
-.sdonow { margin: 4px 0 8px; }
 .steps li.notdone { display: block; list-style: none; margin-top: 10px; }   /* the list and its legend stack; the row rule is flex */
 .notdonerow { display: block; margin: 7px 0; overflow-wrap: anywhere; }
 .notdonerow.waits .ndhead, .notdonerow.waits .mark { color: var(--flag); }
@@ -511,7 +510,7 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .pdeliv { flex: none; padding: 4px 14px 0; }
 /* the tile is capped when open so it can never crowd out the status
    (2026-09-03: 40vh — the status window below shrinks to make the room) */
-.pdeliv .blk.deliv:not(.folded) .body { max-height: 40vh; overflow-y: auto; }
+.pdeliv .blk.deliv:not(.folded) .body, .pdeliv .blk.next:not(.folded) .body { max-height: 40vh; overflow-y: auto; }
 /* the status is its OWN window (John, 2026-09-03): a bordered box between the
    deliverables tile and the files tile; it is the only child that grows, and
    it is overflow:hidden, so nothing can slide under or over it */
@@ -548,13 +547,16 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .sdrow.open .sddetail { display: block; }
 .sdrow .sdmeta { color: var(--faint); font-size: 11.5px; }
 .sdrow .drow { padding: 2px 0 0; }
-.pdeliv .blk.deliv { margin-bottom: 8px; }
+.pdeliv .blk.deliv, .pdeliv .blk.next { margin-bottom: 8px; }
+.pdeliv .blk.next .body { padding: 6px 2px 2px; }
 /* the tile folds wherever it is mounted: the only fold rule used to be
    scoped to .pscroll, so in its own slot it rendered permanently open and
    its header click did nothing (2026-08-26 round 2) */
-.blk.deliv.folded .body { max-height: 1.5em; overflow: hidden; }
+.blk.deliv.folded .body, .blk.next.folded .body { max-height: 1.5em; overflow: hidden; }
 /* folded wins over any mounted max-height above */
-.pdeliv .blk.deliv.folded .body { max-height: 0; overflow: hidden; }
+.pdeliv .blk.deliv.folded .body, .pdeliv .blk.next.folded .body { max-height: 0; overflow: hidden; }
+/* earlier updates are a list of time lines; each opens on click (John, 2026-09-24) */
+.status-history .blk.folded .body { display: none; }
 /* pages with no dedicated slot keep the old in-pane pin */
 .pscroll .blk.deliv { position: sticky; top: 0; z-index: 2;
        background: var(--panel); }

@@ -301,6 +301,7 @@ const Proto = (() => {
       });
     }
     const b = el("div", "blk " + kind + (extraClass ? " " + extraClass : ""));
+    if (who && kind === "steward" && s === paneEl() && s) who = "\u23f1 " + new Date().toTimeString().slice(0, 5) + " \u00b7 " + who;
     if (who) b.appendChild(el("div", "who", who));
     const body = el("div", "body");
     if (kind === "steward") renderRich(body, text); else body.textContent = text;
@@ -333,14 +334,18 @@ const Proto = (() => {
      is persisted server-side to .ecgberht/status-summary.json for the
      main-dashboard tile. */
   // Do now under the lead: the open decision, then the acts the deliverables read serves (Review, Open, Next)
-  function paintDoNow(host) {
-    if (!host) return;
-    host.textContent = "";
+  function nextActs() {
     const acts = [];
     const q = currentQuestion();
     if (q && q.question) acts.push({act: "Answer", label: String(q.question).slice(0, 80), question: q});
     (_deliv.acts || []).forEach(a => acts.push(a));
-    host.appendChild(el("div", "naveyebrow", "Do now"));
+    return acts;
+  }
+  // the Next steps tile's body: what is front and center (Answer, Review, Open, Next), then the plan's next open steps
+  function paintDoNow(host) {
+    if (!host) return;
+    host.textContent = "";
+    const acts = nextActs();
     if (_deliv.warning) host.appendChild(el("div", "navempty", _deliv.warning));   // the current item, honestly
     acts.forEach(a => {
       const row = el("div", "navact navact-" + a.act.toLowerCase());
@@ -352,6 +357,42 @@ const Proto = (() => {
       host.appendChild(row);
     });
     if (!acts.length) host.appendChild(el("div", "navempty", "Nothing waits on you; the steward has not stated a next step."));
+    const plan = ((_lastMap && _lastMap.steps) || []).filter(st => !stepDone(st)).slice(0, 3);
+    if (plan.length) {
+      host.appendChild(el("div", "naveyebrow", "Next in the plan"));
+      plan.forEach(st => {
+        const row = el("div", "navact navact-plan");
+        row.appendChild(el("span", "navactkind", st.status === "active" ? "Now" : "Then"));
+        row.appendChild(el("span", "navactlabel", (st.navigation && st.navigation.label) || st.name));
+        host.appendChild(row);
+      });
+    }
+  }
+  let _nextOpen = (() => {
+    try { return localStorage.getItem("steward_next_open") === "1"; }
+    catch (e) { return false; }
+  })();
+  // the Next steps tile: second tile in the deliverables slot, closed by default (John, 2026-09-24)
+  function renderNextStepsTile() {
+    const s = $("[data-delivmount]");
+    if (!s) return;
+    let tile = s.querySelector(".blk.next");
+    if (!tile) {
+      tile = el("div", "blk steward next" + (_nextOpen ? "" : " folded"));
+      const who = el("div", "who");
+      who.style.cursor = "pointer";
+      who.onclick = () => {
+        tile.classList.toggle("folded");
+        _nextOpen = !tile.classList.contains("folded");
+        try { localStorage.setItem("steward_next_open", _nextOpen ? "1" : "0"); } catch (e) {}
+      };
+      tile.appendChild(who);
+      tile.appendChild(el("div", "body"));
+      s.appendChild(tile);
+    }
+    const n = nextActs().length;
+    tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " · " + n + " for you" : " · nothing waits on you");
+    paintDoNow(tile.querySelector(".body"));
   }
   function renderStatus(stat) {
     const s = paneEl();
@@ -435,10 +476,6 @@ const Proto = (() => {
     leadEl.dataset.statusFact = "lead";
     leadEl.title = leadText;
     compact.appendChild(leadEl);
-    const doNow = el("div", "sdonow");
-    doNow.dataset.donow = "1";
-    paintDoNow(doNow);
-    compact.appendChild(doNow);
     compact.appendChild(tab);   // the ten locked rows stay open below the lead (John, 2026-09-11: wording, not hiding)
     if (stat.latest_event && stat.latest_event.summary) {
       const latest = el("p");
@@ -462,7 +499,7 @@ const Proto = (() => {
     // not for reading history — history stays one click away).
     let history=s.querySelector('[data-statushistory]');
     if(!history){history=el('details','status-history');history.dataset.statushistory='1';history.appendChild(el('summary','','Earlier updates'));s.appendChild(history);}
-    s.querySelectorAll(".blk.status.latest").forEach(o => {o.classList.remove("latest");o.querySelectorAll("[data-donow]").forEach(n => n.remove());history.appendChild(o);});
+    s.querySelectorAll(".blk.status.latest").forEach(o => {o.classList.remove("latest");history.appendChild(o);});
     b.classList.add("latest");
     s.insertBefore(b,s.firstChild);
     syncCompactActivity(lastState);
@@ -749,7 +786,7 @@ const Proto = (() => {
     if(document.getElementById('course-navigation-style'))return;
     const s=el('style');s.id='course-navigation-style';
     s.textContent=`.navtree{min-width:0;font-size:13px;line-height:1.42}.navgroup{margin:5px 0;border-top:1px solid #ffffff20;min-width:0}.navgroup>summary{cursor:pointer;padding:8px 3px;font-weight:600;white-space:normal;overflow-wrap:anywhere}.navcontents{padding:0 0 5px 9px;min-width:0}.navgroup .navgroup .navcontents{padding-left:7px}.navfile{padding:5px 0;overflow-wrap:anywhere;border-bottom:1px solid #ffffff0b}.navfile .drow{white-space:normal;overflow:visible;font-size:13px;line-height:1.42}.navfile a{white-space:normal;overflow-wrap:anywhere}.navpin{padding:10px;margin:0 0 10px;border:1px solid #679cc077;border-radius:6px;background:#44698718}.navpin-title{font-size:14px;font-weight:600;margin:3px 0}.naveyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.8}.navstep-list{padding:0!important;list-style:none}.navstep-list>li{padding:6px 0!important}.navstep-list .sdeliv{display:none}.navstep-list .sdeliv:has(button){display:block}.navempty{opacity:.75;padding:5px 0;font-size:12px}.navtree .navsupport{margin-top:7px}.navtree .navsupport>summary{font-size:12px;font-weight:400}.navtree .wpkind{display:none}.navtree .navstep-list .stitle{white-space:normal}.navtree .navstep-list .sdmeta{font-size:12px}.navtree .navfile .navgroup{font-size:12px}.navtree .navfile .navgroup>summary{padding:3px;font-weight:400}`;
-    s.textContent+='[data-delivmount] .blk.deliv:not(.folded)>.body{max-height:min(52vh,500px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding-right:6px}';
+    s.textContent+='[data-delivmount] .blk.deliv:not(.folded)>.body,[data-delivmount] .blk.next:not(.folded)>.body{max-height:min(52vh,500px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding-right:6px}';
     document.head.appendChild(s);
   }
   function renderNavigation(target,map,items,surface,stepRows=null) {
@@ -1034,7 +1071,7 @@ const Proto = (() => {
     const items = (d && d.items) || [];
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     _deliv = {items, approved: (d && d.approved) || [], acts: (d && d.acts) || [], warning: (d && d.current_warning) || ""};
-    paintDoNow($(".blk.status.latest [data-donow]"));
+    renderNextStepsTile();
     // repaint the plan so step-tagged deliverables land under their steps
     if (_lastMap) { try { paintStepsList(_lastMap); } catch (e) {} }
     // — the tile: its OWN slot above the scrollport when the page provides
@@ -1436,7 +1473,7 @@ const Proto = (() => {
     if(chip){chip.textContent=value;chip.title=value;}
     paintActionNeeded($('[data-openq]'));
     paintActionNeeded($('[data-status-action]'));
-    paintDoNow($('.blk.status.latest [data-donow]'));
+    renderNextStepsTile();
   }
 
   function updateState(st) {

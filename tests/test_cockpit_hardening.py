@@ -172,7 +172,9 @@ def test_real_client_keeps_committed_approval_when_finished_copy_conflicts(cockp
     target=server.campaign/'Finished Deliverables/Block 1/Lecture 2/guide.html'
     target.parent.mkdir(parents=True,exist_ok=True);target.write_text('User-owned unrelated file',encoding='utf-8')
     surface=open_surface(page)
-    row=surface.locator('.blk.status.latest .sdonow [data-product-id="guide"]')   # the Review act sits in Do now under the status lead (Wave E)
+    nxt=surface.locator('[data-delivmount] .blk.next')                              # the Review act sits in the Next steps tile (Wave G)
+    if nxt.locator(':scope.folded').count(): nxt.locator('.who').click()
+    row=nxt.locator('[data-product-id="guide"]')
     with page.expect_response(lambda r:'/refinement-accept' in r.url and r.request.method=='POST') as response:
         row.get_by_role('button',name='Done with this item',exact=True).click()
     result=response.value.json()
