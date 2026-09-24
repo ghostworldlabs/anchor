@@ -71,9 +71,21 @@ const Proto = (() => {
     return "";
   }
   function stepNeedsAttention(st) { return !!stepWaitsOnJohn(st); }
+  // the one current step: the pinned step (navigation.current, the steward's `update --current-step`), else the
+  // single active step; never a guess - the same rule as the server's _focused_step
+  let _nowId = null;
+  function nowStep(map) {
+    const steps = (map && map.steps) || [];
+    const pinned = steps.find(st => st.navigation && st.navigation.current === true && !stepDone(st));
+    if (pinned) return pinned;
+    const active = steps.filter(st => st.status === "active");
+    return active.length === 1 ? active[0] : null;
+  }
+  function isNow(st) { return !!(_nowId && st && st.id === _nowId); }
   function planMarkInfo(st) {
     if (stepDone(st)) return {glyph: "✓", cls: "done", row: "done"};
     if (stepNeedsAttention(st)) return {glyph: "⚑", cls: "flag", row: "waiting"};
+    if (isNow(st)) return {glyph: "●", cls: "now", row: "active"};
     return {glyph: "", cls: "todo", row: st.status === "active" ? "active" : "planned"};
   }
   function currentQuestion() {
@@ -105,7 +117,24 @@ const Proto = (() => {
       row.appendChild(el("span", "action-rectext", " " + oneLine(q.recommendation, 220) + (q.why ? " \u2014 " + oneLine(q.why, 160) : "")));
       bullets.appendChild(row);
     }
-    (q.alternatives || []).slice(0, 3).forEach(a => bullets.appendChild(el("li", "action-alts", "Or: " + oneLine(a, 120))));
+    if (q.authorizes) bullets.appendChild(el("li", "action-auth", "Authorizes: " + oneLine(q.authorizes, 160)));
+    if (q.decide_by) bullets.appendChild(el("li", "action-auth", "Decide by: " + oneLine(q.decide_by, 80)));
+    (q.alternatives || []).slice(0, 3).forEach(a => {
+      const row = el("li", "action-alts");
+      const choose = el("button", "action-alt", "Choose");
+      choose.onclick = async (ev) => {
+        ev.stopPropagation();
+        if (q.id && !pending().some(item => item.id === q.id)) return gone(choose);
+        choose.disabled = true;
+        const tile = host.closest("[data-openq],[data-status-action]");
+        const result = await sendSay("Alternative: " + a, q.id || null);
+        if (result && result.ok) { if (tile) tile.classList.remove("open"); }
+        else choose.disabled = false;
+      };
+      row.appendChild(choose);
+      row.appendChild(el("span", "action-rectext", " " + oneLine(a, 120)));
+      bullets.appendChild(row);
+    });
     host.appendChild(bullets);
     if (q.id) {
       const answer = el("button", "", "Answer this question");
@@ -420,17 +449,25 @@ const Proto = (() => {
     };
     const todo = bullets.length ? el("ul", "stodo") : null;
     if (todo) bullets.slice(0, 3).forEach(t => todo.appendChild(el("li", "", oneLine(t, 90))));
+    const skillRow = text => {   // a commissioned skill run carries its mark on the row
+      const im = run && run.kind === "skill" && window.SkillIcons && window.SkillIcons.img(run.skill || run.label || "", 14);
+      if (!im) return text;
+      const span = el("span", "");
+      span.appendChild(im);
+      span.appendChild(document.createTextNode(text));
+      return span;
+    };
     const rows = [
       ["Summary", factValue("Summary", sliceLine || oneLine(goal) || "—")],
       ["Effort", factValue("Effort", stat.effort || "—")],
-      ["Doing", factValue("Doing", doingLine || (stat.stale ? "Idle" : "—"))],
+      ["Doing", skillRow(factValue("Doing", doingLine || (stat.stale ? "Idle" : "—")))],
       ["Status", factValue("Status", (p.steps_done || 0) + "/" + (p.steps_total || 0) +
         " done · " + (p.attention || "quiet"))],
       ["Tests", factValue("Tests", stat.tests || "—")],
       ["Blocker", factValue("Blocker", p.waiting_on_you ? "waiting on you: " + p.waiting_on_you
         : (stat.halt && stat.halt.reason) ? "blocked: " + stat.halt.reason : "none")],
-      ["Procs", factValue("Procs", seats.length ? seats.join(" · ")
-        : ((run && run.kind === "skill") ? run.skill + " (commissioned)" : "none"))],
+      ["Procs", skillRow(factValue("Procs", seats.length ? seats.join(" · ")
+        : ((run && run.kind === "skill") ? run.skill + " (commissioned)" : "none")))],
       ["Journal", factValue("Journal", stat.journal || "—")],
       ["ETA", factValue("ETA", stat.eta || "—")],
       ["To do", todo || factValue("To do", "—")],
@@ -802,6 +839,7 @@ const Proto = (() => {
       if(!steps.length) return {glyph:'',cls:'todo'};
       if(steps.every(s=>stepDone(s.step))) return {glyph:'✓',cls:'done'};
       if(steps.some(s=>stepNeedsAttention(s.step))) return {glyph:'⚑',cls:'flag'};
+      if(steps.some(s=>isNow(s.step))) return {glyph:'●',cls:'now'};
       return {glyph:'',cls:'todo'};
     };
     function renderReferences(g,parent,refSurface) {
@@ -811,9 +849,9 @@ const Proto = (() => {
       if(steps.length){
         const list=el('ul','navstep-list');
         steps.forEach(s=>{
-          const row=el('li','navstep-reference'),done=stepDone(s.step),attention=stepNeedsAttention(s.step);
+          const row=el('li','navstep-reference'),done=stepDone(s.step),attention=stepNeedsAttention(s.step),now=isNow(s.step);
           row.dataset.stepRef=s.step.id||String(s.index);
-          row.appendChild(el('span','plan-mark '+(done?'done':attention?'flag':'todo'),done?'✓':attention?'⚑':''));
+          row.appendChild(el('span','plan-mark '+(done?'done':attention?'flag':now?'now':'todo'),done?'✓':attention?'⚑':now?'●':''));
           row.appendChild(document.createTextNode(' '+(s.step.name||s.step.id||'Step '+(s.index+1))));
           list.appendChild(row);
         });
@@ -858,6 +896,7 @@ const Proto = (() => {
     if (!list) return;
     const focusKey=document.activeElement && document.activeElement.dataset.navFocus;
     const stepRows=new Map();
+    _nowId = (nowStep(map) || {}).id || null;
     list.textContent = "";
     const unmapped = Object.values(((map.refinement || {}).state || {}).producer_handoffs || {}).filter((h) => !h.step_id && h.status === "pending_steward_review");
     if (unmapped.length) {
@@ -993,8 +1032,9 @@ const Proto = (() => {
   // the red-flag list at the bottom of the plan: every step not done, waiting on you first and in red
   function notDoneList(map, stepRows) {
     const li = el("li", "notdone");
-    const open = map.steps.map((st, i) => ({st, i})).filter(x => !stepDone(x.st));
-    const rank = x => stepWaitsOnJohn(x.st) ? 0 : x.st.status === "active" ? 1 : 2;
+    const supporting = st => !!(st.navigation && st.navigation.role === "support");
+    const open = map.steps.map((st, i) => ({st, i})).filter(x => !stepDone(x.st) && x.st.status !== "parked" && !supporting(x.st));
+    const rank = x => stepWaitsOnJohn(x.st) ? 0 : isNow(x.st) ? 1 : x.st.status === "active" ? 2 : 3;
     open.sort((a, b) => rank(a) - rank(b) || a.i - b.i);
     const box = navDisclosure("plan:notdone", "Not done \u00b7 " + open.length, true);
     open.forEach(x => {
@@ -1002,7 +1042,7 @@ const Proto = (() => {
       const label = (x.st.navigation && x.st.navigation.label) || x.st.name;
       const row = el("div", "notdonerow" + (wait ? " waits" : ""));
       const head = el("div", "ndhead");
-      head.appendChild(el("span", "mark", wait ? "\u2691" : ""));
+      head.appendChild(el("span", "mark" + (isNow(x.st) && !wait ? " now" : ""), wait ? "\u2691" : isNow(x.st) ? "\u25cf" : ""));
       const name = el("button", "navactbtn", label);
       name.onclick = () => {
         const target = stepRows.get(x.i);
@@ -1015,7 +1055,7 @@ const Proto = (() => {
       head.appendChild(name);
       row.appendChild(head);
       const line = el("div", "ndline");
-      const state = wait ? (wait === "blocked" ? "blocked" : "waiting on you") : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
+      const state = wait ? (wait === "blocked" ? "blocked" : "waiting on you") : isNow(x.st) ? "now" : x.st.status === "active" ? "in progress" : (x.st.status || "planned");
       if (wait && !bare) {
         const d = el("details", "ndwait"), key = "plan:notdone:" + (x.st.id || x.st.name || String(x.i));
         d.open = navChoice(key, false);
@@ -1033,7 +1073,9 @@ const Proto = (() => {
     });
     if (!open.length) box.appendChild(el("div", "navempty", "Every step is done."));
     li.appendChild(box);
-    li.appendChild(el("div", "planlegend", "\u2713 done \u00b7 \u2691 waiting on you"));
+    const parked = map.steps.filter(st => st.status === "parked").length, support = map.steps.filter(st => !stepDone(st) && supporting(st)).length;
+    if (parked || support) li.appendChild(el("div", "planlegend", [parked ? "Parked \u00b7 " + parked : "", support ? "Supporting steps \u00b7 " + support : ""].filter(Boolean).join(" \u00b7 ") + " \u2014 kept out of Not done"));
+    li.appendChild(el("div", "planlegend", "\u2713 done \u00b7 \u25cf now \u00b7 \u2691 waiting on you"));
     return li;
   }
   async function renderDeliverablesTile() {
@@ -1266,13 +1308,21 @@ const Proto = (() => {
     if (actEl && actEl.isConnected && actSteps.length) {
       const n = actSteps.length;
       actEl.classList.add("done");
-      actEl.querySelector(".acthead").textContent =
+      actEl.querySelector(".actlabel").textContent =
         "✓ " + n + (n === 1 ? " step" : " steps") + " — click to see what it did";
     }
     actEl = null; actSteps = []; actStart = 0; actHome = null;
   }
+  // the skill a tool use runs: a Skill tool names it; a read under skills/<name>/ names it by its folder
+  function skillOfTool(ev) {
+    if (!window.SkillIcons) return null;
+    if (ev.name === "Skill") return window.SkillIcons.entryFor(String(ev.detail || "").split(/\s+/)[0]);
+    const m = /(?:^|[\\/])skills[\\/]([^\\/\s]+)[\\/]/i.exec(String(ev.detail || ""));
+    return m ? window.SkillIcons.entryFor(m[1]) : null;
+  }
   function activity(ev) {
     const step = (ev.name || "?") + (ev.detail ? " " + ev.detail : "");
+    const sk = skillOfTool(ev);
     const s = targetFor(ev);
     // a tick-tagged tool goes to the status pane, a plain one to the
     // conversation: never keep appending into a line that lives elsewhere
@@ -1284,6 +1334,7 @@ const Proto = (() => {
       actHome = s;
       const box = el("div", "blk act");        // capture the ELEMENT, not the
       const head = el("div", "acthead", "");   // module slot: endActivity nulls
+      head.appendChild(el("span", "actlabel", ""));
       const body = el("div", "actbody");       // actEl and the old closure then
       head.onclick = () => box.classList.toggle("open");  // threw / hit the
       box.appendChild(head);                   // wrong line
@@ -1293,11 +1344,21 @@ const Proto = (() => {
       pin(s, stick);
       actTimer = setInterval(() => {
         if (!actEl || !actEl.isConnected) { resetActivity(); return; }
-        actEl.querySelector(".acthead").textContent = actLabel();
+        actEl.querySelector(".actlabel").textContent = actLabel();
       }, 1000);
     }
-    actEl.querySelector(".acthead").textContent = actLabel();
-    actEl.querySelector(".actbody").appendChild(el("div", "actstep", "· " + step));
+    actEl.querySelector(".actlabel").textContent = actLabel();
+    const line = el("div", "actstep");
+    if (sk) {
+      const head = actEl.querySelector(".acthead"), old = head.querySelector(".skico");
+      if (old) old.remove();
+      const im = window.SkillIcons.img(sk.name, 16);
+      if (im) head.insertBefore(im, head.firstChild);
+      const li = window.SkillIcons.img(sk.name, 14);
+      if (li) line.appendChild(li);
+    }
+    line.appendChild(document.createTextNode("· " + step));
+    actEl.querySelector(".actbody").appendChild(line);
     // stay at the bottom: prose blocks land after it, and a live indicator
     // stranded above the transcript answers nothing. ONLY when the reader is
     // already pinned to the bottom — relocating the node shifts everything
@@ -1312,7 +1373,7 @@ const Proto = (() => {
     actEl = null; actSteps = []; actStart = 0; actHome = null;
     if (!box || !box.isConnected || !n) return;
     box.classList.add("done");
-    box.querySelector(".acthead").textContent =
+    box.querySelector(".actlabel").textContent =
       "✓ " + n + (n === 1 ? " step" : " steps") +
       (ev && ev.duration_s ? " · " + (ev.duration_s < 90 ? ev.duration_s + "s"
         : Math.round(ev.duration_s / 60) + "m") : "") + " — click to see what it did";

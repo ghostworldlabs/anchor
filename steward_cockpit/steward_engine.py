@@ -124,6 +124,8 @@ CONTRACT = (
     "sentences of CONTEXT (assume he has been away and holds none of it - what is "
     "at stake and why it is live now), then what you RECOMMEND with one line of "
     "why, then the realistic ALTERNATIVES in a phrase each with its trade-off, "
+    "then one line beginning 'This authorizes:' naming the exact next act your "
+    "recommendation sets in motion and, when time matters, a line 'Decide by: <when>', "
     "then the QUESTION as the LAST line, answerable in one word. Never an option "
     "dialog, never a bare question, never machinery vocabulary. The engine checks "
     "this: a decision turn with no recommendation is sent back once; "

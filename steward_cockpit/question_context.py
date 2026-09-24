@@ -27,6 +27,8 @@ RECOMMEND_RE = re.compile(
 
 #: How much of the turn tail counts as "where the decision is stated".
 RECOMMEND_TAIL = 1200
+AUTHORIZES_RE = re.compile(r"^\s*(?:this\s+)?authoriz(?:es|ation)\s*[:\-\u2013\u2014]\s*(.+?)\s*$", re.I | re.M)
+DECIDE_BY_RE = re.compile(r"^\s*decide\s+by\s*[:\-\u2013\u2014]?\s*(.+?)\s*$", re.I | re.M)
 
 _LIST_MARK = re.compile(r"^(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)")
 
@@ -64,7 +66,13 @@ def parse_decision(text):
         if m and re.search(r"\w", sents[i][1][m.end():]):
             rec_idx = i
             break
-    out = {"stake": [], "recommendation": "", "why": "", "alternatives": []}
+    out = {"stake": [], "recommendation": "", "why": "", "alternatives": [], "authorizes": "", "decide_by": ""}
+    m = AUTHORIZES_RE.search(text or "")
+    if m:
+        out["authorizes"] = m.group(1)[:160]
+    m = DECIDE_BY_RE.search(text or "")
+    if m:
+        out["decide_by"] = m.group(1)[:80]
     if rec_idx is None:
         return out
     out["recommendation"] = sents[rec_idx][0][:240]
@@ -145,6 +153,8 @@ def save_question_context(question, response_text, *, asked_at, source_ref="", s
         "recommendation": shape["recommendation"],
         "why": shape["why"],
         "alternatives": shape["alternatives"],
+        "authorizes": shape["authorizes"],
+        "decide_by": shape["decide_by"],
         "authorization_scope": authorization_scope,
         "asked_at": _json_copy(asked_at),
         "source_ref": source_ref,
@@ -194,4 +204,7 @@ def normalize_question_context(value):
     alternatives = value.get("alternatives")
     if isinstance(alternatives, list) and alternatives:
         normalized["alternatives"] = [item[:160] for item in alternatives if isinstance(item, str)][:3]
+    for key, cap in (("authorizes", 160), ("decide_by", 80)):
+        if isinstance(value.get(key), str) and value[key].strip():
+            normalized[key] = value[key].strip()[:cap]
     return normalized

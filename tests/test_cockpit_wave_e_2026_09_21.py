@@ -27,3 +27,16 @@ def test_the_stake_is_a_list_of_up_to_three_sentences_that_survives_a_reload():
     legacy = qc.normalize_question_context({**saved, "stake": "One old sentence."})
     assert legacy["stake"] == ["One old sentence."]
     assert qc.parse_decision("Nothing decided. What now?")["stake"] == []
+
+
+def test_the_record_carries_what_the_answer_authorizes_and_a_decide_by_when_stated():
+    text = ("The guide gates the build path. I recommend keeping this version. It passed the independent check. "
+            "- Rebuild from the outline: a day more.\nThis authorizes: the build starts on the guide tomorrow morning.\n"
+            "Decide by: Friday noon.\nKeep it?")
+    d = qc.parse_decision(text)
+    assert d["authorizes"] == "the build starts on the guide tomorrow morning." and d["decide_by"] == "Friday noon."
+    saved = qc.save_question_context("Keep it?", text, asked_at=1)
+    again = qc.normalize_question_context(json.loads(json.dumps(saved)))
+    assert again["authorizes"] == d["authorizes"] and again["decide_by"] == d["decide_by"]
+    plain = qc.parse_decision("I recommend keeping this version. Keep it?")
+    assert plain["authorizes"] == "" and plain["decide_by"] == ""                      # absent when the steward did not state them

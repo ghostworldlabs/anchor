@@ -15,8 +15,9 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     (root/'roadmap.json').write_text(json.dumps({'roadmap_events': [
         {'kind': 'kickoff_proposal', 'proposal_id': 'p1', 'proposal_hash': 'hash1', 'version': 1, 'work_product': product},
         {'kind': 'kickoff_confirm', 'proposal_id': 'p1', 'proposal_hash': 'hash1', 'version': 1}],
-        'roadmap_projection': [{'id': 'live', 'name': 'Build tracker', 'status': 'active', 'component_ids': ['calendar', 'strength']},
-                               {'id': 'research', 'name': 'Research', 'status': 'active', 'navigation': {'role': 'support'}}]}), encoding='utf-8')
+        'roadmap_projection': [{'id': 'live', 'name': 'Build tracker', 'status': 'active', 'component_ids': ['calendar', 'strength'], 'navigation': {'current': True}},
+                               {'id': 'research', 'name': 'Research', 'status': 'active', 'navigation': {'role': 'support'}},
+                               {'id': 'later', 'name': 'Field test', 'status': 'parked'}]}), encoding='utf-8')
     register = '| What | Where | Date | Step |\n| --- | --- | --- | --- |\n' + \
         '| START HERE — Working tracker | `current.html` | 2026-09-13 | LIVE |\n' + \
         '| Earlier workbook | `old.html` | 2026-09-12 | live |\n' + \
@@ -52,7 +53,11 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(surface.locator('.blk.status.latest .action-needed')).to_have_count(0)   # and no question card
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')            # the pin block lists the current files
     notdone = surface.locator('[data-steps] .notdone')
-    expect(notdone).to_contain_text('Not done')                                    # the red-flag list at the bottom of the plan
+    expect(notdone).to_contain_text('Not done \u00b7 1')                            # the pinned step only: the parked and the supporting step are kept out
+    expect(notdone).to_contain_text('Parked \u00b7 1 \u00b7 Supporting steps \u00b7 1')
+    expect(notdone.locator('.ndhead .mark.now')).to_have_count(1)                  # the one current step carries the now mark
+    expect(notdone).to_contain_text('\u25cf now')                                   # and the legend names it
+    expect(surface.locator('[data-steps] li[data-step-id="live"] > .mark.now')).to_have_count(1)
     surface.locator('[data-say]').fill('My own note')
     notdone.locator('.ndact').first.click()                                        # "act on" adds a reference to the item after what John typed
     expect(surface.locator('[data-say]')).to_have_value(re.compile(r'^My own note\nAct on: Build tracker'))
