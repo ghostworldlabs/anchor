@@ -42,9 +42,11 @@ def test_project_usage_includes_checkpoint_and_remains_visible_asleep(cockpit, m
     surface = page.frame_locator('[data-fsframe]')
     footer = surface.locator('[data-spend]')
     expect(footer).to_contain_text("130")
-    expect(footer).to_contain_text("effort sessions")
+    expect(footer).to_contain_text("Total $")                   # one total on the line (Wave I); the parts sit in the hover title
+    expect(footer).not_to_contain_text("effort sessions")
     expect(footer).to_contain_text("1.25")
-    expect(footer).to_contain_text("unpriced")
+    expect(footer).to_contain_text("not priced")
+    assert "effort sessions" in footer.get_attribute("title")
     assert "999999" not in footer.inner_text()
     eng.proc = None
     eng.busy = False

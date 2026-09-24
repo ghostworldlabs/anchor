@@ -15,17 +15,19 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     (root/'roadmap.json').write_text(json.dumps({'roadmap_events': [
         {'kind': 'kickoff_proposal', 'proposal_id': 'p1', 'proposal_hash': 'hash1', 'version': 1, 'work_product': product},
         {'kind': 'kickoff_confirm', 'proposal_id': 'p1', 'proposal_hash': 'hash1', 'version': 1}],
-        'roadmap_projection': [{'id': 'live', 'name': 'Build tracker', 'status': 'active', 'component_ids': ['calendar', 'strength'], 'navigation': {'current': True}},
+        'roadmap_projection': [{'id': 'live', 'name': 'Build tracker', 'status': 'active', 'component_ids': ['calendar', 'strength'], 'navigation': {'current': True}, 'commissioned_as': 'foreman:run-1'},
                                {'id': 'research', 'name': 'Research', 'status': 'active', 'navigation': {'role': 'support'}},
                                {'id': 'later', 'name': 'Field test', 'status': 'parked'}]}), encoding='utf-8')
     register = '| What | Where | Date | Step |\n| --- | --- | --- | --- |\n' + \
         '| START HERE — Working tracker | `current.html` | 2026-09-13 | LIVE |\n' + \
         '| Earlier workbook | `old.html` | 2026-09-12 | live |\n' + \
         '| START HERE: supporting evidence | `support.html` | 2026-09-13 | research |\n' + \
-        '| Unassigned reference | `orphan.html` | 2026-09-13 | unresolved |\n'
+        '| Unassigned reference | `orphan.html` | 2026-09-13 | unresolved |\n' + \
+        '| Field notes | `research/notes.md` | 2026-09-12 | unresolved |\n'
     (root/'DELIVERABLES.md').write_text(register, encoding='utf-8')
     for name in ('current', 'old', 'support', 'orphan'):
         (root/(name+'.html')).write_text('<h1>'+name+' tracker example</h1>', encoding='utf-8')
+    (root/'research').mkdir(); (root/'research'/'notes.md').write_text('# notes\n', encoding='utf-8')
     page.reload()
 
     def open_surface():
@@ -58,6 +60,11 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(notdone.locator('.ndhead .mark.now')).to_have_count(1)                  # the one current step carries the now mark
     expect(notdone).to_contain_text('\u25cf now')                                   # and the legend names it
     expect(surface.locator('[data-steps] li[data-step-id="live"] > .mark.now')).to_have_count(1)
+    expect(surface.locator('[data-steps] li[data-step-id="live"] .stitle img.skico')).to_have_attribute('alt', 'Foreman')   # the commissioned skill's mark on the step
+    expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="researchPrime"]')).to_have_count(1)   # a file's skill from its folder (Wave I)
+    spend = surface.locator('[data-spend]')
+    expect(spend).not_to_contain_text('effort sessions')                            # one total on the line, the parts in the hover (Wave I)
+    expect(spend).to_have_text(re.compile(r'^(Total|cost unavailable)'))
     surface.locator('[data-say]').fill('My own note')
     notdone.locator('.ndact').first.click()                                        # "act on" adds a reference to the item after what John typed
     expect(surface.locator('[data-say]')).to_have_value(re.compile(r'^My own note\nAct on: Build tracker'))
