@@ -47,7 +47,9 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(donow.locator('.navfile')).to_have_count(1)                   # the current file is the one Open act
     expect(donow).to_contain_text('Working tracker')
     expect(donow).to_contain_text('Next in the plan')
+    expect(donow.locator('.action-needed')).to_have_count(1)                # the current question lives in the tile
     expect(surface.locator('.blk.status.latest .sdonow')).to_have_count(0)   # the status report carries no to-do list
+    expect(surface.locator('.blk.status.latest .action-needed')).to_have_count(0)   # and no question card
     expect(panel.locator('.navpin')).to_contain_text('Working tracker')            # the pin block lists the current files
     notdone = surface.locator('[data-steps] .notdone')
     expect(notdone).to_contain_text('Not done')                                    # the red-flag list at the bottom of the plan
@@ -105,7 +107,7 @@ def test_empty_campaign_uses_same_panel_order(cockpit):
     nxt = surface.locator('[data-delivmount] .blk.next')
     expect(nxt.locator('.who')).to_contain_text('nothing waits on you')
     nxt.locator('.who').click()
-    expect(nxt.locator('.body')).to_contain_text('Nothing waits on you; the steward has not stated a next step.')
+    expect(nxt.locator('.body')).to_contain_text('Nothing waits on you.')
     expect(panel.locator('summary').filter(has_text='Approved deliverables · 0')).to_be_visible()
     expect(panel.locator('details[data-group-id="compat-root"] > summary')).to_be_visible()
     expect(surface.locator('[data-steps] .navgroup > summary').first).to_contain_text('Empty campaign')

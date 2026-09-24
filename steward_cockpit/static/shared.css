@@ -320,8 +320,6 @@ button.armed { background: #234a2c; border-color: #3b6b46; color: #b5e6c3; }
 .navactkind { flex:0 0 auto;font-size:11px;opacity:.75;min-width:52px; }
 .navactbtn { background:none;border:0;padding:0;color:inherit;text-decoration:underline;cursor:pointer;text-align:left;font:inherit; }
 .navactlabel { opacity:.9; }
-.status-history { margin-top:10px; }
-.status-history>summary { cursor:pointer;font-size:12px;opacity:.8; }
 .blk.status.latest { position:relative; }
 .live-activity { margin-left:8px;font-weight:600;color:var(--dim); }
 .plan-mark { font-family:var(--mono);margin-right:2px; }
@@ -555,8 +553,6 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .blk.deliv.folded .body, .blk.next.folded .body { max-height: 1.5em; overflow: hidden; }
 /* folded wins over any mounted max-height above */
 .pdeliv .blk.deliv.folded .body, .pdeliv .blk.next.folded .body { max-height: 0; overflow: hidden; }
-/* earlier updates are a list of time lines; each opens on click (John, 2026-09-24) */
-.status-history .blk.folded .body { display: none; }
 /* pages with no dedicated slot keep the old in-pane pin */
 .pscroll .blk.deliv { position: sticky; top: 0; z-index: 2;
        background: var(--panel); }

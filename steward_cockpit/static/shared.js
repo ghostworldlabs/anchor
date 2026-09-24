@@ -301,7 +301,6 @@ const Proto = (() => {
       });
     }
     const b = el("div", "blk " + kind + (extraClass ? " " + extraClass : ""));
-    if (who && kind === "steward" && s === paneEl() && s) who = "\u23f1 " + new Date().toTimeString().slice(0, 5) + " \u00b7 " + who;
     if (who) b.appendChild(el("div", "who", who));
     const body = el("div", "body");
     if (kind === "steward") renderRich(body, text); else body.textContent = text;
@@ -334,65 +333,50 @@ const Proto = (() => {
      is persisted server-side to .ecgberht/status-summary.json for the
      main-dashboard tile. */
   // Do now under the lead: the open decision, then the acts the deliverables read serves (Review, Open, Next)
-  function nextActs() {
-    const acts = [];
-    const q = currentQuestion();
-    if (q && q.question) acts.push({act: "Answer", label: String(q.question).slice(0, 80), question: q});
-    (_deliv.acts || []).forEach(a => acts.push(a));
-    return acts;
-  }
-  // the Next steps tile's body: what is front and center (Answer, Review, Open, Next), then the plan's next open steps
-  function paintDoNow(host) {
-    if (!host) return;
+  function paintNextSteps(host) {
     host.textContent = "";
-    const acts = nextActs();
+    const q = currentQuestion();
+    const ask = el("div", "action-needed");
+    ask.dataset.statusAction = "1";
+    host.appendChild(ask);
+    paintActionNeeded(ask);
+    const acts = _deliv.acts || [];
     if (_deliv.warning) host.appendChild(el("div", "navempty", _deliv.warning));   // the current item, honestly
     acts.forEach(a => {
       const row = el("div", "navact navact-" + a.act.toLowerCase());
       row.appendChild(el("span", "navactkind", a.act));
-      if (a.act === "Answer") { const b = el("button", "navactbtn", a.label); b.onclick = () => openQuestionContext(a.question && a.question.id); row.appendChild(b); }
-      else if (a.item) row.appendChild(navFile(a.item, "status:act"));
-      else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "status:act"));
+      if (a.item) row.appendChild(navFile(a.item, "next:act"));
+      else if (a.path) row.appendChild(navFile({what: a.label, path: a.path, openable: true, step: a.step}, "next:act"));
       else row.appendChild(el("span", "navactlabel", a.label));
       host.appendChild(row);
     });
-    if (!acts.length) host.appendChild(el("div", "navempty", "Nothing waits on you; the steward has not stated a next step."));
-    const plan = ((_lastMap && _lastMap.steps) || []).filter(st => !stepDone(st)).slice(0, 3);
+    const waits = (q && q.question ? 1 : 0) + acts.length;
+    if (!waits) host.appendChild(el("div", "navempty", "Nothing waits on you."));
+    const steps = (_lastMap && _lastMap.steps) || [];
+    const open = steps.filter(st => !stepDone(st));
+    const from = Math.max(0, open.findIndex(st => st.status === "active"));
+    const plan = open.slice(from, from + 3);
     if (plan.length) {
       host.appendChild(el("div", "naveyebrow", "Next in the plan"));
-      plan.forEach(st => {
-        const row = el("div", "navact navact-plan");
-        row.appendChild(el("span", "navactkind", st.status === "active" ? "Now" : "Then"));
-        row.appendChild(el("span", "navactlabel", (st.navigation && st.navigation.label) || st.name));
-        host.appendChild(row);
-      });
+      plan.forEach(st => host.appendChild(el("div", "navactlabel", (st.navigation && st.navigation.label) || st.name)));
     }
+    return waits;
   }
-  let _nextOpen = (() => {
-    try { return localStorage.getItem("steward_next_open") === "1"; }
-    catch (e) { return false; }
-  })();
-  // the Next steps tile: second tile in the deliverables slot, closed by default (John, 2026-09-24)
   function renderNextStepsTile() {
     const s = $("[data-delivmount]");
     if (!s) return;
     let tile = s.querySelector(".blk.next");
     if (!tile) {
-      tile = el("div", "blk steward next" + (_nextOpen ? "" : " folded"));
+      tile = el("div", "blk steward next folded");
       const who = el("div", "who");
       who.style.cursor = "pointer";
-      who.onclick = () => {
-        tile.classList.toggle("folded");
-        _nextOpen = !tile.classList.contains("folded");
-        try { localStorage.setItem("steward_next_open", _nextOpen ? "1" : "0"); } catch (e) {}
-      };
+      who.onclick = () => tile.classList.toggle("folded");
       tile.appendChild(who);
       tile.appendChild(el("div", "body"));
       s.appendChild(tile);
     }
-    const n = nextActs().length;
-    tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " · " + n + " for you" : " · nothing waits on you");
-    paintDoNow(tile.querySelector(".body"));
+    const n = paintNextSteps(tile.querySelector(".body"));
+    tile.querySelector(".who").textContent = "NEXT STEPS" + (n ? " \u00b7 " + n + " for you" : " \u00b7 nothing waits on you");
   }
   function renderStatus(stat) {
     const s = paneEl();
@@ -485,11 +469,7 @@ const Proto = (() => {
         " · " + new Date(stat.latest_event.at).toLocaleString()));
       compact.appendChild(latest);
     }
-    const ask = el("div", "action-needed");
-    ask.dataset.statusAction = "1";
-    compact.appendChild(ask);
     body.appendChild(compact);
-    paintActionNeeded(ask);
     if (p.goal_reread === false)
       body.appendChild(el("div", "splan sflag", "goal not re-read since last close"));
     b.appendChild(body);
@@ -497,9 +477,7 @@ const Proto = (() => {
     // .latest, older blocks above it are folded to their time line, and the
     // pane always brings the newest into view (a status pane is for now,
     // not for reading history — history stays one click away).
-    let history=s.querySelector('[data-statushistory]');
-    if(!history){history=el('details','status-history');history.dataset.statushistory='1';history.appendChild(el('summary','','Earlier updates'));s.appendChild(history);}
-    s.querySelectorAll(".blk.status.latest").forEach(o => {o.classList.remove("latest");history.appendChild(o);});
+    s.querySelectorAll(".blk.status.latest").forEach(o => o.classList.remove("latest"));   // it stays below, folded to its time line
     b.classList.add("latest");
     s.insertBefore(b,s.firstChild);
     syncCompactActivity(lastState);
@@ -559,10 +537,7 @@ const Proto = (() => {
   // plan flow"): register rows may carry an optional Step column — a step
   // NUMBER or a name fragment — and the map paints the link UNDER that step.
   let _deliv = {items: [], approved: [], acts: [], warning: ""}, _lastMap = null, _refinementContext = null, _answerQuestionId = null;
-  let _delivOpen = (() => {
-    try { return localStorage.getItem("steward_deliv_open") === "1"; }
-    catch (e) { return false; }
-  })();
+  let _delivOpen = false;   // both tiles start closed (John, 2026-09-24); a click opens one for the session
   function stepDeliverables(step, idx1) {
     const steps=Array.isArray(_lastMap?.steps)?_lastMap.steps:[step];
     return _deliv.items.filter((it) => {
@@ -798,7 +773,7 @@ const Proto = (() => {
         .sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')));
       if(current.length){
         const files=navDisclosure(surface+':files','Files awaiting you · '+current.length);
-        current.forEach(it=>files.appendChild(navFile(it,surface+':pin',true)));   // files open here; the acts (Done with this item) live in Do now
+        current.forEach(it=>files.appendChild(navFile(it,surface+':pin',true)));
         p.appendChild(files);
       } else p.appendChild(el('div','navempty','No files awaiting review.'));
       target.appendChild(p);
@@ -1107,8 +1082,6 @@ const Proto = (() => {
       who.onclick = () => {
         tile.classList.toggle("folded");
         _delivOpen = !tile.classList.contains("folded");
-        try { localStorage.setItem("steward_deliv_open",
-                                   _delivOpen ? "1" : "0"); } catch (e) {}
       };
       tile.appendChild(who);
       const body = el("div", "body");

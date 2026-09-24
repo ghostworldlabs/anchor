@@ -184,10 +184,13 @@ class ClientContractTest(unittest.TestCase):
         self.assertIn("data-filestoggle", v1)
         self.assertIn("psect folded", v1, "files start CLOSED")
         self.assertIn(".pfiles.psect.folded .flist { display: none; }", self.css)
-        self.assertIn(".pdeliv .blk.deliv.folded .body { max-height: 0;", self.css)
-        # each remembers his choice
+        self.assertIn(".pdeliv .blk.deliv.folded .body, .pdeliv .blk.next.folded .body { max-height: 0;", self.css)
+        # the files tile remembers his choice; the two top tiles start CLOSED on every load (John, 2026-09-24:
+        # "deliverables, next steps (both closed by default)") and open for the session on a click
         self.assertIn("steward_files_open", self.js)
-        self.assertIn("steward_deliv_open", self.js)
+        self.assertNotIn("steward_deliv_open", self.js)
+        self.assertIn('el("div", "blk steward deliv folded")', self.js)
+        self.assertIn('el("div", "blk steward next folded")', self.js)
 
     def test_folded_deliverables_still_summarise(self):
         self.assertIn("newest: ", self.js,
