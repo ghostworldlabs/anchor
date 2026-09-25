@@ -45,9 +45,9 @@ a { color: var(--steward); text-decoration: none; }
 .bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px;
        padding: 8px 14px; border-bottom: 1px solid var(--line);
        background: var(--panel); font-size: 13.5px; }
-.bar .title { font-weight: 600; letter-spacing: .2px; }
+.bar .title { font-weight: 600; letter-spacing: .2px; white-space: nowrap; flex: none; }
 .bar .spacer { flex: 1; }
-.bar .chip { color: var(--dim); white-space: nowrap; flex: none; }
+.bar .chip { color: var(--dim); white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* the total and the stated next share the line; the parts stay in the hover */
 .bar .barlead { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .bar .busy { min-width: 0; flex: none; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
