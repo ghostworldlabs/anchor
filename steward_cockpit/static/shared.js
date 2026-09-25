@@ -248,8 +248,7 @@ const Proto = (() => {
      plain "not applied" line; anything else paints nothing. XHR on purpose: the
      client shim rewrites fetch('/api/…') to /api/steward/, and this route is
      Anchor's own GET /api/ecgberht/kickoff_show. Read-only; never throws. */
-  // the one-line status of record shown in the top bar (2026-09-03); once a
-  // status has painted it, map repaints and the kickoff paint leave it alone
+  // the one-line status of record, shown on the top line (2026-09-03; beside the name since 2026-09-25)
   let _statusLine = "";
   function paintKickoff(briefEl) {
     const box = $("[data-kickoff]");
@@ -278,11 +277,11 @@ const Proto = (() => {
         // the brief line shows the confirmed outcome — the goal in the steward's own words
         if (briefEl) {
           const m = j.rendered.match(/^Outcome:\s*(.+)$/m);
-          if (m && m[1] && !_statusLine) briefEl.textContent = m[1].trim();
+          if (m && m[1]) briefEl.textContent = m[1].trim();
         }
       } else if (j.state === "open" && j.open_draft && j.open_draft.applied === false) {
         box.classList.add("draft");
-        if (briefEl && j.open_draft.goal && !_statusLine) briefEl.textContent = "draft, not applied — " + j.open_draft.goal;
+        if (briefEl && j.open_draft.goal) briefEl.textContent = "draft, not applied — " + j.open_draft.goal;
         box.textContent = "Kickoff draft v" + (j.open_draft.version || "?") +
           " — not applied: " + (j.open_draft.goal || "(no goal in the draft)");
       }
@@ -514,21 +513,16 @@ const Proto = (() => {
     // show their LAST update, stamped, not a fresh blank)
     const stamp = $("[data-statusstamp]");
     if (stamp) stamp.textContent = "last update " + hhmm + (stat.stale ? " · idle" : "");
-    // the top bar is the ONE-LINE status of record for this steward run
-    // (John, 2026-09-03); the goal moves inside the bar, one click away
+    // the top line carries the ONE-LINE status of record for this steward run
+    // (John, 2026-09-03); the goal line below keeps the goal (John, 2026-09-25: not the status twice)
     try {
-      const brief = $("[data-goalbrief]"), lab = $("[data-goallabel]");
-      if (brief) {
-        // the lead (the one server template) is the line of record
-        let line = stat.lead_line || "Next not stated by the steward";
-        if (!p.waiting_on_you && stat.eta) line += " · ETA " + stat.eta;
-        if (line.length > 120) line = line.slice(0, 117).replace(/\s+\S*$/, "") + "…";
-        _statusLine = line + (stat.stale ? "  (" + hhmm + ")" : "");
-        const barlead = $("[data-barlead]");
-        if (barlead) { barlead.textContent = _statusLine; barlead.title = line; }
-        brief.textContent = _statusLine;
-        if (lab) lab.textContent = "Status";
-      }
+      // the lead (the one server template) is the line of record
+      let line = stat.lead_line || "Next not stated by the steward";
+      if (!p.waiting_on_you && stat.eta) line += " · ETA " + stat.eta;
+      if (line.length > 120) line = line.slice(0, 117).replace(/\s+\S*$/, "") + "…";
+      _statusLine = line + (stat.stale ? "  (" + hhmm + ")" : "");
+      const barlead = $("[data-barlead]");
+      if (barlead) { barlead.textContent = _statusLine; barlead.title = line; }
     } catch (e) { /* no-op */ }
     // Deliverables tile stays pinned FIRST in the pane (2026-08-25, John's ask),
     // and its register refreshes on the same cadence as the status it sits above.
@@ -817,7 +811,7 @@ const Proto = (() => {
   function navStyle() {
     if(document.getElementById('course-navigation-style'))return;
     const s=el('style');s.id='course-navigation-style';
-    s.textContent=`.navtree{min-width:0;font-size:13px;line-height:1.42}.navgroup{margin:5px 0;border-top:1px solid #ffffff20;min-width:0}.navgroup>summary{cursor:pointer;padding:8px 3px;font-weight:600;white-space:normal;overflow-wrap:anywhere}.navcontents{padding:0 0 5px 9px;min-width:0}.navgroup .navgroup .navcontents{padding-left:7px}.navfile{padding:5px 0;overflow-wrap:anywhere;border-bottom:1px solid #ffffff0b}.navfile .drow{white-space:normal;overflow:visible;font-size:13px;line-height:1.42}.navfile a{white-space:normal;overflow-wrap:anywhere}.navpin{padding:10px;margin:0 0 10px;border:1px solid #679cc077;border-radius:6px;background:#44698718}.navpin-title{font-size:14px;font-weight:600;margin:3px 0}.naveyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.8}.navstep-list{padding:0!important;list-style:none}.navstep-list>li{padding:6px 0!important}.navstep-list .sdeliv{display:none}.navstep-list .sdeliv:has(button){display:block}.navempty{opacity:.75;padding:5px 0;font-size:12px}.navtree .navsupport{margin-top:7px}.navtree .navsupport>summary{font-size:12px;font-weight:400}.navtree .wpkind{display:none}.navtree .navstep-list .stitle{white-space:normal}.navtree .navstep-list .sdmeta{font-size:12px}.navtree .navfile .navgroup{font-size:12px}.navtree .navfile .navgroup>summary{padding:3px;font-weight:400}`;
+    s.textContent=`.navtree{min-width:0;font-size:13px;line-height:1.42}.navgroup{margin:5px 0;border-top:1px solid #ffffff20;min-width:0}.navgroup>summary{cursor:pointer;padding:8px 3px;font-weight:600;white-space:normal;overflow-wrap:anywhere}.navgroup>summary:has(.plan-mark){list-style:none}.navgroup>summary:has(.plan-mark)::-webkit-details-marker{display:none}.navcontents{padding:0 0 5px 9px;min-width:0}.navgroup .navgroup .navcontents{padding-left:7px}.navfile{padding:5px 0;overflow-wrap:anywhere;border-bottom:1px solid #ffffff0b}.navfile .drow{white-space:normal;overflow:visible;font-size:13px;line-height:1.42}.navfile a{white-space:normal;overflow-wrap:anywhere}.navpin{padding:10px;margin:0 0 10px;border:1px solid #679cc077;border-radius:6px;background:#44698718}.navpin-title{font-size:14px;font-weight:600;margin:3px 0}.naveyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;opacity:.8}.navstep-list{padding:0!important;list-style:none}.navstep-list>li{padding:6px 0!important}.navstep-list .sdeliv{display:none}.navstep-list .sdeliv:has(button){display:block}.navempty{opacity:.75;padding:5px 0;font-size:12px}.navtree .navsupport{margin-top:7px}.navtree .navsupport>summary{font-size:12px;font-weight:400}.navtree .wpkind{display:none}.navtree .navstep-list .stitle{white-space:normal}.navtree .navstep-list .sdmeta{font-size:12px}.navtree .navfile .navgroup{font-size:12px}.navtree .navfile .navgroup>summary{padding:3px;font-weight:400}`;
     s.textContent+='[data-delivmount] .blk.deliv:not(.folded)>.body,[data-delivmount] .blk.next:not(.folded)>.body{max-height:min(52vh,500px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;padding-right:6px}';
     document.head.appendChild(s);
   }
@@ -1898,7 +1892,7 @@ const Proto = (() => {
     if (opts.renderMap) { opts.renderMap(map); return; }
     // goal tile (one sentence; expands to the full bold-led description)
     const gb = $("[data-goalbrief]");
-    if (gb) gb.textContent = _statusLine || map.goal_brief || "(no goal recorded)";
+    if (gb) gb.textContent = map.goal_brief || "(no goal recorded)";
     const gf = $("[data-goalfull]");
     if (gf) renderRich(gf, map.goal_md || "(no goal recorded)");
     paintKickoff(gb);

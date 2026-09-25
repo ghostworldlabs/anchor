@@ -80,14 +80,22 @@ class StatusWindowTest(unittest.TestCase):
         # the replay guard is untouched
         self.assertIn("statusId <= latestStatusId", body)
 
-    def test_goal_bar_line_is_the_run_status_and_survives_repaints(self):
+    def test_top_line_is_the_run_status_and_the_goal_line_keeps_the_goal(self):
         js = self.js
         self.assertIn('data-goallabel', self.v1)
-        self.assertIn('lab.textContent = "Status"', js)
+        self.assertIn('data-barlead', self.v1)
         self.assertIn("_statusLine = line", js)
-        self.assertIn('gb.textContent = _statusLine || map.goal_brief', js)
-        self.assertIn("if (m && m[1] && !_statusLine)", js)   # kickoff paint yields
-        self.assertIn("line.length > 120", js)                 # short, per the elegance rule
+        self.assertIn("barlead.textContent = _statusLine", js)         # the status sits on the top line (John, 2026-09-25)
+        self.assertNotIn("brief.textContent = _statusLine", js)        # and not again on the goal line
+        self.assertNotIn('lab.textContent = "Status"', js)
+        self.assertIn('gb.textContent = map.goal_brief', js)            # the goal line keeps the goal
+        self.assertNotIn("!_statusLine", js)                            # the kickoff outcome paints the goal line freely
+        self.assertIn("line.length > 120", js)                          # short, per the elegance rule
+
+    def test_a_group_row_with_a_mark_has_no_arrow(self):
+        # the mark leads and the title is the toggle, as on the step rows (John, 2026-09-25: "arrows and then dots")
+        self.assertIn(".navgroup>summary:has(.plan-mark){list-style:none}", self.js)
+        self.assertIn(".navgroup>summary:has(.plan-mark)::-webkit-details-marker{display:none}", self.js)
 
     def test_idle_effort_answers_with_its_last_recorded_update(self):
         td = tempfile.mkdtemp(prefix="steward-status-")
