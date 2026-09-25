@@ -442,14 +442,14 @@ def test_status_done_lane_job_registers_project_root_row_failed_none(jobs_env):
     jr._write_record(_job_rec("job-w2-a", project_id=pid, folder_path=folder))
     jr._finalize("job-w2-a", 0)
     items = campaign.read_deliverables(folder)["items"]
-    rows = [it for it in items if it["what"] == "research run — job-w2-a"]
+    rows = [it for it in items if it["what"] == "researchPrime run — job-w2-a"]
     assert len(rows) == 1
     assert rows[0]["route"] == "/report/%s/research/job-w2-a" % pid
     assert rows[0]["openable"] is True
     jr._finalize("job-w2-a", 0)      # idempotent: the re-run adds none
     items = campaign.read_deliverables(folder)["items"]
     assert len([it for it in items
-                if it["what"] == "research run — job-w2-a"]) == 1
+                if it["what"] == "researchPrime run — job-w2-a"]) == 1
     regs = [e["payload"]["register"]
             for e in journal.read_events(pid, folder_path=folder)
             if e.get("type") == journal.EV_DELIVERABLE_PINNED]

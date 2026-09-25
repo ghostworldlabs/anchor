@@ -10,7 +10,7 @@ def test_mapped_failure_and_unmapped_work_are_visible_in_authenticated_workflow(
     page.reload()
     step = _expand_foundation(page)
     surface = page.frame_locator('[data-fsframe]')
-    unmapped = surface.locator('[data-steps] summary').filter(has_text='need Steward to identify their slice')
+    unmapped = surface.locator('[data-steps] summary').filter(has_text='not yet placed in the plan')
     expect(unmapped).to_be_visible()
     unmapped.click()
     expect(surface.locator('[data-steps]').get_by_text('Unmapped source fixture',exact=False)).to_be_visible()

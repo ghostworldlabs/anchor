@@ -36,4 +36,4 @@ def test_outline_title_is_the_only_step_toggle_and_closing_closes_the_children()
     assert "row.dataset.key = key;" in js
     assert "detail.onclick = (ev) => { ev.stopPropagation(); };" in js
     css = (ROOT / "steward_cockpit" / "static" / "shared.css").read_text(encoding="utf-8")
-    assert ".steps li.open .stitle .tw::before" in css
+    assert ".tw::before" not in css                 # no arrow beside the mark on a plan row (John, 2026-09-25); the title is the toggle

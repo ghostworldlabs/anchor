@@ -47,13 +47,16 @@ a { color: var(--steward); text-decoration: none; }
        background: var(--panel); font-size: 13.5px; }
 .bar .title { font-weight: 600; letter-spacing: .2px; }
 .bar .spacer { flex: 1; }
-.bar .chip { color: var(--dim); }
+.bar .chip { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38%; flex: none; }
+.bar .barlead { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.bar .busy { min-width: 0; flex: none; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
        background: var(--faint); margin-right: 6px; vertical-align: baseline; }
 .dot.working { background: var(--run); }
 .dot.needs_you, .dot.blocked { background: var(--flag); }
 .dot.deliverable_ready { background: var(--warn); }
-.busy { color: var(--warn); min-width: 90px; }
+.busy { color: var(--warn); }
+.busy.state-orange { color: var(--flag); } .busy.state-green { color: var(--run); } .busy.state-quiet { color: var(--dim); }
 
 /* ---------- left rail (the map) ---------- */
 .rail { border-right: 1px solid var(--line); background: var(--panel);
@@ -78,8 +81,6 @@ a { color: var(--steward); text-decoration: none; }
 .steps li.open .why { display: block; }
 /* (2026-09-06, John) the title line is the toggle; the twisty says open/closed */
 .steps li .stitle { cursor: pointer; }
-.steps li .stitle .tw::before { content: "\25B8"; color: var(--faint); font-size: 10px; margin-right: 5px; }
-.steps li.open .stitle .tw::before { content: "\25BE"; }
 .steps li .stitle:hover { color: var(--text); }
 .progress { font-size: 12.5px; color: var(--dim); margin-bottom: 6px; }
 .wait, .grass { font-size: 13px; color: var(--dim); white-space: pre-wrap; }

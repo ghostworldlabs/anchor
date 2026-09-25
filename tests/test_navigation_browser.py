@@ -23,11 +23,13 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
         '| Earlier workbook | `old.html` | 2026-09-12 | live |\n' + \
         '| START HERE: supporting evidence | `support.html` | 2026-09-13 | research |\n' + \
         '| Unassigned reference | `orphan.html` | 2026-09-13 | unresolved |\n' + \
-        '| Field notes | `gandalf/notes.md` | 2026-09-12 | unresolved |\n'
+        '| Field notes | `gandalf/notes.md` | 2026-09-12 | unresolved |\n' + \
+        '| Gandalf read LITE — INSTALL | `reads/first.md` | 2026-09-12 | unresolved |\n'
     (root/'DELIVERABLES.md').write_text(register, encoding='utf-8')
     for name in ('current', 'old', 'support', 'orphan'):
         (root/(name+'.html')).write_text('<h1>'+name+' tracker example</h1>', encoding='utf-8')
     (root/'gandalf').mkdir(); (root/'gandalf'/'notes.md').write_text('# notes\n', encoding='utf-8')
+    (root/'reads').mkdir(); (root/'reads'/'first.md').write_text('# read\n', encoding='utf-8')
     page.reload()
 
     def open_surface():
@@ -61,7 +63,11 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(notdone).to_contain_text('\u25cf now')                                   # and the legend names it
     expect(surface.locator('[data-steps] li[data-step-id="live"] > .mark.now')).to_have_count(1)
     expect(surface.locator('[data-steps] li[data-step-id="live"] .stitle img.skico')).to_have_attribute('alt', 'Foreman')   # the commissioned skill's mark on the step
-    expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="Gandalf"]')).to_have_count(1)   # a file's skill from a folder that IS a skill's name (Wave I)
+    expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="Gandalf"]')).to_have_count(2)   # from a skill-named folder (Wave I) and from a title naming the skill as a word (Wave J)
+    expect(surface.locator('.bar [data-barlead]')).to_have_text(re.compile(r'^(Next|Next not stated)'))   # the status lead on the top line (Wave J)
+    expect(surface.locator('.bar [data-busy]')).not_to_be_empty()                                          # the state word beside the name
+    expect(surface.locator('.bar [data-theme-toggle]')).to_have_count(0)                                    # the style button is gone
+    expect(surface.locator('[data-steps] .stitle .tw')).to_have_count(0)                                    # no arrow beside the mark
     spend = surface.locator('[data-spend]')
     expect(spend).not_to_contain_text('effort sessions')                            # one total on the line, the parts in the hover (Wave I)
     expect(spend).to_have_text(re.compile(r'^(Total|cost unavailable)'))

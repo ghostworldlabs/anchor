@@ -524,8 +524,11 @@ const Proto = (() => {
         if (!p.waiting_on_you && stat.eta) line += " · ETA " + stat.eta;
         if (line.length > 120) line = line.slice(0, 117).replace(/\s+\S*$/, "") + "…";
         _statusLine = line + (stat.stale ? "  (" + hhmm + ")" : "");
-        brief.textContent = _statusLine;
-        if (lab) lab.textContent = "Status";
+        const barlead = $("[data-barlead]");
+        if (barlead) { barlead.textContent = _statusLine; barlead.title = line; }
+        // the second line is the Goal again (John, 2026-09-25: the status sits on the top line)
+        brief.textContent = (_lastMap && (_lastMap.goal_brief || _lastMap.goal)) || "";
+        if (lab) lab.textContent = "Goal";
       }
     } catch (e) { /* no-op */ }
     // Deliverables tile stays pinned FIRST in the pane (2026-08-25, John's ask),
@@ -635,7 +638,18 @@ const Proto = (() => {
     history.open = _openHistories.has(key);
     history.ontoggle = () => history.open ? _openHistories.add(key) : _openHistories.delete(key);
     history.appendChild(el("summary", "", handoffs.length + " " + label));
-    handoffs.forEach((h) => history.appendChild(el("div", "", (h.source_ref || h.handoff_id) + " · " + (h.terminal || "outcome unknown") + " · " + h.freshness + " · " + (h.at || ""))));
+    handoffs.forEach((h) => {
+      const day = String(h.at || "").slice(0, 10), kind = h.producer_kind === "conversation" ? "a conversation turn" : (h.producer_kind || "a producer");
+      const outputs = (Array.isArray(h.outputs) ? h.outputs : []).map(o => typeof o === "string" ? {path: o} : (o || {})).filter(o => o.path || o.route);
+      const row = el("div", "handoff");
+      row.appendChild(el("span", "", (day || "undated") + " \u00b7 " + kind + " finished work" + (h.terminal && h.terminal !== "done" ? " (" + h.terminal + ")" : "") + " \u00b7 "));
+      if (outputs.length) outputs.slice(0, 4).forEach(o => row.appendChild(navFile({what: (o.what || String(o.path || o.route).split(/[\\/]/).pop()), path: o.path, route: o.route, openable: true}, "handoffs", true)));
+      else row.appendChild(el("span", "dim", "no files recorded"));
+      const act = el("button", "navactbtn ndact", "act on");
+      act.onclick = () => sayAbout("Act on: unplaced work from " + (day || "an undated turn") + " (" + outputs.length + " file" + (outputs.length === 1 ? "" : "s") + ") \u2014 assign it to a step or dismiss it");
+      row.appendChild(act);
+      history.appendChild(row);
+    });
     return history;
   }
   /* Course/product navigation: one event-derived organization for both views. */
@@ -892,7 +906,7 @@ const Proto = (() => {
     const unmapped = Object.values(((map.refinement || {}).state || {}).producer_handoffs || {}).filter((h) => !h.step_id && h.status === "pending_steward_review");
     if (unmapped.length) {
       const row = el("li", "waiting");
-      row.appendChild(producerHandoffs(unmapped, "work item(s) need Steward to identify their slice", "handoffs:unmapped"));
+      row.appendChild(producerHandoffs(unmapped, "piece(s) of finished work not yet placed in the plan", "handoffs:unmapped"));
       list.appendChild(row);
     }
     map.steps.forEach((st, i) => {
@@ -907,7 +921,6 @@ const Proto = (() => {
       wrap.style.minWidth = "0";
       // (2026-09-06, John) the TITLE line is the only toggle; a ▸/▾ twisty says the state
       const title = el("div", "stitle");
-      title.appendChild(el("span", "tw", ""));
       if (st.part) title.appendChild(el("span", "wpkind", st.part));
       // (2026-09-05, John) a step that names a skill carries its mark
       try {
@@ -1512,12 +1525,16 @@ const Proto = (() => {
     if(_answerQuestionId && !(st.pending_questions||[]).some(q=>q.id===_answerQuestionId))_answerQuestionId=null;
     const busy = $("[data-busy]");
     if (busy) {
+      const att = (st.attention || {}).state, word = st.light === "red" ? "stuck - needs a look"
+        : (st.open_question || att === "needs_you") ? "need your input" : att === "blocked" ? "blocked"
+        : !st.alive ? "asleep" : "quiet";
       busy.textContent = st.busy
         ? ((st.quiet_seconds || 0) >= 300
             ? "thinking " + Math.round(st.quiet_seconds / 60) + " min, no output - Stop turn interrupts"
             : (busySince ? "thinking " + Math.round((Date.now() - busySince) / 1000) + "s"
                          : "working..."))
-        : "";
+        : "\u00b7 " + word;
+      busy.className = "busy state-" + (st.busy ? "green" : word === "need your input" || word === "blocked" || st.light === "red" ? "orange" : "quiet");
     }
     const spend = $("[data-spend]");
     if (spend) {
@@ -1615,7 +1632,7 @@ const Proto = (() => {
       const unknownTotal = [jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.unknown), 0);
       const fam = String((effortUsage || st).billing_family || "");
       const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : fam === "chatgpt" ? "ChatGPT" : "";
-      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + " not priced" + (subName ? " (" + subName + " subscription)" : "") : "";
+      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + (subName ? " on the " + subName + " subscription (no per-call charge)" : " with no price recorded") : "";
       let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (notPriced ? " · " + notPriced : "")
         : notPriced ? "Total: " + notPriced : "cost unavailable";
       if (tokensTotal) total += " · " + Math.round(tokensTotal).toLocaleString() + " tokens recorded";

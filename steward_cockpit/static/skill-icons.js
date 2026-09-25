@@ -81,10 +81,21 @@
     }
     return null;
   }
-  /* The skill that made a register item: its owning step's commission, else its folder. */
+  /* A skill named as a whole word in a row's title ("Gandalf read …", "researchPrime run — …"); names only, never aliases. */
+  function wordSkill(text) {
+    var words = String(text || "").split(/[^A-Za-z0-9\-]+/);
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i].toLowerCase();
+      if (!w) continue;
+      for (var j = 0; j < MAP.length; j++) if (w === MAP[j].name.toLowerCase()) return MAP[j];
+    }
+    return null;
+  }
+  /* The skill that made a register item: its owning step's commission, else the skill its title names, else its folder. */
   function forItem(it, owner) {
     if (!it) return null;
     var e = owner && owner.commissioned_as ? exact(String(owner.commissioned_as).split(":")[0]) : null;
+    if (!e) e = wordSkill(it.what);
     return e ? e.name : fromPath(it.path || it.route || "");
   }
   window.SkillIcons = { MAP: MAP, entryFor: entryFor, exact: exact, iconFor: iconFor, img: img, decorate: decorate, fromPath: fromPath, forItem: forItem };
