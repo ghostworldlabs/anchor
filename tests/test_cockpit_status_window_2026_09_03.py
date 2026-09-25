@@ -84,12 +84,10 @@ class StatusWindowTest(unittest.TestCase):
         js = self.js
         self.assertIn('data-goallabel', self.v1)
         self.assertIn('data-barlead', self.v1)
-        self.assertIn("_statusLine = line", js)
-        self.assertIn("barlead.textContent = _statusLine", js)         # the status sits on the top line (John, 2026-09-25)
-        self.assertNotIn("brief.textContent = _statusLine", js)        # and not again on the goal line
+        self.assertIn("barlead.textContent = line", js)                # the status sits on the top line (John, 2026-09-25)
+        self.assertNotIn("_statusLine", js)                             # and nowhere else: no shared variable
         self.assertNotIn('lab.textContent = "Status"', js)
-        self.assertIn('gb.textContent = map.goal_brief', js)            # the goal line keeps the goal
-        self.assertNotIn("!_statusLine", js)                            # the kickoff outcome paints the goal line freely
+        self.assertIn('gb.textContent = map.goal_brief || ""', js)      # the goal line keeps the goal, blank when none
         self.assertIn("line.length > 120", js)                          # short, per the elegance rule
 
     def test_a_group_row_with_a_mark_has_no_arrow(self):

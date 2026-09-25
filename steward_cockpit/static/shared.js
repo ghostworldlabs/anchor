@@ -248,8 +248,6 @@ const Proto = (() => {
      plain "not applied" line; anything else paints nothing. XHR on purpose: the
      client shim rewrites fetch('/api/…') to /api/steward/, and this route is
      Anchor's own GET /api/ecgberht/kickoff_show. Read-only; never throws. */
-  // the one-line status of record, shown on the top line (2026-09-03; beside the name since 2026-09-25)
-  let _statusLine = "";
   function paintKickoff(briefEl) {
     const box = $("[data-kickoff]");
     if (!box) return;
@@ -513,16 +511,13 @@ const Proto = (() => {
     // show their LAST update, stamped, not a fresh blank)
     const stamp = $("[data-statusstamp]");
     if (stamp) stamp.textContent = "last update " + hhmm + (stat.stale ? " · idle" : "");
-    // the top line carries the ONE-LINE status of record for this steward run
-    // (John, 2026-09-03); the goal line below keeps the goal (John, 2026-09-25: not the status twice)
+    // the status of record sits on the top line; the goal line keeps the goal (John, 2026-09-25)
     try {
-      // the lead (the one server template) is the line of record
       let line = stat.lead_line || "Next not stated by the steward";
       if (!p.waiting_on_you && stat.eta) line += " · ETA " + stat.eta;
       if (line.length > 120) line = line.slice(0, 117).replace(/\s+\S*$/, "") + "…";
-      _statusLine = line + (stat.stale ? "  (" + hhmm + ")" : "");
       const barlead = $("[data-barlead]");
-      if (barlead) { barlead.textContent = _statusLine; barlead.title = line; }
+      if (barlead) { barlead.textContent = line + (stat.stale ? "  (" + hhmm + ")" : ""); barlead.title = line; }
     } catch (e) { /* no-op */ }
     // Deliverables tile stays pinned FIRST in the pane (2026-08-25, John's ask),
     // and its register refreshes on the same cadence as the status it sits above.
@@ -669,8 +664,9 @@ const Proto = (() => {
   }
   function navDisclosure(key, title, open=false, mark=null) {
     const d=el('details','navgroup'), summary=el('summary','');
-    if (mark) summary.appendChild(el('span','plan-mark '+mark.cls, mark.glyph));
-    summary.appendChild(document.createTextNode((mark ? ' ' : '') + title));
+    const marked = !!(mark && mark.glyph);
+    if (marked) summary.appendChild(el('span','plan-mark '+mark.cls, mark.glyph));
+    summary.appendChild(document.createTextNode((marked ? ' ' : '') + title));
     d.dataset.navGroup=key;summary.dataset.navFocus='group:'+key;
     d.open=navChoice(key,open);d.appendChild(summary);
     const save=value=>{navChoices[key]=value;try{localStorage.setItem(navStorageKey(),JSON.stringify(navChoices));}catch(e){}};
@@ -1892,7 +1888,7 @@ const Proto = (() => {
     if (opts.renderMap) { opts.renderMap(map); return; }
     // goal tile (one sentence; expands to the full bold-led description)
     const gb = $("[data-goalbrief]");
-    if (gb) gb.textContent = map.goal_brief || "(no goal recorded)";
+    if (gb) gb.textContent = map.goal_brief || "";
     const gf = $("[data-goalfull]");
     if (gf) renderRich(gf, map.goal_md || "(no goal recorded)");
     paintKickoff(gb);
