@@ -65,7 +65,7 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(surface.locator('[data-steps] li[data-step-id="live"] .stitle img.skico')).to_have_attribute('alt', 'Foreman')   # the commissioned skill's mark on the step
     expect(panel.locator('details[data-group-id="unclassified"] .navfile img.skico[alt="Gandalf"]')).to_have_count(2)   # from a skill-named folder (Wave I) and from a title naming the skill as a word (Wave J)
     expect(surface.locator('.bar [data-barlead]')).to_have_text(re.compile(r'^(Next|Next not stated)'))   # the status lead on the top line (Wave J)
-    expect(surface.locator('.bar [data-busy]')).not_to_be_empty()                                          # the state word beside the name
+    expect(surface.locator('.bar [data-busy]')).to_be_empty()                                              # nothing waits and nothing runs: no state word beside the name
     expect(surface.locator('.bar [data-theme-toggle]')).to_have_count(0)                                    # the style button is gone
     expect(surface.locator('[data-steps] .stitle .tw')).to_have_count(0)                                    # no arrow beside the mark
     spend = surface.locator('[data-spend]')

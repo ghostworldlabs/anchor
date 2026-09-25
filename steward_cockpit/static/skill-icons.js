@@ -85,9 +85,8 @@
   function wordSkill(text) {
     var words = String(text || "").split(/[^A-Za-z0-9\-]+/);
     for (var i = 0; i < words.length; i++) {
-      var w = words[i].toLowerCase();
-      if (!w) continue;
-      for (var j = 0; j < MAP.length; j++) if (w === MAP[j].name.toLowerCase()) return MAP[j];
+      var e = exact(words[i]);
+      if (e && e.name.toLowerCase() === words[i].toLowerCase()) return e;
     }
     return null;
   }

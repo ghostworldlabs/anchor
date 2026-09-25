@@ -2724,8 +2724,8 @@ def _finalize(job_id: str, exit_code, result_envelope=None) -> None:
             effort_dir = rec.get("effort_dir") or pfolder
             where = _dreg.where_for(effort_dir, pfolder, pid,
                                     lane=rec.get("lane"), job_id=job_id)
-            skill_name = {"research": "researchPrime", "plan": "Crucible"}.get(rec.get("lane"), rec.get("lane"))
-            what = "%s run — %s" % (skill_name, rec.get("label") or job_id)   # the row names the skill, so its mark follows
+            import lanes as _lanes
+            what = "%s run — %s" % (_lanes.LANES[rec["lane"]].skill, rec.get("label") or job_id)
             out = _dreg.register(effort_dir, what, where)
             _journal.emit_safe(
                 pid, _journal.EV_DELIVERABLE_PINNED, correlation_id=job_id,

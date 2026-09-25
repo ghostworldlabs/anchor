@@ -526,9 +526,8 @@ const Proto = (() => {
         _statusLine = line + (stat.stale ? "  (" + hhmm + ")" : "");
         const barlead = $("[data-barlead]");
         if (barlead) { barlead.textContent = _statusLine; barlead.title = line; }
-        // the second line is the Goal again (John, 2026-09-25: the status sits on the top line)
-        brief.textContent = (_lastMap && (_lastMap.goal_brief || _lastMap.goal)) || "";
-        if (lab) lab.textContent = "Goal";
+        brief.textContent = _statusLine;
+        if (lab) lab.textContent = "Status";
       }
     } catch (e) { /* no-op */ }
     // Deliverables tile stays pinned FIRST in the pane (2026-08-25, John's ask),
@@ -638,18 +637,33 @@ const Proto = (() => {
     history.open = _openHistories.has(key);
     history.ontoggle = () => history.open ? _openHistories.add(key) : _openHistories.delete(key);
     history.appendChild(el("summary", "", handoffs.length + " " + label));
+    const files = h => (Array.isArray(h.outputs) ? h.outputs : []).map(o => typeof o === "string" ? o : (o && (o.path || o.route)) || "").filter(Boolean);
+    const empty = [];
     handoffs.forEach((h) => {
-      const day = String(h.at || "").slice(0, 10), kind = h.producer_kind === "conversation" ? "a conversation turn" : (h.producer_kind || "a producer");
-      const outputs = (Array.isArray(h.outputs) ? h.outputs : []).map(o => typeof o === "string" ? {path: o} : (o || {})).filter(o => o.path || o.route);
+      const day = String(h.at || "").slice(0, 10);
+      const paths = files(h);
+      if (!paths.length) { empty.push(day); return; }
+      paths.slice(0, 4).forEach(p => {
+        const name = p.split(/[\\/]/).pop();
+        const row = el("div", "handoff");
+        row.appendChild(el("span", "", (day || "undated") + " \u00b7 "));
+        row.appendChild(navFile({what: name, path: p, openable: true}, "handoffs", true));
+        const act = el("button", "navactbtn ndact", "act on");
+        act.onclick = () => sayAbout("Act on: " + name);
+        row.appendChild(act);
+        history.appendChild(row);
+      });
+    });
+    if (empty.length) {
+      const days = [...new Set(empty.filter(Boolean))].sort();
+      const line = empty.length + " turn" + (empty.length === 1 ? "" : "s") + (days.length ? " on " + days.join(", ") : "") + " recorded no files";
       const row = el("div", "handoff");
-      row.appendChild(el("span", "", (day || "undated") + " \u00b7 " + kind + " finished work" + (h.terminal && h.terminal !== "done" ? " (" + h.terminal + ")" : "") + " \u00b7 "));
-      if (outputs.length) outputs.slice(0, 4).forEach(o => row.appendChild(navFile({what: (o.what || String(o.path || o.route).split(/[\\/]/).pop()), path: o.path, route: o.route, openable: true}, "handoffs", true)));
-      else row.appendChild(el("span", "dim", "no files recorded"));
+      row.appendChild(el("span", "", line + " \u00b7 "));
       const act = el("button", "navactbtn ndact", "act on");
-      act.onclick = () => sayAbout("Act on: unplaced work from " + (day || "an undated turn") + " (" + outputs.length + " file" + (outputs.length === 1 ? "" : "s") + ") \u2014 assign it to a step or dismiss it");
+      act.onclick = () => sayAbout("Act on: " + line);
       row.appendChild(act);
       history.appendChild(row);
-    });
+    }
     return history;
   }
   /* Course/product navigation: one event-derived organization for both views. */
@@ -919,7 +933,6 @@ const Proto = (() => {
       // the full string width — the rail then grows a horizontal scrollbar
       // instead of ellipsizing the blue line
       wrap.style.minWidth = "0";
-      // (2026-09-06, John) the TITLE line is the only toggle; a ▸/▾ twisty says the state
       const title = el("div", "stitle");
       if (st.part) title.appendChild(el("span", "wpkind", st.part));
       // (2026-09-05, John) a step that names a skill carries its mark
@@ -1508,6 +1521,20 @@ const Proto = (() => {
       attention==='blocked'?'Blocked':attention==='needs_you'?'Needs your input':
       ['unknown','stale'].includes(attention)?'Activity unconfirmed':'Idle';
   }
+  // the one state rule: the light's colour and its short word (the pane, the project dot and the bar read it)
+  function stateColor(st) {
+    const attention = (_lastMap && _lastMap.attention) || {};
+    const attentionState = st.attention_state || attention.state || "";
+    const working = st.busy || st.working_bg || (st.alive && st.queued);
+    return st.light === "red" ? "red" : working ? "green"
+      : (st.open_question || ["needs_you", "blocked"].includes(attentionState)) ? "orange" : "quiet";
+  }
+  function stateWord(st) {
+    const color = stateColor(st), attention = (_lastMap && _lastMap.attention) || {};
+    const attentionState = st.attention_state || attention.state || "";
+    return color === "red" ? "needs a look" : color === "green" ? "working"
+      : color === "orange" ? ((st.open_question || attentionState === "needs_you") ? "need your input" : "blocked") : "";
+  }
   function syncCompactActivity(st) {
     if(!st)return;
     const value=liveActivityWord(st);
@@ -1525,16 +1552,13 @@ const Proto = (() => {
     if(_answerQuestionId && !(st.pending_questions||[]).some(q=>q.id===_answerQuestionId))_answerQuestionId=null;
     const busy = $("[data-busy]");
     if (busy) {
-      const att = (st.attention || {}).state, word = st.light === "red" ? "stuck - needs a look"
-        : (st.open_question || att === "needs_you") ? "need your input" : att === "blocked" ? "blocked"
-        : !st.alive ? "asleep" : "quiet";
+      const word = stateWord(st);
       busy.textContent = st.busy
         ? ((st.quiet_seconds || 0) >= 300
             ? "thinking " + Math.round(st.quiet_seconds / 60) + " min, no output - Stop turn interrupts"
             : (busySince ? "thinking " + Math.round((Date.now() - busySince) / 1000) + "s"
                          : "working..."))
-        : "\u00b7 " + word;
-      busy.className = "busy state-" + (st.busy ? "green" : word === "need your input" || word === "blocked" || st.light === "red" ? "orange" : "quiet");
+        : (word ? "\u00b7 " + word : "");
     }
     const spend = $("[data-spend]");
     if (spend) {
@@ -1632,7 +1656,7 @@ const Proto = (() => {
       const unknownTotal = [jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.unknown), 0);
       const fam = String((effortUsage || st).billing_family || "");
       const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : fam === "chatgpt" ? "ChatGPT" : "";
-      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + (subName ? " on the " + subName + " subscription (no per-call charge)" : " with no price recorded") : "";
+      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + (subName ? " on the " + subName + " subscription (no per-turn dollar amount)" : " with no price recorded") : "";
       let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (notPriced ? " · " + notPriced : "")
         : notPriced ? "Total: " + notPriced : "cost unavailable";
       if (tokensTotal) total += " · " + Math.round(tokensTotal).toLocaleString() + " tokens recorded";
@@ -1665,14 +1689,12 @@ const Proto = (() => {
     const working = st.busy || st.working_bg || (st.alive && st.queued);
     syncCompactActivity(st);
     // Also support an already-running server from before the state contract repair.
-    const color = st.light === "red" ? "red" : working ? "green"
-      : (st.open_question || ["needs_you", "blocked"].includes(attentionState)) ? "orange" : "quiet";
+    const color = stateColor(st);
     const light = $("[data-light]"), light2 = $("[data-light2]");
     if (light) light.className = "light " + color;
     if (light2) light2.className = "light " + color;
     const projectLight=$('[data-att]');
-    if(projectLight){projectLight.className='dot light '+color;projectLight.title=
-      color==='green'?'Working':color==='red'?'Interrupted':color==='orange'?'Needs your input':'Idle';}
+    if(projectLight){projectLight.className='dot light '+color;projectLight.title=stateWord(st)||'Idle';}
     const stx = $("[data-statetext]");
     if (stx) {
       let txt;

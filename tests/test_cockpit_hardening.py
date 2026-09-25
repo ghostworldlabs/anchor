@@ -123,6 +123,7 @@ def test_accept_recommendation_sends_the_saved_choice(cockpit):
         route.fulfill(status=200, content_type='application/json', body=json.dumps({'ok': True}))
     page.route('**/api/steward/say?*', respond)
     tile = surface.locator('[data-openq]')
+    expect(surface.locator('.bar [data-busy]')).to_contain_text('need your input')   # the state word beside the name while a question is open (Wave J)
     tile.click()
     tile.get_by_role('button', name='Accept recommendation', exact=True).click()
     expect(tile).not_to_have_class(re.compile(r'\bopen\b'), timeout=5000)
