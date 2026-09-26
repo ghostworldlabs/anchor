@@ -2409,8 +2409,7 @@ class Engine:
                     self.open_question_kind = ""
                 if not was_tick:
                     sentences = [s.strip() for s in
-                                 re.split(r"(?<=[.!?])\s+|
-+", txt)      # a line break ends a line such as "Reversible: no" (Wave M)
+                                 re.split(r"(?<=[.!?])\s+|\n+", txt)      # a line break ends a line such as "Reversible: no" (Wave M)
                                  if s.strip().endswith("?")]
                     if sentences and (not question_attention.get("managed_refinement") or
                             question_attention.get("pending_request") or _has_recommendation(txt)):
