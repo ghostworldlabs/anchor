@@ -2746,6 +2746,19 @@ def render_project_tile_html(entry: dict) -> str:
         f'{html_lib.escape(_stw_line)}</span>'
     ) if _stw_line else ""
 
+    # W1a (High Seat, 2026-09-26): the nearest dated open step rides the row — one roadmap read,
+    # the same fact the rail's rows are raised from; nothing when no step carries a date.
+    due_block = ""
+    try:
+        import home_rows as _hr
+        _facts = _hr.project_facts(entry)
+        if _facts.get("dated"):
+            _d = _facts["dated"][0]
+            due_block = (f'<span class="rnd-row-due" title="{html_lib.escape(_d["name"], quote=True)}" '
+                         f'style="color:var(--faint,#8b93a7);font-size:11.5px;white-space:nowrap;margin-left:6px">'
+                         f'&middot; due {html_lib.escape(_hr.short_date(_d["due"]))}</span>')
+    except Exception:
+        due_block = ""
     # Per-lane mini-counts (compact form of the status line) + status dot.
     status = render_status_line_html(pid_raw)
     try:
@@ -2867,6 +2880,7 @@ def render_project_tile_html(entry: dict) -> str:
         f'{summary_block}'
         f'{activity_block}'
         f'{steward_block}'
+        f'{due_block}'
         f'<span class="rnd-row-counts">{status}</span>'
         f'{rollup_block}'
         f'{grave}'
@@ -7500,29 +7514,37 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
     Best-effort at every seam: a registry hiccup degrades one section to an
     honest line, never the page."""
     import home_attention as _ha
+    import home_rows as _hr
     esc = lambda s: html_lib.escape(str(s if s is not None else ""))
 
     try:
         sessions = _sessreg.list_sessions()
     except Exception:
         sessions = []
-    names, folders, open_n = {}, 0, 0
+    names, folders, open_n, entries = {}, 0, 0, []
     try:
         for _e in _rnd.list_projects(include_archived=False, include_future=False,
                                      include_retired=False):
             if _e.get("id"):
                 names[_e["id"]] = _e.get("name") or _e["id"][:8]
+                entries.append(_e)
         open_n = len(names)
     except Exception:
         pass
+    # W1a (High Seat, 2026-09-26): each project's steward record — its wait, its lead line, its
+    # dated open steps — three small reads per project, no scan, no model, no bridge on GET /
+    facts = _hr.all_project_facts(entries, today)
     try:
         folders = len(_rnd.group_by_group())
     except Exception:
         pass
 
     rows = _ha.build_attention(tasks=tasks, sessions=sessions, health=health,
-                               today=today, now=now, project_names=names)
+                               today=today, now=now, project_names=names, projects=facts)
     lead, sub = _ha.the_move(rows, steward_hs_name)
+    bullets = _ha.brief_bullets(rows, facts, today=today, seat_name=steward_hs_name)
+    move_html = ('<div class="rlead">%s</div>' % esc(bullets[0])
+                 + "".join('<div class="rsub">%s</div>' % esc(b) for b in bullets[1:]))
     counts = _ha.rail_counts(sessions, rows, folders=folders, open_projects=open_n)
     due, due_more = _ha.due_rows(tasks, today=today)
     live, live_more = _ha.live_rows(sessions, names)
@@ -7545,8 +7567,7 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
         '<div class="rail-card rail-move">'
         '<div class="rlab">%s</div>'
         '<div class="rtitle">The move today</div>'
-        '<div class="rlead">%s</div>'
-        '<div class="rsub">%s</div>'
+        '%s'
         '</div>'
         '<div class="rail-card"><div class="rlab">Due today</div>%s</div>'
         '<div class="rail-card"><div class="rlab">Coming up</div>'
@@ -7560,7 +7581,7 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
         '<a class="rstat" href="#tile-projects" onclick="r3Open(\'tile-projects\')"><b>%d</b><span>folders</span></a>'
         '</div></div>'
         '<div class="rail-card"><div class="rlab">Workbench</div>%s</div>'
-    ) % (esc(steward_label).upper(), esc(lead), esc(sub), due_html,
+    ) % (esc(steward_label).upper(), move_html, due_html,
          counts["open"], counts["running"],
          "bad" if counts["need_you"] else "", counts["need_you"], counts["need_you"], counts["folders"],
          live_html)
@@ -7621,6 +7642,11 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
 def generate_html(projects, tasks, inbox):
     """Generate a full standalone HTML dashboard matching the original Anchor style."""
     today_str = datetime.now().strftime("%A, %B %d, %Y")
+    try:  # W1a (High Seat, 2026-09-26): the week header in words
+        import home_rows as _hr_week
+        today_str += " \u00b7 " + _hr_week.week_in_words()
+    except Exception:
+        pass
     active = [t for t in tasks if not t["done"]]
     done_tasks = [t for t in tasks if t["done"]]
     # Whether the server requires a token (remote/exposed). Embedded as a bool so

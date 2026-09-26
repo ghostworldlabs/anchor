@@ -25,6 +25,7 @@ RULES = (
     ("needs-you", "red", "a session is waiting on you"),
     ("overdue", "red", "overdue task"),
     ("due-today", "amber", "due today"),
+    ("due-soon", "amber", "due within five weeks"),
     ("failed", "amber", "failed session (7 days)"),
 )
 _RANK = {name: i for i, (name, _sev, _lab) in enumerate(RULES)}
@@ -76,13 +77,16 @@ def _row(rule, text, why, href, kind, project_id=""):
 
 
 def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
-                    project_names=None, limit=6):
+                    project_names=None, limit=6, projects=()):
     """Return the ranked attention rows (at most ``limit``).
 
     ``tasks``    — home task dicts (``text`` · ``priority`` · ``due`` · ``done``).
     ``sessions`` — session-registry records (``status`` · ``lane`` · ``project_id``
                    · ``label`` · ``updated_at``/``created_at``).
     ``health``   — ``(report_date, status)`` from the latest health report or None.
+    ``projects`` — ``home_rows.project_facts`` dicts (W1a, High Seat 2026-09-26): a project whose
+                   steward record waits on John raises a needs-you row; its open dated steps raise
+                   overdue / due-today / due-soon rows (soonest first, within five weeks).
     ``today``    — date; ``now`` — datetime (both default to the wall clock only
                    when omitted, so tests pass them explicitly).
     """
@@ -127,6 +131,21 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
         rows.append(_row("needs-you", "%s is waiting on you" % nm,
                          "%s session needs an answer" % (rec.get("lane") or "a"),
                          "/project/%s" % pid, "project", pid))
+    # 2b. needs-you — the project's own steward record says it waits on John (the strip's human
+    #     wait, else the last status's "waiting on you"); a session row for the same project
+    #     already says it, so the record row is not repeated
+    seen = {pid for _w, _r, pid in needs}
+    for f in projects or ():
+        try:
+            if not isinstance(f, dict) or not f.get("needs_you") or f.get("id") in seen:
+                continue
+            why = " ".join(str(f["needs_you"]).split())
+            why = (why[:88].rstrip() + "\u2026") if len(why) > 90 else why
+            rows.append(_row("needs-you", "%s is waiting on you" % f.get("name"), why,
+                             f.get("href") or "/project/%s" % f.get("id"), "project", f.get("id")))
+            seen.add(f.get("id"))
+        except Exception:
+            continue
 
     # 3./4. tasks — overdue (oldest first, P1 first), then due today (P1 first)
     overdue, due_today = [], []
@@ -154,6 +173,39 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
     for pr, t in due_today:
         rows.append(_row("due-today", t.get("text", ""), "P%d · due today" % pr,
                          "#tile-tasks", "task"))
+    # 3b./4b./4c. dated steps — a project's open steps that carry a due (W1a): overdue, due today,
+    #     and due within five weeks (the ruler's reach), soonest first; each links to its plan
+    late, todays, soon = [], [], []
+    horizon = today + timedelta(days=35)
+    for f in projects or ():
+        if not isinstance(f, dict):
+            continue
+        for st in f.get("dated") or ():
+            try:
+                d = _iso_date(st.get("due"))
+                if d is None:
+                    continue
+                if d < today:
+                    late.append((d, st))
+                elif d == today:
+                    todays.append((d, st))
+                elif d <= horizon:
+                    soon.append((d, st))
+            except Exception:
+                continue
+    for bucket in (late, todays, soon):
+        bucket.sort(key=lambda x: (x[0], x[1].get("name", "")))
+    for d, st in late:
+        days = (today - d).days
+        rows.append(_row("overdue", st.get("name", ""),
+                         "due %s (%d day%s ago) \u00b7 %s" % (_short(d), days, "" if days == 1 else "s", st.get("project_name", "")),
+                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
+    for d, st in todays:
+        rows.append(_row("due-today", st.get("name", ""), "due today \u00b7 %s" % st.get("project_name", ""),
+                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
+    for d, st in soon:
+        rows.append(_row("due-soon", st.get("name", ""), "due %s \u00b7 %s" % (_short(d), st.get("project_name", "")),
+                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
 
     # 5. failed — recent failed sessions, newest first
     failed.sort(key=lambda t: t[0], reverse=True)
@@ -164,6 +216,50 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
 
     rows.sort(key=lambda r: _RANK[r["rule"]])  # stable: keeps each rule's own order
     return rows[: max(0, int(limit or 0))] if limit else rows
+
+
+def _short(d):
+    """date → 'Oct 8'."""
+    d = _iso_date(d)
+    return ("%s %d" % (d.strftime("%b"), d.day)) if d else ""
+
+
+def brief_bullets(rows, projects=(), today=None, seat_name="High Seat"):
+    """The rail's brief as bullets (W1a, High Seat 2026-09-26): the move, who waits on him, what the
+    week holds (or the nearest date), and the standing line. Facts only; never more than four."""
+    today = today or date.today()
+    bullets = []
+    top = rows[0] if rows else None
+    if top:
+        bullets.append("%s%s." % (top["text"], (" \u2014 " + top["why"]) if top.get("why") else ""))
+    else:
+        bullets.append("Nothing is waiting on you.")
+    waits = [r for r in rows or () if r.get("rule") == "needs-you"]
+    if len(waits) > 1:
+        names = [w["text"].replace(" is waiting on you", "") for w in waits]
+        bullets.append("%d wait on you: %s." % (len(waits), ", ".join(names[:4]) + (" and more" if len(names) > 4 else "")))
+    week_end = today + timedelta(days=6 - today.weekday())
+    dated = []
+    for f in projects or ():
+        if isinstance(f, dict):
+            for st in f.get("dated") or ():
+                d = _iso_date(st.get("due"))
+                if d is not None:
+                    dated.append((d, st))
+    dated.sort(key=lambda x: (x[0], x[1].get("name", "")))
+    this_week = [st for d, st in dated if today <= d <= week_end]
+    if this_week:
+        bullets.append("Due this week: " + "; ".join(
+            "%s (%s, %s)" % (st.get("name", ""), _short(st.get("due")), st.get("project_name", "")) for st in this_week[:3]) + ".")
+    else:
+        ahead = next(((d, st) for d, st in dated if d >= today), None)
+        if ahead:
+            bullets.append("Nothing is due this week; the nearest date is %s (%s, %s)." % (
+                _short(ahead[0]), ahead[1].get("name", ""), ahead[1].get("project_name", "")))
+        else:
+            bullets.append("Nothing carries a date yet.")
+    bullets.append("You can act from here. Opening the %s is optional." % seat_name)
+    return bullets[:4]
 
 
 def the_move(rows, seat_name="High Seat"):
