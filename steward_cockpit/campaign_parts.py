@@ -39,24 +39,12 @@ def parse_ref(ref):
 
 
 def _default_lookup(pid):
-    """The registry entry for an id, or for a unique prefix of at least eight characters."""
+    """The registry entry for the full id, nothing looser (a prefix would bind whichever project has it)."""
     try:
         import rnd_registry as _rnd
+        return _rnd.get_project(pid) or None
     except Exception:
         return None
-    try:
-        entry = _rnd.get_project(pid)
-        if entry:
-            return entry
-        if len(pid) >= 8:
-            hits = [e for e in _rnd.list_projects(include_archived=True, include_future=True,
-                                                   include_retired=True)
-                    if str(e.get("id", "")).startswith(pid)]
-            if len(hits) == 1:
-                return hits[0]
-    except Exception:
-        return None
-    return None
 
 
 def _cached(cache, key, fn):
@@ -148,15 +136,13 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
         out["broken"] = False
     elif p["kind"] == "deliverable":
         items = _register(folder, cache)
-        it = None
-        if p["sub"].isdigit():
-            n = int(p["sub"])
-            it = items[n - 1] if 1 <= n <= len(items) else None
-        else:
-            key = p["sub"].lower()
-            it = next((x for x in items if key in str(x.get("what") or "").lower()), None)
+        if not p["sub"].isdigit():
+            out["gap"] = "a deliverable part names a row number (deliverable:<pid>/<n>); '%s' is not one" % p["sub"]
+            return out
+        n = int(p["sub"])
+        it = items[n - 1] if 1 <= n <= len(items) else None
         if it is None:
-            out["gap"] = "no deliverable '%s' in %s's register" % (p["sub"], out["name"])
+            out["gap"] = "no row %d in %s's register (%d rows)" % (n, out["name"], len(items))
             return out
         out["what"] = str(it.get("what") or "")
         out["href"] = str(it.get("route") or "") or "/project/%s" % out["pid"]
