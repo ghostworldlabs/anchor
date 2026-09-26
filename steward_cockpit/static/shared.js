@@ -962,14 +962,18 @@ const Proto = (() => {
         if (_sk) title.appendChild(_sk);
       } catch (e) { /* no-op */ }
       title.appendChild(document.createTextNode((st.navigation && st.navigation.label) || st.name));
+      // W0b: an initiative's heading step wears its tier and life area
+      if (st.tier || st.area) title.appendChild(el("span", "wpkind", (st.tier ? "tier " + st.tier : "") + (st.tier && st.area ? " \u00b7 " : "") + (st.area || "")));
       if (st.due) {
         const due = el("span", "sdue", "· due " + fmtDue(st.due));
         due.style.cssText = "color:var(--faint);font-size:11.5px;margin-left:6px;white-space:nowrap";
         title.appendChild(due);
       }
+      wrap.appendChild(title);
       // W0b (High Seat, 2026-09-26): a part that points at another record shows what that record
       // says - kind, project, step or deliverable, its state, its date - and a link into it.
       // The Campaign never copies those; a broken reference is named here, never blank.
+      // The line sits under the step's title; a project part carries its cockpit's lead line.
       const rs = st.ref ? ((map.resolved || {})[st.id] || null) : null;
       if (st.ref) {
         const line = el("div", "sdmeta sref");
@@ -977,7 +981,8 @@ const Proto = (() => {
         if (rs && !rs.broken) {
           line.appendChild(document.createTextNode("\u2192 " + rs.kind + " \u00b7 " + (rs.name || "")
             + (rs.what ? " \u00b7 " + rs.what : "") + (rs.state ? " \u00b7 " + rs.state : "")
-            + (rs.date ? " \u00b7 due " + fmtDue(rs.date) : "") + " "));
+            + (rs.date ? " \u00b7 due " + fmtDue(rs.date) : "")
+            + (rs.kind === "project" && rs.lead ? " \u00b7 " + oneLine(String(rs.lead), 140) : "") + " "));
           if (rs.href) {
             const a = el("a", "", "open the cockpit");
             a.href = rs.href; a.target = "_blank"; a.rel = "noopener";
@@ -990,7 +995,6 @@ const Proto = (() => {
         }
         wrap.appendChild(line);
       }
-      wrap.appendChild(title);
       if (st.refinement) {
         const r = st.refinement;
         const shownRound=r.display_round??r.round;
@@ -1044,7 +1048,6 @@ const Proto = (() => {
       if (st.status === "waiting" && st.waiting_on)
         parts.push("waiting on: " + st.waiting_on);
       if (st.done_when) parts.push("done when: " + st.done_when);
-      if (rs && rs.lead) parts.push("in its cockpit: " + rs.lead);
       if (st.commissioned_as) parts.push("ran as: " + st.commissioned_as);
       // no filler: a step with nothing recorded shows nothing
       if (parts.length) wrap.appendChild(el("div", "why", parts.join("\n")));

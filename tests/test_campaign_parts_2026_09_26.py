@@ -7,6 +7,7 @@ projection read per distinct target per request.
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -38,10 +39,7 @@ def world(tmp_path):
     entries = {e["id"]: e for e in (mba, trusts)}
 
     def lookup(pid):
-        if pid in entries:
-            return entries[pid]
-        hits = [e for e in entries.values() if e["id"].startswith(pid)] if len(pid) >= 8 else []
-        return hits[0] if len(hits) == 1 else None
+        return entries.get(pid)
     return {"lookup": lookup, "mba": mba, "trusts": trusts}
 
 
@@ -55,7 +53,7 @@ def test_parse_ref_knows_the_four_kinds_and_refuses_the_rest():
 
 
 def test_a_project_part_resolves_to_the_cockpit_with_its_wait_and_nearest_open_date(world):
-    r = cp.resolve_ref("project:6765ece4", lookup=world["lookup"], with_lead=True)
+    r = cp.resolve_ref("project:6765ece4b3bc43b0b0b0907b92b17280", lookup=world["lookup"], with_lead=True)
     assert r["broken"] is False and r["gap"] == ""
     assert r["name"] == "MBA Teaching AI"
     assert r["href"] == "/project/6765ece4b3bc43b0b0b0907b92b17280"
@@ -77,7 +75,7 @@ def test_a_step_part_carries_the_targets_name_state_and_date_and_links_to_its_pl
 def test_broken_references_are_named_never_invented(world):
     unknown = cp.resolve_ref("project:00000000deadbeef", lookup=world["lookup"])
     assert unknown["broken"] is True and unknown["gap"] == "no project with id 00000000deadbeef"
-    nostep = cp.resolve_ref("step:9405abe0/valuation-x", lookup=world["lookup"])
+    nostep = cp.resolve_ref("step:9405abe06dc84b749d4ece0bda1cb45c/valuation-x", lookup=world["lookup"])
     assert nostep["broken"] is True and nostep["gap"] == "no step 'valuation-x' in Family Trusts"
     cal = cp.resolve_ref("calendar:evt-1", lookup=world["lookup"])
     assert cal["broken"] is True and cal["gap"] == "calendar not connected"
@@ -108,3 +106,19 @@ def test_resolve_parts_reads_each_target_once_per_request_and_skips_native_steps
     before = set(cache)
     cp.resolve_parts(steps, cache=cache, lookup=world["lookup"])
     assert set(cache) == before
+
+
+def test_a_deliverable_part_resolves_by_row_number_only(world):
+    d = Path(world["mba"]["folder_path"])
+    (d / "DELIVERABLES.md").write_text(
+        "| What | Where | Date | Step |\n|---|---|---|---|\n| Lecture 3 AI supplement, draft 2 | `drafts/lec3.md` | 2026-09-26 | lec3 |\n",
+        encoding="utf-8")
+    pid = world["mba"]["id"]
+    r = cp.resolve_ref("deliverable:%s/1" % pid, lookup=world["lookup"])
+    assert r["broken"] is False and r["what"] == "Lecture 3 AI supplement, draft 2"
+    by_title = cp.resolve_ref("deliverable:%s/lecture" % pid, lookup=world["lookup"])
+    assert by_title["broken"] is True and "row number" in by_title["gap"]
+    missing = cp.resolve_ref("deliverable:%s/9" % pid, lookup=world["lookup"])
+    assert missing["broken"] is True and missing["gap"].startswith("no row 9")
+    short = cp.resolve_ref("project:6765ece4", lookup=world["lookup"])
+    assert short["broken"] is True                       # the full id only; a prefix never binds
