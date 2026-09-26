@@ -998,6 +998,13 @@ def handle_get(cdir, verb, qs):
         return _efforts(cdir), 200
     if verb == "map":
         m = campaign.read_map(cdir)
+        # W0b (High Seat, 2026-09-26): a part that points at another record is resolved at read,
+        # once per distinct target per request; a broken reference is named on the page, never blank.
+        try:
+            from steward_cockpit.campaign_parts import resolve_parts
+            m["resolved"] = resolve_parts(m.get("steps") or [], cache={}, with_lead=True)
+        except Exception:
+            m["resolved"] = {}
         m["stamp"] = campaign.map_stamp(cdir)
         m["steward"] = CONFIG["steward"]
         return m, 200
