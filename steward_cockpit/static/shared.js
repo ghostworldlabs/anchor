@@ -658,6 +658,10 @@ const Proto = (() => {
   /* Course/product navigation: one event-derived organization for both views. */
   const navStorageKey = () => 'steward_navigation:' + (window.STEWARD_PID || '') + ':' + DIR;
   let navChoices = null;
+  function fileUrl(p) {
+    return "file:///" + String(p).replace(/\\/g, "/").replace(/^\/+/, "").split("/")
+      .map((seg, i) => i === 0 && /^[A-Za-z]:$/.test(seg) ? seg : encodeURIComponent(seg)).join("/");
+  }
   function navChoice(key, fallback) {
     if (!navChoices) { try { navChoices=JSON.parse(localStorage.getItem(navStorageKey())||'{}'); } catch(e) { navChoices={}; } }
     return Object.prototype.hasOwnProperty.call(navChoices,key) ? navChoices[key] : fallback;
@@ -1225,6 +1229,12 @@ const Proto = (() => {
       if(/\.pptx$/i.test(it.path)) {
         const download=el('a','sdmeta',' Download PowerPoint');
         download.href=a.href.replace(/&view=1\b/,'')+'&download=1';download.target='_blank';download.rel='noopener';row.appendChild(download);
+      }
+      if (/\.docx$/i.test(it.path) && it.dir === undefined && _lastMap && _lastMap.dir) {
+        // (Wave D0) one click opens the manuscript in desktop Word, track changes and all
+        const word = el('a', 'sdmeta', ' Open in Word');
+        word.href = "ms-word:ofe|u|" + fileUrl(_lastMap.dir) + "/" + String(it.path).split(/[\\/]/).map(encodeURIComponent).join("/");
+        row.appendChild(word);
       }
       if (it.managed && it.presentation_id) {
         const href = a.href;

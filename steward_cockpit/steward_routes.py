@@ -836,6 +836,59 @@ def _state_with_usage(eng, cdir):
     state["usage_rollup"] = _usage_rollup(cdir)
     return state
 
+def render_brief(proot, rel):
+    """(Wave D1, 2026-09-26) The collaborator's printable brief: goal, path, lead line, waiting on,
+    open decisions, last change. Token-less by design and read-only: no conversation, no file
+    links, no token. None when the effort is not one of the project's discovered efforts."""
+    import html as _html
+    cdir = _effort_dir(proot, rel)
+    if cdir is None:
+        return None
+    m = campaign.read_map(cdir)
+    last = campaign.read_last_status(cdir)
+    focused, _ = campaign._focused_step(m)
+    e = lambda v: _html.escape(str(v or ""), quote=True)
+    marks = {"done": "\u2713", "waiting": "\u2691"}
+    shown = [s for s in m.get("steps") or [] if s.get("status") not in ("parked", "cancelled", "dropped")]
+    rows = []
+    for s in shown:
+        now = focused is not None and s.get("id") == focused.get("id")
+        mark = marks.get(s.get("status"), "\u25cf" if now else "\u00b7")
+        wait = (" \u2014 waiting on " + e(s.get("waiting_on"))) if s.get("waiting_on") else ""
+        rows.append("<li>%s %s%s</li>" % (mark, e(s.get("name")), wait))
+    lead = (last or {}).get("lead_line") or "No status recorded yet"
+    at = (last or {}).get("at") or ""
+    plan = (last or {}).get("plan") or {}
+    waiting = plan.get("waiting_on_you") or (m.get("heartbeat") or {}).get("human_wait") or ""
+    pending = (m.get("heartbeat") or {}).get("pending_request") or {}
+    decisions = []
+    if pending.get("purpose"):
+        decisions.append(pending["purpose"])
+    reviews = (m.get("attention") or {}).get("pending_requests") or []
+    if reviews:
+        decisions.append("%d deliverable%s awaiting review" % (len(reviews), "" if len(reviews) == 1 else "s"))
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\">"
+        "<title>%s \u00b7 brief</title>"
+        "<style>body{font:15px/1.5 Georgia,serif;max-width:760px;margin:40px auto;padding:0 20px;color:#222}"
+        "h1{font-size:24px;margin:0 0 4px}h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:#666;margin:26px 0 6px}"
+        "ul{padding-left:18px;margin:0}li{list-style:none;margin:3px 0}.meta{color:#666;font-size:13px}</style></head><body>"
+        "<h1>%s</h1>"
+        "<h2>Goal</h2><p>%s</p>"
+        "<h2>Path</h2><p>%d of %d steps done%s</p><ul>%s</ul>"
+        "<h2>Status</h2><p>%s</p>"
+        "<h2>Waiting on</h2><p>%s</p>"
+        "<h2>Open decisions</h2><p>%s</p>"
+        "<h2>Last change</h2><p>%s</p>"
+        "<p class=\"meta\">This page is read-only and carries no conversation or files.</p></body></html>") % (
+        e(m.get("name")), e(m.get("name")),
+        e(m.get("goal") or "(no goal recorded)"),
+        sum(1 for s in shown if s.get("status") == "done"), len(shown),
+        (" \u00b7 now: " + e(focused.get("name"))) if focused else "", "".join(rows),
+        e(lead),
+        e(waiting) if waiting else "nothing waiting",
+        e(" \u00b7 ".join(decisions)) if decisions else "none open",
+        ("last status " + e(at)) if at else "no status recorded")
+
 
 def handle_get(cdir, verb, qs):
     if verb == "notebook-status":

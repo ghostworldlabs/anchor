@@ -24,8 +24,10 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
         '| START HERE: supporting evidence | `support.html` | 2026-09-13 | research |\n' + \
         '| Unassigned reference | `orphan.html` | 2026-09-13 | unresolved |\n' + \
         '| Field notes | `gandalf/notes.md` | 2026-09-12 | unresolved |\n' + \
-        '| Gandalf read LITE — INSTALL | `reads/first.md` | 2026-09-12 | unresolved |\n'
+        '| Gandalf read LITE — INSTALL | `reads/first.md` | 2026-09-12 | unresolved |\n' + \
+        '| Chapter 1 manuscript | `chapters/ch1.docx` | 2026-09-13 | live |\n'
     (root/'DELIVERABLES.md').write_text(register, encoding='utf-8')
+    (root/'chapters').mkdir(); (root/'chapters'/'ch1.docx').write_bytes(b'PK\x03\x04 not a real document')
     for name in ('current', 'old', 'support', 'orphan'):
         (root/(name+'.html')).write_text('<h1>'+name+' tracker example</h1>', encoding='utf-8')
     (root/'gandalf').mkdir(); (root/'gandalf'/'notes.md').write_text('# notes\n', encoding='utf-8')
@@ -87,6 +89,10 @@ def test_legacy_components_current_links_and_persistent_navigation(cockpit):
     expect(calendar.locator('.navfilelink a').first).to_be_visible()
     expect(calendar).to_contain_text('Working tracker')
     expect(calendar).to_contain_text('Earlier workbook')
+    word = calendar.locator('a[href^="ms-word:ofe|u|file:///"]')                   # (Wave D0) one click opens the manuscript in desktop Word
+    expect(word).to_have_count(1)
+    href = word.first.get_attribute('href')
+    assert href.endswith('/Navigation%20project/chapters/ch1.docx') and '%3A' not in href   # the drive letter's colon stays literal
     expect(calendar.locator('.nav-accept')).to_have_count(0)
     with page.expect_popup() as opened:
         donow.locator('.navfilelink a').first.click()
