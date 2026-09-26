@@ -65,6 +65,11 @@ citation record): *This is a formal decision record with a recorded RECOMMENDATI
 computes a dollar figure from a pricing table of its own — a session renders
 `N tok · Xm (subscription)` on the Max-subscription host. (Master Plan Phase 5;
 grounded by `intake/gap-closures.md` derived-G1 and `W1-GROUND-TRUTH.md` §1.)
+**Rider (John, 2026-09-25, cockpit workflow Wave L):** a subscription turn that
+reports tokens but no price MAY carry an estimate at the provider's published API
+list price: always the word *estimated*, its own clause beside the reported total,
+never folded into "reported"; the table is one dated, sourced file
+(`steward_cockpit/api_list_prices.json`), and a model not in it stays unpriced.
 
 **Orientation fork (LOCKED, Phase 0).** Read-only orientation narration
 AUTO-EXECUTES as a read-only **plan-mode one-shot job** through `job_runner` (the

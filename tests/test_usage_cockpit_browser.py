@@ -45,7 +45,7 @@ def test_project_usage_includes_checkpoint_and_remains_visible_asleep(cockpit, m
     expect(footer).to_contain_text("Total $")                   # one total on the line (Wave I); the parts sit in the hover title
     expect(footer).not_to_contain_text("effort sessions")
     expect(footer).to_contain_text("1.25")
-    expect(footer).to_contain_text("not priced")
+    expect(footer).to_contain_text("no dollar amount")
     assert "effort total" in footer.get_attribute("title").lower()   # the parts stay in the hover
     assert "999999" not in footer.inner_text()
     eng.proc = None

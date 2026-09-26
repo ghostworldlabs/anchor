@@ -252,6 +252,42 @@ def infer_subscription_cli(cli=None, usage_source=None):
     return ""
 
 
+_LIST_PRICES = None
+
+
+def api_list_prices():
+    """The one dated, sourced price table (John, 2026-09-25: a subscription turn that
+    reports tokens but no price carries an estimate at the provider's published API
+    list price, always labeled estimated). A missing or unreadable file is {}."""
+    global _LIST_PRICES
+    if _LIST_PRICES is None:
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "api_list_prices.json"), encoding="utf-8") as fh:
+                _LIST_PRICES = json.load(fh)
+        except Exception:
+            _LIST_PRICES = {}
+    return _LIST_PRICES if isinstance(_LIST_PRICES, dict) else {}
+
+
+def estimate_list_price_usd(model, usage):
+    """USD for one turn at the table's list price; None when the model is not in the
+    table or the turn carries no token counts. Cached input is a subset of input."""
+    table = api_list_prices().get("usd_per_million")
+    row = (table or {}).get(str(model or "").strip().lower()) if isinstance(table, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    def count(key):
+        value = usage.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+    if not isinstance(row, dict) or not any(key in usage for key in ("input_tokens", "output_tokens")):
+        return None
+    try:
+        cached = min(count("cached_input_tokens"), count("input_tokens"))
+        return round(((count("input_tokens") - cached) * float(row["input"]) + cached * float(row["cached_input"])
+                      + count("output_tokens") * float(row["output"])) / 1e6, 6)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def fmt_usage_cost_text(u, cli=None):
     """Honest cost phrase. Never invents a dollar figure.
 
@@ -358,9 +394,11 @@ def _usage_snapshot(usage):
     if u.get("cost_complete") is False or (reported is None and (turns or tokens)):
         unknown = max(unknown, 1)
     reported = reported if reported is not None else 0.0
+    estimated = _reported_cost(u.get("estimated_spend")) or 0.0
     return {"spend": round(reported, 4) if not unknown else None,
             "reported_spend": round(reported, 4), "cost_complete": not unknown,
             "unpriced_turns": unknown, "tokens": tokens,
+            "estimated_spend": round(estimated, 4), "estimated_turns": count("estimated_turns"),
             "secs": secs, "turns": turns, **_usage_visibility(_usage_original),
             **({"spend": None, "cost_complete": False} if (_usage_visibility(_usage_original)["unpriced_inflight"] or _usage_visibility(_usage_original)["usage_attribution_error"]) else {})}
 
@@ -567,6 +605,7 @@ class Engine:
         _u = _usage_snapshot(stored_entry.get("usage"))
         self.spend = _u["reported_spend"]
         self.unpriced_turns = _u["unpriced_turns"]
+        self.estimated_spend, self.estimated_turns = _u["estimated_spend"], _u["estimated_turns"]
         self.tokens, self.secs, self.turns = _u["tokens"], _u["secs"], _u["turns"]
         self._restore_usage_checkpoints(stored_entry.get("usage"))
         # S2: a resumed steward's children land now, not at its next turn end;
@@ -713,6 +752,9 @@ class Engine:
             "reported_spend_usd": round(self.spend, 4),
             "cost_status": self._usage_cost_status(),
             "unpriced_turns": self.unpriced_turns,
+            "estimated_spend_usd": round(self.estimated_spend, 4),
+            "estimated_turns": self.estimated_turns,
+            "estimate_basis": "API list price as of %s" % (api_list_prices().get("as_of") or "an undated table"),
             "billing_mode": ("subscription" if infer_subscription_cli(self.cli, self._usage_source) and self.unpriced_turns else None),
             "cost_text": fmt_usage_cost_text({
                 "reported_spend": self.spend,
@@ -1936,6 +1978,7 @@ class Engine:
                 "completed_cost_complete": not self.unpriced_turns,
                 "cost_status": self._usage_cost_status(),
                 "unpriced_turns": self.unpriced_turns, "tokens": self.tokens,
+                "estimated_spend": round(self.estimated_spend, 4), "estimated_turns": self.estimated_turns,
                 "secs": int(self.secs), "turns": self.turns,
                 **self._usage_public(persistence_confirmed=persistence_confirmed),
                 "usage_legacy_unknown": self._usage_legacy_unknown,
@@ -2092,6 +2135,16 @@ class Engine:
                 self.secs += duration
                 if cost is None:
                     self.unpriced_turns += 1
+                    # a ChatGPT subscription turn: tokens known, no price reported; the
+                    # estimate at API list price rides beside it, never as a charge
+                    if infer_subscription_cli(self.cli, self._usage_source) == "chatgpt":
+                        counts = (self._usage_checkpoints[_usage_uuid(ev["usage_invocation_id"])].get("counts")
+                                  if tracked else ev.get("usage"))
+                        selection = self.model_selection if isinstance(self.model_selection, dict) else {}
+                        estimate = estimate_list_price_usd(selection.get("model_served") or selection.get("model"), counts)
+                        if estimate is not None:
+                            self.estimated_spend += estimate
+                            self.estimated_turns += 1
                 else:
                     self.spend += cost
                 self.turns += 1

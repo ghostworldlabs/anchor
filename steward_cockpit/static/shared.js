@@ -1646,8 +1646,14 @@ const Proto = (() => {
       const unknownTotal = [jobsUsage, kids, seats].filter(Boolean).reduce((a, b) => a + num(b.unknown), 0);
       const fam = String((effortUsage || st).billing_family || "");
       const subName = fam === "mixed" ? "ChatGPT/Grok" : fam === "grok" ? "Grok" : fam === "chatgpt" ? "ChatGPT" : "";
-      const notPriced = unpricedTotal ? unpricedTotal.toLocaleString() + (subName ? " on the " + subName + " subscription (no per-turn dollar amount)" : " with no price recorded") : "";
-      let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (notPriced ? " · " + notPriced : "")
+      // (John, 2026-09-25) a ChatGPT turn with tokens but no price carries an estimate at API list price
+      const estimatedTotal = priced.reduce((a, b) => a + num(b.estimated_spend), 0) + (sessionOnly ? num(st.estimated_spend_usd) : 0);
+      const estimatedTurns = priced.reduce((a, b) => a + num(b.estimated_turns), 0) + (sessionOnly ? num(st.estimated_turns) : 0);
+      const stillUnpriced = Math.max(0, unpricedTotal - estimatedTurns);
+      const estimated = estimatedTurns ? "about $" + estimatedTotal.toFixed(2) + " estimated for " + estimatedTurns.toLocaleString() + " ChatGPT turn" + (estimatedTurns === 1 ? "" : "s") + " at API list price" : "";
+      const notPriced = stillUnpriced ? stillUnpriced.toLocaleString() + (subName ? (estimatedTurns ? " earlier " : " ") + subName + " turn" + (stillUnpriced === 1 ? "" : "s") + " with no dollar amount" : " with no price recorded") : "";
+      let total = reportedTotal > 0 ? "Total $" + reportedTotal.toFixed(2) + " reported" + (estimated ? " + " + estimated : "") + (notPriced ? " · " + notPriced : "")
+        : estimated ? "Total " + estimated + (notPriced ? " · " + notPriced : "")
         : notPriced ? "Total: " + notPriced : "cost unavailable";
       if (tokensTotal) total += " · " + Math.round(tokensTotal).toLocaleString() + " tokens recorded";
       if (unknownTotal) total += " · " + unknownTotal + " run" + (unknownTotal === 1 ? "" : "s") + " with unknown usage";
@@ -1658,7 +1664,7 @@ const Proto = (() => {
       if (jobsText) spend.title += " · Delegated jobs" + jobsText.replace(/^ · /, ": ") + " · " + recordedTokenText(jobsUsage);
       if (kidsText) spend.title += " · Sub-agents" + kidsText.replace(/^ · /, ": ");
       if (seatsText) spend.title += " · Skill seats" + seatsText.replace(/^ · /, ": ") + " · " + recordedTokenText(seats);
-      spend.title += " · Reported dollars are recorded charges, not an estimate. ChatGPT/Grok subscription turns have no per-turn dollar amount; token updates alone do not increase this subtotal.";
+      spend.title += " · Reported dollars are recorded charges. Estimated dollars come from each ChatGPT turn's recorded tokens at OpenAI's published " + (st.estimate_basis || "API list price") + ", never a charge; the subscription bills a flat fee. Turns recorded before the estimate, and Grok subscription turns, carry no dollar amount.";
       if (st.usage_persistence_error) spend.title = "Usage totals could not be saved. These session counts are in memory and may be lost on restart.";
     }
     const wake = $("[data-wake]");

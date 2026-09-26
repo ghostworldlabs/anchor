@@ -26,7 +26,9 @@ Locked contracts this executes (see ``NORTH-STAR-AMENDMENT.md``):
     unmeasured)`` — NEVER a complete-looking Claude-only number.
   - **No-own-pricing-table (LOCKED).** ``$`` is shown ONLY when the engine itself
     reported a nonzero ``costUSD``; otherwise a session renders ``… (subscription)``.
-    Anchor never computes a dollar figure from a pricing table of its own.
+    Anchor never computes a dollar figure from a pricing table of its own, except
+    the steward cockpit's *labeled estimate* for ChatGPT subscription turns (rider,
+    John 2026-09-25), which is never folded into a reported figure.
 
 The reason strings are ENUM VALUES (from :mod:`usage_capture`), never free text;
 this module only maps them to human-readable hover labels for the badge title.

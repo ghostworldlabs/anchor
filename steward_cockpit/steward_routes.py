@@ -637,11 +637,11 @@ def _other_recorded_usage(cdir):
 
 
 def _usage_rollup(cdir, estate=None):
-    numeric_fields = ("reported_spend", "unpriced_turns", "tokens", "secs")
+    numeric_fields = ("reported_spend", "unpriced_turns", "estimated_spend", "estimated_turns", "tokens", "secs")
     coverage_fields = ("tracked_invocations", "reported_invocations", "partial_invocations",
                        "unavailable_invocations", "finalized_invocations")
     def zero():
-        return {"reported_spend": 0.0, "unpriced_turns": 0, "tokens": 0, "secs": 0,
+        return {"reported_spend": 0.0, "unpriced_turns": 0, "estimated_spend": 0.0, "estimated_turns": 0, "tokens": 0, "secs": 0,
                 "checkpoint_coverage": {field: 0 for field in coverage_fields},
                 "usage_updated_at": None, "_cost_known": 0, "_cost_unknown": 0,
                 "_tokens_known": 0, "_tokens_unknown": 0, "_tokens_partial": 0,
@@ -809,6 +809,7 @@ def _usage_rollup(cdir, estate=None):
                "_tokens_partial", "_sub_unpriced", "_other_unpriced", "_sub_clis")
     for bucket in (stew, term, jobs, children, seats, total):
         bucket["reported_spend"] = round(bucket["reported_spend"], 4)
+        bucket["estimated_spend"] = round(bucket["estimated_spend"], 4)
         bucket["cost_status"] = "unavailable" if not bucket["_cost_known"] else (
             "partial" if bucket["_cost_unknown"] else "reported")
         bucket["cost_complete"] = bucket["cost_status"] == "reported"

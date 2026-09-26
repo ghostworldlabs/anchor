@@ -113,3 +113,68 @@ def test_cache_read_tokens_counted_and_invalid_token_values_ignored(cockpit):
     ev = finish(cockpit, usage={"input_tokens": 5, "cache_creation_input_tokens": 7,
                                "cache_read_input_tokens": 13, "output_tokens": True})
     assert ev["tokens"] == 25
+
+
+# ---- Wave L (John, 2026-09-25): a labeled estimate at API list price ----
+
+def test_price_table_is_dated_sourced_and_numeric():
+    table = engine_mod.api_list_prices()
+    assert table["as_of"] and table["source"].startswith("https://")
+    rows = table["usd_per_million"]
+    assert "gpt-6-astra" in rows
+    for name, row in rows.items():
+        assert set(row) == {"input", "cached_input", "output"}, name
+        assert all(isinstance(v, (int, float)) and v > 0 for v in row.values()), name
+
+
+def test_estimate_prices_uncached_input_cached_input_and_output_separately():
+    usage = {"input_tokens": 1_000_000, "cached_input_tokens": 800_000, "output_tokens": 100_000}
+    assert engine_mod.estimate_list_price_usd("gpt-6-astra", usage) == 7.8      # 0.2M x $10 + 0.8M x $1 + 0.1M x $50
+    assert engine_mod.estimate_list_price_usd("GPT-6-Astra", usage) == 7.8      # the name, any case
+    assert engine_mod.estimate_list_price_usd("best", usage) is None           # not in the table: no guess
+    assert engine_mod.estimate_list_price_usd("gpt-6-astra", {}) is None       # no token counts: no guess
+    assert engine_mod.estimate_list_price_usd("gpt-6-astra", None) is None
+
+
+def test_chatgpt_turn_carries_a_labeled_estimate_beside_the_unpriced_count(cockpit):
+    cockpit.model_selection = {"family": "chatgpt", "model": "gpt-6-astra"}
+    finish(cockpit, usage={"input_tokens": 1_000_000, "cached_input_tokens": 800_000, "output_tokens": 100_000})
+    state = cockpit.state()
+    assert state["unpriced_turns"] == 1                     # still no reported price
+    assert state["estimated_turns"] == 1
+    assert state["estimated_spend_usd"] == 7.8
+    assert state["reported_spend_usd"] == 0                 # never folded into "reported"
+    assert state["estimate_basis"].startswith("API list price as of 20")
+    assert "ChatGPT subscription" in state["cost_text"]
+
+
+def test_a_model_outside_the_table_stays_unpriced_without_an_estimate(cockpit):
+    cockpit.model_selection = {"family": "chatgpt", "model": "best"}
+    finish(cockpit, usage={"input_tokens": 100, "cached_input_tokens": 80, "output_tokens": 20})
+    state = cockpit.state()
+    assert state["unpriced_turns"] == 1 and state["estimated_turns"] == 0 and state["estimated_spend_usd"] == 0
+
+
+def test_estimate_survives_a_new_engine_and_sums_in_the_rollup(cockpit, monkeypatch, tmp_path):
+    cockpit.model_selection = {"family": "chatgpt", "model": "gpt-6-astra"}
+    finish(cockpit, usage={"input_tokens": 1_000_000, "cached_input_tokens": 800_000, "output_tokens": 100_000})
+    finish(cockpit, usage={"input_tokens": 1_000_000, "cached_input_tokens": 800_000, "output_tokens": 100_000})
+    again = engine_mod.Engine(str(tmp_path), fake=True)
+    assert again.estimated_turns == 2 and round(again.estimated_spend, 4) == 15.6
+    total = steward_routes._usage_rollup(str(tmp_path))["total"]
+    assert total["estimated_turns"] == 2 and total["estimated_spend"] == 15.6
+    assert total["unpriced_turns"] == 2 and total["reported_spend"] == 0
+
+
+def test_tracked_codex_turn_estimates_from_its_checkpoint_counts(cockpit):
+    cockpit.model_selection = {"family": "chatgpt", "model": "gpt-5.6-sol"}
+    cockpit.session_id = "01a08260-068d-76a1-99f6-5a7bdf3aaab8"
+    invocation = "01a08260-068d-76a1-99f6-5a7bdf3aaab9"
+    cockpit._handle({"type": "usage_checkpoint", "session_id": cockpit.session_id, "invocation_id": invocation,
+                     "usage": {"input_tokens": 1_000_000, "cached_input_tokens": 500_000, "output_tokens": 100_000},
+                     "token_status": "reported", "usage_source": "codex-rollout"}, cockpit.proc)
+    finish(cockpit, session_id=cockpit.session_id, usage_invocation_id=invocation,
+           usage={"input_tokens": 1_000_000, "cached_input_tokens": 500_000, "output_tokens": 100_000})
+    state = cockpit.state()
+    assert state["estimated_turns"] == 1
+    assert state["estimated_spend_usd"] == 4.2                 # 0.5M x $4 + 0.5M x $0.40 + 0.1M x $20
