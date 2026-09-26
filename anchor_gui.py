@@ -9485,7 +9485,10 @@ window.addEventListener('DOMContentLoaded', function () {{
         try {{
             const t = _anchorToken();
             if (!t) return u;
-            return String(u).replace(/([?&]token=)[^&]*/, '$1' + encodeURIComponent(t));
+            const s = String(u);
+            if (/[?&]token=/.test(s))
+                return s.replace(/([?&]token=)[^&]*/, '$1' + encodeURIComponent(t));
+            return s + (s.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t);
         }} catch (e) {{ return u; }}
     }}
     window.fetch = function () {{
@@ -9505,14 +9508,13 @@ window.addEventListener('DOMContentLoaded', function () {{
                         prompting = false;
                         const a0 = _args[0];
                         if (typeof a0 === 'string') {{
-                            const a1 = _args[1] ? Object.assign({{}}, _args[1]) : undefined;
-                            if (a1 && a1.headers) {{
-                                try {{
-                                    const h = new Headers(a1.headers);
-                                    if (h.has('X-Anchor-Token')) h.set('X-Anchor-Token', _anchorToken());
-                                    a1.headers = h;
-                                }} catch (e) {{}}
-                            }}
+                            const a1 = _args[1] ? Object.assign({{}}, _args[1]) : {{}};
+                            try {{
+                                const h = new Headers(a1.headers || {{}});
+                                const nt = _anchorToken();
+                                if (nt) h.set('X-Anchor-Token', nt);
+                                a1.headers = h;
+                            }} catch (e) {{}}
                             return _origFetch(_retok(a0), a1).then(function (r2) {{
                                 // Still refused with a fresh token — the token is
                                 // wrong, not stale. Reload is the honest last resort.
