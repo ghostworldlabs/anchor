@@ -20096,6 +20096,13 @@ def _reconcile_sessions_tick(pid=None):
                 pass
         except Exception:
             pass
+        # (Wave M, 2026-09-26) reversible decisions proceed on John's silence - the one
+        # server clock the sleeping stewards share
+        try:
+            from steward_cockpit import steward_routes as _scr_silence
+            _scr_silence.proceed_on_silence_sweep()
+        except Exception:
+            pass
 
 
 _RECONCILE_TICK_LOCK = threading.Lock()

@@ -43,6 +43,8 @@ TICK_SECONDS = int(os.environ.get("PROTO_TICK_SECONDS", "600"))
 TICK_CHECK = max(5, min(30, TICK_SECONDS // 2))
 # quiet minutes before the steward sleeps on its own (resume is seamless)
 IDLE_SLEEP_SECONDS = int(os.environ.get("PROTO_IDLE_SLEEP_SECONDS", "1800"))
+# (Wave M, John 2026-09-26) a reversible decision proceeds on its recommendation after this much silence
+SILENCE_SECONDS = int(os.environ.get("STEWARD_SILENCE_SECONDS", str(4 * 3600)))
 MAX_BUFFER = 4000           # normalized events kept for late joiners
 
 STAND_UP = (
@@ -126,6 +128,9 @@ CONTRACT = (
     "why, then the realistic ALTERNATIVES in a phrase each with its trade-off, "
     "then one line beginning 'This authorizes:' naming the exact next act your "
     "recommendation sets in motion and, when time matters, a line 'Decide by: <when>', "
+    "then a line 'Reversible: yes - undo: <how to undo it>' or 'Reversible: no' (a "
+    "reversible decision proceeds on your recommendation after four hours of John's "
+    "silence; an irreversible one waits for him), "
     "then the QUESTION as the LAST line, answerable in one word. Never an option "
     "dialog, never a bare question, never machinery vocabulary. The engine checks "
     "this: a decision turn with no recommendation is sent back once; "
@@ -782,8 +787,10 @@ class Engine:
             "open_question_kind": question_kind,
             "question_context": contexts[0] if contexts else None,
             "pending_questions": contexts,
+            "silence_seconds": SILENCE_SECONDS,
             "decision_history": [{"question": str((e.get("question") or {}).get("question") or "")[:200],
-                                  "answer": str(e.get("answer") or "")[:200], "answered_at": e.get("answered_at")}
+                                  "answer": str(e.get("answer") or "")[:200], "answered_at": e.get("answered_at"),
+                                  "status": e.get("status"), "undo": str(e.get("undo") or "")[:200]}
                                  for e in (getattr(self, "question_history", None) or [])[-5:]],
             "epoch": self.epoch,
         }
@@ -2402,7 +2409,8 @@ class Engine:
                     self.open_question_kind = ""
                 if not was_tick:
                     sentences = [s.strip() for s in
-                                 re.split(r"(?<=[.!?])\s+", txt)
+                                 re.split(r"(?<=[.!?])\s+|
++", txt)      # a line break ends a line such as "Reversible: no" (Wave M)
                                  if s.strip().endswith("?")]
                     if sentences and (not question_attention.get("managed_refinement") or
                             question_attention.get("pending_request") or _has_recommendation(txt)):
@@ -2887,6 +2895,39 @@ class Engine:
                                  "entry_id": newest.stem, "summary": first[:300] or newest.stem})
         except Exception:
             pass
+
+    def proceed_on_silence(self, question_id, now=None):
+        """(Wave M, John 2026-09-26) A reversible decision with an undo and a recommendation
+        proceeds on that recommendation after SILENCE_SECONDS of his silence: recorded as
+        proceeded-on-silence (never as his words), the wait on him cleared, the steward told
+        once with the undo. A review request (the ledger's) never proceeds this way."""
+        now = time.time() if now is None else now
+        with self._lock:
+            q = next((c for c in self._question_contexts(self._attention()) if c.get("id") == question_id), None)
+            if not q or q.get("reversible") is not True or not q.get("undo") or not q.get("recommendation"):
+                return {"ok": False, "reason": "not a reversible decision with an undo and a recommendation"}
+            if (q.get("authorization_scope") or {}).get("request_id"):
+                return {"ok": False, "reason": "a review request waits for John"}
+            asked = q.get("asked_at")
+            if not isinstance(asked, (int, float)) or isinstance(asked, bool) or now - asked < SILENCE_SECONDS:
+                return {"ok": False, "reason": "not yet"}
+            if any((e.get("question") or {}).get("id") == question_id for e in self.question_history):
+                return {"ok": False, "reason": "already decided"}
+            line = ("Proceeded on silence: John did not answer within %d hours and the decision was reversible, "
+                    "so the recommendation stands - %s Undo: %s") % (SILENCE_SECONDS // 3600, q["recommendation"], q["undo"])
+            entry = {"question": q, "answer": q["recommendation"], "answered_at": now,
+                     "status": "proceeded_on_silence", "undo": q["undo"], "source_ref": "silence"}
+            history = (list(self.question_history) + [entry])[-100:]
+            if not _update_state(self.skey(), {"question_history": history, "open_question": "",
+                                               "open_question_kind": "", "question_context": None}):
+                return {"ok": False, "reason": "state not saved"}
+            self.question_history = history
+            self.open_question, self.open_question_kind, self.question_context = "", "", None
+            self._answer_nudged = self._decision_nudged = False
+            self._strip_clear_wait()
+            self._record_conversation("anchor", line)
+        result = self.say(line, human=False)
+        return {"ok": bool(result.get("ok")), "reason": result.get("error", "")}
 
     def _answered_before(self, question, step_id):
         """The history entry that already answered this very question on this

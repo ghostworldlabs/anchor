@@ -132,6 +132,33 @@ def _bad_component(name):
             or "/" in s or "\\" in s)
 
 
+def proceed_on_silence_sweep(now=None):
+    """(Wave M) On the server's reconcile tick: every steward whose saved decision is reversible,
+    carries an undo and a recommendation, and has waited SILENCE_SECONDS proceeds - a sleeping
+    steward wakes for it. Returns the campaign dirs that proceeded."""
+    from steward_cockpit.steward_engine import _read_all_state, SILENCE_SECONDS
+    now = time.time() if now is None else now
+    done = []
+    for key, entry in _read_all_state().items():
+        if "||general||" in key or not isinstance(entry, dict):
+            continue
+        q = entry.get("question_context")
+        if not isinstance(q, dict) or q.get("reversible") is not True or not q.get("undo") or not q.get("recommendation"):
+            continue
+        asked = q.get("asked_at")
+        if not isinstance(asked, (int, float)) or isinstance(asked, bool) or now - asked < SILENCE_SECONDS:
+            continue
+        eng = get_engine(key)
+        if eng is None:
+            continue
+        try:
+            if eng.proceed_on_silence(q.get("id"), now=now).get("ok"):
+                done.append(key)
+        except Exception:
+            continue
+    return done
+
+
 def get_engine(cdir, general=False, tid=None, create=True):
     if general:
         tid = str(tid or "1")

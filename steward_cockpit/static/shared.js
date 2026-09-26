@@ -110,6 +110,15 @@ const Proto = (() => {
     }
     if (q.authorizes) bullets.appendChild(el("li", "action-auth", "Authorizes: " + oneLine(q.authorizes, 160)));
     if (q.decide_by) bullets.appendChild(el("li", "action-auth", "Decide by: " + oneLine(q.decide_by, 80)));
+    if (q.reversible === true && q.undo) {
+      // (Wave M) a reversible decision proceeds on its recommendation after the silence window
+      const secs = (lastState && lastState.silence_seconds) || 4 * 3600;
+      const at = typeof q.asked_at === "number" ? new Date((q.asked_at + secs) * 1000) : null;
+      const when = at ? at.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) + (at.toDateString() === new Date().toDateString() ? "" : " " + at.toLocaleDateString()) : "after " + Math.round(secs / 3600) + " hours";
+      bullets.appendChild(el("li", "action-auth", "Reversible \u00b7 proceeds on the recommendation at " + when + " if unanswered \u00b7 undo: " + oneLine(q.undo, 120)));
+    } else if (q.reversible === false) {
+      bullets.appendChild(el("li", "action-auth", "Not reversible \u00b7 waits for you"));
+    }
     (q.alternatives || []).slice(0, 3).forEach(a => {
       const row = el("li", "action-alts");
       const choose = el("button", "action-alt", "Choose");
@@ -180,7 +189,19 @@ const Proto = (() => {
     if (decided.length) {
       const d = el("details", "action-history");
       d.appendChild(el("summary", "", "Earlier decisions \u00b7 " + decided.length));
-      decided.slice().reverse().forEach(h => d.appendChild(el("p", "sdmeta", oneLine(h.question, 90) + " \u2192 " + oneLine(h.answer, 60))));
+      decided.slice().reverse().forEach(h => {
+        const p = el("p", "sdmeta", oneLine(h.question, 90) + " \u2192 " + oneLine(h.answer, 60) + (h.status === "proceeded_on_silence" ? " \u00b7 proceeded on silence" : ""));
+        if (h.status === "proceeded_on_silence" && h.undo) {
+          const undo = el("button", "action-alt", "Undo");
+          undo.onclick = async (ev) => {
+            ev.stopPropagation(); undo.disabled = true;
+            const result = await sendSay("Undo the decision that proceeded on silence: " + h.undo, null);
+            if (!(result && result.ok)) undo.disabled = false;
+          };
+          p.appendChild(document.createTextNode(" ")); p.appendChild(undo);
+        }
+        d.appendChild(p);
+      });
       host.appendChild(d);
     }
     pending().filter(item => item.id !== q.id).forEach(item => {

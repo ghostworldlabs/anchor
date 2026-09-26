@@ -40,3 +40,19 @@ def test_the_record_carries_what_the_answer_authorizes_and_a_decide_by_when_stat
     assert again["authorizes"] == d["authorizes"] and again["decide_by"] == d["decide_by"]
     plain = qc.parse_decision("I recommend keeping this version. Keep it?")
     assert plain["authorizes"] == "" and plain["decide_by"] == ""                      # absent when the steward did not state them
+
+
+def test_the_record_carries_reversibility_and_the_undo():
+    text = ("The draft folder is a copy.\nI recommend replacing it.\nThis authorizes: the swap.\n"
+            "Reversible: yes \u2014 undo: restore the folder from yesterday's copy.\nReplace it?")
+    d = qc.parse_decision(text)
+    assert d["reversible"] is True and d["undo"] == "restore the folder from yesterday's copy."
+    saved = qc.save_question_context("Replace it?", text, asked_at=1.0)
+    assert saved["reversible"] is True and saved["undo"] == "restore the folder from yesterday's copy."
+    assert qc.normalize_question_context(saved)["undo"] == saved["undo"]          # survives a reload
+    no = qc.parse_decision("I recommend sending it.\nReversible: no\nSend it?")
+    assert no["reversible"] is False and no["undo"] == ""
+    plain = qc.parse_decision("I recommend keeping this version. Keep it?")
+    assert plain["reversible"] is None and plain["undo"] == ""                     # unmarked: never proceeds
+    own_line = qc.parse_decision("I recommend it.\nReversible: yes\nUndo: delete the file.\nGo?")
+    assert own_line["reversible"] is True and own_line["undo"] == "delete the file."
