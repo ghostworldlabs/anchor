@@ -63,10 +63,10 @@ def _ts(v):
         return None
 
 
-def _row(rule, text, why, href, kind, project_id=""):
+def _row(rule, text, why, href, kind, project_id="", label=None):
     return {
         "rule": rule,
-        "rule_label": _LABEL[rule],
+        "rule_label": label or _LABEL[rule],
         "severity": _SEV[rule],
         "text": str(text or "").strip(),
         "why": str(why or "").strip(),
@@ -126,26 +126,38 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
         except Exception:
             continue
     needs.sort(key=lambda t: t[0], reverse=True)
-    for when, rec, pid in needs:
-        nm = names.get(pid) or rec.get("label") or pid[:8]
-        rows.append(_row("needs-you", "%s is waiting on you" % nm,
-                         "%s session needs an answer" % (rec.get("lane") or "a"),
-                         "/project/%s" % pid, "project", pid))
-    # 2b. needs-you — the project's own steward record says it waits on John (the strip's human
-    #     wait, else the last status's "waiting on you"); a session row for the same project
-    #     already says it, so the record row is not repeated
-    seen = {pid for _w, _r, pid in needs}
+    # one needs-you row per project (W1a): the project's own steward record — the strip's human
+    # wait, else the last status's "waiting on you" — is the fact when it exists, and the row says
+    # so; a managed session parked in needs-attention raises the row otherwise, and says that
+    record_wait = {}
     for f in projects or ():
         try:
-            if not isinstance(f, dict) or not f.get("needs_you") or f.get("id") in seen:
-                continue
-            why = " ".join(str(f["needs_you"]).split())
-            why = (why[:88].rstrip() + "\u2026") if len(why) > 90 else why
-            rows.append(_row("needs-you", "%s is waiting on you" % f.get("name"), why,
-                             f.get("href") or "/project/%s" % f.get("id"), "project", f.get("id")))
-            seen.add(f.get("id"))
+            if isinstance(f, dict) and f.get("id") and f.get("needs_you"):
+                why = " ".join(str(f["needs_you"]).split())
+                why = (why[:88].rstrip() + "…") if len(why) > 90 else why
+                record_wait[str(f["id"])] = (str(f.get("name") or str(f["id"])[:8]), why)
         except Exception:
             continue
+    seen = set()
+    for when, rec, pid in needs:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        if pid in record_wait:
+            nm, why = record_wait[pid]
+            rows.append(_row("needs-you", "%s is waiting on you" % nm, why, "/project/%s" % pid,
+                             "project", pid, label="the steward's record waits on you"))
+        else:
+            nm = names.get(pid) or rec.get("label") or pid[:8]
+            rows.append(_row("needs-you", "%s is waiting on you" % nm,
+                             "%s session needs an answer" % (rec.get("lane") or "a"),
+                             "/project/%s" % pid, "project", pid))
+    for pid, (nm, why) in record_wait.items():
+        if pid in seen:
+            continue
+        seen.add(pid)
+        rows.append(_row("needs-you", "%s is waiting on you" % nm, why, "/project/%s" % pid,
+                         "project", pid, label="the steward's record waits on you"))
 
     # 3./4. tasks — overdue (oldest first, P1 first), then due today (P1 first)
     overdue, due_today = [], []
@@ -198,14 +210,14 @@ def build_attention(tasks=(), sessions=(), health=None, today=None, now=None,
     for d, st in late:
         days = (today - d).days
         rows.append(_row("overdue", st.get("name", ""),
-                         "due %s (%d day%s ago) \u00b7 %s" % (_short(d), days, "" if days == 1 else "s", st.get("project_name", "")),
-                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
+                         "due %s (%d day%s ago) · %s" % (_short(d), days, "" if days == 1 else "s", st.get("project_name", "")),
+                         "/project/%s" % st.get("project_id", ""), "step", st.get("project_id", "")))
     for d, st in todays:
-        rows.append(_row("due-today", st.get("name", ""), "due today \u00b7 %s" % st.get("project_name", ""),
-                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
+        rows.append(_row("due-today", st.get("name", ""), "due today · %s" % st.get("project_name", ""),
+                         "/project/%s" % st.get("project_id", ""), "step", st.get("project_id", "")))
     for d, st in soon:
-        rows.append(_row("due-soon", st.get("name", ""), "due %s \u00b7 %s" % (_short(d), st.get("project_name", "")),
-                         "/project/%s#plan" % st.get("project_id", ""), "step", st.get("project_id", "")))
+        rows.append(_row("due-soon", st.get("name", ""), "due %s · %s" % (_short(d), st.get("project_name", "")),
+                         "/project/%s" % st.get("project_id", ""), "step", st.get("project_id", "")))
 
     # 5. failed — recent failed sessions, newest first
     failed.sort(key=lambda t: t[0], reverse=True)
@@ -231,14 +243,21 @@ def brief_bullets(rows, projects=(), today=None, seat_name="High Seat"):
     bullets = []
     top = rows[0] if rows else None
     if top:
-        bullets.append("%s%s." % (top["text"], (" \u2014 " + top["why"]) if top.get("why") else ""))
+        bullets.append("%s%s." % (top["text"], (" — " + top["why"]) if top.get("why") else ""))
     else:
         bullets.append("Nothing is waiting on you.")
-    waits = [r for r in rows or () if r.get("rule") == "needs-you"]
-    if len(waits) > 1:
-        names = [w["text"].replace(" is waiting on you", "") for w in waits]
-        bullets.append("%d wait on you: %s." % (len(waits), ", ".join(names[:4]) + (" and more" if len(names) > 4 else "")))
-    week_end = today + timedelta(days=6 - today.weekday())
+    # who waits: counted from the facts (every project whose record waits), never from the capped rows
+    waiting = [str(f.get("name") or "") for f in projects or () if isinstance(f, dict) and f.get("needs_you")]
+    for r in rows or ():
+        if r.get("rule") == "needs-you":
+            nm = r["text"].replace(" is waiting on you", "")
+            if nm not in waiting:
+                waiting.append(nm)
+    if len(waiting) > 1:
+        bullets.append("%d wait on you: %s." % (len(waiting), ", ".join(waiting[:4]) + (" and more" if len(waiting) > 4 else "")))
+    # the week is the header's: Monday to Sunday; a date already past inside it is named overdue
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
     dated = []
     for f in projects or ():
         if isinstance(f, dict):
@@ -247,10 +266,12 @@ def brief_bullets(rows, projects=(), today=None, seat_name="High Seat"):
                 if d is not None:
                     dated.append((d, st))
     dated.sort(key=lambda x: (x[0], x[1].get("name", "")))
-    this_week = [st for d, st in dated if today <= d <= week_end]
+    this_week = [(d, st) for d, st in dated if week_start <= d <= week_end]
     if this_week:
-        bullets.append("Due this week: " + "; ".join(
-            "%s (%s, %s)" % (st.get("name", ""), _short(st.get("due")), st.get("project_name", "")) for st in this_week[:3]) + ".")
+        def _say(d, st):
+            tag = "overdue since %s" % _short(d) if d < today else ("today" if d == today else _short(d))
+            return "%s (%s, %s)" % (st.get("name", ""), tag, st.get("project_name", ""))
+        bullets.append("This week: " + "; ".join(_say(d, st) for d, st in this_week[:3]) + ".")
     else:
         ahead = next(((d, st) for d, st in dated if d >= today), None)
         if ahead:
@@ -288,10 +309,23 @@ def rail_counts(sessions=(), rows=(), folders=0, open_projects=0):
             "need_you": need_you, "folders": int(folders or 0)}
 
 
-def due_rows(tasks=(), today=None, limit=5):
-    """The rail's 'Due today' list — overdue and today, P1 first, as (text, priority, overdue?)."""
+def due_rows(tasks=(), today=None, limit=5, projects=()):
+    """The rail's 'Due today' list — overdue and today, P1 first, as (text, priority, overdue?);
+    a project's overdue or due-today roadmap steps sit beside the tasks (W1a), so the card never
+    says nothing is due while a step is."""
     today = today or date.today()
     out = []
+    for f in projects or ():
+        if not isinstance(f, dict):
+            continue
+        for st in f.get("dated") or ():
+            try:
+                d = _iso_date(st.get("due"))
+                if d is None or d > today:
+                    continue
+                out.append((d, 1, "%s · %s" % (st.get("name", ""), st.get("project_name", "")), d < today))
+            except Exception:
+                continue
     for t in tasks or ():
         try:
             if not isinstance(t, dict) or t.get("done"):

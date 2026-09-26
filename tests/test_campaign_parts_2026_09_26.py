@@ -68,7 +68,7 @@ def test_a_step_part_carries_the_targets_name_state_and_date_and_links_to_its_pl
     assert r["what"] == "Lecture 3 AI supplement"
     assert r["state"] == "waiting · your read"
     assert r["date"] == "2026-10-10"
-    assert r["href"].endswith("#plan")
+    assert r["href"] == "/project/6765ece4b3bc43b0b0b0907b92b17280"   # the cockpit page has no plan anchor
     assert r["lead"] == ""                   # a lead line only when asked for (a row on screen)
 
 

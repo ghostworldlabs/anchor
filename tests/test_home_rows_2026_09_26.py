@@ -36,6 +36,7 @@ def _world(tmp_path):
     ], wait="approve the Lecture 3 AI supplement", lead="Next: Lecture 3 — the interface lesson is final.")
     trusts = _project(tmp_path, "9405abe0", "Family Trusts", steps=[
         {"id": "val", "name": "Company valuations into the package", "status": "active", "due": "2026-10-08"},
+        {"id": "mon", "name": "Sign the engagement letter", "status": "planned", "due": "2026-09-21"},   # the Monday of the test week
     ], nxt="Send the three valuation figures", why="the package closes on them")
     empty = _project(tmp_path, "aaaaaaaa", "Quiet project")
     return mba, trusts, empty
@@ -46,14 +47,15 @@ def test_project_facts_read_the_record_and_never_the_done_steps(tmp_path):
     f = hr.project_facts(mba, TODAY)
     assert f["has_record"] and f["href"] == "/project/6765ece4"
     assert f["needs_you"] == "approve the Lecture 3 AI supplement"
-    assert f["lead"].startswith("Next: Lecture 3")
+    assert f["summary"]["lead_line"].startswith("Next: Lecture 3") and f["summary_age_s"] is not None
     assert [s["due"] for s in f["dated"]] == ["2026-09-20", "2026-10-10", "2026-10-27"]   # soonest first; the done syllabus is out
     assert f["nearest_due"] == "2026-09-20"
     t = hr.project_facts(trusts, TODAY)
     assert t["needs_you"] == ""
-    assert t["lead"] == "Next: Send the three valuation figures — the package closes on them"   # no summary: the strip's next + why
+    assert t["next"] == "Send the three valuation figures" and t["why"] == "the package closes on them" and t["summary"] is None
+    assert [s["due"] for s in t["dated"]] == ["2026-09-21", "2026-10-08"]
     e = hr.project_facts(empty, TODAY)
-    assert e["has_record"] and e["dated"] == [] and e["nearest_due"] == "" and e["lead"] == ""
+    assert e["has_record"] and e["dated"] == [] and e["nearest_due"] == "" and e["next"] == ""
     nothing = hr.project_facts({"id": "x", "name": "no folder"}, TODAY)
     assert nothing["has_record"] is False and nothing["dated"] == []
 
@@ -61,12 +63,14 @@ def test_project_facts_read_the_record_and_never_the_done_steps(tmp_path):
 def test_the_rows_are_facts_from_the_records_in_rule_order(tmp_path):
     facts = hr.all_project_facts(_world(tmp_path), TODAY)
     rows = ha.build_attention(projects=facts, today=TODAY, now=NOW, limit=10)
-    assert [r["rule"] for r in rows] == ["needs-you", "overdue", "due-soon", "due-soon", "due-soon"]
+    assert [r["rule"] for r in rows] == ["needs-you", "overdue", "overdue", "due-soon", "due-soon", "due-soon"]
     assert rows[0]["text"] == "MBA Teaching AI is waiting on you" and rows[0]["why"] == "approve the Lecture 3 AI supplement"
+    assert rows[0]["rule_label"] == "the steward's record waits on you"
     assert rows[1]["text"] == "Block 1 quiz" and rows[1]["why"] == "due Sep 20 (6 days ago) · MBA Teaching AI"
-    assert rows[1]["href"] == "/project/6765ece4#plan" and rows[1]["kind"] == "step"
-    assert [r["text"] for r in rows[2:]] == ["Company valuations into the package", "Lecture 3 AI supplement", "retool homework 2"]
-    assert rows[2]["why"] == "due Oct 8 · Family Trusts"
+    assert rows[1]["href"] == "/project/6765ece4" and rows[1]["kind"] == "step"
+    assert rows[2]["text"] == "Sign the engagement letter"
+    assert [r["text"] for r in rows[3:]] == ["Company valuations into the package", "Lecture 3 AI supplement", "retool homework 2"]
+    assert rows[3]["why"] == "due Oct 8 · Family Trusts"
     assert all(r["rule_label"] for r in rows)
 
 
@@ -77,7 +81,11 @@ def test_a_session_row_for_the_same_project_is_not_repeated_and_far_dates_stay_o
     rows = ha.build_attention(sessions=sess, projects=facts, today=TODAY, now=NOW,
                               project_names={"6765ece4": "MBA Teaching AI"}, limit=10)
     waits = [r for r in rows if r["rule"] == "needs-you"]
-    assert len(waits) == 1 and waits[0]["why"] == "plan session needs an answer"
+    assert len(waits) == 1                                   # one row per project
+    assert waits[0]["why"] == "approve the Lecture 3 AI supplement"   # the record's wait is the fact
+    assert waits[0]["rule_label"] == "the steward's record waits on you"
+    only_session = ha.build_attention(sessions=sess, today=TODAY, now=NOW, project_names={"6765ece4": "MBA Teaching AI"})
+    assert only_session[0]["why"] == "plan session needs an answer" and only_session[0]["rule_label"] == "a session is waiting on you"
     # a step dated beyond five weeks does not raise a row
     far = date(2026, 12, 1)
     facts2 = hr.all_project_facts(_world(tmp_path / "later"), far) if (tmp_path / "later").mkdir() is None else []
@@ -89,12 +97,15 @@ def test_the_brief_is_bullets_of_facts(tmp_path):
     facts = hr.all_project_facts(_world(tmp_path), TODAY)
     rows = ha.build_attention(projects=facts, today=TODAY, now=NOW, limit=10)
     b = ha.brief_bullets(rows, facts, today=TODAY, seat_name="High Seat")
-    assert b[0] == "MBA Teaching AI is waiting on you — approve the Lecture 3 AI supplement."
-    assert b[1] == "Nothing is due this week; the nearest date is Sep 20 (Block 1 quiz, MBA Teaching AI)." or b[1].startswith("Nothing is due this week")
-    assert b[-1] == "You can act from here. Opening the High Seat is optional."
-    assert len(b) <= 4
+    assert b == ["MBA Teaching AI is waiting on you — approve the Lecture 3 AI supplement.",
+                 "This week: Sign the engagement letter (overdue since Sep 21, Family Trusts).",   # the header's Monday-Sunday; a past date named
+                 "You can act from here. Opening the High Seat is optional."]
     quiet = ha.brief_bullets([], [], today=TODAY)
-    assert quiet[0] == "Nothing is waiting on you." and quiet[1] == "Nothing carries a date yet."
+    assert quiet == ["Nothing is waiting on you.", "Nothing carries a date yet.", "You can act from here. Opening the High Seat is optional."]
+    # the Due today card sees the roadmap steps beside the tasks
+    due, more = ha.due_rows([], today=TODAY, projects=facts)
+    assert [d["text"] for d in due] == ["Block 1 quiz · MBA Teaching AI", "Sign the engagement letter · Family Trusts"]
+    assert all(d["overdue"] for d in due) and more == 0
 
 
 def test_the_week_in_words_and_the_short_date():
@@ -102,3 +113,16 @@ def test_the_week_in_words_and_the_short_date():
     assert hr.week_in_words(date(2026, 9, 30)) == "this week Sep 28 – Oct 4"
     assert hr.short_date("2026-10-08") == "Oct 8"
     assert hr.short_date("junk") == "junk"
+
+
+def test_the_project_row_shows_the_next_step_and_the_date(tmp_path, monkeypatch):
+    (tmp_path / "data").mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path / "data"))
+    import anchor_gui
+    mba, trusts, empty = _world(tmp_path)
+    facts = {f["id"]: f for f in hr.all_project_facts([mba, trusts, empty], TODAY)}
+    row = anchor_gui.render_project_tile_html(trusts, facts[trusts["id"]])
+    assert "next: Send the three valuation figures" in row          # probe 3: no persisted status, so the strip's next
+    assert "overdue since Sep 21" in row                            # the chip says it against today
+    quiet = anchor_gui.render_project_tile_html(empty, facts[empty["id"]])
+    assert "rnd-row-due" not in quiet and "next:" not in quiet

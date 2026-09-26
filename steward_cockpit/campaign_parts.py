@@ -127,7 +127,7 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
             out["gap"] = ("no step '%s' in %s" % (p["sub"], out["name"])) if steps is not None \
                 else ("%s has no readable plan" % out["name"])
             return out
-        out["href"] = "/project/%s#plan" % out["pid"]
+        out["href"] = "/project/%s" % out["pid"]
         out["what"] = str(st.get("name") or p["sub"])
         out["state"] = str(st.get("status") or "")
         if st.get("waiting_on") and st.get("status") in ("waiting", "parked"):

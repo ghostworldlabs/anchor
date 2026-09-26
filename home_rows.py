@@ -9,6 +9,7 @@ bridge spawn on GET /. Never raises; a project without a record yields honest em
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -33,10 +34,11 @@ def project_facts(entry, today=None):
     """One registry entry → the facts its home row is made of.
 
     ``needs_you``  the strip's human wait, else the last status's "waiting on you" (the fact
-                   behind a needs-you row); ``lead`` the last status's lead line, else the strip's
-                   next + why; ``next`` the strip's next step; ``dated`` the open steps that carry
-                   a ``due`` (soonest first, each with its project); ``nearest_due`` the first of
-                   them; ``has_record`` whether any of the three files existed.
+                   behind a needs-you row); ``next`` / ``why`` the strip's next step and its reason;
+                   ``summary`` the last persisted status, parsed once, with ``summary_age_s`` (the
+                   row's steward line reads it from here, not from the file again); ``dated`` the
+                   open steps that carry a ``due`` (soonest first, each with its project);
+                   ``nearest_due`` the first of them; ``has_record`` whether any file existed.
     """
     today = today or date.today()
     entry = entry if isinstance(entry, dict) else {}
@@ -44,7 +46,7 @@ def project_facts(entry, today=None):
     name = str(entry.get("name") or pid[:8])
     folder = str(entry.get("folder_path") or "").strip()
     out = {"id": pid, "name": name, "href": ("/project/%s" % pid) if pid else "",
-           "needs_you": "", "lead": "", "next": "", "why": "", "dated": [],
+           "needs_you": "", "next": "", "why": "", "summary": None, "summary_age_s": None, "dated": [],
            "nearest_due": "", "has_record": False}
     if not folder or not pid:
         return out
@@ -55,15 +57,18 @@ def project_facts(entry, today=None):
         out["needs_you"] = str(strip.get("human_wait") or "").strip()
         out["next"] = str(strip.get("next_recommended") or "").strip()
         out["why"] = str(strip.get("why_next") or "").strip()
-    summ = _read_json(root / ".ecgberht" / "status-summary.json")
+    sfile = root / ".ecgberht" / "status-summary.json"
+    summ = _read_json(sfile)
     if isinstance(summ, dict):
         out["has_record"] = True
-        out["lead"] = str(summ.get("lead_line") or "").strip()
+        out["summary"] = summ
+        try:
+            out["summary_age_s"] = max(0.0, time.time() - sfile.stat().st_mtime)
+        except Exception:
+            out["summary_age_s"] = None
         plan = summ.get("plan") if isinstance(summ.get("plan"), dict) else {}
         if not out["needs_you"]:
             out["needs_you"] = str(plan.get("waiting_on_you") or "").strip()
-    if not out["lead"] and out["next"]:
-        out["lead"] = "Next: " + out["next"] + ((" — " + out["why"]) if out["why"] else "")
     rm = _read_json(root / "roadmap.json")
     if isinstance(rm, dict):
         out["has_record"] = True
@@ -105,6 +110,19 @@ def week_in_words(today=None):
     if mon.month == sun.month:
         return "this week %s–%d" % (md(mon), sun.day)
     return "this week %s – %s" % (md(mon), md(sun))
+
+
+def due_label(iso, today=None):
+    """'overdue since Sep 20' · 'due today' · 'due Oct 8' — the same date, said against today."""
+    d = _iso(iso)
+    if not d:
+        return ""
+    today = today or date.today()
+    if d < today:
+        return "overdue since " + short_date(iso)
+    if d == today:
+        return "due today"
+    return "due " + short_date(iso)
 
 
 def short_date(iso):

@@ -2631,7 +2631,7 @@ def _render_activity_reflection_html(refl: dict) -> str:
     return '<div class="rnd-row-activity">' + "".join(parts) + "</div>"
 
 
-def _steward_status_tile_line(entry: dict) -> str:
+def _steward_status_tile_line(entry: dict, summary=None, age=None) -> str:
     """The cockpit's persisted 10-minute status for a project row (steward
     cutover 2026-08-25): ONE targeted stat+read of
     ``<folder>/.ecgberht/status-summary.json`` — the universal file the
@@ -2643,15 +2643,19 @@ def _steward_status_tile_line(entry: dict) -> str:
     folder = (entry.get("folder_path") or "").strip()
     if not folder:
         return ""
-    f = Path(folder) / ".ecgberht" / "status-summary.json"
-    try:
-        age_seconds = time.time() - f.stat().st_mtime
-        if age_seconds > 900:
-            return "steward status stale · last update %d minutes ago" % max(
-                15, int(age_seconds // 60))
-        data = json.loads(f.read_text(encoding="utf-8"))
-    except Exception:
-        return ""
+    if isinstance(summary, dict) and age is not None:
+        # W1a (High Seat, 2026-09-26): the page read this file once already (home_rows)
+        age_seconds, data = float(age), summary
+    else:
+        f = Path(folder) / ".ecgberht" / "status-summary.json"
+        try:
+            age_seconds = time.time() - f.stat().st_mtime
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+    if age_seconds > 900:
+        return "steward status stale · last update %d minutes ago" % max(
+            15, int(age_seconds // 60))
     if not isinstance(data, dict):
         return ""
     now_lines = [str(x).strip() for x in (data.get("now") or []) if str(x).strip()]
@@ -2700,7 +2704,7 @@ def _steward_status_tile_line(entry: dict) -> str:
                             " · ".join(bits)))[:200]
 
 
-def render_project_tile_html(entry: dict) -> str:
+def render_project_tile_html(entry: dict, facts=None) -> str:
     """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
     lines 124-141): ``name · accurate cached project summary · per-lane
     mini-counts · status dot``. Clicking the row opens the project window;
@@ -2739,7 +2743,17 @@ def render_project_tile_html(entry: dict) -> str:
 
     # Steward cutover 2026-08-25 — the cockpit's persisted 10-minute status
     # rides the home row (one targeted read; '' when absent/stale).
-    _stw_line = _steward_status_tile_line(entry)
+    # W1a (High Seat, 2026-09-26): the row's facts come from ONE pass over the records for the whole
+    # page (home_rows.all_project_facts, handed in); a lone row (the refresh route) reads its own.
+    import home_rows as _hr
+    try:
+        _facts = facts if isinstance(facts, dict) else _hr.project_facts(entry)
+    except Exception:
+        _facts = {}
+    _stw_line = _steward_status_tile_line(entry, summary=_facts.get("summary"), age=_facts.get("summary_age_s"))
+    if not _stw_line and _facts.get("next"):
+        # probe 3 — a named project's next step, from the strip when no status line was persisted
+        _stw_line = "next: " + str(_facts["next"]) + ((" — " + str(_facts["why"])) if _facts.get("why") else "")
     steward_block = (
         f'<span class="rnd-row-steward" '
         f'title="{html_lib.escape(_stw_line, quote=True)}">'
@@ -2750,13 +2764,13 @@ def render_project_tile_html(entry: dict) -> str:
     # the same fact the rail's rows are raised from; nothing when no step carries a date.
     due_block = ""
     try:
-        import home_rows as _hr
-        _facts = _hr.project_facts(entry)
         if _facts.get("dated"):
             _d = _facts["dated"][0]
+            _lab = _hr.due_label(_d["due"])
             due_block = (f'<span class="rnd-row-due" title="{html_lib.escape(_d["name"], quote=True)}" '
-                         f'style="color:var(--faint,#8b93a7);font-size:11.5px;white-space:nowrap;margin-left:6px">'
-                         f'&middot; due {html_lib.escape(_hr.short_date(_d["due"]))}</span>')
+                         f'style="color:{"#f0b35b" if _lab.startswith("overdue") or _lab == "due today" else "var(--faint,#8b93a7)"};'
+                         f'font-size:11.5px;white-space:nowrap;margin-left:6px">'
+                         f'&middot; {html_lib.escape(_lab)}</span>')
     except Exception:
         due_block = ""
     # Per-lane mini-counts (compact form of the status line) + status dot.
@@ -2964,7 +2978,7 @@ def _group_folder_path(entries: list) -> str:
     return ""
 
 
-def _render_group_folders(groups: dict) -> str:
+def _render_group_folders(groups, facts=None) -> str:
     """Render the home dashboard's COLLAPSIBLE FOLDERS (v9 Wave 3).
 
     ``groups`` is keyed by GROUP NAME (from ``rnd_registry.group_by_group``) →
@@ -2986,7 +3000,7 @@ def _render_group_folders(groups: dict) -> str:
     folders = []
     for gname in names:
         entries = groups.get(gname, [])
-        rows = "".join(render_project_tile_html(e) for e in entries)
+        rows = "".join(render_project_tile_html(e, (facts or {}).get(e.get("id"))) for e in entries)
         name_esc = html_lib.escape(gname)
         name_attr = html_lib.escape(gname, quote=True)
         is_ungrouped = (gname == ungrouped_label)
@@ -3026,7 +3040,7 @@ def _render_group_folders(groups: dict) -> str:
 
 def render_projects_view_html(include_archived: bool = False,
                               include_future: bool = False,
-                              include_retired: bool = False) -> str:
+                              include_retired: bool = False, facts=None) -> str:
     """Render the ACTIVE folder-grouped projects view (collapsible folder → tiles).
 
     Defaults to active-only; inactive projects (archived/future/retired) live on
@@ -3045,7 +3059,7 @@ def render_projects_view_html(include_archived: bool = False,
                 'No active R&D projects. Use "+ New Project" to add one.</p></div>')
     return (_render_folder_toolbar()
             + _render_rows_rollup_toggle()
-            + _render_group_folders(groups))
+            + _render_group_folders(groups, facts=facts))
 
 
 def _render_folder_toolbar() -> str:
@@ -7508,7 +7522,7 @@ def restore_task(task_text, from_archive="saved"):
 # is read-only projection of state the page already has; the ranking is
 # home_attention (deterministic, every row names its rule).
 def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
-                   today=None, now=None):
+                   today=None, now=None, facts=None):
     """Return the r3 rail / attention / calendar / email HTML snippets.
 
     Best-effort at every seam: a registry hiccup degrades one section to an
@@ -7533,7 +7547,7 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
         pass
     # W1a (High Seat, 2026-09-26): each project's steward record — its wait, its lead line, its
     # dated open steps — three small reads per project, no scan, no model, no bridge on GET /
-    facts = _hr.all_project_facts(entries, today)
+    facts = list(facts.values()) if isinstance(facts, dict) else _hr.all_project_facts(entries, today)
     try:
         folders = len(_rnd.group_by_group())
     except Exception:
@@ -7541,12 +7555,11 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
 
     rows = _ha.build_attention(tasks=tasks, sessions=sessions, health=health,
                                today=today, now=now, project_names=names, projects=facts)
-    lead, sub = _ha.the_move(rows, steward_hs_name)
     bullets = _ha.brief_bullets(rows, facts, today=today, seat_name=steward_hs_name)
     move_html = ('<div class="rlead">%s</div>' % esc(bullets[0])
                  + "".join('<div class="rsub">%s</div>' % esc(b) for b in bullets[1:]))
     counts = _ha.rail_counts(sessions, rows, folders=folders, open_projects=open_n)
-    due, due_more = _ha.due_rows(tasks, today=today)
+    due, due_more = _ha.due_rows(tasks, today=today, projects=facts)
     live, live_more = _ha.live_rows(sessions, names)
 
     # ── rail ──
@@ -7644,7 +7657,7 @@ def generate_html(projects, tasks, inbox):
     today_str = datetime.now().strftime("%A, %B %d, %Y")
     try:  # W1a (High Seat, 2026-09-26): the week header in words
         import home_rows as _hr_week
-        today_str += " \u00b7 " + _hr_week.week_in_words()
+        today_str += " · " + _hr_week.week_in_words()
     except Exception:
         pass
     active = [t for t in tasks if not t["done"]]
@@ -8127,8 +8140,16 @@ def generate_html(projects, tasks, inbox):
     # R&D control surface: surface the (previously orphaned) folder-grouped
     # projects view inside the dashboard. Best-effort so a registry hiccup never
     # blanks the whole dashboard.
+    # W1a (High Seat, 2026-09-26): ONE pass over every active project's steward record for the page —
+    # the project rows and the rail's rows and bullets all read from it; nothing reads a record twice.
     try:
-        rnd_projects_html = render_projects_view_html()
+        import home_rows as _hr_page
+        _facts_by_id = {f["id"]: f for f in _hr_page.all_project_facts(
+            _rnd.list_projects(include_archived=False, include_future=False, include_retired=False))}
+    except Exception:
+        _facts_by_id = {}
+    try:
+        rnd_projects_html = render_projects_view_html(facts=_facts_by_id)
     except Exception:
         rnd_projects_html = ('<div class="rnd-projects"><p class="rnd-empty">'
                              'R&amp;D projects unavailable.</p></div>')
@@ -8201,7 +8222,7 @@ def generate_html(projects, tasks, inbox):
     # Best-effort: a failure degrades to honest placeholders, never the page.
     try:
         _r3 = _home_r3_parts(tasks, (hr[0], hr[1]) if hr else None,
-                             steward_label, steward_hs_name)
+                             steward_label, steward_hs_name, facts=_facts_by_id)
     except Exception:
         _r3 = {"rail": '<div class="rail-card"><div class="rquiet">rail unavailable</div></div>',
                "attention": "", "attention_count": "talk below",
