@@ -117,14 +117,12 @@ def test_cache_read_tokens_counted_and_invalid_token_values_ignored(cockpit):
 
 # ---- Wave L (John, 2026-09-25): a labeled estimate at API list price ----
 
-def test_price_table_is_dated_sourced_and_numeric():
+def test_price_table_is_dated_sourced_and_holds_the_two_models_john_runs():
     table = engine_mod.api_list_prices()
-    assert table["as_of"] and table["source"].startswith("https://")
-    rows = table["usd_per_million"]
-    assert "gpt-6-astra" in rows
-    for name, row in rows.items():
-        assert set(row) == {"input", "cached_input", "output"}, name
-        assert all(isinstance(v, (int, float)) and v > 0 for v in row.values()), name
+    assert table["as_of"] == "2026-09-25" and table["source"].startswith("https://developers.openai.com/")
+    assert table["usd_per_million"] == {
+        "gpt-6-astra": {"input": 10.0, "cached_input": 1.0, "output": 50.0},
+        "gpt-5.6-sol": {"input": 4.0, "cached_input": 0.4, "output": 20.0}}
 
 
 def test_estimate_prices_uncached_input_cached_input_and_output_separately():

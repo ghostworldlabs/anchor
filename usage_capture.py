@@ -24,9 +24,8 @@ Locked contracts this cites (see ``NORTH-STAR-AMENDMENT.md`` + ``W1-GROUND-TRUTH
   - **No-own-pricing-table (LOCKED).** Tokens + time are the measured facts; ``$``
     is 0.0 on the interactive path (the per-message sidecar carries no ``costUSD``)
     and is shown ONLY when the engine itself reported it. Anchor computes no dollar
-    figure from a pricing table of its own. Rider (John, 2026-09-25): the steward
-    cockpit shows a *labeled estimate* at API list price for ChatGPT subscription
-    turns beside the reported total (``steward_cockpit/api_list_prices.json``).
+    figure from a pricing table of its own (one exception: the steward cockpit's
+    labeled ChatGPT estimate, NORTH-STAR-AMENDMENT.md rider of 2026-09-25).
   - **defer-and-badge (LOCKED).** Pre-feature sessions are never retro-attributed:
     a session with no captured engine UUID finalizes to ``state='uncorrelated'``
     (an ``unmeasured`` reason), never a guessed total.

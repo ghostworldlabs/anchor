@@ -2135,8 +2135,6 @@ class Engine:
                 self.secs += duration
                 if cost is None:
                     self.unpriced_turns += 1
-                    # a ChatGPT subscription turn: tokens known, no price reported; the
-                    # estimate at API list price rides beside it, never as a charge
                     if infer_subscription_cli(self.cli, self._usage_source) == "chatgpt":
                         counts = (self._usage_checkpoints[_usage_uuid(ev["usage_invocation_id"])].get("counts")
                                   if tracked else ev.get("usage"))
