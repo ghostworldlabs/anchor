@@ -1,9 +1,14 @@
 """Wave D (2026-09-26): the collaborator's printable brief is token-less, read-only and honest; the project
 page itself stays locked without a token."""
 import json
+import urllib.error
+import urllib.request
 from pathlib import Path
 
+import pytest
+
 from steward_cockpit import steward_routes
+from tests.test_steward_refinement_browser import campaign_server
 
 
 def _campaign(tmp_path):
@@ -45,3 +50,24 @@ def test_the_brief_carries_the_six_things_and_nothing_private(tmp_path):
 def test_an_unknown_effort_is_none(tmp_path):
     _campaign(tmp_path)
     assert steward_routes.render_brief(str(tmp_path), "nope") is None
+
+
+def _get(url):
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as err:
+        return err.code, err.read().decode("utf-8", "replace")
+
+
+def test_the_brief_route_is_token_less_and_the_project_page_stays_locked(campaign_server):
+    origin, pid = campaign_server.origin, campaign_server.project_id
+    code, body = _get(f"{origin}/project/{pid}/brief?dir=foundation%20campaign")
+    assert code == 200 and "foundation campaign" in body and "<h2>Goal</h2>" in body
+    assert campaign_server.token not in body
+    code, body = _get(f"{origin}/project/{pid}")
+    assert code == 200 and "token-locked" in body                             # the cockpit itself still needs the token
+    code, _ = _get(f"{origin}/project/{pid}/brief?dir=nope")
+    assert code == 404
+    code, _ = _get(f"{origin}/project/not-a-project/brief?dir=")
+    assert code == 404

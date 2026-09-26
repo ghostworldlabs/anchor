@@ -21996,6 +21996,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                         "<p>It lives in the author's design repo and does not "
                         "ship with the bundle.</p>")
             elif self.path.startswith("/project/"):
+                _brief = re.fullmatch(r"/project/([^/]+)/brief/?", urlparse(self.path).path)
+                if _brief:
+                    # (Wave D1, 2026-09-26) the collaborator's printable brief: token-less by
+                    # design, read-only, no conversation, no file links; the id is the capability
+                    from steward_cockpit import steward_routes as _scr
+                    _proot = self._steward_pid_dir(_brief.group(1))
+                    _bdir = parse_qs(urlparse(self.path).query).get("dir", [""])[0]
+                    _bhtml = _scr.render_brief(_proot, _bdir) if _proot else None
+                    if _bhtml is None:
+                        self.send_error(404); return
+                    self._send_bytes(_bhtml.encode("utf-8"), "text/html; charset=utf-8", cache="no-cache"); return
                 # Per-project window (Wave 3 basic view + 4-state status line).
                 # Opening a brownfield project DISCOVERS + ADOPTS its on-disk
                 # trio artifacts so the Kanban/tile/home panel populate (Wave 6).
