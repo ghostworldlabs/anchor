@@ -59,6 +59,12 @@ const Proto = (() => {
     if (st.refinement) return st.refinement.phase === "done";
     return st.status === "done";
   }
+  // W0 (High Seat, 2026-09-26): a step's calendar date, ISO in the record, "Oct 8" on the page
+  function fmtDue(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+    if (!m) return String(iso || "");
+    return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])).toLocaleDateString("en-US", {month: "short", day: "numeric", timeZone: "UTC"});
+  }
   // the wait on John, from structured facts only: a product awaiting his review or blocked, a step the
   // steward set to waiting or blocked; never a text match
   function stepWaitsOnJohn(st) {
@@ -395,7 +401,7 @@ const Proto = (() => {
     const plan = open.slice(from, from + 3);
     if (plan.length) {
       host.appendChild(el("div", "naveyebrow", "Next in the plan"));
-      plan.forEach(st => host.appendChild(el("div", "navactlabel", (st.navigation && st.navigation.label) || st.name)));
+      plan.forEach(st => host.appendChild(el("div", "navactlabel", ((st.navigation && st.navigation.label) || st.name) + (st.due ? " · due " + fmtDue(st.due) : ""))));
     }
     return waits;
   }
@@ -956,6 +962,11 @@ const Proto = (() => {
         if (_sk) title.appendChild(_sk);
       } catch (e) { /* no-op */ }
       title.appendChild(document.createTextNode((st.navigation && st.navigation.label) || st.name));
+      if (st.due) {
+        const due = el("span", "sdue", "· due " + fmtDue(st.due));
+        due.style.cssText = "color:var(--faint);font-size:11.5px;margin-left:6px;white-space:nowrap";
+        title.appendChild(due);
+      }
       wrap.appendChild(title);
       if (st.refinement) {
         const r = st.refinement;
