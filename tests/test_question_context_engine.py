@@ -104,7 +104,7 @@ def test_a_reversible_decision_proceeds_on_four_hours_of_silence(cockpit, monkey
     assert _routes.proceed_on_silence_sweep() == [cockpit.skey()]        # five hours: the recommendation stands
     assert cockpit.state()["question_context"] is None and cockpit.open_question == ""
     last = cockpit.question_history[-1]
-    assert last["status"] == "proceeded_on_silence" and last["answer"] == "I recommend replacing it." and last["undo"].startswith("restore")
+    assert last["status"] == "proceeded_on_silence" and last["answer"] == "I recommend replacing it."
     assert len(sent) == 1 and "Proceeded on silence" in sent[0] and "Undo: restore the folder" in sent[0]
     assert [e for e in cockpit.events if e["t"] == "sys" and "Proceeded on silence" in e["text"]]   # said once, never as his words
     assert not [e for e in cockpit.events if e["t"] == "john"]

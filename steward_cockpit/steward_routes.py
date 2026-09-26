@@ -133,9 +133,9 @@ def _bad_component(name):
 
 
 def proceed_on_silence_sweep(now=None):
-    """(Wave M) On the server's reconcile tick: every steward whose saved decision is reversible,
-    carries an undo and a recommendation, and has waited SILENCE_SECONDS proceeds - a sleeping
-    steward wakes for it. Returns the campaign dirs that proceeded."""
+    """On the server's reconcile tick: every steward whose saved decision is reversible, carries an
+    undo and a recommendation, and has waited SILENCE_SECONDS proceeds - a sleeping steward wakes
+    for it. Returns the campaign dirs that proceeded."""
     from steward_cockpit.steward_engine import _read_all_state, SILENCE_SECONDS
     now = time.time() if now is None else now
     done = []

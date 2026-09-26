@@ -54,5 +54,5 @@ def test_the_record_carries_reversibility_and_the_undo():
     assert no["reversible"] is False and no["undo"] == ""
     plain = qc.parse_decision("I recommend keeping this version. Keep it?")
     assert plain["reversible"] is None and plain["undo"] == ""                     # unmarked: never proceeds
-    own_line = qc.parse_decision("I recommend it.\nReversible: yes\nUndo: delete the file.\nGo?")
-    assert own_line["reversible"] is True and own_line["undo"] == "delete the file."
+    split = qc.parse_decision("I recommend it.\nReversible: yes\nUndo: delete the file.\nGo?")
+    assert split["reversible"] is True and split["undo"] == ""                 # the undo rides the Reversible line, or there is none

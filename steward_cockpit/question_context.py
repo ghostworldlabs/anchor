@@ -31,7 +31,6 @@ _BULLET_RE = re.compile(r"^\s*[-*•·]\s*")
 AUTHORIZES_RE = re.compile(r"^\s*(?:this\s+)?authoriz(?:es|ation)\s*[:\-\u2013\u2014]\s*(.+?)\s*$", re.I | re.M)
 DECIDE_BY_RE = re.compile(r"^\s*decide\s+by\s*:\s*(.+?)\s*$", re.I | re.M)
 REVERSIBLE_RE = re.compile(r"^\s*reversible\s*:\s*(yes|no)\b\s*(?:[,;\-\u2013\u2014]+\s*undo\s*:\s*(.+?))?\s*$", re.I | re.M)
-UNDO_RE = re.compile(r"^\s*undo\s*:\s*(.+?)\s*$", re.I | re.M)
 
 _LIST_MARK = re.compile(r"^(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)")
 
@@ -86,15 +85,10 @@ def parse_decision(text):
     hits = DECIDE_BY_RE.findall(tail)
     if hits:
         out["decide_by"] = hits[-1][:80]
-    # (Wave M) "Reversible: yes - undo: <how>" / "Reversible: no"; an Undo line of its own also counts
-    hits = REVERSIBLE_RE.findall(tail)
+    hits = REVERSIBLE_RE.findall(tail)          # "Reversible: yes - undo: <how>" / "Reversible: no"
     if hits:
         out["reversible"] = hits[-1][0].lower() == "yes"
         out["undo"] = (hits[-1][1] or "").strip()[:200]
-    if not out["undo"]:
-        hits = UNDO_RE.findall(tail)
-        if hits:
-            out["undo"] = hits[-1][:200]
     if rec_idx is None:
         return out
     out["recommendation"] = sents[rec_idx][0][:240]

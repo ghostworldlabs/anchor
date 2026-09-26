@@ -111,8 +111,7 @@ const Proto = (() => {
     if (q.authorizes) bullets.appendChild(el("li", "action-auth", "Authorizes: " + oneLine(q.authorizes, 160)));
     if (q.decide_by) bullets.appendChild(el("li", "action-auth", "Decide by: " + oneLine(q.decide_by, 80)));
     if (q.reversible === true && q.undo) {
-      // (Wave M) a reversible decision proceeds on its recommendation after the silence window
-      const secs = (lastState && lastState.silence_seconds) || 4 * 3600;
+      const secs = 4 * 3600;      // the server's silence window
       const at = typeof q.asked_at === "number" ? new Date((q.asked_at + secs) * 1000) : null;
       const when = at ? at.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}) + (at.toDateString() === new Date().toDateString() ? "" : " " + at.toLocaleDateString()) : "after " + Math.round(secs / 3600) + " hours";
       bullets.appendChild(el("li", "action-auth", "Reversible \u00b7 proceeds on the recommendation at " + when + " if unanswered \u00b7 undo: " + oneLine(q.undo, 120)));
