@@ -323,10 +323,11 @@ def _card(e, f, cls):
     """A project's one card, compact (John, 2026-09-27: "the tiles still seem larger than needed"): the name with the
     effort it reads as a small suffix, ONE line — the Needs-you sentence when there is one, else the next step —
     clamped to two lines, and the acts on one line, Status first (his word: "there should also be a status option");
-    the cockpit link sits by the name. The description, the next step behind a wait and the effort line show only
-    once the card opens. The parts are read from the cockpit's own readers on the effort the card names
-    (home_rows.current_effort → ``data-dir``). A project with no record is a quiet card: the name, its blurb, the
-    cockpit."""
+    the cockpit link sits by the name. The description and the next step behind a wait show only once the card
+    opens (the effort is named by the suffix and again by the Status part — no third line, Grok R7). The name
+    ellipsizes; the suffix stays whole (Grok R7: the effort is the datum the suffix exists for). The parts are read
+    from the cockpit's own readers on the effort the card names (home_rows.current_effort → ``data-dir``). A project
+    with no record is a quiet card: the name, its blurb, the cockpit."""
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
     name = esc(e.get("name"))
@@ -345,15 +346,13 @@ def _card(e, f, cls):
         more_next = ""
     acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     return (
-        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name">%s%s</h3>'
+        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name"><span class="t-nm">%s</span>%s</h3>'
         '<a class="t-go" href="/project/%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a></div>'
-        '%s<div class="t-more"><div class="t-desc">%s</div>%s%s</div>'
+        '%s<div class="t-more"><div class="t-desc">%s</div>%s</div>'
         '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, pid, pid, rel, name, (' <span class="t-eff">&middot; %s</span>' % rel) if rel else "", pid,
-         line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next,
-         ('<div class="t-effort">reads the effort <b>%s</b>, one folder down &middot; the cockpit lists every effort</div>' % rel) if rel else "",
-         acts)
+    ) % (cls, pid, pid, rel, name, ('<span class="t-eff">&middot; %s</span>' % rel) if rel else "", pid,
+         line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next, acts)
 
 
 def _shelf(sid, title, count_text, note, cards_html, foot=""):

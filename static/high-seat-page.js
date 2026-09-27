@@ -10,9 +10,8 @@
   try {
     var _qs = new URLSearchParams(location.search), _t = (_qs.get('token') || '').trim();
     if (_t) {
-      localStorage.setItem('anchor_token', _t); _qs.delete('token'); var _rest = _qs.toString(); history.replaceState(null, '', location.pathname + (_rest ? '?' + _rest : '') + location.hash);
-      // and the browser is logged in (the HttpOnly cookie the page routes and the card route accept), as the old home did
-      fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': _t }, body: JSON.stringify({ token: _t }) }).catch(function () {});
+      _qs.delete('token'); var _rest = _qs.toString(); history.replaceState(null, '', location.pathname + (_rest ? '?' + _rest : '') + location.hash);
+      login(_t);   // stored, and the browser logged in (the HttpOnly cookie the page routes and the card route accept), as the old home did — the one login()
     }
   } catch (e) {}
   function headers() {
@@ -142,13 +141,22 @@
       openPart(card, pid, 'status', $('[data-part="status"]', card));
     });
   });
-  // "paste the token" on a card that answered 401: ask again, then read the open part again
+  // "paste the token" on a card or a balloon that answered 401: ask again, then read that part again
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-login]'); if (!b) return;
     e.preventDefault(); e.stopPropagation();
     askToken().then(function (ok) {
+      if (!ok) return;
+      var bl = b.closest('.balloon');
+      if (bl) {   // the balloon re-reads its own part into its body (Grok R7)
+        var bb = $('.bl-body', bl); bb.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
+        fetchPart(bl.getAttribute('data-pid') || '', 'next', bl.getAttribute('data-dir') || '')
+          .then(function (html) { if (bl.isConnected) bb.innerHTML = html; })
+          .catch(function () { bb.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+        return;
+      }
       var card = b.closest('.tile'), part = card && card.getAttribute('data-open');
-      if (!ok || !card || !part) return;
+      if (!card || !part) return;
       card.removeAttribute('data-open');
       openPart(card, card.getAttribute('data-tile'), part, $('[data-part="' + part + '"]', card));
     });
@@ -168,6 +176,7 @@
       var pid = (mk.getAttribute('href') || '').replace('/project/', '');
       var ruler = $('#ruler');
       balloon = document.createElement('div'); balloon.className = 'balloon';
+      balloon.setAttribute('data-pid', pid);
       var r = mk.getBoundingClientRect(), rr = ruler.getBoundingClientRect();
       var left = Math.max(8, Math.min(r.left - rr.left, rr.width - 440));
       balloon.style.left = left + 'px'; balloon.style.top = (r.bottom - rr.top + 8) + 'px';
@@ -181,6 +190,7 @@
       cardLink.addEventListener('click', function (ev) { ev.preventDefault(); var c = $('#card-' + pid); closeBalloon(); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1600); } });
       var body = $('.bl-body', balloon);
       var ownCard = $('#card-' + pid), ownDir = ownCard ? (ownCard.getAttribute('data-dir') || '') : '';
+      balloon.setAttribute('data-dir', ownDir);
       fetchPart(pid, 'next', ownDir)
         .then(function (html) { if (balloon) body.innerHTML = html; })
         .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });

@@ -13,6 +13,8 @@ import time
 from datetime import date, timedelta
 from pathlib import Path
 
+from steward_cockpit.steward_campaign import _real_wait as _cockpit_wait   # the cockpit's one rule for a wait that says "none"
+
 _OPEN = ("proposed", "planned", "active", "waiting")
 
 
@@ -97,15 +99,10 @@ def project_facts(entry, today=None):
 
 
 def _real_wait(text):
-    """The cockpit's own rule for a wait (steward_campaign._real_wait): a strip that says "none" / "nothing" / "-" is
-    not waiting on anyone — such a project has no business on Needs you (the live board showed "Needs you: none" on
-    four cards, 2026-09-27)."""
-    try:
-        from steward_cockpit.steward_campaign import _real_wait as rule
-        return str(rule(text) or "").strip()
-    except Exception:
-        t = " ".join(str(text or "").split())
-        return "" if t.lower().rstrip(".") in ("", "none", "nothing", "-", "—", "n/a") else t
+    """The cockpit's own rule for a wait (steward_campaign._real_wait, called directly — no second list, Grok R7): a
+    strip that says "none" / "nothing" / "-" / "none — explanation" is not waiting on anyone, so its project has no
+    business on Needs you (the live board showed "Needs you: none" on four cards, 2026-09-27)."""
+    return str(_cockpit_wait(text) or "").strip()
 
 
 def current_effort(folder):

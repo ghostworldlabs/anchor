@@ -115,6 +115,8 @@ def test_a_wait_that_says_none_is_not_a_wait(tmp_path):
     assert hr.project_facts(none, TODAY)["needs_you"] == ""
     dash = _project(tmp_path, "n2", "Says dash", wait="—")
     assert hr.project_facts(dash, TODAY)["needs_you"] == ""
+    expl = _project(tmp_path, "n5", "Says none dash", wait="none — the run is still going")
+    assert hr.project_facts(expl, TODAY)["needs_you"] == ""                          # the cockpit's clause, not a local list (Grok R7)
     real = _project(tmp_path, "n3", "Says a thing", wait="John: sign the engagement letter")
     assert hr.project_facts(real, TODAY)["needs_you"] == "John: sign the engagement letter"
     summ = _project(tmp_path, "n4", "Summary none", lead="Next: x")

@@ -128,7 +128,8 @@ def test_the_board_names_the_effort_a_card_reads_and_shelves_the_record_less_pro
     assert 'data-dir="steward-refinement"' in c and '<span class="t-eff">&middot; steward-refinement</span>' in c
     assert "touched" not in c                                                        # no age on the card (Grok R6: not a receipt, not the cockpit's clock)
     assert c.count('data-dir="steward-refinement"') == 5                            # the card and its four acts
-    assert "reads the effort <b>steward-refinement</b>" in c[c.index('class="t-more"'):]   # the effort line waits behind the open
+    assert "reads the effort" not in c and "t-effort" not in c                     # no third naming of the effort (Grok R7): the suffix and the Status part say it
+    assert '<span class="t-nm">Skill Foundry</span><span class="t-eff">&middot; steward-refinement</span>' in c   # two spans: the name gives way, the suffix stays whole
     q = hsp._card({"id": "q1", "name": "Quiet one", "blurb": "nothing yet"}, {"has_record": False}, "")
     assert 'class="tile quiet"' in q and "no steward record yet" in q and "Open cockpit" in q and "data-part=" not in q
 
@@ -143,7 +144,7 @@ def test_the_compact_card_says_one_line_and_puts_status_first_among_the_acts():
     # the one line is the wait; the description and the next step wait behind the open, before the acts
     assert waiting.index('class="t-line wait"') < waiting.index('class="t-more"') < waiting.index('class="t-next"') < waiting.index('class="t-acts"')
     assert "Needs you:</span>approve the Lecture 3 AI supplement" in waiting and "Next</span>Lecture 4" in waiting and "The course." in waiting
-    assert "t-eff" not in waiting and "t-effort" not in waiting                    # a root record names no effort
+    assert "t-eff" not in waiting and '<span class="t-nm">MBA Teaching AI</span></h3>' in waiting   # a root record names no effort
     plain = hsp._card(e, {"has_record": True, "effort": "", "next": "", "needs_you": ""}, "")
     assert '<div class="t-line"><span class="k">Next</span>not stated</div>' in plain and "t-next" not in plain
 
@@ -154,5 +155,6 @@ def test_the_page_script_says_plainly_when_the_browser_is_not_logged_in():
     js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "This browser is not logged in to Anchor, so the record cannot be read." in js
     assert "r.status === 401 || r.status === 403" in js and "'/api/auth/login'" in js and "askedOnce" in js
-    assert "statusbtn" not in js and "data-login" in js
+    assert "statusbtn" not in js and "data-login" in js and "b.closest('.balloon')" in js   # a balloon re-reads after a paste (Grok R7)
     assert "'/api/version'" in js and "location.reload()" in js                    # a redeploy reloads the open page (the old home's watcher)
+    assert js.count("fetch('/api/auth/login'") == 1                                 # one login(): the hand-off and the paste share it (Grok R7)
