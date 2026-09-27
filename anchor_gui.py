@@ -7795,6 +7795,45 @@ def _campaign_context(entry):
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False}
 
 
+def _desk_context(entry):
+    """The Desk view's context (W3b): the Campaign page's context plus the record's own status (the cockpit's
+    branch: a live engine's state into compose_status, else the persisted record) and the capacity lines."""
+    ctx = _campaign_context(entry)
+    folder = str(entry.get("folder_path"))
+    status = {}
+    try:
+        from steward_cockpit import steward_campaign as _sc
+        from steward_cockpit.high_seat_card import _live_engine
+        eng = _live_engine(folder)
+        data = _sc.compose_status(folder, eng.state()) if eng is not None else (_sc.read_last_status(folder) or _sc.compose_status(folder, None))
+        facts = ((data.get("compact") or {}).get("facts") if isinstance(data.get("compact"), dict) else None) or []
+        status = {"lead": data.get("lead_line") or _sc.lead_line(data.get("plan")), "at": str(data.get("at") or "")[-16:],
+                  "facts": [(f.get("label"), f.get("value")) for f in facts if isinstance(f, dict) and f.get("label")],
+                  "stale": bool(data.get("stale")), "live": eng is not None}
+    except Exception:
+        status = {}
+    ctx["status"] = status
+    ctx["capacity"] = [
+        {"name": "ChatGPT", "state": "not measured yet", "note": "nothing is guessed until Anchor can read it"},
+        {"name": "Grok", "state": "not measured yet", "note": "nothing is guessed"},
+        {"name": "Claude account 1", "state": "not measured yet", "note": "nothing is guessed"},
+        {"name": "Claude account 2", "state": "not measured yet", "note": "nothing is guessed"},
+        {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"},
+    ]
+    return ctx
+
+
+def render_desk_page(entry) -> str:
+    """The Desk view of the Campaign project's cockpit (W3b); an honest error page, never a blank."""
+    try:
+        import desk_page as _dp
+        return _dp.render_desk_html(_desk_context(entry))
+    except Exception as e:
+        return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
+                "<h1>The Desk could not render</h1><p>%s</p><p><a href=\"/project/%s?doc=1\" style=\"color:#8ab4f8\">the ordinary cockpit</a></p></body></html>"
+                % (html_lib.escape("%s: %s" % (type(e).__name__, e)), html_lib.escape(str(entry.get("id") or ""))))
+
+
 def render_campaign_page(entry, open_id=None) -> str:
     """The Campaign view of the Campaign project's cockpit (W3c); an honest error page, never a blank."""
     try:
@@ -22295,6 +22334,9 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 # flag asks for the classic window, the chamber or the ordinary document (?doc=1)
                 _camp = _campaign_entry_for(pid) if not (_classic or _chamber or _flag("doc")) else None
                 if _camp is not None and _project_authed:
+                    if (_qp.get("view", [""])[0] or "") == "desk":      # W3b: the Desk view of the same record
+                        self._send_html(render_desk_page(_camp))
+                        return
                     self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)))
                     return
                 if _classic:

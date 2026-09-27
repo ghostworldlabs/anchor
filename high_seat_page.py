@@ -66,6 +66,7 @@ def campaign_initiatives(steps, resolved=None):
                     "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
                     "href": r.get("href") or "", "status": str(p.get("status") or ""),
                     "broken": bool(r.get("broken")) if ref else False, "gap": r.get("gap") or "",
+                    "waiting_on": str(p.get("waiting_on") or "") if not ref else "",
                     "needs_you": "waiting on you" in str(state).lower() or (
                         not ref and str(p.get("status") or "") == "waiting"
                         and bool(re.search(r"\b(john|you|me)\b", str(p.get("waiting_on") or "").lower()))),
@@ -329,9 +330,13 @@ def _desk_line(ctx):
         '<section class="deskline" id="deskline"><div class="dl-row"><span class="dl-k">Desk</span><span class="dl-d">&middot; admin, no project</span>'
         '<button class="dchip" id="chipTasks" data-desk="tasks">Tasks &middot; <span id="taskTotal">%d</span></button>'
         '<button class="dchip muted" data-desk="cal">Calendar</button><button class="dchip muted" data-desk="mail">Email</button>'
-        '<span class="dl-sp"></span><span class="dl-open muted" title="The Desk cockpit is not built yet">Open the Desk cockpit &mdash; not yet</span></div>'
-        '<div class="dl-body" id="deskBody"><p class="ptile-note">The task list still lives on the old dashboard until the Desk exists.</p></div></section>'
-    ) % int(ctx.get("tasks_open") or 0)
+        '<span class="dl-sp"></span>%s</div>'
+        '<div class="dl-body" id="deskBody"><p class="ptile-note">%s</p></div></section>'
+    ) % (int(ctx.get("tasks_open") or 0),
+         ('<a class="dl-open" href="/project/%s?view=desk" target="_blank" rel="noopener" title="the Desk view of the Campaign record">Open the Desk cockpit &rarr;</a>' % esc((ctx.get("campaign") or {}).get("pid")))
+         if ctx.get("campaign") else '<span class="dl-open muted" title="The Desk reads the Campaign record, which is not stood up yet">Open the Desk cockpit &mdash; after the Campaign exists</span>',
+         "The Desk reads the Campaign record&rsquo;s tasks; this old task list stays on the old dashboard until your word." if ctx.get("campaign")
+         else "The task list still lives on the old dashboard until the Campaign exists.")
 
 
 def _ruler(ctx):
