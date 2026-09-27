@@ -103,6 +103,12 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert "Sample data" not in html
 
 
+def test_the_page_boots_with_the_campaign_id_and_an_undo_on_its_receipt_line():
+    html = hsp.render_high_seat_html(_ctx(campaign=True))
+    assert 'window.ANCHOR_BOOT = {build_id: "test", campaign_pid: "df56"}' in html and 'id="undoBtn" hidden' in html
+    assert 'campaign_pid: ""' in hsp.render_high_seat_html(_ctx(campaign=False))
+
+
 def test_without_a_campaign_the_tile_says_so_honestly():
     html = hsp.render_high_seat_html(_ctx(campaign=False))
     assert "not stood up yet" in html and "Show Tier 1" not in html

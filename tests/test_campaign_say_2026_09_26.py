@@ -32,7 +32,7 @@ STRIP = {"schema": "ecgberht-strip-v0", "project_id": "campaign-test", "face_pat
 def test_dates_are_read_the_way_the_desk_reads_them():
     p = lambda s: cs.parse_due(s, TODAY)
     assert p("2026-10-03") == "2026-10-03" and p("2026-02-30") is None and p("today") == "2026-09-26" and p("tomorrow") == "2026-09-27"
-    assert p("tuesday") == "2026-09-29" and p("Oct 3") == "2026-10-03" and p("3 Oct") == "2026-10-03" and p("October 27") == "2026-10-27"
+    assert p("tuesday") == "2026-09-29" and p("tues") == "2026-09-29" and p("Oct 3") == "2026-10-03" and p("3 Oct") == "2026-10-03" and p("October 27") == "2026-10-27"
     assert p("Sep 20") == "2026-09-20" and p("Feb 29") is None and p("nonsense") is None and p("") is None
 
 
@@ -43,6 +43,10 @@ def test_names_resolve_exactly_then_by_the_one_that_contains_the_words_else_refu
     assert cs._find(cands, "trustee", "part")[0][0] == "trust-call" and cs._find(cands, "the trustee call", "part")[0][0] == "trust-call"
     hit, why = cs._find(cands, "trust", "part")
     assert hit is None and "could be" in why and "say which" in why
+    assert cs._find(cands, "teaching", "initiative")[0][0] == "mba-teaching"                 # a whole word of one name selects
+    hit, why = cs._find(cands, "teach", "initiative")
+    assert hit is None and why.startswith("did you mean") and "MBA Teaching" in why          # a looser match names, never selects
+    assert cs._find(cands, "call the trustee about the trusts", "part")[0] is None             # a name inside the phrase never selects
     hit, why = cs._find(cands, "the magi", "initiative")
     assert hit is None and why.startswith("no initiative named") and "MBA Teaching" in why
 
@@ -94,6 +98,12 @@ def test_the_verbs_move_add_park_unpark_and_promote_through_the_campaign_writer(
     assert amb["ok"] and acts._step(record, "mba-teaching")["tier"] == 3                          # one initiative contains the words
     none = say("move the magi to tier 3")
     assert none["ok"] is False and none["say"].startswith("no initiative named")
+    n_before = len(json.loads((record / "roadmap.json").read_text(encoding="utf-8"))["roadmap_events"])
+    loose = say("move teach to tier 1")                                                        # inside one name only: named, never written
+    assert loose["ok"] is False and loose["say"].startswith("did you mean") and acts._step(record, "mba-teaching")["tier"] == 3
+    assert len(json.loads((record / "roadmap.json").read_text(encoding="utf-8"))["roadmap_events"]) == n_before
+    broken = cs.say_campaign(record, "move the trusts to tier 2", dialogue="file:///C:/nowhere/dialogue.mjs", today=TODAY)
+    assert broken["ok"] is False and broken["campaign_act"] and "grammar could not be read" in broken["say"]        # never the steward's
     s = say("make the AI mechanics class an initiative in tier 2 under writing")
     assert s["ok"] and s["act"] == "campaign_promote_seed" and "tier 2" in s["say"] and seeds_mod.read_seeds(record) == []
     head = acts._step(record, s["step"])
@@ -109,6 +119,9 @@ def test_what_needs_me_reads_the_record_and_writes_nothing(record):
     r = cs.say_campaign(record, "what needs me this week?", dialogue=DIALOGUE, today=TODAY)
     assert r["ok"] and r["read_only"] and "need" in r["say"] and "call the trustee (The trusts, tier 2)" in r["say"]   # the referenced MBA part reads its live state
     assert "nothing on the Campaign is dated inside this week" in r["say"]
-    assert len(json.loads((record / "roadmap.json").read_text(encoding="utf-8"))["roadmap_events"]) == n1 and n1 == n0 + 2
+    assert acts.act(record, {"act": "add", "initiative": "trusts", "kind": "task", "text": "an old one", "due": "2026-09-18"})["ok"]
+    r2 = cs.say_campaign(record, "what needs me this week?", dialogue=DIALOGUE, today=TODAY)
+    assert "an old one" not in r2["say"]                                                        # Monday to Sunday only
+    assert n1 == n0 + 2
     t = cs.say_campaign(record, "What needs me today", dialogue=DIALOGUE, today=TODAY)
     assert t["ok"] and "today or earlier" in t["say"]

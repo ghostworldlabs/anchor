@@ -13134,16 +13134,13 @@ def handle_ecgberht_high_seat_say(handler, path, body):
         return
     # W5 (High Seat, 2026-09-26): a Campaign verb typed on the home is applied on the Campaign record by its own
     # writer (the engine names the act; nothing is sent to a model); anything else talks to the dashboard steward
-    try:
-        from steward_cockpit.campaign_say import say_campaign
-        _cd = _campaign_dir()
-        if (_cd / "roadmap.json").is_file():
-            spoken = say_campaign(str(_cd), text)
-            if spoken is not None:
-                handler._send_json(spoken, 200 if spoken.get("ok") else 400)
-                return
-    except Exception:
-        pass
+    from steward_cockpit.campaign_say import say_campaign
+    _cd = _campaign_dir()
+    if (_cd / "roadmap.json").is_file():
+        spoken = say_campaign(str(_cd), text)      # a refusal on a failed compile or a writer error; None = not a verb
+        if spoken is not None:
+            handler._send_json(spoken, 200 if spoken.get("ok") else 400)
+            return
     folder, err, status = _ecgberht_project_folder("__dashboard__")
     if err is not None:
         handler._send_json({"ok": False, "error": "no_dashboard_steward",

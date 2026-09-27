@@ -19,10 +19,25 @@
     if (!w || w === window) { receipt('The browser blocked the new window — allow popups and try again.', true); return; }
     try { w.opener = null; w.location.replace(url); w.focus(); } catch (e) { try { w.close(); } catch (_) {} }
   }
-  function receipt(text, bad) {
+  var lastUndo = null;
+  function receipt(text, bad, undo) {
     var r = $('#receipt'), t = $('#receiptText'); if (!r || !t) return;
+    lastUndo = undo || null; var u = $('#undoBtn'); if (u) u.hidden = !undo;
     t.textContent = text; r.hidden = false; r.classList.toggle('bad', !!bad);
   }
+  try { var keptLine = sessionStorage.getItem('highseat_receipt'); if (keptLine) { var kl = JSON.parse(keptLine); receipt(kl.text, false, kl.undo); sessionStorage.removeItem('highseat_receipt'); } } catch (e) {}
+  var undoBtn = $('#undoBtn');
+  if (undoBtn) undoBtn.addEventListener('click', function () {
+    if (!lastUndo) return;
+    var body = JSON.parse(JSON.stringify(lastUndo)); body.pid = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.campaign_pid) || '';
+    undoBtn.disabled = true;
+    fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { undoBtn.disabled = false; if (!j || !j.ok) { receipt((j && j.receipt) || 'Nothing was undone.', true); return; }
+        try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.receipt, undo: j.undo || null })); } catch (e) {}
+        location.reload(); })
+      .catch(function () { undoBtn.disabled = false; receipt('That did not go through — nothing was undone.', true); });
+  });
 
   // the rail: each destination scrolls to its section and opens it
   var DEST = { seat: '#brief', campaign: '#camp', needs: '#shNeeds', week: '#shDated', desk: '#deskline',
@@ -174,8 +189,11 @@
       .then(function (j) {
         send.disabled = false; send.textContent = 'Send';
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
-        say.value = ''; receipt(j.say || '…');
-        if (j.campaign_act && !j.read_only) { setTimeout(function () { location.reload(); }, 1400); return; }   // the Campaign tile shows the change; undo lives on the Campaign page
+        say.value = ''; receipt(j.say || '…', false, j.undo || null);
+        if (j.campaign_act && !j.read_only) {   // the Campaign tile shows the change after the reload; the line and its undo survive it
+          try { sessionStorage.setItem('highseat_receipt', JSON.stringify({ text: j.say, undo: j.undo || null })); } catch (e) {}
+          setTimeout(function () { location.reload(); }, 900); return;
+        }
         if (j.project_create && j.project_create.folder) receipt((j.say ? j.say + ' ' : '') + 'A project card is ready: ' + j.project_create.folder + ' — confirm it on the old dashboard.');
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });

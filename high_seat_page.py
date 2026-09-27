@@ -463,7 +463,7 @@ def _panel(ctx):
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it acts on the whole portfolio"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; start a new project called &lt;name&gt; at &lt;folder&gt; &middot; what next?</span><button class="send" id="sendBtn">Send</button></div>'
-        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span></div></section>'
+        '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '<section class="today" id="todayBlock"><div class="today-h"><h3>Today</h3><span class="c">%d raised</span></div>'
         '<div class="today-sub">What needs you, and what is due soonest &mdash; every row a fact from a record, each saying what raised it.</div>'
         '<ul class="tlist">%s</ul>%s</section></aside>'
@@ -510,11 +510,11 @@ def render_high_seat_html(ctx) -> str:
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<title>The %s &middot; Anchor</title><link rel="icon" href="/vendor/brand/gwl-m-icon.svg">'
         '<link rel="stylesheet" href="/static/high-seat-page.css?v=%s">'
-        '<script>window.ANCHOR_BOOT = {build_id: "%s"};</script></head>'
+        '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s"};</script></head>'
         '<body><div class="app">%s<div class="main">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every row on this page is read from a record; where nothing is connected or measured, it says so.</span></div></div></div>'
         '<script src="/static/high-seat-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["steward"]["high_seat_name"]), esc(ctx["build"]), esc(ctx["build"]), _rail(ctx), _masthead(ctx), _hdr(ctx),
+    ) % (esc(ctx["steward"]["high_seat_name"]), esc(ctx["build"]), esc(ctx["build"]), esc((ctx.get("campaign") or {}).get("pid") or ""), _rail(ctx), _masthead(ctx), _hdr(ctx),
          ctx.get("prefs_html") or "", board, _panel(ctx), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))
     return page

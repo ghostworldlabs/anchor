@@ -632,3 +632,6 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* W4: a long capacity state on its own line under the name and the bars */
 .cr-n{flex:none}
 .cr-state{font-size:9.5px;color:var(--text-warm);margin-top:2px;line-height:1.35}
+
+/* W5: the undo on the home's receipt line */
+.receipt .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:10.5px;color:var(--accent-t);cursor:pointer;margin-left:6px}

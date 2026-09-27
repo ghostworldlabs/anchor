@@ -71,16 +71,15 @@ def _find(cands, phrase, what):
     byword = [c for c in cands if words and words <= {w for w in re.split(r"[^a-z0-9]+", _norm(c[1])) if w}]
     if len(byword) == 1:
         return byword[0], None
-    part = [c for c in cands if key in _norm(c[1]) or _norm(c[1]) in key]
-    if len(part) == 1:
-        return part[0], None
-    if len(byword) > 1 and not exact:
-        part = byword
-    if not part and not exact:
-        names = ", ".join("\u2018%s\u2019" % c[1] for c in cands[:6])
-        return None, "no %s named \u2018%s\u2019%s" % (what, phrase, (" \u2014 the record has " + names) if names else "")
-    names = " or ".join("\u2018%s\u2019" % c[1] for c in (exact or part)[:5])
-    return None, "\u2018%s\u2019 could be %s \u2014 say which" % (phrase, names)
+    # a looser match (the words inside a name) only NAMES a candidate; it never selects one, so it never writes
+    near = byword or [c for c in cands if key in _norm(c[1])]
+    if len(near) == 1:
+        return None, "did you mean \u2018%s\u2019? say its name" % near[0][1]
+    if near or exact:
+        names = " or ".join("\u2018%s\u2019" % c[1] for c in (exact or near)[:5])
+        return None, "\u2018%s\u2019 could be %s \u2014 say which" % (phrase, names)
+    names = ", ".join("\u2018%s\u2019" % c[1] for c in cands[:6])
+    return None, "no %s named \u2018%s\u2019%s" % (what, phrase, (" \u2014 the record has " + names) if names else "")
 
 
 _MONTHS = {m.lower(): k for k, m in enumerate(_cal.month_abbr) if m}
@@ -106,8 +105,8 @@ def parse_due(s, today=None):
         return today.isoformat()
     if s == "tomorrow":
         return (today + timedelta(days=1)).isoformat()
-    if s in _DAYS:
-        ahead = (_DAYS[s] - today.weekday()) % 7 or 7
+    if s.isalpha() and (s in _DAYS or s[:3] in _DAYS):
+        ahead = (_DAYS.get(s, _DAYS.get(s[:3])) - today.weekday()) % 7 or 7
         return (today + timedelta(days=ahead)).isoformat()
     m = re.fullmatch(r"([a-z]+)\.? (\d{1,2})", s) or re.fullmatch(r"(\d{1,2}) ([a-z]+)\.?", s)
     if m:
@@ -148,17 +147,21 @@ def _needs(folder, span, today):
         return _refuse("the Campaign record could not be read: %s" % e, "campaign_needs")
     needs = [(p, i) for i in inits for p in i["needs"]]
     monday = today - timedelta(days=today.weekday())
+    start = monday.isoformat() if span != "today" else ""
     end = today if span == "today" else monday + timedelta(days=6)
     dated = sorted(((p["date"], p, i) for i in inits for p in i["parts"]
-                    if p["date"] and not p["broken"] and p["status"] not in ("done", "parked") and p["date"] <= end.isoformat()), key=lambda x: x[0])
+                    if p["date"] and not p["broken"] and p["status"] not in ("done", "parked") and start <= p["date"] <= end.isoformat()), key=lambda x: x[0])
+
+    def more(n):
+        return (" \u2014 and %d more" % (n - 5)) if n > 5 else ""
     bits = []
     if needs:
-        bits.append("%d need%s your word: %s" % (len(needs), "s" if len(needs) == 1 else "", "; ".join("%s (%s, tier %s)" % (p["text"], i["name"], i["tier"] or "?") for p, i in needs[:5])))
+        bits.append("%d need%s your word: %s%s" % (len(needs), "s" if len(needs) == 1 else "", "; ".join("%s (%s, tier %s)" % (p["text"], i["name"], i["tier"] or "?") for p, i in needs[:5]), more(len(needs))))
     else:
         bits.append("nothing waits on your word")
     label = "today" if span == "today" else "this week"
     if dated:
-        bits.append("dated by %s: %s" % (label, "; ".join("%s (%s, %s)" % (p["text"], i["name"], p["date"]) for d, p, i in dated[:5])))
+        bits.append("dated %s: %s%s" % ("today or earlier" if span == "today" else "inside this week (Monday to Sunday)", "; ".join("%s (%s, %s)" % (p["text"], i["name"], p["date"]) for d, p, i in dated[:5]), more(len(dated))))
     else:
         bits.append("nothing on the Campaign is dated %s" % ("today or earlier" if span == "today" else "inside this week"))
     return {"ok": True, "say": "; ".join(bits) + ".", "receipt": "", "undo": None, "act": "campaign_needs", "campaign_act": True, "read_only": True, "model_called": False}
@@ -167,11 +170,19 @@ def _needs(folder, span, today):
 def say_campaign(folder, text, dialogue=None, today=None):
     """None when the words are not a Campaign verb (the steward takes them); else the act's answer."""
     c = compile_utterance(text, dialogue)
-    if not c or not c.get("campaign"):
+    if c is None:
+        return _refuse("the Campaign\u2019s grammar could not be read (the engine did not answer) \u2014 nothing was done", "campaign_compile")
+    if not c.get("campaign"):
         return None
+    try:
+        return _apply(folder, c, today or date.today())
+    except Exception as e:
+        return _refuse("that did not go through: %s \u2014 look at the board before saying it again" % e, str(c.get("act") or "campaign_act"))
+
+
+def _apply(folder, c, today):
     from . import campaign_acts as acts
     act, a = c["act"], c.get("args") or {}
-    today = today or date.today()
     inits = [(s["id"], s.get("name") or s["id"]) for s, g in acts._initiatives(folder)]
     heads = {i for i, _ in inits}
     parts = [(p["id"], p.get("name") or p["id"]) for p in acts._projection(folder)
