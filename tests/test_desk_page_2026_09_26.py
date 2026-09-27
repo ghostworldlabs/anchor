@@ -144,4 +144,18 @@ def test_the_desk_puts_the_composer_right_below_the_brief():
     html = dp.render_desk_html(_ctx())
     col = html[html.index('aria-label="The steward"'):html.index('aria-label="The steward"') + 6000]
     assert col.index('id="brief"') < col.index('class="composer"') < col.index('class="exwrap"')
+    # the exchanges are INSIDE the column: the column's own </section> comes after them (a Playwright locator caught it outside once)
+    from html.parser import HTMLParser
+    class _Depth(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.stack = []; self.exwrap_inside = None
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs); self.stack.append(a.get("aria-label") or a.get("class") or tag)
+            if a.get("class") == "exwrap":
+                self.exwrap_inside = "The steward" in self.stack
+        def handle_endtag(self, tag):
+            if self.stack:
+                self.stack.pop()
+    d = _Depth(); d.feed(html)
+    assert d.exwrap_inside is True
 

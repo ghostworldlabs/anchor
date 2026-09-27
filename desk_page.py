@@ -194,9 +194,9 @@ def _steward_col(ctx):
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Desk from the Campaign record"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers here and acts on the record; the list shows what changed on the next look</span><button class="send" id="sendBtn">Send</button></div>'
-        '<div class="receipt none" id="receipt"><span class="r-mark">&middot;</span><span id="receiptText">No change yet. Every change lands here as one line, with Undo.</span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></section>'
+        '<div class="receipt none" id="receipt"><span class="r-mark">&middot;</span><span id="receiptText">No change yet. Every change lands here as one line, with Undo.</span> <button class="mini" id="undoBtn" hidden>undo</button></div></section>'
         '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the last exchanges</h3><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div>'
+        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div></section>'
     ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]),
          esc(st["label"]), ("%d shown" % min(6, len(turns))) if turns else "no transcript kept",
          ex, "Only the last few exchanges are kept here. What the steward actually did is in the list." if turns else "Nothing said here yet. The cockpit&rsquo;s conversation is the same one.")
