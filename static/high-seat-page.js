@@ -126,22 +126,12 @@
     });
   });
 
-  // Add a project: the existing route, new-folder mode; the row appears on the next look
+  // Add a project: nothing is written from this page — the old dashboard makes and confirms a project
   var apCreate = $('#apCreate');
-  if (apCreate) apCreate.addEventListener('click', function () {
-    var name = ($('#apName').value || '').trim(), parent = ($('#apParent').value || '').trim(), hint = $('#apHint');
-    if (!name || !parent) { hint.textContent = 'A name and a parent folder are needed.'; return; }
-    apCreate.disabled = true; hint.textContent = 'Creating…';
-    fetch('/api/rnd/new_project', { method: 'POST', headers: headers(), body: JSON.stringify({ mode: 'new_folder', name: name, parent_path: parent, priority: 2 }) })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        apCreate.disabled = false;
-        if (!j || !j.ok || !j.entry) { hint.textContent = (j && (j.error || j.message)) || 'Nothing was created.'; return; }
-        hint.textContent = 'Created ' + (j.entry.name || name) + ' — look again to see its row; opening its cockpit.';
-        openWin('/project/' + j.entry.id);
-        setTimeout(function () { location.reload(); }, 1200);
-      })
-      .catch(function () { apCreate.disabled = false; hint.textContent = 'That did not go through — nothing was created.'; });
+  if (apCreate) apCreate.addEventListener('click', function (e) {
+    e.preventDefault();
+    var name = ($('#apName').value || '').trim();
+    openWin('/dashboard' + (name ? ('#new-project=' + encodeURIComponent(name)) : ''));
   });
 
   // the composer: the steward's say route (the same one the old home used)
@@ -155,7 +145,7 @@
         send.disabled = false; send.textContent = 'Send';
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
         say.value = ''; receipt(j.say || '…');
-        if (j.project_create && j.project_create.folder) receipt((j.say ? j.say + ' ' : '') + 'A project card is ready: ' + j.project_create.folder + ' — confirm it on the old dashboard until this page carries the card (W5).');
+        if (j.project_create && j.project_create.folder) receipt((j.say ? j.say + ' ' : '') + 'A project card is ready: ' + j.project_create.folder + ' — confirm it on the old dashboard.');
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
   }

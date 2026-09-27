@@ -44,7 +44,7 @@ def campaign_initiatives(steps, resolved=None):
         nav = s.get("navigation") if isinstance(s.get("navigation"), dict) else {}
         groups = nav.get("groups") or []
         own = next((g for g in groups if isinstance(g, dict) and g.get("id") == s.get("id") and g.get("parent_id") is None), None)
-        if own is not None or s.get("tier"):
+        if own is not None:
             heads.append((s, own))
     out = []
     for s, own in heads:
@@ -70,14 +70,14 @@ def campaign_initiatives(steps, resolved=None):
         open_parts = [p for p in parts if p["status"] not in ("done", "parked") and not p["broken"]]
         dates = sorted(p["date"] for p in open_parts if p["date"])
         out.append({
-            "id": sid, "name": s.get("name") or sid, "tier": int(s.get("tier") or 3),
+            "id": sid, "name": s.get("name") or sid, "tier": int(s["tier"]) if s.get("tier") in (1, 2, 3) else None,
             "order": int((own or {}).get("order") or 0), "area": str(s.get("area") or ""),
             "done_when": s.get("done_when") or "", "status": s.get("status") or "",
             "parts": parts, "next": open_parts[0] if open_parts else None,
             "needs": [p for p in parts if p["needs_you"]], "next_deadline": dates[0] if dates else "",
             "done_count": sum(1 for p in parts if p["status"] == "done"),
         })
-    out.sort(key=lambda i: (i["tier"], i["order"], i["name"]))
+    out.sort(key=lambda i: (i["tier"] or 9, i["order"], i["name"]))   # an untiered initiative sorts last, its tier shown as missing
     for n, i in enumerate(out, 1):
         i["number"] = n
     return out
@@ -101,7 +101,7 @@ def ruler_markers(facts, today):
     already past sits in this week and says overdue."""
     weeks = ruler_weeks(today)
     buckets = {k: [] for k in range(5)}
-    beyond = []
+    beyond, overdue = [], []
     for f in facts or ():
         if not isinstance(f, dict):
             continue
@@ -113,7 +113,7 @@ def ruler_markers(facts, today):
                  "project_name": f.get("name", ""), "needs": bool(f.get("needs_you")),
                  "overdue": d < today, "label": _hr.due_label(st["due"], today)}
             if d < weeks[0]["start"]:
-                buckets[0].append(m)
+                overdue.append(m)          # before this Monday: overdue, not this week's delivery
                 continue
             placed = False
             for k, w in enumerate(weeks):
@@ -124,7 +124,8 @@ def ruler_markers(facts, today):
     for k in buckets:
         buckets[k].sort(key=lambda m: (m["date"], m["name"]))
     beyond.sort(key=lambda m: (m["date"], m["name"]))
-    return weeks, buckets, beyond
+    overdue.sort(key=lambda m: (m["date"], m["name"]))
+    return weeks, buckets, beyond, overdue
 
 
 # ── pieces ─────────────────────────────────────────────────────────────────────────────────────
@@ -205,6 +206,7 @@ def _campaign_tile(ctx):
     t1 = [i for i in inits if i["tier"] == 1]
     t2 = sum(1 for i in inits if i["tier"] == 2)
     t3 = sum(1 for i in inits if i["tier"] == 3)
+    untiered = sum(1 for i in inits if i["tier"] is None)
     t1_dates = sorted(i["next_deadline"] for i in t1 if i["next_deadline"])
     nearest = ""
     if t1_dates:
@@ -248,8 +250,9 @@ def _campaign_tile(ctx):
         '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d initiative%s</b> &middot; &#9873; %d need you &mdash; click one to see its specifics. '
         'The tiers, the re-ranking and the calendar view are in the Campaign.</div>'
         '<div class="t1grid">%s</div>'
-        '<div class="camp-tiers"><span><b>Tier 2</b> &middot; %d &middot; <b>Tier 3</b> &middot; %d &mdash; <span class="rest">open the Campaign for the rest</span></span></div>'
-    ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3)
+        '<div class="camp-tiers"><span><b>Tier 2</b> &middot; %d &middot; <b>Tier 3</b> &middot; %d%s &mdash; <span class="rest">open the Campaign for the rest</span></span></div>'
+    ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3,
+         (" &middot; <b>no tier yet</b> &middot; %d" % untiered) if untiered else "")
     return (
         '<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
         '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Show Tier 1</span>'
@@ -290,9 +293,8 @@ def _projects_tile(ctx):
         '<div class="ptile-body"><div class="ptile-note">The registry as it stands &mdash; every project in its folder, ranked by nobody. The board below is the same projects, ranked.</div>'
         '<div class="addbox"><h4>Add a project</h4><div class="addrow">'
         '<input id="apName" type="text" placeholder="Project name" autocomplete="off">'
-        '<input id="apParent" type="text" placeholder="Parent folder on disk" value="C:\\dev" style="flex:0 1 220px">'
-        '<button class="mk" id="apCreate">Create</button></div>'
-        '<div class="addhint" id="apHint">Creates the folder under the parent, registers the project and opens its cockpit.</div></div>'
+        '<a class="mk" id="apCreate" href="/dashboard" target="_blank" rel="noopener">Create on the dashboard</a></div>'
+        '<div class="addhint" id="apHint">A new project is still made and confirmed on the old dashboard; this page shows it on the next look.</div></div>'
         '<div id="folders">%s</div></div></section>'
     ) % (n, len(groups), "".join(folds))
 
@@ -324,13 +326,13 @@ def _desk_line(ctx):
         '<section class="deskline" id="deskline"><div class="dl-row"><span class="dl-k">Desk</span><span class="dl-d">&middot; admin, no project</span>'
         '<button class="dchip" id="chipTasks" data-desk="tasks">Tasks &middot; <span id="taskTotal">%d</span></button>'
         '<button class="dchip muted" data-desk="cal">Calendar</button><button class="dchip muted" data-desk="mail">Email</button>'
-        '<span class="dl-sp"></span><span class="dl-open muted" title="The Desk cockpit arrives with W3b">Open the Desk cockpit &mdash; not yet</span></div>'
-        '<div class="dl-body" id="deskBody"><p class="ptile-note">The task list still lives on the old dashboard until the Desk lands (W3b).</p></div></section>'
+        '<span class="dl-sp"></span><span class="dl-open muted" title="The Desk cockpit is not built yet">Open the Desk cockpit &mdash; not yet</span></div>'
+        '<div class="dl-body" id="deskBody"><p class="ptile-note">The task list still lives on the old dashboard until the Desk exists.</p></div></section>'
     ) % int(ctx.get("tasks_open") or 0)
 
 
 def _ruler(ctx):
-    weeks, buckets, beyond = ruler_markers(list(ctx["facts"].values()), ctx["today"])
+    weeks, buckets, beyond, overdue = ruler_markers(list(ctx["facts"].values()), ctx["today"])
     head = "".join('<div%s><b>%s</b><span class="sm">%s</span></div>' % (' class="now"' if k == 0 else "", esc(w["label"]), esc(w["name"])) for k, w in enumerate(weeks))
     head += '<div class="beyond"><b>%s&ndash;</b><span class="sm">beyond the ruler</span></div>' % esc(_hr.short_date((weeks[-1]["end"] + timedelta(days=1)).isoformat()))
     on_board = ctx.get("on_board") or set()
@@ -350,29 +352,37 @@ def _ruler(ctx):
                 esc(weeks[0]["label"]), ("Nearest: %s, %s." % (esc(nearest["name"]), esc(_short(nearest["date"])))) if nearest else "Nothing carries a date yet.")
         cols.append('<div%s id="week%d">%s</div>' % (' class="now"' if k == 0 else "", k + 1, inner))
     cols.append('<div class="beyond" id="weekBeyond">%s</div>' % "".join(marker(m) for m in beyond[:8]))
-    total = sum(len(v) for v in buckets.values()) + len(beyond)
+    total = sum(len(v) for v in buckets.values()) + len(beyond) + len(overdue)
+    late = ('<div class="shelf-foot late">Overdue, before this week: %s.</div>' % "; ".join(
+        '<a href="/project/%s" target="_blank" rel="noopener">%s</a> (%s, %s)' % (esc(m["project_id"]), esc(m["name"]), esc(_short(m["date"])), esc(m["project_name"]))
+        for m in overdue[:6])) if overdue else ""
     return (
         '<section class="shelf" id="shDated"><div class="shelf-h"><h3>Dated deliveries</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
         '<span class="note">Each marker is a dated open step in a project&rsquo;s record. Click one to open its cockpit.</span></div>'
         '<div class="ruler" id="ruler"><div class="rl-head">%s</div><div class="rl-marks" id="rlMarks">%s</div></div>'
-        '<div class="shelf-foot">Each marker points at the one card that owns it &mdash; no project has a second card.</div>'
+        '%s<div class="shelf-foot">Each marker points at the one card that owns it &mdash; no project has a second card.</div>'
         '<section class="cal" id="cal"><button class="cal-h" id="calHead"><span class="k">Calendar</span><span class="state">&middot; not connected</span>'
         '<span class="cal-tab" id="tabCal">Calendar</span><span class="cal-tab" id="tabMail">Email</span><span class="sp"></span><span class="tog" id="calTog">Open</span></button>'
         '<div class="cal-body" id="calBody"><p class="conn-zero">No account is connected, so there is nothing to show &mdash; nothing here is sample data. '
         'Connecting means two app registrations (Google, Microsoft) and a sign-in per account; Anchor would read before it ever writes, and every send or calendar change would ask you first.</p></div></section>'
         '</section>'
-    ) % (total, "" if total == 1 else "s", head, "".join(cols))
+    ) % (total, "" if total == 1 else "s", head, "".join(cols), late)
 
 
 def _workbench(ctx):
     live = ctx.get("live") or []
     n = len(live)
     items = "".join('<span class="live">&#9679; live</span><span>%s</span>' % esc(l.get("text")) for l in live[:3])
+    # health and failed rows belong to this line and the Doctor, not to Today (fit line 2)
+    sys_rows = [r for r in ctx.get("rows") or () if r.get("rule") in ("health", "failed")]
+    sys_html = "".join('<a class="bench-row %s" href="%s"%s>%s <span class="dim">&middot; %s</span></a>' % (
+        esc(r.get("severity")), esc(r.get("href")), ' target="_blank" rel="noopener"' if str(r.get("href", "")).startswith("/") else "",
+        esc(r.get("text")), esc(r.get("why"))) for r in sys_rows[:4])
     return (
         '<section class="shelf" id="shBench"><div class="shelf-h"><h3>Workbench</h3><span class="c">%d running</span><span class="rule"></span></div>'
         '<div class="bench" id="bench">%s<span class="dim">Terminals, runs and registers stay in the cockpit. This board does not repeat them.</span>'
-        '<span style="flex:1"></span><a class="dbtn cockpit" href="/project/__dashboard__" target="_blank" rel="noopener">Open cockpit</a></div></section>'
-    ) % (n, items or '<span class="dim">nothing running</span>')
+        '<span style="flex:1"></span><a class="dbtn cockpit" href="/project/__dashboard__?classic=1" target="_blank" rel="noopener">Open cockpit</a></div>%s</section>'
+    ) % (n, items or '<span class="dim">nothing running</span>', ('<div class="bench-sys">%s</div>' % sys_html) if sys_html else "")
 
 
 def _panel(ctx):
@@ -396,8 +406,33 @@ def _panel(ctx):
         meta.append('<span class="st">raised by: %s</span>' % esc(r.get("rule_label")))
         return '<li class="trow"><span class="tb"><span class="tt">%s</span><span class="tm">%s</span></span></li>' % (
             ('<a href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), esc(r.get("text")))) if href.startswith("/") else esc(r.get("text")), "".join(meta))
-    today_rows = "".join(trow(r) for r in rows)
+    today_rows = "".join(trow(r) for r in rows if r.get("rule") not in ("health", "failed"))
+    n_today = sum(1 for r in rows if r.get("rule") not in ("health", "failed"))
     seeds = int(ctx.get("seeds") or 0)
+    # Later this week: dated open steps after today, through Sunday
+    today = ctx["today"]
+    week_end = today + timedelta(days=6 - today.weekday())
+    later = []
+    for f in facts.values():
+        for st in f.get("dated") or ():
+            d = _hr._iso(st.get("due"))
+            if d is not None and today < d <= week_end:
+                later.append((d, st, f))
+    later.sort(key=lambda x: (x[0], x[1].get("name", "")))
+    later_html = "".join('<li class="trow"><span class="tb"><span class="tt"><a href="/project/%s" target="_blank" rel="noopener">%s</a></span>'
+                         '<span class="tm"><span class="src">%s</span><span class="due soon">due %s</span></span></span></li>' % (
+                             esc(f.get("id")), esc(st.get("name")), esc(f.get("name")), esc(_short(st.get("due")))) for d, st, f in later[:6])
+    nearest = None
+    for f in facts.values():
+        for st in f.get("dated") or ():
+            d = _hr._iso(st.get("due"))
+            if d is not None and d > week_end and (nearest is None or d < nearest[0]):
+                nearest = (d, st, f)
+    later_block = ('<div class="blockk">Later this week &middot; %s&ndash;%s</div>%s' % (
+        esc(_short((today + timedelta(days=1)).isoformat())), esc(_short(week_end.isoformat())),
+        ('<ul class="tlist">%s</ul>' % later_html) if later_html else
+        ('<p class="emptyline"><b>Nothing is dated inside the rest of this week.</b>%s</p>' % (
+            (" The next dated step is %s (%s, %s)." % (esc(nearest[1].get("name")), esc(_short(nearest[1].get("due"))), esc(nearest[2].get("name")))) if nearest else ""))))
     return (
         '<aside class="panel"><section class="stew" id="stewBlock">%s<span class="nm"><b id="stewTitle">The %s</b><span id="stewName">%s &middot; your steward</span></span><span class="tag">Steward</span></section>'
         '<div class="seedbar"><button class="seedbtn" id="seedBtn"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>'
@@ -408,10 +443,10 @@ def _panel(ctx):
         '<div class="receipt" id="receipt" hidden><span class="r-mark">&#10003;</span><span id="receiptText"></span></div></section>'
         '<section class="today" id="todayBlock"><div class="today-h"><h3>Today</h3><span class="c">%d raised</span></div>'
         '<div class="today-sub">What needs you, and what is due soonest &mdash; every row a fact from a record, each saying what raised it.</div>'
-        '<ul class="tlist">%s</ul></section></aside>'
+        '<ul class="tlist">%s</ul>%s</section></aside>'
     ) % (_brand_img(ctx["build"], st["high_seat"]), esc(st["high_seat_name"]), esc(st["label"]), seeds,
-         "ideas that could start a project" if seeds else "no seeds yet &mdash; say &ldquo;seed: &hellip;&rdquo; to the steward",
-         esc(ctx["brief_when"]), bullets, esc(st["label"]), len(rows), today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>')
+         "ideas that could start a project" if seeds else "no seeds yet",
+         esc(ctx["brief_when"]), bullets, esc(st["label"]), n_today, today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>', later_block)
 
 
 def render_high_seat_html(ctx) -> str:
@@ -422,7 +457,17 @@ def render_high_seat_html(ctx) -> str:
     needs = [e for e in entries if (facts.get(e.get("id")) or {}).get("needs_you")]
     parked = ctx.get("parked") or []
     parked_ids = {e.get("id") for e in parked}
-    cont = [e for e in entries if e.get("id") not in parked_ids and e not in needs and ((facts.get(e.get("id")) or {}).get("next") or (facts.get(e.get("id")) or {}).get("summary"))]
+    # the locked order (v2.2): needs-you first, then dated inside the five weeks soonest first, then the rest
+    horizon = (ctx["today"] + timedelta(days=35)).isoformat()
+
+    def _soon(e):
+        f = facts.get(e.get("id")) or {}
+        d = f.get("nearest_due") or ""
+        return d if d and d <= horizon else ""
+    dated = sorted([e for e in entries if e.get("id") not in parked_ids and e not in needs and _soon(e)], key=lambda e: (_soon(e), str(e.get("name") or "")))
+    rest = [e for e in entries if e.get("id") not in parked_ids and e not in needs and e not in dated
+            and ((facts.get(e.get("id")) or {}).get("next") or (facts.get(e.get("id")) or {}).get("summary") or (facts.get(e.get("id")) or {}).get("dated"))]
+    cont = dated + rest
     quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
     ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | parked_ids
     board = (
@@ -432,7 +477,7 @@ def render_high_seat_html(ctx) -> str:
                  "".join(_card(e, facts.get(e.get("id")) or {}, " need") for e in needs) or '<div class="ptile-note">Nothing waits on you.</div>')
         + _desk_line(ctx) + _ruler(ctx)
         + _shelf("shCont", "Continuing", "%d project%s" % (len(cont), "" if len(cont) == 1 else "s"),
-                 "Steward order. Moving shelves never makes a second card.",
+                 "Dated soonest first, then the rest. Moving shelves never makes a second card.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in cont) or '<div class="ptile-note">No project carries a next step yet.</div>',
                  ("%d registry project%s no open next step and no card on the board today &mdash; they are in the Projects tile above, in their folders." % (len(quiet), " has" if len(quiet) == 1 else "s have")) if quiet else "")
         + _shelf("shPark", "Parked", "%d project%s" % (len(parked), "" if len(parked) == 1 else "s"), "Off the shelves, still one card each.",

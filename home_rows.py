@@ -47,7 +47,7 @@ def project_facts(entry, today=None):
     folder = str(entry.get("folder_path") or "").strip()
     out = {"id": pid, "name": name, "href": ("/project/%s" % pid) if pid else "",
            "needs_you": "", "next": "", "why": "", "summary": None, "summary_age_s": None, "dated": [],
-           "nearest_due": "", "has_record": False}
+           "nearest_due": "", "has_record": False, "folder": folder, "projection": None}
     if not folder or not pid:
         return out
     root = Path(folder)
@@ -72,6 +72,7 @@ def project_facts(entry, today=None):
     rm = _read_json(root / "roadmap.json")
     if isinstance(rm, dict):
         out["has_record"] = True
+        out["projection"] = rm.get("roadmap_projection") or []   # kept so a resolver in the same request need not read it again
         dated = []
         for s in rm.get("roadmap_projection") or []:
             if not isinstance(s, dict) or s.get("status") not in _OPEN:

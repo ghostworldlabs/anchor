@@ -7657,14 +7657,15 @@ def _high_seat_context():
     import home_rows as _hr
     import high_seat_page as _hsp
     today, now = datetime.now().date(), datetime.now()
+    # ONE registry read for the page, partitioned in memory (live · parked · the Campaign)
     try:
-        entries = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
+        everything = list(_rnd.list_projects(include_archived=True, include_future=True, include_retired=True))
     except Exception:
-        entries = []
-    try:
-        groups = _rnd.group_by_group(include_archived=False, include_future=False, include_retired=False)
-    except Exception:
-        groups = {}
+        everything = []
+    entries = [e for e in everything if str(e.get("state") or "active") not in ("archived", "future", "retired")]
+    groups = {}
+    for e in sorted(entries, key=lambda x: (int(x.get("priority") or 2), str(x.get("name") or "").lower())):
+        groups.setdefault(str(e.get("group") or "").strip() or "Ungrouped", []).append(e)
     facts_list = _hr.all_project_facts(entries, today)
     facts = {f["id"]: f for f in facts_list}
     try:
@@ -7679,11 +7680,7 @@ def _high_seat_context():
     bullets = _ha.brief_bullets(rows, facts_list, today=today, seat_name=stew["high_seat_name"])
     counts = _ha.rail_counts(sessions, rows, folders=len(groups), open_projects=len(entries))
     live, _more = _ha.live_rows(sessions, names)
-    try:
-        parked = [e for e in _rnd.list_projects(include_archived=False, include_future=True, include_retired=False)
-                  if e.get("state") == "future"]
-    except Exception:
-        parked = []
+    parked = [e for e in everything if e.get("state") == "future"]
     try:
         _p, tasks, _i = gather_all()
         tasks_open = sum(1 for x in tasks if not x.get("done"))
@@ -7693,15 +7690,22 @@ def _high_seat_context():
     campaign, initiatives, seeds = None, [], 0
     try:
         camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
-        entry = next((e for e in _rnd.list_projects(include_archived=True, include_future=True, include_retired=True)
+        entry = next((e for e in everything
                       if e.get("folder_path") and Path(e["folder_path"]).resolve() == camp_dir), None)
         if entry and (camp_dir / "roadmap.json").is_file():
             from steward_cockpit.steward_campaign import read_map as _read_map
             from steward_cockpit.campaign_parts import resolve_parts as _resolve
             m = _read_map(str(camp_dir))
-            resolved = _resolve(m.get("steps") or [], cache={}, with_lead=False)
+            # the resolver reads the roadmaps home_rows already read this request
+            _cache = {("projection", str(f.get("folder") or "")): f.get("projection")
+                      for f in facts_list if f.get("folder") and f.get("projection") is not None}
+            resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=False)
             initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
             campaign = {"pid": entry.get("id"), "name": entry.get("name")}
+            top = next((i for i in initiatives if i.get("tier") == 1), None)
+            if top is not None:
+                reason = top.get("done_when") or ((top.get("next") or {}).get("text") if top.get("next") else "")
+                bullets = (["Your Campaign puts %s first%s." % (top["name"], (" \u2014 " + str(reason)[:140]) if reason else "")] + bullets)[:5]
             try:
                 strip = json.loads((camp_dir / "strip.json").read_text(encoding="utf-8"))
                 seeds = sum(1 for r in (strip.get("grasscatch") or []) if isinstance(r, dict) and r.get("kind") == "seed")
@@ -7716,23 +7720,23 @@ def _high_seat_context():
     week = _hr.week_in_words(today)
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
-        "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M \u00b7 %A %d %B"),
+        "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M · %A %d %B"),
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
         "capacity": [
-            {"name": "ChatGPT", "state": "not measured yet", "note": "the capacity meter arrives with W4 \u2014 nothing is guessed"},
-            {"name": "Grok", "state": "not measured yet", "note": "W4"},
-            {"name": "Claude account 1", "state": "not measured yet", "note": "W4"},
-            {"name": "Claude account 2", "state": "not measured yet", "note": "W4"},
-            {"name": "Gemini", "state": "not connected", "note": "a future subscription \u2014 nothing to read"},
+            {"name": "ChatGPT", "state": "not measured yet", "note": "nothing is guessed until Anchor can read it"},
+            {"name": "Grok", "state": "not measured yet", "note": "nothing is guessed"},
+            {"name": "Claude account 1", "state": "not measured yet", "note": "nothing is guessed"},
+            {"name": "Claude account 2", "state": "not measured yet", "note": "nothing is guessed"},
+            {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"},
         ],
     }
 
 
 def render_high_seat_page() -> str:
-    """GET /high-seat \u2014 the steward's portfolio surface (W1b); an honest error page, never a blank."""
+    """GET /high-seat — the steward's portfolio surface (W1b); an honest error page, never a blank."""
     try:
         import high_seat_page as _hsp
         return _hsp.render_high_seat_html(_high_seat_context())
