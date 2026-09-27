@@ -29,8 +29,8 @@ def _steps():
 def _resolved():
     mba = "6765ece4b3bc43b0b0b0907b92b17280"
     return {
-        "mba-project": {"kind": "project", "name": "MBA Teaching AI", "what": "", "state": "waiting on you: approve the Lecture 3 AI supplement", "date": "2026-10-10", "href": "/project/" + mba, "broken": False, "gap": ""},
-        "lectures-3-4": {"kind": "step", "name": "MBA Teaching AI", "what": "Lectures 3 + 4 revised, with AI supplements", "state": "waiting", "date": "2026-10-10", "href": "/project/" + mba, "broken": False, "gap": ""},
+        "mba-project": {"kind": "project", "pid": mba, "name": "MBA Teaching AI", "what": "", "state": "waiting on you: approve the Lecture 3 AI supplement", "date": "2026-10-10", "href": "/project/" + mba, "broken": False, "gap": ""},
+        "lectures-3-4": {"kind": "step", "pid": mba, "name": "MBA Teaching AI", "what": "Lectures 3 + 4 revised, with AI supplements", "state": "waiting", "date": "2026-10-10", "href": "/project/" + mba, "broken": False, "gap": ""},
         "lecture-99": {"kind": "step", "name": "MBA Teaching AI", "what": "", "state": "", "date": "", "href": "", "broken": True, "gap": "no step 'lecture-99' in MBA Teaching AI"},
     }
 
@@ -87,17 +87,19 @@ def test_the_ruler_buckets_dates_by_the_weeks_of_the_page():
 
 def test_the_page_renders_from_facts_and_escapes_them():
     html = hsp.render_high_seat_html(_ctx())
-    assert "<title>The Tip of the Hat" in html and "high-seat-page.css" in html and "high-seat-page.js" in html
+    assert "<title>Tip of the Hat</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-high-seat-hat.jpg?v=test"' in html   # the tab: the steward's icon and the seat's name
+    assert "high-seat-page.css" in html and "high-seat-page.js" in html
+    assert html.index('class="mh-stew"') < html.index('class="mh-pill"') and 'id="stewBlock"' not in html   # the steward at the very top, beside the AI Cockpit pill
     assert "this week Sep 21–27" in html and "id='prefs-here'" in html
     assert "Family &lt;Trusts&gt;" in html and "Family <Trusts>" not in html
     # the Campaign tile: the Tier 1 line, one tile with its parts and the broken reference named
     assert "<b>Tier 1:</b> MBA Teaching, Fall 2026" in html and 'href="/project/df56"' in html
     assert "broken reference: no step &#x27;lecture-99&#x27; in MBA Teaching AI" in html
     assert "Tier 2</b> &middot; 1" in html
-    # the shelves: the waiting project on Needs you, the next one on Continuing, the quiet one counted off the board
+    # the shelves: the waiting project on Needs you, the next one on Continuing, the record-less one a line on the Projects tile
     assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
-    quiet = html[html.index('id="shQuiet"'):html.index('id="shPark"')]
-    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' in quiet and "no steward record yet" in quiet     # the record-less one has its own card on its own shelf
+    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
+    assert "<b>1</b> with no steward record yet" in html                              # one line on the Projects tile, no shelf (Grok R6; fewer tiles)
     # the ruler and the panel
     assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
     assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html
@@ -119,7 +121,6 @@ def test_without_a_campaign_the_tile_says_so_honestly():
 def test_the_board_names_the_effort_a_card_reads_and_shelves_the_record_less_projects():
     ctx = _ctx(campaign=True)
     html = hsp.render_high_seat_html(ctx)
-    assert 'id="shQuiet"' in html and "No record yet" in html
     assert 'class="mh-mark"' in html                                                  # the masthead mark carries its size class
     # a fact that reads an effort one folder down names it on the card and hands it to the card's parts
     e = {"id": "eff1", "name": "Skill Foundry", "blurb": "the foundry"}
@@ -158,3 +159,26 @@ def test_the_page_script_says_plainly_when_the_browser_is_not_logged_in():
     assert "statusbtn" not in js and "data-login" in js and "b.closest('.balloon')" in js   # a balloon re-reads after a paste (Grok R7)
     assert "'/api/version'" in js and "location.reload()" in js                    # a redeploy reloads the open page (the old home's watcher)
     assert js.count("fetch('/api/auth/login'") == 1                                 # one login(): the hand-off and the paste share it (Grok R7)
+
+
+def test_the_campaign_tile_shows_compact_initiatives_with_a_light_and_opens_to_a_status():
+    """John, 2026-09-27: every initiative tile is its name, one line and a light — needs you · working · waiting · idle —
+    on the home and the Campaign page; open, it shows what it showed before plus its Status."""
+    inits = hsp.campaign_initiatives(_steps(), _resolved())
+    mba, trusts = inits[0], inits[1]
+    assert hsp.initiative_light(mba) == "needs" and hsp.initiative_line(mba)[1] == "wait"
+    assert hsp.initiative_light(trusts) == "idle" and hsp.initiative_line(trusts) == ("nothing open", "none")
+    # a referenced project with something running lights the initiative "working" once nothing waits on him
+    quiet = dict(mba, needs=[])
+    assert hsp.initiative_light(quiet, working={"6765ece4b3bc43b0b0b0907b92b17280"}) == "working"
+    assert hsp.initiative_light(quiet) == "waiting"                                   # its step part waits (on its own record, not on him)
+    assert mba["parts"][0]["pid"] == "6765ece4b3bc43b0b0b0907b92b17280"               # the part carries its target's id for the light
+    st = hsp.initiative_status_html(dict(mba, parts=[dict(mba["parts"][0], lead="Next: Lecture 3 — the interface lesson is final.")] + mba["parts"][1:]))
+    assert "Status</span>" in st and "Next: Lecture 3" in st and "waiting on you: approve the Lecture 3 AI supplement" in st and "4 parts &middot; 0 done &middot; 1 needs you" in st
+    html = hsp.render_high_seat_html(_ctx(campaign=True))
+    camp = html[html.index('<section class="camp'):html.index('id="ptile"')]
+    assert 'class="camp open"' in camp and ">Hide<" in camp                             # Tier 1 shows by default
+    tile = camp[camp.index('class="ini-tile needs"'):camp.index("</article>")]
+    assert '<span class="ilight needs"' in tile and "needs you</span>" in tile
+    assert tile.index('class="it-line wait"') < tile.index('class="it-more"') < tile.index('class="istatus"') < tile.index('class="it-parts"')
+    assert "Needs you: MBA Teaching AI" in tile                                          # the one line: the part that waits on him

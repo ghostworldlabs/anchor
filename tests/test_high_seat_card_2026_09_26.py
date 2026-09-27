@@ -48,8 +48,13 @@ def test_next_deliverables_and_plan_read_the_same_record(tmp_path):
     assert "Next in the plan" in nxt and "Lecture 3 AI supplement" in nxt
     dl = card.card_part(PID, "deliverables", str(d), "MBA Teaching AI")["html"]
     assert "Lecture 3 AI supplement, draft 2" in dl
+    # the cockpit's organisation (John, 2026-09-11): current work and review first, Approved folded, then the work by domain
+    assert dl.index("Current work and review") < dl.index("Approved &middot;") < dl.index("All the work, by domain")
+    assert '<details class="cp-fold"><summary>' in dl and '<details class="cp-node d0' in dl
     pl = card.card_part(PID, "plan", str(d), "MBA Teaching AI")["html"]
     assert "1 of 3 steps done" in pl and "Not done &middot; 2" in pl and "due 2026-10-10" in pl
+    assert "The plan, by domain" in pl and '<details class="cp-node d0 flag" open>' in pl    # the domain carries the cockpit's mark (a step waits on him) and stays open
+    assert 'class="cp-step s-done"' in pl and 'class="cp-step s-waiting"' in pl
     assert "Open the plan in the cockpit" in pl
 
 

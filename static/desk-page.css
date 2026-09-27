@@ -306,3 +306,9 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* W4: a long capacity state on its own line under the name and the bars */
 .cr-n{flex:none}
 .cr-state{font-size:9.5px;color:var(--text-warm);margin-top:2px;line-height:1.35}
+
+/* the steward in the masthead, beside the AI Cockpit pill (John, 2026-09-27) */
+.mh-stew{display:flex;align-items:center;gap:8px;margin-right:4px}
+.mh-seat{width:30px;height:30px;border-radius:8px;object-fit:cover;background:#0b0e14;display:block;flex:none}
+.mh-stew b{display:block;font-size:12.5px;font-weight:650;letter-spacing:-.1px;line-height:1.2;white-space:nowrap}
+.mh-stew span{display:block;font-size:10.5px;color:var(--text-dim);white-space:nowrap}

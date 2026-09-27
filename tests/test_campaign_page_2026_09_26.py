@@ -54,7 +54,14 @@ def _ctx():
 
 def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record():
     html = cpg.render_campaign_html(_ctx())
-    assert "<title>The Campaign" in html and "campaign-page.css" in html and "campaign-page.js" in html
+    assert "<title>The Campaign</title>" in html and 'rel="icon" href="/vendor/brand/jarvis-seal-salver.jpg?v=test"' in html   # the tab: the steward's seal
+    assert "campaign-page.css" in html and "campaign-page.js" in html and 'class="mh-stew"' in html
+    # tiers stacked, Tier 1 first; each tile compact — its light and one line — and its Status behind the open
+    t1, t2 = html.index("Tier 1<span"), html.index("Tier 2<span")
+    assert t1 < t2 and html.index('data-lane="mba-teaching"') < t2 < html.index('data-lane="trusts"')
+    tile = html[html.index('data-lane="mba-teaching"'):html.index('data-lane="trusts"')]
+    assert '<span class="ilight needs"' in tile and 'class="iline wait"' in tile and 'class="imore"' in tile and 'class="istatus"' in tile
+    assert tile.index('class="iline wait"') < tile.index('class="imore"') < tile.index('class="istatus"') < tile.index('class="obody"')
     assert "2 in priority order &middot; T1 1 / T2 1 / T3 0" in html
     assert 'data-lane="mba-teaching"' in html and 'data-lane="trusts"' in html and "priority 1 of 2" in html
     assert "retool homework 2" in html and "Oct 27" in html and "Lectures 3 + 4 revised, with AI supplements" in html

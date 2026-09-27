@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 import home_rows as _hr
-from high_seat_page import esc, _brand_img, _masthead, ruler_weeks
+from high_seat_page import esc, _brand_img, _masthead, ruler_weeks, LIGHTS, initiative_light, initiative_line, initiative_status_html
 
 TIER_WORDS = {1: "do first", 2: "next in line", 3: "when there is room"}
 TIER_COLOURS = {1: "#6c9cfc", 2: "#8b93a6", 3: "#5f6674"}
@@ -76,6 +76,9 @@ def _part_row(i, p, today, tick_allowed):
 
 
 def _tile(i, ctx, open_id):
+    """An initiative's tile: compact by default (John, 2026-09-27) — its number and rank, its name, its light and one
+    line; open, everything version D showed (the area and the tier menu, done-looks-like, next, the counts, the parts
+    with their acts) plus its Status."""
     today = ctx["today"]
     dated = [p for p in i["parts"] if p["date"] and not p["broken"] and p["status"] not in ("done", "parked")]
     nxt = i["next"]
@@ -94,21 +97,27 @@ def _tile(i, ctx, open_id):
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
     ) % (len(i["parts"]), len(dated), (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]))
+    light = initiative_light(i, ctx.get("working") or set())
+    glyph, word = LIGHTS[light]
+    one, kind = initiative_line(i)
     return (
         '<article class="itile%s%s" data-lane="%s" style="--areac:%s"><div class="ihead"><span class="pnum" title="priority %d of %d">%d</span>'
         '<span class="rank"><button data-act="up" data-lane="%s" title="up within the tier">&#9650;</button><button data-act="down" data-lane="%s" title="down within the tier">&#9660;</button></span>'
-        '<button class="iname" data-act="toggle" data-lane="%s">%s</button></div>'
-        '<div class="iarea"><span class="larea">%s</span><span class="tierpick">Tier <select class="tsel" data-tiersel="%s">%s</select></span></div>'
+        '<button class="iname" data-act="toggle" data-lane="%s">%s</button><span class="ilight %s" title="the light: needs you · working · waiting · idle, read from its parts">%s %s</span></div>'
+        '<div class="iline %s">%s</div>'
+        '<div class="imore"><div class="iarea"><span class="larea">%s</span><span class="tierpick">Tier <select class="tsel" data-tiersel="%s">%s</select></span></div>'
         '<div class="idone"><span class="k">Done looks like</span>%s</div>'
         '<div class="inext"><span class="k">Next</span>%s</div>'
-        '<div class="isum">%d part%s%s &middot; %d dated%s &middot; %s</div>%s</article>'
+        '<div class="isum">%d part%s%s &middot; %d dated%s &middot; %s</div>%s%s</div></article>'
     ) % (" needs" if i["needs"] else "", " open" if i["id"] == open_id else "", esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
-         i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["name"]),
+         i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["name"]), light, glyph, word,
+         kind, one,
          esc(i["area"].title() or "no area"), esc(i["id"]), tier_opts,
          esc(i["done_when"]) or "not written yet &mdash; say what done looks like",
          ((esc(nxt["text"]) + " &middot; " + (('<span class="d">%s</span>' % esc(_short(nxt["date"]))) if nxt["date"] else "no date") + (' &middot; <span class="am">&#9873; needs you</span>' if nxt["needs_you"] else "")) if nxt else "nothing open"),
          len(i["parts"]), "" if len(i["parts"]) == 1 else "s", (" (%d done)" % i["done_count"]) if i.get("done_count") else "", len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
-         (("overdue " if (_hr._iso(i["next_deadline"]) or today) < today else "next deadline ") + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline set", body)
+         (("overdue " if (_hr._iso(i["next_deadline"]) or today) < today else "next deadline ") + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline set",
+         initiative_status_html(i), body)
 
 
 def _grouped(ctx, open_id):
@@ -320,24 +329,24 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<span class="c" id="boardCount">%d in priority order &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close all</button></div>'
         '%s%s%s%s'
-        '<p class="boardfoot" id="boardFoot">Tier is the grouping; the number on each tile is the global priority, and it renumbers whenever a tier changes. <b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them. A tile opens in place and its column widens. '
+        '<p class="boardfoot" id="boardFoot">Tier 1 first, the lower tiers below. A tile is its name, its light and one line (<i class="lg needs">&#9873;</i> needs you &middot; <i class="lg working">&#9679;</i> working &middot; <i class="lg waiting">&#9679;</i> waiting &middot; <i class="lg idle">&#9675;</i> idle); it opens in place to its status, its parts and its dates. The number on each tile is the global priority, and it renumbers whenever a tier changes. <b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them. '
         '<span class="am">&#9873; needs you</span> &middot; <span class="ok">&#10003; done</span> &middot; <b>parked</b>. Every change is one line with undo.</p></section>'
     ) % (len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _seedband(ctx), _areas(ctx), _grouped(ctx, open_id), _calendar(ctx))
     hdr = (
-        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>%s<span class="who">%s &middot; the %s</span>'
+        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
         '<a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(st["high_seat_name"]), _brand_img(ctx["build"], st["seal"], "seal"), esc(st["label"]), esc(st["high_seat_name"]),
+    ) % (esc(st["high_seat_name"]),
          _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>The Campaign &middot; Anchor</title><link rel="icon" href="/vendor/brand/gwl-m-icon.svg">'
+        '<title>The Campaign</title><link rel="icon" href="/vendor/brand/%s?v=%s">'
         '<link rel="stylesheet" href="/static/campaign-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="canvas">%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every initiative, part, date and count on this page is read from the Campaign record; a project part is read from its own record.</span></div></div>'
         '<script src="/static/campaign-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
+    ) % (esc(st.get("seal") or "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), _masthead(ctx), hdr, ctx.get("prefs_html") or "", board, _panel(ctx),
          _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))

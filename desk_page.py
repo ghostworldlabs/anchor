@@ -284,19 +284,19 @@ def render_desk_html(ctx) -> str:
     st = ctx["steward"]
     tasks = desk_tasks(ctx["initiatives"])
     hdr = (
-        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>Desk</h2>%s<span class="who">%s &middot; the %s</span>'
+        '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>Desk</h2>'
         '<button class="tool doctor" data-tool="doctor">&#10010; Anchor Doctor</button><button class="tool" data-tool="zombie">%sZombie Hunter</button><button class="tool" data-tool="foundry">%sSkill Foundry</button>'
         '<a class="tool" href="/project/%s" title="the Campaign, this record in tiers">the Campaign</a><a class="tool" href="/project/%s?doc=1" title="the ordinary cockpit of this record">the cockpit</a><div class="date">%s</div></div>'
-    ) % (esc(st["high_seat_name"]), _brand_img(ctx["build"], st["seal"], "seal"), esc(st["label"]), esc(st["high_seat_name"]),
+    ) % (esc(st["high_seat_name"]),
          _brand_img(ctx["build"], "zombie-hunter-radar.jpg"), _brand_img(ctx["build"], "skill-foundry-icon.jpg"), esc(ctx["pid"]), esc(ctx["pid"]), esc(ctx["today_str"]))
     return (
         '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>The Desk &middot; Anchor</title><link rel="icon" href="/vendor/brand/gwl-m-icon.svg">'
+        '<title>The Desk</title><link rel="icon" href="/vendor/brand/%s?v=%s">'
         '<link rel="stylesheet" href="/static/desk-page.css?v=%s">'
         '<script>window.ANCHOR_BOOT = {build_id: "%s", campaign_pid: "%s", today: "%s"};</script></head>'
         '<body><div class="page">%s%s<div class="prefs">%s</div><div class="cockpit">%s%s%s</div>'
         '<div class="foot">%s<span>A <b class="gwl-accent">Ghost World Labs</b> tool &middot; Powered by NextGen Nuclear &middot; AI Cockpit &middot; J.C. Liechty</span>'
         '<span>&mdash; every task, date and count on this page is read from the Campaign record; Calendar and Email are not connected, and say so.</span></div></div>'
         '<script src="/static/desk-page.js?v=%s"></script></body></html>'
-    ) % (esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
+    ) % (esc((ctx.get("steward") or {}).get("seal") or "gwl-m-icon.svg"), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["build"]), esc(ctx["pid"]), ctx["today"].isoformat(), _masthead(ctx), hdr, ctx.get("prefs_html") or "",
          _tasks_col(ctx), _steward_col(ctx), _right_col(ctx, tasks), _brand_img(ctx["build"], "gwl-m-icon.svg"), esc(ctx["build"]))

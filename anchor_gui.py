@@ -7648,6 +7648,40 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
             "calendar": cal_html, "email": mail_html}
 
 
+def _working_pids(entries, sessions):
+    """The projects with something running (the initiative light's "working"): a managed session in status running, or
+    a live steward engine that is busy on the project's folder or an effort under it. Read-only; never raises."""
+    out = set()
+    try:
+        for rec in sessions or ():
+            if isinstance(rec, dict) and rec.get("status") == "running" and rec.get("project_id"):
+                out.add(str(rec["project_id"]))
+    except Exception:
+        pass
+    try:
+        from steward_cockpit.steward_routes import ENGINES as _engines
+        folders = []
+        for e in entries or ():
+            try:
+                if e.get("folder_path") and e.get("id"):
+                    folders.append((Path(e["folder_path"]).resolve(), str(e["id"])))
+            except Exception:
+                continue
+        for cdir, eng in list(_engines.items()):
+            try:
+                if not (eng.alive() and getattr(eng, "busy", False)):
+                    continue
+                c = Path(str(cdir)).resolve()
+                for f, pid in folders:
+                    if c == f or f in c.parents:
+                        out.add(pid)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
 def _high_seat_context():
     """Everything the High Seat page (W1b, 2026-09-26) is made of, read once per request: the
     registry, each project's steward record (home_rows), the ranked rows and the brief
@@ -7699,7 +7733,7 @@ def _high_seat_context():
             # the resolver reads the roadmaps home_rows already read this request
             _cache = {("projection", str(f.get("folder") or "")): f.get("projection")
                       for f in facts_list if f.get("folder") and f.get("projection") is not None}
-            resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=False)
+            resolved = _resolve(m.get("steps") or [], cache=_cache, with_lead=True)   # a project part's lead line feeds the initiative's Status
             initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
             campaign = {"pid": entry.get("id"), "name": entry.get("name")}
             top = next((i for i in initiatives if i.get("tier") == 1), None)
@@ -7726,7 +7760,7 @@ def _high_seat_context():
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
-        "capacity": capacity,
+        "capacity": capacity, "working": _working_pids(entries, sessions),
     }
 
 
@@ -7757,7 +7791,7 @@ def _campaign_context(entry):
     today, now = datetime.now().date(), datetime.now()
     m = _read_map(folder)
     steps = m.get("steps") or []
-    resolved = _resolve(steps, cache={}, with_lead=False)
+    resolved = _resolve(steps, cache={}, with_lead=True)   # a project part's lead line feeds the initiative's Status
     initiatives = _hsp.campaign_initiatives(steps, resolved)
     try:
         from steward_cockpit.campaign_seeds import read_seeds as _read_seeds
@@ -7785,9 +7819,15 @@ def _campaign_context(entry):
         prefs_html = render_model_prefs_controls(render_steward_control())
     except Exception:
         prefs_html = ""
+    try:
+        _all = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
+        working = _working_pids(_all, _sessreg.list_sessions())
+    except Exception:
+        working = set()
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
             "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
-            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False}
+            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False,
+            "working": working}
 
 
 def _capacity_rows():

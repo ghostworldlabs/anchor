@@ -403,3 +403,36 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
   .rl-head{position:static}
   .seedrow{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* the steward in the masthead, beside the AI Cockpit pill (John, 2026-09-27) */
+.mh-stew{display:flex;align-items:center;gap:8px;margin-right:4px}
+.mh-seat{width:30px;height:30px;border-radius:8px;object-fit:cover;background:#0b0e14;display:block;flex:none}
+.mh-stew b{display:block;font-size:12.5px;font-weight:650;letter-spacing:-.1px;line-height:1.2;white-space:nowrap}
+.mh-stew span{display:block;font-size:10.5px;color:var(--text-dim);white-space:nowrap}
+
+/* the light on an initiative tile and the legend's dots: needs you · working · waiting · idle */
+.ilight{flex:none;font-size:10px;font-weight:700;white-space:nowrap;color:var(--text-dim2)}
+.ilight.needs{color:var(--amber-t)}.ilight.working{color:var(--success)}.ilight.waiting{color:var(--accent-t)}
+.lg{font-style:normal;font-weight:700}.lg.needs{color:var(--amber-t)}.lg.working{color:var(--success)}.lg.waiting{color:var(--accent-t)}.lg.idle{color:var(--text-dim2)}
+.legend{color:var(--text-dim2);white-space:nowrap}
+/* an opened initiative's Status: each project part's own steward status, then the parts in one line */
+.istatus{margin-top:7px;padding-top:7px;border-top:1px solid var(--line);font-size:11.5px;line-height:1.45}
+.istatus .k{display:block;font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-bottom:3px}
+.istatus .isrow{padding:2px 0}.istatus .isrow a{color:var(--accent-t);text-decoration:none}.istatus .isrow a:hover{text-decoration:underline}
+.istatus .am{color:var(--amber-t)}.istatus .dim{color:var(--text-dim2)}
+
+/* tiers stacked (John, 2026-09-27: more room for tier 1, the lower tiers below); each tier a grid of compact tiles */
+.tiers{display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:4px;transition:none}
+.tcol{flex:none;overflow:visible;min-height:0}
+.tcol-b{display:grid;grid-template-columns:repeat(auto-fill,minmax(226px,1fr));gap:7px;overflow:visible;align-items:start}
+.itile{margin-bottom:0}
+.itile.open{grid-column:1 / -1}
+.ihead{align-items:center}
+.iname{-webkit-line-clamp:1}
+.itile.open .iname{-webkit-line-clamp:3}
+.tiers.focused .itile:not(.open) .iname{font-size:12.5px;-webkit-line-clamp:1}
+.iline{font-size:11px;color:var(--text-warm);margin-top:4px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.iline.wait{color:var(--amber-t)}
+.itile:not(.open) .imore{display:none}
+.boardfoot .lg{font-size:11px}
+@media(max-width:1200px){.tiers{overflow:visible}}
