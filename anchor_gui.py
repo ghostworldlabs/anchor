@@ -21755,6 +21755,21 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self.send_error(404); return
                 self._send_html(_doc)
                 return
+            if _path_only == "/api/high-seat/card":
+                # W2 (High Seat, 2026-09-26): a card's part, composed from the cockpit's own
+                # readers on the project's root effort — token-gated like the steward API.
+                if not self._term_token_ok():
+                    self._send_json({"error": "unauthorized"}, code=401); return
+                _q = parse_qs(urlparse(self.path).query)
+                _pid = (_q.get("pid", [""])[0] or "").strip()
+                _part = (_q.get("part", [""])[0] or "").strip()
+                _entry = _rnd.get_project(_pid) if _pid and not _unsafe_path_seg(_pid) else None
+                if not _entry:
+                    self._send_json({"ok": False, "error": "no such project"}, code=404); return
+                from steward_cockpit.high_seat_card import card_part as _card_part
+                _out = _card_part(_pid, _part, _entry.get("folder_path") or "", _entry.get("name") or "")
+                self._send_json(_out, code=200 if _out.get("ok") else 400)
+                return
             if _path_only.startswith("/api/steward/"):
                 if not self._term_token_ok():
                     self._send_json({"error": "unauthorized"}, code=401); return

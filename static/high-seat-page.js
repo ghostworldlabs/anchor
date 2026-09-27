@@ -68,11 +68,34 @@
     row.addEventListener('dblclick', function () { var pid = row.getAttribute('data-pid'); if (pid) openWin('/project/' + pid); });
   });
 
-  // the cards: a click opens the cockpit; Status opens the same until the tiles open in place (W2)
+  // the cards open in place (W2): Status beside the name; Next steps · Deliverables · Plan in the acts row —
+  // each part is composed on the server from the cockpit's own readers, so the card says what the cockpit says
+  var partCache = {};
+  function openPart(card, pid, part, btn) {
+    var body = $('.t-body', card);
+    var same = card.getAttribute('data-open') === part;
+    $$('.t-acts button, .statusbtn', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
+    if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
+    card.setAttribute('data-open', part); card.classList.add('open');
+    body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
+    var key = pid + ':' + part;
+    if (partCache[key]) { body.innerHTML = partCache[key]; return; }
+    fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part), { headers: headers() })
+      .then(function (r) { return r.json(); })
+      .then(function (jr) {
+        var html = (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>');
+        partCache[key] = html; if (card.getAttribute('data-open') === part) body.innerHTML = html;
+      })
+      .catch(function () { body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+  }
   $$('.tile[data-tile]').forEach(function (card) {
+    var pid = card.getAttribute('data-tile');
+    $$('[data-part]', card).forEach(function (b) {
+      b.addEventListener('click', function (e) { e.stopPropagation(); openPart(card, pid, b.getAttribute('data-part'), b); });
+    });
     card.addEventListener('click', function (e) {
-      if (e.target.closest('a')) return;
-      openWin('/project/' + card.getAttribute('data-tile'));
+      if (e.target.closest('a, button, .t-body')) return;
+      openPart(card, pid, 'status', $('.statusbtn', card));
     });
   });
 

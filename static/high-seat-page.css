@@ -586,3 +586,31 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* W1b: a Tier 1 tile's parts show only while the tile is open */
 .ini-tile:not(.open) .it-parts{display:none}
 .ini-tile.open .it-parts{display:block}
+
+/* W2: a card's parts open in place */
+.tile .t-acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+.tile .t-acts button,.tile .statusbtn{font:inherit;font-size:10.5px;color:var(--text-dim);background:transparent;border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer}
+.tile .t-acts button:hover,.tile .statusbtn:hover{border-color:var(--accent);color:var(--text)}
+.tile .t-acts button.on,.tile .statusbtn.on{border-color:var(--accent);color:var(--accent-t);background:#141a2a}
+.tile .t-acts .t-open{margin-left:auto;font-size:10.5px;color:var(--accent-t)}
+.tile.open{grid-column:1 / -1}
+.tile .t-body{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;line-height:1.5}
+.cp-quiet{color:var(--text-dim2);font-size:11.5px}
+.cp-lead{font-weight:650;margin-bottom:3px}
+.cp-when{font-size:10.5px;color:var(--text-dim2);margin-bottom:6px}
+.cp-facts{border-collapse:collapse;width:100%}
+.cp-facts th{text-align:left;font-weight:600;color:var(--text-dim);font-size:10.5px;padding:3px 10px 3px 0;vertical-align:top;white-space:nowrap;width:70px}
+.cp-facts td{padding:3px 0;border-bottom:1px solid #1c202a;color:var(--text)}
+.cp-foot{margin-top:8px;font-size:11px}
+.cp-foot a,.cp-deliv a,.cp-dep a,.cp-act a{color:var(--accent-t)}
+.cp-q,.cp-dep,.cp-acts,.cp-plan,.cp-notdone{margin:6px 0}
+.cp-q .k,.cp-dep .k,.cp-acts .k,.cp-plan .k,.cp-notdone .k{display:block;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-dim2);margin-bottom:2px}
+.cp-q{color:var(--amber-t);font-weight:600}
+.cp-step{padding:2px 0;border-bottom:1px solid #1c202a}
+.cp-step .mk{display:inline-block;width:16px;color:var(--text-dim)}
+.cp-step.now{color:var(--text);font-weight:600}
+.cp-step.s-done{color:var(--text-dim2)}
+.cp-deliv{padding:2px 0;border-bottom:1px solid #1c202a}
+.cp-deliv.current{color:var(--amber-t)}
+.dim{color:var(--text-dim2)}
+

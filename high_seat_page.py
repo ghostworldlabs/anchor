@@ -298,14 +298,19 @@ def _projects_tile(ctx):
 
 
 def _card(e, f, cls):
+    pid = esc(e.get("id"))
     return (
         '<article class="tile%s" id="card-%s" data-tile="%s"><div class="t-top"><h3 class="t-name">%s</h3>'
-        '<button class="statusbtn" data-status="%s">Status</button></div><div class="t-desc">%s</div>'
-        '<div class="t-next"><span class="k">Next</span>%s</div>%s</article>'
-    ) % (cls, esc(e.get("id")), esc(e.get("id")), esc(e.get("name")), esc(e.get("id")),
+        '<button class="statusbtn" data-part="status" data-pid="%s">Status</button></div><div class="t-desc">%s</div>'
+        '<div class="t-next"><span class="k">Next</span>%s</div>%s'
+        '<div class="t-acts"><button data-part="next" data-pid="%s">Next steps</button><button data-part="deliverables" data-pid="%s">Deliverables</button>'
+        '<button data-part="plan" data-pid="%s">Plan</button><a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div>'
+        '<div class="t-body" hidden></div></article>'
+    ) % (cls, pid, pid, esc(e.get("name")), pid,
          esc((e.get("blurb") or "").strip()[:220]) or "&mdash;",
          esc((f.get("next") or "")[:140]) or "not stated",
-         ('<div class="t-wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(" ".join(str(f["needs_you"]).split())[:140])) if f.get("needs_you") else "")
+         ('<div class="t-wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(" ".join(str(f["needs_you"]).split())[:140])) if f.get("needs_you") else "",
+         pid, pid, pid, pid)
 
 
 def _shelf(sid, title, count_text, note, cards_html, foot=""):
