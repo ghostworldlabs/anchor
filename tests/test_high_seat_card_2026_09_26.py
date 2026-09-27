@@ -76,3 +76,12 @@ def test_a_decision_record_may_name_what_it_depends_on(tmp_path, monkeypatch):
     monkeypatch.setattr(eng, "STATE_FILE", state)
     html = card.card_part(PID, "next", str(d), "MBA Teaching AI")["html"]
     assert "Depends on</span>" in html and "Lecture 3 AI supplement, draft 2" in html and "the rubric" in html
+
+
+def test_a_card_part_opens_the_effort_it_names_and_refuses_a_path_that_escapes(tmp_path):
+    d = _effort(tmp_path)                                    # the fixture's effort folder, used as a SUBFOLDER here
+    root = tmp_path
+    assert card.card_part(PID, "status", str(root), "MBA", rel=d.name)["html"].count("cp-status") == 1
+    assert "No steward record" in card.card_part(PID, "status", str(root), "MBA")["html"]          # the root has no Face
+    for bad in ("..", "../x", "sub/dir", ".hidden", "a\\b"):
+        assert "No steward record" in card.card_part(PID, "status", str(root), "MBA", rel=bad)["html"]

@@ -196,7 +196,7 @@ def _masthead(ctx):
         '<div class="mh-lock">%s<div><div class="mh-w1">Ghost World <span class="gwl-accent">Labs</span></div>'
         '<div class="mh-w2">R&amp;D Mission Control</div></div></div><div class="mh-sp"></div>'
         '<div class="mh-pill">AI Cockpit %s</div></div>'
-    ) % (_brand_img(b, "gwl-m-icon.svg"), _brand_img(b, "gwl-m-icon.svg"))
+    ) % (_brand_img(b, "gwl-m-icon.svg", "mh-mark"), _brand_img(b, "gwl-m-icon.svg"))
 
 
 def _hdr(ctx):
@@ -316,20 +316,42 @@ def _projects_tile(ctx):
     ) % (n, len(groups), "".join(folds))
 
 
+def _age_words(s):
+    if s is None:
+        return ""
+    m = int(s // 60)
+    if m < 60:
+        return "%d min ago" % m
+    if m < 48 * 60:
+        return "%d h ago" % (m // 60)
+    return "%d days ago" % (m // (60 * 24))
+
+
 def _card(e, f, cls):
+    """A project's one card. It reads the effort touched last (home_rows.current_effort) and names it when that is
+    not the project root; its parts open that effort. A project with no record is a quiet card: the name, its blurb
+    and the cockpit."""
     pid = esc(e.get("id"))
+    rel = esc(f.get("effort") or "")
+    if not f.get("has_record"):
+        return (
+            '<article class="tile quiet%s" id="card-%s" data-tile="%s"><div class="t-top"><h3 class="t-name">%s</h3></div>'
+            '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
+        ) % (cls, pid, pid, esc(e.get("name")), esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
+    effort = ('<div class="t-effort">effort &middot; <b>%s</b>%s</div>' % (rel, (" &middot; touched " + esc(_age_words(f.get("touched_s")))) if f.get("touched_s") is not None else "")) if rel else (
+        ('<div class="t-effort">touched %s</div>' % esc(_age_words(f.get("touched_s")))) if f.get("touched_s") is not None else "")
     return (
-        '<article class="tile%s" id="card-%s" data-tile="%s"><div class="t-top"><h3 class="t-name">%s</h3>'
-        '<button class="statusbtn" data-part="status" data-pid="%s">Status</button></div><div class="t-desc">%s</div>'
+        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name">%s</h3>'
+        '<button class="statusbtn" data-part="status" data-pid="%s" data-dir="%s">Status</button></div>%s<div class="t-desc">%s</div>'
         '<div class="t-next"><span class="k">Next</span>%s</div>%s'
-        '<div class="t-acts"><button data-part="next" data-pid="%s">Next steps</button><button data-part="deliverables" data-pid="%s">Deliverables</button>'
-        '<button data-part="plan" data-pid="%s">Plan</button><a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div>'
+        '<div class="t-acts"><button data-part="next" data-pid="%s" data-dir="%s">Next steps</button><button data-part="deliverables" data-pid="%s" data-dir="%s">Deliverables</button>'
+        '<button data-part="plan" data-pid="%s" data-dir="%s">Plan</button><a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, pid, pid, esc(e.get("name")), pid,
+    ) % (cls, pid, pid, rel, esc(e.get("name")), pid, rel, effort,
          esc((e.get("blurb") or "").strip()[:220]) or "&mdash;",
          esc((f.get("next") or "")[:140]) or "not stated",
          ('<div class="t-wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(" ".join(str(f["needs_you"]).split())[:140])) if f.get("needs_you") else "",
-         pid, pid, pid, pid)
+         pid, rel, pid, rel, pid, rel, pid)
 
 
 def _shelf(sid, title, count_text, note, cards_html, foot=""):
@@ -492,7 +514,7 @@ def render_high_seat_html(ctx) -> str:
             and ((facts.get(e.get("id")) or {}).get("next") or (facts.get(e.get("id")) or {}).get("summary") or (facts.get(e.get("id")) or {}).get("dated"))]
     cont = dated + rest
     quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
-    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | parked_ids
+    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | {e.get("id") for e in quiet} | parked_ids
     board = (
         '<div class="board">' + _campaign_tile(ctx) + _projects_tile(ctx)
         + _shelf("shNeeds", "Needs you", "%d project%s" % (len(needs), "" if len(needs) == 1 else "s"),
@@ -502,7 +524,9 @@ def render_high_seat_html(ctx) -> str:
         + _shelf("shCont", "Continuing", "%d project%s" % (len(cont), "" if len(cont) == 1 else "s"),
                  "Dated soonest first, then the rest. Moving shelves never makes a second card.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in cont) or '<div class="ptile-note">No project carries a next step yet.</div>',
-                 ("%d registry project%s no open next step and no card on the board today &mdash; they are in the Projects tile above, in their folders." % (len(quiet), " has" if len(quiet) == 1 else "s have")) if quiet else "")
+                 "")
+        + _shelf("shQuiet", "No record yet", "%d project%s" % (len(quiet), "" if len(quiet) == 1 else "s"), "On the registry with no steward record; open the cockpit to stand one up.",
+                 "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in quiet) or '<div class="ptile-note">Every project on the registry has a record.</div>')
         + _shelf("shPark", "Parked", "%d project%s" % (len(parked), "" if len(parked) == 1 else "s"), "Off the shelves, still one card each.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, " parked") for e in parked) or '<div class="ptile-note">Nothing is parked.</div>')
         + _workbench(ctx) + '</div>')

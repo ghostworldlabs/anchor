@@ -220,7 +220,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .shelf-h .c{font-size:11.5px;color:var(--text-dim2);font-variant-numeric:tabular-nums}
 .shelf-h .rule{flex:1;height:1px;background:var(--line)}
 .shelf-h .note{font-size:11.5px;color:var(--text-dim2);max-width:44ch;text-align:right}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:11px;align-items:start}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;align-items:start}
 .shelf-foot{font-size:11.5px;color:var(--text-dim2);padding:9px 2px 0;line-height:1.5}
 
 /* ═════════ the Desk line ═════════ */
@@ -292,7 +292,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .wkgrid .none{font-size:9.5px;color:#4d525e;margin-top:6px}
 
 /* ═════════ compact card ═════════ */
-.tile{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:9px 11px 10px;
+.tile{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:7px 9px 8px;
   min-width:0;cursor:pointer}
 .tile:hover{border-color:#3d4352}
 .tile.need{border-color:var(--amber-edge);background:linear-gradient(180deg,var(--amber-wash),transparent 46%),var(--surface)}
@@ -303,7 +303,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile.outline{box-shadow:0 0 0 2px var(--amber-edge)}
 .tile.open{cursor:default;border-color:#3d4352}
 .t-top{display:flex;align-items:flex-start;gap:8px}
-.t-name{font-size:14.5px;font-weight:650;letter-spacing:-.2px;line-height:1.25;flex:1;min-width:0}
+.t-name{font-size:13px;font-weight:650;letter-spacing:-.2px;line-height:1.25;flex:1;min-width:0}
 .statusbtn{flex:none;border:1px solid var(--border);background:var(--surface2);border-radius:5px;
   padding:2px 8px;font-size:10.5px;font-weight:650;color:var(--text-dim);white-space:nowrap}
 .statusbtn:hover{color:var(--text);border-color:var(--accent)}
@@ -567,7 +567,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .foot img{width:15px;height:15px}
 .foot .sd{color:var(--amber-t);font-weight:650}
 
-@media(max-width:1340px){.canvas{grid-template-columns:minmax(0,1fr) 340px}.grid,.t1grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1340px){.canvas{grid-template-columns:minmax(0,1fr) 340px}.grid{grid-template-columns:repeat(3,1fr)}.t1grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1100px){
   .canvas{grid-template-columns:1fr}
   .panel{position:static;max-height:none;overflow:visible}
@@ -635,3 +635,19 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 
 /* W5: the undo on the home's receipt line */
 .receipt .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:10.5px;color:var(--accent-t);cursor:pointer;margin-left:6px}
+
+/* John's look, 2026-09-27: denser cards that name the effort they read; a quiet card for a project with no record */
+.tile:not(.open) .t-desc{display:none}
+.t-effort{font-size:10px;color:var(--text-dim2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-effort b{color:var(--text-dim);font-weight:650}
+.t-next{font-size:11.5px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile.open .t-next{display:block}
+.t-wait{font-size:11.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tile.open .t-wait{display:block}
+.t-acts{margin-top:6px}
+.t-acts button,.t-acts .t-open{font-size:10.5px}
+.tile.quiet{background:#13161e;border-color:#252a36;padding:6px 9px 7px}
+.tile.quiet .t-name{color:#b9bdc6;font-size:12.5px}
+.tile.quiet .t-desc{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
+.t-quiet{font-size:10.5px;color:var(--text-dim2);margin-top:4px}
+.t-quiet .t-open{margin:0;padding:0;border:0}

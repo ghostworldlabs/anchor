@@ -6,6 +6,11 @@
   function $(s, r) { return (r || document).querySelector(s); }
   function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
   function token() { try { return localStorage.getItem('anchor_token') || ''; } catch (e) { return ''; } }
+  // the hand-off the old dashboard did: /?token=<t> stores the token for this origin and drops it from the address
+  try {
+    var _qs = new URLSearchParams(location.search), _t = (_qs.get('token') || '').trim();
+    if (_t) { localStorage.setItem('anchor_token', _t); _qs.delete('token'); var _rest = _qs.toString(); history.replaceState(null, '', location.pathname + (_rest ? '?' + _rest : '') + location.hash); }
+  } catch (e) {}
   function headers() {
     var h = { 'Content-Type': 'application/json' };
     var t = token(); if (t) h['X-Anchor-Token'] = t;
@@ -92,7 +97,7 @@
     if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
     card.setAttribute('data-open', part); card.classList.add('open');
     body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
-    fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part), { headers: headers() })
+    fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(card.getAttribute('data-dir') || ''), { headers: headers() })
       .then(function (r) { return r.json(); })
       .then(function (jr) {
         var html = (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>');
@@ -137,7 +142,8 @@
       var cardLink = $('[data-bl-card]', balloon);
       cardLink.addEventListener('click', function (ev) { ev.preventDefault(); var c = $('#card-' + pid); closeBalloon(); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1600); } });
       var body = $('.bl-body', balloon);
-      fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=next', { headers: headers() })
+      var ownCard = $('#card-' + pid), ownDir = ownCard ? (ownCard.getAttribute('data-dir') || '') : '';
+      fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=next&dir=' + encodeURIComponent(ownDir), { headers: headers() })
         .then(function (rs) { return rs.json(); })
         .then(function (jr) { var html = (jr && jr.html) || '<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'; if (balloon) body.innerHTML = html; })
         .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });

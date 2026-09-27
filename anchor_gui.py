@@ -21905,7 +21905,7 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 if not _entry:
                     self._send_json({"ok": False, "error": "no such project"}, code=404); return
                 from steward_cockpit.high_seat_card import card_part as _card_part
-                _out = _card_part(_pid, _part, _entry.get("folder_path") or "", _entry.get("name") or "")
+                _out = _card_part(_pid, _part, _entry.get("folder_path") or "", _entry.get("name") or "", (_q.get("dir", [""])[0] or "").strip())
                 self._send_json(_out, code=200 if _out.get("ok") else 400)
                 return
             if _path_only.startswith("/api/steward/"):

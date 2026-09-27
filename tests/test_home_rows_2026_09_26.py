@@ -126,3 +126,29 @@ def test_the_project_row_shows_the_next_step_and_the_date(tmp_path, monkeypatch)
     assert "overdue since Sep 21" in row                            # the chip says it against today
     quiet = anchor_gui.render_project_tile_html(empty, facts[empty["id"]])
     assert "rnd-row-due" not in quiet and "next:" not in quiet
+
+
+def test_the_facts_come_from_the_effort_touched_last_one_folder_down_and_name_it(tmp_path):
+    import os, time
+    d = tmp_path / "Skill_Foundry"; d.mkdir()
+    (d / "Anchor.md").write_text("a project with no record at its root", encoding="utf-8")
+    eff = d / "steward-refinement"; eff.mkdir()
+    (eff / "ECGBERHT.md").write_text("# Ecgberht\n", encoding="utf-8")
+    (eff / "strip.json").write_text(json.dumps({"human_wait": "", "next_recommended": "Fold the handback", "why_next": "it is the open step"}), encoding="utf-8")
+    (eff / "roadmap.json").write_text(json.dumps({"schema": "x", "roadmap_events": [], "roadmap_projection": [{"id": "s1", "name": "Fold the handback", "status": "active", "due": "2026-10-02"}]}), encoding="utf-8")
+    e = {"id": "sf01", "name": "Skill Foundry", "folder_path": str(d)}
+    f = hr.project_facts(e, TODAY)
+    assert f["has_record"] and f["effort"] == "steward-refinement" and f["next"] == "Fold the handback" and f["nearest_due"] == "2026-10-02"
+    assert f["projection"] is None and f["touched_s"] is not None                   # the root record's projection only is cached for the resolver
+    assert hr.current_effort(str(d)) == "steward-refinement"
+    # a root record touched later wins; an untouched sibling effort does not
+    (d / "ECGBERHT.md").write_text("# Ecgberht\n", encoding="utf-8")
+    (d / "strip.json").write_text(json.dumps({"human_wait": "John: sign it", "next_recommended": "Root next", "why_next": ""}), encoding="utf-8")
+    later = time.time() + 60
+    os.utime(d / "strip.json", (later, later))
+    f2 = hr.project_facts(e, TODAY)
+    assert f2["effort"] == "" and f2["next"] == "Root next" and f2["needs_you"] == "John: sign it"
+    # no record anywhere: honest, and the effort is empty
+    q = tmp_path / "Quiet"; q.mkdir()
+    fq = hr.project_facts({"id": "q1", "name": "Quiet", "folder_path": str(q)}, TODAY)
+    assert fq["has_record"] is False and fq["effort"] == "" and fq["touched_s"] is None

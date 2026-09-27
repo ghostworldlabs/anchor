@@ -25,11 +25,16 @@ def esc(s) -> str:
     return html.escape(str(s if s is not None else ""), quote=True)
 
 
-def _effort_dir(folder):
-    """The project's root effort (the folder itself) when it carries a Face; else None."""
+def _effort_dir(folder, rel=""):
+    """The effort the card names: the project root when it carries a Face, or one subfolder (``rel``, one level, no
+    separators) with its own Face; else None."""
     root = Path(str(folder or ""))
-    if root.is_dir() and (root / "ECGBERHT.md").is_file():
-        return str(root)
+    rel = str(rel or "").strip()
+    if rel and (rel in (".", "..") or "/" in rel or "\\" in rel or rel.startswith(".")):
+        return None
+    d = root / rel if rel else root
+    if d.is_dir() and (d / "ECGBERHT.md").is_file():
+        return str(d)
     return None
 
 
@@ -222,12 +227,13 @@ def plan_html(cdir, pid):
             % (done_n, len(steps), "".join(rows), more, len(open_rows), notdone, esc(pid)))
 
 
-def card_part(pid, part, folder, name=""):
-    """One card part as HTML — ``{"ok", "pid", "part", "html"}``; unknown parts and missing records answer honestly."""
+def card_part(pid, part, folder, name="", rel=""):
+    """One card part as HTML — ``{"ok", "pid", "part", "html"}``; unknown parts and missing records answer honestly.
+    ``rel`` names the effort one folder down when the card reads one (home_rows.current_effort)."""
     part = str(part or "").strip().lower()
     if part not in PARTS:
         return {"ok": False, "pid": pid, "part": part, "error": "unknown part", "html": ""}
-    cdir = _effort_dir(folder)
+    cdir = _effort_dir(folder, rel)
     if cdir is None:
         return {"ok": True, "pid": pid, "part": part, "html": _no_record(pid, name or pid[:8])}
     try:

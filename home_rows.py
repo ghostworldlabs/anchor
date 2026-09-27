@@ -51,6 +51,16 @@ def project_facts(entry, today=None):
     if not folder or not pid:
         return out
     root = Path(folder)
+    # the record may live one folder down (the cockpit's own discovery: the root, or a subfolder with a Face);
+    # the card reads the effort touched last and names it (John, 2026-09-27: "I don't see many efforts")
+    rel = current_effort(folder)
+    if rel:
+        root = root / rel
+        out["effort"] = rel
+    else:
+        out["effort"] = ""
+    out["effort_dir"] = str(root)
+    out["touched_s"] = _touched_age(root)
     strip = _read_json(root / "strip.json")
     if isinstance(strip, dict):
         out["has_record"] = True
@@ -72,7 +82,8 @@ def project_facts(entry, today=None):
     rm = _read_json(root / "roadmap.json")
     if isinstance(rm, dict):
         out["has_record"] = True
-        out["projection"] = rm.get("roadmap_projection") or []   # kept so a resolver in the same request need not read it again
+        if not rel:
+            out["projection"] = rm.get("roadmap_projection") or []   # the ROOT record only: a resolver in the same request keys on the project folder
         dated = []
         for s in rm.get("roadmap_projection") or []:
             if not isinstance(s, dict) or s.get("status") not in _OPEN:
@@ -87,6 +98,43 @@ def project_facts(entry, today=None):
         out["dated"] = dated
         out["nearest_due"] = dated[0]["due"] if dated else ""
     return out
+
+
+_RECORD_FILES = ("strip.json", "roadmap.json", str(Path(".ecgberht") / "status-summary.json"))
+
+
+def _touched(d):
+    """The newest record file's mtime under an effort folder, or 0."""
+    best = 0.0
+    for n in _RECORD_FILES:
+        try:
+            best = max(best, (Path(d) / n).stat().st_mtime)
+        except OSError:
+            pass
+    return best
+
+
+def _touched_age(d):
+    t = _touched(d)
+    return max(0.0, time.time() - t) if t else None
+
+
+def current_effort(folder):
+    """The effort the card shows: of the efforts the cockpit discovers (the root when it has a Face, plus one level
+    of subfolders with their own ECGBERHT.md), the one whose record was touched last; "" for the root or when no
+    effort exists. Read-only; never raises."""
+    try:
+        from steward_cockpit.steward_campaign import discover_efforts
+        efforts = discover_efforts(str(folder)) or []
+    except Exception:
+        return ""
+    best, best_t = "", -1.0
+    for e in efforts:
+        rel = str((e or {}).get("rel") or "")
+        t = _touched(Path(folder) / rel if rel else Path(folder))
+        if t > best_t:
+            best, best_t = rel, t
+    return best
 
 
 def all_project_facts(entries, today=None):

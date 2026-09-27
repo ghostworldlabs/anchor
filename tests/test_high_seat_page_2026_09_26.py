@@ -95,7 +95,8 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert "Tier 2</b> &middot; 1" in html
     # the shelves: the waiting project on Needs you, the next one on Continuing, the quiet one counted off the board
     assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
-    assert 'id="card-9405abe0"' in html and "1 registry project has no open next step" in html
+    quiet = html[html.index('id="shQuiet"'):html.index('id="shPark"')]
+    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' in quiet and "no steward record yet" in quiet     # the record-less one has its own card on its own shelf
     # the ruler and the panel
     assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
     assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html
@@ -112,3 +113,18 @@ def test_the_page_boots_with_the_campaign_id_and_an_undo_on_its_receipt_line():
 def test_without_a_campaign_the_tile_says_so_honestly():
     html = hsp.render_high_seat_html(_ctx(campaign=False))
     assert "not stood up yet" in html and "Show Tier 1" not in html
+
+
+def test_the_board_names_the_effort_a_card_reads_and_shelves_the_record_less_projects():
+    ctx = _ctx(campaign=True)
+    html = hsp.render_high_seat_html(ctx)
+    assert 'id="shQuiet"' in html and "No record yet" in html
+    assert 'class="mh-mark"' in html                                                  # the masthead mark carries its size class
+    # a fact that reads an effort one folder down names it on the card and hands it to the card's parts
+    e = {"id": "eff1", "name": "Skill Foundry", "blurb": "the foundry"}
+    f = {"has_record": True, "effort": "steward-refinement", "touched_s": 3600.0 * 5, "next": "Fold the handback", "needs_you": ""}
+    c = hsp._card(e, f, "")
+    assert 'data-dir="steward-refinement"' in c and "effort &middot; <b>steward-refinement</b> &middot; touched 5 h ago" in c
+    assert c.count('data-dir="steward-refinement"') == 5                            # the card, Status and the three acts
+    q = hsp._card({"id": "q1", "name": "Quiet one", "blurb": "nothing yet"}, {"has_record": False}, "")
+    assert 'class="tile quiet"' in q and "no steward record yet" in q and "Open cockpit" in q and "statusbtn" not in q
