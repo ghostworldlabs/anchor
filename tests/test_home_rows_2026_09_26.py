@@ -139,7 +139,7 @@ def test_the_facts_come_from_the_effort_touched_last_one_folder_down_and_name_it
     e = {"id": "sf01", "name": "Skill Foundry", "folder_path": str(d)}
     f = hr.project_facts(e, TODAY)
     assert f["has_record"] and f["effort"] == "steward-refinement" and f["next"] == "Fold the handback" and f["nearest_due"] == "2026-10-02"
-    assert f["projection"] is None and f["touched_s"] is not None                   # the root record's projection only is cached for the resolver
+    assert f["projection"] is None and "touched_s" not in f and "effort_dir" not in f   # the root record's projection only is cached for the resolver; no private age
     assert hr.current_effort(str(d)) == "steward-refinement"
     # a root record touched later wins; an untouched sibling effort does not
     (d / "ECGBERHT.md").write_text("# Ecgberht\n", encoding="utf-8")
@@ -148,7 +148,13 @@ def test_the_facts_come_from_the_effort_touched_last_one_folder_down_and_name_it
     os.utime(d / "strip.json", (later, later))
     f2 = hr.project_facts(e, TODAY)
     assert f2["effort"] == "" and f2["next"] == "Root next" and f2["needs_you"] == "John: sign it"
+    # the cockpit's own clock (steward_campaign.last_touched): a conversation in the sub-effort newer than the root's
+    # strip makes it the card's effort again — the same sort the cockpit's efforts row uses
+    (eff / ".ecgberht").mkdir()
+    (eff / ".ecgberht" / "conversation-log.json").write_text("[]", encoding="utf-8")
+    os.utime(eff / ".ecgberht" / "conversation-log.json", (later + 60, later + 60))
+    assert hr.current_effort(str(d)) == "steward-refinement"
     # no record anywhere: honest, and the effort is empty
     q = tmp_path / "Quiet"; q.mkdir()
     fq = hr.project_facts({"id": "q1", "name": "Quiet", "folder_path": str(q)}, TODAY)
-    assert fq["has_record"] is False and fq["effort"] == "" and fq["touched_s"] is None
+    assert fq["has_record"] is False and fq["effort"] == ""

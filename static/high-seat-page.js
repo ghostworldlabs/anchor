@@ -92,21 +92,44 @@
     row.addEventListener('dblclick', function () { var pid = row.getAttribute('data-pid'); if (pid) openWin('/project/' + pid); });
   });
 
-  // the cards open in place (W2): Status beside the name; Next steps · Deliverables · Plan in the acts row —
-  // each part is composed on the server from the cockpit's own readers, so the card says what the cockpit says
+  // the cards open in place (W2; the compact card, 2026-09-27): Status · Next steps · Deliverables · Plan in the acts
+  // row — each part is composed on the server from the cockpit's own readers, so the card says what the cockpit says.
+  // The GET card route reads the auth cookie or an Authorization header; a browser that never took the /?token=
+  // hand-off has neither, the route answers 401, and the card SAYS so in words and asks for the token once, as the
+  // old home did: store it, log the browser in (POST /api/auth/login mints the cookie), read the part again.
+  var NOT_LOGGED_IN = 'This browser is not logged in to Anchor, so the record cannot be read.';
+  var askedOnce = false;
+  function login(t) {
+    try { localStorage.setItem('anchor_token', t); } catch (e) {}
+    return fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': t }, body: JSON.stringify({ token: t }) }).catch(function () {});
+  }
+  function askToken() {
+    var t = null;
+    try { t = window.prompt('Anchor access token:'); } catch (e) { t = null; }
+    t = (t || '').trim();
+    return t ? login(t).then(function () { return true; }) : Promise.resolve(false);
+  }
+  function notLoggedIn() { return '<div class="cp-quiet cp-auth">' + NOT_LOGGED_IN + ' <button class="mini" data-login>paste the token</button></div>'; }
+  function fetchPart(pid, part, dir, retried) {
+    return fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(dir || ''), { headers: headers() })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) {
+          if (retried || askedOnce) return notLoggedIn();
+          askedOnce = true;
+          return askToken().then(function (ok) { return ok ? fetchPart(pid, part, dir, true) : notLoggedIn(); });
+        }
+        return r.json().then(function (jr) { return (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'); });
+      });
+  }
   function openPart(card, pid, part, btn) {
     var body = $('.t-body', card);
     var same = card.getAttribute('data-open') === part;
-    $$('.t-acts button, .statusbtn', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
+    $$('.t-acts button', card).forEach(function (b) { b.classList.toggle('on', !same && b === btn); });
     if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
     card.setAttribute('data-open', part); card.classList.add('open');
     body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
-    fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part) + '&dir=' + encodeURIComponent(card.getAttribute('data-dir') || ''), { headers: headers() })
-      .then(function (r) { return r.json(); })
-      .then(function (jr) {
-        var html = (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>');
-        if (card.getAttribute('data-open') === part) body.innerHTML = html;
-      })
+    fetchPart(pid, part, card.getAttribute('data-dir') || '')
+      .then(function (html) { if (card.getAttribute('data-open') === part) body.innerHTML = html; })
       .catch(function () { body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
   }
   $$('.tile[data-tile]').forEach(function (card) {
@@ -116,7 +139,18 @@
     });
     card.addEventListener('click', function (e) {
       if (e.target.closest('a, button, .t-body')) return;
-      openPart(card, pid, 'status', $('.statusbtn', card));
+      openPart(card, pid, 'status', $('[data-part="status"]', card));
+    });
+  });
+  // "paste the token" on a card that answered 401: ask again, then read the open part again
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-login]'); if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    askToken().then(function (ok) {
+      var card = b.closest('.tile'), part = card && card.getAttribute('data-open');
+      if (!ok || !card || !part) return;
+      card.removeAttribute('data-open');
+      openPart(card, card.getAttribute('data-tile'), part, $('[data-part="' + part + '"]', card));
     });
   });
 
@@ -147,9 +181,8 @@
       cardLink.addEventListener('click', function (ev) { ev.preventDefault(); var c = $('#card-' + pid); closeBalloon(); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1600); } });
       var body = $('.bl-body', balloon);
       var ownCard = $('#card-' + pid), ownDir = ownCard ? (ownCard.getAttribute('data-dir') || '') : '';
-      fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=next&dir=' + encodeURIComponent(ownDir), { headers: headers() })
-        .then(function (rs) { return rs.json(); })
-        .then(function (jr) { var html = (jr && jr.html) || '<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'; if (balloon) body.innerHTML = html; })
+      fetchPart(pid, 'next', ownDir)
+        .then(function (html) { if (balloon) body.innerHTML = html; })
         .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
     });
   });
@@ -210,4 +243,19 @@
   }
   if (send) send.addEventListener('click', doSend);
   if (say) say.addEventListener('keydown', function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doSend(); } });
+
+  // a redeploy reloads the open page, as the old home did (the verification law: a mechanism, not "refresh"): /api/version
+  // every 30 s; a build other than the one this page booted with reloads it once — never while he is typing
+  (function () {
+    var mine = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || '';
+    if (!mine) return;
+    function typing() { var a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT') && (a.value || '').trim()); }
+    setInterval(function () {
+      fetch('/api/version', { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (d) {
+        var v = d && d.version; if (!v || v === mine || typing()) return;
+        try { if (sessionStorage.getItem('highseat_reloaded_for') === String(v)) return; sessionStorage.setItem('highseat_reloaded_for', String(v)); } catch (e) {}
+        location.reload();
+      }).catch(function () {});
+    }, 30000);
+  })();
 })();

@@ -83,5 +83,6 @@ def test_a_card_part_opens_the_effort_it_names_and_refuses_a_path_that_escapes(t
     root = tmp_path
     assert card.card_part(PID, "status", str(root), "MBA", rel=d.name)["html"].count("cp-status") == 1
     assert "No steward record" in card.card_part(PID, "status", str(root), "MBA")["html"]          # the root has no Face
-    for bad in ("..", "../x", "sub/dir", ".hidden", "a\\b"):
+    (root / "plain").mkdir()                                                          # a subfolder without a Face is not an effort
+    for bad in ("..", "../x", "sub/dir", ".hidden", "a\\b", "D:foo", "C:foo", "plain", "nope"):   # only what discover_efforts lists resolves
         assert "No steward record" in card.card_part(PID, "status", str(root), "MBA", rel=bad)["html"]

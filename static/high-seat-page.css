@@ -220,7 +220,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .shelf-h .c{font-size:11.5px;color:var(--text-dim2);font-variant-numeric:tabular-nums}
 .shelf-h .rule{flex:1;height:1px;background:var(--line)}
 .shelf-h .note{font-size:11.5px;color:var(--text-dim2);max-width:44ch;text-align:right}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;align-items:start}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(226px,1fr));gap:9px;align-items:start}   /* as many ~240 px cards as the width takes: three at 1440, five at 1920 */
 .shelf-foot{font-size:11.5px;color:var(--text-dim2);padding:9px 2px 0;line-height:1.5}
 
 /* ═════════ the Desk line ═════════ */
@@ -302,21 +302,25 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 @keyframes flash{0%{box-shadow:0 0 0 2px var(--accent)}70%{box-shadow:0 0 0 2px rgba(108,156,252,.35)}100%{box-shadow:0 0 0 0 transparent}}
 .tile.outline{box-shadow:0 0 0 2px var(--amber-edge)}
 .tile.open{cursor:default;border-color:#3d4352}
-.t-top{display:flex;align-items:flex-start;gap:8px}
-.t-name{font-size:13px;font-weight:650;letter-spacing:-.2px;line-height:1.25;flex:1;min-width:0}
-.statusbtn{flex:none;border:1px solid var(--border);background:var(--surface2);border-radius:5px;
-  padding:2px 8px;font-size:10.5px;font-weight:650;color:var(--text-dim);white-space:nowrap}
-.statusbtn:hover{color:var(--text);border-color:var(--accent)}
-.statusbtn.on{color:var(--amber-t);border-color:var(--amber-edge);background:var(--amber-wash)}
-.t-desc{font-size:11.5px;color:var(--text-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tile.open .t-desc{white-space:normal}
-.t-next{font-size:12px;margin-top:4px;color:var(--text-warm)}
+/* the compact card (John, 2026-09-27): the name with the effort as a suffix and the cockpit link beside it, ONE line
+   clamped to two, the acts on one line; the description, the next step behind a wait and the effort line open with it */
+.t-top{display:flex;align-items:baseline;gap:8px}
+.t-name{font-size:13px;font-weight:650;letter-spacing:-.2px;line-height:1.25;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.t-name .t-eff{font-size:10px;font-weight:500;color:var(--text-dim2);letter-spacing:0}
+.t-go{flex:none;font-size:10px;color:var(--accent-t);text-decoration:none;white-space:nowrap}
+.t-go:hover{text-decoration:underline}
+.t-line{font-size:11.5px;margin-top:3px;line-height:1.35;color:var(--text-warm);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.t-line .k{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:5px}
+.t-line.wait{color:var(--amber-t)}
+.t-line .mk{font-weight:700;font-size:10.5px;margin-right:4px}
+.tile.open .t-line{display:block}
+.tile:not(.open) .t-more{display:none}
+.t-more{margin-top:5px}
+.t-desc{font-size:11.5px;color:var(--text-dim)}
+.t-next{font-size:11.5px;margin-top:4px;color:var(--text-warm)}
 .t-next .k{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dim2);font-weight:700;margin-right:5px}
-.t-wait{font-size:12px;margin-top:3px;color:var(--amber-t);line-height:1.35}
-.t-wait .mk{font-weight:700;font-size:10.5px;margin-right:4px}
-.t-collect{font-size:12px;margin-top:3px;color:var(--accent-t)}
-.t-collect .mk{font-weight:700;font-size:10.5px;margin-right:4px}
-.t-open{margin-top:9px;padding-top:9px;border-top:1px solid var(--line)}
+.t-effort{font-size:10.5px;color:var(--text-dim2);margin-top:4px}
+.t-effort b{color:var(--text-dim);font-weight:650}
 .badges{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
 .badge{font-size:10.5px;border:1px solid #454b5c;color:var(--text-warm);border-radius:4px;padding:2px 7px;
   font-variant-numeric:tabular-nums}
@@ -567,7 +571,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .foot img{width:15px;height:15px}
 .foot .sd{color:var(--amber-t);font-weight:650}
 
-@media(max-width:1340px){.canvas{grid-template-columns:minmax(0,1fr) 340px}.grid{grid-template-columns:repeat(3,1fr)}.t1grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:1340px){.canvas{grid-template-columns:minmax(0,1fr) 340px}.t1grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:1100px){
   .canvas{grid-template-columns:1fr}
   .panel{position:static;max-height:none;overflow:visible}
@@ -587,13 +591,14 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .ini-tile:not(.open) .it-parts{display:none}
 .ini-tile.open .it-parts{display:block}
 
-/* W2: a card's parts open in place */
-.tile .t-acts{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
-.tile .t-acts button,.tile .statusbtn{font:inherit;font-size:10.5px;color:var(--text-dim);background:transparent;border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer}
-.tile .t-acts button:hover,.tile .statusbtn:hover{border-color:var(--accent);color:var(--text)}
-.tile .t-acts button.on,.tile .statusbtn.on{border-color:var(--accent);color:var(--accent-t);background:#141a2a}
-.tile .t-acts .t-open{margin-left:auto;font-size:10.5px;color:var(--accent-t)}
+/* W2: a card's parts open in place — the acts on ONE line, at this rule (it outranks any later bare .t-acts rule, which
+   is why a later fix never took: specificity); the row never wraps, so the card's height is the words' alone */
+.tile .t-acts{display:flex;gap:10px;align-items:center;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;margin-top:6px;padding-top:5px;border-top:1px solid var(--line)}
+.tile .t-acts button{font:inherit;font-size:10px;color:var(--text-dim);background:transparent;border:0;border-bottom:1px solid transparent;border-radius:0;padding:0;cursor:pointer;flex:none;line-height:1.5}
+.tile .t-acts button:hover{color:var(--text);border-bottom-color:var(--border)}
+.tile .t-acts button.on{color:var(--accent-t);border-bottom-color:var(--accent)}
 .tile.open{grid-column:1 / -1}
+.tile .t-body .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:10.5px;color:var(--accent-t);cursor:pointer;margin-left:4px}
 .tile .t-body{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;line-height:1.5}
 .cp-quiet{color:var(--text-dim2);font-size:11.5px}
 .cp-lead{font-weight:650;margin-bottom:3px}
@@ -636,23 +641,9 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 /* W5: the undo on the home's receipt line */
 .receipt .mini{border:1px solid var(--border);background:var(--surface2);border-radius:999px;padding:0 8px;font:inherit;font-size:10.5px;color:var(--accent-t);cursor:pointer;margin-left:6px}
 
-/* John's look, 2026-09-27: denser cards that name the effort they read; a quiet card for a project with no record */
-.tile:not(.open) .t-desc{display:none}
-.t-effort{font-size:10px;color:var(--text-dim2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.t-effort b{color:var(--text-dim);font-weight:650}
-.t-next{font-size:11.5px;margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.tile.open .t-next{display:block}
-.t-wait{font-size:11.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.tile.open .t-wait{display:block}
-.t-acts{margin-top:6px}
-.t-acts button,.t-acts .t-open{font-size:10.5px}
+/* John's look, 2026-09-27: a quiet card for a project with no record */
 .tile.quiet{background:#13161e;border-color:#252a36;padding:6px 9px 7px}
 .tile.quiet .t-name{color:#b9bdc6;font-size:12.5px}
-.tile.quiet .t-desc{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
+.tile.quiet .t-desc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px;margin-top:2px}
 .t-quiet{font-size:10.5px;color:var(--text-dim2);margin-top:4px}
-.t-quiet .t-open{margin:0;padding:0;border:0}
-
-/* the acts on one line, the cockpit link at its end; the card keeps its height for the words */
-.t-acts{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}
-.t-acts button{padding:2px 6px;font-size:10px}
-.t-acts .t-open{margin:0 0 0 auto;padding:0;border-top:0;font-size:10px;white-space:nowrap}
+.t-quiet .t-open{color:var(--accent-t)}

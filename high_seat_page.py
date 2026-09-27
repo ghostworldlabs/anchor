@@ -316,42 +316,44 @@ def _projects_tile(ctx):
     ) % (n, len(groups), "".join(folds))
 
 
-def _age_words(s):
-    if s is None:
-        return ""
-    m = int(s // 60)
-    if m < 60:
-        return "%d min ago" % m
-    if m < 48 * 60:
-        return "%d h ago" % (m // 60)
-    return "%d days ago" % (m // (60 * 24))
+_ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))
 
 
 def _card(e, f, cls):
-    """A project's one card. It reads the effort touched last (home_rows.current_effort) and names it when that is
-    not the project root; its parts open that effort. A project with no record is a quiet card: the name, its blurb
-    and the cockpit."""
+    """A project's one card, compact (John, 2026-09-27: "the tiles still seem larger than needed"): the name with the
+    effort it reads as a small suffix, ONE line — the Needs-you sentence when there is one, else the next step —
+    clamped to two lines, and the acts on one line, Status first (his word: "there should also be a status option");
+    the cockpit link sits by the name. The description, the next step behind a wait and the effort line show only
+    once the card opens. The parts are read from the cockpit's own readers on the effort the card names
+    (home_rows.current_effort → ``data-dir``). A project with no record is a quiet card: the name, its blurb, the
+    cockpit."""
     pid = esc(e.get("id"))
     rel = esc(f.get("effort") or "")
+    name = esc(e.get("name"))
     if not f.get("has_record"):
         return (
             '<article class="tile quiet%s" id="card-%s" data-tile="%s"><div class="t-top"><h3 class="t-name">%s</h3></div>'
             '<div class="t-desc">%s</div><div class="t-quiet">no steward record yet &middot; <a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div></article>'
-        ) % (cls, pid, pid, esc(e.get("name")), esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
-    effort = ('<div class="t-effort">effort &middot; <b>%s</b>%s</div>' % (rel, (" &middot; touched " + esc(_age_words(f.get("touched_s")))) if f.get("touched_s") is not None else "")) if rel else (
-        ('<div class="t-effort">touched %s</div>' % esc(_age_words(f.get("touched_s")))) if f.get("touched_s") is not None else "")
+        ) % (cls, pid, pid, name, esc((e.get("blurb") or "").strip()[:160]) or "&mdash;", pid)
+    wait = " ".join(str(f.get("needs_you") or "").split())[:160]
+    nxt = esc((f.get("next") or "")[:160]) or "not stated"
+    if wait:
+        line = '<div class="t-line wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(wait)
+        more_next = '<div class="t-next"><span class="k">Next</span>%s</div>' % nxt
+    else:
+        line = '<div class="t-line"><span class="k">Next</span>%s</div>' % nxt
+        more_next = ""
+    acts = "".join('<button data-part="%s" data-pid="%s" data-dir="%s">%s</button>' % (part, pid, rel, label) for part, label in _ACTS)
     return (
-        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name">%s</h3>'
-        '<button class="statusbtn" data-part="status" data-pid="%s" data-dir="%s">Status</button></div>%s<div class="t-desc">%s</div>'
-        '<div class="t-next"><span class="k">Next</span>%s</div>%s'
-        '<div class="t-acts"><button data-part="next" data-pid="%s" data-dir="%s">Next steps</button><button data-part="deliverables" data-pid="%s" data-dir="%s">Deliverables</button>'
-        '<button data-part="plan" data-pid="%s" data-dir="%s">Plan</button><a class="t-open" href="/project/%s" target="_blank" rel="noopener">Open cockpit</a></div>'
+        '<article class="tile%s" id="card-%s" data-tile="%s" data-dir="%s"><div class="t-top"><h3 class="t-name">%s%s</h3>'
+        '<a class="t-go" href="/project/%s" target="_blank" rel="noopener" title="Open the cockpit">cockpit &#8599;</a></div>'
+        '%s<div class="t-more"><div class="t-desc">%s</div>%s%s</div>'
+        '<div class="t-acts">%s</div>'
         '<div class="t-body" hidden></div></article>'
-    ) % (cls, pid, pid, rel, esc(e.get("name")), pid, rel, effort,
-         esc((e.get("blurb") or "").strip()[:220]) or "&mdash;",
-         esc((f.get("next") or "")[:140]) or "not stated",
-         ('<div class="t-wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(" ".join(str(f["needs_you"]).split())[:140])) if f.get("needs_you") else "",
-         pid, rel, pid, rel, pid, rel, pid)
+    ) % (cls, pid, pid, rel, name, (' <span class="t-eff">&middot; %s</span>' % rel) if rel else "", pid,
+         line, esc((e.get("blurb") or "").strip()[:220]) or "&mdash;", more_next,
+         ('<div class="t-effort">reads the effort <b>%s</b>, one folder down &middot; the cockpit lists every effort</div>' % rel) if rel else "",
+         acts)
 
 
 def _shelf(sid, title, count_text, note, cards_html, foot=""):
@@ -518,7 +520,7 @@ def render_high_seat_html(ctx) -> str:
     board = (
         '<div class="board">' + _campaign_tile(ctx) + _projects_tile(ctx)
         + _shelf("shNeeds", "Needs you", "%d project%s" % (len(needs), "" if len(needs) == 1 else "s"),
-                 "Click a card to open its cockpit. Status sits beside the name.",
+                 "A card opens in place &mdash; Status, Next steps, Deliverables, Plan; the &#8599; opens its cockpit.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, " need") for e in needs) or '<div class="ptile-note">Nothing waits on you.</div>')
         + _desk_line(ctx) + _ruler(ctx)
         + _shelf("shCont", "Continuing", "%d project%s" % (len(cont), "" if len(cont) == 1 else "s"),

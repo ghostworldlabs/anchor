@@ -1,5 +1,6 @@
 """high_seat_page — the High Seat rendered from facts (W1b). Pure: a synthetic context, no server."""
 import os
+import re
 import sys
 from datetime import date
 
@@ -122,9 +123,36 @@ def test_the_board_names_the_effort_a_card_reads_and_shelves_the_record_less_pro
     assert 'class="mh-mark"' in html                                                  # the masthead mark carries its size class
     # a fact that reads an effort one folder down names it on the card and hands it to the card's parts
     e = {"id": "eff1", "name": "Skill Foundry", "blurb": "the foundry"}
-    f = {"has_record": True, "effort": "steward-refinement", "touched_s": 3600.0 * 5, "next": "Fold the handback", "needs_you": ""}
+    f = {"has_record": True, "effort": "steward-refinement", "next": "Fold the handback", "needs_you": ""}
     c = hsp._card(e, f, "")
-    assert 'data-dir="steward-refinement"' in c and "effort &middot; <b>steward-refinement</b> &middot; touched 5 h ago" in c
-    assert c.count('data-dir="steward-refinement"') == 5                            # the card, Status and the three acts
+    assert 'data-dir="steward-refinement"' in c and '<span class="t-eff">&middot; steward-refinement</span>' in c
+    assert "touched" not in c                                                        # no age on the card (Grok R6: not a receipt, not the cockpit's clock)
+    assert c.count('data-dir="steward-refinement"') == 5                            # the card and its four acts
+    assert "reads the effort <b>steward-refinement</b>" in c[c.index('class="t-more"'):]   # the effort line waits behind the open
     q = hsp._card({"id": "q1", "name": "Quiet one", "blurb": "nothing yet"}, {"has_record": False}, "")
-    assert 'class="tile quiet"' in q and "no steward record yet" in q and "Open cockpit" in q and "statusbtn" not in q
+    assert 'class="tile quiet"' in q and "no steward record yet" in q and "Open cockpit" in q and "data-part=" not in q
+
+
+def test_the_compact_card_says_one_line_and_puts_status_first_among_the_acts():
+    """The compact card (John, 2026-09-27): the name, ONE line, the acts — Status first — and nothing else until it opens."""
+    e = {"id": "p1", "name": "MBA Teaching AI", "blurb": "The course."}
+    waiting = hsp._card(e, {"has_record": True, "effort": "", "next": "Lecture 4", "needs_you": "approve the Lecture 3 AI supplement"}, " need")
+    acts = waiting[waiting.index('class="t-acts"'):waiting.index('class="t-body"')]
+    assert re.findall(r'data-part="([a-z]+)"', acts) == ["status", "next", "deliverables", "plan"]
+    assert "statusbtn" not in waiting and 'class="t-go" href="/project/p1"' in waiting
+    # the one line is the wait; the description and the next step wait behind the open, before the acts
+    assert waiting.index('class="t-line wait"') < waiting.index('class="t-more"') < waiting.index('class="t-next"') < waiting.index('class="t-acts"')
+    assert "Needs you:</span>approve the Lecture 3 AI supplement" in waiting and "Next</span>Lecture 4" in waiting and "The course." in waiting
+    assert "t-eff" not in waiting and "t-effort" not in waiting                    # a root record names no effort
+    plain = hsp._card(e, {"has_record": True, "effort": "", "next": "", "needs_you": ""}, "")
+    assert '<div class="t-line"><span class="k">Next</span>not stated</div>' in plain and "t-next" not in plain
+
+
+def test_the_page_script_says_plainly_when_the_browser_is_not_logged_in():
+    """A lint on the served script, not a pixel: the 401 sentence, the one-time token ask and the login POST are there,
+    and the old Status button beside the name is gone."""
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "This browser is not logged in to Anchor, so the record cannot be read." in js
+    assert "r.status === 401 || r.status === 403" in js and "'/api/auth/login'" in js and "askedOnce" in js
+    assert "statusbtn" not in js and "data-login" in js
+    assert "'/api/version'" in js and "location.reload()" in js                    # a redeploy reloads the open page (the old home's watcher)

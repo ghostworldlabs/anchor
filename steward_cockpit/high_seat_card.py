@@ -26,15 +26,21 @@ def esc(s) -> str:
 
 
 def _effort_dir(folder, rel=""):
-    """The effort the card names: the project root when it carries a Face, or one subfolder (``rel``, one level, no
-    separators) with its own Face; else None."""
-    root = Path(str(folder or ""))
+    """The effort the card names, resolved ONLY through the cockpit's own discovery (``discover_efforts``: the project
+    root when it carries a Face, plus one level of subfolders with their own Face, none retired in place) — the same
+    guard the cockpit's routes use. Anything discovery does not list (a path, a dot-name, a foreign drive such as
+    ``D:foo``, a plain subfolder) is None, and the card says "No steward record"."""
+    folder = str(folder or "")
     rel = str(rel or "").strip()
-    if rel and (rel in (".", "..") or "/" in rel or "\\" in rel or rel.startswith(".")):
+    if not folder:
         return None
-    d = root / rel if rel else root
-    if d.is_dir() and (d / "ECGBERHT.md").is_file():
-        return str(d)
+    try:
+        efforts = campaign.discover_efforts(folder) or []
+    except Exception:
+        return None
+    for e in efforts:
+        if str((e or {}).get("rel") or "") == rel:
+            return str(Path(folder) / rel) if rel else str(Path(folder))
     return None
 
 
