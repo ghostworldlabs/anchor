@@ -2753,7 +2753,7 @@ def render_project_tile_html(entry: dict, facts=None) -> str:
     _stw_line = _steward_status_tile_line(entry, summary=_facts.get("summary"), age=_facts.get("summary_age_s"))
     if not _stw_line and _facts.get("next"):
         # probe 3 — a named project's next step, from the strip when no status line was persisted
-        _stw_line = "next: " + str(_facts["next"]) + ((" — " + str(_facts["why"])) if _facts.get("why") else "")
+        _stw_line = ("next: " + str(_facts["next"]) + ((" — " + str(_facts["why"])) if _facts.get("why") else ""))[:160]
     steward_block = (
         f'<span class="rnd-row-steward" '
         f'title="{html_lib.escape(_stw_line, quote=True)}">'
