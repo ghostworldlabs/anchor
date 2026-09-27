@@ -1834,7 +1834,10 @@ const Proto = (() => {
         });
         const resp = await post("/api/upload", { name: file.name, data_b64: b64, mode: "new", sub: "" });
         const j = await resp.json().catch(() => ({}));
-        if (j && j.ok) say("loaded " + file.name + " — it appears in the list on the next refresh");
+        if (j && j.ok) {
+          say("loaded " + file.name);
+          try { _lastFiles = (_lastFiles || []).concat([{ name: file.name, path: file.name, at: new Date().toISOString(), loaded: true }]); renderFiles(_lastFiles); } catch (e) { /* the next refresh paints it */ }
+        }
         else if (j && j.exists) say(file.name + " is already there — nothing overwritten");
         else say(((j && j.error) || "not loaded") + " (" + file.name + ")");
       };

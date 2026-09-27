@@ -70,7 +70,6 @@
 
   // the cards open in place (W2): Status beside the name; Next steps · Deliverables · Plan in the acts row —
   // each part is composed on the server from the cockpit's own readers, so the card says what the cockpit says
-  var partCache = {};
   function openPart(card, pid, part, btn) {
     var body = $('.t-body', card);
     var same = card.getAttribute('data-open') === part;
@@ -78,13 +77,11 @@
     if (same) { body.hidden = true; card.removeAttribute('data-open'); card.classList.remove('open'); return; }
     card.setAttribute('data-open', part); card.classList.add('open');
     body.hidden = false; body.innerHTML = '<div class="cp-quiet">Reading the record…</div>';
-    var key = pid + ':' + part;
-    if (partCache[key]) { body.innerHTML = partCache[key]; return; }
     fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=' + encodeURIComponent(part), { headers: headers() })
       .then(function (r) { return r.json(); })
       .then(function (jr) {
         var html = (jr && jr.html) || ('<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>');
-        partCache[key] = html; if (card.getAttribute('data-open') === part) body.innerHTML = html;
+        if (card.getAttribute('data-open') === part) body.innerHTML = html;
       })
       .catch(function () { body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
   }
@@ -119,16 +116,15 @@
       balloon.style.setProperty('--arrow', Math.max(12, r.left - rr.left - left + 20) + 'px');
       balloon.innerHTML = '<div class="bl-head"><b>' + mk.querySelector('.mk-what').textContent + '</b> · ' + mk.querySelector('.mk-date').textContent
         + ' · ' + mk.querySelector('.mk-proj').textContent + '</div><div class="bl-body"><div class="cp-quiet">Reading the record…</div></div>'
-        + '<div class="bl-foot"><a href="/project/' + encodeURIComponent(pid) + '" target="_blank" rel="noopener">Open cockpit</a> <a href="#card-' + pid + '" data-bl-card="' + pid + '">its card</a> <span class="bl-close" data-bl-close>close</span></div>';
+        + '<div class="bl-foot"><a href="#card-' + pid + '" data-bl-card="' + pid + '">its card</a> <span class="bl-close" data-bl-close>close</span></div>';
       ruler.appendChild(balloon);
       $('[data-bl-close]', balloon).addEventListener('click', closeBalloon);
       var cardLink = $('[data-bl-card]', balloon);
       cardLink.addEventListener('click', function (ev) { ev.preventDefault(); var c = $('#card-' + pid); closeBalloon(); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1600); } });
-      var key = pid + ':next', body = $('.bl-body', balloon);
-      if (partCache[key]) { body.innerHTML = partCache[key]; return; }
+      var body = $('.bl-body', balloon);
       fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=next', { headers: headers() })
         .then(function (rs) { return rs.json(); })
-        .then(function (jr) { var html = (jr && jr.html) || '<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'; partCache[key] = html; if (balloon) body.innerHTML = html; })
+        .then(function (jr) { var html = (jr && jr.html) || '<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'; if (balloon) body.innerHTML = html; })
         .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
     });
   });

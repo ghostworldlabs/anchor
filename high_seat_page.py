@@ -358,7 +358,7 @@ def _ruler(ctx):
         for m in overdue[:6])) if overdue else ""
     return (
         '<section class="shelf" id="shDated"><div class="shelf-h"><h3>Dated deliveries</h3><span class="c">%d dated step%s</span><span class="rule"></span>'
-        '<span class="note">Each marker is a dated open step in a project&rsquo;s record. Click one to open its cockpit.</span></div>'
+        '<span class="note">Each marker is a dated open step in a project&rsquo;s record. Click one to balloon it open.</span></div>'
         '<div class="ruler" id="ruler"><div class="rl-head">%s</div><div class="rl-marks" id="rlMarks">%s</div></div>'
         '%s<div class="shelf-foot">Each marker points at the one card that owns it &mdash; no project has a second card.</div>'
         '<section class="cal" id="cal"><button class="cal-h" id="calHead"><span class="k">Calendar</span><span class="state">&middot; not connected</span>'
