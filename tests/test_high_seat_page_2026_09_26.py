@@ -76,9 +76,10 @@ def test_campaign_initiatives_are_heading_steps_with_their_parts_in_tier_order()
 
 def test_the_ruler_buckets_dates_by_the_weeks_of_the_page():
     facts = list(_ctx()["facts"].values())
-    weeks, buckets, beyond = hsp.ruler_markers(facts, TODAY)
+    weeks, buckets, beyond, overdue = hsp.ruler_markers(facts, TODAY)
     assert weeks[0]["label"] == "Sep 21–27" and weeks[0]["name"] == "this week"
-    assert [m["name"] for m in buckets[0]] == ["Block 1 quiz"] and buckets[0][0]["overdue"]   # a past date sits in this week and says so
+    assert buckets[0] == []                                                                     # a date before this Monday is not this week's delivery
+    assert [m["name"] for m in overdue] == ["Block 1 quiz"] and overdue[0]["overdue"]          # it is named overdue, with its real date
     assert [m["name"] for m in buckets[2]] == ["Lectures 3 + 4 revised"]                       # Oct 10 is week 3
     assert [m["name"] for m in beyond] == ["Valuations"]                                        # Nov 30 is beyond the ruler
 
@@ -96,7 +97,8 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
     assert 'id="card-9405abe0"' in html and "1 registry project has no open next step" in html
     # the ruler and the panel
-    assert "due Oct 10" in html and "Block 1 quiz &middot; overdue" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
+    assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
+    assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html
     assert "MBA Teaching AI is waiting on you" in html and "raised by: the steward&#x27;s record waits on you" in html
     assert "Sample data" not in html
 

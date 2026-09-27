@@ -414,20 +414,20 @@ def _panel(ctx):
     week_end = today + timedelta(days=6 - today.weekday())
     later = []
     for f in facts.values():
-        for st in f.get("dated") or ():
-            d = _hr._iso(st.get("due"))
+        for stp in f.get("dated") or ():
+            d = _hr._iso(stp.get("due"))
             if d is not None and today < d <= week_end:
-                later.append((d, st, f))
+                later.append((d, stp, f))
     later.sort(key=lambda x: (x[0], x[1].get("name", "")))
     later_html = "".join('<li class="trow"><span class="tb"><span class="tt"><a href="/project/%s" target="_blank" rel="noopener">%s</a></span>'
                          '<span class="tm"><span class="src">%s</span><span class="due soon">due %s</span></span></span></li>' % (
-                             esc(f.get("id")), esc(st.get("name")), esc(f.get("name")), esc(_short(st.get("due")))) for d, st, f in later[:6])
+                             esc(f.get("id")), esc(stp.get("name")), esc(f.get("name")), esc(_short(stp.get("due")))) for d, stp, f in later[:6])
     nearest = None
     for f in facts.values():
-        for st in f.get("dated") or ():
-            d = _hr._iso(st.get("due"))
+        for stp in f.get("dated") or ():
+            d = _hr._iso(stp.get("due"))
             if d is not None and d > week_end and (nearest is None or d < nearest[0]):
-                nearest = (d, st, f)
+                nearest = (d, stp, f)
     later_block = ('<div class="blockk">Later this week &middot; %s&ndash;%s</div>%s' % (
         esc(_short((today + timedelta(days=1)).isoformat())), esc(_short(week_end.isoformat())),
         ('<ul class="tlist">%s</ul>' % later_html) if later_html else
