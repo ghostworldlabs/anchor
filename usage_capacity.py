@@ -83,7 +83,7 @@ def _age(seen_at, now):
     if m < 60:
         return "%d min ago" % m
     if m < 48 * 60:
-        return "%d h ago" % (m // 60)
+        return ("%d h %d min ago" % (m // 60, m % 60)) if m % 60 else ("%d h ago" % (m // 60))
     return "%d days ago" % (m // (60 * 24))
 
 
@@ -228,6 +228,11 @@ def _claude_row(s, sig, now):
         pct = int(round(w["utilization"] * 100))
         warn = w["utilization"] >= AMBER
         reset = fmt_reset(w["resets_at"], now) if w["resets_at"] else "unknown"
+        if w["resets_at"] and w["resets_at"] <= now.timestamp():
+            # the window has reset since that run: the old percentage is not the account's meter now
+            parts.append("%s reset at %s — was %d%% before it; no newer run has reported" % (word, reset, pct))
+            bars.append({"label": label, "pct": None, "warn": False})
+            continue
         parts.append("%s %d%% · resets %s" % (word, pct, reset))
         bars.append({"label": label, "pct": pct, "warn": warn})
         if warn:

@@ -86,6 +86,12 @@ def test_the_newest_run_reports_the_account_windows_and_amber_over_eighty(tmp_pa
     row2 = {r["cli"]: r for r in uc.anchor_seen(now=NOW, directory=str(led), jobs=str(jobs), ttl=0)["rows"]}["claude"]
     assert row2["bars"][0] == {"label": "5h", "pct": 84, "warn": True} and row2["amber"].startswith("amber \u2014 over 80% of a known limit: Claude\u2019s five-hour window at 84%")
     assert "the CLI warned at 75%" in row2["note"]
+    # a window whose reset has passed says so; the old percentage is not shown as the meter
+    older.write_text(_event(0.84, 0.40, resets=int(NOW.timestamp()) - 600) + "\n", encoding="utf-8")
+    os.utime(older, (NOW.timestamp() - 7200, NOW.timestamp() - 7200))
+    row3 = {r["cli"]: r for r in uc.anchor_seen(now=NOW, directory=str(led), jobs=str(jobs), ttl=0)["rows"]}["claude"]
+    assert row3["state"].startswith("five-hour window reset at ") and "was 84% before it; no newer run has reported" in row3["state"]
+    assert row3["bars"][0]["pct"] is None and row3["amber"] == "" and "2 h ago" in row3["note"]
     # a log with no event, or a malformed line, yields no signal
     for p in jobs.glob("*.log"):
         p.unlink()
