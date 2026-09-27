@@ -7717,6 +7717,11 @@ def _high_seat_context():
         prefs_html = render_model_prefs_controls(render_steward_control())
     except Exception:
         prefs_html = ""
+    capacity = _capacity_rows()
+    for c in capacity:      # W4: the amber word reaches the brief once, as the first bullet, while a known window is over 80%
+        if c.get("amber"):
+            bullets = ([c["amber"] + "."] + bullets)[:5]
+            break
     week = _hr.week_in_words(today)
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
@@ -7725,13 +7730,7 @@ def _high_seat_context():
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
-        "capacity": [
-            {"name": "ChatGPT", "state": "not measured yet", "note": "nothing is guessed until Anchor can read it"},
-            {"name": "Grok", "state": "not measured yet", "note": "nothing is guessed"},
-            {"name": "Claude account 1", "state": "not measured yet", "note": "nothing is guessed"},
-            {"name": "Claude account 2", "state": "not measured yet", "note": "nothing is guessed"},
-            {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"},
-        ],
+        "capacity": capacity,
     }
 
 
@@ -7795,6 +7794,17 @@ def _campaign_context(entry):
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False}
 
 
+def _capacity_rows():
+    """The rail's and the Desk's capacity lines (W4): what Anchor has seen spend per engine in the five-hour window
+    and the week, from the usage ledgers, each row saying what it cannot see; never raises."""
+    try:
+        import usage_capacity as _uc
+        return _uc.capacity_rows()
+    except Exception:
+        return [{"name": n, "state": "not measured", "note": "the usage ledgers could not be read"} for n in ("Claude", "ChatGPT", "Grok")] + [
+            {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"}]
+
+
 def _desk_context(entry):
     """The Desk view's context (W3b): the Campaign page's context plus the record's own status (the cockpit's
     branch: a live engine's state into compose_status, else the persisted record) and the capacity lines."""
@@ -7810,16 +7820,11 @@ def _desk_context(entry):
         status = {"lead": data.get("lead_line") or _sc.lead_line(data.get("plan")), "at": str(data.get("at") or "")[-16:],
                   "facts": [(f.get("label"), f.get("value")) for f in facts if isinstance(f, dict) and f.get("label")],
                   "stale": bool(data.get("stale")), "live": eng is not None}
-    except Exception:
-        status = {}
+    except Exception as e:      # a failed read is named; the Desk still renders (the Rabbit's W3b trim)
+        status = {"lead": "The status could not be read: %s" % html_lib.escape("%s: %s" % (type(e).__name__, e)), "at": "", "facts": [],
+                  "stale": False, "live": False, "failed": True}
     ctx["status"] = status
-    ctx["capacity"] = [
-        {"name": "ChatGPT", "state": "not measured yet", "note": "nothing is guessed until Anchor can read it"},
-        {"name": "Grok", "state": "not measured yet", "note": "nothing is guessed"},
-        {"name": "Claude account 1", "state": "not measured yet", "note": "nothing is guessed"},
-        {"name": "Claude account 2", "state": "not measured yet", "note": "nothing is guessed"},
-        {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"},
-    ]
+    ctx["capacity"] = _capacity_rows()
     return ctx
 
 

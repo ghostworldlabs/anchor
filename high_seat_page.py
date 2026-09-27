@@ -139,6 +139,19 @@ def _brand_img(build, name, cls=""):
         (' class="%s"' % cls) if cls else "", esc(name), esc(build))
 
 
+def capacity_row_html(c):
+    """One capacity line (W4): the name, the two bars when a run reported the account's windows (amber over 80%),
+    the state in words, the note that says what the row cannot see."""
+    bars = "".join(
+        '<span class="wbar"><span class="wl">%s</span><span class="bar%s%s"><b style="width:%d%%"></b></span><span class="p%s">%s</span></span>' % (
+            esc(b.get("label")), " warn" if b.get("warn") else "", " est" if b.get("pct") is None else "",
+            int(b.get("pct") or 0), " warn" if b.get("warn") else "", ("%d%%" % int(b["pct"])) if b.get("pct") is not None else "?")
+        for b in (c.get("bars") or []) if isinstance(b, dict))
+    sub = (('<span class="amberword">%s</span> &middot; ' % esc(c.get("amber"))) if c.get("amber") else "") + esc(c.get("note"))
+    return ('<div class="cr"><div class="cr-top"><span class="cr-n">%s</span>%s<span class="cr-none">%s</span></div><div class="cr-sub">%s</div></div>'
+            % (esc(c.get("name")), bars, esc(c.get("state")), sub))
+
+
 def _rail(ctx):
     st = ctx["steward"]
     counts = ctx.get("counts") or {}
@@ -146,10 +159,7 @@ def _rail(ctx):
     n_needs = sum(1 for f in ctx["facts"].values() if f.get("needs_you"))
     n_park = len(ctx.get("parked") or [])
     n_bench = int(counts.get("running") or 0)
-    cap_rows = "".join(
-        '<div class="cr"><div class="cr-top"><span class="cr-n">%s</span><span class="cr-none">%s</span></div>'
-        '<div class="cr-sub">%s</div></div>' % (esc(c["name"]), esc(c["state"]), esc(c["note"]))
-        for c in ctx.get("capacity") or ())
+    cap_rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or ())
     return (
         '<nav class="rail">'
         '<div class="lockup">%s<div class="wordmark">Ghost World <span class="gwl-accent">Labs</span></div></div>'
