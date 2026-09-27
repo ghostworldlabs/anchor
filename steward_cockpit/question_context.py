@@ -225,4 +225,13 @@ def normalize_question_context(value):
     for key, cap in (("authorizes", 160), ("decide_by", 80)):
         if isinstance(value.get(key), str) and value[key].strip():
             normalized[key] = value[key].strip()[:cap]
+    # W2 (High Seat, 2026-09-26): what the decision depends on, as the steward names it — register rows
+    # by their What text, or plain names; the page links the ones it can resolve. At most six.
+    depends = value.get("depends_on")
+    if isinstance(depends, str) and depends.strip():
+        depends = [depends]
+    if isinstance(depends, list):
+        cleaned = [item.strip()[:200] for item in depends if isinstance(item, str) and item.strip()]
+        if cleaned:
+            normalized["depends_on"] = cleaned[:6]
     return normalized

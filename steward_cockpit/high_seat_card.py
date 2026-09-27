@@ -58,6 +58,21 @@ def _item_link(it, pid):
     return what
 
 
+def _named_dependencies(cdir):
+    """The ``depends_on`` names on this effort's persisted decision record (the engine's state file,
+    keyed by the effort dir), normalized; [] when there is none or the file is unreadable."""
+    try:
+        import json as _json
+        from .steward_engine import STATE_FILE
+        from .question_context import normalize_question_context
+        state = _json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        entry = state.get(str(cdir)) or state.get(str(Path(cdir))) or state.get(str(Path(cdir)).replace("\\", "/")) or {}
+        rec = normalize_question_context(entry.get("question_context")) if isinstance(entry, dict) else None
+        return list((rec or {}).get("depends_on") or [])
+    except Exception:
+        return []
+
+
 def next_html(cdir, pid):
     m = campaign.read_map(cdir)
     last = campaign.read_last_status(cdir) or {}
@@ -73,6 +88,12 @@ def next_html(cdir, pid):
         items = []
     current = campaign.current_review_items(m, items)
     acts = campaign.review_acts(m, current)
+    # the steward-named "depends on" of the persisted decision record, when one exists for this effort
+    named = _named_dependencies(cdir)
+    by_what = {str(it.get("what") or "").strip().lower(): it for it in items}
+    extra = [by_what.get(n.lower()) or {"what": n, "route": ""} for n in named
+             if n.lower() not in {str(it.get("what") or "").strip().lower() for it in current}]
+    current = list(current) + extra
     focused, _w = campaign._focused_step(m)
     steps = [s for s in m.get("steps") or [] if s.get("status") not in ("done", "parked", "cancelled", "dropped")]
     start = next((i for i, s in enumerate(steps) if focused and s.get("id") == focused.get("id")), 0)

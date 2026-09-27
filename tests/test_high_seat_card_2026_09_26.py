@@ -60,3 +60,19 @@ def test_missing_record_and_unknown_part_answer_honestly(tmp_path):
     assert out["ok"] and "No steward record for Quiet one yet" in out["html"]
     bad = card.card_part("abc", "gossip", str(empty), "Quiet one")
     assert bad["ok"] is False and bad["error"] == "unknown part"
+
+
+def test_a_decision_record_may_name_what_it_depends_on(tmp_path, monkeypatch):
+    from steward_cockpit import question_context as qc
+    rec = qc.normalize_question_context({"question": "Approve the draft?", "response_text": "Approve the draft? I recommend yes.",
+                                         "depends_on": ["Lecture 3 AI supplement, draft 2", 5, "  ", "the rubric"]})
+    assert rec["depends_on"] == ["Lecture 3 AI supplement, draft 2", "the rubric"]
+    assert qc.normalize_question_context({"question": "Go?", "depends_on": "one thing"})["depends_on"] == ["one thing"]
+    d = _effort(tmp_path)
+    state = tmp_path / "proto-state.json"
+    state.write_text(json.dumps({str(d): {"question_context": {"question": "Approve the draft?", "response_text": "Approve the draft?",
+                                                                "depends_on": ["Lecture 3 AI supplement, draft 2", "the rubric"]}}}), encoding="utf-8")
+    from steward_cockpit import steward_engine as eng
+    monkeypatch.setattr(eng, "STATE_FILE", state)
+    html = card.card_part(PID, "next", str(d), "MBA Teaching AI")["html"]
+    assert "Depends on</span>" in html and "Lecture 3 AI supplement, draft 2" in html and "the rubric" in html
