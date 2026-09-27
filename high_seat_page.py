@@ -428,8 +428,10 @@ def _panel(ctx):
             d = _hr._iso(stp.get("due"))
             if d is not None and d > week_end and (nearest is None or d < nearest[0]):
                 nearest = (d, stp, f)
-    later_block = ('<div class="blockk">Later this week &middot; %s&ndash;%s</div>%s' % (
-        esc(_short((today + timedelta(days=1)).isoformat())), esc(_short(week_end.isoformat())),
+    span_start = today + timedelta(days=1)
+    span = _short(span_start.isoformat()) if span_start >= week_end else "%s&ndash;%s" % (esc(_short(span_start.isoformat())), esc(_short(week_end.isoformat())))
+    later_block = ('<div class="blockk">Later this week &middot; %s</div>%s' % (
+        span if span_start <= week_end else "the week is over",
         ('<ul class="tlist">%s</ul>' % later_html) if later_html else
         ('<p class="emptyline"><b>Nothing is dated inside the rest of this week.</b>%s</p>' % (
             (" The next dated step is %s (%s, %s)." % (esc(nearest[1].get("name")), esc(_short(nearest[1].get("due"))), esc(nearest[2].get("name")))) if nearest else ""))))
