@@ -651,3 +651,8 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .tile.quiet .t-desc{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10.5px}
 .t-quiet{font-size:10.5px;color:var(--text-dim2);margin-top:4px}
 .t-quiet .t-open{margin:0;padding:0;border:0}
+
+/* the acts on one line, the cockpit link at its end; the card keeps its height for the words */
+.t-acts{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}
+.t-acts button{padding:2px 6px;font-size:10px}
+.t-acts .t-open{margin:0 0 0 auto;padding:0;border-top:0;font-size:10px;white-space:nowrap}

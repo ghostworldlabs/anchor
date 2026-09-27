@@ -9,11 +9,15 @@
   // the hand-off the old dashboard did: /?token=<t> stores the token for this origin and drops it from the address
   try {
     var _qs = new URLSearchParams(location.search), _t = (_qs.get('token') || '').trim();
-    if (_t) { localStorage.setItem('anchor_token', _t); _qs.delete('token'); var _rest = _qs.toString(); history.replaceState(null, '', location.pathname + (_rest ? '?' + _rest : '') + location.hash); }
+    if (_t) {
+      localStorage.setItem('anchor_token', _t); _qs.delete('token'); var _rest = _qs.toString(); history.replaceState(null, '', location.pathname + (_rest ? '?' + _rest : '') + location.hash);
+      // and the browser is logged in (the HttpOnly cookie the page routes and the card route accept), as the old home did
+      fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Anchor-Token': _t }, body: JSON.stringify({ token: _t }) }).catch(function () {});
+    }
   } catch (e) {}
   function headers() {
     var h = { 'Content-Type': 'application/json' };
-    var t = token(); if (t) h['X-Anchor-Token'] = t;
+    var t = token(); if (t) { h['X-Anchor-Token'] = t; h['Authorization'] = 'Bearer ' + t; }   // the GET card route reads Authorization or the cookie
     var b = (window.ANCHOR_BOOT && window.ANCHOR_BOOT.build_id) || ''; if (b) h['X-Anchor-Build'] = b;
     return h;
   }

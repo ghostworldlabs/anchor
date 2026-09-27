@@ -511,7 +511,7 @@ def render_high_seat_html(ctx) -> str:
         return d if d and d <= horizon else ""
     dated = sorted([e for e in entries if e.get("id") not in parked_ids and e not in needs and _soon(e)], key=lambda e: (_soon(e), str(e.get("name") or "")))
     rest = [e for e in entries if e.get("id") not in parked_ids and e not in needs and e not in dated
-            and ((facts.get(e.get("id")) or {}).get("next") or (facts.get(e.get("id")) or {}).get("summary") or (facts.get(e.get("id")) or {}).get("dated"))]
+            and (facts.get(e.get("id")) or {}).get("has_record")]           # a record with nothing open still has its card here ("Next: not stated")
     cont = dated + rest
     quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
     ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | {e.get("id") for e in quiet} | parked_ids
