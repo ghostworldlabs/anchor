@@ -628,3 +628,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .balloon .bl-close{margin-left:auto;color:var(--text-dim2);cursor:pointer}
 .tile.flash{outline:2px solid var(--accent);outline-offset:2px}
 
+
+/* W4: a long capacity state on its own line under the name and the bars */
+.cr-n{flex:none}
+.cr-state{font-size:9.5px;color:var(--text-warm);margin-top:2px;line-height:1.35}

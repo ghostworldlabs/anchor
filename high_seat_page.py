@@ -148,8 +148,11 @@ def capacity_row_html(c):
             int(b.get("pct") or 0), " warn" if b.get("warn") else "", ("%d%%" % int(b["pct"])) if b.get("pct") is not None else "?")
         for b in (c.get("bars") or []) if isinstance(b, dict))
     sub = (('<span class="amberword">%s</span> &middot; ' % esc(c.get("amber"))) if c.get("amber") else "") + esc(c.get("note"))
-    return ('<div class="cr"><div class="cr-top"><span class="cr-n">%s</span>%s<span class="cr-none">%s</span></div><div class="cr-sub">%s</div></div>'
-            % (esc(c.get("name")), bars, esc(c.get("state")), sub))
+    state = esc(c.get("state"))
+    short = len(str(c.get("state") or "")) <= 24 and not bars     # a short state sits beside the name, as the mockup's rows do
+    return ('<div class="cr"><div class="cr-top"><span class="cr-n">%s</span>%s%s</div>%s<div class="cr-sub">%s</div></div>'
+            % (esc(c.get("name")), bars, ('<span class="cr-none">%s</span>' % state) if short else "",
+               "" if short else '<div class="cr-state">%s</div>' % state, sub))
 
 
 def _rail(ctx):
