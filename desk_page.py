@@ -269,7 +269,7 @@ def _status(ctx):
 
 def _capacity(ctx):
     rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or [])
-    return '<section class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div><p class="cap-foot">Repeated from the High Seat so a long drafting run can be judged without leaving the Desk. A percentage is the account&rsquo;s own window as the newest Claude run reported it; a token count is what Anchor launched.</p></section>' % (
+    return '<section class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div><p class="cap-foot">A percentage is the account&rsquo;s own window as the newest Claude run reported it; a token count is what Anchor launched.</p></section>' % (
         rows or '<div class="cr"><div class="cr-top"><span class="cr-n">no subscription read</span></div></div>')
 
 

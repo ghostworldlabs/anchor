@@ -89,7 +89,7 @@ def _age(seen_at, now):
 
 # ── the limit signal ───────────────────────────────────────────────────────────────────────────
 
-def _tail(path, size=98304):
+def _tail(path, size=262144):
     with open(path, "rb") as f:
         f.seek(0, os.SEEK_END)
         n = f.tell()
@@ -209,7 +209,7 @@ def _seen_words(s):
 
 
 def _claude_row(s, sig, now):
-    turns = "%d turn%s this week" % (s["week_turns"], "" if s["week_turns"] == 1 else "s")
+    turns = "%d ledger entr%s this week" % (s["week_turns"], "y" if s["week_turns"] == 1 else "ies")
     base = {"name": "Claude", "cli": "claude", "window_tokens": s["window_tokens"], "week_tokens": s["week_tokens"],
             "window_turns": s["window_turns"], "week_turns": s["week_turns"], "week_minutes": round(s["week_minutes"], 1), "bars": [], "amber": ""}
     if not sig or sig["five_hour"]["utilization"] is None:
@@ -242,13 +242,13 @@ def _claude_row(s, sig, now):
     if amber:
         base["amber"] = "amber — over 80%% of a known limit: Claude’s %s; hold a long run until then" % "; ".join(amber)
     warned = (" · the CLI warned at %d%%" % int(round(float(sig["threshold"]) * 100))) if sig.get("threshold") else ""
-    base["note"] = ("the account’s own windows, from the newest Claude run Anchor launched (%s, job %s) — this session and laptop chats count in them; "
+    base["note"] = ("the account’s own windows as of the newest Claude run Anchor launched (%s, job %s) — it is that account as of that run, so a later chat is outside it; "
                     "two accounts cannot be told apart; %s, %s%s" % (_age(seen_at, now), sig["log"], _seen_words(s).replace("Anchor-seen · ", "Anchor-seen "), turns, warned))
     return base
 
 
 def _other_row(cli, label, s):
-    turns = "%d turn%s this week" % (s["week_turns"], "" if s["week_turns"] == 1 else "s")
+    turns = "%d ledger entr%s this week" % (s["week_turns"], "y" if s["week_turns"] == 1 else "ies")
     note = ("%s, as the CLI reported them; the window is unpublished, so no percentage" % turns) if cli == "chatgpt" else (
         "%s · %d min; tokens where the CLI reported them, wall-clock otherwise; the window is unpublished" % (turns, int(round(s["week_minutes"]))))
     return {"name": label, "cli": cli, "state": _seen_words(s), "note": note, "window_tokens": s["window_tokens"], "week_tokens": s["week_tokens"],

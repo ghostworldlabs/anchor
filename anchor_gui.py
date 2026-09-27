@@ -7718,10 +7718,6 @@ def _high_seat_context():
     except Exception:
         prefs_html = ""
     capacity = _capacity_rows()
-    for c in capacity:      # W4: the amber word reaches the brief once, as the first bullet, while a known window is over 80%
-        if c.get("amber"):
-            bullets = ([c["amber"] + "."] + bullets)[:5]
-            break
     week = _hr.week_in_words(today)
     return {
         "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,

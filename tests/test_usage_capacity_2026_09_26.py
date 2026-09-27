@@ -30,7 +30,7 @@ def test_the_rows_count_the_window_and_the_week_per_engine_and_say_what_they_can
     assert rows["claude"]["window_tokens"] == 1000 and rows["claude"]["week_tokens"] == 6000 and rows["claude"]["week_turns"] == 2
     assert rows["claude"]["state"] == "Anchor-seen · 1.0k tokens in the five-hour window · 6.0k this week"
     assert "claude.ai’s own bars are the truth" in rows["claude"]["note"] and "no percentage" in rows["claude"]["note"]
-    assert rows["chatgpt"]["window_tokens"] == 300 and "1 turn this week" in rows["chatgpt"]["note"]
+    assert rows["chatgpt"]["window_tokens"] == 300 and "1 ledger entry this week" in rows["chatgpt"]["note"]
     assert rows["grok"]["window_tokens"] == 0 and rows["grok"]["state"].endswith("0 tokens in the five-hour window · 2.5M this week")
     assert "3 min" in rows["grok"]["note"]
     assert rows["gemini"]["state"] == "not connected"
@@ -80,7 +80,7 @@ def test_the_newest_run_reports_the_account_windows_and_amber_over_eighty(tmp_pa
     row = {r["cli"]: r for r in uc.anchor_seen(now=NOW, directory=str(led), jobs=str(jobs), ttl=0)["rows"]}["claude"]
     assert row["state"].startswith("five-hour window 30% \u00b7 resets ") and "week 5% \u00b7 resets" in row["state"]
     assert [b["pct"] for b in row["bars"]] == [30, 5] and not any(b["warn"] for b in row["bars"]) and row["amber"] == ""
-    assert "10 min ago, job new.log" in row["note"] and "Anchor-seen 1.0k tokens" in row["note"] and "this session and laptop chats count" in row["note"]
+    assert "10 min ago, job new.log" in row["note"] and "Anchor-seen 1.0k tokens" in row["note"] and "it is that account as of that run, so a later chat is outside it" in row["note"]
     # the older run alone: amber, with the CLI's own warning threshold
     newer.unlink()
     row2 = {r["cli"]: r for r in uc.anchor_seen(now=NOW, directory=str(led), jobs=str(jobs), ttl=0)["rows"]}["claude"]
@@ -105,6 +105,8 @@ def test_the_row_renders_with_two_bars_and_the_amber_word():
                                "note": "the account\u2019s own windows", "bars": [{"label": "5h", "pct": 84, "warn": True}, {"label": "wk", "pct": 40, "warn": False}],
                                "amber": "amber \u2014 over 80% of a known limit: Claude\u2019s five-hour window at 84%, resets 16:40; hold a long run until then"})
     assert h.count('class="wbar"') == 2 and 'class="bar warn"' in h and '<b style="width:84%"></b>' in h and '<span class="p warn">84%</span>' in h
+    unknown = hsp.capacity_row_html({"name": "Claude", "state": "five-hour window reset at 18:10", "note": "n", "bars": [{"label": "5h", "pct": None, "warn": False}], "amber": ""})
+    assert '<span class="p">?</span>' in unknown and "est" not in unknown
     assert '<span class="amberword">amber' in h and "hold a long run until then" in h
     plain = hsp.capacity_row_html({"name": "Gemini", "state": "not connected", "note": "a future subscription", "bars": [], "amber": ""})
     assert "wbar" not in plain and "amberword" not in plain and "not connected" in plain

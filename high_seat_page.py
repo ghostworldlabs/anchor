@@ -143,8 +143,8 @@ def capacity_row_html(c):
     """One capacity line (W4): the name, the two bars when a run reported the account's windows (amber over 80%),
     the state in words, the note that says what the row cannot see."""
     bars = "".join(
-        '<span class="wbar"><span class="wl">%s</span><span class="bar%s%s"><b style="width:%d%%"></b></span><span class="p%s">%s</span></span>' % (
-            esc(b.get("label")), " warn" if b.get("warn") else "", " est" if b.get("pct") is None else "",
+        '<span class="wbar"><span class="wl">%s</span><span class="bar%s"><b style="width:%d%%"></b></span><span class="p%s">%s</span></span>' % (
+            esc(b.get("label")), " warn" if b.get("warn") else "",
             int(b.get("pct") or 0), " warn" if b.get("warn") else "", ("%d%%" % int(b["pct"])) if b.get("pct") is not None else "?")
         for b in (c.get("bars") or []) if isinstance(b, dict))
     sub = (('<span class="amberword">%s</span> &middot; ' % esc(c.get("amber"))) if c.get("amber") else "") + esc(c.get("note"))
