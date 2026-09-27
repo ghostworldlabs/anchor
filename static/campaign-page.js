@@ -48,6 +48,13 @@
   var undoBtn = $('#undoBtn');
   if (undoBtn) undoBtn.addEventListener('click', function () { if (lastUndo) act(lastUndo); });
 
+  // the seeds tile: closed by default, its head toggles it (John, 2026-09-27)
+  var seedband = $('#seedband'), seedToggle = $('#seedToggle'), seedTog = $('#seedTog');
+  if (seedToggle) seedToggle.addEventListener('click', function () {
+    var open = seedband.classList.toggle('open');
+    seedToggle.setAttribute('aria-expanded', open ? 'true' : 'false'); if (seedTog) seedTog.textContent = open ? 'Hide' : 'Show';
+  });
+
   // the view: grouped ↔ calendar, the same record
   var grouped = $('#viewGrouped'), cal = $('#viewCal'), viewBtn = $('#viewBtn'), title = $('#viewTitle');
   function setView(which) {

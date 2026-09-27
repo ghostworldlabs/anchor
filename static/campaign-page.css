@@ -76,11 +76,19 @@ a{color:inherit}
 /* ═════════ the seed row across the top ═════════ */
 .seedband{flex:none;border:1px solid rgba(74,222,128,.32);border-radius:10px;background:#12161c;
   padding:7px 10px 8px;margin-bottom:8px}
-.sb-h{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.sb-h{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;cursor:pointer}
+.seedband .seedrow{display:none;margin-top:7px}
+.seedband.open .seedrow{display:grid}
+.seedband .sb-h .note{display:none}
+.seedband.open .sb-h .note{display:inline}
+.sb-h .tog{font-size:11px;color:var(--accent-t);border:1px solid var(--border);border-radius:6px;padding:1px 9px;white-space:nowrap}
+.seedband:hover .sb-h .tog{border-color:var(--accent)}
+.sb-h .c b{color:var(--text);font-weight:700}
 .sb-h .t{display:inline-flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.11em;
   text-transform:uppercase;color:var(--success);font-weight:700}
 .sb-h .c{font-size:10.5px;color:var(--text-dim2);font-variant-numeric:tabular-nums}
 .sb-h .note{margin-left:auto;font-size:10.5px;color:var(--text-dim2)}
+.seedband:not(.open) .sb-h .c{margin-right:auto}
 .seedrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:start}
 .seed{border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:6px 9px 7px;min-width:0}
 .seed .st{font-size:11.5px;line-height:1.35;color:var(--text-warm)}
@@ -418,8 +426,12 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .istatus .am{color:var(--amber-t)}.istatus .dim{color:var(--text-dim2)}
 
 /* each tier a grid of compact tiles; empty tracks collapse (auto-fit) so a lone tile has the row; the name wraps, never clipped (Grok R8) */
-.tcol-b{display:grid;grid-template-columns:repeat(auto-fit,minmax(226px,1fr));gap:7px;overflow:visible;align-items:start}
-.itile{margin-bottom:0}
+.tcol-b{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:9px;overflow:visible;align-items:start}
+.itile{margin-bottom:0;padding:11px 13px 12px;min-height:92px}
+.itile:not(.open) .iname{font-size:16px;line-height:1.25;letter-spacing:-.2px}
+.itile:not(.open) .iline{font-size:13px;margin-top:6px}
+.itile:not(.open) .ilight{font-size:11px}
+.itile:not(.open) .pnum{min-width:24px;height:22px;font-size:12px}
 .itile.open{grid-column:1 / -1}
 .ihead{align-items:flex-start}
 .itile.open .iname{-webkit-line-clamp:3}

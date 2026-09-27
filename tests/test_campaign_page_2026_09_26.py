@@ -71,6 +71,7 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert 'class="tickpad" href="/project/%s"' % MBA in html            # a referenced part's tick opens its cockpit
     assert 'data-act="pup"' not in html and 'data-act="pdown"' not in html
     assert "An AI mechanics class with the group" in html and 'data-act="promote" data-seed="s3"' in html
+    assert '<section class="seedband" id="seedband"' in html and 'id="seedToggle"' in html and "<b>1</b> idea, not yet initiatives" in html   # the seeds a closed tile with its count
     assert 'data-pickgo="s3"' in html and "Create it in tier 3" in html and 'data-pickarea="family"' in html
     assert 'id="viewCal"' in html and "beyond the ruler" in html and 'class="tierstrip"' in html
     assert "<b>Tier 1</b> holds MBA Teaching, Fall 2026." in html and "nearest hard date is <b>Oct 10</b>" in html

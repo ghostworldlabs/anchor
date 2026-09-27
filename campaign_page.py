@@ -234,6 +234,8 @@ def _calendar(ctx):
 # ── seeds, areas, the panel ────────────────────────────────────────────────────────────────────
 
 def _seedband(ctx):
+    """The seeds as a tile (John, 2026-09-27): closed by default with the count in its head; the head toggles it open to
+    the seed row as it was — each seed with Make it an initiative and its two questions on the card."""
     seeds = ctx.get("seeds") or []
     if not seeds:
         row = '<div class="seed"><div class="st dim">No seeds yet.</div><div class="sw">Tell the steward &ldquo;seed: &hellip;&rdquo; on the home, or in the cockpit&rsquo;s grasscatcher.</div></div>'
@@ -245,8 +247,10 @@ def _seedband(ctx):
                       '<div class="pick" hidden><div class="q">Which tier?</div><div class="prow">%s</div><div class="q">Which life area?</div><div class="prow">%s</div>'
                       '<div class="prow"><button class="go" data-pickgo="%s">Create it in tier 3</button><button class="cancel" data-pickcancel="1">cancel</button></div></div></div>'
                       % (esc(s["id"]), esc(s["text"]), esc(s["id"]), tiers, areas, esc(s["id"])) for s in seeds)
-    return ('<section class="seedband" aria-label="Seeds"><div class="sb-h"><span class="t">Seeds</span><span class="c" id="seedCount">%d idea%s, not yet initiatives</span>'
-            '<span class="note">Making one an initiative asks for its tier and its life area on the card &mdash; nothing is created until Create it.</span></div><div class="seedrow" id="seedRow">%s</div></section>'
+    return ('<section class="seedband" id="seedband" aria-label="Seeds"><button class="sb-h" id="seedToggle" aria-expanded="false"><span class="t">Seeds</span>'
+            '<span class="c" id="seedCount"><b>%d</b> idea%s, not yet initiatives</span>'
+            '<span class="note">Making one an initiative asks for its tier and its life area on the card &mdash; nothing is created until Create it.</span>'
+            '<span class="tog" id="seedTog">Show</span></button><div class="seedrow" id="seedRow">%s</div></section>'
             % (len(seeds), "" if len(seeds) == 1 else "s", row))
 
 

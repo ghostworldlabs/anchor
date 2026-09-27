@@ -280,8 +280,9 @@ def _hdr(ctx):
 
 
 def _campaign_tile(ctx):
-    """The Campaign on the home: the Tier 1 initiatives as compact tiles, shown by default (John, 2026-09-27: "I just need
-    to be able to see what is going on from a high level and what needs action") — the name, its light, one line;
+    """The Campaign on the home: the Tier 1 initiatives as compact tiles behind the tile's head — closed by default,
+    the head toggles it (John, 2026-09-27 13:15); its line names the Tier 1 initiatives, the next deadline and the
+    seed count while closed. A tile is the name, its light, one line;
     a tile opens in place to what it showed before (the area, done-looks-like, next, the deadline and counts), its
     Status (each project part's own steward status) and its parts. Tiers 2 and 3 are counted; the Campaign page holds them."""
     camp = ctx.get("campaign")
@@ -346,8 +347,8 @@ def _campaign_tile(ctx):
          "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3,
          (" &middot; <b>no tier yet</b> &middot; %d" % untiered) if untiered else "")
     return (
-        '<section class="camp open" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
-        '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Hide</span>'
+        '<section class="camp" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
+        '<span class="d" id="campLine">%s</span><span class="sp"></span><span class="tog" id="campTog">Show Tier 1</span>'
         '<a class="camp-open" href="/project/%s" target="_blank" rel="noopener">Open the Campaign</a></div>'
         '<div class="camp-body" id="campBody">%s</div></section>'
     ) % (line, esc(camp["pid"]), body)

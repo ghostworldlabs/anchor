@@ -178,7 +178,7 @@ def test_the_campaign_tile_shows_compact_initiatives_with_a_light_and_opens_to_a
     assert "Status</span>" in st and "Next: Lecture 3" in st and "waiting on you" not in st and "parts" not in st   # the lead lines only (Grok R8)
     html = hsp.render_high_seat_html(_ctx(campaign=True))
     camp = html[html.index('<section class="camp'):html.index('id="ptile"')]
-    assert 'class="camp open"' in camp and ">Hide<" in camp                             # Tier 1 shows by default
+    assert 'class="camp" id="camp"' in camp and ">Show Tier 1<" in camp                 # closed by default; its head toggles it (13:15)
     tile = camp[camp.index('class="ini-tile needs"'):camp.index("</article>")]
     assert '<span class="ilight needs"' in tile and "needs you</span>" in tile
     assert tile.index('class="it-line wait"') < tile.index('class="it-more"') < tile.index('class="istatus"') < tile.index('class="it-parts"')
