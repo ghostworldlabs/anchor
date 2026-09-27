@@ -65,7 +65,7 @@ def test_the_tasks_are_grouped_by_when_they_are_wanted_with_their_initiative_chi
     assert 'class="rstate">parked until January</span>' in html and 'data-act="unpark" data-id="passport"' in html
     assert 'data-act="tick" data-id="tax" aria-label="Mark done" disabled title="a tick waits on your word' in html
     assert 'data-act="del" data-id="tax"' in html and 'data-act="unflag" data-id="receipts"' in html
-    assert 'data-filter="needs"' in html and '&#9873; needs you<span class="n">1</span>' in html and 'admin<span class="n">3</span>' in html
+    assert 'data-filter="needs"' in html and '&#9873; needs you<span class="n">1</span>' in html and 'admin<span class="n">5</span>' in html and 'dated<span class="n">4</span>' in html
     add = html[html.index('id="addProj">'):]
     assert '<option value="personal-admin" selected>admin</option>' in add[:400]     # admin is the add line's default, in priority order
     assert "<span id='prefs-here'></span>" in html and "MBA Teaching AI (the project)" not in html
@@ -84,6 +84,9 @@ def test_the_brief_calendar_email_status_and_capacity_say_what_they_know():
     assert "0 messages" in html and "Connect an account" in html
     assert "Next: the receipts folder" in html and "<dt>Blocker</dt><dd><i>nothing recorded</i></dd>" in html and "the record, not a live run" in html
     assert "not measured yet" in html and "what needs me today?" in html
+    failed = _ctx(); failed["status"] = {"lead": "The status could not be read: OSError: boom", "at": "", "facts": [], "failed": True}
+    h3 = dp.render_desk_html(failed)
+    assert "The status could not be read: OSError: boom" in h3 and "read failed" in h3 and "the Desk still renders" in h3
 
 
 def test_an_empty_record_says_so_and_a_missing_admin_initiative_is_named():

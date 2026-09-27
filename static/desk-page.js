@@ -51,26 +51,26 @@
   var MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   var DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
   function iso(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function daysIn(y, m) { return new Date(y, m + 1, 0).getDate(); }
+  // a month-and-day stays in this year, as typed (a past day is a past day); Tuesday is the next Tuesday; today only
+  // for the word; a day the calendar does not hold, in any shape, is refused by name and the old date kept
   function parseDate(s) {
     s = (s || '').trim().toLowerCase();
     if (!s) return 'none';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    var t = new Date(TODAY + 'T12:00:00');
+    var t = new Date(TODAY + 'T12:00:00'), y = t.getFullYear(), m, day, mon;
+    m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+    if (m) { var yy = parseInt(m[1], 10), mm = parseInt(m[2], 10) - 1, dd = parseInt(m[3], 10); if (mm < 0 || mm > 11 || dd < 1 || dd > daysIn(yy, mm)) return null; return iso(new Date(yy, mm, dd, 12)); }
     if (s === 'today') return iso(t);
     if (s === 'tomorrow') { t.setDate(t.getDate() + 1); return iso(t); }
     var di = DAYS.indexOf(s.slice(0, 3));
     if (di >= 0 && /^[a-z]+$/.test(s)) { var cur = (t.getDay() + 6) % 7; var ahead = (di - cur + 7) % 7 || 7; t.setDate(t.getDate() + ahead); return iso(t); }
-    var m = /^([a-z]+)\s+(\d{1,2})$/.exec(s) || null, day, mon;
+    m = /^([a-z]+)\.?\s+(\d{1,2})$/.exec(s) || null;
     if (m) { mon = MONTHS.indexOf(m[1].slice(0, 3)); day = parseInt(m[2], 10); }
-    else { m = /^(\d{1,2})\s+([a-z]+)$/.exec(s); if (m) { mon = MONTHS.indexOf(m[2].slice(0, 3)); day = parseInt(m[1], 10); } }
-    if (m && mon >= 0 && day >= 1 && day <= 31) {
-      var y = t.getFullYear(), d = new Date(y, mon, day, 12);
-      if (d.getMonth() !== mon) return null;
-      if (iso(d) < TODAY) d = new Date(y + 1, mon, day, 12);
-      return iso(d);
-    }
+    else { m = /^(\d{1,2})\s+([a-z]+)\.?$/.exec(s); if (m) { mon = MONTHS.indexOf(m[2].slice(0, 3)); day = parseInt(m[1], 10); } }
+    if (m && mon >= 0) { if (day < 1 || day > daysIn(y, mon)) return null; return iso(new Date(y, mon, day, 12)); }
     return null;
   }
+  window.deskParseDate = parseDate;   // for the page's look; the page itself calls it above
 
   // ── filters: page-only; the counts say what is hidden ──
   var filter = 'all';

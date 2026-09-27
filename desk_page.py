@@ -18,7 +18,7 @@ from datetime import timedelta
 
 import home_rows as _hr
 from campaign_page import _needs
-from high_seat_page import esc, _brand_img, _masthead
+from high_seat_page import esc, _brand_img, _masthead, capacity_row_html
 
 GROUPS = ("today", "week", "later", "parked", "done")
 
@@ -79,7 +79,8 @@ def _row(t, initiatives, today, tick_allowed):
     done = t["status"] == "done"
     d = _hr._iso(t["date"]) if t["date"] else None
     soon = bool(d) and d <= today + timedelta(days=10)
-    date_chip = (('<button class="mchip dated%s" data-act="date" data-id="%s">%s</button>' % (" soon" if soon else "", tid, esc(_short(t["date"]))))
+    lab = _short(t["date"]) + ((" %d" % d.year) if d and d.year != today.year else "")
+    date_chip = (('<button class="mchip dated%s" data-act="date" data-id="%s">%s</button>' % (" soon" if soon else "", tid, esc(lab)))
                  if t["date"] else '<button class="mchip" data-act="date" data-id="%s">&middot; no date</button>' % tid)
     opts = "".join('<option value="%s"%s>%s</option>' % (esc(i["id"]), " selected" if i["id"] == t["initiative"] else "",
                                                           "admin" if admin_initiative([i]) is not None else esc(i["name"])) for i in initiatives)
@@ -117,8 +118,8 @@ def _tasks_col(ctx):
     open_ = _open(tasks)
     by = {k: rank([t for t in tasks if group_of(t, today, week_end) == k]) for k in GROUPS}
     near = next((t for t in rank([t for t in open_ if t["date"] and _hr._iso(t["date"]) and _hr._iso(t["date"]) > week_end])), None)
-    filters = (("all", "All", len(tasks)), ("needs", "&#9873; needs you", sum(1 for t in open_ if t["needs_you"])),
-               ("dated", "dated", sum(1 for t in open_ if t["date"])), ("admin", "admin", sum(1 for t in open_ if t["admin"])))
+    filters = (("all", "All", len(tasks)), ("needs", "&#9873; needs you", sum(1 for t in tasks if t["needs_you"])),
+               ("dated", "dated", sum(1 for t in tasks if t["date"])), ("admin", "admin", sum(1 for t in tasks if t["admin"])))
     fbtns = "".join('<button data-filter="%s"%s>%s<span class="n">%d</span></button>' % (k, ' class="on"' if k == "all" else "", lab, n) for k, lab, n in filters)
     week_lab = "%s&ndash;%s" % (esc(_short(monday.isoformat())), esc(_short(week_end.isoformat())))
     groups = (
@@ -145,7 +146,7 @@ def _tasks_col(ctx):
         '<div class="scroll" style="flex:1"><div class="tklist" id="tkList">%s</div></div>%s'
         '<div class="tklegend"><b>&#10003; done</b> waits on your word on the close law &middot; <b>&#9873; needs you</b> &middot; <b>&#9679; in progress</b> &middot; <b>&middot; no date</b> &middot; '
         '<b>&#10005;</b> takes a task off the Desk (the record keeps it; Undo puts it back). Click the text to rename it, the date to change it, the chip to move it to another initiative. '
-        '%s The old task list stays on the old dashboard until your word.</div></div></section>'
+        '%s</div></div></section>'
     ) % (len(open_), len(by["parked"]), len(by["done"]), fbtns, "Every task, grouped by when it is wanted. Parked and Done fall to the bottom.", groups, addline, source)
 
 
@@ -256,18 +257,19 @@ def _status(ctx):
     s = ctx.get("status") or {}
     facts = s.get("facts") or []
     rows = "".join('<div class="srow"><dt>%s</dt><dd>%s</dd></div>' % (esc(l), esc(v) if v else "<i>nothing recorded</i>") for l, v in facts)
-    stamp = esc(s.get("at") or "no report yet")
+    stamp = esc(s.get("at") or ("read failed" if s.get("failed") else "no report yet"))
     lead = esc(s.get("lead") or "No status recorded on the Campaign yet &mdash; the steward writes one on its first turn.")
     kind = " &middot; live" if s.get("live") else (" &middot; the record, not a live run" if s.get("stale") else "")
     return ('<section class="status"><div class="st-h">Status &mdash; the Campaign&rsquo;s latest report<span class="stamp">%s%s</span></div><p class="st-lead" id="stLead">%s</p><dl id="stRows">%s</dl>'
             '<p class="st-fine">%s</p></section>' % (stamp, kind, lead, rows or '<div class="srow"><dt>Status</dt><dd>nothing recorded</dd></div>',
-                                                    "The rows are the cockpit&rsquo;s own status facts; a row with nothing in it says so." if facts else "The Desk runs no build: its status is the Campaign record&rsquo;s, once the steward has written one."))
+                                                    "The rows are the cockpit&rsquo;s own status facts; a row with nothing in it says so." if facts else (
+                                                        "The status could not be read this time; the Desk still renders from the record." if s.get("failed") else
+                                                        "The Desk runs no build: its status is the Campaign record&rsquo;s, once the steward has written one.")))
 
 
 def _capacity(ctx):
-    rows = "".join('<div class="cr"><div class="cr-top"><span class="cr-n">%s</span><span class="cr-none">%s</span></div><div class="cr-sub">%s</div></div>' % (
-        esc(c.get("name")), esc(c.get("state")), esc(c.get("note"))) for c in ctx.get("capacity") or [])
-    return '<section class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div><p class="cap-foot">Repeated from the High Seat so a long drafting run can be judged without leaving the Desk. Nothing is measured yet; nothing is guessed.</p></section>' % (
+    rows = "".join(capacity_row_html(c) for c in ctx.get("capacity") or [])
+    return '<section class="cap"><h3>Capacity &middot; window and week</h3><div id="capList">%s</div><p class="cap-foot">Repeated from the High Seat so a long drafting run can be judged without leaving the Desk. A percentage is the account&rsquo;s own window as the newest Claude run reported it; a token count is what Anchor launched.</p></section>' % (
         rows or '<div class="cr"><div class="cr-top"><span class="cr-n">no subscription read</span></div></div>')
 
 
