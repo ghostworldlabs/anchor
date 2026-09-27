@@ -36,6 +36,9 @@ def world(tmp_path):
     trusts = _project(tmp_path, "9405abe06dc84b749d4ece0bda1cb45c", "Family Trusts", [
         {"id": "valuations", "name": "Company valuations into the package", "status": "active"},
     ])
+    # the trusts' wait lives only on the persisted status, as a managed campaign's does
+    (Path(trusts["folder_path"]) / ".ecgberht" / "status-summary.json").write_text(
+        json.dumps({"at": "2026-09-26T17:00", "lead_line": "", "plan": {"waiting_on_you": "the three valuation figures"}}), encoding="utf-8")
     entries = {e["id"]: e for e in (mba, trusts)}
 
     def lookup(pid):
@@ -122,3 +125,8 @@ def test_a_deliverable_part_resolves_by_row_number_only(world):
     assert missing["broken"] is True and missing["gap"].startswith("no row 9")
     short = cp.resolve_ref("project:6765ece4", lookup=world["lookup"])
     assert short["broken"] is True                       # the full id only; a prefix never binds
+
+
+def test_a_project_part_reads_the_wait_from_the_last_status_when_the_strip_has_none(world):
+    r = cp.resolve_ref("project:9405abe06dc84b749d4ece0bda1cb45c", lookup=world["lookup"])
+    assert r["state"] == "waiting on you: the three valuation figures"

@@ -117,7 +117,12 @@ def resolve_ref(ref, cache=None, lookup=None, with_lead=False):
     steps = _projection(folder, cache)
     if p["kind"] == "project":
         out["href"] = "/project/%s" % out["pid"]
+        # the same fact the home's rows use: the strip's human wait, else the last status's "waiting on you"
         wait = _strip_wait(folder, cache)
+        if not wait:
+            plan = _summary(folder, cache).get("plan")
+            wait = " ".join(str((plan or {}).get("waiting_on_you") or "").split()) if isinstance(plan, dict) else ""
+            wait = (wait[:88].rstrip() + "…") if len(wait) > 90 else wait
         out["state"] = ("waiting on you: " + wait) if wait else ""
         out["date"] = _nearest_due(steps)
         out["broken"] = False
