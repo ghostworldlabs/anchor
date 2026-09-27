@@ -204,4 +204,4 @@ def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_close
     full = anchor_gui._render_group_folders({"Teaching": entries}, {})
     assert "rnd-kebab" in full and 'draggable="true"' in full                                   # the old dashboard's own list is untouched
     js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
-    assert "\u25BE" in js and "rnd-collapsed" in js                                            # the folder arrow turns when it opens
+    assert "u25BE" in js and "rnd-collapsed" in js                                            # the folder arrow turns when it opens

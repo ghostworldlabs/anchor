@@ -223,6 +223,11 @@ def deliverables_html(cdir, pid):
     return "".join(out)
 
 
+def _why(s):
+    """The words beside a flag: the cockpit's wait phrase, else the step's own waiting_on (an active step can carry one)."""
+    return _waits(s) or " ".join(str(s.get("waiting_on") or "").split())[:90]
+
+
 def _step_row(s, now_id):
     """A step as the cockpit marks it: ✓ done, ⚑ needs attention (the cockpit's own rule — a wait, a block, a review
     handoff, even on an active step), ● the current step, ▷ otherwise; the wait's words beside the flag."""
@@ -236,7 +241,7 @@ def _step_row(s, now_id):
         g, cls = "&#9655;", "s-" + esc(s.get("status") or "planned")
     return '<div class="cp-step %s"><span class="mk">%s</span>%s%s%s</div>' % (
         cls, g, esc(_step_label(s)), (' <span class="dim">&middot; due %s</span>' % esc(s.get("due"))) if s.get("due") else "",
-        (' <span class="dim">&middot; %s</span>' % esc(_waits(s))) if _waits(s) else "")
+        (' <span class="dim">&middot; %s</span>' % esc(_why(s))) if _why(s) else "")
 
 
 def _plan_node_html(node, now_id, depth=0):
@@ -281,7 +286,7 @@ def plan_html(cdir, pid):
     open_rows.sort(key=rank)
     notdone = "".join('<div class="cp-step"><span class="mk">%s</span>%s%s</div>' % (
         "&#9873;" if campaign._step_needs_attention(s) else ("&#9679;" if s.get("id") == now_id else "&middot;"), esc(_step_label(s)),
-        (' <span class="dim">&middot; %s</span>' % esc(_waits(s))) if _waits(s) else "") for i, s in open_rows)
+        (' <span class="dim">&middot; %s</span>' % esc(_why(s))) if _why(s) else "") for i, s in open_rows)
     done_n = sum(1 for s in steps if _done(s))
     return ('<div class="cp-planpane"><div class="cp-when">%d of %d steps done &middot; &#10003; done &middot; &#9655; unfinished &middot; &#9873; waits on you &middot; &#9679; now</div>'
             '<div class="cp-sec"><span class="k">The plan, by domain</span>%s</div>'
