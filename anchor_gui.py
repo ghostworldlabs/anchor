@@ -7705,7 +7705,7 @@ def _high_seat_context():
             top = next((i for i in initiatives if i.get("tier") == 1), None)
             if top is not None:
                 reason = top.get("done_when") or ((top.get("next") or {}).get("text") if top.get("next") else "")
-                bullets = (["Your Campaign puts %s first%s." % (top["name"], (" \u2014 " + str(reason)[:140]) if reason else "")] + bullets)[:5]
+                bullets = (["Your Campaign puts %s first%s." % (top["name"], (" — " + str(reason)[:140]) if reason else "")] + bullets)[:5]
             try:
                 strip = json.loads((camp_dir / "strip.json").read_text(encoding="utf-8"))
                 seeds = sum(1 for r in (strip.get("grasscatch") or []) if isinstance(r, dict) and r.get("kind") == "seed")
@@ -7733,6 +7733,99 @@ def _high_seat_context():
             {"name": "Gemini", "state": "not connected", "note": "a future subscription — nothing to read"},
         ],
     }
+
+
+def _campaign_dir():
+    return Path(_paths.data_dir()).resolve().parent / "Campaign"
+
+
+def _campaign_entry_for(pid):
+    """The registry entry when ``pid`` is the Campaign project (its folder is <workspace>/Campaign); else None."""
+    try:
+        e = _rnd.get_project(pid) if pid and not _unsafe_path_seg(pid) else None
+        if e and e.get("folder_path") and Path(e["folder_path"]).resolve() == _campaign_dir():
+            return e
+    except Exception:
+        pass
+    return None
+
+
+def _campaign_context(entry):
+    """Everything the Campaign page (W3c, 2026-09-26) is made of, read once per request: the record's
+    initiatives and parts (resolved), the strip's seeds, the effort's conversation, the registry's
+    projects for the add line, the steward livery. No model, no bridge."""
+    import high_seat_page as _hsp
+    import home_rows as _hr
+    from steward_cockpit.steward_campaign import read_map as _read_map
+    from steward_cockpit.campaign_parts import resolve_parts as _resolve
+    folder = str(entry.get("folder_path"))
+    today, now = datetime.now().date(), datetime.now()
+    m = _read_map(folder)
+    steps = m.get("steps") or []
+    resolved = _resolve(steps, cache={}, with_lead=False)
+    initiatives = _hsp.campaign_initiatives(steps, resolved)
+    seeds = []
+    try:
+        strip = json.loads((Path(folder) / "strip.json").read_text(encoding="utf-8"))
+        promoted = set()
+        for r in strip.get("receipts") or []:
+            if isinstance(r, dict) and r.get("kind") == "grasscatch" and str(r.get("grasscatch_why") or "").startswith("promoted"):
+                promoted.add(" ".join(str(r.get("deferred") or "").split()).lower())
+        for k, g in enumerate(strip.get("grasscatch") or []):
+            text = g if isinstance(g, str) else str((g or {}).get("deferred") or (g or {}).get("text") or "")
+            text = " ".join(text.split())
+            if text and text.lower() not in promoted:
+                seeds.append({"id": "seed-%d" % k, "text": text})
+    except Exception:
+        seeds = []
+    turns = []
+    try:
+        from steward_cockpit.conversation_history import read_history_document
+        for tn in (read_history_document(folder) or {}).get("turns") or []:
+            if not isinstance(tn, dict) or not tn.get("text"):
+                continue
+            at = str(tn.get("at") or "")
+            turns.append({"you": str(tn.get("role") or "").lower() in ("you", "user", "john", "human"),
+                          "text": " ".join(str(tn.get("text")).split()), "at": at[11:16] if len(at) >= 16 else at})
+    except Exception:
+        turns = []
+    try:
+        projects = [{"id": e.get("id"), "name": e.get("name")} for e in _rnd.list_projects(include_archived=False, include_future=False, include_retired=False)
+                    if e.get("id") and e.get("id") != entry.get("id")]
+    except Exception:
+        projects = []
+    stew = _steward_ui()
+    try:
+        prefs_html = render_model_prefs_controls(render_steward_control())
+    except Exception:
+        prefs_html = ""
+    return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
+            "brief_when": now.strftime("%H:%M \u00b7 %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
+            "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False}
+
+
+def render_campaign_page(entry, open_id=None) -> str:
+    """The Campaign view of the Campaign project's cockpit (W3c); an honest error page, never a blank."""
+    try:
+        import campaign_page as _cp
+        return _cp.render_campaign_html(_campaign_context(entry), open_id=open_id)
+    except Exception as e:
+        return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
+                "<h1>The Campaign could not render</h1><p>%s</p><p><a href=\"/project/%s?doc=1\" style=\"color:#8ab4f8\">the ordinary cockpit</a></p></body></html>"
+                % (html_lib.escape("%s: %s" % (type(e).__name__, e)), html_lib.escape(str(entry.get("id") or ""))))
+
+
+def handle_high_seat_campaign(handler, path, body):
+    """POST /api/high-seat/campaign — one act on the Campaign's own record (W3c): move a tier, re-rank,
+    rename, date, park with its trigger, unpark, flag, add a part, promote a seed. Token-gated by the
+    middleware; refused for any project that is not the Campaign. Every answer is a receipt sentence."""
+    b = body or {}
+    entry = _campaign_entry_for(str(b.get("pid") or ""))
+    if entry is None:
+        handler._send_json({"ok": False, "receipt": "only the Campaign takes these acts"}, 404); return
+    from steward_cockpit.campaign_acts import act as _act
+    out = _act(entry.get("folder_path"), b)
+    handler._send_json(out, 200 if out.get("ok") else 400)
 
 
 def render_high_seat_page() -> str:
@@ -20685,6 +20778,7 @@ def handle_foundry_sleep_rollback(handler, path, body):
 # the STRING name (keeping route_table.py import-free); the strangler resolves it
 # here. A migrated row whose name is absent falls through to legacy (defensive).
 _MIGRATED_HANDLERS = {
+    "handle_high_seat_campaign": handle_high_seat_campaign,
     "handle_version": handle_version,
     "handle_status": handle_status,
     "handle_routes": handle_routes,
@@ -22206,6 +22300,12 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 _flag = lambda k: _qp.get(k, [""])[0] in ("1", "true", "yes")
                 _chamber = _flag("chamber")
                 _classic = _flag("classic")
+                # W3c (High Seat, 2026-09-26): the Campaign project's cockpit is the Campaign page unless a
+                # flag asks for the classic window, the chamber or the ordinary document (?doc=1)
+                _camp = _campaign_entry_for(pid) if not (_classic or _chamber or _flag("doc")) else None
+                if _camp is not None and _project_authed:
+                    self._send_html(render_campaign_page(_camp, open_id=(_qp.get("open", [""])[0] or None)))
+                    return
                 if _classic:
                     self._send_html(render_project_window_html(pid))
                 elif not _project_authed:
