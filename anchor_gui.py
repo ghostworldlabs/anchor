@@ -21913,16 +21913,17 @@ class AnchorHandler(BaseHTTPRequestHandler):
                     self._send_json({"error": "unauthorized"}, code=401); return
                 self._steward_api("GET", _path_only[len("/api/steward/"):])
                 return
-            if _path_only == "/" or _path_only == "/dashboard":
-                # Serve the dashboard for "/" REGARDLESS of query string so the
-                # cache-busting reload ("/?v=<build_id>") lands on the dashboard
-                # instead of 404ing.
+            if _path_only == "/" and parse_qs(urlparse(self.path).query).get("classic", [""])[0] not in ("1", "true", "yes"):
+                # The High Seat IS the home (John, 2026-09-27: "show me the updated main dashboard"). The old
+                # dashboard stays at /?classic=1 and /dashboard until the writer switch retires its task list.
+                # Served REGARDLESS of the rest of the query so the cache-busting reload ("/?v=<build_id>") lands here.
+                self._send_html(render_high_seat_page())
+            elif _path_only == "/" or _path_only == "/dashboard":
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
             elif _path_only == "/high-seat":
-                # W1b (High Seat, 2026-09-26): the steward's portfolio surface, at its own
-                # route until John's look flips "/" to it.
+                # W1b (High Seat, 2026-09-26): the steward's portfolio surface at its own route too.
                 self._send_html(render_high_seat_page())
             elif _path_only == "/doctor":
                 # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
