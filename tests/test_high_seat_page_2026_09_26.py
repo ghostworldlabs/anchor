@@ -60,6 +60,7 @@ def _ctx(campaign=True):
             "counts": {"open": 3, "running": 1, "need_you": 1, "folders": 3}, "live": [{"text": "a build session", "project_id": mba, "lane": "build"}],
             "parked": [], "tasks_open": 13, "campaign": {"pid": "df56", "name": "Campaign"} if campaign else None, "initiatives": initiatives, "seeds": 0,
             "capacity": [{"name": "ChatGPT", "state": "not measured yet", "note": "W4"}],
+            "seed_rows": [{"id": "s3", "text": "An AI mechanics class with the group", "at": "2026-09-26"}] if campaign else [],
             "projects_html": '<div class="rnd-projects"><div class="rnd-folder-list"><div class="rnd-folder rnd-collapsed"><div class="rnd-folder-head">Teaching</div></div></div></div>'}
 
 
@@ -205,3 +206,18 @@ def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_close
     assert "rnd-kebab" in full and 'draggable="true"' in full                                   # the old dashboard's own list is untouched
     js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
     assert "u25BE" in js and "rnd-collapsed" in js                                            # the folder arrow turns when it opens
+
+
+def test_the_seeds_button_opens_a_panel_of_the_campaigns_seeds():
+    """John, 2026-09-27: the Seeds button did nothing. It opens a panel: each seed with Make it an initiative (the
+    steward's verb into the composer; Send is the word) and the way to the Campaign; no writer."""
+    html = hsp.render_high_seat_html(_ctx(campaign=True))
+    panel = html[html.index('id="seedPanel"'):html.index('id="brief"')]
+    assert 'aria-controls="seedPanel"' in html and "Seeds &middot; 1" in panel
+    assert 'data-seed="s3"' in panel and "An AI mechanics class with the group" in panel and 'data-seed-text="An AI mechanics class with the group"' in panel
+    assert 'href="/project/df56"' in panel and "asks both on the card" in panel
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "seedPanel.classList.toggle('open')" in js and "an initiative in tier 3" in js
+    quiet = hsp.render_high_seat_html(_ctx(campaign=False))
+    assert "The Campaign is not stood up yet" in quiet[quiet.index('id="seedPanel"'):]
+

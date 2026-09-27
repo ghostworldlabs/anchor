@@ -741,3 +741,6 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .rnd-row-counts .rnd-lane { padding: 2px 7px; font-size: 11px; }
 .rnd-mini.rnd-danger:hover { border-color: var(--danger); color: var(--danger); }
 .rnd-empty { color: var(--text-dim); font-size: 13px; }
+/* the seed panel the Seeds button opens (2026-09-27) */
+.seedpanel .hint a{color:var(--accent-t)}
+.seedpanel .sd .st.dim{color:var(--text-dim2)}

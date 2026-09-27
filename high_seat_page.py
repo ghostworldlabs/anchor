@@ -485,6 +485,28 @@ def _workbench(ctx):
     ) % (n, items or '<span class="dim">nothing running</span>', ('<div class="bench-sys">%s</div>' % sys_html) if sys_html else "")
 
 
+def _seed_panel(ctx):
+    """What the Seeds button opens (John, 2026-09-27: "nothing happens. Something should happen"): the Campaign's
+    seeds, each with Make it an initiative — which puts the steward's own verb into the composer ("make <seed> an
+    initiative in tier 3"), his Send being the word — and the way to the Campaign, where the tier and the life area
+    are asked on the card. Nothing here writes."""
+    rows = ctx.get("seed_rows") or []
+    camp = ctx.get("campaign") or {}
+    if not camp:
+        body = '<div class="sd"><span class="st dim">The Campaign is not stood up yet; seeds arrive with it.</span></div>'
+    elif not rows:
+        body = '<div class="sd"><span class="st dim">No seeds yet.<em>Tell the steward &ldquo;seed: &hellip;&rdquo; here, or in a cockpit&rsquo;s grasscatcher.</em></span></div>'
+    else:
+        body = "".join(
+            '<div class="sd" data-seed="%s"><span class="st">%s<em>%s</em></span>'
+            '<button class="go" data-seed-text="%s" title="puts the verb in the composer; Send is the word">Make it an initiative</button></div>' % (
+                esc(r.get("id")), esc(r.get("text")), ("caught " + esc(_hr.short_date(r.get("at")))) if r.get("at") else "from the grasscatcher", esc(r.get("text")))
+            for r in rows)
+    foot = ('<div class="hint">A seed becomes an initiative in tier 3 unless you say the tier and the life area &mdash; '
+            '<a href="/project/%s" target="_blank" rel="noopener">the Campaign</a> asks both on the card.</div>' % esc(camp.get("pid"))) if camp else ""
+    return '<section class="seedpanel" id="seedPanel"><h4>Seeds &middot; %d</h4>%s%s</section>' % (len(rows), body, foot)
+
+
 def _panel(ctx):
     st = ctx["steward"]
     bullets = "".join('<li%s>%s</li>' % (' class="lead"' if k == 0 else "", esc(b)) for k, b in enumerate(ctx.get("bullets") or []))
@@ -536,7 +558,7 @@ def _panel(ctx):
         ('<p class="emptyline"><b>Nothing is dated inside the rest of this week.</b>%s</p>' % (
             (" The next dated step is %s (%s, %s)." % (esc(nearest[1].get("name")), esc(_short(nearest[1].get("due"))), esc(nearest[2].get("name")))) if nearest else ""))))
     return (
-        '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>'
+        '<aside class="panel"><div class="seedbar"><button class="seedbtn" id="seedBtn" aria-expanded="false" aria-controls="seedPanel"><span>Seeds</span><span class="cnt" id="seedCount">%d</span></button><span class="lbl" id="seedLbl">%s</span></div>%s'
         '<section class="brief" id="brief"><div class="kicker">The brief <span class="k-when" id="briefWhen">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it acts on the whole portfolio"></textarea>'
@@ -545,7 +567,7 @@ def _panel(ctx):
         '<section class="today" id="todayBlock"><div class="today-h"><h3>Today</h3><span class="c">%d raised</span></div>'
         '<div class="today-sub">What needs you, and what is due soonest &mdash; every row a fact from a record, each saying what raised it.</div>'
         '<ul class="tlist">%s</ul>%s</section></aside>'
-    ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet",
+    ) % (seeds, "ideas that could start a project" if seeds else "no seeds yet", _seed_panel(ctx),
          esc(ctx["brief_when"]), bullets, esc(st["label"]), n_today, today_rows or '<li class="trow"><span class="tb"><span class="tt">Nothing is waiting on you.</span></span></li>', later_block)
 
 

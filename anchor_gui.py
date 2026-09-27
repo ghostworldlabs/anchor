@@ -7730,7 +7730,7 @@ def _high_seat_context():
     except Exception:
         tasks_open = 0
     # the Campaign: the project whose folder is <workspace>/Campaign (PLAN §3), read once
-    campaign, initiatives, seeds = None, [], 0
+    campaign, initiatives, seeds, seed_rows = None, [], 0, []
     try:
         camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
         entry = next((e for e in everything
@@ -7751,11 +7751,12 @@ def _high_seat_context():
                 bullets = (["Your Campaign puts %s first%s." % (top["name"], (" — " + str(reason)[:140]) if reason else "")] + bullets)[:5]
             try:
                 from steward_cockpit.campaign_seeds import read_seeds as _read_seeds
-                seeds = len(_read_seeds(camp_dir))
+                seed_rows = list(_read_seeds(camp_dir) or [])
+                seeds = len(seed_rows)
             except Exception:
                 seeds = 0
     except Exception:
-        campaign, initiatives, seeds = None, [], 0
+        campaign, initiatives, seeds, seed_rows = None, [], 0, []
     try:
         prefs_html = render_model_prefs_controls(render_steward_control())
     except Exception:
@@ -7768,7 +7769,7 @@ def _high_seat_context():
         "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
         "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
-        "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
+        "campaign": campaign, "initiatives": initiatives, "seeds": seeds, "seed_rows": seed_rows,
         "capacity": capacity, "working": _working_pids(entries, sessions),
         "projects_html": _high_seat_projects_html(groups, facts),
     }

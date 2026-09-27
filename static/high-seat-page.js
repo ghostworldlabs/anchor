@@ -230,6 +230,19 @@
 
   // the composer: the steward's say route (the same one the old home used)
   var say = $('#say'), send = $('#sendBtn');
+  // the Seeds button opens the seed panel; a seed's button puts the steward's verb in the composer — Send is the word
+  var seedBtn = $('#seedBtn'), seedPanel = $('#seedPanel');
+  if (seedBtn && seedPanel) seedBtn.addEventListener('click', function () {
+    var open = seedPanel.classList.toggle('open'); seedBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  $$('#seedPanel .go[data-seed-text]').forEach(function (g) {
+    g.addEventListener('click', function () {
+      if (!say) return;
+      say.value = 'make ' + g.getAttribute('data-seed-text') + ' an initiative in tier 3';
+      say.focus(); say.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      receipt('The verb is in the composer — add the tier or the life area if you want, then Send.');
+    });
+  });
   function doSend() {
     var text = (say.value || '').trim(); if (!text || send.disabled) return;
     send.disabled = true; send.textContent = 'Thinking…';
