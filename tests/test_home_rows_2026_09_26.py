@@ -108,6 +108,21 @@ def test_the_brief_is_bullets_of_facts(tmp_path):
     assert all(d["overdue"] for d in due) and more == 0
 
 
+def test_a_wait_that_says_none_is_not_a_wait(tmp_path):
+    """The cockpit's rule (steward_campaign._real_wait) on the home: a strip whose human_wait says "none" puts no card
+    on Needs you; a real sentence does; the status summary's waiting_on_you follows the same rule."""
+    none = _project(tmp_path, "n1", "Says none", wait="none")
+    assert hr.project_facts(none, TODAY)["needs_you"] == ""
+    dash = _project(tmp_path, "n2", "Says dash", wait="—")
+    assert hr.project_facts(dash, TODAY)["needs_you"] == ""
+    real = _project(tmp_path, "n3", "Says a thing", wait="John: sign the engagement letter")
+    assert hr.project_facts(real, TODAY)["needs_you"] == "John: sign the engagement letter"
+    summ = _project(tmp_path, "n4", "Summary none", lead="Next: x")
+    (tmp_path / "Summary_none" / ".ecgberht" / "status-summary.json").write_text(
+        json.dumps({"at": "2026-09-26T17:00", "lead_line": "Next: x", "plan": {"waiting_on_you": "nothing"}}), encoding="utf-8")
+    assert hr.project_facts(summ, TODAY)["needs_you"] == ""
+
+
 def test_the_week_in_words_and_the_short_date():
     assert hr.week_in_words(date(2026, 9, 26)) == "this week Sep 21–27"
     assert hr.week_in_words(date(2026, 9, 30)) == "this week Sep 28 – Oct 4"

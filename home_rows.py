@@ -60,7 +60,7 @@ def project_facts(entry, today=None):
     strip = _read_json(root / "strip.json")
     if isinstance(strip, dict):
         out["has_record"] = True
-        out["needs_you"] = str(strip.get("human_wait") or "").strip()
+        out["needs_you"] = _real_wait(strip.get("human_wait"))
         out["next"] = str(strip.get("next_recommended") or "").strip()
         out["why"] = str(strip.get("why_next") or "").strip()
     sfile = root / ".ecgberht" / "status-summary.json"
@@ -74,7 +74,7 @@ def project_facts(entry, today=None):
             out["summary_age_s"] = None
         plan = summ.get("plan") if isinstance(summ.get("plan"), dict) else {}
         if not out["needs_you"]:
-            out["needs_you"] = str(plan.get("waiting_on_you") or "").strip()
+            out["needs_you"] = _real_wait(plan.get("waiting_on_you"))
     rm = _read_json(root / "roadmap.json")
     if isinstance(rm, dict):
         out["has_record"] = True
@@ -94,6 +94,18 @@ def project_facts(entry, today=None):
         out["dated"] = dated
         out["nearest_due"] = dated[0]["due"] if dated else ""
     return out
+
+
+def _real_wait(text):
+    """The cockpit's own rule for a wait (steward_campaign._real_wait): a strip that says "none" / "nothing" / "-" is
+    not waiting on anyone — such a project has no business on Needs you (the live board showed "Needs you: none" on
+    four cards, 2026-09-27)."""
+    try:
+        from steward_cockpit.steward_campaign import _real_wait as rule
+        return str(rule(text) or "").strip()
+    except Exception:
+        t = " ".join(str(text or "").split())
+        return "" if t.lower().rstrip(".") in ("", "none", "nothing", "-", "—", "n/a") else t
 
 
 def current_effort(folder):
