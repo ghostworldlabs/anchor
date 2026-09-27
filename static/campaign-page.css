@@ -112,11 +112,10 @@ a{color:inherit}
 .ac.zero{color:var(--text-dim2)}
 .areas .note{font-size:10.5px;color:var(--text-dim2);margin-left:auto;text-align:right;max-width:44ch;line-height:1.4}
 
-/* ═════════ GROUPED VIEW — three tier columns ═════════ */
-.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;flex:1;min-height:0;
-  transition:grid-template-columns .16s ease}
+/* ═════════ GROUPED VIEW — the tiers stacked, Tier 1 first (John, 2026-09-27); each a grid of compact tiles ═════════ */
+.tiers{display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;overflow-y:auto;padding-right:4px}
 .tcol{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--line);
-  border-radius:9px;background:#14171e;overflow:hidden}
+  border-radius:9px;background:#14171e;overflow:visible;flex:none}
 .tcol.hot{border-color:#3a4252}
 .tcol-h{flex:none;padding:6px 9px 7px;border-bottom:1px solid var(--line);background:#11141b;
   border-top:3px solid var(--tierc)}
@@ -170,9 +169,6 @@ a{color:inherit}
 .isum .am{color:var(--amber-t);font-weight:700}
 .isum .ok{color:var(--success);font-weight:650}
 .obody{margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}
-.tiers.focused .itile:not(.open) .idone,
-.tiers.focused .itile:not(.open) .inext{display:none}
-.tiers.focused .itile:not(.open) .iname{font-size:11.5px;-webkit-line-clamp:3}
 
 /* ═════════ CALENDAR VIEW — the five-week ruler ═════════ */
 .rl-head{display:grid;grid-template-columns:var(--cols);position:sticky;top:0;z-index:4;
@@ -421,18 +417,13 @@ a.tickpad.on{background:var(--success);border-color:var(--success)}
 .istatus .isrow{padding:2px 0}.istatus .isrow a{color:var(--accent-t);text-decoration:none}.istatus .isrow a:hover{text-decoration:underline}
 .istatus .am{color:var(--amber-t)}.istatus .dim{color:var(--text-dim2)}
 
-/* tiers stacked (John, 2026-09-27: more room for tier 1, the lower tiers below); each tier a grid of compact tiles */
-.tiers{display:flex;flex-direction:column;gap:8px;overflow-y:auto;padding-right:4px;transition:none}
-.tcol{flex:none;overflow:visible;min-height:0}
-.tcol-b{display:grid;grid-template-columns:repeat(auto-fill,minmax(226px,1fr));gap:7px;overflow:visible;align-items:start}
+/* each tier a grid of compact tiles; empty tracks collapse (auto-fit) so a lone tile has the row; the name wraps, never clipped (Grok R8) */
+.tcol-b{display:grid;grid-template-columns:repeat(auto-fit,minmax(226px,1fr));gap:7px;overflow:visible;align-items:start}
 .itile{margin-bottom:0}
 .itile.open{grid-column:1 / -1}
-.ihead{align-items:center}
-.iname{-webkit-line-clamp:1}
+.ihead{align-items:flex-start}
 .itile.open .iname{-webkit-line-clamp:3}
-.tiers.focused .itile:not(.open) .iname{font-size:12.5px;-webkit-line-clamp:1}
 .iline{font-size:11px;color:var(--text-warm);margin-top:4px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .iline.wait{color:var(--amber-t)}
 .itile:not(.open) .imore{display:none}
-.boardfoot .lg{font-size:11px}
 @media(max-width:1200px){.tiers{overflow:visible}}

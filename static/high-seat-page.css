@@ -673,7 +673,7 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .ini-tile:not(.open) .it-more{display:none}
 .it-more{margin-top:5px}
 .it-area span{font-size:9px;letter-spacing:.05em;text-transform:uppercase;font-weight:700;color:var(--text-dim);border:1px solid var(--border);border-radius:999px;padding:0 7px}
-.t1grid{grid-template-columns:repeat(auto-fill,minmax(226px,1fr))}
+.t1grid{grid-template-columns:repeat(auto-fit,minmax(226px,1fr))}   /* empty tracks collapse: a lone initiative has the row (Grok R8) */
 .ini-tile.open{grid-column:1 / -1}
 /* a card's Plan and Deliverables parts, organised as the cockpit's panels are */
 .cp-sec{margin:8px 0}
@@ -685,3 +685,67 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .cp-node summary .mk.done{color:var(--success)}.cp-node summary .mk.flag{color:var(--amber-t)}.cp-node summary .mk.todo{color:var(--text-dim)}
 .cp-node .cp-step,.cp-node .cp-deliv{margin-left:16px}
 .cp-step.s-waiting .mk{color:var(--amber-t)}.cp-step.s-done .mk{color:var(--success)}
+
+/* the old dashboard's project list inside the Projects tile (John, 2026-09-27): its own rules, copied from the dashboard page */
+.rnd-name { font-weight: 600; font-size: 14px; }
+.rnd-badge { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-dim); }
+.rnd-status-line { margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.rnd-lane { padding: 4px 10px; border-radius: 6px; background: #1b2030; font-size: 13px; }
+.rnd-lane.rnd-lane-empty { color: var(--text-dim); }
+.rnd-imported { color: var(--text-dim); font-style: italic; font-size: 11px; }
+.rnd-running { color: var(--success); font-size: 11px; }
+.rnd-row-due { flex: 0 0 auto; font-size: 11px; color: var(--amber-t); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gandalf-card-status[hidden] { display: none; }
+.ptile .rnd-folder-list { margin-top: 4px; }
+/* v9 Wave 3 — collapsible project FOLDERS (group field; drag-to-group). */
+.rnd-folder-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.rnd-folder { border-bottom: 1px solid var(--border); }
+.rnd-folder:last-child { border-bottom: none; }
+.rnd-folder-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; cursor: pointer; background: var(--surface2, #232733); }
+.rnd-folder-head:hover { background: var(--surface3, #2a2f3d); }
+.rnd-tw { font-size: 11px; color: var(--text-dim); width: 12px; flex: 0 0 auto; }
+.rnd-fname { font-size: 13.5px; font-weight: 600; }
+.rnd-fcount { font-size: 11px; color: var(--text-dim); }
+.rnd-fpath { font-size: 10.5px; color: var(--text-dim); font-family: ui-monospace, Consolas, monospace; margin-left: 6px; }
+.rnd-fsp { flex: 1; }
+.rnd-fdrop-hint { font-size: 11px; color: var(--accent); }
+.rnd-folder-body { display: flex; flex-direction: column; gap: 6px; padding: 6px 8px 8px; }
+.rnd-folder.rnd-collapsed .rnd-folder-body { display: none; }
+.rnd-folder.rnd-droptarget .rnd-folder-head { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.rnd-grip { flex: 0 0 auto; color: var(--text-dim); font-size: 13px; cursor: grab; letter-spacing: -2px; }
+.rnd-row[draggable="true"] { cursor: grab; }
+.rnd-row.rnd-dragging { opacity: .5; }
+/* v9 Wave 4 — the Option-C "move on disk + group" confirm dialog. */
+/* v3 Wave 5 — thin full-width project ROWS (replace the square .rnd-tile). */
+.rnd-folder-rows { display: flex; flex-direction: column; gap: 6px; }
+.rnd-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface2, #232733); cursor: pointer; position: relative; }
+.rnd-seal-ico { width: 18px; height: 18px; border-radius: 4px; flex: 0 0 auto; object-fit: cover; }
+.rnd-row:hover { border-color: var(--accent); }
+.rnd-row:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rnd-dot { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--text-dim); }
+.rnd-dot.rnd-dot-running { background: var(--success); box-shadow: 0 0 5px var(--success); }
+.rnd-dot.rnd-dot-idle { background: var(--text-dim); }
+.rnd-row .rnd-name { flex: 0 0 auto; white-space: nowrap; }
+.rnd-row-summary { flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); opacity: .85; }
+.rnd-row-summary.rnd-dim { color: var(--text-dim); opacity: .6; font-style: italic; }
+/* v6 Wave 7 — timely activity reflection: running indicator + "what's happening". */
+.rnd-row-activity { flex: 3 1 0; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); overflow: hidden; }
+.rnd-row-steward { flex: 2 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--accent); opacity: .9; font-variant-numeric: tabular-nums; }
+.rnd-act-running { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; color: var(--success); font-weight: 600; }
+.rnd-act-pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--success); box-shadow: 0 0 5px var(--success); animation: rndActPulse 1.4s ease-in-out infinite; }
+@keyframes rndActPulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.rnd-act-latest { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rnd-act-lane { text-transform: capitalize; color: var(--text); opacity: .85; }
+.rnd-act-title { color: var(--text); opacity: .9; }
+.rnd-act-status.rnd-act-green { color: var(--success); }
+.rnd-act-status.rnd-act-amber { color: #e0a02a; }
+.rnd-act-status.rnd-act-red { color: var(--danger, #e06c6c); }
+.rnd-act-status.rnd-act-grey { color: var(--text-dim); }
+.rnd-row-counts { flex: 0 0 auto; }
+.rnd-row-counts .rnd-status-line { gap: 5px; }
+.rnd-row-counts .rnd-lane { padding: 2px 7px; font-size: 11px; }
+/* v4 Wave 8 — per-row cost/tokens/time rollup + the R&D view's global window toggle. */
+.rnd-grave { flex: 0 0 auto; opacity: .55; padding: 1px 6px; }
+.rnd-grave:hover { opacity: 1; }
+.rnd-mini.rnd-danger:hover { border-color: var(--danger); color: var(--danger); }
+.rnd-empty { color: var(--text-dim); font-size: 13px; }

@@ -84,7 +84,7 @@ def test_a_flagged_native_part_reads_as_needs_you_and_the_counts_say_so():
     roster = next(p for p in inits["mba-teaching"]["parts"] if p["id"] == "roster")
     assert roster["needs_you"] is True and len(inits["mba-teaching"]["needs"]) == 2
     assert 'data-act="unflag" data-part="roster"' in html                # the row offers to clear the flag
-    assert "&#9873; 2 need you" in html and "&#9873; 2 parts need you" in html
+    assert "&#9873; 1 initiative needs you" in html and "&#9873; 2 parts need you" in html   # the noun said (Grok R8)
     assert "5 parts (1 done)" in html and "overdue Sep 19" in html         # done over named; a past next date is overdue
 
 

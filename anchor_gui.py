@@ -7761,7 +7761,24 @@ def _high_seat_context():
         "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
         "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
         "capacity": capacity, "working": _working_pids(entries, sessions),
+        "projects_html": _high_seat_projects_html(groups, facts),
     }
+
+
+def _high_seat_projects_html(groups, facts):
+    """The Projects tile's body on the High Seat: the OLD dashboard's project list — its folders and its rows, the one
+    renderer (`_render_group_folders` → `render_project_tile_html`), every folder closed (John, 2026-09-27: "the same
+    look and feel, and all of the folders closed"). The row's kebab menu, its cost rollup and its boneyard button need
+    the old page's script, so they are left off here; the row opens the project window. Never raises."""
+    import re as _re
+    try:
+        html = _render_group_folders(groups, facts=facts)
+    except Exception as e:
+        return '<p class="ptile-note">The project list could not be rendered: %s</p>' % html_lib.escape("%s: %s" % (type(e).__name__, e))
+    html = _re.sub(r'<div class="rnd-kebab" onclick="event\.stopPropagation\(\)">.*?<div class="rnd-kebab-menu" id="rnd-kebab-[^"]*">.*?</div>\s*</div>', "", html, flags=_re.S)
+    html = _re.sub(r'<span class="rnd-row-roll"[^>]*>.*?</span>', "", html, flags=_re.S)
+    html = _re.sub(r'<button class="rnd-mini(?: rnd-accent)? rnd-grave" .*?</button>', "", html, flags=_re.S)
+    return html
 
 
 def _campaign_dir():

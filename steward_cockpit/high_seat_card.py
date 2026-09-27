@@ -184,8 +184,8 @@ def _node_html(node, pid, depth=0, current_ids=()):
     rows = "".join('<div class="cp-deliv%s">%s<span class="dim">%s%s</span></div>' % (
         " current" if id(it) in current_ids or it.get("is_current") else "", _item_link(it, pid),
         (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "",
-        " &middot; awaiting your review" if (id(it) in current_ids or it.get("is_current")) else "") for it in items[:8])
-    more = ('<div class="dim">&hellip; %d more in the cockpit</div>' % (len(items) - 8)) if len(items) > 8 else ""
+        " &middot; awaiting your review" if (id(it) in current_ids or it.get("is_current")) else "") for it in items)
+    more = ""
     kids = "".join(_node_html(c, pid, depth + 1, current_ids) for c in node.get("children") or [])
     done = mark.get("cls") == "done"
     return ('<details class="cp-node d%d %s"%s><summary><span class="mk %s">%s</span>%s<span class="dim"> &middot; %d</span></summary>%s%s%s</details>' % (
@@ -209,12 +209,12 @@ def deliverables_html(cdir, pid):
     out = ['<div class="cp-delivs">']
     out.append('<div class="cp-sec"><span class="k">Current work and review &middot; %d</span>%s</div>' % (
         len(current), "".join('<div class="cp-deliv current">%s<span class="dim">%s &middot; awaiting your review</span></div>' % (
-            _item_link(it, pid), (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "") for it in current[:10])
+            _item_link(it, pid), (" &middot; " + esc(campaign._item_summary(it))) if campaign._item_summary(it) else "") for it in current)
         or '<div class="dim">Nothing is pinned for your review.</div>'))
     approved = view.get("approved") or []
     out.append('<details class="cp-fold"><summary><span class="k">Approved &middot; %d</span></summary>%s</details>' % (
         len(approved), "".join('<div class="cp-deliv">%s<span class="dim">%s</span></div>' % (
-            _item_link(it, pid), (" &middot; " + esc(it.get("date"))) if it.get("date") else "") for it in approved[:20])
+            _item_link(it, pid), (" &middot; " + esc(it.get("date"))) if it.get("date") else "") for it in approved)
         or '<div class="dim">Nothing accepted yet.</div>'))
     streams = view.get("streams") or []
     out.append('<div class="cp-sec"><span class="k">All the work, by domain</span>%s</div>' % (
@@ -224,10 +224,11 @@ def deliverables_html(cdir, pid):
 
 
 def _step_row(s, now_id):
-    """A step as the cockpit marks it: ✓ done, ⚑ waiting on you, ● the current step, ▷ otherwise."""
+    """A step as the cockpit marks it: ✓ done, ⚑ needs attention (the cockpit's own rule — a wait, a block, a review
+    handoff, even on an active step), ● the current step, ▷ otherwise; the wait's words beside the flag."""
     if _done(s):
         g, cls = "&#10003;", "s-done"
-    elif _waits(s):
+    elif campaign._step_needs_attention(s):
         g, cls = "&#9873;", "s-waiting"
     elif s.get("id") == now_id:
         g, cls = "&#9679;", "now"
@@ -246,7 +247,7 @@ def _plan_node_html(node, now_id, depth=0):
     done = mark.get("cls") == "done"
     return ('<details class="cp-node d%d %s"%s><summary><span class="mk %s">%s</span>%s<span class="dim"> &middot; %d of %d done</span></summary>%s%s</details>' % (
         depth, esc(mark.get("cls") or "todo"), "" if done else " open", esc(mark.get("cls") or "todo"), esc(mark.get("glyph") or "&#9655;"),
-        esc(node.get("label") or node.get("id") or "work"), done_n, len(steps), "".join(_step_row(s, now_id) for s in steps[:30]), kids))
+        esc(node.get("label") or node.get("id") or "work"), done_n, len(steps), "".join(_step_row(s, now_id) for s in steps), kids))
 
 
 def plan_html(cdir, pid):
@@ -264,7 +265,7 @@ def plan_html(cdir, pid):
         roots = (campaign.work_stream_model(m, items) or {}).get("roots") or []
     except Exception:
         roots = []
-    tree = "".join(_plan_node_html(n, now_id) for n in roots) or "".join(_step_row(s, now_id) for s in steps[:40])
+    tree = "".join(_plan_node_html(n, now_id) for n in roots) or "".join(_step_row(s, now_id) for s in steps)
 
     # Not done, as the cockpit holds it: not done and not held out (parked or supporting, unless it is the current step)
     def supporting(s):
@@ -280,7 +281,7 @@ def plan_html(cdir, pid):
     open_rows.sort(key=rank)
     notdone = "".join('<div class="cp-step"><span class="mk">%s</span>%s%s</div>' % (
         "&#9873;" if _waits(s) else ("&#9679;" if s.get("id") == now_id else "&middot;"), esc(_step_label(s)),
-        (' <span class="dim">&middot; %s</span>' % esc(_waits(s))) if _waits(s) else "") for i, s in open_rows[:12])
+        (' <span class="dim">&middot; %s</span>' % esc(_waits(s))) if _waits(s) else "") for i, s in open_rows)
     done_n = sum(1 for s in steps if _done(s))
     return ('<div class="cp-planpane"><div class="cp-when">%d of %d steps done &middot; &#10003; done &middot; &#9655; unfinished &middot; &#9873; waits on you &middot; &#9679; now</div>'
             '<div class="cp-sec"><span class="k">The plan, by domain</span>%s</div>'

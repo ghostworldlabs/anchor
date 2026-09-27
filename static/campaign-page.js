@@ -62,12 +62,11 @@
   // tiles: one open at a time in the grouped view; lanes open independently
   function openTile(id) {
     $$('.itile').forEach(function (t) { t.classList.toggle('open', t.getAttribute('data-lane') === id && !t.classList.contains('open')); });
-    if (grouped) grouped.classList.toggle('focused', !!$('.itile.open'));
   }
   $$('.itile [data-act="toggle"]').forEach(function (b) { b.addEventListener('click', function () { openTile(b.getAttribute('data-lane')); }); });
   $$('.lane [data-act="toggle"]').forEach(function (b) { b.addEventListener('click', function () { var l = b.closest('.lane'); l.classList.toggle('open'); }); });
   $$('.pc[data-act="chip"]').forEach(function (c) { c.addEventListener('click', function () { setView('grouped'); openTile(c.getAttribute('data-lane')); var row = $('.row[data-part="' + c.getAttribute('data-part') + '"]'); if (row) { row.scrollIntoView({ block: 'center' }); row.classList.add('hot'); setTimeout(function () { row.classList.remove('hot'); }, 1600); } }); });
-  var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { $$('.itile.open, .lane.open').forEach(function (t) { t.classList.remove('open'); }); if (grouped) grouped.classList.remove('focused'); });
+  var closeAll = $('#closeAll'); if (closeAll) closeAll.addEventListener('click', function () { $$('.itile.open, .lane.open').forEach(function (t) { t.classList.remove('open'); }); });
   $$('[data-goto]').forEach(function (g) { g.addEventListener('click', function () { setView('grouped'); openTile(g.getAttribute('data-goto')); var t = $('.itile[data-lane="' + g.getAttribute('data-goto') + '"]'); if (t) t.scrollIntoView({ block: 'center' }); }); });
 
   // the area filter: dims, never removes, so the numbers stay true

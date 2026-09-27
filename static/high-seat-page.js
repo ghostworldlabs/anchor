@@ -79,17 +79,9 @@
   var ptile = $('#ptile'), ptileTog = $('#ptileTog');
   function setPtile(open) { if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all'; }
   var ptileToggle = $('#ptileToggle'); if (ptileToggle) ptileToggle.addEventListener('click', function () { setPtile(!ptile.classList.contains('open')); });
-  $$('.fold-h').forEach(function (h) { h.addEventListener('click', function () { h.parentElement.classList.toggle('open'); }); });
-  $$('.prow .go').forEach(function (g) {
-    g.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var card = $('#card-' + g.getAttribute('data-goto'));
-      if (card) { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); card.classList.add('flash'); setTimeout(function () { card.classList.remove('flash'); }, 1600); }
-    });
-  });
-  $$('.prow').forEach(function (row) {
-    row.addEventListener('dblclick', function () { var pid = row.getAttribute('data-pid'); if (pid) openWin('/project/' + pid); });
-  });
+  // the old dashboard's list inside the tile: its folder heads and rows call these two by name (every folder starts closed)
+  window.rndToggleFolder = function (head) { var f = head && head.closest('.rnd-folder'); if (f) f.classList.toggle('rnd-collapsed'); };
+  window.openProjectWindow = function (pid) { if (pid) openWin('/project/' + pid); };
 
   // the cards open in place (W2; the compact card, 2026-09-27): Status · Next steps · Deliverables · Plan in the acts
   // row — each part is composed on the server from the cockpit's own readers, so the card says what the cockpit says.

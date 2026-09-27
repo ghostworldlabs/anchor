@@ -59,7 +59,8 @@ def _ctx(campaign=True):
             "facts": facts, "rows": rows, "bullets": ["MBA Teaching AI is waiting on you — approve the Lecture 3 AI supplement.", "You can act from here."],
             "counts": {"open": 3, "running": 1, "need_you": 1, "folders": 3}, "live": [{"text": "a build session", "project_id": mba, "lane": "build"}],
             "parked": [], "tasks_open": 13, "campaign": {"pid": "df56", "name": "Campaign"} if campaign else None, "initiatives": initiatives, "seeds": 0,
-            "capacity": [{"name": "ChatGPT", "state": "not measured yet", "note": "W4"}]}
+            "capacity": [{"name": "ChatGPT", "state": "not measured yet", "note": "W4"}],
+            "projects_html": '<div class="rnd-projects"><div class="rnd-folder-list"><div class="rnd-folder rnd-collapsed"><div class="rnd-folder-head">Teaching</div></div></div></div>'}
 
 
 def test_campaign_initiatives_are_heading_steps_with_their_parts_in_tier_order():
@@ -96,10 +97,10 @@ def test_the_page_renders_from_facts_and_escapes_them():
     assert "<b>Tier 1:</b> MBA Teaching, Fall 2026" in html and 'href="/project/df56"' in html
     assert "broken reference: no step &#x27;lecture-99&#x27; in MBA Teaching AI" in html
     assert "Tier 2</b> &middot; 1" in html
-    # the shelves: the waiting project on Needs you, the next one on Continuing, the record-less one a line on the Projects tile
+    # the shelves: the waiting project on Needs you, the next one on Continuing, the record-less one on its own shelf (until his word — R6/R8 hold)
     assert 'id="card-6765ece4b3bc43b0b0b0907b92b17280"' in html and "Needs you:</span>approve the Lecture 3 AI supplement" in html
-    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' not in html and 'id="shQuiet"' not in html
-    assert "<b>1</b> with no steward record yet" in html                              # one line on the Projects tile, no shelf (Grok R6; fewer tiles)
+    quiet = html[html.index('id="shQuiet"'):html.index('id="shPark"')]
+    assert 'id="card-9405abe0"' in html and 'id="card-quiet"' in quiet and "no steward record yet" in quiet
     # the ruler and the panel
     assert "due Oct 10" in html and "Overdue, before this week:" in html and "Block 1 quiz" in html and "Tasks &middot; <span id=\"taskTotal\">13</span>" in html
     assert "Later this week" in html and "Dated soonest first" in html and "href=\"/project/__dashboard__?classic=1\"" in html
@@ -166,7 +167,7 @@ def test_the_campaign_tile_shows_compact_initiatives_with_a_light_and_opens_to_a
     on the home and the Campaign page; open, it shows what it showed before plus its Status."""
     inits = hsp.campaign_initiatives(_steps(), _resolved())
     mba, trusts = inits[0], inits[1]
-    assert hsp.initiative_light(mba) == "needs" and hsp.initiative_line(mba)[1] == "wait"
+    assert hsp.initiative_light(mba) == "needs" and hsp.initiative_line(mba) == ("&#9873; approve the Lecture 3 AI supplement", "wait")   # the action itself (Grok R8)
     assert hsp.initiative_light(trusts) == "idle" and hsp.initiative_line(trusts) == ("nothing open", "none")
     # a referenced project with something running lights the initiative "working" once nothing waits on him
     quiet = dict(mba, needs=[])
@@ -174,11 +175,27 @@ def test_the_campaign_tile_shows_compact_initiatives_with_a_light_and_opens_to_a
     assert hsp.initiative_light(quiet) == "waiting"                                   # its step part waits (on its own record, not on him)
     assert mba["parts"][0]["pid"] == "6765ece4b3bc43b0b0b0907b92b17280"               # the part carries its target's id for the light
     st = hsp.initiative_status_html(dict(mba, parts=[dict(mba["parts"][0], lead="Next: Lecture 3 — the interface lesson is final.")] + mba["parts"][1:]))
-    assert "Status</span>" in st and "Next: Lecture 3" in st and "waiting on you: approve the Lecture 3 AI supplement" in st and "4 parts &middot; 0 done &middot; 1 needs you" in st
+    assert "Status</span>" in st and "Next: Lecture 3" in st and "waiting on you" not in st and "parts" not in st   # the lead lines only (Grok R8)
     html = hsp.render_high_seat_html(_ctx(campaign=True))
     camp = html[html.index('<section class="camp'):html.index('id="ptile"')]
     assert 'class="camp open"' in camp and ">Hide<" in camp                             # Tier 1 shows by default
     tile = camp[camp.index('class="ini-tile needs"'):camp.index("</article>")]
     assert '<span class="ilight needs"' in tile and "needs you</span>" in tile
     assert tile.index('class="it-line wait"') < tile.index('class="it-more"') < tile.index('class="istatus"') < tile.index('class="it-parts"')
-    assert "Needs you: MBA Teaching AI" in tile                                          # the one line: the part that waits on him
+    assert "&#9873; approve the Lecture 3 AI supplement" in tile and "it-wait" not in tile and "pt-legend" not in tile   # the one line is the action; nothing said twice
+
+
+def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_closed(tmp_path, monkeypatch):
+    """John, 2026-09-27: the Projects tile opens to the old dashboard's project list, same look, every folder closed.
+    The page embeds the list it is handed; the list is the old renderer's, its folders collapsed, without the kebab."""
+    html = hsp.render_high_seat_html(_ctx())
+    tile = html[html.index('id="ptile"'):html.index('id="shNeeds"')]
+    assert 'class="rnd-folder rnd-collapsed"' in tile and 'class="prow"' not in tile and "fold-h" not in tile
+    (tmp_path / "data").mkdir()
+    monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path / "data"))
+    import anchor_gui
+    entries = [{"id": "p1", "name": "One", "folder_path": str(tmp_path), "group": "Teaching"}, {"id": "p2", "name": "Two", "folder_path": str(tmp_path), "group": "Teaching"}]
+    out = anchor_gui._high_seat_projects_html({"Teaching": entries}, {})
+    assert out.count('class="rnd-folder rnd-collapsed"') == 1 and out.count('class="rnd-row"') == 2
+    assert 'onclick="openProjectWindow(' in out and 'onclick="rndToggleFolder(this)"' in out
+    assert "rnd-kebab" not in out and "rnd-row-roll" not in out                              # the old page's menu and rollup need its script

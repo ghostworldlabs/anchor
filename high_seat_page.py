@@ -109,11 +109,22 @@ def initiative_light(i, working=None):
 
 
 def initiative_line(i):
-    """The one sentence a compact initiative tile carries: the wait when a part needs him, else the next open part,
-    else what done looks like. Returns (html, kind)."""
+    """The one sentence a compact initiative tile carries (Grok R8: the action, not the part's name): when a part waits
+    on him, the wait itself — a project part's "waiting on you: …" without its prefix, a native part's trigger, else
+    the part's text; else the next open part; else what done looks like. Returns (html, kind)."""
     if i.get("needs"):
         p = i["needs"][0]
-        return "&#9873; Needs you: " + esc(p.get("text") or p.get("target") or ""), "wait"
+        state = str(p.get("state") or "")
+        low = state.lower()
+        if "waiting on you:" in low:
+            words = state[low.index("waiting on you:") + len("waiting on you:"):].strip()
+        elif p.get("waiting_on") and str(p["waiting_on"]).strip().lower() not in ("john", "you", "me"):
+            words = "%s &mdash; %s" % (esc(p.get("text") or ""), esc(p["waiting_on"]))
+            return "&#9873; " + words, "wait"
+        else:
+            words = ""
+        text = esc(words) if words else esc(p.get("text") or p.get("target") or "")
+        return "&#9873; " + text, "wait"
     nxt = i.get("next")
     if nxt:
         return "Next: " + esc(nxt.get("text") or "") + ((" &middot; " + esc(_short(nxt["date"]))) if nxt.get("date") else ""), "next"
@@ -124,25 +135,17 @@ def initiative_line(i):
 
 def initiative_status_html(i):
     """The Status of an opened initiative (John: "the status is missing"): each project part's own steward status —
-    its last lead line, read from its record — with its wait; then the parts in one line. Nothing invented: a part
-    without a recorded status says so."""
+    its last lead line, read from its record. Only that (Grok R8): the wait and the counts are already on the tile.
+    A part without a recorded status says so."""
     rows = []
     for p in i.get("parts") or ():
         if p.get("kind") != "project":
             continue
         lead = " ".join(str(p.get("lead") or "").split())[:220]
-        state = str(p.get("state") or "")
-        rows.append('<div class="isrow"><a href="%s" target="_blank" rel="noopener">%s</a> &mdash; %s%s</div>' % (
-            esc(p.get("href") or "#"), esc(p.get("target") or p.get("text") or "project"), esc(lead) or "no status recorded yet",
-            (' <span class="am">&middot; %s</span>' % esc(state)) if state else ""))
-    parts = i.get("parts") or []
-    done = sum(1 for p in parts if p.get("status") == "done")
-    n_needs = len(i.get("needs") or [])
-    summary = "%d part%s &middot; %d done &middot; %d need%s you &middot; %s" % (
-        len(parts), "" if len(parts) == 1 else "s", done, n_needs, "s" if n_needs == 1 else "",
-        ("next deadline " + esc(_short(i["next_deadline"]))) if i.get("next_deadline") else "no deadline")
-    return '<div class="istatus"><span class="k">Status</span>%s<div class="isrow dim">%s</div></div>' % (
-        "".join(rows) or '<div class="isrow dim">No project part yet &mdash; the parts below carry their own states.</div>', summary)
+        rows.append('<div class="isrow"><a href="%s" target="_blank" rel="noopener">%s</a> &mdash; %s</div>' % (
+            esc(p.get("href") or "#"), esc(p.get("target") or p.get("text") or "project"), esc(lead) or "no status recorded yet"))
+    return '<div class="istatus"><span class="k">Status</span>%s</div>' % (
+        "".join(rows) or '<div class="isrow dim">No project part yet &mdash; the parts below carry their own states.</div>')
 
 
 # ── the ruler ──────────────────────────────────────────────────────────────────────────────────
@@ -302,7 +305,6 @@ def _campaign_tile(ctx):
     tiles = []
     for i in t1:
         nxt = i["next"]
-        wait = i["needs"][0] if i["needs"] else None
         light = initiative_light(i, working)
         glyph, word = LIGHTS[light]
         one, kind = initiative_line(i)
@@ -317,16 +319,15 @@ def _campaign_tile(ctx):
                     (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p["target"] and p["kind"] != "task" else "",
                     crit, esc(state), " none" if not p["date"] else (" soon" if date.startswith(("due today", "overdue")) else ""), esc(date),
                     (' <a class="pt-open" href="%s" target="_blank" rel="noopener">open the cockpit</a>' % esc(p["href"])) if p["href"] else ""))
-        rows = ('<div class="pt-legend">Its parts, as the Campaign holds them &mdash; kind &middot; what &middot; its state in its own record &middot; its date. '
-                'Read-only here; the Campaign page is where they move.</div>' + "".join(_part_row(p) for p in i["parts"]))
+        rows = "".join(_part_row(p) for p in i["parts"])
         tiles.append(
             '<article class="ini-tile%s" data-ini="%d"><div class="it-top"><span class="it-no">%d</span>'
             '<h4 class="it-name">%s</h4><span class="ilight %s" title="%s">%s %s</span></div>'
             '<div class="it-line %s">%s</div>'
             '<div class="it-more">%s'
             '<div class="it-done"><span class="k">Done looks like</span>%s</div>'
-            '<div class="it-next"><span class="k">Next</span>%s</div>%s'
-            '<div class="it-foot"><span class="dl %s">%s</span><span class="cnt">%d parts &middot; %d need you</span></div>%s</div>'
+            '<div class="it-next"><span class="k">Next</span>%s</div>'
+            '<div class="it-foot"><span class="dl %s">%s</span><span class="cnt">%d parts &middot; %d part%s need%s you</span></div>%s</div>'
             '<div class="it-parts">%s</div></article>' % (
                 " needs" if i["needs"] else "", i["number"], i["number"], esc(i["name"]),
                 light, "the light: needs you · working · waiting · idle, read from its parts", glyph, word,
@@ -334,17 +335,15 @@ def _campaign_tile(ctx):
                 ('<div class="it-area"><span>%s</span></div>' % esc(i["area"].title())) if i["area"] else "",
                 esc(i["done_when"]) or "not written yet &mdash; say what done looks like",
                 (esc(nxt["text"]) + ' <span class="dim">&middot; %s</span>' % esc(nxt["kind"])) if nxt else "nothing open",
-                ('<div class="it-wait"><span class="mk">&#9873; Needs you:</span>%s</div>' % esc(wait["text"])) if wait else "",
                 "soon" if i["next_deadline"] else "none",
                 ("next deadline " + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline",
-                len(i["parts"]), len(i["needs"]), initiative_status_html(i), rows))
+                len(i["parts"]), len(i["needs"]), "" if len(i["needs"]) == 1 else "s", "s" if len(i["needs"]) == 1 else "", initiative_status_html(i), rows))
     body = (
-        '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d initiative%s</b> &middot; &#9873; %d need you &mdash; '
-        'each tile is its name, its light and one line; click one for its status, its parts and its dates. '
-        '<span class="legend"><i class="lg needs">&#9873;</i> needs you &middot; <i class="lg working">&#9679;</i> working &middot; <i class="lg waiting">&#9679;</i> waiting &middot; <i class="lg idle">&#9675;</i> idle</span></div>'
+        '<div class="camp-note"><b>Tier 1 &middot; do first &middot; %d initiative%s</b> &middot; &#9873; %d initiative%s need%s you</div>'
         '<div class="t1grid">%s</div>'
         '<div class="camp-tiers"><span><b>Tier 2</b> &middot; %d &middot; <b>Tier 3</b> &middot; %d%s &mdash; <span class="rest">open the Campaign for the rest</span></span></div>'
-    ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3,
+    ) % (len(t1), "" if len(t1) == 1 else "s", sum(1 for i in t1 if i["needs"]), "" if sum(1 for i in t1 if i["needs"]) == 1 else "s", "s" if sum(1 for i in t1 if i["needs"]) == 1 else "",
+         "".join(tiles) or '<div class="camp-note">No Tier 1 initiative yet.</div>', t2, t3,
          (" &middot; <b>no tier yet</b> &middot; %d" % untiered) if untiered else "")
     return (
         '<section class="camp open" id="camp"><div class="camp-h" id="campHead"><span class="k">Campaign</span>'
@@ -355,42 +354,21 @@ def _campaign_tile(ctx):
 
 
 def _projects_tile(ctx):
+    """The Projects tile: the registry as it stands, in the OLD dashboard's own list (John, 2026-09-27: "the same look
+    and feel, and all of the folders closed") — `ctx["projects_html"]` is that list, rendered by the old dashboard's
+    renderer in `anchor_gui`; the head counts the folders and the record-less projects."""
     groups = ctx.get("groups") or {}
-    facts = ctx["facts"]
-    on_board = ctx.get("on_board") or set()
-    folds = []
-    for folder in sorted(groups, key=lambda g: (g == "Ungrouped", g.lower())):
-        entries = groups[folder] or []
-        waits = sum(1 for e in entries if (facts.get(e.get("id")) or {}).get("needs_you"))
-        rows = []
-        for e in entries:
-            f = facts.get(e.get("id")) or {}
-            lead = ""
-            summ = f.get("summary") if isinstance(f.get("summary"), dict) else None
-            if summ and summ.get("lead_line"):
-                lead = str(summ["lead_line"])[:160]
-            elif f.get("next"):
-                lead = ("Next: " + f["next"])[:160]
-            rows.append(
-                '<div class="prow" data-pid="%s"><div class="pn">%s%s</div><div class="pb">%s</div><div class="pl"><span class="q">%s:</span> %s</div></div>' % (
-                    esc(e.get("id")), esc(e.get("name")),
-                    '<button class="go" data-goto="%s">on the board</button>' % esc(e.get("id")) if e.get("id") in on_board else '<span class="nocard">no card today</span>',
-                    esc((e.get("blurb") or "").strip()[:200]) or "&mdash;", esc(ctx["steward"]["label"]), esc(lead) or "No next step registered."))
-        folds.append(
-            '<div class="fold open"><button class="fold-h" data-fold="%s"><span class="fn">%s</span><span class="fc">%d</span><span class="tw">%s</span></button>'
-            '<div class="fold-rows">%s</div></div>' % (esc(folder), esc(folder), len(entries), ("&#9873; %d waiting on you" % waits) if waits else "", "".join(rows)))
     n = sum(len(v) for v in groups.values())
-    quiet_n = int(ctx.get("quiet_n") or 0)
     return (
         '<section class="ptile" id="ptile"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
-        '<span class="n" id="ptileCount">&middot; as they are now &middot; %d in %d folders%s</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
-        '<div class="ptile-body"><div class="ptile-note">The registry as it stands &mdash; every project in its folder, ranked by nobody. The board below is the same projects, ranked.</div>'
+        '<span class="n" id="ptileCount">&middot; as they are now &middot; %d in %d folders</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
+        '<div class="ptile-body"><div class="ptile-note">The registry as it stands &mdash; every project in its folder, as the old dashboard lists them; a row opens its project window. The board below is the same projects, ranked.</div>'
         '<div class="addbox"><h4>Add a project</h4><div class="addrow">'
         '<input id="apName" type="text" placeholder="Project name" autocomplete="off">'
         '<a class="mk" id="apCreate" href="/dashboard" target="_blank" rel="noopener">Create on the dashboard</a></div>'
         '<div class="addhint" id="apHint">A new project is still made and confirmed on the old dashboard; this page shows it on the next look.</div></div>'
         '<div id="folders">%s</div></div></section>'
-    ) % (n, len(groups), (" &middot; <b>%d</b> with no steward record yet &mdash; open one's cockpit to stand it up" % quiet_n) if quiet_n else "", "".join(folds))
+    ) % (n, len(groups), ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
 
 
 _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))
@@ -590,8 +568,7 @@ def render_high_seat_html(ctx) -> str:
             and (facts.get(e.get("id")) or {}).get("has_record")]           # a record with nothing open still has its card here ("Next: not stated")
     cont = dated + rest
     quiet = [e for e in entries if e not in needs and e not in cont and e.get("id") not in parked_ids]
-    ctx["quiet_n"] = len(quiet)          # the record-less projects: one line on the Projects tile, no shelf (Grok R6, his direction: fewer tiles)
-    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | parked_ids
+    ctx["on_board"] = {e.get("id") for e in needs} | {e.get("id") for e in cont} | {e.get("id") for e in quiet} | parked_ids   # the quiet shelf stays until his word (R6 hold)
     board = (
         '<div class="board">' + _campaign_tile(ctx) + _projects_tile(ctx)
         + _shelf("shNeeds", "Needs you", "%d project%s" % (len(needs), "" if len(needs) == 1 else "s"),
@@ -602,6 +579,8 @@ def render_high_seat_html(ctx) -> str:
                  "Dated soonest first, then the rest. Moving shelves never makes a second card.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in cont) or '<div class="ptile-note">No project carries a next step yet.</div>',
                  "")
+        + _shelf("shQuiet", "No record yet", "%d project%s" % (len(quiet), "" if len(quiet) == 1 else "s"), "On the registry with no steward record; open the cockpit to stand one up.",
+                 "".join(_card(e, facts.get(e.get("id")) or {}, "") for e in quiet) or '<div class="ptile-note">Every project on the registry has a record.</div>')
         + _shelf("shPark", "Parked", "%d project%s" % (len(parked), "" if len(parked) == 1 else "s"), "Off the shelves, still one card each.",
                  "".join(_card(e, facts.get(e.get("id")) or {}, " parked") for e in parked) or '<div class="ptile-note">Nothing is parked.</div>')
         + _workbench(ctx) + '</div>')

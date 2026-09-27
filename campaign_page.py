@@ -27,8 +27,9 @@ def _short(d):
     return _hr.short_date(d) if d else ""
 
 
-def _needs(n):
-    return "&#9873; %d need%s you" % (n, "s" if n == 1 else "")
+def _needs(n, noun="part"):
+    """"⚑ 2 parts need you" — the noun said (Grok R8: the board counts parts, a tier header counts initiatives)."""
+    return "&#9873; %d %s%s need%s you" % (n, noun, "" if n == 1 else "s", "s" if n == 1 else "")
 
 
 def _part_state(p):
@@ -131,7 +132,7 @@ def _grouped(ctx, open_id):
             '<section class="tcol%s" style="--tierc:%s"><div class="tcol-h"><div class="tn">Tier %d<span class="tw">%s</span></div>'
             '<div class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</div></div><div class="tcol-b">%s</div></section>' % (
                 " hot" if t == 1 else "", TIER_COLOURS[t], t, TIER_WORDS[t], len(mine), "" if len(mine) == 1 else "s",
-                ('<span class="am">%s</span>' % _needs(needs)) if needs else "none need you", dated, "" if dated == 1 else "s",
+                ('<span class="am">%s</span>' % _needs(needs, "initiative")) if needs else "no initiative needs you", dated, "" if dated == 1 else "s",
                 "".join(_tile(i, ctx, open_id) for i in mine) or '<div class="dim" style="padding:10px;font-size:12px">nothing in this tier</div>'))
     untiered = [i for i in inits if i["tier"] is None]
     extra = ""
@@ -216,7 +217,7 @@ def _calendar(ctx):
         needs = sum(1 for i in mine if i["needs"])
         dated = sum(1 for i in mine for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"])
         return '<div class="tierstrip" style="--tierc:%s"><span class="tn">%s</span><span class="tw">%s</span><span class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</span></div>' % (
-            colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs)) if needs else "none need you", dated, "" if dated == 1 else "s")
+            colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs, "initiative")) if needs else "no initiative needs you", dated, "" if dated == 1 else "s")
     lanes = []
     for t in (1, 2, 3):
         mine = [i for i in inits if i["tier"] == t]
@@ -329,8 +330,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '<span class="c" id="boardCount">%d in priority order &middot; T1 %d / T2 %d / T3 %d &middot; %d parts &middot; %d dated%s</span>'
         '<span class="rule"></span><button class="viewbtn" id="viewBtn">&#128197; Calendar view</button><button class="mini" id="closeAll">Close all</button></div>'
         '%s%s%s%s'
-        '<p class="boardfoot" id="boardFoot">Tier 1 first, the lower tiers below. A tile is its name, its light and one line (<i class="lg needs">&#9873;</i> needs you &middot; <i class="lg working">&#9679;</i> working &middot; <i class="lg waiting">&#9679;</i> waiting &middot; <i class="lg idle">&#9675;</i> idle); it opens in place to its status, its parts and its dates. The number on each tile is the global priority, and it renumbers whenever a tier changes. <b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them. '
-        '<span class="am">&#9873; needs you</span> &middot; <span class="ok">&#10003; done</span> &middot; <b>parked</b>. Every change is one line with undo.</p></section>'
+        '<p class="boardfoot" id="boardFoot"><b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them; every change is one line with undo.</p></section>'
     ) % (len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _seedband(ctx), _areas(ctx), _grouped(ctx, open_id), _calendar(ctx))
     hdr = (
