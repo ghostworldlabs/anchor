@@ -618,4 +618,13 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
 .bench-row{font-size:11.5px;color:var(--text)}
 .bench-row.red{color:var(--amber-t)}
 .shelf-foot.late a{color:var(--amber-t)}
+/* W2: the balloon's own rows */
+#ruler{position:relative}
+.mkcard.on{border-color:var(--accent)}
+.balloon .bl-head{font-size:12px;margin-bottom:6px}
+.balloon .bl-body{font-size:12px;line-height:1.5;max-height:340px;overflow:auto}
+.balloon .bl-foot{margin-top:8px;font-size:11px;display:flex;gap:12px;align-items:center}
+.balloon .bl-foot a{color:var(--accent-t)}
+.balloon .bl-close{margin-left:auto;color:var(--text-dim2);cursor:pointer}
+.tile.flash{outline:2px solid var(--accent);outline-offset:2px}
 

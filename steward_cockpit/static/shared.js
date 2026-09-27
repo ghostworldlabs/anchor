@@ -1817,6 +1817,33 @@ const Proto = (() => {
   function wireFileTools() {
     const s = $("[data-fsearch]");
     if (s && !s._wired) { s._wired = true; s.oninput = () => renderFiles(_lastFiles); }
+    // W2 (High Seat, 2026-09-26): the upload place sits at the TOP of the Files section (John):
+    // drop or pick, one POST per file through the effort's own upload verb; the list repaints
+    // with the next state refresh, and the line here says what happened to each file.
+    const up = $("[data-fupload]");
+    if (up && !up._wired) {
+      up._wired = true;
+      const msg = $("[data-fupmsg]"), pick = $("[data-fupfile]");
+      const say = (text) => { if (msg) msg.textContent = " · " + text; };
+      const send = async (file) => {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(String(r.result).split(",")[1] || "");
+          r.onerror = () => rej(new Error("read failed"));
+          r.readAsDataURL(file);
+        });
+        const resp = await post("/api/upload", { name: file.name, data_b64: b64, mode: "new", sub: "" });
+        const j = await resp.json().catch(() => ({}));
+        if (j && j.ok) say("loaded " + file.name + " — it appears in the list on the next refresh");
+        else if (j && j.exists) say(file.name + " is already there — nothing overwritten");
+        else say(((j && j.error) || "not loaded") + " (" + file.name + ")");
+      };
+      const queue = (files) => Array.from(files || []).forEach((f) => send(f).catch(() => say("not loaded (" + f.name + ")")));
+      up.ondragover = (e) => { e.preventDefault(); up.classList.add("hot"); };
+      up.ondragleave = () => up.classList.remove("hot");
+      up.ondrop = (e) => { e.preventDefault(); up.classList.remove("hot"); queue(e.dataTransfer.files); };
+      if (pick) pick.onchange = () => { queue(pick.files); pick.value = ""; };
+    }
     const sortBtns = Array.from(document.querySelectorAll("[data-fsort]"));
     sortBtns.forEach(b => {
       if (b._wired) return; b._wired = true;

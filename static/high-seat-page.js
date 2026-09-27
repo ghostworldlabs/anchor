@@ -99,6 +99,40 @@
     });
   });
 
+  // the ruler's markers balloon open (W2): the step, its project and date, the project's open decision and
+  // what it depends on — the same Next steps fragment a card shows — and the links into the cockpit
+  var balloon = null;
+  function closeBalloon() { if (balloon) { balloon.remove(); balloon = null; } $$('.mkcard.on').forEach(function (m) { m.classList.remove('on'); }); }
+  document.addEventListener('click', function (e) { if (balloon && !e.target.closest('.balloon, .mkcard')) closeBalloon(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeBalloon(); });
+  $$('.mkcard').forEach(function (mk) {
+    mk.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if (mk.classList.contains('on')) { closeBalloon(); return; }
+      closeBalloon(); mk.classList.add('on');
+      var pid = (mk.getAttribute('href') || '').replace('/project/', '');
+      var ruler = $('#ruler');
+      balloon = document.createElement('div'); balloon.className = 'balloon';
+      var r = mk.getBoundingClientRect(), rr = ruler.getBoundingClientRect();
+      var left = Math.max(8, Math.min(r.left - rr.left, rr.width - 440));
+      balloon.style.left = left + 'px'; balloon.style.top = (r.bottom - rr.top + 8) + 'px';
+      balloon.style.setProperty('--arrow', Math.max(12, r.left - rr.left - left + 20) + 'px');
+      balloon.innerHTML = '<div class="bl-head"><b>' + mk.querySelector('.mk-what').textContent + '</b> · ' + mk.querySelector('.mk-date').textContent
+        + ' · ' + mk.querySelector('.mk-proj').textContent + '</div><div class="bl-body"><div class="cp-quiet">Reading the record…</div></div>'
+        + '<div class="bl-foot"><a href="/project/' + encodeURIComponent(pid) + '" target="_blank" rel="noopener">Open cockpit</a> <a href="#card-' + pid + '" data-bl-card="' + pid + '">its card</a> <span class="bl-close" data-bl-close>close</span></div>';
+      ruler.appendChild(balloon);
+      $('[data-bl-close]', balloon).addEventListener('click', closeBalloon);
+      var cardLink = $('[data-bl-card]', balloon);
+      cardLink.addEventListener('click', function (ev) { ev.preventDefault(); var c = $('#card-' + pid); closeBalloon(); if (c) { c.scrollIntoView({ behavior: 'smooth', block: 'center' }); c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1600); } });
+      var key = pid + ':next', body = $('.bl-body', balloon);
+      if (partCache[key]) { body.innerHTML = partCache[key]; return; }
+      fetch('/api/high-seat/card?pid=' + encodeURIComponent(pid) + '&part=next', { headers: headers() })
+        .then(function (rs) { return rs.json(); })
+        .then(function (jr) { var html = (jr && jr.html) || '<div class="cp-quiet">' + ((jr && jr.error) || 'Nothing came back.') + '</div>'; partCache[key] = html; if (balloon) body.innerHTML = html; })
+        .catch(function () { if (balloon) body.innerHTML = '<div class="cp-quiet">That did not go through.</div>'; });
+    });
+  });
+
   // the Calendar / Email tile
   var cal = $('#cal'), calTog = $('#calTog');
   function setCalTab(which) { var a = $('#tabCal'), b = $('#tabMail'); if (a) a.classList.toggle('on', which === 'cal'); if (b) b.classList.toggle('on', which === 'mail'); }

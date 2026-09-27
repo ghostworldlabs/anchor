@@ -571,3 +571,7 @@ body[data-theme="command"] .composer textarea { border-color: #1e3357; }
 .pfiles .frow a.fname { color: var(--text); text-decoration: none; }
 .pfiles .frow a.fname:hover { color: var(--steward); text-decoration: underline; }
 .skico { vertical-align: -4px; }
+/* W2 (High Seat, 2026-09-26): the upload place at the top of the Files section */
+.fupload { border: 1px dashed var(--line); border-radius: 8px; padding: 6px 9px; font-size: 11.5px; color: var(--faint); margin: 6px 0 8px; }
+.fupload.hot { border-color: var(--steward, var(--accent)); color: var(--text); }
+
