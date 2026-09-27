@@ -27,6 +27,10 @@ def _short(d):
     return _hr.short_date(d) if d else ""
 
 
+def _needs(n):
+    return "&#9873; %d need%s you" % (n, "s" if n == 1 else "")
+
+
 def _part_state(p):
     if p["broken"]:
         return "broken reference"
@@ -61,14 +65,14 @@ def _part_row(i, p, today, tick_allowed):
             ('<button class="mchip" data-act="park" data-part="%s">park</button>' % pid)) if not ref else ""
     tick = (('<button class="tick%s" data-act="tick" data-part="%s" aria-label="mark done"%s></button>' % (
         " on" if done else "", pid, "" if (tick_allowed and not ref) else ' disabled title="a tick waits on your word on the close law"'))
-            if not ref else '<span class="tickpad" title="a referenced part is closed in its own record"></span>')
+            if not ref else (('<a class="tickpad%s" href="%s" target="_blank" rel="noopener" title="done or parked in its own record &mdash; open it"></a>' % (" on" if done else "", esc(p["href"])))
+                             if p["href"] else '<span class="tickpad" title="a referenced part is closed in its own record"></span>'))
     name = ('<span class="rt" data-act="name" data-part="%s">%s</span>' % (pid, esc(p["text"]))) if not ref else ('<span class="rt">%s</span>' % esc(p["text"]))
     return ('<li class="row%s%s" data-part="%s">%s<div class="rb">%s<div class="rm">'
-            '<span class="mchip kind">%s</span>%s%s%s%s'
-            '<button class="mchip" data-act="pup" data-part="%s">&#9650;</button><button class="mchip" data-act="pdown" data-part="%s">&#9660;</button>%s'
+            '<span class="mchip kind">%s</span>%s%s%s%s%s'
             '</div></div></li>' % (
                 " done" if done else "", " pparked" if p["status"] == "parked" else "", pid, tick, name,
-                esc(p["kind"]), date_chip, flag_chip, state_chip, link, pid, pid, park))
+                esc(p["kind"]), date_chip, flag_chip, state_chip, link, park))
 
 
 def _tile(i, ctx, open_id):
@@ -88,7 +92,7 @@ def _tile(i, ctx, open_id):
         '<input class="ad" data-add="date" type="text" autocomplete="off" placeholder="2026-10-27 &middot; blank">'
         '<button class="mk" data-act="add" data-lane="%s">Add</button>'
         '<span class="ah">Enter adds it. No date and it sits in the <b>no date</b> column of the calendar view.</span></div></div></div>'
-    ) % (len(i["parts"]), len(dated), (' &middot; <span style="color:var(--amber-t);font-weight:700">&#9873; %d need you</span>' % len(i["needs"])) if i["needs"] else "",
+    ) % (len(i["parts"]), len(dated), (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
          rows or '<li class="row"><div class="rb"><span class="rt dim">no parts yet</span></div></li>', esc(i["id"]), projects, esc(i["id"]))
     return (
         '<article class="itile%s%s" data-lane="%s" style="--areac:%s"><div class="ihead"><span class="pnum" title="priority %d of %d">%d</span>'
@@ -97,14 +101,14 @@ def _tile(i, ctx, open_id):
         '<div class="iarea"><span class="larea">%s</span><span class="tierpick">Tier <select class="tsel" data-tiersel="%s">%s</select></span></div>'
         '<div class="idone"><span class="k">Done looks like</span>%s</div>'
         '<div class="inext"><span class="k">Next</span>%s</div>'
-        '<div class="isum">%d parts &middot; %d dated%s &middot; %s</div>%s</article>'
+        '<div class="isum">%d part%s%s &middot; %d dated%s &middot; %s</div>%s</article>'
     ) % (" needs" if i["needs"] else "", " open" if i["id"] == open_id else "", esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
          i["number"], ctx["n_total"], i["number"], esc(i["id"]), esc(i["id"]), esc(i["id"]), esc(i["name"]),
          esc(i["area"].title() or "no area"), esc(i["id"]), tier_opts,
          esc(i["done_when"]) or "not written yet &mdash; say what done looks like",
          ((esc(nxt["text"]) + " &middot; " + (('<span class="d">%s</span>' % esc(_short(nxt["date"]))) if nxt["date"] else "no date") + (' &middot; <span class="am">&#9873; needs you</span>' if nxt["needs_you"] else "")) if nxt else "nothing open"),
-         len(i["parts"]), len(dated), (' &middot; <span class="am">&#9873; %d need%s you</span>' % (len(i["needs"]), "" if len(i["needs"]) == 1 else "s")) if i["needs"] else "",
-         ("next deadline " + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline set", body)
+         len(i["parts"]), "" if len(i["parts"]) == 1 else "s", (" (%d done)" % i["done_count"]) if i.get("done_count") else "", len(dated), (' &middot; <span class="am">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
+         (("overdue " if (_hr._iso(i["next_deadline"]) or today) < today else "next deadline ") + esc(_short(i["next_deadline"]))) if i["next_deadline"] else "no deadline set", body)
 
 
 def _grouped(ctx, open_id):
@@ -118,7 +122,7 @@ def _grouped(ctx, open_id):
             '<section class="tcol%s" style="--tierc:%s"><div class="tcol-h"><div class="tn">Tier %d<span class="tw">%s</span></div>'
             '<div class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</div></div><div class="tcol-b">%s</div></section>' % (
                 " hot" if t == 1 else "", TIER_COLOURS[t], t, TIER_WORDS[t], len(mine), "" if len(mine) == 1 else "s",
-                ('<span class="am">&#9873; %d need you</span>' % needs) if needs else "none need you", dated, "" if dated == 1 else "s",
+                ('<span class="am">%s</span>' % _needs(needs)) if needs else "none need you", dated, "" if dated == 1 else "s",
                 "".join(_tile(i, ctx, open_id) for i in mine) or '<div class="dim" style="padding:10px;font-size:12px">nothing in this tier</div>'))
     untiered = [i for i in inits if i["tier"] is None]
     extra = ""
@@ -134,53 +138,87 @@ def _calendar(ctx):
     today = ctx["today"]
     weeks = ruler_weeks(today)
     inits = ctx["initiatives"]
+    monday = weeks[0]["start"]
 
+    # cells: 0 = no date (undated, and parked — a parked part is never on the ruler); 7 = before this week (a past
+    # date: overdue while open, done with its date otherwise); 1–5 = the weeks; 6 = beyond the ruler
     def bucket(p):
         d = _hr._iso(p["date"]) if p["date"] else None
-        if d is None:
+        if d is None or p["status"] == "parked":
             return 0
+        if d < monday:
+            return 7
         for k, w in enumerate(weeks):
             if w["start"] <= d <= w["end"]:
                 return k + 1
-        return 6 if d > weeks[-1]["end"] else 1
-    counts = [0] * 7
+        return 6
+    counts = [0] * 8
+    overdue = parked_dated = 0
     for i in inits:
         for p in i["parts"]:
-            counts[bucket(p)] += 1
-    head = ['<div class=" nod"><b>No date</b><span class="sm">undated parts</span><span class="cn">%d undated</span></div>' % counts[0]]
+            b = bucket(p)
+            counts[b] += 1
+            if b == 7 and p["status"] != "done" and not p["broken"]:
+                overdue += 1
+            if b == 0 and p["date"] and p["status"] == "parked":
+                parked_dated += 1
+    has_over = counts[7] > 0
+    order = [0] + ([7] if has_over else []) + [1, 2, 3, 4, 5, 6]
+    head = ['<div class=" nod"><b>No date</b><span class="sm">undated and parked parts</span><span class="cn">%d undated%s</span></div>' % (
+        counts[0] - parked_dated, (" &middot; %d parked" % parked_dated) if parked_dated else "")]
+    if has_over:
+        head.append('<div class=" over"><b>Before this week</b><span class="sm">past dates</span><span class="cn">%s</span></div>' % (
+            ("%d overdue" % overdue) if overdue else ("%d done" % counts[7])))
     for k, w in enumerate(weeks):
         head.append('<div class="%s"><b>%s</b><span class="sm">%s</span><span class="cn">%s</span></div>' % (
             "now" if k == 0 else "", esc(w["label"]), esc(w["name"]), ("%d dated" % counts[k + 1]) if counts[k + 1] else "nothing dated"))
     head.append('<div class=" beyond"><b>%s &rarr;</b><span class="sm">beyond the ruler</span><span class="cn">%s</span></div>' % (
         esc(_hr.short_date((weeks[-1]["end"] + timedelta(days=1)).isoformat())), ("%d dated" % counts[6]) if counts[6] else "nothing dated"))
 
-    def chip(i, p):
-        cls = " need" if p["needs_you"] else (" done" if p["status"] == "done" else "")
-        tail = ('<span class="pc-f">&#9873; needs you</span>' if p["needs_you"] else ('<span class="pc-s ok">&#10003; done</span>' if p["status"] == "done" else ""))
+    def chip(i, p, past):
+        late = past and p["status"] != "done" and not p["broken"]
+        cls = " need" if p["needs_you"] else (" done" if p["status"] == "done" else (" over" if late else ""))
+        tail = ('<span class="pc-f">&#9873; needs you</span>' if p["needs_you"] else
+                ('<span class="pc-s ok">&#10003; done</span>' if p["status"] == "done" else
+                 ('<span class="pc-f">overdue</span>' if late else ('<span class="pc-c">parked</span>' if p["status"] == "parked" else ""))))
         return ('<button class="pc%s" data-act="chip" data-lane="%s" data-part="%s"><span class="pc-top"><span class="pc-d">%s</span><span class="pc-k">%s</span></span>'
                 '<span class="pc-n">%s</span>%s</button>' % (cls, esc(i["id"]), esc(p["id"]), esc(_short(p["date"])) if p["date"] else "no date", esc(p["kind"]), esc(p["text"]), tail))
+
+    def cell_class(k):
+        return " now" if k == 1 else (" beyond" if k == 6 else (" over" if k == 7 else ""))
+
+    def lane(i):
+        cells = [[] for _ in range(8)]
+        for p in i["parts"]:
+            b = bucket(p)
+            cells[b].append(chip(i, p, b == 7))
+        track = "".join('<div class="cell%s">%s</div>' % (cell_class(k), "".join(cells[k])) for k in order)
+        return (
+            '<section class="lane" data-lane="%s" style="--areac:%s"><div class="lane-h"><div class="rankbox"><b class="rnum">%s</b></div>'
+            '<button class="lane-t" data-act="toggle" data-lane="%s"><span class="lrow1"><span class="ln">%s</span><span class="larea" style="--areac:%s">%s</span></span>'
+            '<span class="ldone"><span class="k">Done looks like</span>%s</span></button><span class="lmeta">%s%d parts &middot; %d dated</span></div>'
+            '<div class="track">%s</div></section>' % (
+                esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), i["number"] if i["tier"] else "&ndash;", esc(i["id"]), esc(i["name"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
+                esc(i["area"].title() or "no area"), esc(i["done_when"]) or "not written yet",
+                ('<span class="fl">%s</span>' % _needs(len(i["needs"]))) if i["needs"] else "",
+                len(i["parts"]), sum(1 for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"]), track))
+
+    def strip(label, word, colour, mine):
+        needs = sum(1 for i in mine if i["needs"])
+        dated = sum(1 for i in mine for p in i["parts"] if p["date"] and p["status"] not in ("done", "parked") and not p["broken"])
+        return '<div class="tierstrip" style="--tierc:%s"><span class="tn">%s</span><span class="tw">%s</span><span class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</span></div>' % (
+            colour, label, word, len(mine), "" if len(mine) == 1 else "s", ('<span class="am">%s</span>' % _needs(needs)) if needs else "none need you", dated, "" if dated == 1 else "s")
     lanes = []
     for t in (1, 2, 3):
         mine = [i for i in inits if i["tier"] == t]
-        needs = sum(1 for i in mine if i["needs"])
-        dated = sum(1 for i in mine for p in i["parts"] if p["date"])
-        lanes.append('<div class="tierstrip" style="--tierc:%s"><span class="tn">Tier %d</span><span class="tw">%s</span><span class="tm">%d initiative%s &middot; %s &middot; %d dated part%s</span></div>' % (
-            TIER_COLOURS[t], t, TIER_WORDS[t], len(mine), "" if len(mine) == 1 else "s", ('<span class="am">&#9873; %d need you</span>' % needs) if needs else "none need you", dated, "" if dated == 1 else "s"))
-        for i in mine:
-            cells = [[] for _ in range(7)]
-            for p in i["parts"]:
-                cells[bucket(p)].append(chip(i, p))
-            track = "".join('<div class="cell%s">%s</div>' % (" now" if k == 1 else (" beyond" if k == 6 else ""), "".join(c)) for k, c in enumerate(cells))
-            lanes.append(
-                '<section class="lane" data-lane="%s" style="--areac:%s"><div class="lane-h"><div class="rankbox"><b class="rnum">%d</b></div>'
-                '<button class="lane-t" data-act="toggle" data-lane="%s"><span class="lrow1"><span class="ln">%s</span><span class="larea" style="--areac:%s">%s</span></span>'
-                '<span class="ldone"><span class="k">Done looks like</span>%s</span></button><span class="lmeta">%s%d parts &middot; %d dated</span></div>'
-                '<div class="track">%s</div></section>' % (
-                    esc(i["id"]), AREA_COLOURS.get(i["area"], "#8b93a6"), i["number"], esc(i["id"]), esc(i["name"]), AREA_COLOURS.get(i["area"], "#8b93a6"),
-                    esc(i["area"].title() or "no area"), esc(i["done_when"]) or "not written yet",
-                    ('<span class="fl">&#9873; %d need%s you</span>' % (len(i["needs"]), "" if len(i["needs"]) == 1 else "s")) if i["needs"] else "",
-                    len(i["parts"]), sum(1 for p in i["parts"] if p["date"]), track))
-    return '<div class="scroll" id="viewCal" style="flex:1;display:none"><div id="boardScroll"><div class="rl-head">%s</div>%s</div></div>' % ("".join(head), "".join(lanes))
+        lanes.append(strip("Tier %d" % t, TIER_WORDS[t], TIER_COLOURS[t], mine))
+        lanes.extend(lane(i) for i in mine)
+    untiered = [i for i in inits if i["tier"] is None]
+    if untiered:
+        lanes.append(strip("No tier yet", "give each a tier", "#5f6674", untiered))
+        lanes.extend(lane(i) for i in untiered)
+    return '<div class="scroll%s" id="viewCal" style="flex:1;display:none"><div id="boardScroll"><div class="rl-head">%s</div>%s</div></div>' % (
+        " has-over" if has_over else "", "".join(head), "".join(lanes))
 
 
 # ── seeds, areas, the panel ────────────────────────────────────────────────────────────────────
@@ -190,10 +228,15 @@ def _seedband(ctx):
     if not seeds:
         row = '<div class="seed"><div class="st dim">No seeds yet.</div><div class="sw">Tell the steward &ldquo;seed: &hellip;&rdquo; on the home, or in the cockpit&rsquo;s grasscatcher.</div></div>'
     else:
-        row = "".join('<div class="seed" data-seed="%s"><div class="st">%s</div><div class="sw">would suit <b>tier 3</b> &mdash; you choose the tier and the area</div>'
-                      '<button class="mk" data-act="promote" data-seed="%s">Make it an initiative</button></div>' % (esc(s["id"]), esc(s["text"]), esc(s["id"])) for s in seeds)
+        tiers = "".join('<button data-picktier="%d"%s>Tier %d%s</button>' % (t, ' class="on"' if t == 3 else "", t, " &middot; suggested" if t == 3 else "") for t in (1, 2, 3))
+        areas = "".join('<button data-pickarea="%s">%s</button>' % (a, a.title()) for a in AREAS) + '<button data-pickarea="" class="on">none yet</button>'
+        row = "".join('<div class="seed" data-seed="%s"><div class="st">%s</div><div class="sw">would suit <b>tier 3</b> &mdash; you choose the tier and the life area</div>'
+                      '<button class="mk" data-act="promote" data-seed="%s">Make it an initiative</button>'
+                      '<div class="pick" hidden><div class="q">Which tier?</div><div class="prow">%s</div><div class="q">Which life area?</div><div class="prow">%s</div>'
+                      '<div class="prow"><button class="go" data-pickgo="%s">Create it in tier 3</button><button class="cancel" data-pickcancel="1">cancel</button></div></div></div>'
+                      % (esc(s["id"]), esc(s["text"]), esc(s["id"]), tiers, areas, esc(s["id"])) for s in seeds)
     return ('<section class="seedband" aria-label="Seeds"><div class="sb-h"><span class="t">Seeds</span><span class="c" id="seedCount">%d idea%s, not yet initiatives</span>'
-            '<span class="note">Making one an initiative asks for its tier and its life area &mdash; nothing is guessed silently.</span></div><div class="seedrow" id="seedRow">%s</div></section>'
+            '<span class="note">Making one an initiative asks for its tier and its life area on the card &mdash; nothing is created until Create it.</span></div><div class="seedrow" id="seedRow">%s</div></section>'
             % (len(seeds), "" if len(seeds) == 1 else "s", row))
 
 
@@ -279,7 +322,7 @@ def render_campaign_html(ctx, open_id=None) -> str:
         '%s%s%s%s'
         '<p class="boardfoot" id="boardFoot">Tier is the grouping; the number on each tile is the global priority, and it renumbers whenever a tier changes. <b>&#9650;&#9660;</b> re-ranks inside a tier; the <b>Tier</b> menu moves an initiative between them. A tile opens in place and its column widens. '
         '<span class="am">&#9873; needs you</span> &middot; <span class="ok">&#10003; done</span> &middot; <b>parked</b>. Every change is one line with undo.</p></section>'
-    ) % (len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">&#9873; %d need you</span>' % n_needs) if n_needs else "",
+    ) % (len(inits), tiers[1], tiers[2], tiers[3], n_parts, n_dated, (' &middot; <span style="color:var(--amber-t);font-weight:700">%s</span>' % _needs(n_needs)) if n_needs else "",
          _seedband(ctx), _areas(ctx), _grouped(ctx, open_id), _calendar(ctx))
     hdr = (
         '<div class="hdr"><a class="back" href="/high-seat">&larr; %s</a><h2>The Campaign</h2>%s<span class="who">%s &middot; the %s</span>'

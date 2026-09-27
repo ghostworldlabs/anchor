@@ -1,6 +1,8 @@
-/* The Campaign page (W3c, 2026-09-26): the view toggle, the tiles and lanes that open, the area filter, and every act
-   on the record through /api/high-seat/campaign — each act a receipt with undo; the composer talks to the steward
-   through the effort's own say route. Nothing here invents data: the page was rendered from the record. */
+/* The Campaign page (W3c, 2026-09-26; trimmed by its Rabbit read): the view toggle, the tiles and lanes that open,
+   the area filter, and every act on the record through /api/high-seat/campaign — each act a receipt with undo,
+   one act in flight at a time; the seed's two questions and the park's trigger are asked on the card, never in a
+   browser prompt; the composer talks to the steward through the effort's own say route. Nothing here invents
+   data: the page was rendered from the record. */
 (function () {
   'use strict';
   function $(s, r) { return (r || document).querySelector(s); }
@@ -28,16 +30,20 @@
   // a receipt survives the reload that shows the changed board
   try { var kept = sessionStorage.getItem('campaign_receipt'); if (kept) { var k = JSON.parse(kept); receipt(k.text, k.bad, k.undo); sessionStorage.removeItem('campaign_receipt'); } } catch (e) {}
 
+  // one act in flight at a time: a second click while the first is on its way is ignored until the reload
+  var busy = false;
   function act(body, onDone) {
+    if (busy) return;
+    busy = true;
     body.pid = PID;
     fetch('/api/high-seat/campaign', { method: 'POST', headers: headers(), body: JSON.stringify(body) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (!j || !j.ok) { receipt((j && j.receipt) || 'Nothing was done.', true); return; }
+        if (!j || !j.ok) { busy = false; receipt((j && j.receipt) || 'Nothing was done.', true); return; }
         try { sessionStorage.setItem('campaign_receipt', JSON.stringify({ text: j.receipt, bad: false, undo: j.undo || null })); } catch (e) {}
-        if (onDone) onDone(j); else location.reload();
+        if (onDone) { busy = false; onDone(j); } else location.reload();
       })
-      .catch(function () { receipt('That did not go through — nothing was done.', true); });
+      .catch(function () { busy = false; receipt('That did not go through — nothing was done.', true); });
   }
   var undoBtn = $('#undoBtn');
   if (undoBtn) undoBtn.addEventListener('click', function () { if (lastUndo) act(lastUndo); });
@@ -78,7 +84,7 @@
   $$('[data-act="up"], [data-act="down"]').forEach(function (b) { b.addEventListener('click', function () { act({ act: 'rank', step: b.getAttribute('data-lane'), direction: b.getAttribute('data-act') }); }); });
   $$('.tsel[data-tiersel]').forEach(function (s) { s.addEventListener('change', function () { act({ act: 'move_tier', step: s.getAttribute('data-tiersel'), tier: s.value }); }); });
 
-  // parts: rename, date, flag, park, tick, order
+  // parts: rename, date, flag, park (its trigger picked on the row), tick
   $$('.rt[data-act="name"]').forEach(function (n) {
     n.addEventListener('click', function () {
       var v = window.prompt('Rename this part', n.textContent.trim()); if (v === null) return;
@@ -91,12 +97,30 @@
       act({ act: 'date', step: d.getAttribute('data-part'), due: v.trim() || 'none' });
     });
   });
-  $$('[data-act="park"]').forEach(function (p) { p.addEventListener('click', function () { var v = window.prompt('Park until when, or what? (the trigger)', 'January'); if (v === null || !v.trim()) return; act({ act: 'park', step: p.getAttribute('data-part'), waiting_on: v.trim() }); }); });
+  function closeParkPicks() { $$('.parkpick').forEach(function (x) { x.parentNode.removeChild(x); }); }
+  $$('[data-act="park"]').forEach(function (p) {
+    p.addEventListener('click', function () {
+      var row = p.closest('.row'), step = p.getAttribute('data-part'); if (!row) return;
+      closeParkPicks();
+      var box = document.createElement('div'); box.className = 'parkpick';
+      box.innerHTML = '<span class="q">Park until when?</span>'
+        + ['January', 'March', 'June'].map(function (w) { return '<button type="button" data-parkuntil="' + w + '">' + w + '</button>'; }).join('')
+        + '<input type="text" data-parkfree placeholder="or say what it waits for" autocomplete="off">'
+        + '<button type="button" data-parkgo="1">park</button><button type="button" data-parkcancel="1">cancel</button>';
+      row.appendChild(box);
+      $$('[data-parkuntil]', box).forEach(function (b) { b.addEventListener('click', function () { act({ act: 'park', step: step, waiting_on: b.getAttribute('data-parkuntil') }); }); });
+      var free = $('[data-parkfree]', box);
+      function go() { var v = (free.value || '').trim(); if (!v) { receipt('A park carries its trigger — say until when, or what.', true); free.focus(); return; } act({ act: 'park', step: step, waiting_on: v }); }
+      $('[data-parkgo]', box).addEventListener('click', go);
+      free.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } if (e.key === 'Escape') closeParkPicks(); });
+      $('[data-parkcancel]', box).addEventListener('click', closeParkPicks);
+      free.focus();
+    });
+  });
   $$('[data-act="unpark"]').forEach(function (p) { p.addEventListener('click', function () { act({ act: 'unpark', step: p.getAttribute('data-part') }); }); });
   $$('[data-act="flag"]').forEach(function (p) { p.addEventListener('click', function () { act({ act: 'flag', step: p.getAttribute('data-part') }); }); });
   $$('[data-act="unflag"]').forEach(function (p) { p.addEventListener('click', function () { act({ act: 'unflag', step: p.getAttribute('data-part') }); }); });
   $$('[data-act="tick"]').forEach(function (p) { p.addEventListener('click', function () { if (p.disabled) return; act({ act: 'tick', step: p.getAttribute('data-part') }); }); });
-  $$('[data-act="pup"], [data-act="pdown"]').forEach(function (p) { p.addEventListener('click', function () { receipt('Ordering parts inside an initiative is not built yet — the initiative order and the tiers are.', true); }); });
 
   // add a part
   $$('.addline').forEach(function (line) {
@@ -108,14 +132,16 @@
     text.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
   });
 
-  // seeds → initiatives: the two questions, both skippable
-  $$('[data-act="promote"]').forEach(function (b) {
-    b.addEventListener('click', function () {
-      var seed = b.closest('.seed'), text = $('.st', seed).textContent.trim();
-      var tier = window.prompt('Which tier? 1 · do first, 2 · next in line, 3 · when there is room (blank = 3)', '3'); if (tier === null) return;
-      var area = window.prompt('Which life area? family · professional · writing · research · tools · personal (blank = none yet)', ''); if (area === null) return;
-      act({ act: 'promote', seed: text, tier: tier.trim() || '3', area: area.trim().toLowerCase() || null });
-    });
+  // seeds → initiatives: the two questions on the card; nothing is created until Create it
+  $$('.seed').forEach(function (card) {
+    var mk = $('[data-act="promote"]', card), pick = $('.pick', card), go = $('[data-pickgo]', card); if (!mk || !pick || !go) return;
+    function chosen(sel) { var b = $(sel + '.on', pick); return b ? b.getAttribute(sel.replace('[', '').replace(']', '')) : ''; }
+    function label() { go.textContent = 'Create it in tier ' + (chosen('[data-picktier]') || '3'); }
+    mk.addEventListener('click', function () { $$('.seed .pick').forEach(function (x) { if (x !== pick) x.hidden = true; }); pick.hidden = false; mk.hidden = true; label(); });
+    $$('[data-picktier]', pick).forEach(function (b) { b.addEventListener('click', function () { $$('[data-picktier]', pick).forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); label(); }); });
+    $$('[data-pickarea]', pick).forEach(function (b) { b.addEventListener('click', function () { $$('[data-pickarea]', pick).forEach(function (x) { x.classList.remove('on'); }); b.classList.add('on'); }); });
+    $('[data-pickcancel]', pick).addEventListener('click', function () { pick.hidden = true; mk.hidden = false; });
+    go.addEventListener('click', function () { act({ act: 'promote', seed: go.getAttribute('data-pickgo'), tier: chosen('[data-picktier]') || '3', area: chosen('[data-pickarea]') || null }); });
   });
 
   // the tools

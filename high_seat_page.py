@@ -12,6 +12,7 @@ on the page is read from a record or is an honest "not connected / not measured 
 from __future__ import annotations
 
 import html
+import re
 from datetime import date, timedelta
 
 import home_rows as _hr
@@ -65,7 +66,9 @@ def campaign_initiatives(steps, resolved=None):
                     "target": r.get("name") or "", "state": state, "date": r.get("date") or p.get("due") or "",
                     "href": r.get("href") or "", "status": str(p.get("status") or ""),
                     "broken": bool(r.get("broken")) if ref else False, "gap": r.get("gap") or "",
-                    "needs_you": "waiting on you" in str(state).lower(),
+                    "needs_you": "waiting on you" in str(state).lower() or (
+                        not ref and str(p.get("status") or "") == "waiting"
+                        and bool(re.search(r"\b(john|you|me)\b", str(p.get("waiting_on") or "").lower()))),
                 })
         open_parts = [p for p in parts if p["status"] not in ("done", "parked") and not p["broken"]]
         dates = sorted(p["date"] for p in open_parts if p["date"])

@@ -7,6 +7,7 @@
   --success:#4ade80; --danger:#f87171; --gwl:#22c55e;
   --amber:#e2a93f; --amber-t:#f0bf59; --amber-edge:rgba(226,169,63,.45); --amber-wash:rgba(226,169,63,.07);
   --cols:170px repeat(5,minmax(0,1fr)) 126px;
+  --cols-over:170px 128px repeat(5,minmax(0,1fr)) 126px;
   color-scheme:dark;
 }
 *{margin:0;padding:0;box-sizing:border-box}
@@ -271,6 +272,16 @@ a{color:inherit}
 .tick.on{background:var(--success);border-color:var(--success);color:#0b1220;font-weight:700}
 .tick::before{content:"\2713"}
 .tickpad{width:13px;flex:none}
+a.tickpad{height:13px;border:1px dashed #545c6e;border-radius:3px;display:inline-block;margin-top:2px}
+a.tickpad:hover{border-color:var(--accent)}
+a.tickpad.on{background:var(--success);border-color:var(--success)}
+#viewCal.has-over .rl-head,#viewCal.has-over .track{grid-template-columns:var(--cols-over)}
+.rl-head .over{background:rgba(226,169,63,.05);border-left:1px dashed #5a4a2a}
+.rl-head .over .cn{color:var(--amber-t);font-weight:650}
+.cell.over{background:rgba(226,169,63,.03);border-left:1px dashed #5a4a2a}
+.pc.over{border-color:rgba(226,169,63,.5)}
+.parkpick input{border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;padding:1px 7px;font:inherit;font-size:11px;width:150px}
+.pick[hidden]{display:none}
 .rb{flex:1;min-width:0}
 .rt{font-size:12px;line-height:1.35;cursor:text;border-radius:4px;padding:0 3px;margin-left:-3px;
   display:inline-block;word-wrap:break-word}
@@ -381,7 +392,7 @@ a{color:inherit}
 .foot img{width:15px;height:15px;display:block}
 .foot .sd{color:var(--amber-t);font-weight:650}
 
-@media(max-width:1380px){:root{--cols:150px repeat(5,minmax(0,1fr)) 112px}.canvas{grid-template-columns:minmax(0,1fr) 344px;gap:13px}}
+@media(max-width:1380px){:root{--cols:150px repeat(5,minmax(0,1fr)) 112px;--cols-over:150px 112px repeat(5,minmax(0,1fr)) 112px}.canvas{grid-template-columns:minmax(0,1fr) 344px;gap:13px}}
 @media(max-width:1200px){
   .page{height:auto;overflow:visible}
   .canvas{grid-template-columns:1fr}

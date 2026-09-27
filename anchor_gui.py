@@ -7707,8 +7707,8 @@ def _high_seat_context():
                 reason = top.get("done_when") or ((top.get("next") or {}).get("text") if top.get("next") else "")
                 bullets = (["Your Campaign puts %s first%s." % (top["name"], (" — " + str(reason)[:140]) if reason else "")] + bullets)[:5]
             try:
-                strip = json.loads((camp_dir / "strip.json").read_text(encoding="utf-8"))
-                seeds = sum(1 for r in (strip.get("grasscatch") or []) if isinstance(r, dict) and r.get("kind") == "seed")
+                from steward_cockpit.campaign_seeds import read_seeds as _read_seeds
+                seeds = len(_read_seeds(camp_dir))
             except Exception:
                 seeds = 0
     except Exception:
@@ -7764,18 +7764,9 @@ def _campaign_context(entry):
     steps = m.get("steps") or []
     resolved = _resolve(steps, cache={}, with_lead=False)
     initiatives = _hsp.campaign_initiatives(steps, resolved)
-    seeds = []
     try:
-        strip = json.loads((Path(folder) / "strip.json").read_text(encoding="utf-8"))
-        promoted = set()
-        for r in strip.get("receipts") or []:
-            if isinstance(r, dict) and r.get("kind") == "grasscatch" and str(r.get("grasscatch_why") or "").startswith("promoted"):
-                promoted.add(" ".join(str(r.get("deferred") or "").split()).lower())
-        for k, g in enumerate(strip.get("grasscatch") or []):
-            text = g if isinstance(g, str) else str((g or {}).get("deferred") or (g or {}).get("text") or "")
-            text = " ".join(text.split())
-            if text and text.lower() not in promoted:
-                seeds.append({"id": "seed-%d" % k, "text": text})
+        from steward_cockpit.campaign_seeds import read_seeds as _read_seeds
+        seeds = _read_seeds(folder)
     except Exception:
         seeds = []
     turns = []
@@ -7800,7 +7791,7 @@ def _campaign_context(entry):
     except Exception:
         prefs_html = ""
     return {"pid": entry.get("id"), "name": entry.get("name"), "today": today, "today_str": now.strftime("%A, %B %d, %Y"),
-            "brief_when": now.strftime("%H:%M \u00b7 %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
+            "brief_when": now.strftime("%H:%M · %A %d %B"), "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
             "initiatives": initiatives, "seeds": seeds, "turns": turns[-6:], "projects": projects, "tick_allowed": False}
 
 

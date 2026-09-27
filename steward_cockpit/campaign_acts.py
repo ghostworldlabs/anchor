@@ -1,11 +1,14 @@
 """campaign_acts — what John does on the Campaign page, written into the Campaign's own record through the
 engine's writer (the CLI and its spine), each act a receipt with its inverse.
 
-W3c of the High Seat plan (2026-09-26). Acts: move_tier · rank (up/down within a tier) · rename · date ·
-park (with its trigger) · unpark · flag / unflag (a native part's "needs you") · add (a task, or a project part
-by reference) · promote (a seed → an initiative, asking the tier and the area). A tick on a native part waits on
-John's word on the close law (PLAN §9.6) and is refused here with that sentence. The Campaign never writes another
-record: a date or a flip on a referenced part is refused by the engine and the refusal is the receipt.
+W3c of the High Seat plan (2026-09-26), trimmed by its Rabbit read. Acts: move_tier · rank (up/down within a
+tier) · rename · date · park (with its trigger) · unpark · flag / unflag (a native part's "needs you") · add (a
+task, or a project part by reference) · promote (a seed, by id → an initiative, with the tier and the area he
+picked) · withdraw / restore (the inverse of add and promote: the record is append-only, so a step is never
+deleted — its navigation is cleared, which takes it off the board while the ordinary cockpit still shows it;
+restore puts the navigation back). A tick on a native part waits on John's word on the close law (PLAN §9.6)
+and is refused here with that sentence. The Campaign never writes another record: a date or a flip on a
+referenced part is refused by the engine and the refusal is the receipt.
 """
 from __future__ import annotations
 
@@ -13,6 +16,8 @@ import json
 import re
 import subprocess
 from pathlib import Path
+
+from .campaign_seeds import seed_by_id
 
 ECG = Path(r"C:\dev\Ecgberht\bin\ecgberht.mjs")
 SPINE = "file:///C:/dev/Ecgberht/engine/ledger-spine.mjs"
@@ -65,6 +70,16 @@ def _initiatives(project):
     return out
 
 
+def _parts_of(project, sid):
+    out = []
+    for p in _projection(project):
+        nav = p.get("navigation") if isinstance(p.get("navigation"), dict) else {}
+        path = nav.get("path") or []
+        if p.get("id") != sid and path and path[0] == sid:
+            out.append(p)
+    return out
+
+
 def _slug(text, prefix=""):
     s = re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")[:48].strip("-") or "part"
     return (prefix[:12] + "-" + s) if prefix else s
@@ -90,9 +105,15 @@ def _write_nav(project, s, order=None):
     return _spine_set(project, s["id"], {"navigation": nav})
 
 
+def _foot(project, tier, except_id=None):
+    return max([int(g.get("order") or 0) for x, g in _initiatives(project) if x.get("tier") == tier and x.get("id") != except_id] or [-1]) + 1
+
+
 # ── the acts ───────────────────────────────────────────────────────────────────────────────────
 
-def move_tier(project, step, tier):
+def move_tier(project, step, tier, order=None):
+    """Move an initiative to a tier: one step_set of its tier, then its place — the foot of that tier, or the
+    order the undo carries (so a head of a tier comes back as its head, not at the bottom with a new number)."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
         return _no("no such initiative")
@@ -103,19 +124,25 @@ def move_tier(project, step, tier):
     if tier not in (1, 2, 3):
         return _no("a tier is 1, 2 or 3")
     old = s.get("tier")
+    old_order = int(_own_group(s).get("order") or 0)
     if old == tier:
         return _no("%s is already in tier %d" % (s.get("name"), tier))
     r = _cli(project, "roadmap-set", "--step", step, "--tier", str(tier))
     if not r.get("ok"):
         return _no("the engine refused: %s" % r.get("error"))
-    # it lands at the foot of its new tier
-    foot = max([int(_own_group(x).get("order") or 0) for x, g in _initiatives(project) if x.get("tier") == tier and x.get("id") != step] or [-1]) + 1
-    _write_nav(project, _step(project, step), order=foot)
-    return _ok("%s moved to tier %d (from %s), at its foot" % (s.get("name"), tier, ("tier %d" % old) if old else "no tier"),
-               undo={"act": "move_tier", "step": step, "tier": old} if old else None)
+    place = int(order) if order is not None else _foot(project, tier, except_id=step)
+    r2 = _write_nav(project, _step(project, step), order=place)
+    if not r2.get("ok"):
+        return _no("%s moved to tier %d, but its place there was refused: %s \u2014 it keeps its old order number" % (s.get("name"), tier, r2.get("error")))
+    return _ok("%s moved to tier %d (from %s), %s" % (s.get("name"), tier, ("tier %d" % old) if old else "no tier",
+                                                      ("at its foot" if order is None else "back in its place")),
+               undo={"act": "move_tier", "step": step, "tier": old, "order": old_order} if old else None)
 
 
 def rank(project, step, direction):
+    """Move an initiative up or down within its tier. The tier is first renumbered to its sorted positions
+    (a write only where an order differs — equal orders would otherwise make Up sort later), then the two
+    neighbours swap; a refused second write puts the first back."""
     s = _step(project, step)
     if s is None or _own_group(s) is None:
         return _no("no such initiative")
@@ -126,15 +153,20 @@ def rank(project, step, direction):
     j = idx - 1 if direction == "up" else idx + 1
     if j < 0 or j >= len(same):
         return _no("%s is already at the %s of its tier \u2014 the Tier menu moves it between tiers" % (s.get("name"), "top" if direction == "up" else "foot"))
-    a, b = same[idx], same[j]
-    oa, ob = a[0], b[0]
-    if oa == ob:
-        ob = oa + 1 if direction == "up" else oa - 1
-    r1 = _write_nav(project, a[1], order=ob)
-    r2 = _write_nav(project, b[1], order=oa)
-    if not (r1.get("ok") and r2.get("ok")):
-        return _no("the engine refused: %s" % (r1.get("error") or r2.get("error")))
-    return _ok("%s moved %s within tier %s, past %s" % (s.get("name"), direction, s.get("tier"), b[1].get("name")),
+    for k, (o, x) in enumerate(same):
+        if o != k:
+            r0 = _write_nav(project, x, order=k)
+            if not r0.get("ok"):
+                return _no("the tier could not be renumbered: %s" % r0.get("error"))
+    mover, other = same[idx][1], same[j][1]
+    r1 = _write_nav(project, other, order=idx)
+    if not r1.get("ok"):
+        return _no("the engine refused: %s" % r1.get("error"))
+    r2 = _write_nav(project, mover, order=j)
+    if not r2.get("ok"):
+        _write_nav(project, other, order=j)
+        return _no("the engine refused: %s \u2014 nothing moved" % r2.get("error"))
+    return _ok("%s moved %s within tier %s, past %s" % (s.get("name"), direction, s.get("tier"), other.get("name")),
                undo={"act": "rank", "step": step, "direction": "down" if direction == "up" else "up"})
 
 
@@ -247,16 +279,21 @@ def add(project, initiative, kind, text, due=None, project_id=None):
     r2 = _spine_set(project, sid, {"navigation": {"path": [initiative]}})
     if not r2.get("ok"):
         return _no("the part was written but not placed: %s" % r2.get("error"))
-    return _ok("added \u2018%s\u2019 to %s%s" % (text, head.get("name"), (" \u00b7 due " + str(due)) if due else ""), undo={"act": "park", "step": sid, "waiting_on": "undone"}, step=sid)
+    return _ok("added \u2018%s\u2019 to %s%s" % (text, head.get("name"), (" \u00b7 due " + str(due)) if due else ""), undo={"act": "withdraw", "step": sid}, step=sid)
 
 
-def promote(project, seed_text, tier, area, done_when=None):
-    text = " ".join(str(seed_text or "").split())
-    if not text:
-        return _no("which seed?")
+def promote(project, seed_id, tier, area, done_when=None):
+    """A seed (by its id on the strip) becomes an initiative: the heading step with the tier and area he picked,
+    its root group at the foot of that tier, and the seed spent by one later receipt that cites its id."""
+    seed = seed_by_id(project, seed_id)
+    if seed is None:
+        return _no("no such seed \u2014 the row above the board is the list")
+    text = seed["text"]
     try:
-        tier = int(tier) if str(tier).strip() else 3
+        tier = int(tier) if str(tier or "").strip() else 3
     except Exception:
+        return _no("a tier is 1, 2 or 3")
+    if tier not in (1, 2, 3):
         return _no("a tier is 1, 2 or 3")
     sid = _slug(text)
     if _step(project, sid) is not None:
@@ -267,15 +304,55 @@ def promote(project, seed_text, tier, area, done_when=None):
     r = _cli(project, *args)
     if not r.get("ok"):
         return _no("the engine refused: %s" % r.get("error"))
-    foot = max([int(g.get("order") or 0) for x, g in _initiatives(project) if x.get("tier") == tier] or [-1]) + 1
-    r2 = _spine_set(project, sid, {"navigation": {"path": [sid], "groups": [{"id": sid, "label": text, "order": foot, "parent_id": None}], "role": "primary"}})
+    r2 = _spine_set(project, sid, {"navigation": {"path": [sid], "groups": [{"id": sid, "label": text, "order": _foot(project, tier), "parent_id": None}], "role": "primary"}})
     if not r2.get("ok"):
         return _no("the heading was written but not grouped: %s" % r2.get("error"))
-    _cli(project, "grasscatch", "--deferred", text, "--reason", "promoted to an initiative (%s) by John on the Campaign" % sid)
-    return _ok("%s is now an initiative in tier %d%s" % (text, tier, (" \u00b7 " + str(area)) if area else ""), undo={"act": "park", "step": sid, "waiting_on": "undone \u2014 a seed again"}, step=sid)
+    r3 = _cli(project, "grasscatch", "--deferred", text, "--reason", "promoted seed %s \u2192 the initiative %s, by John on the Campaign" % (seed["id"], sid))
+    spent = " \u2014 but the seed could not be spent on the strip: %s" % r3.get("error") if not r3.get("ok") else ""
+    return _ok("%s is now an initiative in tier %d%s%s" % (text, tier, (" \u00b7 " + str(area)) if area else "", spent),
+               undo={"act": "withdraw", "step": sid, "seed": seed["id"]}, step=sid)
 
 
-ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote"}
+def withdraw(project, step, seed=None):
+    """The inverse of add and promote. The record is append-only, so nothing is deleted: the step's navigation
+    is cleared (one step_set), which takes it off the board; the ordinary cockpit still shows it. A heading that
+    has parts is refused (the engine would refuse their paths). With a seed id, the seed is given back."""
+    s = _step(project, step)
+    if s is None:
+        return _no("no such part")
+    old_nav = s.get("navigation")
+    if not old_nav:
+        return _no("%s is already off the board" % s.get("name"))
+    if _own_group(s) is not None and _parts_of(project, step):
+        return _no("%s has parts now \u2014 move them first, then withdraw it" % s.get("name"))
+    r = _spine_set(project, step, {"navigation": None})
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    back = ""
+    if seed:
+        r2 = _cli(project, "grasscatch", "--deferred", s.get("name") or "", "--reason", "restored seed %s \u2014 the initiative %s was undone by John on the Campaign" % (seed, step))
+        back = " and the seed is back above the board" if r2.get("ok") else " \u2014 but the seed could not be restored on the strip: %s" % r2.get("error")
+    return _ok("%s withdrawn \u2014 off the board; the record keeps it (the cockpit shows it)%s" % (s.get("name"), back),
+               undo={"act": "restore", "step": step, "navigation": old_nav, "seed": seed})
+
+
+def restore(project, step, navigation, seed=None):
+    s = _step(project, step)
+    if s is None:
+        return _no("no such part")
+    if not isinstance(navigation, dict):
+        return _no("nothing to restore it to")
+    r = _spine_set(project, step, {"navigation": navigation})
+    if not r.get("ok"):
+        return _no("the engine refused: %s" % r.get("error"))
+    spent = ""
+    if seed:
+        r2 = _cli(project, "grasscatch", "--deferred", s.get("name") or "", "--reason", "promoted seed %s \u2192 the initiative %s, by John on the Campaign (restored)" % (seed, step))
+        spent = "" if r2.get("ok") else " \u2014 but the seed could not be spent on the strip: %s" % r2.get("error")
+    return _ok("%s is back on the board%s" % (s.get("name"), spent), undo={"act": "withdraw", "step": step, "seed": seed})
+
+
+ACTS = {"move_tier", "rank", "rename", "date", "park", "unpark", "flag", "unflag", "tick", "add", "promote", "withdraw", "restore"}
 
 
 def act(project, body):
@@ -286,7 +363,7 @@ def act(project, body):
         return _no("no such act")
     try:
         if a == "move_tier":
-            return move_tier(project, body.get("step"), body.get("tier"))
+            return move_tier(project, body.get("step"), body.get("tier"), body.get("order"))
         if a == "rank":
             return rank(project, body.get("step"), "up" if body.get("direction") == "up" else "down")
         if a == "rename":
@@ -307,6 +384,10 @@ def act(project, body):
             return add(project, body.get("initiative"), body.get("kind"), body.get("text"), body.get("due"), body.get("project_id"))
         if a == "promote":
             return promote(project, body.get("seed"), body.get("tier"), body.get("area"), body.get("done_when"))
+        if a == "withdraw":
+            return withdraw(project, body.get("step"), body.get("seed"))
+        if a == "restore":
+            return restore(project, body.get("step"), body.get("navigation"), body.get("seed"))
     except Exception as e:
         return _no("that did not go through: %s" % e)
     return _no("no such act")
