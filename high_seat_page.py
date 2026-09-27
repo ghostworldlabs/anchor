@@ -216,15 +216,19 @@ def _campaign_tile(ctx):
     for i in t1:
         nxt = i["next"]
         wait = i["needs"][0] if i["needs"] else None
-        rows = "".join(
-            '<div class="it-part%s"><span class="ik">%s</span><span class="it">%s%s</span>'
-            '<span class="is">%s</span><span class="id">%s</span>%s</div>' % (
-                " broken" if p["broken"] else "", esc(p["kind"]), esc(p["text"]),
-                (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p["target"] and p["kind"] != "task" else "",
-                esc("broken reference: " + p["gap"]) if p["broken"] else esc(p["state"] or p["status"]),
-                esc(_hr.due_label(p["date"], ctx["today"])) if p["date"] else "no date",
-                (' <a class="go" href="%s" target="_blank" rel="noopener">open the cockpit</a>' % esc(p["href"])) if p["href"] else "")
-            for p in i["parts"])
+        def _part_row(p):
+            state = ("broken reference: " + p["gap"]) if p["broken"] else (p["state"] or p["status"])
+            crit = " crit" if (p["broken"] or p["needs_you"]) else ""
+            date = _hr.due_label(p["date"], ctx["today"]) if p["date"] else "no date"
+            return (
+                '<div class="ptr%s"><span class="pt-kind %s">%s</span><span class="pt-what">%s%s</span>'
+                '<span class="pt-state%s">%s</span><span class="pt-date%s">%s</span>%s</div>' % (
+                    " pdone" if p["status"] == "done" else "", esc(p["kind"]), esc(p["kind"]), esc(p["text"]),
+                    (' <span class="dim">&middot; %s</span>' % esc(p["target"])) if p["target"] and p["kind"] != "task" else "",
+                    crit, esc(state), " none" if not p["date"] else (" soon" if date.startswith(("due today", "overdue")) else ""), esc(date),
+                    (' <a class="pt-open" href="%s" target="_blank" rel="noopener">open the cockpit</a>' % esc(p["href"])) if p["href"] else ""))
+        rows = ('<div class="pt-legend">Its parts, as the Campaign holds them &mdash; kind &middot; what &middot; its state in its own record &middot; its date. '
+                'Read-only here; the Campaign page is where they move.</div>' + "".join(_part_row(p) for p in i["parts"]))
         tiles.append(
             '<article class="ini-tile%s" data-ini="%d"><div class="it-top"><span class="it-no">%d</span>'
             '<h4 class="it-name">%s</h4>%s</div>'

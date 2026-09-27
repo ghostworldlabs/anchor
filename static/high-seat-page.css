@@ -583,3 +583,6 @@ code{font-family:ui-monospace,Consolas,"Cascadia Mono",monospace}
   .ptr{flex-wrap:wrap}
   .shelf-h .note{text-align:left}
 }
+/* W1b: a Tier 1 tile's parts show only while the tile is open */
+.ini-tile:not(.open) .it-parts{display:none}
+.ini-tile.open .it-parts{display:block}
