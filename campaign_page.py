@@ -230,8 +230,8 @@ def brief_bullets(ctx):
             esc(_hr.week_in_words(today).replace("this week ", "")), (" The first mark is %s." % esc(_short(ahead[0]))) if ahead else ""))
     needs = [(p, i) for i in inits for p in i["needs"]]
     if needs:
-        out.append('<span class="amberword">&#9873; %d part%s need you</span>, %d with no date. In tier order: %s%s.' % (
-            len(needs), "" if len(needs) == 1 else "s", sum(1 for p, i in needs if not p["date"]),
+        out.append('<span class="amberword">&#9873; %d part%s need%s you</span>, %d with no date. In tier order: %s%s.' % (
+            len(needs), "" if len(needs) == 1 else "s", "s" if len(needs) == 1 else "", sum(1 for p, i in needs if not p["date"]),
             " &middot; ".join('<button class="goto" data-goto="%s">%s</button> (tier %s)' % (esc(i["id"]), esc(p["text"]), i["tier"] or "?") for p, i in needs[:3]),
             (" &hellip; and %d more" % (len(needs) - 3)) if len(needs) > 3 else ""))
     else:

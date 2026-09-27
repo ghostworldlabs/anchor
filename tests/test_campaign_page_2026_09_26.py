@@ -59,7 +59,7 @@ def test_the_page_renders_tiers_parts_seeds_calendar_and_brief_from_the_record()
     assert "An AI mechanics class with the group" in html and 'data-act="promote"' in html
     assert 'id="viewCal"' in html and "beyond the ruler" in html and 'class="tierstrip"' in html
     assert "<b>Tier 1</b> holds MBA Teaching, Fall 2026." in html and "nearest hard date is <b>Oct 10</b>" in html
-    assert "&#9873; 1 part need you" in html
+    assert "&#9873; 1 part needs you" in html
     assert "what does the Campaign say?" in html and "Sample data" not in html
 
 
