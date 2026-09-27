@@ -91,3 +91,19 @@ def test_a_card_part_opens_the_effort_it_names_and_refuses_a_path_that_escapes(t
     (root / "plain").mkdir()                                                          # a subfolder without a Face is not an effort
     for bad in ("..", "../x", "sub/dir", ".hidden", "a\\b", "D:foo", "C:foo", "plain", "nope"):   # only what discover_efforts lists resolves
         assert "No steward record" in card.card_part(PID, "status", str(root), "MBA", rel=bad)["html"]
+
+
+def test_the_plan_flags_a_step_that_waits_even_while_active(tmp_path):
+    """Grok R8/R8b: the domain tree and the Not-done list both flag by the cockpit's own rule (a waiting_on on an active
+    step is attention), and the waiting step comes first in the list."""
+    d = _effort(tmp_path)
+    rm = json.loads((d / "roadmap.json").read_text(encoding="utf-8"))
+    rm["roadmap_projection"].append({"id": "lec5", "name": "Lecture 5 rubric", "status": "active", "waiting_on": "the rubric from the department"})
+    (d / "roadmap.json").write_text(json.dumps(rm), encoding="utf-8")
+    pl = card.card_part(PID, "plan", str(d), "MBA Teaching AI")["html"]
+    tree = pl[pl.index("The plan, by domain"):pl.index("Not done &middot;")]
+    notdone = pl[pl.index("Not done &middot;"):]
+    assert '<div class="cp-step s-waiting"><span class="mk">&#9873;</span>Lecture 5 rubric' in tree
+    assert notdone.index("Lecture 5 rubric") < notdone.index("Lecture 4 AI supplement")            # attention first
+    assert '&#9873;</span>Lecture 5 rubric' in notdone and "the rubric from the department" in notdone
+

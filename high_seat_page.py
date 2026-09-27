@@ -356,19 +356,19 @@ def _campaign_tile(ctx):
 def _projects_tile(ctx):
     """The Projects tile: the registry as it stands, in the OLD dashboard's own list (John, 2026-09-27: "the same look
     and feel, and all of the folders closed") — `ctx["projects_html"]` is that list, rendered by the old dashboard's
-    renderer in `anchor_gui`; the head counts the folders and the record-less projects."""
+    renderer in `anchor_gui`; the head counts the projects and the folders."""
     groups = ctx.get("groups") or {}
     n = sum(len(v) for v in groups.values())
     return (
         '<section class="ptile" id="ptile"><button class="ptile-h" id="ptileToggle"><span class="k">Projects</span>'
-        '<span class="n" id="ptileCount">&middot; as they are now &middot; %d in %d folders</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
-        '<div class="ptile-body"><div class="ptile-note">The registry as it stands &mdash; every project in its folder, as the old dashboard lists them; a row opens its project window. The board below is the same projects, ranked.</div>'
-        '<div class="addbox"><h4>Add a project</h4><div class="addrow">'
+        '<span class="n" id="ptileCount">&middot; %d project%s in %d folder%s</span><span class="sp"></span><span class="tog" id="ptileTog">Show all</span></button>'
+        '<div class="ptile-body"><div class="addbox"><h4>Add a project</h4><div class="addrow">'
         '<input id="apName" type="text" placeholder="Project name" autocomplete="off">'
         '<a class="mk" id="apCreate" href="/dashboard" target="_blank" rel="noopener">Create on the dashboard</a></div>'
         '<div class="addhint" id="apHint">A new project is still made and confirmed on the old dashboard; this page shows it on the next look.</div></div>'
         '<div id="folders">%s</div></div></section>'
-    ) % (n, len(groups), ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
+    ) % (n, "" if n == 1 else "s", len(groups), "" if len(groups) == 1 else "s",
+         ctx.get("projects_html") or '<p class="ptile-note">No project list was handed to the page.</p>')
 
 
 _ACTS = (("status", "Status"), ("next", "Next steps"), ("deliverables", "Deliverables"), ("plan", "Plan"))

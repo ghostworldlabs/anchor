@@ -277,10 +277,10 @@ def plan_html(cdir, pid):
 
     def rank(pair):
         i, s = pair
-        return (0 if _waits(s) else 1 if s.get("id") == now_id else 2 if s.get("status") == "active" else 3, i)
+        return (0 if campaign._step_needs_attention(s) else 1 if s.get("id") == now_id else 2 if s.get("status") == "active" else 3, i)
     open_rows.sort(key=rank)
     notdone = "".join('<div class="cp-step"><span class="mk">%s</span>%s%s</div>' % (
-        "&#9873;" if _waits(s) else ("&#9679;" if s.get("id") == now_id else "&middot;"), esc(_step_label(s)),
+        "&#9873;" if campaign._step_needs_attention(s) else ("&#9679;" if s.get("id") == now_id else "&middot;"), esc(_step_label(s)),
         (' <span class="dim">&middot; %s</span>' % esc(_waits(s))) if _waits(s) else "") for i, s in open_rows)
     done_n = sum(1 for s in steps if _done(s))
     return ('<div class="cp-planpane"><div class="cp-when">%d of %d steps done &middot; &#10003; done &middot; &#9655; unfinished &middot; &#9873; waits on you &middot; &#9679; now</div>'

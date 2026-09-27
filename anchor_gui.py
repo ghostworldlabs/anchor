@@ -2704,13 +2704,18 @@ def _steward_status_tile_line(entry: dict, summary=None, age=None) -> str:
                             " · ".join(bits)))[:200]
 
 
-def render_project_tile_html(entry: dict, facts=None) -> str:
+def render_project_tile_html(entry: dict, facts=None, chrome: bool = True) -> str:
     """Render a THIN, full-width project ROW (v3 Wave 5, IMPLEMENTATION-PLAN
     lines 124-141): ``name · accurate cached project summary · per-lane
     mini-counts · status dot``. Clicking the row opens the project window;
     lifecycle controls (P1/P2, rescan, blurb, notes, archive/retire/reactivate)
     moved OFF the row into a kebab/hover menu so the row stays one line. This
-    REPLACES the old square ``.rnd-tile``."""
+    REPLACES the old square ``.rnd-tile``.
+
+    ``chrome=False`` (the High Seat's Projects tile, 2026-09-27) leaves off the
+    pieces that need this page's script — the kebab menu, the cost rollup, the
+    boneyard button, the drag grip and ``draggable`` — the row is then the
+    look and the click only."""
     pid_raw = entry.get("id", "")
     pid = html_lib.escape(pid_raw)
     name = html_lib.escape(entry.get("name", ""))
@@ -2856,7 +2861,7 @@ def render_project_tile_html(entry: dict, facts=None) -> str:
                  f'title="Resurrect: make this project active again">resurrect</button>')
     # Kebab menu holds all lifecycle controls so the row stays thin. The row
     # itself (click anywhere not on the kebab) opens the project window.
-    kebab = (
+    kebab = "" if not chrome else (
         f'<div class="rnd-kebab" onclick="event.stopPropagation()">'
         f'<button class="rnd-kebab-btn" onclick="rndToggleKebab(event,\'{pid}\')" '
         f'title="Project actions" aria-label="Project actions">&#8942;</button>'
@@ -2873,14 +2878,18 @@ def render_project_tile_html(entry: dict, facts=None) -> str:
     # the path server-side, not from the row).
     group = entry.get("group", "") or ""
     group_attr = html_lib.escape(group, quote=True)
+    if not chrome:   # no script for them on the High Seat: the kebab (above), the rollup, the boneyard button, the drag
+        grave = rollup_block = ""
+    drag_attr = 'draggable="true" ' if chrome else ''
+    grip = ('<span class="rnd-grip" aria-hidden="true" '
+            'title="Drag into a folder">&#8942;&#8942;</span>') if chrome else ''
     return (
         f'<div class="rnd-row" data-project-id="{pid}" data-notes="{notes_attr}" '
         f'data-blurb="{blurb_attr}" data-group="{group_attr}" '
-        f'draggable="true" tabindex="0" role="button" '
+        f'{drag_attr}tabindex="0" role="button" '
         f'onclick="openProjectWindow(\'{pid}\')" '
         f'title="Open {name}">'
-        f'<span class="rnd-grip" aria-hidden="true" '
-        f'title="Drag into a folder">&#8942;&#8942;</span>'
+        f'{grip}'
         f'<span class="rnd-dot {dot_cls}" aria-hidden="true"></span>'
         # setup / read status slot (2026-08-27): the bulk badge poll writes
         # here, so a freshly created project says what it is doing instead of
@@ -2978,7 +2987,7 @@ def _group_folder_path(entries: list) -> str:
     return ""
 
 
-def _render_group_folders(groups, facts=None) -> str:
+def _render_group_folders(groups, facts=None, chrome: bool = True) -> str:
     """Render the home dashboard's COLLAPSIBLE FOLDERS (v9 Wave 3).
 
     ``groups`` is keyed by GROUP NAME (from ``rnd_registry.group_by_group``) →
@@ -3000,7 +3009,7 @@ def _render_group_folders(groups, facts=None) -> str:
     folders = []
     for gname in names:
         entries = groups.get(gname, [])
-        rows = "".join(render_project_tile_html(e, (facts or {}).get(e.get("id"))) for e in entries)
+        rows = "".join(render_project_tile_html(e, (facts or {}).get(e.get("id")), chrome=chrome) for e in entries)
         name_esc = html_lib.escape(gname)
         name_attr = html_lib.escape(gname, quote=True)
         is_ungrouped = (gname == ungrouped_label)
@@ -3010,7 +3019,7 @@ def _render_group_folders(groups, facts=None) -> str:
         path_block = (f'<span class="rnd-fpath">{html_lib.escape(fpath)}</span>'
                       if fpath else '')
         drop_hint = ('<span class="rnd-fdrop-hint">drop here to remove '
-                     'from a folder</span>' if is_ungrouped else '')
+                     'from a folder</span>' if (is_ungrouped and chrome) else '')   # no drop without the drag (High Seat)
         # (2026-09-01, John) Folders open CLOSED by default — opening the Projects
         # tile used to fan out every project in every folder. The server renders
         # the collapsed state (no flash of expanded rows before JS runs); the JS
@@ -7768,17 +7777,13 @@ def _high_seat_context():
 def _high_seat_projects_html(groups, facts):
     """The Projects tile's body on the High Seat: the OLD dashboard's project list — its folders and its rows, the one
     renderer (`_render_group_folders` → `render_project_tile_html`), every folder closed (John, 2026-09-27: "the same
-    look and feel, and all of the folders closed"). The row's kebab menu, its cost rollup and its boneyard button need
-    the old page's script, so they are left off here; the row opens the project window. Never raises."""
-    import re as _re
+    look and feel, and all of the folders closed"). Rendered without the chrome that needs the old page's script (the
+    kebab menu, the cost rollup, the boneyard button, the drag) — the renderer's own argument, not a clip after the
+    fact (Grok R8b). Never raises: a throw becomes one sentence in the tile."""
     try:
-        html = _render_group_folders(groups, facts=facts)
+        return _render_group_folders(groups, facts=facts, chrome=False)
     except Exception as e:
         return '<p class="ptile-note">The project list could not be rendered: %s</p>' % html_lib.escape("%s: %s" % (type(e).__name__, e))
-    html = _re.sub(r'<div class="rnd-kebab" onclick="event\.stopPropagation\(\)">.*?<div class="rnd-kebab-menu" id="rnd-kebab-[^"]*">.*?</div>\s*</div>', "", html, flags=_re.S)
-    html = _re.sub(r'<span class="rnd-row-roll"[^>]*>.*?</span>', "", html, flags=_re.S)
-    html = _re.sub(r'<button class="rnd-mini(?: rnd-accent)? rnd-grave" .*?</button>', "", html, flags=_re.S)
-    return html
 
 
 def _campaign_dir():

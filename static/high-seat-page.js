@@ -80,7 +80,11 @@
   function setPtile(open) { if (!ptile) return; ptile.classList.toggle('open', open); if (ptileTog) ptileTog.textContent = open ? 'Hide' : 'Show all'; }
   var ptileToggle = $('#ptileToggle'); if (ptileToggle) ptileToggle.addEventListener('click', function () { setPtile(!ptile.classList.contains('open')); });
   // the old dashboard's list inside the tile: its folder heads and rows call these two by name (every folder starts closed)
-  window.rndToggleFolder = function (head) { var f = head && head.closest('.rnd-folder'); if (f) f.classList.toggle('rnd-collapsed'); };
+  window.rndToggleFolder = function (head) {
+    var f = head && head.closest('.rnd-folder'); if (!f) return;
+    var closed = f.classList.toggle('rnd-collapsed');
+    var tw = head.querySelector('.rnd-tw'); if (tw) tw.textContent = closed ? '\u25B8' : '\u25BE';   // the arrow turns, as the old page's does; nothing remembered
+  };
   window.openProjectWindow = function (pid) { if (pid) openWin('/project/' + pid); };
 
   // the cards open in place (W2; the compact card, 2026-09-27): Status · Next steps · Deliverables · Plan in the acts

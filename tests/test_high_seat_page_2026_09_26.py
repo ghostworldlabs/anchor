@@ -191,6 +191,7 @@ def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_close
     html = hsp.render_high_seat_html(_ctx())
     tile = html[html.index('id="ptile"'):html.index('id="shNeeds"')]
     assert 'class="rnd-folder rnd-collapsed"' in tile and 'class="prow"' not in tile and "fold-h" not in tile
+    assert "&middot; 3 projects in 3 folders" in tile and "The registry as it stands" not in tile       # the head says the noun; no lecture (Grok R8b)
     (tmp_path / "data").mkdir()
     monkeypatch.setenv("ANCHOR_DATA_DIR", str(tmp_path / "data"))
     import anchor_gui
@@ -198,4 +199,9 @@ def test_the_projects_tile_holds_the_old_dashboards_list_with_every_folder_close
     out = anchor_gui._high_seat_projects_html({"Teaching": entries}, {})
     assert out.count('class="rnd-folder rnd-collapsed"') == 1 and out.count('class="rnd-row"') == 2
     assert 'onclick="openProjectWindow(' in out and 'onclick="rndToggleFolder(this)"' in out
-    assert "rnd-kebab" not in out and "rnd-row-roll" not in out                              # the old page's menu and rollup need its script
+    assert "rnd-kebab" not in out and "rnd-row-roll" not in out and "rnd-grave" not in out   # the old page's menu, rollup and boneyard button need its script
+    assert "draggable" not in out and "rnd-grip" not in out and "drop here" not in out         # and its drag (Grok R8b: the renderer's own argument, no clip)
+    full = anchor_gui._render_group_folders({"Teaching": entries}, {})
+    assert "rnd-kebab" in full and 'draggable="true"' in full                                   # the old dashboard's own list is untouched
+    js = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "high-seat-page.js"), encoding="utf-8").read()
+    assert "\u25BE" in js and "rnd-collapsed" in js                                            # the folder arrow turns when it opens
