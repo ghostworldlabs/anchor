@@ -7648,6 +7648,100 @@ def _home_r3_parts(tasks, health, steward_label, steward_hs_name,
             "calendar": cal_html, "email": mail_html}
 
 
+def _high_seat_context():
+    """Everything the High Seat page (W1b, 2026-09-26) is made of, read once per request: the
+    registry, each project's steward record (home_rows), the ranked rows and the brief
+    (home_attention), the session registry, the health report, the Campaign record when it
+    exists. No model call, no bridge spawn. Best-effort at every seam."""
+    import home_attention as _ha
+    import home_rows as _hr
+    import high_seat_page as _hsp
+    today, now = datetime.now().date(), datetime.now()
+    try:
+        entries = list(_rnd.list_projects(include_archived=False, include_future=False, include_retired=False))
+    except Exception:
+        entries = []
+    try:
+        groups = _rnd.group_by_group(include_archived=False, include_future=False, include_retired=False)
+    except Exception:
+        groups = {}
+    facts_list = _hr.all_project_facts(entries, today)
+    facts = {f["id"]: f for f in facts_list}
+    try:
+        sessions = _sessreg.list_sessions()
+    except Exception:
+        sessions = []
+    hr = latest_health_report()
+    names = {e.get("id"): e.get("name") or "" for e in entries}
+    rows = _ha.build_attention(tasks=[], sessions=sessions, health=(hr[0], hr[1]) if hr else None,
+                               today=today, now=now, project_names=names, projects=facts_list, limit=12)
+    stew = _steward_ui()
+    bullets = _ha.brief_bullets(rows, facts_list, today=today, seat_name=stew["high_seat_name"])
+    counts = _ha.rail_counts(sessions, rows, folders=len(groups), open_projects=len(entries))
+    live, _more = _ha.live_rows(sessions, names)
+    try:
+        parked = [e for e in _rnd.list_projects(include_archived=False, include_future=True, include_retired=False)
+                  if e.get("state") == "future"]
+    except Exception:
+        parked = []
+    try:
+        _p, tasks, _i = gather_all()
+        tasks_open = sum(1 for x in tasks if not x.get("done"))
+    except Exception:
+        tasks_open = 0
+    # the Campaign: the project whose folder is <workspace>/Campaign (PLAN §3), read once
+    campaign, initiatives, seeds = None, [], 0
+    try:
+        camp_dir = Path(_paths.data_dir()).resolve().parent / "Campaign"
+        entry = next((e for e in _rnd.list_projects(include_archived=True, include_future=True, include_retired=True)
+                      if e.get("folder_path") and Path(e["folder_path"]).resolve() == camp_dir), None)
+        if entry and (camp_dir / "roadmap.json").is_file():
+            from steward_cockpit.steward_campaign import read_map as _read_map
+            from steward_cockpit.campaign_parts import resolve_parts as _resolve
+            m = _read_map(str(camp_dir))
+            resolved = _resolve(m.get("steps") or [], cache={}, with_lead=False)
+            initiatives = _hsp.campaign_initiatives(m.get("steps") or [], resolved)
+            campaign = {"pid": entry.get("id"), "name": entry.get("name")}
+            try:
+                strip = json.loads((camp_dir / "strip.json").read_text(encoding="utf-8"))
+                seeds = sum(1 for r in (strip.get("grasscatch") or []) if isinstance(r, dict) and r.get("kind") == "seed")
+            except Exception:
+                seeds = 0
+    except Exception:
+        campaign, initiatives, seeds = None, [], 0
+    try:
+        prefs_html = render_model_prefs_controls(render_steward_control())
+    except Exception:
+        prefs_html = ""
+    week = _hr.week_in_words(today)
+    return {
+        "today": today, "today_str": now.strftime("%A, %B %d, %Y"), "week": week,
+        "week_short": week.replace("this week ", ""), "brief_when": now.strftime("%H:%M \u00b7 %A %d %B"),
+        "build": BUILD_ID, "steward": stew, "prefs_html": prefs_html,
+        "entries": entries, "groups": groups, "facts": facts, "rows": rows, "bullets": bullets,
+        "counts": counts, "live": live, "parked": parked, "tasks_open": tasks_open,
+        "campaign": campaign, "initiatives": initiatives, "seeds": seeds,
+        "capacity": [
+            {"name": "ChatGPT", "state": "not measured yet", "note": "the capacity meter arrives with W4 \u2014 nothing is guessed"},
+            {"name": "Grok", "state": "not measured yet", "note": "W4"},
+            {"name": "Claude account 1", "state": "not measured yet", "note": "W4"},
+            {"name": "Claude account 2", "state": "not measured yet", "note": "W4"},
+            {"name": "Gemini", "state": "not connected", "note": "a future subscription \u2014 nothing to read"},
+        ],
+    }
+
+
+def render_high_seat_page() -> str:
+    """GET /high-seat \u2014 the steward's portfolio surface (W1b); an honest error page, never a blank."""
+    try:
+        import high_seat_page as _hsp
+        return _hsp.render_high_seat_html(_high_seat_context())
+    except Exception as e:
+        return ("<!DOCTYPE html><html><body style=\"font-family:system-ui;background:#0b0e14;color:#e6e9ef;padding:24px\">"
+                "<h1>The High Seat could not render</h1><p>%s</p><p><a href=\"/dashboard\" style=\"color:#8ab4f8\">the dashboard</a></p></body></html>"
+                % html_lib.escape("%s: %s" % (type(e).__name__, e)))
+
+
 # ANCHOR[rearch]: GENERATE_HTML — structural anchor (W1); keep UNIQUE, keep
 # directly above the def. The anchor-freshness gate (tools/anchors.py)
 # re-locates this before every extraction wave — no line numbers anywhere.
@@ -21673,6 +21767,10 @@ class AnchorHandler(BaseHTTPRequestHandler):
                 projects, tasks, inbox = gather_all()
                 html = generate_html(projects, tasks, inbox)
                 self._send_html(html)
+            elif _path_only == "/high-seat":
+                # W1b (High Seat, 2026-09-26): the steward's portfolio surface, at its own
+                # route until John's look flips "/" to it.
+                self._send_html(render_high_seat_page())
             elif _path_only == "/doctor":
                 # Doctor V3 Wave 3 — the honest diagnostics page in Anchor's
                 # own style (render_doctor_page_html: real stats from
