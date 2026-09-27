@@ -175,6 +175,7 @@
         send.disabled = false; send.textContent = 'Send';
         if (!j || !j.ok) { receipt((j && (j.say || j.message || j.error)) || 'No answer came back — nothing was done.', true); return; }
         say.value = ''; receipt(j.say || '…');
+        if (j.campaign_act && !j.read_only) { setTimeout(function () { location.reload(); }, 1400); return; }   // the Campaign tile shows the change; undo lives on the Campaign page
         if (j.project_create && j.project_create.folder) receipt((j.say ? j.say + ' ' : '') + 'A project card is ready: ' + j.project_create.folder + ' — confirm it on the old dashboard.');
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });

@@ -206,7 +206,11 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         send.disabled = false; send.textContent = 'Send';
-        if (!j || j.ok === false) { receipt((j && (j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
+        if (!j || j.ok === false) { receipt((j && (j.say || j.receipt || j.error || j.message)) || 'No answer came back — nothing was done.', true); return; }
+        if (j.campaign_act && !j.read_only) {   // a Campaign verb: the record changed; the receipt and its undo survive the reload
+          try { sessionStorage.setItem('desk_receipt', JSON.stringify({ text: j.say, bad: false, undo: j.undo || null })); } catch (e) {}
+          location.reload(); return;
+        }
         say.value = ''; receipt(j.say || j.reply || j.text || 'Said. The steward answers in the conversation; look again in a moment.');
       })
       .catch(function () { send.disabled = false; send.textContent = 'Send'; receipt('That did not go through — nothing was done.', true); });
