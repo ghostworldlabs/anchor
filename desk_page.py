@@ -5,7 +5,7 @@ W3b of the High Seat plan (2026-09-26). The approved design is the mockup
 ``static/desk-page.css`` ported as it is. Three columns, each keeping the job it has in a project cockpit: LEFT the
 tasks (the plan's place) — every native task on the Campaign record, grouped Today · This week · Later · Parked ·
 Done, each with its initiative chip (the admin initiative's tasks are the Desk's own), editable where it sits;
-CENTRE the steward's brief, the last exchanges and the composer; RIGHT Calendar and Email closed above the open
+CENTRE the steward's brief, the composer right below it (John, 2026-09-27), then the last exchanges; RIGHT Calendar and Email closed above the open
 status and the capacity lines. Calendar and Email are drawn empty with the reason in words — no account is
 connected; the marks on the calendar are the record's own dated tasks. Pure: a context dict in, HTML out; every
 count is counted from the record. The acts go through ``steward_cockpit/campaign_acts`` (the same route the
@@ -191,15 +191,15 @@ def _steward_col(ctx):
         "you" if t["you"] else "st", "You" if t["you"] else esc(st["label"]), esc(t["at"]), esc(t["text"][:600])) for t in turns[-6:])
     return (
         '<section class="col" aria-label="The steward"><section class="brief" id="brief"><div class="kicker">The brief <span class="k-when">%s</span></div><ul class="blist" id="briefList">%s</ul></section>'
-        '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the last exchanges</h3><span class="note" id="exNote">%s</span></div>'
-        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div>'
         '<section class="composer"><label class="sr" for="say">Tell the steward what to do</label>'
         '<textarea id="say" rows="2" placeholder="Tell %s what to do &mdash; it runs the Desk from the Campaign record"></textarea>'
         '<div class="comp-row"><span class="hint">Ctrl+Enter sends &middot; the steward answers here and acts on the record; the list shows what changed on the next look</span><button class="send" id="sendBtn">Send</button></div>'
         '<div class="receipt none" id="receipt"><span class="r-mark">&middot;</span><span id="receiptText">No change yet. Every change lands here as one line, with Undo.</span> <button class="mini" id="undoBtn" hidden>undo</button></div></section></section>'
-    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]), ("%d shown" % min(6, len(turns))) if turns else "no transcript kept",
-         ex, "Only the last few exchanges are kept here. What the steward actually did is in the list." if turns else "Nothing said here yet. The cockpit&rsquo;s conversation is the same one.",
-         esc(st["label"]))
+        '<div class="exwrap"><div class="exhead"><h3>%s &mdash; the last exchanges</h3><span class="note" id="exNote">%s</span></div>'
+        '<div class="scroll" style="flex:1"><ul class="ex" id="exList">%s<li class="exfade">%s</li></ul></div></div>'
+    ) % (esc(ctx["brief_when"]), bullets, esc(st["label"]),
+         esc(st["label"]), ("%d shown" % min(6, len(turns))) if turns else "no transcript kept",
+         ex, "Only the last few exchanges are kept here. What the steward actually did is in the list." if turns else "Nothing said here yet. The cockpit&rsquo;s conversation is the same one.")
 
 
 # ── RIGHT: Calendar, Email, the status, capacity ───────────────────────────────────────────────

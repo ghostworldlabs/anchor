@@ -137,3 +137,11 @@ def test_retag_moves_a_task_between_initiatives_and_refuses_a_heading(record):
     assert acts.act(record, {"act": "retag", "step": "tax", "initiative": "admin"})["ok"] is False        # already there
     assert acts.act(record, {"act": "retag", "step": "admin", "initiative": "mba"})["ok"] is False        # a heading is not a part
     assert acts.act(record, {"act": "retag", "step": "tax", "initiative": "nowhere"})["ok"] is False
+
+
+def test_the_desk_puts_the_composer_right_below_the_brief():
+    """John, 2026-09-27: the interaction with the steward stays in the middle, right below the Brief; the exchanges after."""
+    html = dp.render_desk_html(_ctx())
+    col = html[html.index('aria-label="The steward"'):html.index('aria-label="The steward"') + 6000]
+    assert col.index('id="brief"') < col.index('class="composer"') < col.index('class="exwrap"')
+
